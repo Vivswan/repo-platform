@@ -1,7 +1,3 @@
-// Rules over the settings layers and settings-repos.yml: the starters'
-// identity keys, the apply step's inputs, and step-output gates across
-// every workflow.
-
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -32,9 +28,8 @@ interface WorkflowStep {
   "continue-on-error"?: boolean | string;
 }
 
-/** Every step of every job in a parsed workflow. Rules about steps read
- *  this rather than the file's text: a matching string in a comment, or on
- *  some other step, must not satisfy them. */
+/** Rules about steps read the parsed document, never the file's text:
+ *  a matching string in a comment, or on some other step, must not satisfy them. */
 function stepsOf(text: string, rel: string): WorkflowStep[] {
   const doc = asRecord(parseYaml(text), rel);
   const jobs = asRecord(doc.jobs ?? {}, `${rel} jobs`);
@@ -51,9 +46,7 @@ function workflowSteps(rel: string): WorkflowStep[] {
   return stepsOf(read(rel), rel);
 }
 
-/** The unsafe term of a step condition, or null when every term is safe.
- *  An unrun step's ABSENT output compares as the number 0 in Actions, so
- *  only `== '<non-zero literal>'` and `!= ''` cannot be satisfied by one.
+/** An unrun step's ABSENT output compares as the number 0 in Actions, so only `== '<non-zero literal>'` and `!= ''` cannot be satisfied by one.
  *  Terms without a step output (`env.*`, `needs.*`) are not this hazard. */
 export function unsafeStepCondition(condition: string): string | null {
   const OUTPUT = /steps\.[\w-]+\.outputs\./;
@@ -73,9 +66,8 @@ export function unsafeStepCondition(condition: string): string | null {
   return null;
 }
 
-/** unsafeStepCondition over a workflow's steps, exempting FAIL steps (a
- *  bare `exit <non-zero>` last line, no continue-on-error): a gate that
- *  opens on an absent output there turns the job red, which is the point. */
+/** FAIL steps (a bare `exit <non-zero>` last line, no continue-on-error) are exempt:
+ *  a gate that opens on an absent output there turns the job red, which is the point. */
 export function stepOutputGateMismatches(rel: string, steps: WorkflowStep[]): Mismatch[] {
   const mismatches: Mismatch[] = [];
   for (const step of steps) {
@@ -108,20 +100,15 @@ export function settingsIdentityMismatches(repository: Record<string, unknown>):
   }));
 }
 
-/** The settings starters the writer seeds, one per visibility. */
 export const SETTINGS_STARTERS = [
   "files/base/.github/settings.local.yml",
   "files/base/.github/settings.local.private.yml",
 ];
 
-/** The fleet protection rulesets the override layer owns. */
 export const OVERRIDE_RULESETS = ["main", "non-bypassable"];
 
-/** One starter's judgment (exported for the forcing tests): all four
- *  identity keys seeded, and no labels or rulesets section, which would
- *  seed every new repository with a shadowing copy of baseline entries,
- *  frozen at the first write. The placeholders sit inside quoted scalars,
- *  so the source parses as the YAML the writer emits. */
+/** A labels or rulesets section would seed every new repository with a shadowing copy of baseline entries, frozen at the first write.
+ *  The starters' placeholders sit inside quoted scalars, so the source parses as written without neutralizing them. */
 export function starterMismatches(rel: string, text: string): Mismatch[] {
   const mismatches: Mismatch[] = [];
   const starter = asRecord(parseYaml(text), rel);
@@ -147,9 +134,6 @@ export function starterMismatches(rel: string, text: string): Mismatch[] {
   return mismatches;
 }
 
-/** The overlay's judgment (exported for the forcing tests): valid identity
- *  shapes, and none of the override layer's rulesets, which merge ABOVE
- *  every repo layer and would silently override a redeclaration. */
 export function overlayMismatches(text: string): Mismatch[] {
   const own = asRecord(parseYaml(text), OWN_OVERLAY);
   const mismatches = settingsIdentityMismatches(
@@ -189,8 +173,6 @@ function sameLineComment(scalar: Scalar, lines: LineCounter): string | null {
   return sameLine ? scalar.comment : null;
 }
 
-/** Every apply step's `uses` as written on its line, `<value> # <comment>`:
- *  the pin and its version comment off the YAML document's scalar node. */
 function applyUsesPins(text: string): string[] {
   const pins: string[] = [];
   const lines = new LineCounter();
@@ -209,13 +191,9 @@ function applyUsesPins(text: string): string[] {
   return pins;
 }
 
-/** The settings-apply-input judgment on a workflow's text (exported for
- *  the forcing tests): exactly one github-settings-as-code step, pinned
- *  to the tagged commit with its version comment, gated on the selector's
- *  non-empty repos output (an empty repos input is the action's
- *  single-repo mode), and taking exactly the repos-mode inputs - never
- *  `repository`, `settings-file`, `defaults-file`, or `repos-dir`, which
- *  would apply a document other than each target's own rendered file. */
+/** An empty repos input is the action's single-repo mode, so the apply is gated on the selector's non-empty output.
+ *  The with: block is matched whole: `repository`, `settings-file`, `defaults-file`, or `repos-dir` would apply a document
+ *  other than each target's own rendered file. */
 export function settingsApplyInputMismatches(text: string): Mismatch[] {
   const rel = SETTINGS_WORKFLOW;
   const steps = stepsOf(text, rel);
@@ -280,15 +258,8 @@ export function settingsApplyInputMismatches(text: string): Mismatch[] {
   return mismatches;
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const settingsWorkflowRules: Rule[] = [
   {
-    // The two starters and repo-platform's own overlay are the repo layers
-    // this repository authors by hand; the rendered documents are
-    // generated from them (settings:check covers the root one). Each
-    // starter seeds all four identity keys and no labels or rulesets, the
-    // overlay declares valid identity shapes, and the override layer owns
-    // the protection rulesets no repo layer redeclares.
     name: "settings-starter",
     run: () => {
       // The override layer must still own the rulesets the overlay is

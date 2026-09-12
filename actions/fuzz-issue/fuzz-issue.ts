@@ -1,48 +1,28 @@
 /**
- * File, update, or resolve a repository's nightly tracking issue. Knows
- * nothing about any repo's fuzzer: with ARTIFACTS_DIR set the body is built
- * from failure reports laid out per docs/fuzzer.md ("The failure-report
- * contract (v1)"); the producer writes the replay command and this script
- * only assembles the issue. With ARTIFACTS_DIR empty the body is the
- * generic nightly-failure report the plain-CI starter uses. STREAM picks
- * the wording: fuzz speaks of failure reports and crashing inputs, generic
- * of reports only.
- *
- * MODE=report comments on the open labeled issue or creates it (one open
- * issue per label, owner assigned at creation; see assignOwner).
- * MODE=resolve comments on and closes EVERY open labeled issue after a
- * green run, because the release gate blocks on any of them.
- *
- * Inputs and context come from the environment as action.yml sets them;
- * GITHUB_REPOSITORY names the repo on every gh call via --repo.
+ * Knows nothing about any repo's fuzzer: the producer writes the replay command and this script only assembles the issue.
+ * The failure-report layout it reads is the contract in docs/fuzzer.md ("The failure-report contract (v1)").
  */
 
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
-/** Report head shown per failure when an uploaded artifact carries the rest. */
 const REPORT_LINES = 60;
 /** GitHub caps an issue or comment body at 65,536 characters; stay comfortably under it. */
 const MAX_BODY = 60_000;
-/** Per-block character cap when an artifact carries the rest.
- *  Small enough that the header, footer, notice, and one full block always fit inside MAX_BODY. */
+/** Small enough that the header, footer, notice, and one full block always fit inside MAX_BODY. */
 const MAX_BLOCK_CHARS = 8_000;
 /** Contract v1: failure directory names are plain identifiers. */
 const DIR_NAME = /^[A-Za-z0-9._-]+$/;
-/** Title for a newly created tracking issue; must match the `title` input
- *  default in action.yml (the test asserts it). */
+/** Must match the `title` input default in action.yml (the test asserts it). */
 export const DEFAULT_TITLE = "Nightly fuzz failures";
-/** Label tuple used only when report mode has to CREATE the label; each
- *  must match its input default in action.yml (the test asserts it), and
- *  the fuzzer module manifest's tracking_label carries the same values
- *  (check_ssot pins that; the settings-labels block generates from it). */
+/** Each must match its input default in action.yml (the test asserts it)
+ *  and the fuzzer module's tracking_label in files.yml (the labels ssot rule pins it). */
 export const DEFAULT_LABEL_COLOR = "B60205";
 export const DEFAULT_LABEL_DESCRIPTION = "Automated nightly fuzz failure";
 
 /** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
 export type GhRunner = (args: string[]) => Promise<string>;
 
-/** Run gh and return stdout; throws with gh's stderr on a non-zero exit. */
 const gh: GhRunner = async (args) => {
   const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([
@@ -56,11 +36,6 @@ const gh: GhRunner = async (args) => {
   return stdout;
 };
 
-/**
- * The failure directories under the artifacts dir, oldest first. Only
- * immediate subdirectories with contract-conforming names count; top-level
- * files and oddly named directories are ignored.
- */
 export function failureDirs(root: string): string[] {
   if (!existsSync(root)) {
     return [];
@@ -83,12 +58,8 @@ export function failureDirs(root: string): string[] {
 }
 
 /**
- * The first lines of `text` within `lines` lines and `chars` characters,
- * whole lines only, with a marker naming how many were cut.
- * The first line is kept even when it alone overflows `chars`: capChars cuts
- * an unbreakable line, and a block must never lose all its content.
- * A single trailing newline is not a line, so text of exactly `lines` lines
- * plus a trailing newline is returned whole.
+ * The first line is kept even when it alone overflows `chars`: capChars cuts an unbreakable line, and a block must never lose all its content.
+ * A single trailing newline is not a line, so text of exactly `lines` lines plus a trailing newline is returned whole.
  */
 export function head(text: string, lines: number, chars: number): string {
   const all = text.split("\n");
@@ -114,10 +85,6 @@ export function head(text: string, lines: number, chars: number): string {
   return `${kept.join("\n")}${marker(all.length - kept.length)}`;
 }
 
-/**
- * Truncate `text` to at most `max` characters, appending a marker when cut.
- * The marker is counted, so the return is always <= max.
- */
 export function capChars(text: string, max: number): string {
   if (text.length <= max) {
     return text;
@@ -127,7 +94,6 @@ export function capChars(text: string, max: number): string {
   return text.slice(0, keep) + marker;
 }
 
-/** The run link built from the standard Actions environment variables. */
 export function runUrl(env: NodeJS.ProcessEnv): string {
   const server = env.GITHUB_SERVER_URL;
   const repo = env.GITHUB_REPOSITORY;
@@ -138,11 +104,6 @@ export function runUrl(env: NodeJS.ProcessEnv): string {
   return `${server}/${repo}/actions/runs/${runId}`;
 }
 
-/**
- * The per-failure section title: the report's first line with its heading
- * markers stripped. A report without a usable first line falls back to the
- * directory name; a missing report says so.
- */
 export function blockTitle(dir: string, report: string): string {
   const first = report
     .split("\n")[0]
@@ -154,13 +115,9 @@ export function blockTitle(dir: string, report: string): string {
   return report ? basename(dir) : `${basename(dir)} (no report.md)`;
 }
 
-/** Which nightly stream an issue tracks; it picks the report body's and the
- *  resolve comment's wording. The default must stay fuzz: fleet fuzzer
- *  starters predate the input and pass nothing. */
+/** The default must stay fuzz: fleet fuzzer starters predate the input and pass nothing. */
 export type Stream = "fuzz" | "generic";
 
-/** The report body's nouns per stream: the fuzz stream reports crashes the
- *  fuzzer wrote, the generic stream reports whatever the producer wrote. */
 const BODY_WORDS: Record<
   Stream,
   {
@@ -195,7 +152,6 @@ const BODY_WORDS: Record<
   },
 };
 
-/** Build the issue/comment body from every failure directory. */
 export function buildBody(
   dirs: string[],
   env: NodeJS.ProcessEnv,
@@ -219,9 +175,7 @@ export function buildBody(
 
   const header = `${words.run} on ${date} produced ${dirs.length} ${words.report}(s).\n`;
   const footer = url ? `\nRun: ${url}` : "";
-  // With an artifact the body is a summary and the artifact carries the rest.
-  // Without one the body is the only record: every report rides whole, cut
-  // only at its share of the body limit, and nothing points at an artifact.
+  // Without an artifact the body is the only record, so every report rides whole, cut only at its share of the body limit.
   const summary = artifactName !== "";
   const artifactsNote = summary
     ? `\nThe full ${words.artifacts}${words.artifactsDetail} are attached to the run as \`${artifactName}\`.`
@@ -249,8 +203,7 @@ export function buildBody(
     const reportPath = join(dir, "report.md");
     const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
     const heading = `## ${blockTitle(dir, report)}\n`;
-    // The report's own heading is dropped (the block heading replaces it);
-    // the rest of the head carries the replay command per the contract.
+    // The contract asks producers to keep the replay block near the top: only the head survives when an artifact carries the rest.
     const rest = report.split("\n").slice(1).join("\n").trim();
     const block = capChars(
       rest ? `${heading}\n${head(rest, lineCap, blockCap - heading.length - 2)}\n` : heading,
@@ -270,12 +223,6 @@ export function buildBody(
   return `${header}\n${blocks.join("\n")}${truncation}${artifactsNote}${footer}`;
 }
 
-/**
- * The no-artifacts report body: a stream without a failure-report directory
- * (the nightly module's plain-CI starter) gets a generic notice naming the
- * workflow, the date, the failing commit, and the run, and points readers
- * at the run log instead of at artifacts.
- */
 export function buildGenericBody(env: NodeJS.ProcessEnv): string {
   const date = new Date().toISOString().slice(0, 10);
   const workflow = env.GITHUB_WORKFLOW ? `\`${env.GITHUB_WORKFLOW}\`` : "The nightly workflow";
@@ -300,10 +247,8 @@ export function buildGenericBody(env: NodeJS.ProcessEnv): string {
  * bounds one round trip, not how many issues a green night can close. */
 const OPEN_ISSUE_LIMIT = 100;
 
-/** The open issues carrying the label (gh's default ordering, newest
- * first), with their assignees; empty when none. Humans can label extra
- * issues into the stream, so one open issue per label is a goal, not an
- * invariant. */
+/** gh lists newest first, so fileIssue's limit-1 read is the newest open issue.
+ * Humans can label extra issues into the stream, so one open issue per label is a goal, not an invariant. */
 async function openIssues(
   run: GhRunner,
   repo: string,
@@ -331,12 +276,9 @@ async function openIssues(
 }
 
 /**
- * Best-effort owner assignment at creation: an issue created with a
- * workflow token fires no issues:opened event, so the auto-assign module
- * structurally cannot catch it. The owner login is the repo slug's owner (a
- * personal-account fleet); an org owner is not assignable, and the nightly
- * pipeline must not gain a failure path over assignment, so a failed
- * assignment logs a notice and the filing stands.
+ * An issue created with a workflow token fires no issues:opened event, so the auto-assign module cannot catch it.
+ * An org owner is not assignable, and the nightly pipeline must not gain a failure path over assignment,
+ * so a failed assignment logs a notice and the filing stands.
  */
 export async function assignOwner(run: GhRunner, repo: string, issueNumber: number): Promise<void> {
   const owner = repo.split("/")[0];
@@ -350,20 +292,16 @@ export async function assignOwner(run: GhRunner, repo: string, issueNumber: numb
   }
 }
 
-/** The trailing issue number from a `gh issue create` URL, or undefined. */
 export function issueNumberFromUrl(url: string): number | undefined {
   const match = url.trim().match(/\/(\d+)\s*$/);
   return match ? Number(match[1]) : undefined;
 }
 
-/** A label safe to hand to gh as a positional/flag value and to render into
- * YAML unquoted: plain identifier characters plus spaces and colons, never
- * starting with a dash (gh would parse it as a flag), within GitHub's
- * 50-character label limit. */
+/** No leading dash (gh would parse it as a flag), within GitHub's 50-character label limit.
+ * Hand-copied into actions/plan/registration.ts and actions/release-health/release-health.ts; the tracking-label-regex ssot rule pins the copies. */
 export const LABEL_RE = /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/;
 
-/** Whether the repo already has the label (exact name, case-insensitive,
- * the way GitHub deduplicates labels). */
+/** Case-insensitive, the way GitHub deduplicates labels. */
 async function labelExists(run: GhRunner, repo: string, label: string): Promise<boolean> {
   // --search is best-match ordered but not contractually so; a high limit
   // keeps an exact match from hiding past the default 30 in a label-heavy
@@ -384,14 +322,7 @@ async function labelExists(run: GhRunner, repo: string, label: string): Promise<
   return labels.some((entry) => entry.name.toLowerCase() === label.toLowerCase());
 }
 
-/**
- * Comment on the open labeled issue if one exists, else create it and
- * assign the owner (see assignOwner). A still-unassigned open issue picks
- * the owner up on the comment path; an assigned one is left alone, since a
- * human may have deliberately reassigned it. Returns the issue number so
- * the caller can dispatch auto-assign at it (CODEOWNERS policy on top of the
- * owner default); undefined only when gh's create URL fails to parse.
- */
+/** An already-assigned open issue is left alone: a human may have deliberately reassigned it. */
 export async function fileIssue(
   run: GhRunner,
   repo: string,
@@ -457,12 +388,9 @@ export async function fileIssue(
 }
 
 /**
- * After a green run: comment on and close EVERY open labeled issue. The
- * release-health gate blocks while any open issue carries the label, so an
- * extra left open (a human labeling a related issue) would keep releases
- * blocked under a log saying all was resolved. The fuzz-stream comment
- * hedges on unpinned crashes, which one green night cannot prove (a test
- * pins the wording for the fleet fuzzer starters that pass no STREAM).
+ * Every open labeled issue is closed: the release-health gate blocks while any carries the label, so one left open
+ * (a human labeling a related issue) would keep releases blocked under a log saying all was resolved.
+ * The fuzz wording hedges on unpinned crashes, which one green night cannot prove; a test pins it for the fleet fuzzer starters that pass no STREAM.
  */
 export async function resolveIssue(
   run: GhRunner,
@@ -551,9 +479,6 @@ async function main(): Promise<number> {
     return 1;
   }
   const title = process.env.TITLE || DEFAULT_TITLE;
-  // An artifacts directory means the failure-report contract, worded for
-  // the stream; without one the stream is plain nightly CI and gets the
-  // generic body.
   const artifactsDir = process.env.ARTIFACTS_DIR;
   const body = artifactsDir
     ? buildBody(failureDirs(artifactsDir), process.env, process.env.ARTIFACT_NAME || "", stream)

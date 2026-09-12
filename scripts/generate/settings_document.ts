@@ -1,7 +1,5 @@
 #!/usr/bin/env bun
-// This repository's own .github/settings.yml through the sync writer's render.
-// The sync never targets the operator: its files are the sources.
-// So the operator renders its own document.
+// The sync never targets the operator (its files are the sources), so the operator renders its own .github/settings.yml through the writer's render.
 //
 // Usage: bun scripts/generate/settings_document.ts [--check] [--root <dir>]
 

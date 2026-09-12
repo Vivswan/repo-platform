@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-// The file table of files.yml as Markdown (path, class, when). --write
-// rewrites a Markdown file's generated region (bun run regen); --check
-// compares it instead (bun run files:check, in the check chain and CI).
-//
 // Usage: bun scripts/files_table.ts [--check|--write docs/new-repo.md]
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -31,7 +27,6 @@ export function filesTable(entries: FileEntry[]): string {
   return ["| File | Class | When |", "| --- | --- | --- |", ...rows].join("\n");
 }
 
-/** The generated region's bounds in a document, or null without one. */
 function generatedRegion(doc: string): { start: number; end: number } | null {
   const start = doc.indexOf(BEGIN);
   const end = doc.indexOf(END);

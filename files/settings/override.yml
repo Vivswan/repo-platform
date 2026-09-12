@@ -1,53 +1,28 @@
 ---
-# Layer 6 of the settings merge: the TOP of the stack (docs/settings.md).
-# This is the only layer a repository cannot beat - it merges ABOVE the
-# repository's own .github/settings.local.yml, so a repo that declares one
-# of these keys, or nulls it out, still gets the fleet value. Everything a
-# repository is allowed to tune lives in files/settings/baseline.yml
-# instead.
-#
-# Keep this file to genuine fleet invariants: the merge-method policy and
-# the two protection rulesets. Cosmetic defaults belong in the baseline.
+# Layer 6, the TOP of the settings merge (docs/settings.md): it merges ABOVE the repository's own .github/settings.local.yml, so a key declared or nulled there still gets the fleet value.
+# Only genuine fleet invariants belong here; everything a repository may tune lives in files/settings/baseline.yml.
 
 repository:
-  # Squash-only merges, fleet wide.
   allow_squash_merge: true
   allow_merge_commit: false
   allow_rebase_merge: false
-  # The squash subject must ALWAYS be the PR title (the pr-title check and
-  # release-please rely on it); GitHub defaults to that only for
-  # single-commit PRs. The body stays blank: with PR_BODY every squash
-  # message is the whole PR body (tables, fences, details blocks), which
-  # release-please drops from the changelog when it cannot parse it, and
-  # whose footers count only in a clean trailing block. A PR that needs
-  # footers (BREAKING CHANGE, Release-As) carries a BEGIN_COMMIT_OVERRIDE
-  # ... END_COMMIT_OVERRIDE block in its body, which release-please reads
-  # instead of the commit message.
+  # release-please parses the squash subject and the pr-title check validates the PR title because it becomes that subject;
+  # GitHub defaults the subject to the PR title only for single-commit PRs.
+  # BLANK because with PR_BODY the whole body (tables, fences, details blocks) becomes the message, which release-please drops
+  # from the changelog when it cannot parse it, and whose footers count only in a clean trailing block.
+  #   footers a PR needs (BREAKING CHANGE, Release-As) -> a BEGIN_COMMIT_OVERRIDE ... END_COMMIT_OVERRIDE block in the PR body, which release-please reads instead
   squash_merge_commit_title: PR_TITLE
   squash_merge_commit_message: BLANK
   allow_auto_merge: true
   enable_vulnerability_alerts: true
 
 rulesets:
-  # Admins (RepositoryRole id 5) are in the bypass list, so direct pushes
-  # to main still work. ONE required status check: `all-green`, the
-  # ci.yml all-green JOB's own check run - the job needs every gating job
-  # and fails unless each result is success or skipped with at least one
-  # success (docs/all-green.md). Copilot reviews are requested by the
-  # public overlay's copilot_code_review rule but ADVISORY: nothing
-  # blocks on them. The pr-title module's required check rides its own
-  # baseline-owned ruleset (below in the baseline), not this list, so
-  # this context never changes with module selections.
+  # ONE required check, all-green (docs/all-green.md); the pr-title module's check rides its own baseline-owned ruleset, so this context never changes with module selection.
+  # loadOverrideLayer refuses this file when the all-green context or its integration_id pin is missing.
   #
-  # The entry pins integration_id 15368 (the GitHub Actions app, which
-  # creates job check runs): the pin stops a non-Actions app or a plain
-  # commit status from satisfying the context by name. loadOverrideLayer
-  # refuses this file when the context or its pin is missing.
-  #
-  # A module layer may ADD a rule to this ruleset (the toolchain modules'
-  # settings-public.yml layers add code_scanning): rules lists of a
-  # same-name ruleset append across layers, keyed by `type`. They cannot
-  # remove or weaken a rule declared here.
+  #   bypass actor 5 (RepositoryRole admin)   -> direct pushes to main keep working
+  #   integration_id 15368 (GitHub Actions)    -> no other app and no plain commit status can satisfy the context by name
+  #   module settings-public.yml layers         -> append rules keyed by `type` (code_scanning); none can remove or weaken a rule declared here
   - name: main
     target: branch
     enforcement: active
@@ -71,12 +46,9 @@ rulesets:
         parameters:
           required_approving_review_count: 0
           dismiss_stale_reviews_on_push: false
-          # Require an approving review from a CODEOWNER before merge.
-          # Admins in bypass_actors can still merge without one.
           require_code_owner_review: true
           require_last_push_approval: false
-          # Every PR review thread must be resolved before merge, fleet
-          # wide - an unresolved comment is an unaddressed finding.
+          # An unresolved review thread is an unaddressed finding.
           required_review_thread_resolution: true
           # Squash-only merges (enforced by the ruleset, not just repo
           # settings).

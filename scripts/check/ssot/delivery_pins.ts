@@ -1,6 +1,3 @@
-// Rules pinning what the fleet executes from: upstream action refs and
-// every self-reference riding the build branch.
-
 import { join } from "node:path";
 import { FLEET_WORKFLOWS } from "../../../.github/scripts/build-branches/branch_tree.ts";
 import { actionManifestPaths } from "../../lib/action_steps.ts";
@@ -18,10 +15,7 @@ export interface Pin {
   version: string | null;
 }
 
-/** `uses: <owner>/<action>@<ref>` pins in a file, commented examples
- *  included; `uses: ./...` locals and placeholder-owner lines are skipped
- *  (the fleet-refs-ride-build rule judges those). The action key is
- *  owner/repo (subpaths like codeql-action/init collapse). */
+/** Commented example lines count too, and placeholder-owner pins are skipped: the fleet-refs-ride-build rule judges those. */
 export function extractUsesPins(text: string, file: string): Pin[] {
   const pins: Pin[] = [];
   for (const rawLine of text.split("\n")) {
@@ -55,12 +49,9 @@ export const BRANCH_PINNED: Record<string, string> = {};
 const SHA_RE = /^[0-9a-f]{40}$/;
 const VERSION_COMMENT_RE = /^v\d+\.\d+\.\d+$/;
 
-/** Every action outside `owner`'s account is pinned by full commit sha with
- *  the tag it came from as a trailing comment (`@<sha> # vX.Y.Z`, the shape
- *  Dependabot bumps), one comment per sha repo-wide. A moving tag or branch
- *  would let upstream change what the fleet runs without a PR here; the
- *  owner's own actions ride their own delivery channels and are judged by
- *  the fleet-refs-ride-build rule instead. */
+/** A moving tag or branch would let upstream change what the fleet runs without a PR here; `@<sha> # vX.Y.Z` is the shape Dependabot bumps.
+ *  The owner's own actions are exempt: the repo-platform self-pins under files/ are judged by the fleet-refs-ride-build rule,
+ *  and the settings apply's pin by the settings-apply-input rule. */
 export function pinShapeMismatches(
   pins: Pin[],
   owner: string,
@@ -134,12 +125,8 @@ export function pinMismatches(pins: Pin[]): Mismatch[] {
   return mismatches;
 }
 
-/** The green-gated branch every self-pin the writer copies executes from.
- *  A twin of publish.ts's BRANCH constant (the one delivery channel
- *  post-green.yml publishes), pinned against it by the fleet-refs-ride-build
- *  rule, so a delivery-branch rename updates both. Starters are written
- *  once: a rename reaches fresh writes only, never a pin an already-written
- *  starter carries. */
+/** A twin of publish.ts's BRANCH, pinned against it by the fleet-refs-ride-build rule so a delivery-branch rename updates both.
+ *  Starters are written once, so a rename reaches fresh writes only, never a pin an already-written starter carries. */
 export const DELIVERY_REF = "build";
 
 export interface SelfPin {
@@ -159,9 +146,6 @@ export function sourceSelfPins(text: string, file: string): SelfPin[] {
   return [...text.matchAll(token)].map((match) => ({ file, stem: match[1], ref: match[2] }));
 }
 
-/** DELIVERY_REF against the branch publish.ts actually advances: the
- *  pins below are only right while both name the same branch, so a
- *  rename of either alone mismatches, naming the twin to update. */
 export function deliveryRefTwinMismatches(published: string, deliveryRef: string): Mismatch[] {
   if (published === deliveryRef) return [];
   return [
@@ -173,14 +157,8 @@ export function deliveryRefTwinMismatches(published: string, deliveryRef: string
   ];
 }
 
-/** The categorical delivery-channel law over the writer's sources: every
- *  `<owner>/repo-platform/<path>@<ref>` token - composite action and
- *  reusable workflow alike - must ride the green-gated delivery branch.
- *  `@main` is the ungated live tip, and any other ref forks the delivery
- *  story, so a single off-channel pin mismatches, named with its file and
- *  offending ref. Throws when no pin is found at all: the sources always
- *  carry self-references, so an empty scan means the extraction grammar
- *  rotted, not a clean fleet. */
+/** `@main` is the ungated live tip and any other ref forks the delivery story.
+ *  An empty scan means the extraction grammar rotted, not a clean fleet: the sources always carry self-references. */
 export function deliveryRefMismatches(pins: SelfPin[], deliveryRef: string): Mismatch[] {
   if (pins.length === 0) {
     throw new Error(
@@ -197,14 +175,9 @@ export function deliveryRefMismatches(pins: SelfPin[], deliveryRef: string): Mis
     }));
 }
 
-/** The shipping side of the delivery-channel law: a reusable-workflow `uses:`
- *  fetches the FILE at the named ref, so a pin on a workflow the build
- *  branch does not ship 404s every caller run even though the ref is
- *  right; every `repo-platform/.github/workflows/<name>` pin must name a
- *  FLEET_WORKFLOWS entry (branch_tree.ts ships exactly that roster). Actions
- *  need no twin check: copyActions ships the whole actions/ tree, so an
- *  action pin can only 404 by naming a directory that does not exist, which
- *  the build-tree assembly catches. */
+/** A reusable-workflow `uses:` fetches the FILE at the ref, so a pin on a workflow the build branch does not ship 404s every caller run
+ *  even with the right ref; branch_tree.ts ships exactly FLEET_WORKFLOWS.
+ *  Actions have no twin check: copyActions ships the whole actions/ tree, so only a pin naming a directory that does not exist could 404. */
 export function fleetWorkflowPinMismatches(
   pins: SelfPin[],
   shipped: readonly string[],
@@ -221,7 +194,6 @@ export function fleetWorkflowPinMismatches(
     }));
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const deliveryPinRules: Rule[] = [
   {
     name: "action-pins",
@@ -242,14 +214,8 @@ export const deliveryPinRules: Rule[] = [
     },
   },
   {
-    // The categorical delivery-channel law: EVERY self-reference in the
-    // writer's sources (composite action or reusable workflow) rides the
-    // green-gated build branch. One blanket scan, never per-file pins, so
-    // a planted @main reds with the file and ref; the scope (files/) is
-    // structural, exactly what the fleet receives and executes, while this
-    // repo's own workflows live outside it. DELIVERY_REF is pinned against
-    // publish.ts's BRANCH by AST (importing the publisher would run its git
-    // wiring).
+    // One blanket scan over files/ (exactly what the fleet receives), never per-file pins, so a planted @main reds with its file and ref.
+    // publish.ts's BRANCH is read off the AST: importing the publisher would run its git wiring.
     name: "fleet-refs-ride-build",
     run: () => {
       const published = constStringValue(

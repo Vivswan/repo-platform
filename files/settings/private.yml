@@ -1,11 +1,6 @@
 ---
-# Layer 2 of the settings merge, applied to PRIVATE repositories only
-# (docs/settings.md).
-#
-# The marker label github-settings-as-code's private reporting pins its
-# report issue with. The central apply redacts private targets and injects
-# the label into its managed set automatically; declaring it here keeps
-# the roster the layers spell out equal to the roster the apply reconciles.
+# Layer 2 of the settings merge, PRIVATE repositories only (docs/settings.md).
+# The apply injects this label into its managed set itself (github-settings-as-code pins its private report issue with it); declaring it here keeps the roster the layers spell out equal to the one the apply reconciles.
 
 labels:
   - name: settings-as-code-report

@@ -1,7 +1,3 @@
-// The repository inputs more than one rule group keys on: the repo root,
-// the owner, file and tree readers, and the parsed documents (files.yml
-// memoized, the rest re-read per call).
-
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -20,10 +16,8 @@ export const REPO_ROOT = resolve(import.meta.dir, "../../..");
  *  owner slot every fleet-facing pin and PAT URL spells. */
 export const OWNER = "Vivswan";
 
-/** A writer source with its `{{name}}` placeholders replaced by a plain
- *  word and its blocks anchor line by a comment, line count preserved, so
- *  the YAML parses the way the written file will (a bare `{{` opens a flow
- *  mapping); `${{ }}` expressions are not placeholders and ride through. */
+/** A bare `{{` opens a YAML flow mapping, so placeholders become a plain word before parsing, line count preserved;
+ *  `${{ }}` expressions ride through. */
 export function neutralizePlaceholders(text: string): string {
   return text
     .replace(/^\{\{blocks\}\}$/gm, "# blocks")
@@ -32,8 +26,6 @@ export function neutralizePlaceholders(text: string): string {
     );
 }
 
-/** A writer source read for parsing: placeholders neutralized under files/,
- *  every other path verbatim. */
 export function readSource(rel: string): string {
   const text = read(rel);
   return rel.startsWith("files/") ? neutralizePlaceholders(text) : text;
@@ -43,9 +35,7 @@ export function read(rel: string): string {
   return readFileSync(join(REPO_ROOT, rel), "utf-8");
 }
 
-/** Every path git tracks in this repository. capture() carries the hang
- *  bound a bare piped spawn lacks (the spawn-sync-hang-bound rule's
- *  semantics - the checker must not be its own counterexample). */
+/** capture() carries the hang bound a bare piped spawn lacks: the checker must not be its own counterexample to the spawn-sync-hang-bound rule. */
 export function trackedFiles(): string[] {
   const proc = capture(["git", "-C", REPO_ROOT, "ls-files", "-z"]);
   if (proc.exitCode !== 0) {
@@ -71,10 +61,8 @@ function memoize<T>(compute: () => T): () => T {
   };
 }
 
-/** files.yml's modules in canonical order, with their data. */
 export const modules = memoize((): Module[] => loadModules(join(REPO_ROOT, "files.yml")));
 
-/** files.yml parsed whole: the module data beside the settings block. */
 export const filesConfig = memoize(() => parseFilesConfig(read("files.yml")));
 
 export function asRecord(value: unknown, where: string): Record<string, unknown> {
@@ -84,8 +72,6 @@ export function asRecord(value: unknown, where: string): Record<string, unknown>
   return value as Record<string, unknown>;
 }
 
-/** One tracking stream: the module and its files.yml tracking_label,
- *  color and description included. */
 export interface TrackingStream {
   module: string;
   key: string;
@@ -94,10 +80,6 @@ export interface TrackingStream {
   description: string;
 }
 
-/** files.yml's tracking_label streams (fuzzer, nightly, ...), in canonical
- *  order, the single source the doc constants and the label tuples are
- *  anchored to; throws when no module declares one or a stream lacks its
- *  tuple, so every rule keyed on it fails loudly. */
 export function trackingStreams(): TrackingStream[] {
   const streams = modules().flatMap((m): TrackingStream[] => {
     const tracking = m.tracking_label;
@@ -121,7 +103,6 @@ export function trackingStreams(): TrackingStream[] {
   return streams;
 }
 
-/** The repository slug (package.json's name) beside the owner. */
 export function repoSlug(): string {
   const pkg = asRecord(JSON.parse(read("package.json")), "package.json");
   return String(pkg.name);
@@ -140,8 +121,6 @@ export function ciJobs(ci: Record<string, unknown>, where: string): Record<strin
   return asRecord(ci.jobs, `${where} jobs`);
 }
 
-/** All non-directory paths below `rel` (repo-relative), sorted; skips
- *  node_modules. Symlinks are returned but flagged. */
 export function walkFiles(rel: string): { path: string; symlink: boolean }[] {
   const found: { path: string; symlink: boolean }[] = [];
   const visit = (dir: string) => {
@@ -163,10 +142,7 @@ export interface Label {
   description: string;
 }
 
-/** Every label tuple any settings LAYER can emit for ANY selection and
- *  either visibility - tracking labels excluded (they come from each
- *  repository's registration). The single roster the doc-constant rules
- *  key on. */
+/** Tracking labels are not here: they come from each repository's registration, not from a layer. */
 export function managedLabelRoster(): Label[] {
   return allLayerLabels(layerConfig(filesConfig()), join(REPO_ROOT, "files"));
 }

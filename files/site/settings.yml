@@ -1,5 +1,3 @@
-# The site module's settings layer (merged per docs/settings.md): enables
-# GitHub Pages with Actions-workflow builds, so the first deploy needs no
-# manual Pages toggle - the settings apply creates the site when absent.
+# The settings apply creates the Pages site when absent, so the first deploy needs no manual Pages toggle.
 pages:
   build_type: workflow

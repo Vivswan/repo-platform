@@ -1,7 +1,4 @@
-// This repository's site configuration at its three hand-copied homes:
-// ci.yml's docs-check job (the strict check), ci.yml's site job (the
-// deploy), and scripts/docs_check.ts (the local twin). A check over a
-// different include set than the deploy passes PRs the deploy then breaks on.
+// A docs check over a different include set than the deploy passes PRs the deploy then breaks on.
 
 import { constStringValue } from "../../lib/ts_extract.ts";
 import { canonical, type Mismatch } from "./comparison.ts";
@@ -11,7 +8,6 @@ import type { Rule } from "./rule_roster.ts";
 export const DOCS_CHECK_SCRIPT = "scripts/docs_check.ts";
 const CI = ".github/workflows/ci.yml";
 
-/** The `with.config` of one step or job, as the parsed JSON it carries. */
 function configOf(carrier: Record<string, unknown>, where: string): unknown {
   const config = asRecord(carrier.with ?? {}, `${where} with`).config;
   if (typeof config !== "string") {
@@ -24,7 +20,6 @@ function configOf(carrier: Record<string, unknown>, where: string): unknown {
   }
 }
 
-/** The docs-check job's pages-site step: the one step that runs the check. */
 function docsCheckStep(jobs: Record<string, unknown>): Record<string, unknown> {
   const job = asRecord(jobs["docs-check"] ?? {}, `${CI} docs-check`);
   const steps = Array.isArray(job.steps) ? (job.steps as unknown[]) : [];
@@ -39,8 +34,6 @@ function docsCheckStep(jobs: Record<string, unknown>): Record<string, unknown> {
   return asRecord(step, `${CI} docs-check pages-site step`);
 }
 
-/** The deploy's config (ci.yml's site job) is the reference; the check
- *  job and the local script must carry the same JSON, key order aside. */
 export function siteConfigMismatches(
   ci: Record<string, unknown>,
   docsCheckSource: string,
@@ -66,7 +59,6 @@ export function siteConfigMismatches(
   );
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const siteConfigRules: Rule[] = [
   {
     name: "site-config-parity",

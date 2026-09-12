@@ -12,14 +12,9 @@ export interface Rule {
   run: () => Mismatch[];
 }
 
-/** Every rule this checker runs, by name - the checker's own authored
- *  roster, mirroring ALL_GREEN_ROSTER one level down: the run loop counts
- *  whatever the rules array happens to hold, so a rule silently dropped
- *  (a bad merge, a refactor that loses an entry) or registered twice
- *  would stay green with nothing to notice it. main() compares this list
- *  against the live rules in both directions (ruleRosterMismatches), so
- *  adding a rule means adding its name here, and deleting one means
- *  removing its entry in the same change, deliberately. */
+/** The run loop counts whatever the rules array holds, so a rule silently dropped or registered twice would stay green with nothing
+ *  to notice it; this roster is compared against the live rules in both directions (ruleRosterMismatches).
+ *  Adding a rule means adding its name here; deleting one means removing its entry in the same change. */
 export const RULE_ROSTER = [
   "bun-dirs",
   "bun-types-pin",
@@ -65,14 +60,8 @@ export const RULE_ROSTER = [
   "site-config-parity",
 ] as const;
 
-/** Set-plus-uniqueness comparison between the authored roster and the live
- *  rules' names, in both directions: a live rule missing from the roster is
- *  a gate the roster never vouched for, a roster entry with no live rule is
- *  a DROPPED rule (the silent case the roster exists for, since the run loop
- *  only counts what survived), and a duplicate on either side is a double-run
- *  rule or a double-vouched entry. Not a rule itself: it runs unconditionally
- *  in main(), before the loop it audits, so it cannot drop out of the rules
- *  array alongside what it guards. */
+/** Not a rule itself: it runs unconditionally in main(), before the loop it audits,
+ *  so it cannot drop out of the rules array alongside what it guards. */
 export function ruleRosterMismatches(
   roster: readonly string[],
   names: readonly string[],

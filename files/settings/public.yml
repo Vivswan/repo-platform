@@ -1,12 +1,6 @@
 ---
-# Layer 2 of the settings merge, applied to PUBLIC repositories only
-# (docs/settings.md). Private repositories without Advanced Security
-# reject the security_and_analysis keys with a 422, and the code_quality
-# rule gates a feature family unavailable there, which is why neither can
-# live in the unconditional baseline.
-#
-# security_and_analysis is declared so the apply heals an out-of-band
-# disable: GitHub enables both keys by default on public repositories.
+# Layer 2 of the settings merge, PUBLIC repositories only (docs/settings.md): a private repository without Advanced Security rejects the security_and_analysis keys with a 422 and cannot use the code_quality feature family.
+# GitHub already enables both security_and_analysis keys on public repositories; declaring them lets the apply heal an out-of-band disable.
 
 repository:
   security_and_analysis:
@@ -16,48 +10,24 @@ repository:
       status: enabled
 
 rulesets:
-  # The main ruleset's code_quality rule lives HERE, fleet-wide for public
-  # repos, not in the toolchain modules' overlays next to code_scanning.
-  # Placement reasoning - the evidence is GitHub's docs plus ONE live
-  # specimen (checked 2026-08), not a guarantee GitHub keeps behaving
-  # this way:
+  # code_quality lives here for every public repo, not beside code_scanning in the toolchain layers: the rule gates on GitHub Code Quality's OWN analysis, and its documented blocking conditions omit "a required tool is not configured".
+  # The evidence is the docs' silence plus ONE live specimen, copilot-env, which has carried this rule since 2026-08-21 (ruleset history v47188788).
   #
-  # - The rule gates on GitHub Code Quality's OWN analysis (a per-repo
-  #   enablement, Team/GHEC-only product), not on code-scanning uploads.
-  #   Unlike code_scanning, its documented blocking conditions omit "a
-  #   required tool is not configured" - an argument from the docs'
-  #   silence - and the one specimen matches: copilot-env has carried
-  #   exactly this rule since 2026-08-21 (ruleset history v47188788) on a
-  #   personal account where Code Quality cannot be enabled at all, and
-  #   PRs kept auto-merging under it (auto-merge does not bypass rules).
-  #   On that evidence it is declared on every public repo regardless of
-  #   toolchain - no module gate, no local re-declaration. If GitHub ever
-  #   starts blocking on an unconfigured analysis, the failure mode is
-  #   loud (blocked merges fleet-wide), not silent.
-  # - Public-only, mirroring code_scanning: the Code Quality feature
-  #   family needs Advanced Security on private repositories, which this
-  #   fleet does not carry, so the private overlay stays silent.
-  #
-  # Rules of a same-name ruleset APPEND across layers keyed by `type`, so
-  # this adds to the main ruleset that files/settings/override.yml
-  # declares rather than replacing it. severity `warnings`: quality
-  # warnings gate merges once Code Quality analysis exists on a repo
-  # (matching copilot-env's live rule, the fleet's one specimen).
+  #   personal account                                   -> Code Quality (a Team/GHEC-only product) cannot be enabled there
+  #   PRs kept auto-merging under the rule               -> auto-merge does not bypass rules, so the rule was not blocking
+  #   GitHub starts blocking on an unconfigured analysis -> merges block fleet-wide, loudly, not silently
+  #   private repositories                               -> the feature family needs Advanced Security, so the private layer stays silent
+  #   rules of a same-name ruleset                       -> append across layers keyed by `type`, adding to the main ruleset in files/settings/override.yml
+  #   severity: warnings                                 -> matches the specimen's live rule
   - name: main
     rules:
       - type: code_quality
         parameters:
           severity: warnings
-      # Automatically request Copilot code review on PRs to main, including
-      # on each new push and on draft PRs - PUBLIC repositories only, by
-      # fleet policy: private repos can run Copilot reviews (verified live
-      # 2026-08), the fleet just chooses not to request them there. The
-      # reviews are ADVISORY: each run posts a copilot-pull-request-reviewer
-      # check run on the reviewed head, but no gate waits on it since the
-      # verdict machinery retired. Verified edges: bot-authored PRs
-      # (Dependabot) and new pushes to DRAFT PRs get no automatic run
-      # despite this rule - request the review from the reviewers panel
-      # where wanted.
+      # Public-only by fleet policy, not by GitHub: private repos can run Copilot reviews (verified live 2026-08). The reviews are ADVISORY; no gate waits on the copilot-pull-request-reviewer check run.
+      #
+      #   bot-authored PRs (Dependabot)   -> no automatic run despite this rule
+      #   a new push to a DRAFT PR        -> no automatic run despite review_draft_pull_requests; request it from the reviewers panel
       - type: copilot_code_review
         parameters:
           review_on_push: true

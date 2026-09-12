@@ -1,15 +1,10 @@
 ---
-# This repository's OWN settings overlay, written once and repo-owned. The
-# sync renders .github/settings.yml from the fleet settings layers, the
-# module selection in .repo-platform.yml, and this file; edit this file,
-# never the rendered one (the next sync replaces it and holds the PR).
-# {{github_username}}/repo-platform's central settings run applies the
-# rendered file after every green main merge there and nightly.
-# Fleet defaults merge UNDER this file - keys here win, null opts out,
-# labels replace by name, rulesets MERGE by name; both must stay lists.
-# The fleet invariants (squash-only merging, the protection rulesets)
-# sit ABOVE and cannot be overridden. Undeclared labels are
-# deleted by the apply; undeclared rulesets are left alone.
+# This repository's OWN settings overlay, written once and repo-owned: edit this file, never the rendered .github/settings.yml (the next sync replaces it and holds the PR).
+# Fleet defaults merge UNDER it and the fleet invariants (squash-only merging, the protection rulesets) ABOVE it ({{github_username}}/repo-platform's docs/settings.md).
+#
+#   a key declared here   -> wins over the fleet default; null opts out
+#   labels (a list)       -> replace the fleet entry by name; undeclared labels are deleted by the apply
+#   rulesets (a list)     -> merge into the fleet entry by name; undeclared rulesets are left alone
 
 repository:
   description: "{{description}}"

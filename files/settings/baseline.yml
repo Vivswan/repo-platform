@@ -1,17 +1,6 @@
 ---
-# Layer 1 of the settings merge: the fleet-wide defaults every managed
-# repository starts from. Everything here is OVERRIDABLE - a repository's
-# own .github/settings.local.yml wins over it. Invariants a repository
-# must not be able to weaken live in files/settings/override.yml, which
-# merges ABOVE the overlay.
-#
-# The full merge order (low to high) and the dialect are in
-# docs/settings.md. Identity keys (description, homepage, topics,
-# private) never appear in any fleet layer: they are per-repo and live in
-# the repository's own overlay.
-#
-# This is a plain settings-as-code document, like every other layer: no
-# key here is special to the merge, and no code derives content from it.
+# Layer 1 of the settings merge (docs/settings.md): everything here is OVERRIDABLE by a repository's own .github/settings.local.yml.
+# Invariants a repository must not weaken live in files/settings/override.yml, which merges ABOVE the overlay; identity keys (description, homepage, topics, private) live only in the overlay.
 
 repository:
   has_issues: true
@@ -23,12 +12,8 @@ repository:
   allow_update_branch: true
   enable_automated_security_fixes: true
 
-# The unconditional labels: dependabot's base pair first (the base
-# dependabot.yml always carries the github-actions ecosystem, and
-# dependabot recreates its labels when missing, so leaving either
-# undeclared would loop delete/recreate nightly), then the triage trio.
-# Per-ecosystem dependabot labels come from the toolchain modules' own
-# settings.yml layers.
+# dependabot recreates `dependencies` and `github_actions` when missing (the base dependabot.yml always carries the github-actions ecosystem), so leaving either undeclared would loop delete/recreate nightly.
+# Per-ecosystem dependabot labels come from the toolchain modules' own settings.yml layers.
 labels:
   - name: dependencies
     color: "0366d6"
@@ -52,23 +37,14 @@ labels:
   - name: merge-when-green
     color: "0e8a16"
     description: "Owner approved: merge once every gate is green"
-  # The fleet-wide nightly Trivy stream's tracking label (docs/security-scans.md):
-  # fleet-ci files findings under it on every repository, so it is fleet
-  # data, not a module's tracking label; the plan job lists it among the
-  # tracking labels release-health blocks on.
+  # Fleet data, not a module's tracking label: fleet-nightly's Trivy scan files findings under it on every repository (docs/security-scans.md), and the plan job lists it among the tracking labels release-health blocks on.
   - name: security-nightly
     color: "1d76db"
     description: Automated nightly security scan findings
 
 rulesets:
-  # The pr-title module's required-check ruleset, DISABLED here so the
-  # apply can heal a module deselection: the apply never deletes a whole
-  # undeclared ruleset, so without this baseline entry a repo dropping the
-  # module would keep a live ruleset requiring a check its render no
-  # longer creates - every PR wedged. The module's settings.yml flips
-  # enforcement to active (a same-name ruleset merges key by key), so
-  # selection and deselection both land through the ordinary apply. The
-  # full shape lives here once; the module layer carries only the flip.
+  # DISABLED here on purpose: the apply never deletes a whole undeclared ruleset, so a repo dropping the pr-title module would otherwise keep a live ruleset requiring a check its render no longer creates, and every PR would wedge.
+  # files/pr-title/settings.yml flips enforcement to active (a same-name ruleset merges key by key); the full shape lives here once.
   - name: pr-title
     target: branch
     enforcement: disabled

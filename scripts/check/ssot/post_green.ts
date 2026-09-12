@@ -1,7 +1,3 @@
-// Rules keeping the fleet writers behind the all-green gate: the
-// registered writers and token holders, their post-green callers, and the
-// settings apply's own green gate.
-
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -9,11 +5,6 @@ import { escapeRegExp, type Mismatch } from "./comparison.ts";
 import { OWNER, REPO_ROOT, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-/** settings-repos.yml's green gate, judged on the parsed workflow (exported
- *  for the forcing tests): in the job that selects the targets, the gate
- *  runs before the selection and unconditionally; every job checks out
- *  exactly once and without a ref, landing on the trigger commit the gate
- *  judged. */
 export function settingsGreenGateMismatches(text: string): Mismatch[] {
   const rel = ".github/workflows/settings-repos.yml";
   const mismatches: Mismatch[] = [];
@@ -140,11 +131,6 @@ export interface WorkflowCaller {
   uses: string;
 }
 
-/** Every job in `workflows` (repo-relative path to text) whose `uses:`
- *  calls the repository's own workflow `rel`, in either spelling of a
- *  same-repository call (owner and repository match in any case, the
- *  path exactly). A foreign
- *  repository's same path is not this file and does not count. */
 export function callersOf(
   workflows: Record<string, string>,
   rel: string,
@@ -172,10 +158,7 @@ export function callersOf(
   return callers;
 }
 
-/** The census verdict shared by post-green.yml and the fleet writers:
- *  exactly one caller, at `expectedSite`, in the local spelling (a
- *  canonical `@ref` call from the right job would run an unjudged ref's
- *  copy of the workflow). Null when it holds, else the `got` text. */
+/** A canonical `@ref` call from the right job would run an unjudged ref's copy of the workflow, so only the local spelling passes. */
 function soleLocalCallerProblem(callers: WorkflowCaller[], expectedSite: string): string | null {
   if (callers.length === 1 && callers[0].site === expectedSite && callers[0].local) return null;
   if (callers.length === 0) return "no caller at all";
@@ -184,15 +167,9 @@ function soleLocalCallerProblem(callers: WorkflowCaller[], expectedSite: string)
     .join(", ")}`;
 }
 
-/** post-green.yml's call is the all-green gate's one exit, so its callers
- *  ARE that gate: exactly one job anywhere may call it, ci.yml's
- *  post-green job, itself needs-ordered behind the all-green job
- *  (allGreenGateMismatches judges that edge). A second caller would run
- *  every post-green leg - the fleet writers included - behind whatever
- *  that workflow's trigger is. Its only other way in, a workflow_dispatch,
- *  runs the two delivery legs alone, publish-build and move-stable
- *  (tests/build-branches/publish_wiring.test.ts pins that), each behind its
- *  script's own in-script gate. */
+/** post-green.yml's callers ARE the all-green gate's one exit: a second caller would run every post-green leg, the fleet writers included,
+ *  behind whatever that workflow's trigger is. allGreenGateMismatches judges the caller's needs edge; the workflow_dispatch way in runs
+ *  the two delivery legs alone behind their in-script gates (tests/build-branches/publish_wiring.test.ts pins that). */
 export function postGreenCallerMismatches(
   workflows: Record<string, string>,
   owner: string,
@@ -209,13 +186,8 @@ export function postGreenCallerMismatches(
   ];
 }
 
-/** Every workflow that reads the fleet PAT and is NOT a fleet writer, with
- *  why it holds the token. The PAT is the one credential that can mutate
- *  managed repositories, so holding it is the independent census of "could
- *  this workflow be a fleet writer": a holder must be a registered writer
- *  (FLEET_WRITERS) or classified here, and a stale entry must be removed;
- *  fleetTokenHolderMismatches holds the two rosters together in both
- *  directions, so an unregistered fleet-mutating workflow cannot land silently. */
+/** The PAT is the one credential that can mutate managed repositories, so holding it is the independent census of "could this be a fleet writer":
+ *  every holder is in FLEET_WRITERS or classified here with why it holds the token. */
 export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
   ".github/workflows/ci.yml": "passes the secret through to post-green.yml",
   ".github/workflows/post-green.yml":
@@ -230,19 +202,12 @@ export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
     "workflow_call-only; a managed ci.yml hands it the secret to publish THAT repository's draft release",
 };
 
-/** Whether a parsed workflow can read the fleet PAT: any string value (never
- *  a comment; the census works on the parsed document) whose Actions
- *  expressions reference the `secrets` context other than by the name of a
- *  DIFFERENT secret, every whole or computed access (`toJSON(secrets)`,
- *  `secrets[name]`) included since those reach the PAT too, or a job passing
- *  `secrets: inherit`, which hands a called workflow every secret without
- *  naming one. Conservative on purpose: a false holder costs a
- *  classification line, a missed one a silent writer. */
+/** Conservative on purpose: a false holder costs a classification line, a missed one a silent writer.
+ *    `secrets.OTHER_NAME` only            -> not a holder
+ *    `toJSON(secrets)`, `secrets[name]`   -> a holder: a whole or computed access reaches the PAT too
+ *    `secrets: inherit` on a call         -> a holder: every secret is handed on without naming one */
 export function readsFleetToken(doc: unknown): boolean {
-  // Every `secrets.<name>` / `secrets['<name>']` reference; any other
-  // `secrets` token left in an expression is a whole or computed access.
-  // Case-insensitive throughout: Actions resolves the context and the
-  // secret name in any case.
+  // Case-insensitive throughout: Actions resolves the context and the secret name in any case.
   const named =
     /\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)\b|\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\])/gi;
   const reads = (text: string): boolean => {
@@ -271,11 +236,6 @@ export function readsFleetToken(doc: unknown): boolean {
   return walk(doc);
 }
 
-/** The fleet-token census: the workflows that read the fleet PAT
- *  (readsFleetToken, on the parsed document) must be exactly the
- *  registered writers plus the classified non-writers - a holder in
- *  neither is an unregistered candidate writer, an entry with no holder
- *  is a stale classification. */
 export function fleetTokenHolderMismatches(workflows: Record<string, string>): Mismatch[] {
   const holders = Object.entries(workflows)
     .filter(([, text]) => readsFleetToken(parseYaml(text)))
@@ -305,14 +265,6 @@ export function fleetTokenHolderMismatches(workflows: Record<string, string>): M
   return mismatches;
 }
 
-/** One fleet writer's way in, judged structurally on the parsed writer and
- *  every workflow in the repository (exported so the forcing tests run the
- *  exact judgment): triggers exactly FLEET_WRITER_TRIGGERS, the call
- *  declaring both `repos` and `sha`, the concurrency ternary keying the
- *  call-only input into a per-run group and naming the lane, every call input
- *  landing on the step that consumes it, and post-green.yml's caller job as
- *  the ONLY caller anywhere in `workflows` (repo-relative paths), holding
- *  that lane: a second caller would be a second way into the fleet. */
 export function fleetWriterMismatches(
   rel: string,
   text: string,
@@ -395,9 +347,7 @@ export function fleetWriterMismatches(
       });
     }
   }
-  // The caller census: exactly one job anywhere may call this writer, and
-  // it is post-green.yml's, in the local spelling. An absent caller is
-  // reported once, by the job check below.
+  // An absent caller is reported once, by the job check below.
   const expectedCaller = `${POST_GREEN_REL} job ${writer.callerJob}`;
   const callers = callersOf(workflows, rel, owner);
   const censusProblem = soleLocalCallerProblem(callers, expectedCaller);
@@ -443,7 +393,6 @@ export function fleetWriterMismatches(
   return mismatches;
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const postGreenRules: Rule[] = [
   {
     // The one fleet-wide settings WRITER's gate: trimming it would leave the
@@ -452,13 +401,8 @@ export const postGreenRules: Rule[] = [
     run: () => settingsGreenGateMismatches(read(".github/workflows/settings-repos.yml")),
   },
   {
-    // The fleet WRITERS reach managed repositories only behind the
-    // all-green gate: post-green.yml calls each in a green main push's
-    // own run, and the self-woken cron and dispatch paths gate in-script.
-    // A `push` trigger on either would apply fleet-wide concurrently with
-    // the CI run judging that very commit (the shape the settings apply
-    // once had, behind a bounded wait). Judged structurally by
-    // fleetWriterMismatches on both files.
+    // A `push` trigger on a fleet writer would apply fleet-wide concurrently with the CI run judging that very commit;
+    // post-green.yml calls each writer in a green main push's own run, and the self-woken cron and dispatch paths gate in-script.
     name: "fleet-writers-ride-post-green",
     run: () => {
       const workflows = Object.fromEntries(
