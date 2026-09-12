@@ -2,16 +2,15 @@ name: Release Health
 description: >-
   Gates releases in managed repos: fails when an open tracking issue of a
   nightly stream (fuzz or CI), an open release-blocker issue, or an open
-  Dependabot alert at or above the severity threshold says the repository
-  is not release-worthy. Two modes: pull-request (on a release-please PR's
-  CI) and release (on the main-push release path; a push that is not a
-  release-PR merge is not gated, and the release-cut output tells the
-  caller which it was). The override label on the release PR
-  turns failures into warnings. Needs GH_TOKEN in the environment with
-  issues read, pull-requests read, and vulnerability-alerts read (the
-  security gate degrades to a notice where alerts are unreadable or
-  disabled) and gh >= 2.51 on the runner (GitHub-hosted runners ship
-  current gh).
+  Dependabot alert at high or critical severity says the repository is not
+  release-worthy. Two modes: pull-request (on a release-please PR's CI) and
+  release (on the main-push release path; a push that is not a release-PR
+  merge is not gated, and the release-cut output tells the caller which it
+  was). The release-override label on the release PR turns failures into
+  warnings. Needs GH_TOKEN in the environment with issues read,
+  pull-requests read, and vulnerability-alerts read (an unreadable alerts
+  endpoint fails the gate) and gh >= 2.51 on the runner (GitHub-hosted
+  runners ship current gh).
 
 inputs:
   mode:
@@ -23,18 +22,6 @@ inputs:
       issue carrying any of them blocks. Empty disables the tracking gates.
     required: false
     default: ""
-  blocker-label:
-    description: An open issue carrying this label blocks the release
-    required: false
-    default: release-blocker
-  override-label:
-    description: This label on the release PR bypasses all gates (failures become warnings)
-    required: false
-    default: release-override
-  security-severity:
-    description: Minimum severity of an open Dependabot alert that blocks; off|low|medium|high|critical
-    required: false
-    default: high
 
 outputs:
   release-cut:
@@ -59,8 +46,5 @@ runs:
       env:
         MODE: ${{ inputs.mode }}
         TRACKING_LABELS: ${{ inputs.tracking-labels }}
-        BLOCKER_LABEL: ${{ inputs.blocker-label }}
-        OVERRIDE_LABEL: ${{ inputs.override-label }}
-        SECURITY_SEVERITY: ${{ inputs.security-severity }}
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/release-health.ts"'

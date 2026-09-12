@@ -28,7 +28,11 @@ export const LABEL_RE = /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/;
 
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export type Severity = (typeof SEVERITIES)[number];
-export type SecurityThreshold = Severity | "off";
+
+/** One value across the fleet; files/release-please/settings.yml declares the two labels (the labels ssot rule pins it). */
+export const BLOCKER_LABEL = "release-blocker";
+export const OVERRIDE_LABEL = "release-override";
+export const SECURITY_THRESHOLD: Severity = "high";
 
 /** Mode-specific context, parsed up front so each mode's requirements
  * (event payload vs commit sha) cannot be missing later. */
@@ -41,9 +45,6 @@ export interface Config {
   repo: string;
   /** Tracking-issue stream labels; empty disables the tracking gates. */
   trackingLabels: string[];
-  blockerLabel: string;
-  overrideLabel: string;
-  security: SecurityThreshold;
 }
 
 function parseLabel(name: string, value: string): string {
@@ -94,21 +95,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     throw new Error(`unknown MODE '${mode}' (expected pull-request or release)`);
   }
 
-  const security = env.SECURITY_SEVERITY || "high";
-  if (security !== "off" && !SEVERITIES.includes(security as Severity)) {
-    throw new Error(
-      `SECURITY_SEVERITY must be one of off|${SEVERITIES.join("|")}, got '${security}'`,
-    );
-  }
-
-  return {
-    context,
-    repo,
-    trackingLabels: parseTrackingLabels(env),
-    blockerLabel: parseLabel("BLOCKER_LABEL", env.BLOCKER_LABEL || "release-blocker"),
-    overrideLabel: parseLabel("OVERRIDE_LABEL", env.OVERRIDE_LABEL || "release-override"),
-    security: security as SecurityThreshold,
-  };
+  return { context, repo, trackingLabels: parseTrackingLabels(env) };
 }
 
 export function severitiesAtOrAbove(threshold: Severity): Severity[] {
@@ -218,8 +205,7 @@ export async function findReleasePr(
 
 export type GateOutcome =
   | { gate: string; status: "pass"; summary: string }
-  | { gate: string; status: "fail"; problem: string; advice: string }
-  | { gate: string; status: "skip"; reason: string };
+  | { gate: string; status: "fail"; problem: string; advice: string };
 
 /** gh issue list returns at most this many entries; a count that hits it is
  * reported as "at least" so the message never understates the backlog. */
@@ -277,22 +263,11 @@ export async function securityGate(
       `repos/${repo}/dependabot/alerts?state=open&severity=${severities}&per_page=100`,
     ]);
   } catch (error) {
-    // The workflow GITHUB_TOKEN can read this endpoint only when the caller
-    // grants `vulnerability-alerts: read` (the dedicated permissions key;
-    // security-events covers code scanning, not Dependabot). A missing grant
-    // and a repo with Dependabot alerts disabled both answer HTTP 403, and a
-    // host without the feature 404s - none of those may block a fleet repo.
+    // A missing `vulnerability-alerts: read` grant and disabled alerts both answer HTTP 403; either is a broken gate, not a pass.
     const message = error instanceof Error ? error.message : String(error);
-    // Rate limiting (primary, secondary, and abuse-detection wording) also
-    // answers HTTP 403, but it is an operational failure, not a missing
-    // grant; skipping on it would silently drop the gate.
-    if (/rate limit|abuse detection/i.test(message)) {
-      throw error;
-    }
-    if (/HTTP 40[34]|dependabot alerts are (?:disabled|not available)/i.test(message)) {
-      return { gate, status: "skip", reason: message };
-    }
-    throw error;
+    throw new Error(
+      `security gate could not read the Dependabot alerts (${message}); the gate needs vulnerability-alerts: read and Dependabot alerts enabled on the repository`,
+    );
   }
   const alerts = JSON.parse(json) as Array<{ number: number }>;
   if (alerts.length === 0) {
@@ -327,19 +302,14 @@ export async function runHealthCheck(
       );
       return 0;
     }
-    override = hasLabel(pr.labels, cfg.overrideLabel)
+    override = hasLabel(pr.labels, OVERRIDE_LABEL)
       ? { active: true, prNumber: pr.number }
-      : { active: false, reason: `no '${cfg.overrideLabel}' label on release PR #${pr.number}` };
+      : { active: false, reason: `no '${OVERRIDE_LABEL}' label on release PR #${pr.number}` };
   } else {
-    override = await overrideFromPullRequest(
-      run,
-      cfg.repo,
-      cfg.context.eventPath,
-      cfg.overrideLabel,
-    );
+    override = await overrideFromPullRequest(run, cfg.repo, cfg.context.eventPath, OVERRIDE_LABEL);
   }
 
-  const overrideHint = `or apply the '${cfg.overrideLabel}' label to the release PR and re-run this check`;
+  const overrideHint = `or apply the '${OVERRIDE_LABEL}' label to the release PR and re-run this check`;
   // Every gate runs even under the override, so the report is complete.
   const outcomes: GateOutcome[] = [];
   for (const label of cfg.trackingLabels) {
@@ -358,31 +328,23 @@ export async function runHealthCheck(
       run,
       cfg.repo,
       "blocker",
-      cfg.blockerLabel,
+      BLOCKER_LABEL,
       `close the blocker issue(s), ${overrideHint}`,
     ),
   );
-  if (cfg.security !== "off") {
-    outcomes.push(
-      await securityGate(
-        run,
-        cfg.repo,
-        cfg.security,
-        `fix or dismiss the alert(s) under the repository's Security tab, ${overrideHint}`,
-      ),
-    );
-  }
-
-  for (const outcome of outcomes) {
-    if (outcome.status === "skip") {
-      out(`::notice::${outcome.gate} gate skipped: ${outcome.reason}`);
-    }
-  }
+  outcomes.push(
+    await securityGate(
+      run,
+      cfg.repo,
+      SECURITY_THRESHOLD,
+      `fix or dismiss the alert(s) under the repository's Security tab, ${overrideHint}`,
+    ),
+  );
 
   const failures = outcomes.filter((outcome) => outcome.status === "fail");
   if (failures.length === 0) {
     const parts = outcomes
-      .map((o) => (o.status === "pass" ? `${o.gate}: ${o.summary}` : `${o.gate}: skipped`))
+      .flatMap((o) => (o.status === "pass" ? [`${o.gate}: ${o.summary}`] : []))
       .join("; ");
     out(`release health: all gates passed (${parts})`);
     return 0;
@@ -394,7 +356,7 @@ export async function runHealthCheck(
     }
     const names = failures.map((failure) => failure.gate).join(", ");
     out(
-      `::notice::OVERRIDE: the '${cfg.overrideLabel}' label on release PR #${override.prNumber} bypassed ${failures.length} failing gate(s) (${names}); this release ships despite them`,
+      `::notice::OVERRIDE: the '${OVERRIDE_LABEL}' label on release PR #${override.prNumber} bypassed ${failures.length} failing gate(s) (${names}); this release ships despite them`,
     );
     return 0;
   }

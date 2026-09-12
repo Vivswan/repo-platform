@@ -87,6 +87,9 @@ export function labelRegexCopyMismatches(
   return mismatches;
 }
 
+/** release-health's gate labels, read off the action so the roster cannot drift from what the gate queries. */
+const RELEASE_GATE_LABELS = ["BLOCKER_LABEL", "OVERRIDE_LABEL"] as const;
+
 /** The two starter workflows carrying a tracking stream's create tuple. */
 export const FUZZ_STARTER = "files/fuzzer/.github/workflows/nightly-fuzz.yml";
 export const NIGHTLY_STARTER = "files/nightly/.github/workflows/nightly.yml";
@@ -119,8 +122,13 @@ export const labelRules: Rule[] = [
         "settings-as-code-report",
         "autorelease: pending",
         "autorelease: tagged",
-        "release-blocker",
-        "release-override",
+        ...RELEASE_GATE_LABELS.map((name) =>
+          constStringValue(read("actions/release-health/release-health.ts"), name, {
+            where: "release-health.ts",
+            what: "the release gate label",
+            exported: true,
+          }),
+        ),
       ];
       for (const name of required) {
         if (!rosterNames.has(name)) {
