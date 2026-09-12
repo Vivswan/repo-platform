@@ -31,6 +31,13 @@ runs:
           echo "::error::the all-green job needs nothing - an empty needs list vouches for no gate at all; list every gating job."
           exit 1
         fi
+        # The concurrency group cancelling the older of two runs at one head lands here. Still exit 1: a composite
+        # step ends only success or failure, so exit 0 would turn a hand-cancelled PR run into a green required check.
+        cancelled="$(jq '[to_entries[] | select(.value.result == "cancelled")] | length' <<<"$NEEDS")"
+        if [ "$cancelled" -eq "$total" ]; then
+          echo "::error::every gating job was cancelled - this run has no verdict; the newer run at this head carries it, or re-run this one."
+          exit 1
+        fi
         failed="$(jq -r '[to_entries[]
           | select(.value.result != "success" and .value.result != "skipped")
           | "\(.key) (\(.value.result))"] | join(", ")' <<<"$NEEDS")"
