@@ -1,12 +1,5 @@
-# The platform's module data file (grammar: actions/plan/files_config.ts;
-# the writer's tree checks: .github/scripts/sync/writer/files_config.ts;
-# contract: docs/sync.md). The fleet plan reads the modules block (its key
-# order is the canonical module order) for each repository's defaults. Every
-# source lives under files/; the writer copies it, splices the selected
-# modules' block files in at its {{blocks}} line, substitutes the
-# placeholders below, and nothing else. The one exception is the rendered
-# settings document: the writer folds the settings layers below with each
-# module's settings_layers files and the repository's own overlay.
+# Grammar: actions/plan/files_config.ts; tree checks: .github/scripts/sync/writer/files_config.ts;
+# contract: docs/sync.md. The modules block's key order is the canonical module order the plan emits.
 
 placeholders:
   - project_name

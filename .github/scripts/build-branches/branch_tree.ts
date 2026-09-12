@@ -1,23 +1,7 @@
 #!/usr/bin/env bun
-// Assembles the `build` branch tree: the one generated delivery channel the
-// fleet consumes, for the sync writer's data and `uses:` action refs
-// (layout and extraction rules: docs/build-provenance.md, "Extraction
-// safety"). files.yml and files/ are byte copies of this checkout's, and
-// each action ships its sources plus dependency manifests, never
-// node_modules: it installs at its own action_path when it runs.
-//
-// Invariants this file owns: content is fully deterministic (no timestamps
-// or source shas in-tree), which the sync's provenance tree proof and
-// publish.ts's no-change skip both depend on; nothing may RUN on the
-// branch, so copyFleetWorkflows hard-fails on any shipped workflow whose
-// triggers are not exactly workflow_call (PAT pushes can trigger workflows,
-// and push events execute the pushed tree's own files).
-//
-// Usage:
-//   bun .github/scripts/build-branches/branch_tree.ts --dest DIR
-//   bun .github/scripts/build-branches/branch_tree.ts --check
-//     (assembles into a fresh per-run scratch directory and removes it, so
-//     concurrent checks never share a path)
+// The `build` branch tree (layout and extraction rules: docs/build-provenance.md, "Extraction safety").
+// Nothing in it may vary between assemblies of one commit, so no timestamps or source shas go in-tree:
+// the sync's provenance tree proof and publish.ts's no-change skip both compare it.
 
 import {
   cpSync,
@@ -39,10 +23,8 @@ import { layerConfig, managedLabelNames } from "../sync/writer/settings_layers.t
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
-/** The path with every EXISTING component dereferenced: resolve() is
- * lexical, so a symlinked parent (say /tmp/projects -> the repo's parent)
- * would otherwise alias the checkout past the overlap guard below. The
- * not-yet-existing tail is re-attached unresolved. */
+/** resolve() is lexical, so a symlinked parent (say /tmp/projects -> the repo's parent) would alias
+ * the checkout past destOverlapsRepo; only the EXISTING components can be dereferenced. */
 export function canonicalize(path: string): string {
   let base = path;
   const tail: string[] = [];
@@ -55,14 +37,9 @@ export function canonicalize(path: string): string {
   return join(realpathSync(base), ...tail);
 }
 
-/** The fleet-facing reusable workflows the build branch must carry - every
- *  reusable workflow a MANAGED workflow calls `@build`: the managed ci.yml
- *  calls fleet-ci.yml (whose codeql job calls ./reusable-codeql.yml,
- *  resolving at fleet-ci's own ref - this branch), fleet-nightly.yml, and
- *  the release pair, and reusable-site.yml, and auto-assign.yml calls
- *  the reusable-auto-assign pair. A
- *  reusable-workflow `uses:` fetches the FILE at the named ref, so a build
- *  branch missing one 404s every fleet run that calls it. */
+/** Every reusable workflow a managed workflow calls `@build`; a `uses:` fetches the FILE at that ref,
+ *  so a missing one 404s every fleet run that calls it. reusable-codeql.yml is here because
+ *  fleet-ci.yml's codeql job calls it by `./` path, which resolves at fleet-ci's own ref: this branch. */
 export const FLEET_WORKFLOWS = [
   "fleet-ci.yml",
   "fleet-nightly.yml",
@@ -120,9 +97,8 @@ export const TEST_FILE_SUFFIX = ".test.ts";
  *  ships with no action.yml. */
 export const SHARED_DIR = "shared";
 
-/** Whether a path under an action root publishes: outside every excluded
- *  directory segment (relative to the root, so an ancestor named
- *  node_modules does not filter the whole copy away) and not a test file. */
+/** Segments are judged relative to the action root: an ancestor of the checkout named
+ *  node_modules must not filter the whole copy away. */
 export function publishes(actionRoot: string, src: string): boolean {
   const segments = relative(actionRoot, src).split("/");
   if (segments.some((segment) => EXCLUDED_DIRS.has(segment))) return false;
@@ -137,9 +113,8 @@ function hasPublishableFile(actionRoot: string, dir = actionRoot): boolean {
   });
 }
 
-/** The action directories under `<repoRoot>/actions`, sorted: those with at
- *  least one publishable file. A directory holding only ignored leftovers
- *  (the node_modules of a retired action, after a pull) is invisible. */
+/** A directory holding only ignored leftovers (a retired action's node_modules after a pull) is
+ *  not an action. */
 export function actionDirNames(repoRoot: string): string[] {
   const source = join(repoRoot, "actions");
   return readdirSync(source, { withFileTypes: true })
@@ -149,11 +124,6 @@ export function actionDirNames(repoRoot: string): string[] {
     .sort();
 }
 
-/** Copies every action directory (the shared zone included) to
- *  `<dest>/actions`, returning the number of files written. Throws when
- *  the source has no actions at all: the managed workflows reference them
- *  by path, so publishing a branch without them would 404 every fleet CI
- *  run rather than fail here. */
 export function copyActions(repoRoot: string, dest: string): number {
   const source = join(repoRoot, "actions");
   if (!existsSync(source)) {
@@ -167,12 +137,6 @@ export function copyActions(repoRoot: string, dest: string): number {
   if (!names.some((name) => name !== SHARED_DIR)) {
     throw new Error(`actions/ at ${repoRoot} holds no action directories`);
   }
-  // A directory with sources but no action.yml is a BROKEN state, never an
-  // intentional retirement - retiring an action deletes its whole
-  // directory. Publishing it anyway would succeed here and then fail every
-  // fleet `uses: .../<name>@build` at resolve time, so refuse loudly
-  // before anything is copied. The shared zone is reached by path, never
-  // resolved as an action.
   for (const name of names) {
     if (name === SHARED_DIR) continue;
     if (!existsSync(join(source, name, "action.yml"))) {
@@ -204,7 +168,6 @@ function countFiles(dir: string): number {
   return total;
 }
 
-/** The workflow document's trigger names, whatever shape `on:` takes. */
 function triggerNames(doc: unknown): string[] {
   const on = doc && typeof doc === "object" ? (doc as Record<string, unknown>).on : undefined;
   if (typeof on === "string") return [on];
@@ -213,14 +176,8 @@ function triggerNames(doc: unknown): string[] {
   return [];
 }
 
-/** Copies the fleet-facing reusable workflows to `<dest>/.github/workflows`,
- *  refusing - by hard error, naming the file and the trigger - any workflow
- *  whose triggers are not exactly `workflow_call`. This is what keeps
- *  "nothing can run on the build branch" true now that the branch carries
- *  .github/workflows/ and is pushed with a PAT (whose pushes, unlike
- *  GITHUB_TOKEN's, CAN trigger workflows): push and branch events execute
- *  the pushed tree's own workflow files, and a workflow_call-only tree has
- *  nothing to run. */
+/** The branch is pushed with a PAT, and a PAT push (unlike GITHUB_TOKEN's) runs the pushed tree's
+ *  own workflows, so only workflow_call-only workflows may ship. */
 export function copyFleetWorkflows(repoRoot: string, dest: string): void {
   const outDir = join(dest, ".github", "workflows");
   mkdirSync(outDir, { recursive: true });
@@ -255,37 +212,28 @@ export function copyFleetWorkflows(repoRoot: string, dest: string): void {
   }
 }
 
-/** Every managed label name, lowercased (GitHub deduplicates label names
- *  case-insensitively) and deduped, in declaration order: the settings
- *  layers files.yml declares are the roster's single home. */
+/** Lowercased first: GitHub deduplicates label names case-insensitively. */
 export function reservedLabelNames(repoRoot: string): string[] {
   const config = parseFilesConfig(readFileSync(join(repoRoot, FILES_CONFIG), "utf-8"));
   const names = managedLabelNames(layerConfig(config), join(repoRoot, FILES_DIR));
   return [...new Set(names.map((name) => name.toLowerCase()))];
 }
 
-/** Writes the reserved label roster the plan action refuses a tracking
- *  label from. */
 export function writeReservedLabels(repoRoot: string, dest: string): void {
   const reserved = reservedLabelNames(repoRoot).map((name) => `- ${JSON.stringify(name)}\n`);
   writeFileSync(join(dest, RESERVED_LABELS_FILE), reserved.join(""));
 }
 
-/** Copies files.yml and the files/ tree verbatim, after the writer's own
- *  loader has accepted them: a source missing from the tree or a token
- *  outside the placeholder list fails the assembly here rather than every
- *  fleet sync or plan step that reads the branch. */
+/** loadFilesConfig runs for its refusals alone: a missing source or an unknown placeholder fails
+ *  the assembly here instead of every fleet sync that reads the branch. */
 export function copyFilesTree(repoRoot: string, dest: string): void {
   loadFilesConfig(join(repoRoot, FILES_CONFIG), join(repoRoot, FILES_DIR));
   cpSync(join(repoRoot, FILES_DIR), join(dest, FILES_DIR), { recursive: true });
   writeFileSync(join(dest, FILES_CONFIG), readFileSync(join(repoRoot, FILES_CONFIG)));
 }
 
-/** Assemble the whole branch tree at `dest` (which must exist and be
- *  empty): actions/, the fleet-facing reusable workflows, the reserved
- *  label roster, files.yml and files/, and the README. Exported for the
- *  extraction-safety regression, which asserts no assembled path carries
- *  a placeholder or expression. */
+/** `dest` must exist and be empty. Exported for the extraction-safety case in
+ *  tests/build-branches/branch_tree.test.ts. */
 export function assembleBranchTree(dest: string): void {
   copyActions(REPO_ROOT, dest);
   copyFleetWorkflows(REPO_ROOT, dest);
@@ -294,16 +242,13 @@ export function assembleBranchTree(dest: string): void {
   writeFileSync(join(dest, "README.md"), README);
 }
 
-/** A refused invocation: reported as `error: <message>` and exit 2 by the
- * CLI entry, thrown here so the parser stays testable. */
+/** Thrown rather than exiting in place so parseArgs stays testable. */
 export class UsageError extends Error {}
 
 function usageError(message: string): never {
   throw new UsageError(message);
 }
 
-/** Where to assemble: a caller-owned directory (replaced, kept), or a
- * scratch directory this run mints and removes. Exactly one. */
 export type Target = { kind: "dest"; dest: string } | { kind: "check" };
 
 export function parseArgs(argv: string[]): Target {
@@ -329,10 +274,8 @@ export function parseArgs(argv: string[]): Target {
   return { kind: "dest", dest };
 }
 
-/** True when dest is the repository root, an ancestor of it, or inside it -
- * every path whose recursive removal would take the checkout with it. A
- * dest of "/" must not slip past the ancestor check because "/" + "/" is
- * "//", which no absolute path starts with. */
+/** The input behind the endsWith check: a dest of "/" would become "//", which no absolute path
+ * starts with, and slip past as not-an-ancestor. */
 export function destOverlapsRepo(dest: string, repoRoot: string): boolean {
   const destPrefix = dest.endsWith("/") ? dest : `${dest}/`;
   return dest === repoRoot || repoRoot.startsWith(destPrefix) || dest.startsWith(`${repoRoot}/`);

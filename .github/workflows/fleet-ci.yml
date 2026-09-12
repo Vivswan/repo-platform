@@ -1,19 +1,11 @@
-# Every managed repository's ci.yml calls this reusable, so an edit here
-# changes fleet CI with no per-repo diff trail; repo-platform's own CI
-# gating every edit is the counterweight. The `plan` job runs first and
-# resolves the repository's configuration from its registration
-# (actions/plan@build); every other job needs it and keys on its outputs,
-# so a call carries no per-repository inputs. The caller job's RESULT is
-# what the all-green gate judges: a job that fails here fails the whole
-# call, and a SKIPPED job leaves it green (module/visibility conditions are
-# the design). Job names are non-gating and nothing here may be
-# name-addressed. Action refs must stay fully qualified @build: a `./`
-# ACTION path resolves against the CALLER's checkout (a `./` WORKFLOW ref
-# resolves against this repository). Every job-level permission here must
-# fit the skeleton ci.yml's `ci` caller grant: GitHub checks a nested job's
-# grant against the caller's before its `if` runs, so a job needing more
-# (the nightly scan's issues: write) lives in fleet-nightly.yml behind its
-# own caller (the fleet-caller-ceilings rule pins both).
+# Every managed ci.yml calls this workflow, so an edit here changes fleet CI with no per-repo diff
+# trail; this repository's own gate is the counterweight. The caller judges the call's one RESULT:
+# a job that fails here fails the call, a SKIPPED job leaves it green, and no job is name-addressed.
+#
+#   `./` ACTION path   -> the CALLER's checkout, so action refs stay Vivswan/repo-platform/actions/<name>@build
+#   `./` WORKFLOW ref  -> this repository (reusable-codeql.yml)
+#   job permissions    -> checked against the skeleton ci.yml's caller grant BEFORE the job's `if` runs (the fleet-caller-ceilings rule)
+# A job needing more than that grant lives in fleet-nightly.yml behind its own caller.
 
 name: Fleet CI
 
@@ -31,10 +23,7 @@ permissions:
   contents: read
 
 jobs:
-  # The one read of the registration: a sparse checkout of the one file
-  # the plan resolves from, and the outputs every later job keys on. The
-  # visibility rides the event's repository object; the action asks the API
-  # when an event carries none.
+  # The visibility input is empty on events without a repository object; the action asks the API then.
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -57,10 +46,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The platform's files against the manifest the last sync stamped: the
-  # action DEFERS the failure so the findings comment is posted before the
-  # gate goes red. The nightly schedule carries only the jobs that ask for
-  # it; the nightly scan itself rides fleet-nightly.yml.
+  # The action DEFERS its failure so the findings comment posts first; the step below re-raises it.
+  # != 'schedule': the nightly cron carries only the jobs that ask for it (codeql); the nightly scan
+  # itself rides fleet-nightly.yml.
   validate-managed-files:
     needs: [plan]
     if: github.event_name != 'schedule'
@@ -84,9 +72,8 @@ jobs:
           echo "::error::validate-managed-files failed; see the findings on this PR (or the job summary) and the step log above."
           exit 1
 
-  # The seven base checks in one job for every visibility (a standalone job
-  # bills a rounded-up minute per push); !cancelled() keeps later checks
-  # running past a failure, and the judge last names every failed check.
+  # One job, not seven: a standalone job bills a rounded-up minute per push. !cancelled() on each
+  # step keeps later checks running past a failure, and the judge names every failed one.
   base-checks:
     needs: [plan]
     if: github.event_name != 'schedule'
@@ -97,8 +84,7 @@ jobs:
       # Write only for check-file-size's sticky comment.
       pull-requests: write
     steps:
-      # One checkout serves every check: fetch-depth 0 because
-      # commit-names walks history and gitleaks scans the event's range.
+      # fetch-depth 0: commit-names walks history and gitleaks scans the event's range.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -106,8 +92,6 @@ jobs:
       - id: typography
         if: ${{ !cancelled() }}
         uses: Vivswan/repo-platform/actions/check-typography@build
-      # Advisory: continue-on-error keeps a finding from turning the PR
-      # red; the sticky comment and step summary still land.
       - id: file-size
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -157,10 +141,8 @@ jobs:
           echo "$failed"
           exit 1
 
-  # Fails a PR introducing a dependency with a high or critical advisory.
-  # Public only: the dependency-graph API is free just there.
-  # PR events only: nothing else has a diff.
-  # != 'true' so an empty visibility output runs the check and fails loudly.
+  # Public only: the dependency-graph API is free just there. != 'true' so an empty visibility
+  # output runs the check, where a private repository fails loudly instead of skipping silently.
   dependency-review:
     needs: [plan]
     if: ${{ needs.plan.outputs.private != 'true' && github.event_name == 'pull_request' }}
@@ -171,11 +153,9 @@ jobs:
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@build
 
-  # Actions security audit over every workflow and action.yml (actions/zizmor).
-  # The fleet policy applies unless the repository carries .github/zizmor.yml.
-  # High findings reach code scanning on public repositories only: a private personal repository has none.
-  # != 'true': an empty visibility output uploads and fails loudly.
-  # A high finding fails the job everywhere.
+  # The fleet policy applies unless the repository carries .github/zizmor.yml. SARIF uploads on
+  # public repositories only (a private personal repository has no code scanning); != 'true' so an
+  # empty visibility output uploads, where a private repository fails loudly instead of skipping silently.
   zizmor:
     needs: [plan]
     if: github.event_name != 'schedule'
@@ -191,15 +171,11 @@ jobs:
         with:
           upload-sarif: ${{ needs.plan.outputs.private != 'true' }}
 
-  # Unused files, exports, and dependencies, on the JavaScript toolchains
-  # only: the repository's own toolchain and lockfile install first (knip
-  # resolves imports through node_modules; bun's install serves a
-  # repository selecting both modules), then the action with the fleet
-  # default configuration unless the repository carries knip.json. Each
-  # install runs only when its inputs exist (a repository committed right
-  # after selecting the module has none yet), and setup-node's cache stays
-  # off: it hard-fails on a package.json naming a package manager with no
-  # lockfile.
+  # knip resolves imports through node_modules, so the repository's own toolchain installs first;
+  # the fleet configuration applies unless the repository carries its own knip configuration.
+  #   bun selected                 -> bun's install serves a repository selecting both modules
+  #   install inputs missing       -> stand down: a repository committed right after selecting the module has none yet
+  #   package-manager-cache: false -> setup-node hard-fails on a package.json naming a package manager with no lockfile
   knip:
     needs: [plan]
     if: (contains(fromJSON(needs.plan.outputs.modules), 'bun') || contains(fromJSON(needs.plan.outputs.modules), 'node')) && github.event_name != 'schedule'
@@ -241,8 +217,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: Vivswan/repo-platform/actions/semgrep@build
 
-  # CodeQL, one call per language. On the nightly schedule it runs on the
-  # week's Monday alone (the plan's weekly output).
+  # On the nightly schedule it runs on the week's Monday alone (the plan's weekly output).
   codeql:
     needs: [plan]
     if: needs.plan.outputs.codeql-languages != '[]' && needs.plan.outputs.codeql-languages != '' && (github.event_name != 'schedule' || needs.plan.outputs.weekly == 'true')
@@ -271,11 +246,8 @@ jobs:
         with:
           skills-dir: ${{ needs.plan.outputs.skills-dir }}
 
-  # The docs PR check (docs/site.md): docs/ built once, strictly, with the
-  # include roots the deploy reads from the registration, so a dead
-  # internal link fails the PR instead of the site leg after the merge.
-  # The hashFiles guard sits on the step: a job-level if: runs before the
-  # checkout exists, where every hashFiles reads empty.
+  # A dead internal link fails the PR here instead of the site leg after the merge. The hashFiles
+  # guard sits on the step: GitHub does not allow hashFiles in a job-level if.
   docs-check:
     needs: [plan]
     if: contains(fromJSON(needs.plan.outputs.modules), 'site') && github.event_name == 'pull_request'
@@ -318,9 +290,8 @@ jobs:
             exit 1
           fi
 
-  # Early release gating: fails the release PR on open tracking/blocker
-  # issues or Dependabot alerts at the severity threshold. Can go stale,
-  # so the release path re-runs the same action as the pre-flight.
+  # Can go stale between check and release, so the release path re-runs the same action as its
+  # pre-flight.
   release-health:
     needs: [plan]
     if: contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
@@ -342,9 +313,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The blocking half of the security scan (docs/security-scans.md); the configuration lives in the action.
-  # A fixable HIGH or CRITICAL vulnerability in any lockfile, or any HIGH or CRITICAL misconfiguration in a Dockerfile or infrastructure file, fails the gate for every visibility.
-  # The only bypass is the repository's .trivyignore.yaml, statement and expiry per entry.
+  # Blocks for every visibility (docs/security-scans.md); the only bypass is the repository's
+  # .trivyignore.yaml, statement and expiry per entry.
   trivy:
     needs: [plan]
     if: github.event_name != 'schedule'

@@ -1,7 +1,5 @@
 ---
-# Vivswan/repo-platform's OWN settings overlay, hand-written and repo-owned.
-# Edit this file, never the rendered .github/settings.yml.
-# The sync never targets this repository, so `bun run settings` renders it.
+# Edit here, never the rendered .github/settings.yml: the sync never targets this repository, so `bun run settings` renders it.
 # The override layer merges ABOVE this file: main and non-bypassable are not redeclared.
 
 repository:
@@ -13,9 +11,7 @@ repository:
   private: false
 
 rulesets:
-  # The generated build branch is append-only for everyone, the publisher included.
-  # A publish-only ruleset is not expressible (docs/settings.md).
-  # GitHub rejects an Integration bypass actor on a user-owned repository.
+  # A publish-only ruleset is not expressible (docs/settings.md), and GitHub rejects an Integration bypass actor on a user-owned repository.
   - name: build-branches
     target: branch
     enforcement: active
@@ -31,11 +27,8 @@ rulesets:
     # Only the explicit empty list lets the nightly heal clear an out-of-band bypass actor.
     bypass_actors: []
 
-  # The fleet's coming delivery ref (docs/build-provenance.md).
-  # Post-green moves it forward along main with a lease push after the all-green gate.
-  # Deletion only, like github-settings-as-code's own `latest-tag` ruleset.
-  # A lease move onto an existing tag is a force-class update to git.
-  # An update or non_fast_forward rule would need a bypass for the mover.
+  # The fleet's coming delivery ref (docs/build-provenance.md); post-green moves it along main with a lease push.
+  # Deletion only: a lease move is a force-class update to git, so an update or non_fast_forward rule would need a bypass for the mover.
   - name: stable-tag
     target: tag
     enforcement: active
