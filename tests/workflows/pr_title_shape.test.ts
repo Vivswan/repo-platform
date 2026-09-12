@@ -1,6 +1,6 @@
 // The fleet squash-merges with the PR title as the subject, and the subject then meets actions/validate-commit-names;
 // a title the pr-title check passes but that gate refuses (`fix(sync,writer): ...`, two scopes) lands red on main.
-// The commit side of every row is the gate's own path: refusal() on the subject it normalizes (first line, trimmed).
+// The commit side of every row is the gate itself: the action run in title mode, commitlint over its config.
 // The title side models MODELED_ACTION's src/validatePrTitle.js on its bundled parser (conventional-commits-parser 6,
 // conventional-changelog-conventionalcommits 9.1.0 parser options); a pin bump reds the uses pin below until re-traced:
 //   parseHeader             -> the preset's breakingHeaderPattern is tried first; no action input replaces it
@@ -8,20 +8,14 @@
 //   types (parseEnum)       -> split on newline, trimmed, empties dropped, each wrapped in ^ $
 //   subjectPattern          -> must match the WHOLE subject (match[0].length === subject.length)
 // Titles are single-line, so multi-line inputs are not rows: on "fix: x\ry" the parser refuses (`.` stops at \r)
-// while the gate accepts, and on " fix: x" the parser refuses (no trim) while the gate trims; both are the harmless
-// direction, a title refused never lands.
+// while the gate accepts; the harmless direction, a title refused never lands.
 // The root twin is judged too: nothing else pins it to the managed source.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import {
-  allowedTypes,
-  refusal,
-  scopeCharacterClass,
-  subject,
-} from "../../actions/validate-commit-names/subject.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn.ts";
 
 interface Step {
   uses?: string;
@@ -65,8 +59,23 @@ function actionAccepts(inputs: Record<string, string>, title: string): boolean {
   return whole !== null && whole[0].length === description.length;
 }
 
+const ACTION = join(
+  import.meta.dir,
+  "../..",
+  "actions/validate-commit-names/validate-commit-names.ts",
+);
+const gateVerdicts = new Map<string, boolean>();
+
 function commitGateAccepts(title: string): boolean {
-  return refusal(subject(title)) === undefined;
+  let accepted = gateVerdicts.get(title);
+  if (accepted === undefined) {
+    accepted =
+      boundedSpawnSync([process.execPath, ACTION], {
+        env: { PATH: process.env.PATH, PR_TITLE: title },
+      }).exitCode === 0;
+    gateVerdicts.set(title, accepted);
+  }
+  return accepted;
 }
 
 describe.each([
@@ -80,10 +89,10 @@ describe.each([
     expect(judge.uses).toBe(MODELED_ACTION);
   });
 
-  test("the judge's inputs are the shared grammar, verbatim", () => {
+  test("the judge's inputs are the gate's type list and scope class, verbatim", () => {
     expect(inputs).toEqual({
-      types: `${allowedTypes.join("\n")}\n`,
-      headerPattern: `^(\\w*)(?:\\((${scopeCharacterClass}+)\\))?!?: (.*)$`,
+      types: "build\nchore\nci\ndocs\nfeat\nfix\nperf\nrefactor\nrevert\nstyle\ntest\n",
+      headerPattern: "^(\\w*)(?:\\(([A-Za-z0-9._/-]+)\\))?!?: (.*)$",
       subjectPattern: "^\\s*\\S.*$",
     });
   });
@@ -94,7 +103,6 @@ describe.each([
     ["feat(a)!: x", true],
     ["docs: x", true],
     ["docs(all-green/build.v2_1): x", true],
-    ["fix: x ", true],
     ["fix:  x", true],
     ["fix(a,b): x", false],
     ["fix(a, b): x", false],
@@ -111,13 +119,17 @@ describe.each([
     expect([actionAccepts(inputs, title), commitGateAccepts(title)]).toEqual([accepted, accepted]);
   });
 
-  // The open gap: a `!` title is parsed by the preset's breakingHeaderPattern, whose scope group is `(.*)`, and the
-  // action reads no input that replaces it; `scopes` and `disallowScopes` judge each comma-split piece, so neither
-  // sees the comma. Recorded here so re-tracing the model at a new pin moves the rows it closes into the table above.
-  test.each([["fix(a,b)!: x"], ["fix()!: x"], ["fix(a b)!: x"]])(
-    "%p passes the title check and the commit gate refuses it",
-    (title) => {
-      expect([actionAccepts(inputs, title), commitGateAccepts(title)]).toEqual([true, false]);
-    },
-  );
+  // The open gaps, closed only by running the gate itself on the title: a `!` title is parsed by the preset's
+  // breakingHeaderPattern, whose scope group is `(.*)`, and the action reads no input that replaces it; and the
+  // action has no case, full-stop, or trim rule where config-conventional refuses.
+  test.each([
+    ["fix(a,b)!: x"],
+    ["fix()!: x"],
+    ["fix(a b)!: x"],
+    ["fix: Repair installer"],
+    ["fix: x."],
+    ["fix: x "],
+  ])("%p passes the title check and the commit gate refuses it", (title) => {
+    expect([actionAccepts(inputs, title), commitGateAccepts(title)]).toEqual([true, false]);
+  });
 });

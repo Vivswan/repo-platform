@@ -1,166 +1,200 @@
-// The motivating refusal: a fleet committer read `style(contract,tests): ...` being refused as a validator bug,
-// because the message showed only the generic grammar and not the one-scope rule that refused it.
+// The action is commitlint over the config beside it, fed by two callers: the fleet's commit-names step hands over the
+// event's commit range, the pr-title workflow hands over the PR title (no checkout, no event payload). Every row here
+// runs the action as CI runs it and reads the whole verdict: the exit status and commitlint's problem list.
 
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { oneScopeRule, refusal, subject } from "../../../actions/validate-commit-names/subject.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
+import { ONE_SCOPE, SUBJECT_CASE, TYPE_ENUM, verdict } from "../../shared/commitlint_verdict.ts";
+import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 const root = join(import.meta.dir, "../../..");
+const ACTION = join(root, "actions/validate-commit-names/validate-commit-names.ts");
 const scratch = temp.dir("validate-commit-names-");
 let serial = 0;
 
-const COMMA_SCOPE_SUBJECT = "style(contract,tests): align the fixture layout";
-const GENERIC_REASON = "not of the shape <type>(<scope>)?!?: <description>";
+// No user or system git config: a global commit.gpgsign or core.commentChar would change what the scratch repo stores.
+const GIT_PINS = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+  GIT_AUTHOR_NAME: "t",
+  GIT_AUTHOR_EMAIL: "t@t",
+  GIT_COMMITTER_NAME: "t",
+  GIT_COMMITTER_EMAIL: "t@t",
+};
 
-// A zero `before` sha makes the validator read the payload's commit list, so no git repo is needed.
-// Each commit's id is its 1-based position repeated, so `2222222` in an expected stderr names the second subject.
-function runValidator(subjects: string[]): BoundedSpawnResult {
+function runAction(env: Record<string, string>, cwd = root): BoundedSpawnResult {
+  return boundedSpawnSync([process.execPath, ACTION], {
+    cwd,
+    env: { PATH: process.env.PATH, ...GIT_PINS, ...env },
+  });
+}
+
+function eventFile(payload: unknown): string {
   const eventPath = join(scratch, `event-${serial++}.json`);
-  writeFileSync(
-    eventPath,
-    JSON.stringify({
-      before: "0".repeat(40),
-      after: "f".repeat(40),
-      commits: subjects.map((message, index) => ({
-        id: String(index + 1).repeat(40),
-        message,
-      })),
-    }),
-  );
-  return boundedSpawnSync(
-    [process.execPath, "actions/validate-commit-names/validate-commit-names.ts"],
-    {
-      cwd: root,
-      env: { PATH: process.env.PATH, GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath },
-    },
-  );
+  writeFileSync(eventPath, JSON.stringify(payload));
+  return eventPath;
 }
 
-const REFUSALS: { subject: string; reason: string | undefined }[] = [
-  { subject: "style(contract): align the fixture layout", reason: undefined },
-  { subject: "feat!: simplify bootstrap", reason: undefined },
-  // Any comma list a committer would write, whatever the spacing around the separators.
-  { subject: COMMA_SCOPE_SUBJECT, reason: oneScopeRule },
-  { subject: "docs(all-green, build-provenance): restructure both guides", reason: oneScopeRule },
-  { subject: "docs(a , b): update guides", reason: oneScopeRule },
-  { subject: "docs(a,  b): update guides", reason: oneScopeRule },
-  { subject: "fix(a,b,c): three scopes", reason: oneScopeRule },
-  { subject: "feat(sync,writer)!: cut the compat era", reason: oneScopeRule },
-  // Refused for something other than the comma: the grammar shape, never the one-scope rule.
-  { subject: "wip: half-done things", reason: GENERIC_REASON },
-  { subject: "feat(a b): space in scope", reason: GENERIC_REASON },
-  { subject: "feat(): empty scope", reason: GENERIC_REASON },
-  { subject: "feat(,): only a separator", reason: GENERIC_REASON },
-  { subject: "Feat(x,y): capitalized type with a comma", reason: GENERIC_REASON },
-  { subject: "feat(x,y) missing colon", reason: GENERIC_REASON },
-];
+const HEADER_100 = `fix: ${"x".repeat(95)}`;
 
-describe("refusal", () => {
-  for (const { subject, reason } of REFUSALS) {
-    test(`${reason ?? "accepted"}: ${subject}`, () => {
-      expect(refusal(subject)).toBe(reason);
-    });
-  }
-});
-
-const EXAMPLES =
-  "Examples: `feat: add setup flow`, `fix: repair installer`, `feat!: simplify bootstrap`, `chore(main): release 3.0.0`.\n\n";
-const REFUSAL_HEADER = `Commit subjects must be Conventional Commits.\n${EXAMPLES}`;
-
-const RUNS: { name: string; subjects: string[]; outcome: BoundedSpawnResult }[] = [
-  {
-    name: "a single-scope subject passes with nothing on stderr",
-    subjects: ["style(contract): align the fixture layout"],
-    outcome: { exitCode: 0, stdout: "Checked 1 non-merge commit subject(s).\n", stderr: "" },
-  },
-  {
-    name: "a comma-scoped subject is refused naming the one-scope rule beside the subject",
-    subjects: [COMMA_SCOPE_SUBJECT],
-    outcome: {
-      exitCode: 1,
-      stdout: "Checked 1 non-merge commit subject(s).\n",
-      stderr: `${REFUSAL_HEADER}- 1111111 ${COMMA_SCOPE_SUBJECT}\n  ${oneScopeRule}\n`,
-    },
-  },
-  {
-    name: "a non-conventional subject is refused for the grammar shape, not the one-scope rule",
-    subjects: ["wip: half-done things"],
-    outcome: {
-      exitCode: 1,
-      stdout: "Checked 1 non-merge commit subject(s).\n",
-      stderr: `${REFUSAL_HEADER}- 1111111 wip: half-done things\n  ${GENERIC_REASON}\n`,
-    },
-  },
-  {
-    name: "each refused subject carries its own reason in one run and the accepted one is not listed",
-    subjects: ["feat(sync): the accepted one", COMMA_SCOPE_SUBJECT, "wip: half-done things"],
-    outcome: {
-      exitCode: 1,
-      stdout: "Checked 3 non-merge commit subject(s).\n",
-      stderr:
-        `${REFUSAL_HEADER}- 2222222 ${COMMA_SCOPE_SUBJECT}\n  ${oneScopeRule}\n` +
-        `- 3333333 wip: half-done things\n  ${GENERIC_REASON}\n`,
-    },
-  },
-];
-
-describe("the CI validator's whole outcome", () => {
-  for (const { name, subjects, outcome } of RUNS) {
-    test(name, () => {
-      expect(runValidator(subjects)).toEqual(outcome);
-    });
-  }
-});
-
-// The fleet's pr-title workflow hands the action the PR title as its `title` input, with no checkout and no event
-// payload: the title becomes the squash subject, so the same refusal() judges it and no title passes that check to
-// land red at the commit-names gate. A title is never a merge commit, so the range's merge exemption does not apply.
-function runTitleJudge(title: string): BoundedSpawnResult {
-  return boundedSpawnSync(
-    [process.execPath, "actions/validate-commit-names/validate-commit-names.ts"],
-    { cwd: root, env: { PATH: process.env.PATH, PR_TITLE: title } },
-  );
-}
-
-const TITLE_HEADER = `The PR title becomes the squash-merge subject and must be a Conventional Commit.\n${EXAMPLES}`;
-
-const TITLES: [title: string, reason: string | undefined][] = [
-  ["fix(a): x", undefined],
-  ["feat!: x", undefined],
-  ["fix(a)!: x", undefined],
-  ["docs: x", undefined],
-  ["docs(all-green/build.v2_1): x", undefined],
-  ["fix: x ", undefined],
-  ["fix:  x", undefined],
-  ["fix(a,b): x", oneScopeRule],
-  ["fix(a, b): x", oneScopeRule],
-  ["fix(a,b)!: x", oneScopeRule],
-  ["fix(a b): x", GENERIC_REASON],
-  ["fix(): x", GENERIC_REASON],
-  ["fix()!: x", GENERIC_REASON],
-  ["fix(a b)!: x", GENERIC_REASON],
-  ["fix(a):x", GENERIC_REASON],
-  ["fix(a): ", GENERIC_REASON],
-  ["fix:  ", GENERIC_REASON],
-  ["fix: \t", GENERIC_REASON],
-  ["Fix(a): x", GENERIC_REASON],
-  ["bogus(a): x", GENERIC_REASON],
-  ["(a): x", GENERIC_REASON],
-  ["Merge branch 'main' into feature", GENERIC_REASON],
+const TITLES: [title: string, problems: string[]][] = [
+  ["fix(a): x", []],
+  ["feat!: x", []],
+  ["fix(a)!: x", []],
+  ["docs(all-green/build.v2_1): x", []],
+  ["fix:  x", []],
+  [HEADER_100, []],
+  ["fix(a,b): x", [ONE_SCOPE]],
+  ["fix(a, b): x", [ONE_SCOPE]],
+  ["fix(a,b)!: x", [ONE_SCOPE]],
+  ["fix(a b): x", [ONE_SCOPE]],
+  ["fix(): x", [ONE_SCOPE]],
+  ["fix(a,b)(c): x", [ONE_SCOPE]],
+  ["fix(a)(c): x", [ONE_SCOPE]],
+  ["fix(a)!(c): x", [ONE_SCOPE]],
+  ["fix(a):(c): x", [ONE_SCOPE]],
+  // The parser reads the scope up to the last `): `, and so will release-please on the landed subject.
+  ["fix(core): handle fn(): safely", [ONE_SCOPE]],
+  ["fix: Repair installer", [SUBJECT_CASE]],
+  ["fix: x.", ["subject may not end with full stop [subject-full-stop]"]],
+  [
+    `${HEADER_100}x`,
+    ["header must not be longer than 100 characters, current length is 101 [header-max-length]"],
+  ],
+  ["fix: x ", ["header must not end with whitespace [header-trim]"]],
+  ["fix(a):x", ["subject may not be empty [subject-empty]", "type may not be empty [type-empty]"]],
+  ["Fix(a): x", ["type must be lower-case [type-case]", TYPE_ENUM]],
+  ["bogus(a): x", [TYPE_ENUM]],
+  ["(a): x", ["type may not be empty [type-empty]"]],
 ];
 
 describe("the PR title judged as the squash subject it becomes", () => {
-  for (const [title, reason] of TITLES) {
-    test(`${reason ?? "accepted"}: ${JSON.stringify(title)}`, () => {
-      expect(runTitleJudge(title)).toEqual({
-        exitCode: reason === undefined ? 0 : 1,
-        stdout: "Checked the PR title.\n",
-        stderr: reason === undefined ? "" : `${TITLE_HEADER}- ${subject(title)}\n  ${reason}\n`,
+  for (const [title, expected] of TITLES) {
+    test(`${expected.length === 0 ? "accepted" : expected.join("; ")}: ${JSON.stringify(title)}`, () => {
+      expect(verdict(runAction({ PR_TITLE: title }))).toEqual({
+        exitCode: expected.length === 0 ? 0 : 1,
+        stderr: "",
+        problems: expected,
       });
     });
   }
+});
+
+/** A scratch history whose base..head holds, oldest first: an accepted commit with an unwrapped 150-character body
+ *  line, a merge that brings in a comma-scoped commit, and a Sentence-case commit; `orphan` is a root unrelated to it. */
+function scratchRepo(): { repo: string; base: string; head: string; orphan: string } {
+  const repo = join(scratch, `repo-${serial++}`);
+  const git = (...args: string[]): string => {
+    const result = boundedSpawnSync(["git", ...args], {
+      cwd: repo,
+      env: { PATH: process.env.PATH, ...GIT_PINS },
+    });
+    if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+    return result.stdout.trim();
+  };
+  mkdirSync(repo);
+  git("init", "-q", "-b", "main");
+  git("commit", "-q", "--allow-empty", "-m", "chore: root");
+  const base = git("rev-parse", "HEAD");
+  git("commit", "-q", "--allow-empty", "-m", `feat(a): ok\n\n${"y".repeat(150)}`);
+  git("checkout", "-q", "-b", "side");
+  git("commit", "-q", "--allow-empty", "-m", "docs(a,b): two scopes");
+  git("checkout", "-q", "main");
+  git("merge", "-q", "--no-ff", "--no-edit", "side");
+  git("commit", "-q", "--allow-empty", "-m", "fix: Sentence case");
+  const head = git("rev-parse", "HEAD");
+  git("checkout", "-q", "--orphan", "other");
+  git("commit", "-q", "--allow-empty", "-m", "chore: other root");
+  const orphan = git("rev-parse", "HEAD");
+  git("checkout", "-q", "main");
+  return { repo, base, head, orphan };
+}
+
+// Newest first, the order commitlint reports a range in; the merge commit itself is ignored.
+const RANGE_PROBLEMS = [SUBJECT_CASE, ONE_SCOPE];
+
+describe("the event's commit range", () => {
+  const { repo, base, head, orphan } = scratchRepo();
+
+  test("pull_request: base..head from the event, merge subjects ignored", () => {
+    const eventPath = eventFile({ pull_request: { base: { sha: base }, head: { sha: head } } });
+    const result = runAction(
+      { GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: eventPath },
+      repo,
+    );
+    expect(verdict(result)).toEqual({ exitCode: 1, stderr: "", problems: RANGE_PROBLEMS });
+  });
+
+  test("push with both ends resolvable: before..after", () => {
+    const eventPath = eventFile({ before: base, after: head, commits: [] });
+    const result = runAction({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath }, repo);
+    expect(verdict(result)).toEqual({ exitCode: 1, stderr: "", problems: RANGE_PROBLEMS });
+  });
+
+  test("a pull_request event without its shas fails instead of judging nothing", () => {
+    const eventPath = eventFile({ pull_request: {} });
+    const result = runAction({ GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: eventPath });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("pull_request event is missing base/head SHAs.");
+  });
+
+  // A new branch's `before` is the zero sha and a force-push orphans it or re-roots the history: the payload's
+  // messages are judged instead. A body line shaped like a merge subject exempts nothing.
+  const FALLBACKS: [name: string, before: string][] = [
+    ["zero before sha", "0".repeat(40)],
+    ["before sha no longer in the repository", "1".repeat(40)],
+    ["before sha from an unrelated history", orphan],
+  ];
+  for (const [name, before] of FALLBACKS) {
+    test(`push, ${name}: the payload's commit messages, one verdict each`, () => {
+      const eventPath = eventFile({
+        before,
+        after: head,
+        commits: [
+          "style(contract): x",
+          "docs(a,b): x\n\nMerge branch 'topic' into main",
+          "wip: x",
+        ].map((message, index) => ({ id: String(index + 1).repeat(40), message })),
+      });
+      const result = runAction({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath }, repo);
+      expect(verdict(result)).toEqual({
+        exitCode: 1,
+        stderr: "",
+        problems: [ONE_SCOPE, TYPE_ENUM],
+      });
+    });
+  }
+
+  test(
+    "a 20-commit payload is warned about as possibly truncated, and still judged to the last entry",
+    () => {
+      const eventPath = eventFile({
+        before: "0".repeat(40),
+        after: head,
+        commits: Array.from({ length: 20 }, (_, index) => ({
+          id: String(index).repeat(40),
+          message: index === 19 ? "wip: x" : `fix: commit ${index}`,
+        })),
+      });
+      const result = runAction({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath });
+      expect([result.stdout.startsWith("::warning::"), verdict(result)]).toEqual([
+        true,
+        { exitCode: 1, stderr: "", problems: [TYPE_ENUM] },
+      ]);
+    },
+    harnessBound(60_000),
+  ); // twenty commitlint launches, one per payload message
+
+  test("another event judges nothing", () => {
+    const eventPath = eventFile({});
+    const result = runAction({
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_EVENT_PATH: eventPath,
+    });
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+  });
 });

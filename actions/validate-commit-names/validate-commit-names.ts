@@ -1,18 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { isMergeSubject, refusal, subject } from "./subject.ts";
+import { readFileSync, writeSync } from "node:fs";
+import { commitlint, type Verdict } from "./commitlint.ts";
 
 const zeroSha = /^0{40}$/;
-
-// One judge for two callers: fleet-ci's commit-names step hands over the event's commit range, the pr-title
-// workflow hands over the PR title that becomes the squash subject (docs/fleet-guidelines.md promises one grammar).
-const EXAMPLES =
-  "Examples: `feat: add setup flow`, `fix: repair installer`, `feat!: simplify bootstrap`, `chore(main): release 3.0.0`.";
-
-interface Judged {
-  label: string;
-  subject: string;
-}
 
 interface PushPayloadCommit {
   id: string;
@@ -26,30 +16,19 @@ interface EventPayload {
   commits?: PushPayloadCommit[];
 }
 
-function git(args: string[]): string {
-  return execFileSync("git", args, { encoding: "utf8" }).trim();
-}
+type Judged = { range: [from: string, to: string] } | { messages: string[] };
 
-// A force-push orphans the old tip (and a shallow clone may never fetch it), so `before` can name a commit that
-// no longer exists, and `git rev-list before..after` would then fail fatally.
-function revExists(rev: string): boolean {
+// commitlint refuses a range whose ends share no merge-base, and a force-push can orphan the old tip (a shallow clone
+// may never fetch it) or re-root the history: one probe answers both, and either way the range is not judgeable.
+function rangeJudgeable(before: string, after: string): boolean {
   try {
     // stdio "ignore" keeps git's "fatal: Not a valid object name" off the log
     // -- a missing `before` is an expected, handled case, not an error.
-    execFileSync("git", ["cat-file", "-e", `${rev}^{commit}`], { stdio: "ignore" });
+    execFileSync("git", ["merge-base", before, after], { stdio: "ignore" });
     return true;
   } catch {
     return false;
   }
-}
-
-function shasInRange(range: string): string[] {
-  const output = git(["rev-list", "--reverse", range]);
-  return output ? output.split(/\r?\n/) : [];
-}
-
-function commitSubject(sha: string): string {
-  return subject(git(["show", "-s", "--format=%s", sha]));
 }
 
 function eventPayload(): EventPayload {
@@ -60,7 +39,7 @@ function eventPayload(): EventPayload {
   return JSON.parse(readFileSync(eventPath, "utf8")) as EventPayload;
 }
 
-function listCommits(): Judged[] {
+function judged(): Judged {
   const eventName = process.env.GITHUB_EVENT_NAME;
   const payload = eventPayload();
 
@@ -70,21 +49,14 @@ function listCommits(): Judged[] {
     if (!base || !head) {
       throw new Error("pull_request event is missing base/head SHAs.");
     }
-    return shasInRange(`${base}..${head}`).map((sha) => ({
-      label: `${sha.slice(0, 7)} `,
-      subject: commitSubject(sha),
-    }));
+    return { range: [base, head] };
   }
 
   if (eventName === "push") {
-    const before = payload.before;
-    const after = payload.after;
+    const { before, after } = payload;
     // A new branch's `before` is the zero sha and a force-push orphans it: the push payload is the fallback.
-    if (before && after && !zeroSha.test(before) && revExists(before) && revExists(after)) {
-      return shasInRange(`${before}..${after}`).map((sha) => ({
-        label: `${sha.slice(0, 7)} `,
-        subject: commitSubject(sha),
-      }));
+    if (before && after && !zeroSha.test(before) && rangeJudgeable(before, after)) {
+      return { range: [before, after] };
     }
     const listed = payload.commits ?? [];
     // GitHub truncates the push payload's commit list at 20 entries; at
@@ -94,39 +66,33 @@ function listCommits(): Judged[] {
         "::warning::push payload may be truncated (it lists 20 commits, GitHub's cap) and the base..head range is not resolvable here; commits beyond the payload, if any, were not validated",
       );
     }
-    return listed.map((commit) => ({
-      label: `${commit.id.slice(0, 7)} `,
-      subject: subject(commit.message),
-    }));
+    return { messages: listed.map((commit) => commit.message) };
   }
 
-  return [];
+  return { messages: [] };
 }
 
-function judge(entries: Judged[], header: string): void {
-  const failures = entries.flatMap((entry) => {
-    const reason = refusal(entry.subject);
-    return reason === undefined ? [] : [{ ...entry, reason }];
-  });
-  if (failures.length === 0) return;
-  const lines = failures.map((entry) => `- ${entry.label}${entry.subject}\n  ${entry.reason}`);
-  console.error([header, EXAMPLES, "", ...lines].join("\n"));
-  process.exitCode = 1;
+function report(verdict: Verdict): number {
+  writeSync(1, verdict.report);
+  return verdict.status;
 }
 
 function main(): void {
   const title = process.env.PR_TITLE ?? "";
   if (title !== "") {
-    console.log("Checked the PR title.");
-    judge(
-      [{ label: "", subject: subject(title) }],
-      "The PR title becomes the squash-merge subject and must be a Conventional Commit.",
-    );
+    process.exitCode = report(commitlint([], title));
     return;
   }
-  const commits = listCommits().filter((commit) => !isMergeSubject(commit.subject));
-  console.log(`Checked ${commits.length} non-merge commit subject(s).`);
-  judge(commits, "Commit subjects must be Conventional Commits.");
+  const target = judged();
+  if ("range" in target) {
+    process.exitCode = report(commitlint(["--from", target.range[0], "--to", target.range[1]]));
+    return;
+  }
+  // Every message gets its verdict before the step fails, one launch each: commitlint reads one message per stdin.
+  process.exitCode = Math.max(
+    0,
+    ...target.messages.map((message) => report(commitlint([], message))),
+  );
 }
 
 main();

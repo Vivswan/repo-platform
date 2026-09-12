@@ -1,7 +1,12 @@
 {
   "name": "validate-commit-names",
   "private": true,
-  "description": "Dev-only manifest for editor/typecheck support; the action itself has no runtime dependencies.",
+  "description": "Dependency manifest for the validate-commit-names action: commitlint and config-conventional are the judge its commitlint.config.mjs extends.",
+  "dependencies": {
+    "@commitlint/cli": "21.2.2",
+    "@commitlint/config-conventional": "21.2.2",
+    "@commitlint/is-ignored": "21.2.2"
+  },
   "devDependencies": {
     "@types/node": "^26.4.1",
     "typescript": "^7.0.2"

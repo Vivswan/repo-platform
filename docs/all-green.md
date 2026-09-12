@@ -30,7 +30,7 @@ The judgment's own scenario tests are alls-green's; this repository pins the ste
 | `all-green` shows "Expected" and never arrives | The CI run was cancelled or superseded before the gate ran | Push again or re-run the newest CI run at the head. |
 | `all-green` failed with every job `cancelled` | The concurrency group cancelled this run for a newer one at the same head, or someone cancelled it | The newer run at the head carries the verdict; if none exists or the merge box still reads this run, re-run the newest CI run at the head. |
 | `all-green` failed with `ci` skipped | fleet-ci's `plan` job did not run, so the caller skipped and the gate never lets it | A run that verified nothing must not merge; check why the caller skipped. |
-| `pr-title` waiting (repos with the pr-title module) | Its own required check, outside this gate | Fix the title to a Conventional Commit; the workflow re-runs on open/edit/reopen/push ([the pr-title ruleset](settings.md#the-pr-title-ruleset)). |
+| `pr-title` waiting (repos with the pr-title module) | Its own required check, outside this gate | Fix the title to what commitlint accepts under config-conventional plus one scope ([the grammar](fleet-guidelines.md#conventional-commits-squash-merged): no scope list, no Sentence-case description, no trailing period, at most 100 characters); the workflow re-runs on open/edit/reopen/push ([the pr-title ruleset](settings.md#the-pr-title-ruleset)). |
 
 ## What gates what
 

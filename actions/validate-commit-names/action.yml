@@ -1,10 +1,12 @@
 name: Validate Commit Names
 description: >-
-  Fails when a subject is not a Conventional Commit (feat/fix/chore/docs/...)
-  with at most one scope. Without `title`, judges every non-merge commit
-  subject in the push/PR range, which needs the repository checked out with
-  fetch-depth: 0 so base..head resolves on pull_request events. With `title`,
-  judges that one string instead and needs no checkout.
+  Fails when commitlint refuses a commit message under the action's
+  commitlint.config.mjs (@commitlint/config-conventional plus one scope per
+  subject); both feeders run that one judge. Without `title`, judges every
+  commit in the push/PR range (commitlint ignores merge commits), which needs
+  the repository checked out with fetch-depth: 0 so base..head resolves on
+  pull_request events. With `title`, judges that one string instead and needs
+  no checkout.
 
 inputs:
   title:
@@ -25,6 +27,13 @@ runs:
       uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
         pin: ${{ github.action_path }}/.bun-version
+
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
     - name: Validate the subjects
       shell: bash
