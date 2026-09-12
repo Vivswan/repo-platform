@@ -179,8 +179,8 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
       got: "no plan printer step",
     });
   }
-  // The plan probed once; a row that probes again costs N selections per run and could move a
-  // row onto another repository. The resolver's one listing is the row's whole network.
+  // The plan probed once; a row that probes again repeats the fleet-wide probes (N selections per
+  // run) and breaks row_budget.ts's one-listing bound.
   for (const [label, command] of [
     ["discovery", DISCOVERY],
     ["selection", SELECTOR],

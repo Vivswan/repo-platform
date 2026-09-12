@@ -15,9 +15,10 @@ import { maskForms } from "../shared/mask.ts";
  *  the run id. Without the token it names nothing, and the same repository keys differently in
  *  every run, so a private row rides the matrix and the step env unnamed.
  *
- *  The runner drops a job output that carries a masked value, and every masked form is at least
- *  shared/mask.ts's four characters, so the digest rides in three-character groups behind a
- *  separator no slug, URL, or base64 spelling of one contains.
+ *  The runner drops a job output that carries a masked value. The bare-name mask starts at
+ *  shared/mask.ts's four characters, and the slug and URL forms carry `/` or `:`, which the matrix
+ *  never does, so the digest rides in three-character groups behind a separator no slug, URL, or
+ *  base64 spelling of one contains.
  *    private repository `beef`, raw digest `...becbeef8c...`  -> the whole matrix dropped, every row red */
 export function rowKeyOf(pat: string, runId: string): (repo: string) => string {
   return (repo) =>
@@ -36,7 +37,6 @@ export function matrixRows(
   return rows.map((row, index) => ({ row: index, key: keyOf(row.repo) }));
 }
 
-/** The listed repository carrying the plan's key, or a refusal naming no repository. */
 export function resolveRow(
   rows: DiscoveredRepo[],
   key: string,
@@ -52,10 +52,9 @@ export function resolveRow(
   return { target };
 }
 
-/** The row's step: one listing of the owner's writable repositories, the row matched by key, every
- *  form of the name masked, then `handOn`'s lines appended to GITHUB_ENV. The listing is the check,
- *  not a re-selection: a repository the listing no longer names fails the step naming nothing, and
- *  one still listed is this run's target whatever its registration or the token's grant now says.
+/** The listing is the check, not a re-selection: a repository the listing no longer names fails the
+ *  step naming nothing, and one still listed is this run's target whatever its registration or the
+ *  token's grant now says.
  *
  *  Env: ROW_KEY (the plan's key for this row), PAT and GITHUB_RUN_ID (the key's inputs), OWNER and
  *  GH_TOKEN (the listing), GITHUB_ENV. */
