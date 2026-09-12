@@ -1,16 +1,20 @@
 #!/usr/bin/env bun
 // Nothing records the upstream SHA on purpose: the outputs change only when consumed upstream content changes,
 // so the refresh-gitignore PR diff stays worth reading.
-// --topology is the offline gate: the block files match files.yml's sources, and every copy of a section carries the same bytes;
+// --topology is the offline gate: the block files match files.yml's sources, every copy of a section carries the same bytes,
+// and the operator's own region carries exactly the sections its registration selects;
 // content drift inside a block against upstream is ungated until the next refresh regenerates over it.
 //
 // Usage: bun scripts/generate/build_gitignore.ts [--topology]
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { readRegistration } from "../../.github/scripts/sync/writer/registration.ts";
+import { resolveModules } from "../../.github/scripts/sync/writer/select.ts";
 import {
   blockSourcePath,
   blockValueOf,
+  type FilesConfig,
   parseFilesConfig,
 } from "../../actions/plan/files_config.ts";
 import { cleanManagedRegion, HASH_REGION_MARKERS } from "../../actions/shared/grammar.ts";
@@ -68,8 +72,7 @@ export function blockRel(module: string, path: string): string {
   return `${module}/${blockSourcePath(GITIGNORE, blockName(path))}`;
 }
 
-export function gitignoreSources(filesText: string, label = "files.yml"): [string, string[]][] {
-  const config = parseFilesConfig(filesText, label);
+export function gitignoreSources(config: FilesConfig, label = "files.yml"): [string, string[]][] {
   return Object.entries(config.modules).flatMap(([module, data]): [string, string[]][] => {
     const names = data.gitignore_sources;
     if (names === undefined) return [];
@@ -80,8 +83,24 @@ export function gitignoreSources(filesText: string, label = "files.yml"): [strin
   });
 }
 
-export function selfSources(entries: [string, string[]][]): string[] {
-  return [...new Set(entries.flatMap(([, sources]) => sources))];
+/** The operator's own selection, read the way the sync reads a target's: .repo-platform.yml resolved against files.yml. */
+export function ownModules(root: string, config: FilesConfig): string[] {
+  const { selected, dropped } = resolveModules(config, readRegistration(root).modules);
+  if (dropped.length > 0) {
+    throw new Error(
+      `.repo-platform.yml selects module(s) files.yml does not know: ${dropped.join(", ")}`,
+    );
+  }
+  return selected;
+}
+
+/** The selected modules' sources once each, in files.yml order: the writer's block order for the same selection. */
+export function selfSources(entries: [string, string[]][], modules: string[]): string[] {
+  return [
+    ...new Set(
+      entries.filter(([module]) => modules.includes(module)).flatMap(([, sources]) => sources),
+    ),
+  ];
 }
 
 /** Returned rather than deleted: the missing name may be the typo to fix, not the block. */
@@ -207,6 +226,7 @@ export function buildSelf(
 
 export function topologyProblems(input: {
   entries: [string, string[]][];
+  modules: string[];
   filesDir: string;
   selfText: string;
 }): string[] {
@@ -260,7 +280,7 @@ export function topologyProblems(input: {
     if (slice === null) {
       problems.push(".gitignore has no single clean REPO-PLATFORM MANAGED region");
     } else {
-      const sources = selfSources(input.entries);
+      const sources = selfSources(input.entries, input.modules);
       const sectionsMissing = sources.filter((path) => !blockSections.has(path));
       if (sectionsMissing.length > 0) {
         problems.push(
@@ -275,11 +295,15 @@ export function topologyProblems(input: {
       );
       if (slice.region !== expected) {
         const present = sectionsIn(slice.region);
-        const missing = [...ALWAYS, ...sources].filter((path) => !(path in present));
+        const wanted = [...ALWAYS, ...sources];
+        const missing = wanted.filter((path) => !(path in present));
+        const unselected = Object.keys(present).filter((path) => !wanted.includes(path));
         problems.push(
           missing.length > 0
             ? `.gitignore's managed region lacks the section(s) [${missing.join(", ")}]; ${rerun}`
-            : `.gitignore's managed region differs from files/base/.gitignore plus the block files; ${rerun}`,
+            : unselected.length > 0
+              ? `.gitignore's managed region carries the section(s) [${unselected.join(", ")}] no module in .repo-platform.yml declares; ${rerun}`
+              : `.gitignore's managed region differs from files/base/.gitignore plus the block files; ${rerun}`,
         );
       }
     }
@@ -307,7 +331,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 }
 
 async function run(topology: boolean): Promise<number> {
-  const entries = gitignoreSources(readFileSync(FILES_CONFIG, "utf-8"));
+  const config = parseFilesConfig(readFileSync(FILES_CONFIG, "utf-8"));
+  const entries = gitignoreSources(config);
+  const modules = ownModules(REPO_ROOT, config);
   const strays = strayBlockFiles(entries, FILES_DIR);
   if (strays.length > 0) {
     throw new Error(
@@ -325,6 +351,7 @@ async function run(topology: boolean): Promise<number> {
     }
     const problems = topologyProblems({
       entries,
+      modules,
       filesDir: FILES_DIR,
       selfText: readFileSync(OUTPUT_SELF).toString("latin1"),
     });
@@ -332,11 +359,10 @@ async function run(topology: boolean): Promise<number> {
       throw new Error(`the gitignore copies disagree:\n  - ${problems.join("\n  - ")}`);
     }
     console.log(
-      "gitignore topology OK: the block files match files.yml's sources, and every copy of a section agrees.",
+      "gitignore topology OK: the block files match files.yml's sources, every copy of a section agrees, and .gitignore carries this repository's selection.",
     );
     return 0;
   }
-  const sources = selfSources(entries);
   // Before any fetch: a malformed self output must abort while every
   // output still stands as committed, rather than behind a half-written
   // set.
@@ -347,7 +373,9 @@ async function run(topology: boolean): Promise<number> {
   const sha = await upstreamHead();
   console.log(`github/gitignore HEAD is ${sha}`);
   const sections: Record<string, string> = {};
-  for (const path of [...ALWAYS, ...sources]) sections[path] = await section(sha, path);
+  // Every declared source feeds a block file; the self output takes only this repository's selection.
+  const declared = new Set([...ALWAYS, ...entries.flatMap(([, paths]) => paths)]);
+  for (const path of declared) sections[path] = await section(sha, path);
 
   const outputs: [string, string][] = [
     [join(FILES_DIR, BASE_REL), buildFilesBase(sections)],
@@ -357,7 +385,7 @@ async function run(topology: boolean): Promise<number> {
         buildBlock(sections[path]),
       ]),
     ),
-    [OUTPUT_SELF, buildSelf(sections, sources, selfSides)],
+    [OUTPUT_SELF, buildSelf(sections, selfSources(entries, modules), selfSides)],
   ];
   for (const [out, content] of outputs) {
     // latin1, the read decoding's inverse: the self output's repo-owned

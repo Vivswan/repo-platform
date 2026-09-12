@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { capture } from "../../../.github/scripts/shared/proc.ts";
+import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import {
   ALWAYS,
   blockName,
@@ -14,6 +15,7 @@ import {
   gitignoreSources,
   main,
   missingBlockFiles,
+  ownModules,
   PLATFORM_SECTIONS,
   sectionsIn,
   selfSources,
@@ -60,6 +62,9 @@ const ENTRIES: [string, string[]][] = [
   ["fuzzer", ["fuzzer"]],
 ];
 
+/** The generated fixture's own selection: every declaring module, so its self file carries every section. */
+const SELECTED = ["bun", "uv", "fuzzer"];
+
 function generated(): { filesDir: string; selfPath: string } {
   const root = temp.dir("build-gitignore-");
   const filesDir = join(root, "files");
@@ -75,7 +80,10 @@ function generated(): { filesDir: string; selfPath: string } {
   const selfPath = join(root, ".gitignore");
   writeFileSync(
     selfPath,
-    buildSelf(SECTIONS, selfSources(ENTRIES), { above: "# mine\n\n", below: "\n# after\n" }),
+    buildSelf(SECTIONS, selfSources(ENTRIES, SELECTED), {
+      above: "# mine\n\n",
+      below: "\n# after\n",
+    }),
   );
   return { filesDir, selfPath };
 }
@@ -93,22 +101,36 @@ describe("the source grammar", () => {
   });
 
   test("gitignoreSources reads the declaring modules in files.yml order", () => {
-    expect(gitignoreSources(FILES_YML)).toEqual(ENTRIES);
+    expect(gitignoreSources(parseFilesConfig(FILES_YML))).toEqual(ENTRIES);
   });
 
   test("a non-list declaration is refused by name", () => {
-    expect(() => gitignoreSources(FILES_YML.replace("[Python]", "Python"))).toThrow(
-      "modules.uv.gitignore_sources must be a list of names",
-    );
+    expect(() =>
+      gitignoreSources(parseFilesConfig(FILES_YML.replace("[Python]", "Python"))),
+    ).toThrow("modules.uv.gitignore_sources must be a list of names");
   });
 
-  test("selfSources lists every distinct source once, in first-declaration order", () => {
-    expect(selfSources([...ENTRIES, ["node", ["Node.gitignore"]]])).toEqual([
+  test("selfSources is the selection's sources once each in files.yml order: a registration without fuzzer gets no fuzzer section", () => {
+    const shared: [string, string[]][] = [...ENTRIES, ["node", ["Node.gitignore"]]];
+    expect(selfSources(shared, ["bun", "uv", "fuzzer", "node"])).toEqual([
       "Node.gitignore",
       "bun.gitignore",
       "Python.gitignore",
       "fuzzer",
     ]);
+    expect(selfSources(shared, ["node", "uv"])).toEqual(["Python.gitignore", "Node.gitignore"]);
+    expect(selfSources(shared, ["pages"])).toEqual([]);
+  });
+
+  test("ownModules reads the operator's registration through the writer's rule and refuses a module files.yml lacks", () => {
+    const root = temp.dir("build-gitignore-registration-");
+    const config = parseFilesConfig(FILES_YML);
+    writeFileSync(join(root, ".repo-platform.yml"), "modules: [pages, bun]\n");
+    expect(ownModules(root, config)).toEqual(["bun", "pages"]);
+    writeFileSync(join(root, ".repo-platform.yml"), "modules: [bun, rust]\n");
+    expect(() => ownModules(root, config)).toThrow(
+      ".repo-platform.yml selects module(s) files.yml does not know: rust",
+    );
   });
 });
 
@@ -127,13 +149,13 @@ describe("the outputs", () => {
   });
 
   test("the self output keeps both sides and carries the base body plus every source once", () => {
-    const self = buildSelf(SECTIONS, selfSources(ENTRIES), {
+    const self = buildSelf(SECTIONS, selfSources(ENTRIES, SELECTED), {
       above: "# mine\n",
       below: "# after\n",
     });
     expect(self.startsWith("# mine\n# BEGIN REPO-PLATFORM MANAGED\n")).toBe(true);
     expect(self.endsWith("# END REPO-PLATFORM MANAGED\n# after\n")).toBe(true);
-    expect(Object.keys(sectionsIn(self))).toEqual([...ALWAYS, ...selfSources(ENTRIES)]);
+    expect(Object.keys(sectionsIn(self))).toEqual([...ALWAYS, ...selfSources(ENTRIES, SELECTED)]);
   });
 
   test("sectionsIn reads each section back, upstream or platform, blank lines inside a body kept", () => {
@@ -161,9 +183,36 @@ describe("the offline topology check", () => {
     const { filesDir, selfPath } = generated();
     expect(strayBlockFiles(ENTRIES, filesDir)).toEqual([]);
     expect(missingBlockFiles(ENTRIES, filesDir)).toEqual([]);
-    expect(topologyProblems({ entries: ENTRIES, filesDir, selfText: readSelf(selfPath) })).toEqual(
+    expect(
+      topologyProblems({
+        entries: ENTRIES,
+        modules: SELECTED,
+        filesDir,
+        selfText: readSelf(selfPath),
+      }),
+    ).toEqual([]);
+  });
+
+  test("the self region follows the registration: without fuzzer selected, a region without its section passes and one carrying it is named", () => {
+    const { filesDir, selfPath } = generated();
+    const modules = ["bun", "uv"];
+    const trimmed = buildSelf(SECTIONS, selfSources(ENTRIES, modules), { above: "", below: "" });
+    expect(Object.keys(sectionsIn(trimmed))).toEqual([
+      ...ALWAYS,
+      "Node.gitignore",
+      "bun.gitignore",
+      "Python.gitignore",
+    ]);
+    expect(topologyProblems({ entries: ENTRIES, modules, filesDir, selfText: trimmed })).toEqual(
       [],
     );
+    expect(
+      topologyProblems({ entries: ENTRIES, modules, filesDir, selfText: readSelf(selfPath) }).map(
+        (p) => p.split(";")[0],
+      ),
+    ).toEqual([
+      ".gitignore's managed region carries the section(s) [fuzzer] no module in .repo-platform.yml declares",
+    ]);
   });
 
   test("a block no source names is a stray; a declared source without its block is missing", () => {
@@ -183,7 +232,7 @@ describe("the offline topology check", () => {
       buildBlock(SECTIONS["Node.gitignore"]),
     );
     writeFileSync(join(filesDir, "uv/.block.Python.gitignore"), SECTIONS["Python.gitignore"]);
-    const problems = topologyProblems({ entries: ENTRIES, filesDir, selfText });
+    const problems = topologyProblems({ entries: ENTRIES, modules: SELECTED, filesDir, selfText });
     expect(problems.map((p) => p.split(";")[0])).toEqual([
       "files/bun/.block.bun.gitignore encodes [Node.gitignore] but its name stands for bun.gitignore",
       "files/uv/.block.Python.gitignore is not exactly its section plus one blank line",
@@ -204,7 +253,9 @@ describe("the offline topology check", () => {
       buildBlock("## Node (github/gitignore Node.gitignore)\nnode_modules/\ndist/\n"),
     );
     expect(
-      topologyProblems({ entries: shared, filesDir, selfText }).map((p) => p.split(";")[0]),
+      topologyProblems({ entries: shared, modules: [...SELECTED, "node"], filesDir, selfText }).map(
+        (p) => p.split(";")[0],
+      ),
     ).toEqual([
       "files/node/.block.Node.gitignore differs from another module's copy of Node.gitignore",
       ".gitignore's managed region differs from files/base/.gitignore plus the block files",
@@ -217,19 +268,26 @@ describe("the offline topology check", () => {
       Object.entries(SECTIONS).filter(([path]) => path !== "Global/Windows.gitignore"),
     );
     writeFileSync(join(filesDir, "base/.gitignore"), buildFilesBase(without));
-    const selfText = buildSelf(without, selfSources(ENTRIES), { above: "", below: "" });
+    const selfText = buildSelf(without, selfSources(ENTRIES, SELECTED), { above: "", below: "" });
     expect(
-      topologyProblems({ entries: ENTRIES, filesDir, selfText }).map((p) => p.split(";")[0]),
+      topologyProblems({ entries: ENTRIES, modules: SELECTED, filesDir, selfText }).map(
+        (p) => p.split(";")[0],
+      ),
     ).toEqual(["files/base/.gitignore lacks the section(s) [Global/Windows.gitignore]"]);
     writeFileSync(join(filesDir, "base/.gitignore"), buildFilesBase(SECTIONS));
     expect(
-      topologyProblems({ entries: ENTRIES, filesDir, selfText }).map((p) => p.split(";")[0]),
+      topologyProblems({ entries: ENTRIES, modules: SELECTED, filesDir, selfText }).map(
+        (p) => p.split(";")[0],
+      ),
     ).toEqual([".gitignore's managed region lacks the section(s) [Global/Windows.gitignore]"]);
     rmSync(join(filesDir, "bun/.block.bun.gitignore"));
     expect(
-      topologyProblems({ entries: ENTRIES, filesDir, selfText: readSelf(selfPath) }).map(
-        (p) => p.split(";")[0],
-      ),
+      topologyProblems({
+        entries: ENTRIES,
+        modules: SELECTED,
+        filesDir,
+        selfText: readSelf(selfPath),
+      }).map((p) => p.split(";")[0]),
     ).toEqual([
       "no block file carries [bun.gitignore], so .gitignore cannot be checked against them",
     ]);
@@ -240,9 +298,12 @@ describe("the offline topology check", () => {
     const drifted = "## Fuzzer workspace paths (repo-platform fuzzer)\n";
     writeFileSync(join(filesDir, "fuzzer/.block.fuzzer.gitignore"), buildBlock(drifted));
     expect(
-      topologyProblems({ entries: ENTRIES, filesDir, selfText: readSelf(selfPath) }).map(
-        (p) => p.split(";")[0],
-      ),
+      topologyProblems({
+        entries: ENTRIES,
+        modules: SELECTED,
+        filesDir,
+        selfText: readSelf(selfPath),
+      }).map((p) => p.split(";")[0]),
     ).toEqual([
       "files/fuzzer/.block.fuzzer.gitignore is not the platform-authored section fuzzer",
       ".gitignore's managed region differs from files/base/.gitignore plus the block files",
@@ -254,7 +315,9 @@ describe("the offline topology check", () => {
     const selfText = readSelf(selfPath);
     writeFileSync(join(filesDir, "base/.gitignore"), `${buildFilesBase(SECTIONS)}extra\n`);
     expect(
-      topologyProblems({ entries: ENTRIES, filesDir, selfText }).map((p) => p.split(";")[0]),
+      topologyProblems({ entries: ENTRIES, modules: SELECTED, filesDir, selfText }).map(
+        (p) => p.split(";")[0],
+      ),
     ).toEqual([
       "files/base/.gitignore is not the header, the agent and CI workspace sections, and exactly the OS sections [Global/Windows.gitignore, Global/macOS.gitignore, Global/Linux.gitignore]",
       ".gitignore's managed region differs from files/base/.gitignore plus the block files",
@@ -262,14 +325,19 @@ describe("the offline topology check", () => {
     writeFileSync(join(filesDir, "base/.gitignore"), buildFilesBase(SECTIONS));
     const lacking = buildSelf(SECTIONS, ["Node.gitignore"], { above: "", below: "" });
     expect(
-      topologyProblems({ entries: ENTRIES, filesDir, selfText: lacking }).map(
+      topologyProblems({ entries: ENTRIES, modules: SELECTED, filesDir, selfText: lacking }).map(
         (p) => p.split(";")[0],
       ),
     ).toEqual([
       ".gitignore's managed region lacks the section(s) [bun.gitignore, Python.gitignore, fuzzer]",
     ]);
     expect(
-      topologyProblems({ entries: ENTRIES, filesDir: temp.dir("empty-files-"), selfText }),
+      topologyProblems({
+        entries: ENTRIES,
+        modules: SELECTED,
+        filesDir: temp.dir("empty-files-"),
+        selfText,
+      }),
     ).toEqual([
       "files/base/.gitignore is missing; run 'bun scripts/generate/build_gitignore.ts' to regenerate every copy",
     ]);
