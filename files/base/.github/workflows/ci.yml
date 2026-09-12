@@ -120,8 +120,6 @@ jobs:
     with:
       sha: ${{ github.sha }}
       tracking-labels: ${{ needs.ci.outputs.tracking-labels }}
-    secrets:
-      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
   # Repo-owned: edit update-release.yml, not this file.
   # The ceiling here and on update-release-pr is the contract with the repo-owned hooks: a hook narrows itself per job,
@@ -154,8 +152,6 @@ jobs:
     uses: {{github_username}}/repo-platform/.github/workflows/fleet-release-publish.yml@build
     with:
       tag: ${{ needs.release.outputs.tag_name }}
-    secrets:
-      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
   # Repo-owned: edit update-release-pr.yml, not this file. The ceiling is update-release's, under the same contract.
   update-release-pr:

@@ -70,7 +70,7 @@ describe("the sync row's failure path", () => {
     expect(writer.exitCode).toBe(1);
     expect(writer.stderr).toBe("");
     expect(writer.stdout).toBe(
-      "::error::.repo-platform.yml: pages: is no longer a registration key - the website build lives in the repo-owned hook .github/actions/site-build/action.yml and the module is `site` (docs/site.md)\n",
+      '::error::.repo-platform.yml: (top level): Unrecognized key: "pages"\n',
     );
     expect(existsSync(join(runnerTemp, "summary.json"))).toBe(false);
 

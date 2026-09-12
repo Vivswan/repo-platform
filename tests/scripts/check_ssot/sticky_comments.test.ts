@@ -25,7 +25,7 @@ describe("sticky-pr-comments", () => {
   const step = (header: string | null, uses = PIN, extra: string[] = []) =>
     [
       "      - name: Comment that checks will not re-run",
-      "        if: steps.push.outputs.no_retrigger == 'true'",
+      "        if: steps.push.outputs.pushed == 'true'",
       `        uses: ${uses}`,
       ...extra,
       "        with:",

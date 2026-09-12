@@ -193,13 +193,8 @@ export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
   ".github/workflows/post-green.yml":
     "pushes THIS repository's build branch (workflow-scope files GITHUB_TOKEN may not push) " +
     "and passes the secret through to the two writers it calls",
-  ".github/workflows/dependabot-bun-lockfile.yml": "pushes to THIS repository's dependabot PRs",
   ".github/workflows/refresh-gitignore.yml": "opens PRs in THIS repository",
   ".github/workflows/refresh-toolchains.yml": "opens PRs in THIS repository",
-  ".github/workflows/fleet-release.yml":
-    "workflow_call-only; a managed ci.yml hands it the secret so release-please's PR runs its checks in THAT repository",
-  ".github/workflows/fleet-release-publish.yml":
-    "workflow_call-only; a managed ci.yml hands it the secret to publish THAT repository's draft release",
 };
 
 /** Conservative on purpose: a false holder costs a classification line, a missed one a silent writer.

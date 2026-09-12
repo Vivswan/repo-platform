@@ -11,10 +11,8 @@ const TOKEN = "ghs_secret_token_value";
 const REPO = "Vivswan/managed";
 const HEAD_REF = "dependabot/npm_and_yarn/zod-4.4.3";
 const WARNING =
-  "::warning::lockfile fix pushed without REPO_PLATFORM_TOKEN: the new head's pull_request run waits for approval. " +
-  "Open it in the Actions tab and choose Approve and run, or push an empty commit. " +
-  "Durable fix: register REPO_PLATFORM_TOKEN as a Dependabot secret " +
-  "(Settings > Secrets and variables > Dependabot) so the push comes from the PAT and its run starts on its own.";
+  "::warning::lockfile fix pushed with github.token, which starts no workflows: the new head's pull_request run waits for approval. " +
+  "Open it in the Actions tab and choose Approve and run, or push an empty commit.";
 
 const LS_FILES = ["git", "ls-files", "-z", "--", "bun.lock", "*/bun.lock"];
 const DIFF = ["git", "diff", "--quiet", "--", "bun.lock", "*/bun.lock"];
@@ -63,7 +61,7 @@ const REGENERATED = { "bun.lock": "regenerated\n", "pkg/bun.lock": "regenerated\
 const SCENARIOS: Scenario[] = [
   {
     name: "nothing changed: the regeneration runs, then no commit, push, or output",
-    env: { STUB_DIFF_EXIT: "0", CAN_RETRIGGER: "true" },
+    env: { STUB_DIFF_EXIT: "0" },
     exitCode: 0,
     git: [LS_FILES, DIFF],
     bun: [install("."), install("pkg")],
@@ -73,30 +71,19 @@ const SCENARIOS: Scenario[] = [
     lockfiles: REGENERATED,
   },
   {
-    name: "changed with the PAT: commit and push, no warning, no output",
-    env: { STUB_DIFF_EXIT: "1", CAN_RETRIGGER: "true" },
+    name: "changed: commit and push, then the pushed output and the warning",
+    env: { STUB_DIFF_EXIT: "1" },
     exitCode: 0,
     git: [LS_FILES, DIFF, ...CONFIG, ADD, COMMIT, PUSH],
     bun: [install("."), install("pkg")],
-    output: "",
-    stdoutHas: [],
-    stdoutLacks: ["::warning::", "::error::", "lockfiles already deduped"],
-    lockfiles: REGENERATED,
-  },
-  {
-    name: "changed with github.token: push, then the no_retrigger output and the warning",
-    env: { STUB_DIFF_EXIT: "1", CAN_RETRIGGER: "false" },
-    exitCode: 0,
-    git: [LS_FILES, DIFF, ...CONFIG, ADD, COMMIT, PUSH],
-    bun: [install("."), install("pkg")],
-    output: "no_retrigger=true\n",
+    output: "pushed=true\n",
     stdoutHas: [WARNING],
-    stdoutLacks: ["::error::"],
+    stdoutLacks: ["::error::", "lockfiles already deduped"],
     lockfiles: REGENERATED,
   },
   {
     name: "a lockfile bun emptied is restored from the index before the diff",
-    env: { STUB_DIFF_EXIT: "0", CAN_RETRIGGER: "true", STUB_BUN_EMPTIES: "pkg" },
+    env: { STUB_DIFF_EXIT: "0", STUB_BUN_EMPTIES: "pkg" },
     exitCode: 0,
     git: [LS_FILES, ["git", "checkout", "--", "pkg/bun.lock"], DIFF],
     bun: [install("."), install("pkg")],
@@ -107,7 +94,7 @@ const SCENARIOS: Scenario[] = [
   },
   {
     name: "a failed install ends the run with its code before the diff",
-    env: { STUB_DIFF_EXIT: "1", CAN_RETRIGGER: "true", STUB_BUN_EXIT: "3" },
+    env: { STUB_DIFF_EXIT: "1", STUB_BUN_EXIT: "3" },
     exitCode: 3,
     git: [LS_FILES],
     bun: [install(".")],
@@ -117,8 +104,8 @@ const SCENARIOS: Scenario[] = [
     lockfiles: { "bun.lock": "regenerated\n", "pkg/bun.lock": "old\n" },
   },
   {
-    name: "a failed push fails the run and flags no retrigger",
-    env: { STUB_DIFF_EXIT: "1", CAN_RETRIGGER: "false", STUB_PUSH_EXIT: "128" },
+    name: "a failed push fails the run with no pushed output",
+    env: { STUB_DIFF_EXIT: "1", STUB_PUSH_EXIT: "128" },
     exitCode: 128,
     git: [LS_FILES, DIFF, ...CONFIG, ADD, COMMIT, PUSH],
     bun: [install("."), install("pkg")],

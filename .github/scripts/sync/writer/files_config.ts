@@ -282,20 +282,21 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
   if (problems.length > 0) throw new FilesConfigError(label, problems);
 }
 
-/** A path the previous data file knew (written or retired) must still be
- *  written or retired: dropping it would leave the file in every repository
- *  with nothing to remove it. */
+/** A path the previous data file wrote must still be written or retired: dropped, the file would
+ *  stay in every repository with nothing to remove it. A retired entry leaves on the owner's probe
+ *  that no repository carries the path (docs/sync.md), which this check cannot see. */
 export function checkRetirements(previous: FilesConfig, current: FilesConfig): void {
   const known = new Set([
     ...current.files.map((entry) => entry.path),
     ...current.retired.map((entry) => entry.path),
   ]);
-  const problems = [
-    ...previous.files.map((entry) => entry.path),
-    ...previous.retired.map((entry) => entry.path),
-  ]
+  const problems = previous.files
+    .map((entry) => entry.path)
     .filter((path, index, all) => !known.has(path) && all.indexOf(path) === index)
-    .map((path) => `${path} was in the previous files.yml but is neither written nor retired now`);
+    .map(
+      (path) =>
+        `${path} was written by the previous files.yml but is neither written nor retired now`,
+    );
   if (problems.length > 0) throw new FilesConfigError("files.yml", problems);
 }
 

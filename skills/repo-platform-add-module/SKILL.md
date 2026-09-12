@@ -120,7 +120,6 @@ The full checklist per module is in [references/modules.md](references/modules.m
 - Labels: the sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from the registration's `labels.*` keys (the module's default when the key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; a `labels.*` key for a module the repo does not select fails the plan and holds the sync PR.
 - `fuzzer` / `nightly`: replace the starter's placeholder step with real work; a custom label also goes into the starter's `label:` inputs.
 - `skills`: a skill folder is unpublished until `plugin.json`'s `skills` array lists it.
-- `bun`: register a repo-scoped Contents:RW PAT as a Dependabot secret so the lockfile fixer's push re-runs CI: `gh secret set REPO_PLATFORM_TOKEN --app dependabot`.
 - `site`: the module's settings layer enables Pages on the next settings apply (before it: `gh api -X POST repos/Vivswan/<repo>/pages -f build_type=workflow`); the repo's own website goes into the repo-owned `.github/actions/site-build/action.yml` hook, seeded as a no-op, so fill it in or the site is the docs alone (`docs/README.md` was step 1's business).
 
 ## Module keys

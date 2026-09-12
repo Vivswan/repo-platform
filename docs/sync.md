@@ -87,7 +87,7 @@ retired:
 | `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers, the selected modules' `settings_layers` files, and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
 | `settings.baseline`, `settings.public`, `settings.private`, `settings.override` | The four fleet settings layers, clean paths under `files/`; present exactly when a `render: settings` entry exists. |
-| `retired[].path` | A path the platform no longer writes. |
+| `retired[].path` | A path the platform no longer writes. The entry leaves the roster only after a live probe (`gh api repos/<owner>/<repo>/contents/<path>` over every fleet repository) shows that no repository carries the path. |
 | `retired[].moved_to` | The path the file moves to (`git mv`) when that path is absent. |
 
 Blocks land at the anchor line: the word `blocks` inside double braces, alone on its line, spelled like a placeholder. A source without one gets them appended at the end. Every piece is newline-terminated first, so the seams never merge two lines. The anchor appears at most once and only as a whole line, in sources of entries that declare `blocks` (for a split entry, inside the region body). A starter's blocks are rendered once, at creation.
@@ -107,7 +107,7 @@ The loader refuses, all problems at once:
 - two entries for one `path` whose conditions can both hold (below)
 - a path listed under both `files` and `retired`
 - a `files` entry at `.github/repo-platform-manifest.json`, the manifest the writer itself writes last
-- with `--previous-files`: a path the previous `files.yml` wrote or retired that the current one neither writes nor retires
+- with `--previous-files`: a path the previous `files.yml` wrote that the current one neither writes nor retires (a retired entry may leave; the probe above is its gate)
 
 ## files.yml reference
 

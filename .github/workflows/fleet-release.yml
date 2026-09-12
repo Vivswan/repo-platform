@@ -4,7 +4,7 @@
 #   release-cut true   -> the cut: tag the release-PR merge and draft the release; no PR work
 #   release-cut false  -> propose or refresh the release PR, only while main's head is still the judged commit
 #
-# Without REPO_PLATFORM_TOKEN the release PR is GITHUB_TOKEN's, so its checks wait for "Approve and run" or the PR's next push.
+# The release PR is GITHUB_TOKEN's, so its checks wait for "Approve and run" or the PR's next push.
 # Once the draft exists a rerun cannot recreate it (the tag is forced): re-run the failed jobs, or finish by hand with
 # `gh release upload <tag> <assets> --clobber` and `gh release edit <tag> --draft=false`.
 
@@ -25,10 +25,6 @@ on:
         required: false
         type: string
         default: ""
-    secrets:
-      REPO_PLATFORM_TOKEN:
-        description: The fleet PAT; release-please falls back to github.token without it.
-        required: false
     outputs:
       release_created:
         description: Whether release-please cut a draft release ("true" or empty).
@@ -87,9 +83,8 @@ jobs:
         id: cut
         if: steps.health.outputs.release-cut == 'true'
         with:
-          # github.token may not create a ref or release on a commit whose .github/workflows differ from main's head (that needs workflows: write).
-          # Once a later commit changes a workflow file on main, only the PAT can still tag the release commit.
-          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          # github.token cannot create the tag once a later main commit changed a workflow file (that needs workflows: write); the cut fails then.
+          token: ${{ github.token }}
           skip-github-pull-request: true
       # gh api, not an anonymous ls-remote, so private repositories work.
       - name: Check main still stands at the judged commit
@@ -108,7 +103,7 @@ jobs:
         id: propose
         if: steps.health.outputs.release-cut == 'false' && steps.head.outputs.current == 'true'
         with:
-          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          token: ${{ github.token }}
           skip-github-release: true
       # release-please's propose phase silently ABORTS - green - while a
       # merged PR still wears "autorelease: pending". Checked AFTER the
