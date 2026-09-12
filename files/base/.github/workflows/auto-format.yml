@@ -1,4 +1,4 @@
-# Repo-owned: written once by {{github_username}}/repo-platform, never
+# Repo-owned: seeded once by the fleet sync, never
 # overwritten by a later sync - adjust the format commands freely. The
 # push uses github.token, which starts no workflows; a PAT would
 # re-trigger CI, but any same-repo PR's formatter tooling runs in this

@@ -12,7 +12,6 @@ export function isLandingFile(filePath: string): boolean {
   return LANDING_FILES.has(filePath.split("/").pop() ?? "");
 }
 
-/** The longest mount wins, so a root mounted inside another's segment resolves to itself. */
 export function sourcePathOf(
   docsDir: string,
   includes: readonly { path: string; mount: string }[],

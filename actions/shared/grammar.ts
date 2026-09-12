@@ -49,7 +49,7 @@ export type ManagedRegionWireFieldsExhaustive = AssertNever<
  *  UNTRUSTED-input check below. */
 export const GRAMMAR_IDS: readonly GrammarId[] = ["managed-region"];
 
-/** Manifest text rides through a target checkout, so a grammar id is narrowed here, never cast. */
+/** Manifest text rides through a target checkout, so a grammar id is validated here before the cast. */
 export function knownGrammar(value: unknown): GrammarId | null {
   return typeof value === "string" && (GRAMMAR_IDS as readonly string[]).includes(value)
     ? (value as GrammarId)
