@@ -2,10 +2,11 @@
 // files.yml's pin lines are rewritten in place, line-targeted, so its comments and layout survive; the workflow around it commits
 // and opens the PR.
 
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { PLATFORM_NAME } from "../../../actions/shared/platform.ts";
 import { toolchainPins } from "../../../scripts/generate/toolchain_pins.ts";
+import { setOutput } from "../shared/gha.ts";
 import { must } from "../shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -79,11 +80,18 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** GitHub's /releases/latest is most-recent-by-DATE, so a backport patch on an older line can surface as "latest"; a genuine
- *  rollback is a deliberate hand edit, never an automated downgrade. */
-export function decideBump(pinned: string, fetched: string): "bump" | "current" | "downgrade" {
+/** GitHub's /releases/latest is most-recent-by-DATE, so a backport patch on an older line can surface as "latest". A genuine
+ *  rollback is a deliberate hand edit, never an automated downgrade, and a run that saw one cannot tell whether main is
+ *  behind upstream, so it aborts instead of reporting "nothing moved" (the workflow's PR step would close a valid PR on that). */
+export function decideBump(pinned: string, fetched: string, what: string): "bump" | "current" {
   const order = compareVersions(fetched, pinned);
-  return order === 0 ? "current" : order < 0 ? "downgrade" : "bump";
+  if (order < 0) {
+    throw new Error(
+      `${what}: upstream latest ${fetched} is OLDER than the pinned ${pinned} ` +
+        "(a backport release surfacing as latest?) - refusing to refresh on a view that cannot see upstream's newest",
+    );
+  }
+  return order === 0 ? "current" : "bump";
 }
 
 /** "bun to 1.3.15" / "bun to 1.3.15 and deno to 2.9.6" / an ", and" list. */
@@ -96,15 +104,24 @@ export function proseBumps(bumps: Bump[]): string {
 
 /** The bumps crossing a major version (a bun 2.0, a deno 3.0), as
  *  "deno 2 -> 3" fragments for the PR body's prominent callout. */
-export function majorJumps(bumps: Bump[]): string {
+function majorJumps(bumps: Bump[]): string {
   return bumps
     .filter((b) => b.from.split(".")[0] !== b.version.split(".")[0])
     .map((b) => `${b.module} ${b.from.split(".")[0]} -> ${b.version.split(".")[0]}`)
     .join(", ");
 }
 
-/** Both failure messages are fixed strings: fetch()'s rejections and response.json()'s carry runtime-generated text, and main()
- *  publishes this message as a public ::warning. */
+export function prBody(bumps: Bump[]): string {
+  const summary =
+    `Automated toolchain pin refresh: bump ${proseBumps(bumps)} (fleet-wide via the managed version dotfiles - ` +
+    "see docs/toolchains.md). Merging this moves the stable tag once green; the next sync pushes it to the fleet.";
+  const major = majorJumps(bumps);
+  if (major === "") return summary;
+  return `**MAJOR VERSION JUMP: ${major} - review before merging.**\n\n${summary}`;
+}
+
+/** Both failure messages are fixed strings: fetch()'s rejections and response.json()'s carry runtime-generated text, and this
+ *  message is the run's public failure line. */
 export async function fetchJson(url: string): Promise<unknown> {
   const headers: Record<string, string> = { "user-agent": `${PLATFORM_NAME}-refresh-toolchains` };
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
@@ -113,9 +130,8 @@ export async function fetchJson(url: string): Promise<unknown> {
   }
   let response: Response;
   try {
-    // A hung upstream should fail this one source fast (each source
-    // already degrades to a warning) instead of leaning on the job
-    // timeout.
+    // A hung upstream should fail the run fast instead of leaning on the
+    // job timeout.
     response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
   } catch {
     throw new Error(`GET ${url} failed before a response (network, TLS, or timeout)`);
@@ -126,6 +142,20 @@ export async function fetchJson(url: string): Promise<unknown> {
   } catch {
     throw new Error(`GET ${url} returned a body that is not valid JSON`);
   }
+}
+
+/** Every source or none: a run that cannot see one upstream cannot tell "nothing moved" from "could not look", and an
+ *  empty bumps output lets the workflow's PR step close a still-valid refresh PR as caught up. */
+export async function latestVersions<T extends { module: string }>(
+  pinned: T[],
+  fetch: (url: string) => Promise<unknown> = fetchJson,
+): Promise<(T & { latest: string })[]> {
+  const latests: (T & { latest: string })[] = [];
+  for (const entry of pinned) {
+    const source = PIN_SOURCES[entry.module];
+    latests.push({ ...entry, latest: source.parse(await fetch(source.url)) });
+  }
+  return latests;
 }
 
 async function main(): Promise<number> {
@@ -151,36 +181,13 @@ async function main(): Promise<number> {
     }
   }
 
-  // Fetch and parse EVERY source before touching files.yml, so a bad
-  // upstream cannot abort the run mid-write. A single failing source is a
-  // warning (the others still refresh); only a total blackout aborts.
-  const latests: { module: string; pin: { file: string; version: string }; latest: string }[] = [];
-  for (const { module, pin } of pinned) {
-    const source = PIN_SOURCES[module];
-    try {
-      latests.push({ module, pin, latest: source.parse(await fetchJson(source.url)) });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.log(`::warning::${module}: skipping this refresh (${message})`);
-    }
-  }
-  if (latests.length === 0) {
-    throw new Error("no toolchain source could be fetched - refusing to refresh nothing");
-  }
-
-  // Compute every rewrite before writing anything, for the same reason.
+  // Every fetch, then every rewrite, then the one write: a bad upstream or
+  // a malformed pin line aborts before files.yml is touched.
+  const latests = await latestVersions(pinned);
   const bumps: Bump[] = [];
   for (const { module, pin, latest } of latests) {
-    const decision = decideBump(pin.version, latest);
-    if (decision === "current") {
+    if (decideBump(pin.version, latest, module) === "current") {
       console.log(`${module}: ${pin.version} is current`);
-      continue;
-    }
-    if (decision === "downgrade") {
-      console.log(
-        `::warning::${module}: upstream latest ${latest} is OLDER than the pinned ` +
-          `${pin.version} (a backport release surfacing as latest?) - not downgrading`,
-      );
       continue;
     }
     filesText = bumpFilesPin(filesText, module, latest, "files.yml");
@@ -194,10 +201,8 @@ async function main(): Promise<number> {
     console.log("all toolchain pins are current; nothing to regenerate");
   }
   if (process.env.GITHUB_OUTPUT) {
-    appendFileSync(
-      process.env.GITHUB_OUTPUT,
-      `bumps=${proseBumps(bumps)}\nmajor=${majorJumps(bumps)}\n`,
-    );
+    setOutput("bumps", proseBumps(bumps));
+    setOutput("body", prBody(bumps));
   }
   return 0;
 }

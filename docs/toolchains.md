@@ -45,8 +45,8 @@ Rules that follow:
 
 The refresh-toolchains workflow (weekly cron plus manual dispatch, mirroring refresh-gitignore) bumps the pins when upstream moved:
 
-1. Fetch the latest upstream versions: bun's latest GitHub release, Deno's latest stable release.
+1. Fetch the latest upstream versions: bun's latest GitHub release, Deno's latest stable release. An unreachable source, or a "latest" older than the pin (a backport surfacing as latest), aborts the run: such a view cannot tell "nothing moved" from "could not see upstream's newest".
 2. Rewrite the `modules.<module>.pin` entries in `files.yml` in place, then rerun `bun run pins`, which writes the version dotfiles under `files/`, beside the actions, and at this repository's root (`bun run pins:check` is the offline gate against drift).
-3. Open or refresh a PR on the `automation/toolchain-refresh` branch when anything moved.
+3. Open or refresh a PR on the `automation/toolchain-refresh` branch when anything moved; when nothing moved and that PR is still open, main already carries its pins, so the PR is closed and its branch deleted.
 
 Merging the PR moves the `stable` tag once its gate is green; the next sync rolls the pin out to the fleet.

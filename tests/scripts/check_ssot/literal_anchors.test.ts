@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
+  AUTOMATION_PR_ACTION,
+  automationPrIdentityMismatches,
   inlineFunctionCopies,
   isOwnPagesOrigin,
   platformNameLiteralMismatches,
@@ -318,5 +321,61 @@ describe("platformNameLiteralMismatches", () => {
         got: 'const begin = "# BEGIN REPO-PLATFORM MANAGED";',
       },
     ]);
+  });
+});
+
+describe("automationPrIdentityMismatches", () => {
+  const identity = { name: "bot", email: "bot@example.invalid" };
+  const signature = "bot <bot@example.invalid>";
+  const workflow = (inputs: Record<string, string>) =>
+    [
+      "jobs:",
+      "  refresh:",
+      "    steps:",
+      "      - run: bun regenerate.ts",
+      "      - name: Commit, push, and open PR",
+      `        uses: ${AUTOMATION_PR_ACTION}@0000000000000000000000000000000000000000 # v8.1.1`,
+      "        with:",
+      "          branch: automation/x-refresh",
+      ...Object.entries(inputs).map(([key, value]) => `          ${key}: ${value}`),
+      "",
+    ].join("\n");
+  const REL = ".github/workflows/refresh-x.yml";
+
+  const rows: { reason: string; inputs: Record<string, string>; mismatches: Mismatch[] }[] = [
+    {
+      reason: "both inputs spelling the identity yield nothing (the control)",
+      inputs: { committer: signature, author: signature },
+      mismatches: [],
+    },
+    {
+      reason: "a missing author and a misspelled committer are each named",
+      inputs: { committer: "bot <bot@users.noreply.github.com>" },
+      mismatches: [
+        {
+          file: `${REL} step "Commit, push, and open PR"`,
+          expected: `with.committer: ${signature}`,
+          got: "with.committer: bot <bot@users.noreply.github.com>",
+        },
+        {
+          file: `${REL} step "Commit, push, and open PR"`,
+          expected: `with.author: ${signature}`,
+          got: "no author: on the step",
+        },
+      ],
+    },
+  ];
+
+  test.each(rows)("$reason", ({ inputs, mismatches }) => {
+    // A second workflow with no such step is never judged and never
+    // counts toward the anchor.
+    const files = { [REL]: workflow(inputs), ".github/workflows/ci.yml": "jobs: {}\n" };
+    expect(automationPrIdentityMismatches(files, identity)).toEqual(mismatches);
+  });
+
+  test("no step anywhere is a lost anchor, not a clean tree", () => {
+    expect(() =>
+      automationPrIdentityMismatches({ ".github/workflows/ci.yml": "jobs: {}\n" }, identity),
+    ).toThrow(`no ${AUTOMATION_PR_ACTION} step in any workflow - anchor lost`);
   });
 });

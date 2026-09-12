@@ -1,4 +1,5 @@
-// Every committer is a TypeScript script importing these constants; no workflow or action carries its own copy.
+// TypeScript committers import these constants. The two refresh workflows cannot: their create-pull-request step spells
+// SYNC_IDENTITY, and the pins-and-identities rule (scripts/check/ssot/literal_anchors.ts) holds every such step to it.
 
 import { BUILD_BOT, SYNC_BOT } from "../../../actions/shared/platform.ts";
 

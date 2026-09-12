@@ -220,14 +220,9 @@ describe("stageComposedTreeArgv", () => {
     const sites: { rel: string; composed: boolean; allowedPlainAdds?: string[] }[] = [
       { rel: ".github/scripts/build-branches/publish.ts", composed: true },
       { rel: ".github/scripts/shared/rebuild_tree.ts", composed: true },
-      // The plain adds stage managed-repo trees whose own ignore rules must
-      // keep applying: --force would smuggle ignored files, so these sites
+      // The plain add stages a managed-repo tree whose own ignore rules must
+      // keep applying: --force would smuggle ignored files, so this site
       // must never adopt the helper.
-      {
-        rel: ".github/scripts/shared/open_automation_pr.ts",
-        composed: false,
-        allowedPlainAdds: ['["git", "add", "-A"]'],
-      },
       {
         rel: ".github/scripts/sync/deliver.ts",
         composed: false,

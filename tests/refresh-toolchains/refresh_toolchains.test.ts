@@ -2,13 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type Bump,
   bumpFilesPin,
   decideBump,
   fetchJson,
   latestBunVersion,
   latestDenoVersion,
-  majorJumps,
+  latestVersions,
   PIN_SOURCES,
+  prBody,
   proseBumps,
 } from "../../.github/scripts/refresh-toolchains/refresh_toolchains";
 import { toolchainPins } from "../../scripts/generate/toolchain_pins";
@@ -17,7 +19,7 @@ describe("fetchJson", () => {
   test("a malformed body rejects with the fixed diagnostic, never the body", async () => {
     // Loopback server, no upstream network (hostname pinned: the default
     // 0.0.0.0 listener collides in sandboxed runs). The rejection message
-    // is published as a public ::warning, and runtimes differ on whether
+    // is the run's public failure line, and runtimes differ on whether
     // their JSON error text embeds the body - so the fixed-string
     // guarantee must hold regardless of what the runtime would say.
     const server = Bun.serve({
@@ -64,20 +66,50 @@ describe("fetchJson", () => {
   });
 });
 
+describe("latestVersions", () => {
+  const pinned = [
+    { module: "bun", pin: { file: ".bun-version", version: "1.4.0" } },
+    { module: "deno", pin: { file: ".dvmrc", version: "2.9.5" } },
+  ];
+  const upstream = (failing: string) => async (url: string) => {
+    if (url.includes(failing)) throw new Error(`GET ${url} failed: 503`);
+    return { tag_name: url.includes("oven-sh") ? "bun-v1.4.1" : "v2.9.6" };
+  };
+
+  test("every source answers, or the run aborts: one unreachable upstream never reads as an empty refresh", async () => {
+    expect(await latestVersions(pinned, upstream("nowhere"))).toEqual([
+      { ...pinned[0], latest: "1.4.1" },
+      { ...pinned[1], latest: "2.9.6" },
+    ]);
+    await expect(latestVersions(pinned, upstream("oven-sh"))).rejects.toThrow(
+      "GET https://api.github.com/repos/oven-sh/bun/releases/latest failed: 503",
+    );
+  });
+});
+
 describe("decideBump", () => {
-  // A downgrade is never applied: GitHub's date-ordered /releases/latest can
-  // surface a backport on an older line.
   test.each([
-    ["1.3.15", "1.2.22", "downgrade", "backport on an older line surfaces as date-ordered latest"],
-    ["2.0.0", "1.99.99", "downgrade", "major below the pin"],
     ["1.3.14", "1.3.14", "current", "equal is a no-op"],
     ["1.3.14", "1.3.15", "bump", "patch ahead"],
     ["2.9.5", "3.0.0", "bump", "major line jump"],
     ["1.9.0", "1.10.0", "bump", "minor 10 > 9 numerically (lexicographic says 1.10 < 1.9)"],
-    ["1.10.0", "1.9.9", "downgrade", "minor 9 < 10 numerically (lexicographic says 1.9 > 1.10)"],
     ["9.99.99", "10.0.0", "bump", "major 10 > 9 numerically (lexicographic says 10 < 9)"],
   ] as const)("pin %s, fetched %s -> %s (%s)", (pinned, fetched, verdict) => {
-    expect(decideBump(pinned, fetched)).toBe(verdict);
+    expect(decideBump(pinned, fetched, "bun")).toBe(verdict);
+  });
+
+  // A downgrade is never applied and never reads as "current": GitHub's
+  // date-ordered /releases/latest can surface a backport on an older line,
+  // and a run that saw one aborts rather than let the PR step close a
+  // valid refresh PR as caught up.
+  test.each([
+    ["1.3.15", "1.2.22", "backport on an older line surfaces as date-ordered latest"],
+    ["2.0.0", "1.99.99", "major below the pin"],
+    ["1.10.0", "1.9.9", "minor 9 < 10 numerically (lexicographic says 1.9 > 1.10)"],
+  ] as const)("pin %s, fetched %s -> the run aborts (%s)", (pinned, fetched) => {
+    expect(() => decideBump(pinned, fetched, "bun")).toThrow(
+      `bun: upstream latest ${fetched} is OLDER than the pinned ${pinned} (a backport release surfacing as latest?)`,
+    );
   });
 });
 
@@ -188,17 +220,30 @@ describe("proseBumps", () => {
   });
 });
 
-describe("majorJumps", () => {
-  test("names only the bumps crossing a major version", () => {
-    expect(
-      majorJumps([
+describe("prBody", () => {
+  const summary = (bumps: string) =>
+    `Automated toolchain pin refresh: bump ${bumps} (fleet-wide via the managed version dotfiles - see docs/toolchains.md). Merging this moves the stable tag once green; the next sync pushes it to the fleet.`;
+
+  const rows: { reason: string; bumps: Bump[]; body: string }[] = [
+    {
+      reason: "a minor refresh is the summary alone",
+      bumps: [{ module: "bun", from: "1.3.14", version: "1.4.0" }],
+      body: summary("bun to 1.4.0"),
+    },
+    {
+      reason:
+        "only the bumps crossing a major line lead the banner, one blank line before the summary",
+      bumps: [
         { module: "bun", from: "1.3.14", version: "1.3.15" },
         { module: "uv", from: "0.9.0", version: "1.0.0" },
         { module: "deno", from: "2.9.5", version: "3.0.0" },
-      ]),
-    ).toBe("uv 0 -> 1, deno 2 -> 3");
-    expect(majorJumps([{ module: "bun", from: "1.3.14", version: "1.4.0" }])).toBe("");
-    expect(majorJumps([])).toBe("");
+      ],
+      body: `**MAJOR VERSION JUMP: uv 0 -> 1, deno 2 -> 3 - review before merging.**\n\n${summary("bun to 1.3.15, uv to 1.0.0, and deno to 3.0.0")}`,
+    },
+  ];
+
+  test.each(rows)("$reason", ({ bumps, body }) => {
+    expect(prBody(bumps)).toBe(body);
   });
 });
 
