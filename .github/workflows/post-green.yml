@@ -155,8 +155,9 @@ jobs:
           BEFORE_SHA: ${{ needs.move-stable.outputs.previous || inputs.before }}
         run: bun .github/scripts/fleet/fleet_sync_marker.ts
 
-  # Ordered behind the mover so the sync renders from the commit it left (a red mover skips the sync rather than
-  # ship the previous commit); judged by name, since the directives read runs on every mover result.
+  # Ordered behind the mover so the sync renders from the tag as this run's mover or a newer one left it (a red
+  # mover skips the sync rather than ship the previous commit); judged by name, since the directives read runs on
+  # every mover result.
   # This job holds the sync-repos lane the weekly cron also holds; the called run keys a per-run group instead.
   sync-fleet:
     needs: [move-stable, read-directives]

@@ -366,7 +366,7 @@ describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-stable)", ()
     ]) {
       expect(callable).toContain(name);
     }
-    // Push- and schedule-triggered workflows are not callable, whatever ref a pin names.
+    // Workflows with no workflow_call trigger are not callable, whatever ref a pin names.
     expect(callable).not.toContain("ci.yml");
     expect(callable).not.toContain("protect-build-branches.yml");
   });

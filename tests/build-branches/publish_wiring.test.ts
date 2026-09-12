@@ -210,7 +210,7 @@ describe("post-green publish wiring", () => {
       "read-directives",
       "settings-fleet",
     ]);
-    // The control: a red publish of the build branch, which no fleet pin and no sync reads any more, skips nothing.
+    // The control: a red publish of the build branch, which no source under files/ pins and no sync reads, skips nothing.
     expect(jobsRunning(jobs, "push", armed, ["publish-build"]).sort()).toEqual([
       "move-stable",
       "read-directives",
