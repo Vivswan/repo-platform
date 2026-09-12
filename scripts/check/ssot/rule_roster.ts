@@ -24,6 +24,7 @@ export const RULE_ROSTER = [
   "local-bun-runtime",
   "action-pins",
   "fleet-refs-ride-build",
+  "delivery-pin-stems",
   "sticky-pr-comments",
   "local-gates",
   "all-green-roster",
