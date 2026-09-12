@@ -39,6 +39,7 @@ const BASELINE_LABELS = [
   "bug",
   "enhancement",
   "fix-lint",
+  "merge-when-green",
   "security-nightly",
 ];
 
