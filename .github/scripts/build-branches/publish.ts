@@ -8,7 +8,8 @@ import { allGreenFailure } from "../shared/all_green.ts";
 import { commitRunWrite, commitStampParse, commitStampWrite } from "../shared/commit_stamp.ts";
 import { env, fail, requireEnv } from "../shared/gha.ts";
 import { BUILD_IDENTITY } from "../shared/git_identity.ts";
-import { capture, must, mustCapture } from "../shared/proc.ts";
+import { gitAnswersYes, gitResolvedCommit } from "../shared/git_yes_no.ts";
+import { must, mustCapture } from "../shared/proc.ts";
 import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
 import { stampUnhealthyReason } from "../shared/stamp_checks.ts";
 import { scratchWorktrees } from "./scratch.ts";
@@ -30,24 +31,13 @@ if (ref !== "" && ref !== "refs/heads/main") {
 must(["git", "config", "user.name", BUILD_IDENTITY.name]);
 must(["git", "config", "user.email", BUILD_IDENTITY.email]);
 
-function resolves(revspec: string): string {
-  const probe = capture(["git", "rev-parse", "--verify", "--quiet", revspec]);
-  return probe.exitCode === 0 ? probe.stdout.trimEnd() : "";
-}
-
 function isAncestor(ancestor: string, descendant: string): boolean {
-  return capture(["git", "merge-base", "--is-ancestor", ancestor, descendant]).exitCode === 0;
+  return gitAnswersYes(["merge-base", "--is-ancestor", ancestor, descendant]);
 }
 
-/** ls-remote --exit-code returns 2 for an absent ref; any other failure is a blip, which must never read as "absent": the orphan seed
- * path would then mint a build history disconnected from the live branch. */
+/** A failed look must never read as "absent": the orphan seed path would then mint a build history disconnected from the live branch. */
 function refExistsOnOrigin(ref: string): boolean {
-  const probe = capture(["git", "ls-remote", "--exit-code", "origin", ref]);
-  if (probe.exitCode === 0) return true;
-  if (probe.exitCode === 2) return false;
-  throw new Error(
-    `git ls-remote for ${ref} failed (exit ${probe.exitCode}): ${probe.stderr.trim()} - an operational failure, not an absent ref; re-run the build`,
-  );
+  return gitAnswersYes(["ls-remote", "--exit-code", "origin", ref], { noExit: 2 });
 }
 
 /** Newest-green-wins: publishing onto a tip stamped with a descendant of `candidateSource` would roll the branch back.
@@ -58,7 +48,7 @@ function refExistsOnOrigin(ref: string): boolean {
 function staleReason(candidateSource: string, tipSource: string): string {
   if (tipSource === "" || tipSource === candidateSource) return "";
   const bothResolve =
-    resolves(`${candidateSource}^{commit}`) !== "" && resolves(`${tipSource}^{commit}`) !== "";
+    gitResolvedCommit(candidateSource) !== "" && gitResolvedCommit(tipSource) !== "";
   if (bothResolve && isAncestor(candidateSource, tipSource)) {
     return (
       `the published tip already ships ${tipSource.slice(0, 12)}, which descends from ` +
@@ -145,7 +135,7 @@ function publish(sourceSha: string): void {
   // tree must be the same function of the composed bytes, or the
   // provenance proof reads the skew as tampering.
   must(stageComposedTreeArgv(scratch.out));
-  const staged = capture(["git", "-C", scratch.out, "diff", "--cached", "--quiet"]).exitCode !== 0;
+  const staged = !gitAnswersYes(["diff", "--cached", "--quiet"], { cwd: scratch.out });
   // The no-change skip is guarded by the tip's stamp health: a tree-identical
   // tip with a broken stamp must NOT skip, or no dispatch could heal it. That
   // recovery is the one tree-identical commit, hence the scoped --allow-empty.
@@ -155,10 +145,7 @@ function publish(sourceSha: string): void {
           sourceSha: tipSource,
           history: mustCapture(["git", "-C", scratch.out, "log", "--format=%B", "HEAD"]),
           mainRef: "origin/main",
-          git: {
-            resolveCommit: (revspec) => resolves(`${revspec}^{commit}`),
-            isAncestor,
-          },
+          git: { resolveCommit: gitResolvedCommit, isAncestor },
         })
       : "";
   if (branchExists && !staged && stampProblem === "") {
@@ -207,7 +194,7 @@ if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
 // that is not main history - so publishing one (a dispatch naming a PR
 // head, whose own CI run posted an all-green check) would wedge every
 // sync on the tip. Refuse before any mutation.
-if (resolves(`${sourceSha}^{commit}`) === "" || !isAncestor(sourceSha, "origin/main")) {
+if (gitResolvedCommit(sourceSha) === "" || !isAncestor(sourceSha, "origin/main")) {
   fail(
     `refusing to publish: ${sourceSha.slice(0, 12)} is not a commit on main. The build branch stamps its source as main history, and the sync refuses anything else; dispatch with a main commit's sha.`,
   );
