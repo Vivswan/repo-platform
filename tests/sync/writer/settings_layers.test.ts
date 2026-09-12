@@ -349,8 +349,8 @@ describe("the layer topology fails CLOSED", () => {
     {
       reason: "a layer with a section the apply does not know",
       config: CONFIG,
-      damage: (tree) => writeFileSync(join(tree, "site/settings.yml"), "lables: []\n"),
-      problem: "unknown top-level section(s) in files/site/settings.yml: lables",
+      damage: (tree) => writeFileSync(join(tree, "site/settings.yml"), "labels_v2: []\n"),
+      problem: "unknown top-level section(s) in files/site/settings.yml: labels_v2",
     },
   ])("$reason is a load problem naming the file", ({ config, damage, problem }) => {
     // The control: every committed declaration has its file, so the one
@@ -498,8 +498,8 @@ describe("foldSettings", () => {
   test("a null on a section the apply does not know is named with its layer at the fold", () => {
     // readLayer lets it through (a null there is an opt-out marker until the
     // fold sees what it meets); the fold's own per-layer view names the file.
-    expect(foldSettings([layer("over", "lables: null\n")], "f")).toEqual({
-      refused: expect.stringContaining("unknown top-level section(s) in over: lables"),
+    expect(foldSettings([layer("over", "labels_v2: null\n")], "f")).toEqual({
+      refused: expect.stringContaining("unknown top-level section(s) in over: labels_v2"),
     });
   });
 

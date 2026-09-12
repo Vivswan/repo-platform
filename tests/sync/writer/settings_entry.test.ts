@@ -432,18 +432,18 @@ describe("renderSettings", () => {
     },
     {
       reason: "an overlay naming a section the apply does not know",
-      overrides: { overlay: `${OVERLAY}lables: []\n` },
+      overrides: { overlay: `${OVERLAY}labels_v2: []\n` },
       detail: expect.stringContaining(
-        "unknown top-level section(s) in .github/settings.local.yml: lables",
+        "unknown top-level section(s) in .github/settings.local.yml: labels_v2",
       ),
     },
     {
       // Legal at the layer boundary (a null is an opt-out marker until the
       // fold sees what it meets); the fold names the overlay.
       reason: "an overlay nulling a section the apply does not know",
-      overrides: { overlay: `${OVERLAY}lables: null\n` },
+      overrides: { overlay: `${OVERLAY}labels_v2: null\n` },
       detail: expect.stringContaining(
-        "unknown top-level section(s) in .github/settings.local.yml: lables",
+        "unknown top-level section(s) in .github/settings.local.yml: labels_v2",
       ),
     },
     {
