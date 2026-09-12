@@ -47,7 +47,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Conventional Commits, squash-merged
 
-- Rule: PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/); PRs squash-merge, so the PR title becomes the commit subject.
+- Rule: PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/); PRs squash-merge, so the PR title becomes the commit subject. One scope per subject: `fix(sync,writer): ...` is refused, so split the change or pick the scope that names it.
 - Why: release-please derives versions and changelogs from the subjects.
 - How: `fix(sync): ...`, `feat(writer)!: ...`, `docs: ...`.
 - Enforced by: the [`pr-title` check](settings.md#the-pr-title-ruleset) on the PR title (pr-title module); the `commit-names` job (actions/validate-commit-names) on the subjects; squash-only merging with the PR title as subject is the [settings override layer](settings.md), applied to every managed repository.
