@@ -29,6 +29,8 @@ const exit = run(
     join(requireEnv("ACTION_PATH"), "validator", "validate_managed_files.ts"),
     "--files",
     requireEnv("FILES_CONFIG"),
+    "--private",
+    requireEnv("REPOSITORY_PRIVATE"),
     root,
   ],
   {

@@ -6,7 +6,7 @@ import { checkManifestShape } from "./checks/manifest_shape.ts";
 import { checkRegistration } from "./checks/registration.ts";
 import { checkReleasePlease } from "./checks/release_please.ts";
 import { checkYaml } from "./checks/yaml.ts";
-import { type Context, loadContext } from "./context.ts";
+import { type Context, loadContext, type Target } from "./context.ts";
 import { type Finding, print, writeReports } from "./findings.ts";
 
 const CHECKS: ((ctx: Context) => Finding[])[] = [
@@ -26,6 +26,7 @@ function usageError(message: string): never {
 function main(): number {
   let selfMode = false;
   let filesConfig: string | undefined;
+  let privateRepo: boolean | undefined;
   const positional: string[] = [];
   const args = process.argv.slice(2);
   for (let i = 0; i < args.length; i++) {
@@ -36,6 +37,11 @@ function main(): number {
       const value = args[i];
       if (value === undefined || value.startsWith("-")) usageError("--files expects a path");
       filesConfig = value;
+    } else if (arg === "--private") {
+      i++;
+      const value = args[i];
+      if (value !== "true" && value !== "false") usageError("--private expects true or false");
+      privateRepo = value === "true";
     } else if (arg.startsWith("-")) usageError(`unrecognized argument: ${arg}`);
     else positional.push(arg);
   }
@@ -45,7 +51,17 @@ function main(): number {
     if (!selfMode) usageError("--files <files.yml> is required outside --self");
     filesConfig = resolve(root, "files.yml");
   }
-  const ctx = loadContext(root, selfMode, resolve(filesConfig));
+  const target: Target = selfMode
+    ? { mode: "self" }
+    : {
+        mode: "render",
+        private:
+          privateRepo ??
+          usageError(
+            "--private <true|false> (the repository's visibility) is required outside --self",
+          ),
+      };
+  const ctx = loadContext(root, resolve(filesConfig), target);
   const findings = CHECKS.flatMap((check) => check(ctx));
   writeReports(findings, process.env);
   return print(findings);

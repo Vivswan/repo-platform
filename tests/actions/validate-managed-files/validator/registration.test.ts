@@ -75,7 +75,9 @@ describe("the registration", () => {
       const { exitCode, stderr } = runValidator({}, [], opts);
       expect(exitCode).toBe(1);
       expect(stderr).toContain(problem);
-      expect(stderr).toContain("the registration's module names cannot be judged");
+      expect(stderr).toContain(
+        "neither the registration's module names nor the manifest's classes can be judged",
+      );
       expect(stderr).not.toContain("unknown module(s)");
     },
   );

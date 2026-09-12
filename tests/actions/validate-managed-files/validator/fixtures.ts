@@ -23,7 +23,13 @@ export const FILES_YML = [
   "  uv: {}",
   "  pages: {}",
   "  release-please: {}",
-  "files: []",
+  "files:",
+  "  - {path: .gitignore, class: split, region: hash}",
+  "  - {path: .editorconfig, class: split, region: hash}",
+  "  - {path: LICENSE.md, class: split, region: html}",
+  "  - {path: AGENTS.md, class: split, region: html}",
+  "  - {path: .github/workflows/ci.yml, class: managed}",
+  "  - {path: .github/workflows/checks.yml, class: starter}",
   "",
 ].join("\n");
 
@@ -109,6 +115,7 @@ export interface RunValidatorOptions {
   omit?: string[];
   filesYml?: string | null;
   filesPath?: string;
+  private?: boolean;
 }
 
 export interface ValidatorResult {
@@ -152,7 +159,7 @@ export function validatorRunner(temp: TempDirs) {
     // The module data file sits beside the tree in self mode (the
     // operator's own files.yml) and outside it otherwise (the build
     // branch's, named with --files).
-    const filesArgs: string[] = [];
+    const filesArgs: string[] = selfMode ? [] : ["--private", String(opts.private ?? false)];
     if (opts.filesPath !== undefined) filesArgs.push("--files", opts.filesPath);
     else if (opts.filesYml !== null) {
       const text = opts.filesYml ?? FILES_YML;

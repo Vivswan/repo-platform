@@ -146,24 +146,24 @@ The `validate-managed-files` job judges the repository against the platform's cu
 | YAML | a YAML file anywhere in the repository that does not parse |
 | Conflict markers | a merge's conflict markers left in a source, config, or markdown file (the validator's text suffixes) |
 | Manifest shape | a missing, unparsable, or malformed `.github/repo-platform-manifest.json`, or an entry carrying a field the vocabulary lacks |
-| Manifest parity | managed content whose hash differs from its record (an edit outside a sync), or a recorded managed file missing from the repo |
+| Manifest parity | an entry recorded under a class other than the one `files.yml` writes its path under for this repository's modules and visibility (a relabel to `starter` would switch parity off; a path no selected entry writes, a mirror target say, is judged as recorded), managed content whose hash differs from its record (an edit outside a sync), or a recorded managed file missing from the repo |
 
 - Errors block; advisories inform. The verdict is ONE per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 - The report step always runs, reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
-- The check judges what the last sync recorded, so a module edit alone changes nothing here; the sync PR that follows brings the files and the manifest together ([changing the module selection](#changing-the-module-selection)).
+- The check judges what the last sync recorded against the classes the edited selection makes live, so a module edit alone changes nothing here unless it flips a recorded path's class (the exception in the table below); the sync PR that follows brings the files and the manifest together ([changing the module selection](#changing-the-module-selection)).
 
 ### Changing the module selection
 
 A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying the module's files and the manifest stamp that records them. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` job reads the new list on the next run, validating the registration on the first PR.
 
-- The managed-files check is green on the first PR by design: it judges the stamped manifest, never the module list, so nothing is bypassed.
+- The managed-files check is green on the first PR by design: it judges the stamped manifest against the classes the new selection makes live, so nothing is bypassed; the one exception is an edit that flips a recorded path's class (see the table below).
 - The one red to expect: a module whose fleet-ci jobs read a file the sync has not written yet (`skills` reads `.claude-plugin/plugin.json`; a toolchain module's jobs read its version pin, `.node-version` for `node`). It stays red until the sync PR lands unless the first PR adds that file.
 - The module's DATA files (its workflows, starters, and toolchain pins) are what the second PR carries, written by the sync once the first has merged:
 
 ```text
 PR edits modules: in .repo-platform.yml
   -> plan reads the registration and checks it against the build's module data (an unknown module or a malformed file fails the job)
-  -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet
+  -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet (unless the edit flips a recorded path's class: see the table)
   -> merge the registration edit (the files cannot precede it: the sync reads the default branch), then
              gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
   -> the sync opens a PR carrying the files and the new manifest stamp (the writer replaces platform files whole), held for review
@@ -173,7 +173,7 @@ PR edits modules: in .repo-platform.yml
 | | |
 |---|---|
 | What the PR check judges | The `plan` job runs on every event and reads `.repo-platform.yml`, checking it against the module data the build branch ships beside the plan action: every module name must exist and the file must parse. It fails closed, so an unknown module or a malformed registration never merges through a PR (a registration the sync does meet with an unknown name has that name dropped and the sync PR held with a Registration note). |
-| What the PR check does not judge | `validate-managed-files` reads the edited registration for its module names, but its parity check walks the manifest the LAST sync recorded, so the new module's missing files are not findings. Nothing on the PR compares the tree against the new selection; the sync PR brings the files, and the manifest with them. |
+| What the PR check does not judge | `validate-managed-files` reads the edited registration for its module names and for the class each recorded path now falls under, but its parity check walks the manifest the LAST sync recorded, so the new module's missing files are not findings. Nothing on the PR compares the tree against the new selection; the sync PR brings the files, and the manifest with them. One edit does fail the PR: a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say), because the sync that restamps the record reads the default branch. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules. |
 | Enforced by | [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` job. The sync side is a manual run of sync-repos.yml ([the manual run](#the-manual-run)). |
 
 #### The manual run

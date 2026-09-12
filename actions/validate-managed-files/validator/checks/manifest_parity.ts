@@ -37,6 +37,36 @@ export function checkManifestParity(ctx: Context): Finding[] {
       }
       continue;
     }
+    if (!isRecordedClass(entry.class)) {
+      findings.push(
+        error(
+          `${where} has unknown class ${JSON.stringify(entry.class)} (expected one of ` +
+            `${RECORDED_CLASSES.join(", ")}); re-run the sync to regenerate the manifest`,
+        ),
+      );
+      continue;
+    }
+    // The class decides what parity verifies (a starter: nothing), so it is
+    // judged before any dispatch, against the declaration the selection
+    // makes live. A path no live declaration writes (a mirror target, a
+    // retired path, a deselected module's file) is dispatched as recorded.
+    const declared = ctx.classes?.get(rel);
+    if (declared !== undefined && declared !== entry.class) {
+      findings.push(
+        error(
+          `${where} is recorded as ${entry.class} but files.yml declares the path ` +
+            `${declared} - the class decides what parity verifies, and the ` +
+            "sync records the declared one; revert a hand edit (git history has the stamped " +
+            "original: the sync holds a drifted file whose record it cannot verify, never " +
+            "restamps it), merge the pending sync PR when the platform changed the path's class " +
+            "since the last sync (a row that PR holds keeps the old record until it is resolved), " +
+            "or, when this registration's module change flips it (a mirror target a newly " +
+            "selected entry writes, say), land the edit that retires the old record first " +
+            "(docs/new-repo.md, PR edits modules)",
+        ),
+      );
+      continue;
+    }
     if (entry.class === "starter") {
       if ("hash" in entry) {
         findings.push(
@@ -52,15 +82,6 @@ export function checkManifestParity(ctx: Context): Finding[] {
     // A mirror is a byte copy the sync wrote, its hash the whole file's,
     // so it is verified exactly like a managed file. A link is a symlink
     // the sync placed, its hash the target string's.
-    if (!isRecordedClass(entry.class)) {
-      findings.push(
-        error(
-          `${where} has unknown class ${JSON.stringify(entry.class)} (expected one of ` +
-            `${RECORDED_CLASSES.join(", ")}); re-run the sync to regenerate the manifest`,
-        ),
-      );
-      continue;
-    }
     const hash = "hash" in entry ? entry.hash : undefined;
     if (hash !== null && !(typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash))) {
       findings.push(
