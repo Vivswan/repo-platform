@@ -33,6 +33,8 @@ interface Scenario {
   conclusion?: string;
   /** The git question a stubbed git answers with exit 128 (every other call reaches the real git). */
   gitErrorsOn?: GitQuestion;
+  /** Origin's main sits at m2 (the tag already names m3) until the resolver's tag fetch lands; then a push advances it to m3. */
+  mainAdvancesAfterTagFetch?: boolean;
 }
 
 type GitQuestion = "the ancestry question" | "the files.yml question";
@@ -79,6 +81,9 @@ function run(scenario: Scenario): Outcome {
   const m2 = commit("two");
   const m3 = commit("three");
   fixtureGit(work, ["push", "--quiet", "origin", "main"]);
+  if (scenario.mainAdvancesAfterTagFetch === true) {
+    fixtureGit(origin, ["update-ref", "refs/heads/main", m2]);
+  }
   fixtureGit(work, ["switch", "--quiet", "-c", "side", m1]);
   const side = commit("side");
   fixtureGit(work, ["push", "--quiet", "origin", "side"]);
@@ -100,17 +105,17 @@ function run(scenario: Scenario): Outcome {
   if (scenario.staleLocalTag !== undefined) {
     fixtureGit(work, ["tag", "-f", "stable", shas[scenario.staleLocalTag]]);
   }
-  if (scenario.gitErrorsOn !== undefined) {
+  if (scenario.gitErrorsOn !== undefined || scenario.mainAdvancesAfterTagFetch === true) {
     const real = Bun.which("git");
     if (real === null) throw new Error("git is not on PATH");
+    const stub =
+      scenario.gitErrorsOn !== undefined
+        ? `if ${GIT_ERRORS[scenario.gitErrorsOn]}; then echo 'fatal: stubbed' >&2; exit 128; fi`
+        : // The advance lands the instant the tag fetch returns: the narrowest window between the resolver's two fetches.
+          `if [ "$1" = fetch ] && [[ "$*" == *${TAG}* ]]; then ${JSON.stringify(real)} "$@"; rc=$?; ${JSON.stringify(real)} -C ${JSON.stringify(origin)} update-ref refs/heads/main ${m3}; exit $rc; fi`;
     writeFileSync(
       join(bin, "git"),
-      [
-        "#!/usr/bin/env bash",
-        `if ${GIT_ERRORS[scenario.gitErrorsOn]}; then echo 'fatal: stubbed' >&2; exit 128; fi`,
-        `exec ${JSON.stringify(real)} "$@"`,
-        "",
-      ].join("\n"),
+      ["#!/usr/bin/env bash", stub, `exec ${JSON.stringify(real)} "$@"`, ""].join("\n"),
       { mode: 0o755 },
     );
   }
@@ -154,6 +159,14 @@ describe("resolve_build.ts behavior (real git)", () => {
       `api repos/o/r/commits/${r.shas.m3}/check-runs?check_name=all-green&filter=latest&per_page=100`,
     ]);
     expect(r.output).toContain(`build ${r.shas.m3.slice(0, 12)} verified`);
+  });
+
+  test("main advancing between the resolver's two fetches never leaves the tag's commit outside main's snapshot", () => {
+    // The tag is fetched first, so main's snapshot never predates it; the reverse order compares the tag against
+    // a stale main and fails a valid delivery.
+    const r = run({ tag: "m3", mainAdvancesAfterTagFetch: true });
+    expect(r.exitCode).toBe(0);
+    expect(r.outputs).toEqual({ build: r.shas.m3 });
   });
 
   test("an annotated tag resolves to the commit it names, never the tag object", () => {
