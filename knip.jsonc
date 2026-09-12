@@ -32,9 +32,9 @@
       "project": ["**/*.{ts,mts}"]
     },
     "actions/pages-site": {
-      // The two scripts action.yml runs; the vitepress plugin adds the config and theme, and vitepress
+      // The script action.yml runs; the vitepress plugin adds the config and theme, and vitepress
       // consumes the data loaders' default exports, which is why entry exports are not judged here.
-      "entry": ["build.ts", "check_links.ts", ".vitepress/**/*.data.ts"],
+      "entry": ["build.ts", ".vitepress/**/*.data.ts"],
       "project": ["**/*.{ts,mts,vue}"],
       "includeEntryExports": false,
       // @localSearchIndex is vitepress's virtual module; shiki and markdown-it are imported directly but arrive through vitepress.

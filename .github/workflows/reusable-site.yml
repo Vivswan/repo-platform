@@ -114,25 +114,50 @@ jobs:
 
       # Nightly link rot over what shipped: external links only (internal
       # ones were fatal at assembly), on the schedule alone so a fixed link
-      # closes the issue on the next clean night, never on a push.
+      # closes the issue on the next clean night, never on a push. Green
+      # whatever lychee finds (fail: false): the deploy has shipped, so
+      # findings become the tracking issue below. lychee's own empty-run
+      # guard still fails the step when the site held no link to judge.
       - name: Check external links
         id: links
         if: github.event_name == 'schedule' && steps.site.outputs.publish == 'true' && steps.site.outputs.link-rot-label != ''
-        uses: Vivswan/repo-platform/actions/pages-site/check-links@stable
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
-          site-dir: ${{ steps.site.outputs.site-dir }}
+          workingDirectory: ${{ steps.site.outputs.site-dir }}
+          # http(s) links alone: own-site links resolve to files under
+          # --root-dir and the assembly already judged them. The theme's
+          # "Edit this page" links are theme output an anonymous crawl
+          # cannot judge (auth redirect, 404 on a private repository).
+          args: >-
+            --no-progress
+            --root-dir ${{ steps.site.outputs.site-dir }}
+            --scheme https --scheme http
+            --exclude-all-private
+            --exclude '^${{ github.server_url }}/${{ github.repository }}/edit/'
+            --timeout 30 --max-retries 3 --retry-wait-time 5
+            '**/*.html'
+          fail: false
+          format: markdown
+          # One failure directory of the fuzz-issue action's report contract
+          # (docs/fuzzer.md): <artifacts-dir>/<failure>/report.md, its first
+          # line lychee's `# Summary` heading.
+          output: ${{ runner.temp }}/link-rot/external-links/report.md
 
-      # A count the gates below can test positively (check_ssot's
-      # step-output-gates rule): an absent count fails here rather than
-      # reading as a clean night, and neither the report nor the close runs.
-      - name: Read the link-rot count
+      # A verdict the gates below can test positively (check_ssot's
+      # step-output-gates rule): anything but lychee's two verdicts fails
+      # here rather than reading as a clean night, and neither the report
+      # nor the close runs.
+      - name: Read the link-rot verdict
         id: rot
         if: steps.links.outcome == 'success'
         env:
-          BROKEN: ${{ steps.links.outputs.broken }}
+          EXIT_CODE: ${{ steps.links.outputs.exit_code }}
         run: |
-          [[ "$BROKEN" =~ ^[0-9]+$ ]] || { echo "::error::check-links published no broken count: '$BROKEN'"; exit 1; }
-          echo "found=$([ "$BROKEN" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          case "$EXIT_CODE" in
+            0) echo "found=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "found=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::lychee published no verdict: exit code '$EXIT_CODE' (0 = clean, 2 = broken links)"; exit 1 ;;
+          esac
 
       - name: File or update the link-rot issue
         if: steps.rot.outputs.found == 'true'
@@ -141,7 +166,7 @@ jobs:
           mode: report
           label: ${{ steps.site.outputs.link-rot-label }}
           title: Docs site link rot
-          artifacts-dir: ${{ steps.links.outputs.report-dir }}
+          artifacts-dir: ${{ runner.temp }}/link-rot
           # The stream's create tuple, anchored to files.yml's site
           # tracking_label by check_ssot's labels rule.
           label-color: "D4A72C"
