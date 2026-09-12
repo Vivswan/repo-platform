@@ -47,7 +47,7 @@ export function parseRepositorySlug(slug: string): RepositorySlug {
 }
 
 /** A tracking label absent from both the registration and files.yml's module default stays absent:
- *  select.ts then refuses any listed source that uses it. */
+ *  sync.ts then refuses any listed source that uses it (placeholders.ts, missingPlaceholders). */
 export function placeholderValues(
   registration: Registration,
   repository: RepositorySlug,
