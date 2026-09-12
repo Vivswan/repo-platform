@@ -36,7 +36,7 @@ runs:
     # the action here.
     - name: Set up the action's bun
       id: action-bun
-      uses: Vivswan/repo-platform/actions/bun-setup@build
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
         pin: ${{ github.action_path }}/.bun-version
         required: "false"
@@ -57,7 +57,7 @@ runs:
         "${{ runner.temp }}/validate-managed-files-report.md"
 
     # The tarball ships no node_modules, so the dependencies are installed here.
-    # FILES_CONFIG is the files.yml at the build branch root, two levels above this action.
+    # FILES_CONFIG is the files.yml at the delivery commit's root, two levels above this action.
     - name: Validate the checkout
       id: validate
       if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'

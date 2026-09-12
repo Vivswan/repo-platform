@@ -6,10 +6,10 @@ Everything originates here. This repo pushes standards files into managed repos 
 
 ## Mental model
 
-Sources on `main`, a published build branch, sync PRs into each repo:
+Sources on `main`, a moving `stable` tag, sync PRs into each repo:
 
 - [files.yml](files.yml) is the file list: every path the platform writes, its ownership class (`managed`, `split`, `starter`, `link`), the module or visibility condition it lands under, and its source under `files/`. The `modules` section holds each module's data (toolchain pin, dependabot ecosystems, gitignore sources, tracking label); the `settings` section declares the settings layers and the condition each lands under.
-- Every green `main` commit rebuilds the orphan `build` branch, the one delivery channel: `files.yml` and `files/` for the writer, `actions/` for the composite actions the written workflows pin `@build`, and the fleet-facing reusable workflows. Every path is extraction-safe.
+- Every green `main` commit moves the `stable` tag, the one delivery channel: the written workflows pin `@stable` and read `files.yml` and `files/` (the writer), `actions/` (the composite actions), and the fleet-facing reusable workflows straight from that commit. Every path is extraction-safe.
 - [sync-repos.yml](.github/workflows/sync-repos.yml) copies the published build's files into each managed repo on a dispatch, a merge directive, or the weekly cron, then pushes a branch and PR into it with the fleet PAT ([docs/sync.md](docs/sync.md)). A report that holds nothing arms squash auto-merge and lands once the repo's `all-green` check passes; anything a human should see (replaced local edits, a held retirement, a refused mirror, a registration note) stays for review.
 
 Fleet settings are rendered into every managed repo: the sync writes a managed `.github/settings.yml` as a merge of plain YAML documents - the fleet baseline, the layers `files.yml` selects for the repo (its visibility, its modules, CodeQL where it runs), the repo's own `.github/settings.local.yml` (a starter written once, for its identity keys and its own labels), then a fleet override layer no repo can weaken - and [settings-repos.yml](.github/workflows/settings-repos.yml) applies each rendered file in a github-settings-as-code job of its own ([docs/settings.md](docs/settings.md)).
@@ -42,7 +42,7 @@ The fleet PAT's grant decides the fleet: every owned, non-archived repo the REPO
 
 ## Shipping a change
 
-Merge to `main`; once CI's `all-green` gate passes, the `build` branch is rebuilt and the fleet picks it up on the next weekly sync. To sync right after the merge, put a directive line first in the PR body:
+Merge to `main`; once CI's `all-green` gate passes, the `stable` tag moves to the merged commit and the fleet picks it up on the next weekly sync. To sync right after the merge, put a directive line first in the PR body:
 
 | Line | Syncs |
 | --- | --- |

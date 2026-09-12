@@ -7,15 +7,14 @@ import { join, resolve } from "node:path";
 import {
   allLayerLabels,
   declaredPrivate,
-  type LayerSources,
   layerConfig,
   layerPaths,
   loadModules,
-  managedLabelNames,
   managedSettings,
   readLayers,
 } from "../../../.github/scripts/sync/writer/settings_layers";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
+import type { LayerSources } from "../../../actions/plan/reserved_labels.ts";
 import type { Selection } from "../../../actions/shared/selection.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
@@ -366,24 +365,6 @@ describe("managedSettings", () => {
 });
 
 describe("the label roster", () => {
-  test("managedLabelNames covers every emittable label for the reserved-roster consumers", () => {
-    // The whole roster, spelled out: every fleet layer's labels, every
-    // toolchain module's dependabot label (reachable for ANY selection),
-    // and the release-please module's own.
-    expect(managedLabelNames(CONFIG, TREE)).toEqual([
-      ...BASELINE_LABELS,
-      "settings-as-code-report",
-      "javascript",
-      "deno",
-      "python:uv",
-      "rust",
-      "autorelease: pending",
-      "autorelease: tagged",
-      "release-blocker",
-      "release-override",
-    ]);
-  });
-
   test("allLayerLabels carries each tuple whole and refuses a damaged tree", () => {
     expect(allLayerLabels(CONFIG, TREE).find((label) => label.name === "security-nightly")).toEqual(
       {

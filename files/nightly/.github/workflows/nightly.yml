@@ -49,7 +49,7 @@ jobs:
     steps:
       - name: File or update the nightly issue
         if: needs.checks.result == 'failure' || needs.checks.result == 'cancelled'
-        uses: {{github_username}}/repo-platform/actions/fuzz-issue@build
+        uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
           label: "{{nightly_label}}"
@@ -60,7 +60,7 @@ jobs:
 
       - name: Close the nightly issue on a green night
         if: needs.checks.result == 'success'
-        uses: {{github_username}}/repo-platform/actions/fuzz-issue@build
+        uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: resolve
           label: "{{nightly_label}}"

@@ -2,8 +2,8 @@ name: Plan
 description: >-
   Resolves one managed repository's fleet configuration at run time, so
   every managed ci.yml can be byte-identical: reads the repository's
-  registration (.repo-platform.yml), checks it against the module data
-  shipped beside this action on the build branch (files.yml, whose modules
+  registration (.repo-platform.yml), checks it against the module data at
+  the root of the delivery commit beside this action (files.yml, whose modules
   block is the vocabulary in canonical order), and publishes the result as
   step outputs. Mode default resolves what fleet-ci.yml's jobs key on (the
   module selection in canonical order, the visibility, the CodeQL languages,
@@ -56,7 +56,7 @@ runs:
     # setup-bun can put another bun first.
     - name: Set up the action's bun
       id: action-bun
-      uses: Vivswan/repo-platform/actions/bun-setup@build
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
         pin: ${{ github.action_path }}/.bun-version
 
@@ -67,8 +67,8 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
-    # files.yml and the reserved label roster sit at the build branch root,
-    # two levels above this action's directory.
+    # files.yml and its files/ tree sit at the delivery commit's root, two
+    # levels above this action's directory.
     - name: Resolve the plan
       id: plan
       shell: bash
@@ -77,5 +77,5 @@ runs:
         MODE: ${{ inputs.mode }}
         PRIVATE: ${{ inputs.private }}
         FILES_CONFIG: ${{ github.action_path }}/../../files.yml
-        RESERVED_LABELS_FILE: ${{ github.action_path }}/../../reserved-labels.yml
+        FILES_TREE: ${{ github.action_path }}/../../files
       run: '"$ACTION_BUN" "${{ github.action_path }}/plan.ts"'

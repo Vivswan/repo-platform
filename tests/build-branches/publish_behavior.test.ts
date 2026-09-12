@@ -461,7 +461,7 @@ describe("publish.ts behavior (real git)", () => {
   test("a source off main is refused before any mutation - the stamp must name main history", () => {
     // The dispatch hazard: a PR head's own CI run posts an all-green
     // check (the gh stub greens every sha), but stamping it would fail
-    // the sync's stamp check 1 and wedge every sync on the tip.
+    // stamp check 1 at that tip.
     const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, source: "side" });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("is not a commit on main");

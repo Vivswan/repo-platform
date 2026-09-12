@@ -36,7 +36,7 @@ describe("fleet-nightly.yml", () => {
     expect(fleetNightly.permissions).toEqual({ contents: "read" });
   });
 
-  test("plan is the first job, fleet-ci's twin: the sparse registration checkout, then the plan action at @build", () => {
+  test("plan is the first job, fleet-ci's twin: the sparse registration checkout, then the plan action at @stable", () => {
     const [first, second, ...rest] = Object.keys(fleetNightly.jobs);
     expect([first, second, rest]).toEqual(["plan", "trivy-nightly", []]);
     const job = fleetNightly.jobs.plan;
@@ -44,7 +44,7 @@ describe("fleet-nightly.yml", () => {
     const steps = job?.steps ?? [];
     expect(steps.map((step) => step.uses ?? "run")).toEqual([
       expect.stringContaining("actions/checkout@"),
-      expect.stringContaining("repo-platform/actions/plan@build"),
+      expect.stringContaining("repo-platform/actions/plan@stable"),
     ]);
     expect(steps[0]?.with).toEqual({
       "sparse-checkout": ".repo-platform.yml\n",
@@ -76,10 +76,10 @@ describe("fleet-nightly.yml", () => {
     const steps = job?.steps ?? [];
     expect(steps.map((step) => step.uses ?? "run")).toEqual([
       expect.stringContaining("actions/checkout@"),
-      expect.stringContaining("repo-platform/actions/trivy@build"),
+      expect.stringContaining("repo-platform/actions/trivy@stable"),
       expect.stringContaining("actions/upload-artifact@"),
-      expect.stringContaining("repo-platform/actions/fuzz-issue@build"),
-      expect.stringContaining("repo-platform/actions/fuzz-issue@build"),
+      expect.stringContaining("repo-platform/actions/fuzz-issue@stable"),
+      expect.stringContaining("repo-platform/actions/fuzz-issue@stable"),
       expect.stringContaining("github/codeql-action/upload-sarif@"),
     ]);
     const [, scan, artifact, report, resolve, sarif] = steps;

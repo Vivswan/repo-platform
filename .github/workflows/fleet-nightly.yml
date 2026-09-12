@@ -2,7 +2,7 @@
 # and trivy-nightly needs `issues: write`, which the skeleton's `ci` caller never grants, so it rides its own `nightly` caller.
 #
 #   not in the all-green needs list   -> nothing here gates; the scan stays green whatever it finds
-#   a `./` action path                -> resolves against the CALLER's checkout, so repo-platform's action refs stay `@build`
+#   a `./` action path                -> resolves against the CALLER's checkout, so repo-platform's action refs stay `@stable`
 
 name: Fleet nightly
 
@@ -24,7 +24,7 @@ jobs:
           sparse-checkout: |
             .repo-platform.yml
           sparse-checkout-cone-mode: false
-      - uses: Vivswan/repo-platform/actions/plan@build
+      - uses: Vivswan/repo-platform/actions/plan@stable
         id: plan
         with:
           private: ${{ github.event.repository.private }}
@@ -43,7 +43,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/trivy@build
+      - uses: Vivswan/repo-platform/actions/trivy@stable
         id: scan
         with:
           mode: nightly
@@ -56,7 +56,7 @@ jobs:
           if-no-files-found: ignore
       - name: File or update the security issue
         if: steps.scan.outputs.found == 'true'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
           label: security-nightly
@@ -70,7 +70,7 @@ jobs:
           stream: generic
       - name: Close the security issue on a clean night
         if: steps.scan.outputs.found == 'false'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
           mode: resolve
           label: security-nightly

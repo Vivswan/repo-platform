@@ -201,38 +201,26 @@ describe("post-green publish wiring", () => {
       Object.keys(jobs).sort(),
     );
     expect(jobs["read-directives"].if).not.toContain("needs.move-stable.outputs");
-    // A red mover (a lost lease) leaves the read on its fallback base
-    // instead of losing this commit's directive, and the sync it arms
-    // still runs: the publish and the opt-in are judged by name.
+    // A red mover (a lost lease, a refused push) leaves the read on its fallback base, skips the sync (the tag
+    // names a stale commit), and skips the publish: the directives read prefers a build stamp to the mover's base,
+    // so a publish landing here would carry the base past this commit and the next mover's range would miss its
+    // directive. Skipped, the next mover's range starts at the commit the tag named before it moved, at or before
+    // this one, and the directive is read then.
     expect(jobsRunning(jobs, "push", { armed: "true" }, ["move-stable"]).sort()).toEqual([
-      "publish-build",
-      "read-directives",
-      "settings-fleet",
-      "sync-fleet",
-    ]);
-    // That sync runs on the strength of sync-fleet's !cancelled() alone:
-    // the red mover is its ancestor through read-directives, so the
-    // implicit success() a bare condition carries would skip it, however
-    // green its direct needs. The mutant dropping the status function is
-    // red here, which is what proves the simulator reads the whole chain.
-    const mutant = structuredClone(jobs);
-    mutant["sync-fleet"].if = (mutant["sync-fleet"].if ?? "").replace("!cancelled() && ", "");
-    expect(mutant["sync-fleet"].if).not.toContain("cancelled()");
-    expect(jobsRunning(mutant, "push", { armed: "true" }, ["move-stable"]).sort()).toEqual([
-      "publish-build",
       "read-directives",
       "settings-fleet",
     ]);
-    // The control for that failure model: a red publish still skips the sync.
+    // The control: a red publish of the build branch, which no fleet pin and no sync reads any more, skips nothing.
     expect(jobsRunning(jobs, "push", armed, ["publish-build"]).sort()).toEqual([
       "move-stable",
       "read-directives",
       "settings-fleet",
+      "sync-fleet",
     ]);
-    for (const leg of ["publish-build", "move-stable"]) {
-      expect(jobs[leg].if).toBeUndefined();
-      expect(jobs[leg].needs).toBeUndefined();
-    }
+    expect(jobs["move-stable"].if).toBeUndefined();
+    expect(jobs["move-stable"].needs).toBeUndefined();
+    expect(jobs["publish-build"].if).toBeUndefined();
+    expect(jobs["publish-build"].needs).toEqual(["move-stable"]);
   });
 
   test("post-green releases only on the gate's OWN green result, on a push to main", () => {
@@ -338,12 +326,12 @@ describe("post-green publish wiring", () => {
         repos: "${{ steps.directives.outputs.repos }}",
       },
     });
-    // sync-fleet's own verification is the called sync's (the green source and
-    // provenance gates in resolve_refs.ts).
+    // sync-fleet's own verification is the called sync's (resolve_build.ts re-reads main history and the
+    // green check at the commit the tag names); it rides the mover, not the build-branch publish.
     const syncFleet = jobs["sync-fleet"];
-    expect(syncFleet.needs).toEqual(["publish-build", "read-directives"]);
+    expect(syncFleet.needs).toEqual(["move-stable", "read-directives"]);
     expect(syncFleet.if).toBe(
-      "!cancelled() && needs.publish-build.result == 'success' && needs.read-directives.outputs.armed == 'true'",
+      "!cancelled() && needs.move-stable.result == 'success' && needs.read-directives.outputs.armed == 'true'",
     );
     // The fleet's single-writer lane is held HERE (the raw group census
     // below cannot tell which job holds it).

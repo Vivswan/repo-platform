@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
       - name: Regenerate, commit, and push the deduped lockfiles
         id: push
-        uses: Vivswan/repo-platform/actions/dedupe-bun-lockfile@build
+        uses: Vivswan/repo-platform/actions/dedupe-bun-lockfile@stable
         with:
           token: ${{ github.token }}
           head-ref: ${{ github.event.pull_request.head.ref }}

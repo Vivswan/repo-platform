@@ -34,6 +34,8 @@ interface Scenario {
   staleReadAt?: "m1" | "m2";
   ancestryProbeErrors?: boolean;
   sourceProbeErrors?: boolean;
+  /** ls-remote answers "no tag" (exit 2) but a descendant holds the pipe past the probe's deadline. */
+  lsRemoteHangs?: boolean;
 }
 
 interface Outcome {
@@ -99,6 +101,9 @@ function run(scenario: Scenario): Outcome {
       `if [ "$1" = merge-base ] && [ "$4" != origin/main ]; then echo 'fatal: stubbed' >&2; exit 128; fi`,
     );
   }
+  if (scenario.lsRemoteHangs === true) {
+    stubbedGit.push(`if [ "$1" = ls-remote ]; then sleep 10 & exit 2; fi`);
+  }
   if (scenario.sourceProbeErrors === true) {
     stubbedGit.push(
       `if [ "$1" = rev-parse ] && [ "$3" = --quiet ]; then echo 'fatal: stubbed' >&2; exit 128; fi`,
@@ -130,6 +135,8 @@ function run(scenario: Scenario): Outcome {
       // The gate's poll is for a fresh check racing a consumer; a fixture's
       // verdict never changes, so the red case must not wait it out.
       ALL_GREEN_WAIT_MS: "0",
+      // The hang case needs a deadline the descendant outlives; every other probe keeps the default.
+      ...(scenario.lsRemoteHangs === true ? { PROBE_TIMEOUT_MS: "2000" } : {}),
     },
   });
   const outputs = Object.fromEntries(
@@ -246,10 +253,10 @@ describe("move_stable.ts behavior (real git)", () => {
     expect(r.originTag()).toBe(r.m1);
   });
 
-  test("an unreadable origin is an operational failure, never a first move", () => {
+  test("an unreadable origin is an errored look, never a first move", () => {
     const r = run({ brokenOrigin: true });
-    expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("an operational failure, not an absent tag");
+    expect(r.exitCode).not.toBe(0);
+    expect(r.output).toContain("git ls-remote could not answer (exit 128)");
     expect(r.outputs).toEqual({});
   });
 
@@ -269,6 +276,16 @@ describe("move_stable.ts behavior (real git)", () => {
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("could not answer");
     expect(r.output).not.toContain("is not a commit on main");
+    expect(r.outputs).toEqual({});
+    expect(r.originTag()).toBe(r.m1);
+  });
+
+  test("a remote read that hits its deadline beside exit 2 is fatal, never a first move", () => {
+    // Read as an absent tag, the expiry would lease-push with an empty lease over a tag that exists:
+    // the server refuses, but the diagnostic would send the operator after a race that never happened.
+    const r = run({ tag: "m1", lsRemoteHangs: true });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.output).toContain("git ls-remote could not answer (timed out)");
     expect(r.outputs).toEqual({});
     expect(r.originTag()).toBe(r.m1);
   });

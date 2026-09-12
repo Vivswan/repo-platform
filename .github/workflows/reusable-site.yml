@@ -13,7 +13,7 @@
 # configuration as JSON. On scheduled
 # runs with a link-rot label the deployed site's external links are checked
 # after the deploy and findings ride the fleet's tracking-issue stream
-# (fuzz-issue@build). Callers own `concurrency: pages`; this workflow
+# (fuzz-issue@stable). Callers own `concurrency: pages`; this workflow
 # declares none.
 
 name: Reusable Site
@@ -93,7 +93,7 @@ jobs:
 
       - name: Assemble the site
         id: site
-        uses: Vivswan/repo-platform/actions/pages-site@build
+        uses: Vivswan/repo-platform/actions/pages-site@stable
         with:
           site-dir: ${{ steps.hook.outputs.dist }}
           config: ${{ inputs.config }}
@@ -118,7 +118,7 @@ jobs:
       - name: Check external links
         id: links
         if: github.event_name == 'schedule' && steps.site.outputs.publish == 'true' && steps.site.outputs.link-rot-label != ''
-        uses: Vivswan/repo-platform/actions/pages-site/check-links@build
+        uses: Vivswan/repo-platform/actions/pages-site/check-links@stable
         with:
           site-dir: ${{ steps.site.outputs.site-dir }}
 
@@ -136,7 +136,7 @@ jobs:
 
       - name: File or update the link-rot issue
         if: steps.rot.outputs.found == 'true'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
           label: ${{ steps.site.outputs.link-rot-label }}
@@ -150,7 +150,7 @@ jobs:
 
       - name: Close the link-rot issue on a clean night
         if: steps.rot.outputs.found == 'false'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
           mode: resolve
           label: ${{ steps.site.outputs.link-rot-label }}

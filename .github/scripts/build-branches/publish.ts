@@ -108,12 +108,12 @@ function publish(sourceSha: string): void {
     "--dest",
     scratch.tree,
   ]);
-  // The fleet's action refs are actions/<name>@build, so a tree with no action manifest at all would
-  // 404 every one of them; the staleness check cannot catch it when that source IS the tip's own.
+  // A tree with no action manifest at all would 404 every `uses:` ref reading this tree; the
+  // staleness check cannot catch it when that source IS the tip's own.
   if (!hasActionManifest(join(scratch.tree, "actions"))) {
     fail(
       `refusing to publish: the tree built from ${sourceSha.slice(0, 12)} carries no actions/ subtree ` +
-        `with an action.yml, so every fleet action ref would 404. Re-run the workflow for a main ` +
+        `with an action.yml, so every uses: ref reading this tree would 404. Re-run the workflow for a main ` +
         `commit whose build tree carries the actions.`,
     );
   }
@@ -189,13 +189,13 @@ if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
   fail(`SOURCE_SHA is not a full commit sha (got '${sourceSha}')`);
 }
 // Main-history guard: the stamp names SOURCE_SHA as the tip's source,
-// and the sync's stamp check 1 (shared/stamp_checks.ts) refuses a source
-// that is not main history - so publishing one (a dispatch naming a PR
-// head, whose own CI run posted an all-green check) would wedge every
-// sync on the tip. Refuse before any mutation.
+// and stamp check 1 (shared/stamp_checks.ts) refuses a source that is
+// not main history - so publishing one (a dispatch naming a PR head,
+// whose own CI run posted an all-green check) would fail the branch's
+// own proof at that tip. Refuse before any mutation.
 if (gitResolvedCommit(sourceSha) === "" || !isAncestor(sourceSha, "origin/main")) {
   fail(
-    `refusing to publish: ${sourceSha.slice(0, 12)} is not a commit on main. The build branch stamps its source as main history, and the sync refuses anything else; dispatch with a main commit's sha.`,
+    `refusing to publish: ${sourceSha.slice(0, 12)} is not a commit on main. The build branch stamps its source as main history, and its proof refuses anything else; dispatch with a main commit's sha.`,
   );
 }
 // Green-source gate: the post-green caller only fires after a green

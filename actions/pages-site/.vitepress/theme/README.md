@@ -1,6 +1,6 @@
 # The fleet docs theme
 
-This directory is the ONE home of the fleet's docs-site look: every managed repository's docs site builds with these files, and none of them exists in any fleet repository (fleet repos carry only markdown). Changes here ship on the next `build` branch publish, and every site picks them up on its next deploy (each site's nightly rebuild makes that automatic - no per-repo work).
+This directory is the ONE home of the fleet's docs-site look: every managed repository's docs site builds with these files, and none of them exists in any fleet repository (fleet repos carry only markdown). Changes here ship on the next `stable` tag move, and every site picks them up on its next deploy (each site's nightly rebuild makes that automatic - no per-repo work).
 
 The base skin is [vitepress-carbon](https://github.com/brenoepics/vitepress-carbon) (GitHub-monochrome, token-based), pinned exact in `../../package.json` next to the exact `vitepress` pin - both bumped only by deliberate commits here, never by a floating range.
 

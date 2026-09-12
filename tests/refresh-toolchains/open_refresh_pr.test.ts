@@ -10,7 +10,7 @@ const SCRIPTS = join(import.meta.dir, "../../.github/scripts");
 const script = join(SCRIPTS, "refresh-toolchains/open_refresh_pr.ts");
 
 const SUMMARY =
-  "Automated toolchain pin refresh: bump bun 1.3.0 -> 1.4.0 (fleet-wide via the managed version dotfiles - see docs/toolchains.md). Merging this rebuilds the build branch; the next sync pushes it to the fleet.";
+  "Automated toolchain pin refresh: bump bun 1.3.0 -> 1.4.0 (fleet-wide via the managed version dotfiles - see docs/toolchains.md). Merging this moves the stable tag once green; the next sync pushes it to the fleet.";
 
 function run(env: Record<string, string | undefined>) {
   const root = temp.dir("open-refresh-pr-");

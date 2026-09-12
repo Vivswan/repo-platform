@@ -32,6 +32,6 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-    uses: {{github_username}}/repo-platform/.github/workflows/reusable-auto-assign.yml@build
+    uses: {{github_username}}/repo-platform/.github/workflows/reusable-auto-assign.yml@stable
     with:
       issue: ${{ inputs.issue || '' }}

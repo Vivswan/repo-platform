@@ -30,7 +30,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Rename a tracking label without breaking the stream | [Tracking issues: renaming the label](tracking-issues.md#renaming-the-label) |
 | Add, rename, or retire a file the platform writes | [Sync: files.yml](sync.md#filesyml) |
 | Read a sync PR's report, or find why a row held | [Sync: the report](sync.md#the-report) |
-| Check why the `build` branch can be trusted | [Build provenance](build-provenance.md) |
+| Check why the `stable` tag can be trusted | [Build provenance](build-provenance.md) |
 | Change a managed workflow so it uses a new input of a platform action | [Build provenance: a new action input lands as a stack](build-provenance.md#a-new-action-input-lands-as-a-stack) |
 | Keep a private repo's name out of fleet logs, and find where its details land | [Sync: private repositories](sync.md#private-repositories) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
@@ -57,5 +57,5 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 9. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
 10. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
 11. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking gate (fixable HIGH-or-CRITICAL vulnerabilities, any HIGH-or-CRITICAL misconfiguration), the expiring bypass file, and the nightly scan that files one tracking issue per repository; semgrep on public repositories.
-12. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
+12. [Build provenance](build-provenance.md) - why the `stable` delivery tag is trustworthy, and what residual trust remains.
 13. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.

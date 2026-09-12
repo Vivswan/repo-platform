@@ -84,14 +84,14 @@ export function checkManifestShape(ctx: Context): Finding[] {
     );
     return findings;
   }
-  // The self entry records the build the writer copied from: null before
-  // the first sync stamps it, else the build commit's full sha.
+  // The self entry records the delivery commit the writer copied from: null
+  // before the first sync stamps it, else that main commit's full sha.
   const commit = "commit" in self ? self.commit : null;
   if (commit !== null && !(typeof commit === "string" && /^[0-9a-f]{40}$/.test(commit))) {
     findings.push(
       error(
-        `${MANIFEST_NAME}: its self entry's commit must be null or the build's full 40-hex ` +
-          `sha, the value the sync writes; revert the edit or ${RESYNC}`,
+        `${MANIFEST_NAME}: its self entry's commit must be null or the delivery commit's full ` +
+          `40-hex sha, the value the sync writes; revert the edit or ${RESYNC}`,
       ),
     );
   }

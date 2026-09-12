@@ -98,7 +98,7 @@ describe("the manifest's shape", () => {
     } else {
       expect(exitCode).toBe(1);
       expect(stderr).toContain(
-        "its self entry's commit must be null or the build's full 40-hex sha",
+        "its self entry's commit must be null or the delivery commit's full 40-hex sha",
       );
     }
   });

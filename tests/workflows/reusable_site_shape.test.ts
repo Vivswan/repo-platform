@@ -71,7 +71,7 @@ describe("reusable-site.yml", () => {
   test("the hook runs from the checkout when it exists, with the resolved URLs, BEFORE the fleet's assembly reads its dist", () => {
     const urls = stepIndex((step) => step.id === "urls");
     const hook = usesIndex(HOOK);
-    const site = usesIndex("repo-platform/actions/pages-site@build");
+    const site = usesIndex("repo-platform/actions/pages-site@stable");
     expect([urls, hook, site].every((index) => index >= 0)).toBe(true);
     expect(urls).toBeLessThan(hook);
     expect(hook).toBeLessThan(site);
@@ -142,7 +142,7 @@ describe("reusable-site.yml", () => {
     const configure = usesIndex("actions/configure-pages@");
     const upload = usesIndex("actions/upload-pages-artifact@");
     const deploy = usesIndex("actions/deploy-pages@");
-    expect(usesIndex("repo-platform/actions/pages-site@build")).toBeLessThan(configure);
+    expect(usesIndex("repo-platform/actions/pages-site@stable")).toBeLessThan(configure);
     expect(configure).toBeLessThan(upload);
     expect(upload).toBeLessThan(deploy);
     for (const index of [configure, upload, deploy]) expect(steps[index]?.if).toBe(PUBLISH);
@@ -162,13 +162,13 @@ describe("reusable-site.yml", () => {
     expect(links?.if).toBe(
       `github.event_name == 'schedule' && ${PUBLISH} && steps.site.outputs.link-rot-label != ''`,
     );
-    expect(links?.uses).toContain("repo-platform/actions/pages-site/check-links@build");
+    expect(links?.uses).toContain("repo-platform/actions/pages-site/check-links@stable");
     expect(links?.with).toEqual({ "site-dir": "${{ steps.site.outputs.site-dir }}" });
     expect(usesIndex("actions/deploy-pages@")).toBeLessThan(stepIndex((s) => s.id === "links"));
     const rot = steps.find((step) => step.id === "rot");
     expect(rot?.if).toBe("steps.links.outcome == 'success'");
     expect(rot?.run).toContain("exit 1");
-    const issues = steps.filter((step) => (step.uses ?? "").includes("actions/fuzz-issue@build"));
+    const issues = steps.filter((step) => (step.uses ?? "").includes("actions/fuzz-issue@stable"));
     expect(issues.map((step) => [step.if, step.with?.mode, step.with?.label])).toEqual([
       ["steps.rot.outputs.found == 'true'", "report", "${{ steps.site.outputs.link-rot-label }}"],
       ["steps.rot.outputs.found == 'false'", "resolve", "${{ steps.site.outputs.link-rot-label }}"],

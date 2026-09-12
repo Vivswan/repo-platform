@@ -77,7 +77,7 @@ jobs:
 
       - name: File or update the fuzz issue
         if: failure()
-        uses: {{github_username}}/repo-platform/actions/fuzz-issue@build
+        uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
           label: "{{fuzzer_label}}"
@@ -89,7 +89,7 @@ jobs:
 
       - name: Close the fuzz issue on a green night
         if: success()
-        uses: {{github_username}}/repo-platform/actions/fuzz-issue@build
+        uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: resolve
           label: "{{fuzzer_label}}"

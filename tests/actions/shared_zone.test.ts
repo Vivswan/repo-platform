@@ -1,4 +1,4 @@
-// actions/shared ships on the build branch and runs before any install, so every module there must resolve with zero installation.
+// actions/shared runs from the delivery commit before any install, so every module there must resolve with zero installation.
 // The scan is Bun.Transpiler's, not a regex: a regex misses `from/* */"zod"`.
 //   bare "zod"  -> breaks only once a rendered repository runs the hook
 //   bare "fs"   -> resolves, but is refused so the builtin intent is explicit (node:fs)

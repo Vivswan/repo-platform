@@ -34,7 +34,7 @@ runs:
     # the lockfile regeneration, which runs `bun install` by name.
     - name: Set up the action's bun
       id: action-bun
-      uses: Vivswan/repo-platform/actions/bun-setup@build
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
         pin: ${{ github.action_path }}/.bun-version
 

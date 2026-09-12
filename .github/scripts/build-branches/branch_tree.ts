@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
-// The `build` branch tree (layout and extraction rules: docs/build-provenance.md, "Extraction safety").
-// Nothing in it may vary between assemblies of one commit, so no timestamps or source shas go in-tree:
-// the sync's provenance tree proof and publish.ts's no-change skip both compare it.
+// The `build` branch tree, published beside the `stable` tag and consumed by nothing since the fleet's pins moved to
+// the tag (docs/build-provenance.md, "The build branch, until its deletion"); the guards below still hold it to the
+// shape a `uses:` ref can run. Nothing in it may vary between assemblies of one commit, so no timestamps or source
+// shas go in-tree: the provenance tree proof and publish.ts's no-change skip both compare it.
 
 import {
   cpSync,
@@ -18,9 +19,9 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
+import { reservedLabelNames as derivedReservedLabels } from "../../../actions/plan/reserved_labels.ts";
 import { PLATFORM_NAME } from "../../../actions/shared/platform.ts";
 import { loadFilesConfig } from "../sync/writer/files_config.ts";
-import { layerConfig, managedLabelNames } from "../sync/writer/settings_layers.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
@@ -38,9 +39,9 @@ export function canonicalize(path: string): string {
   return join(realpathSync(base), ...tail);
 }
 
-/** Every reusable workflow a managed workflow calls `@build`; a `uses:` fetches the FILE at that ref,
- *  so a missing one 404s every fleet run that calls it. reusable-codeql.yml is here because
- *  fleet-ci.yml's codeql job calls it by `./` path, which resolves at fleet-ci's own ref: this branch. */
+/** Every reusable workflow a managed workflow calls; a `uses:` fetches the FILE at the named ref,
+ *  so a missing one 404s every caller. reusable-codeql.yml is here because fleet-ci.yml's codeql
+ *  job calls it by `./` path, which resolves at fleet-ci's own ref. */
 export const FLEET_WORKFLOWS = [
   "fleet-ci.yml",
   "fleet-nightly.yml",
@@ -79,10 +80,11 @@ copies from), the composite actions under \`actions/\`, the fleet-facing
 reusable workflows (${FLEET_WORKFLOWS.join(", ")}) under
 \`.github/workflows/\`, and \`reserved-labels.yml\` (the managed labels no
 tracking stream may reuse). Every path is plain, so
-\`uses: <owner>/${PLATFORM_NAME}/actions/<name>@build\` refs extract cleanly on
-the runner, and an @build pin runs only action and workflow code CI has
-vouched for. Every shipped workflow is workflow_call-only (enforced at
-assembly), so nothing can ever run ON this branch.
+\`uses: <owner>/${PLATFORM_NAME}/actions/<name>\` refs extract cleanly on the
+runner. The fleet's pins ride the \`stable\` tag, which names a green main
+commit directly; this branch is published beside it until its deletion.
+Every shipped workflow is workflow_call-only (enforced at assembly), so
+nothing can ever run ON this branch.
 `;
 
 /** Installed dependencies never publish under actions/: the action reinstalls them from its shipped lockfile. */
@@ -129,8 +131,8 @@ export function copyActions(repoRoot: string, dest: string): number {
   if (!existsSync(source)) {
     throw new Error(
       `no actions/ directory at ${repoRoot} - the managed workflows call ` +
-        "actions by path, so a build branch without them breaks every " +
-        "fleet CI run; check the checkout before publishing",
+        "actions by path, so a tree without them has nothing to run; check " +
+        "the checkout before publishing",
     );
   }
   const names = actionDirNames(repoRoot);
@@ -144,7 +146,7 @@ export function copyActions(repoRoot: string, dest: string): number {
         `actions/${name} at ${repoRoot} has no action.yml - sources without a ` +
           "manifest are a broken state, not a retirement (retiring an action " +
           "removes its whole directory); publishing this tree would break " +
-          `every fleet 'uses: .../actions/${name}@build' ref`,
+          `every 'uses: .../actions/${name}' ref reading this tree`,
       );
     }
   }
@@ -185,10 +187,9 @@ export function copyFleetWorkflows(repoRoot: string, dest: string): void {
     const sourcePath = join(repoRoot, ".github", "workflows", name);
     if (!existsSync(sourcePath)) {
       throw new Error(
-        `.github/workflows/${name} is missing at ${repoRoot} - the fleet pins it ` +
-          "@build (a reusable-workflow uses: fetches the file at that ref), so a " +
-          "build branch without it breaks every fleet CI run; check the checkout " +
-          "before publishing",
+        `.github/workflows/${name} is missing at ${repoRoot} - a reusable-workflow ` +
+          "uses: fetches the file at the named ref, so a tree without it 404s every " +
+          "caller; check the checkout before publishing",
       );
     }
     const content = readFileSync(sourcePath, "utf-8");
@@ -212,11 +213,9 @@ export function copyFleetWorkflows(repoRoot: string, dest: string): void {
   }
 }
 
-/** Lowercased first: GitHub deduplicates label names case-insensitively. */
 export function reservedLabelNames(repoRoot: string): string[] {
   const config = parseFilesConfig(readFileSync(join(repoRoot, FILES_CONFIG), "utf-8"));
-  const names = managedLabelNames(layerConfig(config), join(repoRoot, FILES_DIR));
-  return [...new Set(names.map((name) => name.toLowerCase()))];
+  return [...derivedReservedLabels(config, join(repoRoot, FILES_DIR))];
 }
 
 export function writeReservedLabels(repoRoot: string, dest: string): void {

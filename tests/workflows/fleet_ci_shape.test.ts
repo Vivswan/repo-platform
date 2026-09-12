@@ -1,5 +1,5 @@
 // fleet-ci.yml is the fleet's gate-job home, so the shape every managed repository relies on is pinned here once;
-// only the wiring is judged, since the predicates live in the @build actions and their own suites police them.
+// only the wiring is judged, since the predicates live in the @stable actions and their own suites police them.
 //   validate-managed-files job, base-checks steps  -> thin callers of their actions
 //   module- and visibility-conditioned jobs        -> job-level guards; a skipped job stands down in the all-green verdict
 
@@ -50,7 +50,7 @@ describe("fleet-ci.yml", () => {
   // other gate jobs stand down there with this exact clause.
   const SKIP_ON_SCHEDULE = "github.event_name != 'schedule'";
 
-  test("plan is the first job: a sparse checkout of the registration, then the plan action at @build", () => {
+  test("plan is the first job: a sparse checkout of the registration, then the plan action at @stable", () => {
     const [first, ...rest] = Object.keys(fleetCi.jobs);
     expect(first).toBe("plan");
     expect(rest.length).toBeGreaterThan(0);
@@ -59,7 +59,7 @@ describe("fleet-ci.yml", () => {
     const steps = job?.steps ?? [];
     expect(steps.map((step) => step.uses ?? "run")).toEqual([
       expect.stringContaining("actions/checkout@"),
-      expect.stringContaining("repo-platform/actions/plan@build"),
+      expect.stringContaining("repo-platform/actions/plan@stable"),
     ]);
     expect(steps[0]?.with).toEqual({
       "sparse-checkout": ".repo-platform.yml",
@@ -93,13 +93,13 @@ describe("fleet-ci.yml", () => {
     });
   });
 
-  test("validate-managed-files is a thin caller of the action at @build", () => {
+  test("validate-managed-files is a thin caller of the action at @stable", () => {
     const job = fleetCi.jobs["validate-managed-files"];
     const steps = job?.steps ?? [];
     const uses = steps.map((step) => step.uses ?? "run");
     expect(uses).toEqual([
       expect.stringContaining("actions/checkout@"),
-      expect.stringContaining("repo-platform/actions/validate-managed-files@build"),
+      expect.stringContaining("repo-platform/actions/validate-managed-files@stable"),
       "run",
     ]);
     // The token serves the sticky comment; the visibility is the plan's
@@ -127,12 +127,12 @@ describe("fleet-ci.yml", () => {
   // a lost step drops the check fleet-wide; a step without `!cancelled()`
   // would be skipped by an earlier failure, hiding it.
   const BASE_CHECKS: { id: string; tool: string; advisory?: true }[] = [
-    { id: "typography", tool: "repo-platform/actions/check-typography@build" },
-    { id: "file-size", tool: "repo-platform/actions/check-file-size@build", advisory: true },
-    { id: "commit-names", tool: "repo-platform/actions/validate-commit-names@build" },
+    { id: "typography", tool: "repo-platform/actions/check-typography@stable" },
+    { id: "file-size", tool: "repo-platform/actions/check-file-size@stable", advisory: true },
+    { id: "commit-names", tool: "repo-platform/actions/validate-commit-names@stable" },
     { id: "actionlint", tool: "raven-actions/actionlint@" },
-    { id: "yamllint", tool: "repo-platform/actions/yamllint@build" },
-    { id: "typos", tool: "repo-platform/actions/typos@build" },
+    { id: "yamllint", tool: "repo-platform/actions/yamllint@stable" },
+    { id: "typos", tool: "repo-platform/actions/typos@stable" },
     { id: "gitleaks", tool: "gitleaks/gitleaks-action@" },
   ];
 
@@ -282,13 +282,13 @@ describe("fleet-ci.yml", () => {
     });
   }
 
-  test("dependency-review is public-PR-only and calls the wrapper at @build", () => {
+  test("dependency-review is public-PR-only and calls the wrapper at @stable", () => {
     const job = fleetCi.jobs["dependency-review"];
     expect(job?.if).toBe(
       "${{ needs.plan.outputs.private != 'true' && github.event_name == 'pull_request' }}",
     );
     expect((job?.steps ?? []).map((step) => step.uses ?? "")).toContainEqual(
-      expect.stringContaining("repo-platform/actions/dependency-review@build"),
+      expect.stringContaining("repo-platform/actions/dependency-review@stable"),
     );
   });
 
@@ -301,7 +301,7 @@ describe("fleet-ci.yml", () => {
     const steps = job?.steps ?? [];
     expect(steps.map((step) => step.uses ?? "run")).toEqual([
       expect.stringContaining("actions/checkout@"),
-      expect.stringContaining("repo-platform/actions/zizmor@build"),
+      expect.stringContaining("repo-platform/actions/zizmor@stable"),
     ]);
     // != 'true': an empty visibility output uploads and fails loudly rather
     // than silently skipping the upload.
@@ -322,7 +322,7 @@ describe("fleet-ci.yml", () => {
       [expect.stringContaining("oven-sh/setup-bun@"), undefined, undefined],
       ["bun install --frozen-lockfile", "hashFiles('package.json') != ''", "bun-install"],
       [
-        expect.stringContaining("repo-platform/actions/knip@build"),
+        expect.stringContaining("repo-platform/actions/knip@stable"),
         "steps.bun-install.outcome == 'success'",
         undefined,
       ],
@@ -339,12 +339,12 @@ describe("fleet-ci.yml", () => {
     expect(job?.permissions).toBeUndefined();
   });
 
-  test("semgrep is public-only and calls its action at @build with the SARIF grant", () => {
+  test("semgrep is public-only and calls its action at @stable with the SARIF grant", () => {
     const job = fleetCi.jobs.semgrep;
     expect(job?.if).toBe(`needs.plan.outputs.private != 'true' && ${SKIP_ON_SCHEDULE}`);
     expect((job?.steps ?? []).map((step) => step.uses ?? "run")).toEqual([
       expect.stringContaining("actions/checkout@"),
-      expect.stringContaining("repo-platform/actions/semgrep@build"),
+      expect.stringContaining("repo-platform/actions/semgrep@stable"),
     ]);
     expect(job?.permissions).toEqual({ "contents": "read", "security-events": "write" });
   });
@@ -371,14 +371,14 @@ describe("fleet-ci.yml", () => {
     }
   });
 
-  test("docs-check builds docs/ strictly through pages-site at @build, standing down without a docs/ tree", () => {
+  test("docs-check builds docs/ strictly through pages-site at @stable, standing down without a docs/ tree", () => {
     const steps = fleetCi.jobs["docs-check"]?.steps ?? [];
     // The hashFiles guard sits on the steps: at the job level it would
     // read an empty workspace and never arm.
     expect(steps.map((step) => [step.uses ?? step.run, step.if, step.with])).toEqual([
       [expect.stringContaining("actions/checkout@"), undefined, undefined],
       [
-        expect.stringContaining("repo-platform/actions/pages-site@build"),
+        expect.stringContaining("repo-platform/actions/pages-site@stable"),
         "hashFiles('docs/**') != ''",
         { check: "true" },
       ],
@@ -391,10 +391,10 @@ describe("fleet-ci.yml", () => {
     expect(fleetCi.jobs["docs-check"]?.permissions).toBeUndefined();
   });
 
-  test("release-health calls its action at @build in pull-request mode, labels forwarded", () => {
+  test("release-health calls its action at @stable in pull-request mode, labels forwarded", () => {
     const steps = fleetCi.jobs["release-health"]?.steps ?? [];
     const action = steps.find((step) =>
-      (step.uses ?? "").includes("repo-platform/actions/release-health@build"),
+      (step.uses ?? "").includes("repo-platform/actions/release-health@stable"),
     );
     expect(action?.with?.mode).toBe("pull-request");
     expect(action?.with?.["tracking-labels"]).toBe("${{ needs.plan.outputs.tracking-labels }}");
@@ -441,13 +441,13 @@ describe("fleet-ci.yml", () => {
   // The two halves of the security scan split on the schedule event: the
   // blocking scan runs on every other event, the nightly one (in
   // fleet-nightly.yml) on the schedule alone, so neither runs twice.
-  test("trivy is the thin blocking scan at @build, standing down on the schedule", () => {
+  test("trivy is the thin blocking scan at @stable, standing down on the schedule", () => {
     const trivy = fleetCi.jobs.trivy;
     expect(trivy?.if).toBe("github.event_name != 'schedule'");
     expect(trivy?.permissions).toBeUndefined();
     expect((trivy?.steps ?? []).map((step) => step.uses ?? "run")).toEqual([
       expect.stringContaining("actions/checkout@"),
-      expect.stringContaining("repo-platform/actions/trivy@build"),
+      expect.stringContaining("repo-platform/actions/trivy@stable"),
     ]);
     // No inputs: the blocking mode is the action's default, and the gate
     // is the same for every repository.

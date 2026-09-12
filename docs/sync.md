@@ -29,12 +29,12 @@ bun .github/scripts/sync/writer/sync.ts \
   --files files.yml --tree files \
   --target <checkout> --build <full sha> \
   --repository <owner/name> --private <true|false> \
-  [--previous-files <files.yml of the build being replaced>] \
+  [--previous-files <files.yml of the delivery commit being replaced>] \
   [--summary <path for the JSON summary>]
 ```
 
 - `--tree` is the `files/` directory itself; every `source` in `files.yml` starts with `files/` and resolves under it.
-- `--build` is the build commit's full sha, 40 lowercase hex characters (`git rev-parse origin/build`), stamped into the manifest's `commit` field, which the fleet validator reads as a full sha; a short or uppercase one is refused before anything is written.
+- `--build` is the delivery commit's full sha, 40 lowercase hex characters (`git fetch origin +refs/tags/stable:refs/tags/stable` then `git rev-parse stable^{commit}`, the forced refspec so a local tag left by an earlier fetch is refreshed), stamped into the manifest's `commit` field, which the fleet validator reads as a full sha; a short or uppercase one is refused before anything is written.
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the default `copyright_holder`.
 - `--previous-files` turns on the retirement check (below).
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
@@ -260,7 +260,7 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 
 ## The manifest
 
-`.github/repo-platform-manifest.json`, the layout `actions/shared/manifest.ts` already parses: one entry per line, sorted by path. The manifest's own entry carries the build sha in `commit` (`null` before the first sync, else the build's full sha) and no hash. That entry is the one record of the build commit: `validate-managed-files` judges its shape in place ([manifest_shape.ts](../actions/validate-managed-files/validator/checks/manifest_shape.ts)), and nothing fetches the build branch to learn it. Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror` (with `kind: symlink` for a link, hash of the target string), `link` (hash of the target string). The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
+`.github/repo-platform-manifest.json`, the layout `actions/shared/manifest.ts` already parses: one entry per line, sorted by path. The manifest's own entry carries the delivery commit in `commit` (`null` before the first sync, else the full sha of the main commit the `stable` tag named when the sync ran) and no hash. That entry is the one record of that commit: `validate-managed-files` judges its shape in place ([manifest_shape.ts](../actions/validate-managed-files/validator/checks/manifest_shape.ts)), and nothing fetches the tag to learn it. Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror` (with `kind: symlink` for a link, hash of the target string), `link` (hash of the target string). The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
 
 ## The report
 
@@ -288,10 +288,10 @@ The sync never targets this repository, yet it carries root copies of the files 
 
 | Step | Script | What it does |
 | --- | --- | --- |
-| plan: resolve the build | [sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts) | the build tip, proven the builder's output of a green main commit ([build-provenance.md](build-provenance.md)) and carrying `files.yml`; every row checks out exactly this commit |
+| plan: resolve the build | [sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts) | the commit the `stable` tag names, re-verified main history with a green `all-green` check ([build-provenance.md](build-provenance.md)) and carrying `files.yml`; every row checks out exactly this commit |
 | plan: discover and select | [fleet/discover_repos.ts](../.github/scripts/fleet/discover_repos.ts), [fleet/select_sync_repos.ts](../.github/scripts/fleet/select_sync_repos.ts) | the rows: the repositories the fleet token can push to that have adopted the platform (this repository excepted), narrowed by the dispatch `repo` input or the called `repos` scope ([fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts)), written sorted to `$RUNNER_TEMP/rows.json`, and the matrix rows: one `{row, key}` per row, the key an HMAC of the slug under the fleet token and the run id in three-character groups (`edd~166~...`: opaque in the public log, so a private row is identified without being named, and spelling no four characters of a private name, since the runner drops a job output that carries a masked value); the log names the public slugs and counts the private ones |
 | plan: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `plan` | `plan: <N> rows` |
-| row 1: check out | actions/checkout | repo-platform, then the build at the plan's commit under `build/` |
+| row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/` |
 | row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | one listing of the owner's writable repositories (the same call discovery makes, no re-selection), the row's key recomputed over it and the one repository carrying it taken (no such repository: the step refuses, naming no repository); every form of the name is registered with the masker before anything else prints, and the name and its visibility ride `GITHUB_ENV` (which the runner never echoes) from here |
 | row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text); the token is stripped from the remote afterwards; `continue-on-error` |
 | row 4: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
@@ -330,7 +330,7 @@ The same job runs for public and private targets: nothing is conditional on visi
 What a run still shows:
 
 - `plan: <N> rows` and one `row <i>: ...` line per row.
-- The build commit the run ships and its stamped main commit: those name THIS repository's builds, not a target.
+- The delivery commit the run ships: it names THIS repository's main history, not a target.
 - A step's exit status, and the red step's own error when a row failed before its target was resolved (nothing target-derived exists yet at that point).
 - The plan job's selection line, which names public repositories in the clear and counts the private ones.
 

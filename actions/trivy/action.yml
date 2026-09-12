@@ -41,7 +41,7 @@ runs:
     # setup-bun can put another bun first.
     - name: Set up the action's bun
       id: action-bun
-      uses: Vivswan/repo-platform/actions/bun-setup@build
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
         pin: ${{ github.action_path }}/.bun-version
 

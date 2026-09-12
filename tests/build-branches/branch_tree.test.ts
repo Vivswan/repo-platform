@@ -152,7 +152,7 @@ describe("copyActions", () => {
   test("refuses a directory with sources but no action.yml, naming it, BEFORE copying", () => {
     // Broken state, not a retirement: retiring an action deletes its whole
     // directory. Publishing sources without a manifest would succeed here
-    // and then 404 every fleet `uses: .../<name>@build` at resolve time.
+    // and then 404 every `uses: .../<name>` ref reading this tree at resolve time.
     const root = actionsFixture();
     const orphan = join(root, "actions", "orphaned-action");
     mkdirSync(orphan, { recursive: true });
@@ -355,9 +355,9 @@ describe("assembleBranchTree", () => {
   });
 
   test("the fleet-facing reusable workflows ship at .github/workflows", () => {
-    // A reusable-workflow `uses:` fetches the FILE at the named ref, so
-    // fleet-ci.yml@build and fleet-ci's ./reusable-codeql.yml call both
-    // resolve against THIS tree; losing one 404s every fleet CI run.
+    // A reusable-workflow `uses:` fetches the FILE at the named ref, so a
+    // fleet-ci.yml pinned here and fleet-ci's ./reusable-codeql.yml call both
+    // resolve against THIS tree; losing one 404s every caller.
     for (const name of FLEET_WORKFLOWS) {
       expect(existsSync(join(dest, ".github", "workflows", name))).toBe(true);
     }

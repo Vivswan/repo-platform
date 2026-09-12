@@ -454,8 +454,8 @@ jobs:
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
-  # Ordered behind post-green so the deploy runs after this run republished the build branch its
-  # actions ride; !cancelled() keeps a red fleet leg from holding the site back. No push clause in
+  # Ordered behind post-green so the deploy runs after this run's mover, and a green move's theme
+  # is what @stable serves it; !cancelled() keeps a red or skipped post-green from holding the site back. No push clause in
   # the if: the weekly schedule is the rebuild and link-rot check, a dispatch the manual deploy.
   site:
     needs: [all-green, post-green]

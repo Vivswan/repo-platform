@@ -1,5 +1,5 @@
-// Checks 1 and 2 of the provenance proof (docs/build-provenance.md), shared so the sync and the publisher cannot drift.
-// verify_build_provenance.ts fails the sync on any reason; publish.ts's no-change skip treats one as "do not skip",
+// Checks 1 and 2 of the build branch's stamp proof (docs/build-provenance.md), shared so the tree proof and the publisher cannot drift.
+// verify_build_provenance.ts fails on any reason; publish.ts's no-change skip treats one as "do not skip",
 // so a dispatch can heal a bad stamp with a freshly stamped commit.
 //
 // The rollback walk skips two kinds of ancestor stamp on purpose. Skipping the first opens a replay window, which closes when the
@@ -10,7 +10,7 @@
 import { commitStampParseAll } from "./commit_stamp.ts";
 
 /** The git questions, injected so both consumers bring their own repo
- * context (the sync verifies a fetched tip in the checkout, the
+ * context (the tree proof verifies a fetched tip in the checkout, the
  * publisher verifies its scratch branch worktree against origin/main). */
 export interface StampCheckGit {
   /** The resolved sha of `<revspec>^{commit}`, "" when unresolvable. */
@@ -20,7 +20,7 @@ export interface StampCheckGit {
 }
 
 /** `history` is the full `git log --format=%B` of the tip's ancestry through all parents, so a merge tip cannot hide the previous tip.
- * A reason is a fragment: the sync prepends its subject and appends its rebuild hint, the publisher logs it as the recovery note. */
+ * A reason is a fragment: the tree proof prepends its subject and appends its rebuild hint, the publisher logs it as the recovery note. */
 export function stampUnhealthyReason(options: {
   sourceSha: string;
   history: string;

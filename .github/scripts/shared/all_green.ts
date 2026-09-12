@@ -28,9 +28,9 @@ const checkRunsSchema = z.object({
 /** Injectable gh runner so tests never touch the network. */
 export type GhRunner = (command: string[]) => RunResult;
 
-/** capture()'s default hang bound is five minutes; a gate probe that slow is a stalled connection,
- * and every caller waits on it. */
-const PROBE_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? "15000");
+/** capture()'s default hang bound is five minutes; a probe of the remote (this gate read, the tag mover's ls-remote) that
+ * slow is a stalled connection, and every caller waits on it. */
+export const PROBE_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? "15000");
 
 const boundedCapture: GhRunner = (command) => capture(command, { timeoutMs: PROBE_TIMEOUT_MS });
 

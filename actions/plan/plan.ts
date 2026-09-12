@@ -1,6 +1,6 @@
 // The fleet's plan: resolves one managed repository's CI configuration at
 // run time from the repository's registration and
-// files.yml, the module data shipped at the build branch root beside this
+// files.yml, the module data at the root of the delivery commit beside this
 // action. Every managed ci.yml is byte-identical; what differs per
 // repository is computed here and handed to the jobs as step outputs.
 //
@@ -16,16 +16,15 @@
 // invalid registration into a green run.
 //
 // Env: MODE (default|site), PRIVATE ("true"/"false"; empty asks the API
-// for GITHUB_REPOSITORY with GH_TOKEN), FILES_CONFIG (the build branch's
+// for GITHUB_REPOSITORY with GH_TOKEN), FILES_CONFIG (the delivery commit's
 // files.yml: `modules` keys are the vocabulary in canonical order, values
-// the defaults the registration may leave unset), RESERVED_LABELS_FILE
-// (labels the platform manages, which no tracking stream may reuse),
-// GITHUB_OUTPUT. Runs in the caller's checkout.
+// the defaults the registration may leave unset), FILES_TREE (its files/
+// tree, whose settings layers name the labels no tracking stream may
+// reuse), GITHUB_OUTPUT. Runs in the caller's checkout.
 
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { DocsConfig, SiteConfigJson } from "../pages-site/.vitepress/conventions.ts";
 import {
   capture,
@@ -46,6 +45,7 @@ import {
 } from "./files_config.ts";
 import { describeMirrorProblem, mirrorDeclarationProblems, ownedPaths } from "./mirrors.ts";
 import { LABEL_RE, parseRegistration, type Registration } from "./registration.ts";
+import { type LayerSources, reservedLabelNames } from "./reserved_labels.ts";
 
 export const MODES = ["default", "site"] as const;
 export type Mode = (typeof MODES)[number];
@@ -73,6 +73,8 @@ export interface FilesData {
   /** The file entries and retirements, for the paths a mirror may name. */
   files: FileEntry[];
   retired: RetiredEntry[];
+  /** The settings layers the reserved label roster is derived from. */
+  layers: LayerSources;
 }
 
 /** Where files.yml declares one default the plan reads. */
@@ -122,6 +124,7 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
     defaults,
     files: config.files,
     retired: config.retired,
+    layers: { modules: config.modules, settings: config.settings },
   };
 }
 
@@ -136,15 +139,6 @@ export interface PlanInput {
    *  close unrelated issues and every settings apply fight over it. */
   reservedLabels: ReadonlySet<string>;
   private: boolean;
-}
-
-/** The reserved label roster the build branch ships, a YAML list of names. */
-export function readReservedLabels(path: string): Set<string> {
-  const data: unknown = parseYaml(readFileSync(path, "utf-8"), { logLevel: "error" });
-  if (!Array.isArray(data) || !data.every((name) => typeof name === "string")) {
-    throw new PlanError([`${path}: must be a YAML list of label names`]);
-  }
-  return new Set(data.map((name) => name.toLowerCase()));
 }
 
 /** The selected modules' data in canonical order; an unknown name fails. */
@@ -365,7 +359,7 @@ function main(): number {
   const input: PlanInput = {
     registration: readRegistration(root),
     ...moduleData,
-    reservedLabels: readReservedLabels(requireEnv("RESERVED_LABELS_FILE")),
+    reservedLabels: reservedLabelNames(moduleData.layers, requireEnv("FILES_TREE")),
     private:
       mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
   };

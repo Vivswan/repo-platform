@@ -579,7 +579,7 @@ describe("skeletonGateMismatches", () => {
     {
       reason: "the ci caller calls another workflow",
       mutate: (j) => {
-        j.ci.uses = "owner/repo-platform/.github/workflows/fleet-nightly.yml@build";
+        j.ci.uses = "owner/repo-platform/.github/workflows/fleet-nightly.yml@stable";
       },
       job: "ci",
     },
