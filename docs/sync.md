@@ -123,10 +123,10 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `when` form | Used by |
 | --- | --- |
 | `modules: [x]` | every module-owned file |
-| `any: {declaring: <key>}` | the CodeQL variant of `auto-assign.yml` and the CodeQL settings layer (`codeql_language`), `auto-format.yml` (`toolchain_steps`), the Toolchain variant of `AGENTS.md` (`agents_toolchain`) |
+| `any: {declaring: <key>}` | the CodeQL settings layer (`codeql_language`), `auto-format.yml` (`toolchain_steps`), the Toolchain variant of `AGENTS.md` (`agents_toolchain`) |
 | `without: [...]` | `LICENSE.md` (not `custom-license`), the plain variant of `.typography-allow` |
-| `without: {declaring: <key>}` | the plain variants of `AGENTS.md` (`agents_toolchain`) and `auto-assign.yml` (`codeql_language`) |
-| `private: true` / `false` | the two `.github/settings.local.yml` starters, the `auto-assign.yml` variants (code scanning exists on public repositories only) |
+| `without: {declaring: <key>}` | the plain variant of `AGENTS.md` (`agents_toolchain`) |
+| `private: true` / `false` | the two `.github/settings.local.yml` starters, the public, private, and CodeQL settings layers |
 
 The three links carry no `when`: every repository gets them.
 

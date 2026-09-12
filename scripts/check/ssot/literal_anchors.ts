@@ -33,13 +33,6 @@ function handProse(rel: string): string {
   return prose;
 }
 
-export function inlineFunctionCopies(text: string, name: string): string[] {
-  // The name is a function identifier the calling rule spells out, never input.
-  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-  const block = new RegExp(`^( *)async function ${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\1\\}`, "gm");
-  return [...text.matchAll(block)].map((match) => match[0]);
-}
-
 /** Pinned on the parsed documents, not a grep: a commented-out write or a stray literal would still match as text.
  *
  *  a renamed or dropped `id:` on any side   -> an empty output, which is not "true": every run skips the cut, silently
@@ -496,38 +489,5 @@ export const literalAnchorRules: Rule[] = [
         script: read("actions/release-health/release-health.ts"),
         skeleton: read(SKELETON_SOURCE),
       }),
-  },
-  {
-    // The copies cannot be hoisted into a shared script: a reusable workflow runs from the CALLER's checkout, where this repo's scripts do not exist.
-    name: "auto-assign-codeowners-parity",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      const sites = [
-        { file: ".github/workflows/reusable-auto-assign.yml", copies: 1 },
-        { file: ".github/workflows/reusable-auto-assign-alerts.yml", copies: 1 },
-      ];
-      const found: { file: string; body: string }[] = [];
-      for (const site of sites) {
-        const blocks = inlineFunctionCopies(read(site.file), "resolveAssignees");
-        if (blocks.length !== site.copies) {
-          throw new Error(
-            `${site.file}: expected ${site.copies} resolveAssignees ` +
-              `cop${site.copies === 1 ? "y" : "ies"}, found ${blocks.length} - anchor lost`,
-          );
-        }
-        for (const body of blocks) found.push({ file: site.file, body });
-      }
-      const [canon, ...rest] = found;
-      for (const copy of rest) {
-        if (copy.body !== canon.body) {
-          mismatches.push({
-            file: copy.file,
-            expected: `a resolveAssignees block byte-identical to ${canon.file}'s first copy`,
-            got: "a drifted copy - update every inline copy together",
-          });
-        }
-      }
-      return mismatches;
-    },
   },
 ];

@@ -52,7 +52,7 @@ From the platform's `files.yml` (`bun scripts/files_table.ts` prints the live ta
 | `deno` | `.dvmrc`, `.github/workflows/deno-audit.yml` | managed |
 | `uv`, `rust` | no file of their own | - |
 | every toolchain | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml` | split; managed |
-| every toolchain but `rust` | `.github/workflows/auto-format.yml`; the CodeQL variant of `auto-assign.yml` on public repos | starter; managed |
+| every toolchain but `rust` | `.github/workflows/auto-format.yml` | starter |
 | `site` | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | - |
 | `release-please` | `release-please-config.json`, `.release-please-manifest.json`; the release variant of `.typography-allow` | starter; managed |
 | `pr-title` | `.github/workflows/pr-title.yml` | managed |

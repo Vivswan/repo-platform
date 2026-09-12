@@ -105,10 +105,7 @@ files:
   - {path: .github/workflows/copilot-setup-steps.yml, class: starter, blocks: toolchain_steps}
   - {path: .gitleaks.toml, class: starter}
   - {path: .yamllint, class: managed}
-  # auto-assign: the code-scanning alert job exists where CodeQL runs (public, with a CodeQL toolchain).
-  - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: false, any: {declaring: codeql_language}}, source: files/base/.github/workflows/auto-assign.codeql.yml}
-  - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: true}}
-  - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: false, without: {declaring: codeql_language}}}
+  - {path: .github/workflows/auto-assign.yml, class: managed}
   - {path: .github/workflows/auto-format.yml, class: starter, when: {any: {declaring: toolchain_steps}}, blocks: toolchain_steps}
   - {path: .typography-allow, class: managed, when: {without: [release-please]}}
   - {path: .typography-allow, class: managed, when: {modules: [release-please]}}

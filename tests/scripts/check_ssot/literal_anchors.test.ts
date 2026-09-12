@@ -3,39 +3,10 @@ import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
   AUTOMATION_PR_ACTION,
   automationPrIdentityMismatches,
-  inlineFunctionCopies,
   isOwnPagesOrigin,
   platformNameLiteralMismatches,
   releaseCutWiringMismatches,
 } from "../../../scripts/check/ssot/literal_anchors.ts";
-
-describe("inlineFunctionCopies", () => {
-  const copy = (indent: string, body: string) =>
-    [
-      `${indent}async function resolve() {`,
-      `${indent}  if (x) {`,
-      `${indent}    ${body}`,
-      `${indent}  }`,
-      `${indent}}`,
-    ].join("\n");
-
-  test.each([
-    { indent: "    ", reason: "four-space indent" },
-    { indent: "  ", reason: "two-space indent - the nested close brace sits at indent+2" },
-  ])(
-    "extracts every copy byte-exactly, closing at the declaration's own indent ($reason)",
-    ({ indent }) => {
-      // Two of the three copies are identical, so a deduplicating extractor fails the exact list.
-      const a = copy(indent, "a();");
-      const b = copy(indent, "b();");
-      expect(inlineFunctionCopies(`head\n${a}\ntail\n${b}\n${a}\n`, "resolve")).toEqual([a, b, a]);
-    },
-  );
-
-  test("returns nothing when the function is absent, so rules can fail loudly", () => {
-    expect(inlineFunctionCopies("const resolve = 1;", "resolve")).toEqual([]);
-  });
-});
 
 describe("isOwnPagesOrigin", () => {
   const at = (text: string) => text.indexOf("io/repo-platform");

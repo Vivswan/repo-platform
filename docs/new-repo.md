@@ -74,9 +74,7 @@ Every path below comes from `files.yml` at the commit the `stable` tag names ([s
 | `.github/workflows/copilot-setup-steps.yml` | starter | always |
 | `.gitleaks.toml` | starter | always |
 | `.yamllint` | managed | always |
-| `.github/workflows/auto-assign.yml` | managed | any of `bun`, `deno`, `uv`; public |
-| `.github/workflows/auto-assign.yml` | managed | private |
-| `.github/workflows/auto-assign.yml` | managed | without `bun`, `deno`, `uv`; public |
+| `.github/workflows/auto-assign.yml` | managed | always |
 | `.github/workflows/auto-format.yml` | starter | any of `bun`, `deno`, `uv` |
 | `.typography-allow` | managed | without `release-please` |
 | `.typography-allow` | managed | modules: `release-please` |
@@ -188,7 +186,7 @@ PR edits modules: in .repo-platform.yml
 
 The community health files (contributing guide, security policy, code of conduct, issue forms) are not written: GitHub serves them to every repository under the account from the account's `<owner>/.github` repository. A repository that needs a different text commits its own file, which GitHub prefers over the default; the issue forms count as one set, so any file under a repository's own `.github/ISSUE_TEMPLATE/` replaces all of the default forms. A fragment left behind when a sync PR retires one of them hides the default the same way, so that PR's review deletes or completes it before merging ([the sync-pr skill](../skills/repo-platform-sync-pr/SKILL.md#repository-owned-markdown-after-a-retirement)).
 
-Every repository receives the agent instructions (`AGENTS.md` with its `CLAUDE.md`, `.github/agents.md`, and `.github/copilot-instructions.md` symlinks), a repo-owned `copilot-setup-steps.yml` starter prefilled with installs for the selected toolchains, a managed `.github/instructions/review.instructions.md` telling Copilot code review how to word its comments (problem first, then an example, then the fix; short plain sentences) and what earns one (a demonstrable defect in the diff; no speculative hardening, no unenforced style opinions), the managed `auto-assign.yml` (issues, PRs, and code scanning alerts assigned to the owner), the settings overlay starter and the rendered `.github/settings.yml` described below. The modules add:
+Every repository receives the agent instructions (`AGENTS.md` with its `CLAUDE.md`, `.github/agents.md`, and `.github/copilot-instructions.md` symlinks), a repo-owned `copilot-setup-steps.yml` starter prefilled with installs for the selected toolchains, a managed `.github/instructions/review.instructions.md` telling Copilot code review how to word its comments (problem first, then an example, then the fix; short plain sentences) and what earns one (a demonstrable defect in the diff; no speculative hardening, no unenforced style opinions), the managed `auto-assign.yml` (issues and PRs assigned to the repository owner), the settings overlay starter and the rendered `.github/settings.yml` described below. The modules add:
 
 | Module | What lands |
 | --- | --- |

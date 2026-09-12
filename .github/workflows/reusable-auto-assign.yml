@@ -1,5 +1,5 @@
 # A called job can only downgrade the caller's token: adding a scope here breaks every caller not yet synced with it.
-# This runs from the CALLER's checkout, where repo-platform's scripts do not exist, so every step stays inline.
+# This runs in the CALLER's repository, where repo-platform's scripts do not exist, so the steps are gh commands.
 
 name: Reusable Auto Assign
 
@@ -14,9 +14,7 @@ on:
 
 jobs:
   assign:
-    # Dependabot PR runs get a read-only GITHUB_TOKEN; the write calls below
-    # would fail, so skip them (the nightly sweep assigns those PRs with the
-    # repo's own token instead).
+    # Dependabot PR runs get a read-only GITHUB_TOKEN, so the write below would fail; the nightly sweep assigns those PRs with the repo's own token.
     if: >-
       ((github.event_name == 'issues' || github.event_name == 'pull_request') &&
       github.actor != 'dependabot[bot]') ||
@@ -25,139 +23,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read # CODEOWNERS resolution
-      issues: write
+      issues: write # issue events, and the sweep assigns issues and PRs alike
       pull-requests: write # PR events, and a dispatched number may be a PR
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ASSIGNEE: ${{ github.repository_owner }}
     steps:
-      - name: Resolve assignees from CODEOWNERS
-        id: who
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            // Teams cannot be assignees, so only @user entries on the last `*` line count; the repo owner otherwise.
-            async function resolveAssignees() {
-              for (const path of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
-                let data;
-                try {
-                  ({ data } = await github.rest.repos.getContent({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    path,
-                  }));
-                } catch (error) {
-                  if (error.status === 404) continue;
-                  throw error;
-                }
-                const text = Buffer.from(data.content, 'base64').toString('utf8');
-                let owners = null;
-                for (const line of text.split('\n')) {
-                  const entry = line.trim();
-                  if (!entry || entry.startsWith('#')) continue;
-                  const [pattern, ...rest] = entry.split(/\s+/);
-                  if (pattern === '*') owners = rest; // last * entry wins
-                }
-                const users = (owners ?? [])
-                  .filter((o) => /^@[A-Za-z0-9-]+$/.test(o))
-                  .map((o) => o.slice(1));
-                if (users.length) return users;
-                break;
-              }
-              return [context.repo.owner];
-            }
-            core.setOutput('assignees', JSON.stringify(await resolveAssignees()));
-
-      - name: Assign issue to code owners
-        if: github.event_name == 'issues'
-        env:
-          ASSIGNEES: ${{ steps.who.outputs.assignees }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            await github.rest.issues.addAssignees({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              assignees: JSON.parse(process.env.ASSIGNEES)
-            });
-
-      - name: Assign PR to code owners
+      # The issues REST route covers PRs too, so one call serves an issue, a PR, and a dispatched number of either kind.
+      # A fork PR's token is read-only, so only same-repository PRs are assigned on open.
+      - name: Assign the opened or dispatched item to the repository owner
         if: >-
-          github.event_name == 'pull_request' && github.event.action == 'opened' &&
-          github.event.pull_request.head.repo.full_name == github.repository
+          github.event_name == 'issues' ||
+          (github.event_name == 'pull_request' && github.event.action == 'opened' &&
+          github.event.pull_request.head.repo.full_name == github.repository) ||
+          (github.event_name == 'workflow_dispatch' && inputs.issue != '')
         env:
-          ASSIGNEES: ${{ steps.who.outputs.assignees }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            await github.rest.issues.addAssignees({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              assignees: JSON.parse(process.env.ASSIGNEES)
-            });
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || inputs.issue }}
+        run: gh api -X POST "repos/$GH_REPO/issues/$NUMBER/assignees" -f "assignees[]=$ASSIGNEE"
 
-      # GitHub's automatic CODEOWNERS review request does not reach every PR, so the resolved owners are requested here too.
-      # GitHub rejects a self-review request with 422, so the PR author is dropped.
-      - name: Request review from code owners
-        if: >-
-          github.event_name == 'pull_request' && github.event.action == 'opened' &&
-          github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          ASSIGNEES: ${{ steps.who.outputs.assignees }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const author = context.payload.pull_request.user.login.toLowerCase();
-            const reviewers = JSON.parse(process.env.ASSIGNEES)
-              .filter((user) => user.toLowerCase() !== author);
-            if (reviewers.length === 0) return;
-            await github.rest.pulls.requestReviewers({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
-              reviewers
-            });
-
-      # GitHub fires no workflow for an issue or PR created with a workflow's own GITHUB_TOKEN, so the creating
-      # workflow dispatches this one with the number.
-      #   a number  -> that item alone
-      #   empty     -> a sweep of every open unassigned issue and PR, page-bounded so a backlog cannot run away; the nightly drains the rest
-      - name: Assign the dispatched item, or sweep open unassigned items
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          ISSUE: ${{ inputs.issue }}
-          ASSIGNEES: ${{ steps.who.outputs.assignees }}
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const raw = process.env.ISSUE ?? "";
-            let numbers;
-            if (raw === "") {
-              numbers = [];
-              for (let page = 1; page <= 10; page++) {
-                const { data } = await github.rest.issues.listForRepo({
-                  owner, repo, state: 'open', assignee: 'none', per_page: 100, page,
-                });
-                numbers.push(...data.map((item) => item.number));
-                if (data.length < 100) break;
-              }
-            } else {
-              if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
-                core.setFailed(`issue input is not a positive integer: ${raw}`);
-                return;
-              }
-              numbers = [Number(raw)];
-            }
-            const assignees = JSON.parse(process.env.ASSIGNEES);
-            for (const issueNumber of numbers) {
-              await github.rest.issues.addAssignees({
-                owner,
-                repo,
-                issue_number: issueNumber,
-                assignees
-              });
-              core.info(`assigned #${issueNumber} to ${assignees.join(', ')}`);
-            }
-            core.info(`assigned ${numbers.length} item(s)`);
+      # GitHub fires no workflow for an issue or PR created with a workflow's own GITHUB_TOKEN, so the schedule sweeps every open unassigned one.
+      # Filtered client-side: a listing filtered on assignee shrinks as the sweep assigns, so its later pages would shift and skip items.
+      - name: Sweep open unassigned issues and PRs to the repository owner
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.issue == '')
+        shell: bash # pipefail, so a failed listing fails the step instead of sweeping nothing
+        run: >-
+          gh api --paginate "repos/$GH_REPO/issues?state=open&per_page=100" --jq '.[] | select(.assignees == []) | .number' |
+          xargs -r -I{} gh api -X POST "repos/$GH_REPO/issues/{}/assignees" -f "assignees[]=$ASSIGNEE"

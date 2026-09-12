@@ -13,7 +13,7 @@ describe("sticky-pr-comments", () => {
   const SHA = "5770ad5eb8f42dd2c4f34da00c94c5381e49af88";
   const PIN = `${STICKY_COMMENT_ACTION}@${SHA} # v3.0.5`;
   const WORKFLOW = "files/deno/.github/workflows/deno-audit.yml";
-  const VARIANT = "files/base/.github/workflows/auto-assign.codeql.yml";
+  const VARIANT = "files/base/.github/workflows/ci.private.yml";
   const BLOCK = "files/bun/.github/workflows/auto-format.block.toolchain.yml";
   const REPO_WORKFLOW = ".github/workflows/protect-build-branches.yml";
   const ACTION = "actions/check-file-size/action.yml";
@@ -43,7 +43,7 @@ describe("sticky-pr-comments", () => {
 
   test.each([
     { rel: WORKFLOW, stem: HOST },
-    { rel: VARIANT, stem: "auto-assign" },
+    { rel: VARIANT, stem: "ci" },
     { rel: BLOCK, stem: "auto-format" },
     { rel: "files/bun/.github/dependabot.block.bun.yml", stem: null },
     { rel: "files/bun/.block.Node.gitignore", stem: null },
@@ -56,7 +56,7 @@ describe("sticky-pr-comments", () => {
   // token, which a fork PR grants no pull-requests write.
   test.each([
     { rel: WORKFLOW, scope: strict(HOST) },
-    { rel: VARIANT, scope: strict("auto-assign") },
+    { rel: VARIANT, scope: strict("ci") },
     { rel: BLOCK, scope: strict("auto-format") },
     { rel: "files/bun/.block.Node.gitignore", scope: strict() },
     { rel: REPO_WORKFLOW, scope: strict("protect-build-branches") },
