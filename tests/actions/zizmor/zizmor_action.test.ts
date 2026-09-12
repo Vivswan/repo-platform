@@ -135,13 +135,12 @@ describe("actions/zizmor", () => {
     expect(runStep("Remove the copied policy", repo).exitCode).toBe(0);
   });
 
-  test("the fleet policy: ref pins for the delivery channel only, sha pins elsewhere at medium, two managed-file ignores", () => {
+  test("the fleet policy: ref pins for the delivery channel only, sha pins elsewhere at zizmor's own severity, two managed-file ignores", () => {
     const policy = parseYaml(readFileSync(join(REPO_ROOT, "actions/zizmor/zizmor.yml"), "utf8"));
     expect(policy).toEqual({
       rules: {
         "unpinned-uses": {
           config: { policies: { "Vivswan/repo-platform/*": "ref-pin", "*": "hash-pin" } },
-          remap: { severity: "medium" },
         },
         "dangerous-triggers": { ignore: ["auto-assign.yml"] },
         "bot-conditions": { ignore: ["dependabot-bun-lockfile.yml"] },
