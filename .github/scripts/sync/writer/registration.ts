@@ -46,11 +46,8 @@ export function parseRepositorySlug(slug: string): RepositorySlug {
   return { owner: match[1], name: match[2] };
 }
 
-/** The values for every placeholder: the project block when the
- *  registration carries one, the repository name otherwise; the year is
- *  the current UTC year; each tracking label is the registration's own
- *  value, else the module default files.yml declares, else absent (no
- *  listed source may use them then). */
+/** A tracking label absent from both the registration and files.yml's module default stays absent:
+ *  select.ts then refuses any listed source that uses it. */
 export function placeholderValues(
   registration: Registration,
   repository: RepositorySlug,
