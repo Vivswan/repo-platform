@@ -3,11 +3,9 @@ import {
   canonical,
   escapeRegExp,
   firstDiff,
-  MARKER_TOKENS,
   mustMatch,
   orderedListMismatches,
   setMismatch,
-  stripGeneratedRegions,
 } from "../../../scripts/check/ssot/comparison.ts";
 import { callersOf } from "../../../scripts/check/ssot/post_green.ts";
 
@@ -98,52 +96,5 @@ describe("escapeRegExp", () => {
     expect(callersOf(workflows, rel, "Vivswan").map((c) => c.site)).toEqual([
       ".github/workflows/a.yml job x",
     ]);
-  });
-});
-
-describe("stripGeneratedRegions", () => {
-  // Markers built from the stripper's own tokens, so a marker-text rename
-  // keeps these fixtures aligned with what the stripper must match.
-  const begin = (name: string) => `<!-- ${MARKER_TOKENS.begin} ${name} (generator) -->`;
-  const end = (name: string) => `<!-- ${MARKER_TOKENS.end} ${name} -->`;
-
-  test("removes balanced regions, inline and multi-line, keeping hand prose", () => {
-    const text = `hand ${begin("a")}gen a${end("a")} middle\n${begin("b")}\ngen b\n${end("b")} tail`;
-    expect(stripGeneratedRegions(text, "doc")).toEqual({
-      prose: "hand  middle\n tail",
-      regions: 2,
-    });
-  });
-
-  test("reports zero regions for marker-free text, so callers can fail a no-op strip", () => {
-    expect(stripGeneratedRegions("plain hand prose", "doc")).toEqual({
-      prose: "plain hand prose",
-      regions: 0,
-    });
-  });
-
-  test("a BEGIN inside an open region throws naming both regions", () => {
-    const text = `${begin("a")} x ${begin("b")} y ${end("b")}`;
-    expect(() => stripGeneratedRegions(text, "doc")).toThrow("'a' is still open where 'b'");
-  });
-
-  test("a mismatched END name throws", () => {
-    expect(() => stripGeneratedRegions(`${begin("a")} x ${end("b")}`, "doc")).toThrow(
-      "closed by END 'b'",
-    );
-  });
-
-  test("a dangling END throws", () => {
-    expect(() => stripGeneratedRegions(`x ${end("a")}`, "doc")).toThrow("no matching BEGIN");
-  });
-
-  test("an unclosed region throws", () => {
-    expect(() => stripGeneratedRegions(`x ${begin("a")} y`, "doc")).toThrow("never closed");
-  });
-
-  test("a marker token outside the comment grammar throws instead of surviving the strip", () => {
-    expect(() => stripGeneratedRegions(`x ${MARKER_TOKENS.begin} y`, "doc")).toThrow(
-      "malformed generated-region markers remain",
-    );
   });
 });

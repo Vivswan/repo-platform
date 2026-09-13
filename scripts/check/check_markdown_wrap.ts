@@ -101,15 +101,13 @@ export function scanMarkdown(content: string): {
       structural();
       continue;
     }
-    // A generated-region marker comment riding on the delimiter row would hide the table,
-    // so comments are masked (to a space, as in opensComment) before matching.
     if (table !== null && (!rest.includes("|") || depth !== table.depth)) table = null;
     const next = quoteDepth(lines[index + 1] ?? "");
     if (
       table === null &&
       rest.includes("|") &&
       next.depth === depth &&
-      TABLE_DELIMITER.test(next.rest.replace(/<!--[\s\S]*?-->/g, " "))
+      TABLE_DELIMITER.test(next.rest)
     ) {
       table = { depth };
     }
