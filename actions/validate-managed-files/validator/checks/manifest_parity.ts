@@ -178,8 +178,8 @@ export function checkManifestParity(ctx: Context): Finding[] {
     // otherwise be offered a resync the class writer holds. A directory is judged before the recorded kind: the mirror
     // writer treats it alike under both kinds. A mirror remedy never says to remove a reached occupant first (the
     // writer replaces a wrong-kind file or link itself, and removing a pattern's only match fails the run); it says
-    // what the re-run does at every path a record can sit on, since the validator reads no declaration and no
-    // retired list, and the removal it does name is of what a retirement held.
+    // what the re-run does at every path a record can sit on, since the validator reads no mirror declaration and no
+    // retired list.
     const linkRecorded =
       entry.class === "link" || (entry.class === "mirror" && entry.kind === "symlink");
     const removeThenResync = `or remove what stands at the path and ${RESYNC}`;
