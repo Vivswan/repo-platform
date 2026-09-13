@@ -122,10 +122,11 @@ describe("fleet-ci.yml", () => {
 
   // One unconditional job for every visibility. The check is its action:
   // a lost step drops the check fleet-wide; a step without `!cancelled()`
-  // would be skipped by an earlier failure, hiding it.
-  const BASE_CHECKS: { id: string; tool: string; advisory?: true }[] = [
+  // would be skipped by an earlier failure, hiding it; a step with
+  // `continue-on-error` fails open, so no base check carries one.
+  const BASE_CHECKS: { id: string; tool: string }[] = [
     { id: "typography", tool: "repo-platform/actions/check-typography@stable" },
-    { id: "file-size", tool: "repo-platform/actions/check-file-size@stable", advisory: true },
+    { id: "file-size", tool: "repo-platform/actions/check-file-size@stable" },
     { id: "commit-names", tool: "repo-platform/actions/validate-commit-names@stable" },
     { id: "actionlint", tool: "raven-actions/actionlint@" },
     { id: "yamllint", tool: "repo-platform/actions/yamllint@stable" },
@@ -144,14 +145,14 @@ describe("fleet-ci.yml", () => {
       id: step.id,
       uses: step.uses,
       if: step.if,
-      advisory: step["continue-on-error"],
+      "continue-on-error": step["continue-on-error"],
     }));
     expect(checks).toEqual(
       BASE_CHECKS.map((check) => ({
         id: check.id,
         uses: expect.stringContaining(check.tool),
         if: "${{ !cancelled() }}",
-        advisory: check.advisory,
+        "continue-on-error": undefined,
       })),
     );
     // The judge reads every check's conclusion and fails the job naming
@@ -212,7 +213,6 @@ describe("fleet-ci.yml", () => {
   const HEADER = "## Base checks\n\n| check | outcome | verdict |\n| --- | --- | --- |\n";
   const ok: StepResult = { outcome: "success", conclusion: "success" };
   const failed: StepResult = { outcome: "failure", conclusion: "failure" };
-  const advisory: StepResult = { outcome: "failure", conclusion: "success" };
   const cancelled: StepResult = { outcome: "cancelled", conclusion: "cancelled" };
   const skipped: StepResult = { outcome: "skipped", conclusion: "skipped" };
   const JUDGE_CASES: {
@@ -234,19 +234,10 @@ describe("fleet-ci.yml", () => {
       },
     },
     {
-      reason: "an advisory finding (continue-on-error) is reported and does not fail",
-      steps: { "typography": ok, "file-size": advisory },
-      verdict: {
-        status: 0,
-        stdout: ["all base checks passed"],
-        rows: ["| typography | success | ok |", "| file-size | failure | advisory |"],
-      },
-    },
-    {
       reason: "every failed, cancelled, or skipped check is named; green ones are not",
       steps: {
         "typography": ok,
-        "file-size": advisory,
+        "file-size": failed,
         "commit-names": failed,
         "yamllint": cancelled,
         "gitleaks": skipped,
@@ -254,13 +245,14 @@ describe("fleet-ci.yml", () => {
       verdict: {
         status: 1,
         stdout: [
+          "::error::base check failed: file-size",
           "::error::base check failed: commit-names",
           "::error::base check failed: yamllint",
           "::error::base check failed: gitleaks",
         ],
         rows: [
           "| typography | success | ok |",
-          "| file-size | failure | advisory |",
+          "| file-size | failure | FAILED |",
           "| commit-names | failure | FAILED |",
           "| yamllint | cancelled | FAILED |",
           "| gitleaks | skipped | FAILED |",

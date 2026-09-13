@@ -664,7 +664,7 @@ export const allGreenRules: Rule[] = [
           mismatches.push({
             file: `${rel} job '${name}'`,
             expected:
-              "no job-level continue-on-error on a fleet gating job (a softened job reads green to every caller's all-green; an advisory check softens its own STEP inside base-checks)",
+              "no job-level continue-on-error on a fleet gating job (a softened job reads green to every caller's all-green)",
             got: `continue-on-error: ${String(job["continue-on-error"])}`,
           });
         }
