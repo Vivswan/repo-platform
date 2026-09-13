@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { prTitleWorkflowMismatches } from "../../../scripts/check/ssot/pr_title.ts";
+import {
+  PR_TITLE_WORKFLOW,
+  prTitleWorkflowMismatches,
+} from "../../../scripts/check/ssot/pr_title.ts";
 
 describe("prTitleWorkflowMismatches", () => {
   const workflow = [
@@ -14,7 +17,9 @@ describe("prTitleWorkflowMismatches", () => {
     "  pr-title:",
     "    runs-on: ubuntu-latest",
     "    steps:",
-    "      - uses: amannn/action-semantic-pull-request@v6",
+    "      - uses: {{github_username}}/repo-platform/actions/validate-commit-names@stable",
+    "        with:",
+    "          title: ${{ github.event.pull_request.title }}",
     "",
   ].join("\n");
   const baseline = [
@@ -98,13 +103,41 @@ describe("prTitleWorkflowMismatches", () => {
     expect(displayNamed.some((m) => m.expected.includes("no job-level name:"))).toBe(true);
   });
 
-  test("a swapped-out judgment step or any condition goes red - a required check must never be a green no-op", () => {
+  test("a swapped-out judge, a dropped title input, or any condition goes red - a required check must never be a green no-op", () => {
     const swapped = prTitleWorkflowMismatches(
-      workflow.replace("      - uses: amannn/action-semantic-pull-request@v6", "      - run: true"),
+      workflow.replace(
+        "      - uses: {{github_username}}/repo-platform/actions/validate-commit-names@stable",
+        "      - uses: some-org/semantic-title@v6",
+      ),
       baseline,
       moduleLayer,
     );
-    expect(swapped.some((m) => m.expected.includes("action-semantic-pull-request"))).toBe(true);
+    expect(swapped).toEqual([
+      {
+        file: PR_TITLE_WORKFLOW,
+        expected:
+          'exactly one step whose uses: starts "- uses: {{github_username}}/repo-platform/actions/validate-commit-names@" ' +
+          "(the commit-names gate's own judge, so a title this check passes cannot land red there; without it the required check is a green no-op)",
+        got: "0 occurrences",
+      },
+    ]);
+    // Without the input the action judges the commit range, which is not the title, in a job that checked nothing out.
+    const untitled = prTitleWorkflowMismatches(
+      workflow.replace(
+        "          title: ${{ github.event.pull_request.title }}",
+        "          title: ''",
+      ),
+      baseline,
+      moduleLayer,
+    );
+    expect(untitled).toEqual([
+      {
+        file: PR_TITLE_WORKFLOW,
+        expected:
+          'the line "          title: ${{ github.event.pull_request.title }}" exactly once (the action judges the title it is given; without the input it judges the commit range, which is not the title)',
+        got: "missing",
+      },
+    ]);
     const conditioned = prTitleWorkflowMismatches(
       workflow.replace("    runs-on:", "    if: false\n    runs-on:"),
       baseline,

@@ -40,7 +40,7 @@ Settings stop being applied too: the central run only manages enrolled repos car
    - replace each thin caller (`auto-assign.yml`, the `site` job's `reusable-site.yml` call, the `ci` job's `fleet-ci.yml` call) with a copy of the corresponding `reusable-*.yml`/fleet job from repo-platform; the `all-green` job already runs a third-party action and needs nothing
    - replace `uses: Vivswan/repo-platform/actions/...` steps with vendored copies of the action scripts
    - CodeQL runs inside fleet-ci's `codeql` matrix; inline repo-platform's `reusable-codeql.yml` too if you want CodeQL without repo-platform
-   - the `pr-title.yml` workflow needs nothing: it uses a public action directly (drop its required check from the `pr-title` ruleset if you delete it)
+   - the `pr-title.yml` workflow is one more `uses: Vivswan/repo-platform/actions/...` step (the `validate-commit-names` action with the PR title as its `title` input): vendor it like the others, or delete the workflow and drop its required check from the `pr-title` ruleset
 
 4. (Optional) Strip the marker comments from `.gitignore`. The content keeps working either way.
 

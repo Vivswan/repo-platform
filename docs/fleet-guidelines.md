@@ -52,7 +52,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 - Rule: PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/) as [commitlint](https://commitlint.js.org/)'s config-conventional judges them, with one scope per subject; PRs squash-merge, so the PR title becomes the commit subject. Refused: a scope list (`fix(sync,writer): ...`: split the change or pick the scope that names it), a Sentence-case description (`fix: Repair installer`), a trailing period. Merge, revert, reapply, fixup, squash, amend, and bare version-number subjects are exempt (commitlint's default ignores, applied to the subject line); no line has a length cap.
 - Why: release-please derives versions and changelogs from the subjects.
 - How: `fix(sync): ...`, `feat(writer)!: ...`, `docs: ...`.
-- Enforced by: the [`pr-title` check](settings.md#the-pr-title-ruleset) on the PR title (pr-title module); the `commit-names` job (actions/validate-commit-names) on the subjects; squash-only merging with the PR title as subject is the [settings override layer](settings.md), applied to every managed repository.
+- Enforced by: one judge, actions/validate-commit-names, run as the [`pr-title` check](settings.md#the-pr-title-ruleset) on the PR title (pr-title module) and as the `commit-names` job on the commit subjects; squash-only merging with the PR title as subject is the [settings override layer](settings.md), applied to every managed repository.
 
 ## Plain ASCII punctuation
 
