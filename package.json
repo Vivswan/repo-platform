@@ -40,7 +40,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@vivswan/github-settings-as-code": "2.0.1-main.1059.g3d256b8",
+    "@vivswan/github-settings-as-code": "next",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   }

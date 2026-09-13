@@ -5,7 +5,7 @@
     "": {
       "name": "repo-platform",
       "dependencies": {
-        "@vivswan/github-settings-as-code": "2.0.1-main.1059.g3d256b8",
+        "@vivswan/github-settings-as-code": "next",
         "yaml": "^2.9.0",
         "zod": "^4.4.3",
       },
@@ -206,7 +206,7 @@
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
-    "@vivswan/github-settings-as-code": ["@vivswan/github-settings-as-code@2.0.1-main.1059.g3d256b8", "", { "dependencies": { "@noble/ciphers": "2.4.0", "@noble/curves": "2.4.0", "@noble/hashes": "2.4.0", "@octokit/core": "7.0.8", "@octokit/openapi-types": "29.0.1", "@octokit/plugin-request-log": "6.0.0", "@octokit/plugin-retry": "8.1.1", "@octokit/plugin-throttling": "11.0.5", "@octokit/types": "18.0.0", "age-encryption": "0.3.1", "bottleneck": "2.19.5", "commander": "15.0.0", "consola": "3.4.2", "neverthrow": "8.2.0", "picocolors": "1.1.1", "yaml": "2.9.0", "zod": "4.5.4" }, "bin": { "gsac": "lib/pkg/cli.js", "github-settings-as-code": "lib/pkg/cli.js" } }, "sha512-sPPyJ0bmHphQzrbi6OFgXfF7+GqKG76cs4KKEFc8IGzsATEanymdSqtroRdKsnnXRer+k1QcL9FLGI4LXbgMEQ=="],
+    "@vivswan/github-settings-as-code": ["@vivswan/github-settings-as-code@2.0.1-main.450.20260913.g131780e", "", { "dependencies": { "@noble/ciphers": "2.4.0", "@noble/curves": "2.4.0", "@noble/hashes": "2.4.0", "@octokit/core": "7.0.8", "@octokit/openapi-types": "29.0.1", "@octokit/plugin-request-log": "6.0.0", "@octokit/plugin-retry": "8.1.1", "@octokit/plugin-throttling": "11.0.5", "@octokit/types": "18.0.0", "age-encryption": "0.3.1", "bottleneck": "2.19.5", "commander": "15.0.0", "consola": "3.4.2", "neverthrow": "8.2.0", "picocolors": "1.1.1", "yaml": "2.9.0", "zod": "4.5.4" }, "bin": { "gsac": "lib/pkg/cli.js", "github-settings-as-code": "lib/pkg/cli.js" } }, "sha512-D8SSLHgaZ02bhGYaHQCERKm9VyxjY4SkY21y7O1BS6UntnS8iAjBdb3Ur8Nd9B4Pazd17WL6iK5SM6gj8cIcTg=="],
 
     "age-encryption": ["age-encryption@0.3.1", "", { "dependencies": { "@noble/ciphers": "^2.1.1", "@noble/curves": "^2.0.1", "@noble/hashes": "^2.0.1", "@noble/post-quantum": "^0.5.3", "@scure/base": "^2.0.0" } }, "sha512-bYgd7lxM7tEANmb9bXf7xTFB3Qpq+JGKinVSdFh5MV+t2fJJZSTdKhWkvXTFJQGysZd+K9Dt3F+n+4DKazXlnQ=="],
 

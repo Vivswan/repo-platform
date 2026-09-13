@@ -219,20 +219,27 @@ describe("every selection folds to a document the apply accepts", () => {
   // here so a layer edit that only breaks some other selection is caught
   // before a sync run holds that selection's rows.
   test("the fleet layers with the override, for every module subset and visibility", () => {
+    // Folded once per distinct layer stack: a module with no layer of its
+    // own changes nothing, and the library judges every layer on every
+    // fold, so the 2048 selections would cost the runner more than the
+    // test bound for 256 distinct folds.
     const names = Object.keys(CONFIG.modules);
-    let folds = 0;
+    const stacks = new Map<string, string[]>();
     for (let mask = 0; mask < 1 << names.length; mask++) {
       const modules = names.filter((_, index) => mask & (1 << index));
       for (const isPrivate of [false, true]) {
-        const layers = layerPaths(CONFIG, { modules, private: isPrivate }).map((rel) =>
-          loadLayer(join(TREE, rel)),
-        );
-        const folded = foldSettings([...layers, loadOverrideLayer(OVERRIDE)], "the fleet fold");
-        if ("refused" in folded) throw new Error(`${modules.join("+")}: ${folded.refused}`);
-        folds++;
+        const paths = layerPaths(CONFIG, { modules, private: isPrivate });
+        stacks.set(paths.join(" "), paths);
       }
     }
-    expect(folds).toBe(2 ** names.length * 2);
+    const override = loadOverrideLayer(OVERRIDE);
+    for (const [stack, paths] of stacks) {
+      const layers = paths.map((rel) => loadLayer(join(TREE, rel)));
+      const folded = foldSettings([...layers, override], "the fleet fold");
+      if ("refused" in folded) throw new Error(`${stack}: ${folded.refused}`);
+    }
+    // Seven modules carry a layer; the CodeQL layer follows three of them and the visibility.
+    expect(stacks.size).toBe(2 ** 7 * 2);
   });
 });
 

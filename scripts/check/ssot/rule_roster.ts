@@ -37,6 +37,7 @@ export const RULE_ROSTER = [
   "settings-starter",
   "step-output-gates",
   "settings-apply-input",
+  "settings-apply-library-pin",
   "settings-lane-newest-wins",
   "fleet-sync-labels",
   "labels",
