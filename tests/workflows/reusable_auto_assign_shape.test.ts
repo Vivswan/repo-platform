@@ -2,7 +2,7 @@
 // the managed region no longer changes it. GitHub's own CODEOWNERS review request covers the review.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { substitute } from "../../.github/scripts/sync/writer/placeholders.ts";
@@ -72,8 +72,9 @@ describe("reusable-auto-assign.yml", () => {
     expect(read(REUSABLE)).not.toMatch(/CODEOWNERS|requestReviewers|github-script/);
   });
 
-  test("the managed caller: one job over one source, no CodeQL variant", () => {
-    expect(parseYaml(substitute(read(CALLER), { github_username: "owner" }))).toEqual({
+  test("the managed caller: one job over one source, no CodeQL variant, no alerts sibling", () => {
+    const caller = parseYaml(substitute(read(CALLER), { github_username: "owner" }));
+    expect(caller).toEqual({
       name: "Auto Assign",
       on: {
         workflow_dispatch: {
@@ -93,7 +94,7 @@ describe("reusable-auto-assign.yml", () => {
       permissions: {},
       jobs: {
         "auto-assign": {
-          permissions: { "contents": "read", "issues": "write", "pull-requests": "write" },
+          permissions: { "issues": "write", "pull-requests": "write" },
           uses: "owner/repo-platform/.github/workflows/reusable-auto-assign.yml@stable",
           with: { issue: "${{ inputs.issue || '' }}" },
         },
@@ -106,5 +107,21 @@ describe("reusable-auto-assign.yml", () => {
     expect(existsSync(join(ROOT, "files/base/.github/workflows/auto-assign.codeql.yml"))).toBe(
       false,
     );
+    expect(
+      readdirSync(join(ROOT, ".github/workflows")).filter((f) =>
+        f.startsWith("reusable-auto-assign"),
+      ),
+    ).toEqual(["reusable-auto-assign.yml"]);
+  });
+
+  test("the caller grants exactly the union of what the called jobs use: a called job can only downgrade the token", () => {
+    const called = parseYaml(read(REUSABLE)) as {
+      jobs: Record<string, { permissions: Record<string, string> }>;
+    };
+    const union = Object.assign({}, ...Object.values(called.jobs).map((job) => job.permissions));
+    const caller = parseYaml(substitute(read(CALLER), { github_username: "owner" })) as {
+      jobs: Record<string, { permissions: Record<string, string> }>;
+    };
+    expect(caller.jobs["auto-assign"].permissions).toEqual(union);
   });
 });

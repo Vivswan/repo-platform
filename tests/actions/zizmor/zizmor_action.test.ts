@@ -135,7 +135,7 @@ describe("actions/zizmor", () => {
     expect(runStep("Remove the copied policy", repo).exitCode).toBe(0);
   });
 
-  test("the rendered policy: ref pins for the caller's delivery channel only, sha pins elsewhere at zizmor's own severity, one managed-file ignore", () => {
+  test("the rendered policy: ref pins for the caller's delivery channel only, sha pins elsewhere at zizmor's own severity, no ignores", () => {
     const repo = temp.dir("zizmor-policy-");
     runStep("Render the fleet policy", repo);
     const policy = parseYaml(readFileSync(join(repo, COPY), "utf8"));
@@ -144,7 +144,6 @@ describe("actions/zizmor", () => {
         "unpinned-uses": {
           config: { policies: { [`${OWNER}/repo-platform/*`]: "ref-pin", "*": "hash-pin" } },
         },
-        "dangerous-triggers": { ignore: ["auto-assign.yml"] },
       },
     });
   });
