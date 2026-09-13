@@ -1,18 +1,4 @@
-// Pure planning logic for the fleet's GitHub Pages site (docs/site.md):
-// the layout from the hook's dist and docs/, and each docs mount's tiers.
-// build.ts owns all I/O; keeping the planning pure is what lets the tests
-// force every layout row without a git repository or a build.
-//
-// The docs mount's tier contract:
-//   tags kept -> <mount>latest/ from HEAD, <mount><tag>/ per kept tag, and
-//                the mount root a SECOND build of the newest tag (base = the
-//                mount root, so deep links at the root resolve)
-//   no tags   -> <mount>latest/ from HEAD, and the mount root a SECOND
-//                build of HEAD (the root is always a real page: the one copy
-//                a site indexes)
-// The docs mount root also carries versions.json, the machine-readable
-// version index the theme's dropdown is fed from at build time. The
-// website is one copy of the hook's dist at the site root, unversioned.
+// Pure planning for the site (docs/site.md); build.ts owns all I/O, which is what lets the tests force every layout row without a git repository or a build.
 
 import {
   type DocsConfig,
@@ -36,7 +22,6 @@ export interface SiteConfig {
   linkRotLabel: string;
 }
 
-/** The docs, rendered by the fleet under the central theme, versioned. */
 export interface DocsMount {
   kind: "docs";
   /** Site-root-relative URL prefix: "/" or "/<segment>/". */
@@ -44,8 +29,6 @@ export interface DocsMount {
   include: readonly IncludeRoot[];
 }
 
-/** The repository's own website, prebuilt by its site-build hook: one
- *  copy of `dist` at the site root. */
 export interface PrebuiltMount {
   kind: "prebuilt";
   path: "/";
@@ -59,28 +42,22 @@ export interface Layout {
   website: PrebuiltMount | null;
 }
 
-/** One build of one ref, landing at one artifact path. */
 export interface Tier {
   kind: "single" | "latest" | "tag" | "root";
-  /** The git ref the content builds from. */
   ref: string;
   /** The version identity handed to the build (DOCS_SITE_CURRENT): "" for
    *  the check build, "latest", or the tag - the root tier carries the
    *  newest served tag's identity, or "latest" while none serve. */
   version: string;
-  /** Artifact path relative to the site root, "" or "<dir>/.../": where
-   *  this tier's build output lands inside _site. */
+  /** Artifact path relative to the site root, "" or "<dir>/.../". */
   rel: string;
 }
 
-/** Throws unless `value` is a plain relative path inside the repository. */
 export function validateRelPath(value: string, what: string): void {
   const problem = relPathProblem(value);
   if (problem !== null) throw new Error(`${what} '${value}' ${problem}`);
 }
 
-/** The config's `include` list parsed to the three keys, each root judged
- *  by the site's rules (conventions.ts). */
 function parseIncludes(value: unknown, where: string): IncludeRoot[] {
   if (!Array.isArray(value)) throw new Error(`${where} must be a list of {path, mount, page}`);
   const includes = value.map((entry, index): IncludeRoot => {
@@ -162,9 +139,7 @@ export function parseSiteConfig(json: string): SiteConfig {
   };
 }
 
-/** The layout, one row per (hook dist, docs/, docs half) combination
- *  (docs/site.md, "Layout"): the docs move under their path only beside a
- *  website, and a docs half turned off leaves docs/ out. */
+/** The table in docs/site.md, "Layout". */
 export function siteLayout(input: {
   dist: string;
   hasDocs: boolean;
@@ -205,12 +180,8 @@ export function mountRel(mountPath: string): string {
   return mountPath.slice(1);
 }
 
-/** The tiers the docs mount builds, given the version tags it serves
- *  (newest first). Order matters: the root tier comes last, so assembly
- *  can check its top-level entries against the tier directories already in
- *  place. The root is always a real build - the newest served tag, or HEAD
- *  while none serve - never a redirect: the root is the one copy a site
- *  indexes, and a redirect stub there leaves it nothing to index. */
+/** The root tier comes last, so assembly can check its top-level entries against the tier directories already in place.
+ *  The root is always a real build, never a redirect: it is the one copy a site indexes, and a redirect stub there leaves it nothing to index. */
 export function planMount(mount: DocsMount, tags: string[]): Tier[] {
   const prefix = mountRel(mount.path);
   const tiers: Tier[] = [
@@ -228,9 +199,6 @@ export function planMount(mount: DocsMount, tags: string[]): Tier[] {
   return tiers;
 }
 
-/** Top-level entry names the docs mount root reserves for the layout
- *  itself; a root-tier build emitting one of these would overwrite a
- *  version directory or the index. */
 export function reservedRootEntries(tags: string[]): Set<string> {
   return new Set(["latest", "versions.json", ...tags]);
 }
@@ -241,9 +209,6 @@ export interface VersionEntry {
   path: string;
 }
 
-/** The versions.json document for the docs mount: latest first, then the
- *  served tags newest first. The theme's dropdown is fed the same list at
- *  build time (versionLinks). */
 export function versionsIndex(tags: string[]): VersionEntry[] {
   return [
     { label: "latest", path: "latest/" },
@@ -251,8 +216,6 @@ export function versionsIndex(tags: string[]): VersionEntry[] {
   ];
 }
 
-/** The dropdown entries for the theme: absolute site paths, derived from
- *  the mount prefix so nothing hardcodes where the docs mount. */
 export function versionLinks(
   rootBase: string,
   mount: DocsMount,
@@ -262,9 +225,6 @@ export function versionLinks(
   return versionsIndex(tags).map(({ label, path }) => ({ label, link: mountBase + path }));
 }
 
-/** The URL base path a tier's build renders under: the Pages root base
- *  (site root "/" on a custom domain, "/<repo>/" on project pages) plus
- *  the tier's artifact path. */
 export function urlBase(rootBase: string, rel: string): string {
   return rootBase + rel;
 }

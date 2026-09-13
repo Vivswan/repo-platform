@@ -1,5 +1,4 @@
-// The one assembly of a sourced entry's text: the writer and the parity rule (scripts/check/ssot/twin_copies.ts)
-// share this render, so the copy the rule holds a root file to is the writer's own, not a second reading.
+// scripts/check/ssot/twin_copies.ts renders through this too, so the copy it holds a root file to is the writer's own, not a second reading.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +20,6 @@ import { renderRegion } from "./write_split.ts";
 
 type SourcedEntry = ManagedEntry | StarterEntry | SplitEntry;
 
-/** A placeholder without a value stops the render: an empty value is never written. */
 export function renderSourced(
   config: FilesConfig,
   tree: string,

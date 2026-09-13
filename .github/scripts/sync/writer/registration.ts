@@ -1,17 +1,9 @@
-// The target repository's registration, read from its checkout through the
-// fleet grammar (actions/plan/registration.ts), and the placeholder values
-// the writer derives from it plus the repository slug the operator passes
-// (the registration never names its own owner) and the module-declared
-// defaults files.yml carries for the tracking labels it may leave unset.
-
 import { parseRegistration, type Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import type { PlaceholderName, PlaceholderValues } from "./placeholders.ts";
 import { existingFile } from "./target_files.ts";
 
-/** The registration the target declares. A malformed one is a hard error:
- *  the grammar names the file in every message, and a module name it does
- *  not know is not an error here (files.yml decides which names it knows). */
+/** The grammar names the file in every message, so none is prefixed here. A module name files.yml does not know is judged there, not here. */
 export function readRegistration(target: string): Registration {
   const bytes = existingFile(target, REGISTRATION_PATH);
   if (bytes === null) throw new Error(`${REGISTRATION_PATH}: missing from the target repository`);
@@ -20,8 +12,6 @@ export function readRegistration(target: string): Registration {
   return read.registration;
 }
 
-/** Where the registration sets each placeholder the writer cannot fall
- *  back for, named in the report when the value is missing. */
 export const PLACEHOLDER_SOURCE: Record<PlaceholderName, string> = {
   project_name: "project.name",
   project_slug: "project.slug",
@@ -46,7 +36,7 @@ export function parseRepositorySlug(slug: string): RepositorySlug {
   return { owner: match[1], name: match[2] };
 }
 
-/** A tracking label absent from both the registration and files.yml's module default stays absent:
+/** The registration never names its own owner, so the slug comes from the operator. A tracking label absent from both the registration and files.yml's module default stays absent:
  *  sync.ts then refuses any listed source that uses it (placeholders.ts, missingPlaceholders). */
 export function placeholderValues(
   registration: Registration,

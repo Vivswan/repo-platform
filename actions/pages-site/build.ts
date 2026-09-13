@@ -1,22 +1,5 @@
-// Assembles the fleet's GitHub Pages site artifact (planning contract and
-// layout in lib.ts; docs/site.md describes the result). Stateless by
-// design: every deploy re-enumerates the version tags and rebuilds every
-// docs tier, so theme updates restyle every version and nothing
-// accumulates between runs.
-//
-// Entry modes (env, set by action.yml): CHECK=true builds docs/ once,
-// strictly (dead internal links fatal), and emits no artifact; otherwise
-// SITE_DIR (the site-build hook's dist, "" for none) and docs/ drive the
-// layout and the publish and site-dir outputs. Both read CONFIG (the JSON
-// the plan action or the caller resolved) and end in the internal-link
-// gate (site_links.ts) over what they built. Both need a committed git
-// checkout at GITHUB_WORKSPACE: each docs tier's project facts and commit
-// are read from the ref's tree with git, never from the working files.
-//
-// Docs builds run against materialized trees so no node_modules bleeds
-// across tiers: each tier COPIES its docs tree into the build root because
-// module resolution walks up from the source files (buildVitepressTier).
-// The website is copied as the hook built it.
+// Stateless by design: every deploy re-enumerates the version tags and rebuilds every docs tier, so theme updates restyle every version and nothing accumulates between runs.
+// Both modes need a committed git checkout at GITHUB_WORKSPACE: each docs tier's project facts and commit are read from the ref's tree with git, never from the working files.
 
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -71,8 +54,6 @@ function requireEnv(name: string): string {
   return value;
 }
 
-/** Run argv, inheriting output; env additions land over the LIVE process
- *  env. Throws naming the argv on any nonzero exit. */
 function run(argv: string[], opts: { cwd?: string; env?: Record<string, string> } = {}): void {
   const proc = spawnSync(argv[0], argv.slice(1), {
     cwd: opts.cwd,
@@ -94,18 +75,12 @@ function capture(argv: string[], cwd?: string): string {
   return proc.stdout;
 }
 
-/** Whether `ref` carries `path`: `git ls-tree` separates the honest
- *  answers (exit 0 - entry listed or not) from failures (bad ref, corrupt
- *  repository), which throw via capture instead of collapsing into
- *  "absent" the way a plain exit-code probe would. */
+/** `git ls-tree` separates the honest answers (exit 0, entry listed or not) from failures (bad ref, corrupt repository), which throw via capture instead of collapsing into absent. */
 function treeHas(cfg: Config, ref: string, path: string): boolean {
   return capture(["git", "-C", cfg.workspace, "ls-tree", ref, "--", path]).trim() !== "";
 }
 
-/** The file's content at `ref`, or null when the tree has no such path
- *  or the entry is not a regular file - `git show` on a SYMLINK yields
- *  its target path text, which must never be judged as content. Any
- *  other git failure still throws via capture. */
+/** `git show` on a symlink yields its target path text, which must never be judged as content. */
 function treeFile(cfg: Config, ref: string, path: string): string | null {
   const entry = capture(["git", "-C", cfg.workspace, "ls-tree", ref, "--", path]).trim();
   if (entry === "") return null;
@@ -114,9 +89,6 @@ function treeFile(cfg: Config, ref: string, path: string): string | null {
   return capture(["git", "-C", cfg.workspace, "show", `${ref}:${path}`]);
 }
 
-/** A generated file the layout owns (versions.json, CNAME): never an
- *  overwrite - existing content at its path is a mount or build output
- *  claiming the same URL. */
 function writeExclusive(path: string, content: string, what: string): void {
   if (existsSync(path)) {
     throw new Error(
@@ -127,8 +99,7 @@ function writeExclusive(path: string, content: string, what: string): void {
   writeFileSync(path, content);
 }
 
-/** GitHub's delimited output form: a line break inside a value cannot set a second output.
- *  Exported for its tests. */
+/** GitHub's delimited output form: a line break inside a value cannot set a second output. Exported for its tests. */
 export function setOutput(name: string, value: string): void {
   const out = env("GITHUB_OUTPUT");
   if (out === "") {
@@ -155,13 +126,7 @@ export function assertDocsLanding(docsTree: string): void {
   }
 }
 
-/** The central-theme invariant: fleet repositories carry ONLY markdown, and
- *  the theme comes from the platform alone. A caller-shipped .vitepress
- *  directory would silently NOT apply (the build root is the action's, not
- *  the caller's), so it is refused loudly instead of shipping a site that
- *  ignores it. Historical tags carrying one are excluded from the version
- *  set instead (they cannot be fixed); this hard refusal covers the content
- *  being edited today. */
+/** Historical tags carrying one are excluded from the version set instead (eligibleDocsTags); this refusal covers the content being edited today. */
 export function assertCentralTheme(docsTree: string): void {
   if (existsSync(join(docsTree, ".vitepress"))) {
     throw new Error(
@@ -230,8 +195,7 @@ function readConfig(): Config {
   };
 }
 
-/** Extract `ref` (optionally one subtree) into a fresh directory; `git
- *  archive` never carries .git, so extracted builds cannot read history. */
+/** `git archive` never carries .git, so extracted builds cannot read history. */
 function extractTree(cfg: Config, ref: string, into: string, subtree?: string): void {
   mkdirSync(into, { recursive: true });
   const tar = `${into}.tar`;
@@ -252,9 +216,6 @@ function extractTree(cfg: Config, ref: string, into: string, subtree?: string): 
 
 let buildCounter = 0;
 
-/** A finished tier must serve its own base URL: a build that "succeeded"
- *  without an index.html deploys a 404 at the tier root on a green run
- *  (for the docs tree, that means no README.md or index.md landing page). */
 function assertTierIndex(dist: string, what: string): string {
   if (!existsSync(join(dist, "index.html"))) {
     throw new Error(
@@ -265,12 +226,7 @@ function assertTierIndex(dist: string, what: string): string {
   return dist;
 }
 
-/** The site-build hook's dist as the directory to copy to the site root,
- *  or the refusal the hook contract promises (docs/site.md): an absolute
- *  path or one leaving the repository would publish a tree that is not
- *  the judged commit's, a missing directory or one without index.html
- *  would deploy a 404 at the site root on a green run. Exported for its
- *  tests. */
+/** Exported for its tests. */
 export function resolvePrebuilt(workspace: string, dist: string): string {
   validateRelPath(dist, "the site-build hook's dist");
   const dir = join(workspace, dist);
@@ -292,24 +248,13 @@ export function resolvePrebuilt(workspace: string, dist: string): string {
   return assertTierIndex(dir, `the site-build hook's dist '${dist}'`);
 }
 
-/** Dead-link strictness per tier: current content (a HEAD tier) must FAIL
- *  on a dead internal link - that failure is the docs PR check's value and
- *  the deploy's last line of defense - while historical tags build lenient
- *  because history cannot be fixed. Stubbing this to always-lenient would
- *  ship silently rotten current docs on a green run. */
+/** Current content must fail on a dead internal link; historical tags build lenient because history cannot be fixed. Always-lenient would ship silently rotten current docs on a green run. */
 export function tierStrictLinks(tier: Tier): boolean {
   return tier.ref === "HEAD";
 }
 
-/** Materialize each include root under `<srcDir>/<mount>/` the way the
- *  docs tree was (the workspace tree at HEAD, an extract at a tag) and
- *  return the roots this tier carries, in the order given. Shallower
- *  mounts stage first, so a root mounted inside another's mount
- *  (`skills/agents` under `skills`) lands in the parent's tree whichever
- *  order the caller listed them; a parent whose own source carries the
- *  child's directory is still the collision it is. At HEAD a missing root
- *  is a configuration error, like a missing docs directory; at a tag it
- *  is skipped with a notice, since history cannot be fixed. */
+/** Shallower mounts stage first, so a root mounted inside another's mount (`skills/agents` under `skills`) lands in the parent's tree whichever order the caller listed them.
+ *  At a tag a missing root is skipped with a notice, since history cannot be fixed. */
 function stageIncludes(
   cfg: Config,
   tier: Tier,
@@ -364,9 +309,6 @@ function stageIncludes(
   return includes.filter((include) => staged.has(include));
 }
 
-/** A child directory carrying both the include's page and an index.md is
- *  refused: both would serve at the directory URL, and shipping one
- *  silently would hide the other. */
 function assertIncludePages(target: string, include: IncludeRoot): void {
   for (const child of readdirSync(target, { withFileTypes: true })) {
     if (!child.isDirectory()) continue;
@@ -380,14 +322,8 @@ function assertIncludePages(target: string, include: IncludeRoot): void {
   }
 }
 
-/** One vitepress build: the bundled config and theme over the docs tree,
- *  materialized into the build root (HEAD tiers copy the workspace tree,
- *  tag tiers extract straight into the root), with the include roots
- *  staged inside it. Dead-link strictness is DERIVED here from the tier -
- *  the one owner - so a strict-HEAD build and a lenient-tag build are the
- *  only representable states. Project facts (facts.ts) read the tier's OWN
- *  ref, so a tagged version shows the toolchains and license that tag
- *  carried. */
+/** Dead-link strictness is derived here from the tier, the one owner, so a strict HEAD build and a lenient tag build are the only representable states.
+ *  Project facts read the tier's own ref, so a tagged version shows the toolchains and license that tag carried. */
 function buildVitepressTier(
   cfg: Config,
   tier: Tier,
@@ -465,11 +401,7 @@ function buildVitepressTier(
   };
 }
 
-/** Copy a build's entries into place, refusing overwrites: a collision is
- *  always two sources claiming one URL (the docs mount inside the
- *  website's output, a root build emitting a version directory's name),
- *  and shipping either silently would serve the wrong content on a green
- *  run. Exported for its tests. */
+/** Exported for its tests. */
 export function copyInto(src: string, dest: string, what: string, reserved?: Set<string>): void {
   mkdirSync(dest, { recursive: true });
   for (const entry of readdirSync(src)) {
@@ -515,8 +447,6 @@ function eligibleDocsTags(cfg: Config, kept: string[]): string[] {
   });
 }
 
-/** Build and lay out the docs mount's tiers; returns each tier's place in
- *  the artifact and whether its content is current, for the link gate. */
 function assembleDocs(cfg: Config, mount: DocsMount, kept: string[]): TierScope[] {
   const tags = eligibleDocsTags(cfg, kept);
   const tiers = planMount(mount, tags);
@@ -575,9 +505,6 @@ async function main(): Promise<void> {
       );
       return;
     }
-    // The docs PR check: one strict build of the working tree (a HEAD tier
-    // derives strict dead links) with the same include roots the deploy
-    // stages, then the link gate over it; no artifact.
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
     const { dist } = buildVitepressTier(cfg, tier, [], cfg.docs.include, { base: "/" });
     // No origin: this build sits at "/", not at the deployed layout, so a

@@ -1,12 +1,6 @@
-// The internal-link gate over the assembled site (docs/site.md, "The docs
-// PR check"): linkinator crawls the CURRENT content's pages from a loopback
-// server that serves the whole artifact at its Pages base the way GitHub
-// Pages does, and every same-site link, fragment included, must resolve
-// whichever mount serves the target - VitePress's own dead-link check stops
-// at its tree, and the hook's website has no check of its own. Blocking by design: a broken link here
-// ships a 404 on a green deploy. Historical tag tiers are targets but never
-// seeds: history cannot be fixed (build.ts's tierStrictLinks draws the same
-// line).
+// linkinator crawls the current content's pages from a loopback server serving the whole artifact at its Pages base, so a link resolves whichever mount serves the target:
+// VitePress's own dead-link check stops at its tree, and the hook's website has no check of its own.
+// Historical tag tiers are targets but never seeds, since history cannot be fixed (tierStrictLinks in build.ts draws the same line).
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -19,18 +13,13 @@ import { decodePathSegments, encodePathSegments } from "./.vitepress/url-path.ts
  *  is external. */
 const LOCAL_SERVER = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?=[/?#]|$)/;
 
-/** A crawl result URL as a site path ("/docs/x.html#id"), or null for an
- *  external one. */
 function sitePath(url: string): string | null {
   if (/^https?:\/\//.test(url) && !LOCAL_SERVER.test(url)) return null;
   const path = url.replace(LOCAL_SERVER, "");
   return path.startsWith("/") ? path : `/${path}`;
 }
 
-/** Every HTML page (`.html` or `.htm`, as Pages serves both) in the site.
- *  Each page of a strict tier seeds the crawl: version tiers are navigated
- *  through a <select>, not anchors, so a crawl from the root alone would
- *  never reach them. */
+/** Pages serves `.htm` as well as `.html`. Every page of a strict tier seeds the crawl: version tiers are navigated through a <select>, not anchors, so a crawl from the root alone would never reach them. */
 export function walkHtml(dir: string, prefix = ""): string[] {
   const pages: string[] = [];
   for (const name of readdirSync(join(dir, prefix)).sort()) {
@@ -44,7 +33,6 @@ export function walkHtml(dir: string, prefix = ""): string[] {
   return pages;
 }
 
-/** One tier's place in the artifact and whether its content is current. */
 export interface TierScope {
   /** Artifact path relative to the site root, "" or "<dir>/.../". */
   rel: string;
@@ -52,11 +40,7 @@ export interface TierScope {
   strict: boolean;
 }
 
-/** The pages the gate seeds among `pages` (site-relative HTML paths):
- *  each belongs to the tier whose rel is the LONGEST prefix of its path
- *  (tiers nest: a versioned mount's root rel prefixes its latest/ and tag
- *  directories, and a "/" mount's "" prefixes everything), and only a
- *  strict tier's pages seed. */
+/** A page belongs to the tier whose rel is the longest prefix of its path: tiers nest, a mount's root rel prefixing its latest/ and tag directories. */
 export function seedPages(pages: string[], tiers: TierScope[]): string[] {
   return pages.filter((page) => {
     const owner = tiers
@@ -74,9 +58,7 @@ export interface BrokenLink {
   reason: string;
 }
 
-/** The broken same-site links among linkinator's results, one row per
- *  page-and-href, both as site paths. A fragment failure keeps its 2xx
- *  status and reads as the missing anchor. */
+/** A fragment failure keeps its 2xx status and reads as the missing anchor. */
 export function collectInternalBroken(
   links: { url: string; state: string; status?: number; parent?: string }[],
 ): BrokenLink[] {
@@ -121,10 +103,7 @@ function attribute(
   return raw === null ? null : decodeHTML(raw);
 }
 
-/** The anchors of a page naming a fragment on this site, each resolved
- *  against the page's own URL (or its `<base href>`, which precedes the
- *  anchors in the document): the target as a site path plus the fragment.
- *  Only same-origin links count; a bare `#` names nothing. */
+/** Anchors resolve against the page's `<base href>` when it has one, which precedes them in the document. */
 export function fragmentTargets(
   html: string,
   pageUrl: string,
@@ -168,7 +147,6 @@ export function fragmentTargets(
   return rows;
 }
 
-/** The fragments a page offers: every element id and anchor name. */
 export function fragmentIds(html: string): Set<string> {
   const ids = new Set<string>();
   const add = (value: string | null) => {
@@ -181,18 +159,12 @@ export function fragmentIds(html: string): Set<string> {
   return ids;
 }
 
-/** Whether a page offering `ids` resolves `fragment`: one of its ids, or
- *  `top` in any letter case, which the browser reads as the top of the
- *  document when no element carries it. */
+/** `top` in any letter case is the document top when no element carries it. */
 export function resolvesFragment(ids: Set<string>, fragment: string): boolean {
   return ids.has(fragment) || fragment.toLowerCase() === "top";
 }
 
-/** The file GitHub Pages serves for `path` (decoded, relative to `root`),
- *  or null when nothing is there or the path leaves the root: the file
- *  itself, a directory's index.html with or without the trailing slash, or
- *  `<path>.html` for an extensionless path. The one serving rule, so the
- *  crawl and the fragment pass judge a URL the same way. */
+/** The one Pages serving rule, so the crawl and the fragment pass judge a URL the same way. */
 export function servedFile(root: string, path: string): string | null {
   const file = resolve(root, path.replace(/^\/+/, ""));
   if (file !== root && !file.startsWith(`${root}/`)) return null;
@@ -205,27 +177,19 @@ export function servedFile(root: string, path: string): string | null {
   return null;
 }
 
-/** The site-relative path a URL path names under `rootBase`, or null when
- *  it is outside the base; the base spelled without its slash is the base.
- *  The crawl's server and the fragment pass resolve through this alone. */
+/** The base spelled without its slash is the base; the crawl's server and the fragment pass resolve through this alone. */
 function underBase(rootBase: string, pathname: string): string | null {
   if (pathname === rootBase.slice(0, -1)) return "";
   return pathname.startsWith(rootBase) ? pathname.slice(rootBase.length) : null;
 }
 
-/** The HTML page a decoded site path serves, or null when it is outside
- *  the base, nothing is there, or the target is not an HTML page:
- *  linkinator reports the first two, and a fragment on another kind of
- *  file (`manual.pdf#page=2`) is the viewer's, not an element id. */
+/** A fragment on a file that is not an HTML page (`manual.pdf#page=2`) is the viewer's, not an element id. */
 function servedPage(site: string, rootBase: string, path: string): string | null {
   const rel = underBase(rootBase, path);
   const file = rel === null ? null : servedFile(site, rel);
   return file !== null && /\.html?$/i.test(file) ? file : null;
 }
 
-/** Every fragment link on `pages` (site-relative HTML paths under
- *  `rootBase`, served at `origin`) whose target page exists but carries no
- *  such id. */
 export function brokenFragments(
   site: string,
   rootBase: string,
@@ -259,13 +223,10 @@ export function brokenFragments(
   return sortBroken(broken);
 }
 
-/** The failure list as printed: one `page -> href (reason)` line each. */
 export function formatBroken(broken: BrokenLink[]): string {
   return broken.map(({ page, href, reason }) => `  ${page} -> ${href} (${reason})`).join("\n");
 }
 
-/** `site` served at `rootBase` on a loopback port by the Pages rule
- *  (servedFile); the base spelled without its slash reads as the base. */
 function serveSite(site: string, rootBase: string): ReturnType<typeof Bun.serve> {
   const notFound = (request: Request) =>
     new Response(request.method === "HEAD" ? null : "not found", { status: 404 });
@@ -284,11 +245,7 @@ function serveSite(site: string, rootBase: string): ReturnType<typeof Bun.serve>
   });
 }
 
-/** The deployed site's URL prefix as a match on a link: the parsed
- *  origin (host lowercased, default port dropped) plus the root base
- *  without its slash, escaped so the host's dots match themselves, then a
- *  path, query, fragment, or nothing. A sibling site on the same origin
- *  (`https://owner.github.io/other-repo/`) therefore stays external. */
+/** The host's dots are escaped, and the lookahead keeps a sibling site on the same origin (`https://owner.github.io/other-repo/`) external. */
 export function ownSitePattern(origin: string, rootBase: string): RegExp {
   const prefix = new URL(origin).origin + rootBase.slice(0, -1);
   // The site's own parsed origin, escaped, never a visitor's input.
@@ -296,14 +253,8 @@ export function ownSitePattern(origin: string, rootBase: string): RegExp {
   return new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[/?#]|$)`);
 }
 
-/** Crawl the current content of the assembled `site` (served under
- *  `rootBase`) and throw, after printing the list, on any broken same-site
- *  link. `origin` is the deployed site's (`https://owner.github.io`): a
- *  link spelled with it under the base is the site's own and is judged
- *  against the artifact; null when the build's layout is not the deployed
- *  one (the docs PR check builds one mount at the root), so such links
- *  stay external. Returns the counts the caller logs. A crawl that judged
- *  nothing is failed-to-look, never link-free. */
+/** `origin` is the deployed site's (`https://owner.github.io`): a link spelled with it under the base is the site's own and is judged against the artifact.
+ *  Null when the build's layout is not the deployed one (the docs PR check builds one mount at the root), so such links stay external. */
 export async function checkSiteLinks(
   site: string,
   rootBase: string,

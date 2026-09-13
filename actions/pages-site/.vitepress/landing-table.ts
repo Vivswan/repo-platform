@@ -15,8 +15,6 @@ import type { CuratedRow } from "./theme/launcher-model.ts";
 
 const LOCALE_ROOT_ROUTE_RE = /^\/(?:([^/]+)\/)?$/;
 
-/** Whether a source-relative path (either side of the rewrite map) serves
- *  at a locale root's own URL. */
 export function isLandingPath(relativePath: string, rewrites: Record<string, string>): boolean {
   const match = LOCALE_ROOT_ROUTE_RE.exec(routeOf(relativePath, rewrites));
   return match !== null && (match[1] === undefined || isLocaleDir(match[1]));

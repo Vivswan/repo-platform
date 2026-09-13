@@ -1,6 +1,4 @@
-// The target-repo report: what the writer did, in Markdown for the PR body
-// and as a JSON summary for the operator. `hold` is decided here alone,
-// from the rows, so no writer can forget to raise it.
+// `hold` is decided here alone, from the rows, so no writer can forget to raise it.
 
 import type { FileClass } from "../../../../actions/plan/files_config.ts";
 import type { MirrorRow } from "./mirrors.ts";
@@ -37,7 +35,6 @@ export interface SyncReport extends SyncOutcome {
   holdReasons: string[];
 }
 
-/** Every reason a human must look before merging. */
 export function holdReasons(outcome: SyncOutcome): string[] {
   const reasons: string[] = [];
   for (const row of outcome.written) {
@@ -76,7 +73,6 @@ const DIFF_CELL_CAP = 4_000_000;
 
 type Op = { kind: " " | "-" | "+"; text: string };
 
-/** Line operations turning `a` into `b` (longest common subsequence). */
 function diffOps(a: string[], b: string[]): Op[] {
   const table: Uint32Array[] = new Array(a.length + 1);
   for (let i = a.length; i >= 0; i--) {
@@ -105,9 +101,7 @@ function diffOps(a: string[], b: string[]): Op[] {
   return ops;
 }
 
-/** A unified diff of `before` to `after`, hunk-grouped with three lines of
- *  context and capped at `cap` lines (the PR body has a size limit and the
- *  texts are target content). */
+/** Capped: the PR body has a size limit and the texts are target content. */
 export function unifiedDiff(
   path: string,
   before: string,
@@ -178,8 +172,6 @@ function table(header: string[], rows: string[][]): string {
   return [line(header), line(header.map(() => "---")), ...rows.map(line)].join("\n");
 }
 
-/** The Markdown report: header, Written, and each further section only
- *  when it has rows. */
 export function renderReport(report: SyncReport): string {
   const parts = [
     "## Sync report",

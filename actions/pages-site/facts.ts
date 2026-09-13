@@ -15,8 +15,6 @@ export interface ProjectFacts {
   /** The docs tree the pages render from, repo-relative: the prefix that
    *  turns a page's staged path into its repository path. */
   docsDir: string;
-  /** Which commit this tier was built from: the default branch for HEAD
-   *  tiers, the tag for tag tiers, and the commit it resolved to. */
   provenance: { label: string; sha: string; url: string };
   /** 0..5, a stable hash of the repository name: the theme's per-repo
    *  accent, so a repository keeps its color across theme updates. */
@@ -29,13 +27,11 @@ export interface FactsInput {
   defaultBranch: string;
   ref: string;
   sha: string;
-  /** The GitHub server the repository lives on, e.g. https://github.com. */
   serverUrl: string;
 }
 
 type Identity = Pick<ProjectFacts, "description" | "homepage" | "topics">;
 
-/** The file's content at the tier's ref, or null when absent. */
 export type FactsReader = (path: string) => string | null;
 
 const SETTINGS_FILE = ".github/settings.yml";
@@ -69,8 +65,7 @@ const TOOLCHAIN_FILES: { name: string; path: string; version: (text: string) => 
     { name: "Rust", path: "rust-toolchain.toml", version: rustChannel },
   ];
 
-/** A one-line version pin (.bun-version and kin), with the optional
- *  leading v dropped so every toolchain reads the same way. */
+/** The leading v is dropped so every toolchain reads the same way. */
 function pinnedVersion(text: string): string | null {
   const line = text
     .split("\n")

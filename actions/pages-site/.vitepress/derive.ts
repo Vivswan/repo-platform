@@ -1,17 +1,11 @@
-// Derives the VitePress site structure from the caller repository's docs
-// tree alone: the fleet's repos carry ONLY markdown, so the routes, the
-// locales, and what a page says about itself (its title, its sidebar
-// order and group) come from the files, never from a per-repo config.
-// sidebar.ts builds the sidebar on these primitives. Imported by
-// config.mts at build time and by the action's tests directly.
+// The fleet's repositories carry only markdown, so the routes, the locales, and what a page says about itself come from the files, never from a per-repo config.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import matter from "gray-matter";
 import { isLocaleDir, isUnwalkedEntry, owningRoot } from "./conventions.ts";
 
-/** The locale directories present in a walked file list: top-level
- *  convention-named directories that actually carry markdown, sorted. */
+/** Only directories that carry markdown count. */
 export function detectLocales(files: string[]): string[] {
   return [
     ...new Set(
@@ -23,8 +17,6 @@ export function detectLocales(files: string[]): string[] {
   ].sort();
 }
 
-/** Markdown files under `srcDir` as sorted relative paths, skipping the
- *  unwalked entries. */
 export function walkMarkdown(srcDir: string, prefix = ""): string[] {
   const files: string[] = [];
   for (const name of readdirSync(join(srcDir, prefix)).sort()) {
@@ -39,9 +31,7 @@ export function walkMarkdown(srcDir: string, prefix = ""): string[] {
   return files;
 }
 
-/** Whether a path is a regular file: false for whatever makes a read fail
- *  (a missing entry, a directory, a path through a file). VitePress's
- *  include directive expands only such a path. */
+/** VitePress's include directive expands only a regular file, so every stat failure is false. */
 export function isRegularFile(path: string): boolean {
   try {
     return statSync(path).isFile();
@@ -50,9 +40,6 @@ export function isRegularFile(path: string): boolean {
   }
 }
 
-/** The include roots' page files among `files`: `<mount>/<child>/<page>`,
- *  one per child directory of the root owning the file (owningRoot). These
- *  are the exact paths deriveRewrites serves at the directory URL. */
 export function includeIndexPages(
   files: string[],
   includes: { mount: string; page: string }[],
@@ -65,12 +52,7 @@ export function includeIndexPages(
   });
 }
 
-/** Route rewrites to each directory's index.md, one exact entry per source:
- *  the `indexPages` (an include root's pages, includeIndexPages) first, then
- *  every README.md (the fleet convention), so a docs tree indexed by READMEs
- *  serves each landing page at the directory URL. A directory that carries
- *  BOTH keeps its index.md and the README stays at its own route; beside an
- *  index page the README stays at its own route too. */
+/** An existing index.md, or an include page that already claimed it, wins; the README then keeps its own route. */
 export function deriveRewrites(
   files: string[],
   indexPages: readonly string[] = [],
@@ -93,13 +75,8 @@ export function deriveRewrites(
   return rewrites;
 }
 
-/** What a page's markdown says about itself, read once at config time.
- *  `order` and `group` are the sidebar's frontmatter keys (docs/site.md
- *  documents the contract); null when the page carries none. */
+/** `order` and `group` are the sidebar's frontmatter keys (docs/site.md). */
 export interface PageMeta {
-  /** The `title` frontmatter, else the first `# ` heading, else the `name`
-   *  frontmatter (a SKILL.md names itself there), else the filename
-   *  humanized (dashes and underscores to spaces). */
   title: string;
   order: number | null;
   group: string | null;
@@ -109,8 +86,7 @@ export function readPage(srcDir: string, file: string): PageMeta {
   return pageMeta(file, readFileSync(join(srcDir, file), "utf-8"));
 }
 
-/** `pageMeta` on a source string; `file` names the page in the error a
- *  malformed key raises, so a fleet repo's docs PR check points at it. */
+/** `file` names the page in the error a malformed key raises, so a fleet repository's docs PR check points at it. */
 export function pageMeta(file: string, source: string): PageMeta {
   const { data, content } = matter(source);
   const heading = /^#\s+(.+?)\s*$/m.exec(content)?.[1] ?? null;
@@ -121,17 +97,12 @@ export function pageMeta(file: string, source: string): PageMeta {
   };
 }
 
-/** The title of a page with neither a `title` key nor an h1: its `name`
- *  frontmatter when that is a non-blank string (trimmed), else its
- *  filename humanized. The sidebar row (pageMeta) and the document title
- *  (config.mts's transformPageData) both read it, so they agree. */
+/** The sidebar row (pageMeta) and the document title (config.mts transformPageData) both read it, so they agree. */
 export function untitledPageTitle(file: string, name: unknown): string {
   const stem = file.split("/").pop()?.replace(/\.md$/, "") ?? file;
   return text(name) ?? stem.replace(/[-_]/g, " ");
 }
 
-/** A frontmatter string that says something: trimmed, or null when the
- *  key is absent, not a string, or blank. */
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
@@ -154,11 +125,7 @@ function frontmatterGroup(file: string, value: unknown): string | null {
   return value.trim();
 }
 
-/** The route a file SERVES at, which is the rewrite map's business: the
- *  rewritten path decides, and only an exact `index.md` basename is a
- *  directory index (a `search-index.md` is an ordinary page, and a README
- *  beside a real index.md keeps its own route - the rewrite map skipped
- *  it, so the sidebar must not point both at the directory). */
+/** Only an exact `index.md` basename is a directory index: `search-index.md` is an ordinary page, and a README the rewrite map skipped keeps its own route so the sidebar never points two files at one directory. */
 export function routeOf(file: string, rewrites: Record<string, string>): string {
   const effective = rewrites[file] ?? file;
   const segments = effective.split("/");

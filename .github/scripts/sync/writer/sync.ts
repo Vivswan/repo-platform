@@ -1,17 +1,5 @@
 #!/usr/bin/env bun
-// The copy writer's entry point: files.yml plus the files/ tree in, one
-// target checkout rewritten, the Markdown report on stdout and a JSON
-// summary beside it. Managed content is copied whole, split regions are
-// copied between the repository-owned halves, starters are copied once;
-// the one rendered entry, the settings document, folds the settings layers
-// with the repository's overlay (settings_entry.ts). Exit 0 whether or not
-// the report holds the PR; a nonzero exit is a data or environment error
-// the operator must fix.
-//
-// Usage:
-//   bun sync.ts --files <files.yml> --tree <files dir> --target <checkout>
-//     --build <full sha> --repository <owner/name> --private <true|false>
-//     [--summary <path>]
+// Exit 0 whether or not the report holds the PR; a nonzero exit is a data or environment error the operator must fix.
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -71,27 +59,18 @@ export interface SyncOptions {
 }
 
 interface Rendered {
-  /** What the entry writes: the whole file, the region, or the link
-   *  target. A starter's is rendered inside its writer, only when it
-   *  creates the file, so it is empty here (nothing reads it: no mirror
-   *  copies a starter and no diff is reported for one). */
+  /** A starter's content is rendered inside its writer only on creation, so it is empty here; nothing reads it, since no mirror copies a starter and no diff is reported for one. */
   content: string;
   record: ManifestRecord;
   write: (recorded: string | null) => WriteOutcome | { missing: string[] };
 }
 
-/** What one run renders every entry against: the registration and the
- *  slug the operator passed, beside the placeholder values. */
 interface Facts {
   registration: Registration;
   slug: RepositorySlug;
   values: PlaceholderValues;
 }
 
-/** The entry's content and record, and its class writer bound to them; or
- *  the placeholders its text needs that have no value, in which case
- *  nothing is rendered (an empty value is never written); or the reason a
- *  rendered entry holds. */
 function render(
   options: SyncOptions,
   config: WriterFilesConfig,
@@ -159,7 +138,6 @@ function render(
   };
 }
 
-/** Whether what sits at the path is already exactly what the entry writes. */
 function alreadyWritten(found: Found, entry: FileEntry, content: string): boolean {
   if (entry.class === "link") {
     return found.kind === "link" && found.target.equals(Buffer.from(content, "utf-8"));
@@ -176,13 +154,8 @@ interface Written {
   detail?: string;
 }
 
-/** One entry written by its class, or the placeholders it lacks a value
- *  for (nothing is written then). A path whose record the writer reads
- *  under another class than the entry declares is a class flip: the
- *  recorded content is the platform's own previous write, so it is
- *  replaced whole when it still matches its record; otherwise the record
- *  is stale and the file is written as an unrecorded one (a flip to
- *  starter hands the file over and is never judged). */
+/** A record under another class than the entry declares is a class flip: the file is the platform's own previous write, so it is replaced whole while it still matches its record;
+ *  otherwise the record is stale and the file is judged unrecorded. A flip to starter hands the file over and is never judged. */
 function writeEntry(
   options: SyncOptions,
   config: WriterFilesConfig,
@@ -255,10 +228,7 @@ export function runSync(options: SyncOptions): SyncReport {
   const entries = selectEntries(config, { modules: selected, private: options.private });
   const entryPaths = new Set(entries.map((entry) => entry.path));
   const owned = ownedPaths(config, { modules: selected, private: options.private });
-  // Every path files.yml declares today, for any selection. A stale record
-  // at none of these and at no retired path is one the current files.yml
-  // cannot account for (a hand edit, or an entry deleted with no `retired`
-  // row), so its retirement is noted, which holds the PR.
+  // A stale record at no declared and no retired path is one files.yml cannot account for (a hand edit, or an entry deleted with no `retired` row), so its retirement is noted, which holds the PR.
   const declared = new Set(config.files.map((entry) => entry.path));
   // Manifest keys are target-repo content: a stale record is retired only
   // when its path is one the writer could have written.

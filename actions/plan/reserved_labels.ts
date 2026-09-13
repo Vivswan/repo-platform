@@ -1,20 +1,12 @@
-// The label roster every settings layer can emit, derived from files.yml and the files/ tree beside it. Two consumers
-// share this one reading so they cannot disagree on a name: the plan action refuses a tracking label naming one (a green
-// night would close whatever issues carry it), and the writer's settings render keeps the same roster out of the
-// tracking tuples. Which layers exist is DECLARED, never discovered: a missing declared layer fails here, since reading
-// past it would silently shrink the roster.
+// The plan action and the writer's settings render share this one reading, so they cannot disagree on a name. Which layers exist is declared, never discovered: a missing declared layer fails here, since reading past it would silently shrink the roster.
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { type FilesConfig, SOURCE_PREFIX } from "./files_config.ts";
 
-/** What the roster is derived from: the module data in canonical order and
- *  the `settings` block, which a data file with no rendered entry lacks. */
 export type LayerSources = Pick<FilesConfig, "modules" | "settings">;
 
-/** Every layer file the config declares, tree-relative and in stack
- *  order; none when the settings block is absent. */
 export function declaredLayers(config: LayerSources): string[] {
   const { settings } = config;
   if (settings === null) return [];

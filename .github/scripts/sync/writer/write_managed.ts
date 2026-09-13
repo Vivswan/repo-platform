@@ -1,8 +1,4 @@
-// Managed files are written whole. A local edit (content that is neither
-// the new content nor what the writer last recorded) is replaced anyway and
-// reported with the text it replaced, so the report can show the diff and
-// hold the PR for a human. A symbolic link at the path is held: the writer
-// never reads through it and has no record of writing it as a file.
+// A local edit is replaced anyway and returned as text, so the report shows the diff and holds the PR. A link at the path is held: the writer never reads through one and has no record of writing it as a file.
 
 import { sha256 } from "./manifest.ts";
 import { probe, writeFile } from "./target_files.ts";

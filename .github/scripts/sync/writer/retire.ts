@@ -1,15 +1,3 @@
-// Retirement: a path files.yml no longer writes leaves the repository only
-// when the file is still exactly what the writer recorded; anything else
-// recorded is held for a human, and an unrecorded file there is not the
-// platform's to retire. A split file whose region is the recorded write but
-// which carries repository-owned content around it is handed over once: the
-// region and its marker lines go, the rest stays as a plain file joined
-// without the blank lines the region left behind, and the record leaves
-// with the region, so the next run has no claim on the path.
-// A `moved_to` path is `git mv`ed while its new home is absent, and its
-// record travels with it so the following write sees the moved file as the
-// writer's own.
-
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { RetiredEntry } from "../../../../actions/plan/files_config.ts";
@@ -26,11 +14,9 @@ export interface RetireRow {
   detail: string;
 }
 
-/** What sits at a path against the writer's last write.
- *  `unrecorded`: no record, or one the writer does not read (manifest.ts readRecord), so nothing at the path is its to judge.
- *  `blank`: a split whose region is the last write with only blank lines around it, so nothing is worth handing over.
- *  A symbolic link is judged by its target string, never read through, under a `link` record or a `kind: symlink`
- *  mirror record; under any other record it is foreign, as the mirror writer reads it. */
+/** unrecorded -> no record, or one readRecord refuses, so nothing at the path is the writer's to judge
+ *  blank      -> a split whose region is the last write with only blank lines around it, so nothing is worth handing over
+ *  A symbolic link is judged by its target string, never read through; under a record that is not a link or a symlink mirror it is foreign, as mirrors.ts reads it. */
 export type Judgement =
   | { verdict: "unrecorded" }
   | { verdict: "own" }
@@ -44,10 +30,9 @@ const foreign = (reason: string): Judgement => ({ verdict: "foreign", reason });
 const lines = (text: string) => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 const blank = (line: string) => line.trim() === "";
 
-/** The halves around a removed region as one plain file.
- *  The region usually opened the file, so the blank lines the tail began with would lead a headless file: they go.
- *  Blank lines that framed a mid-file region merge into one, and into none when content stands on one side only.
- *  Every other byte is the repository's own and stays. */
+/** The region usually opened the file, so blank lines that would lead a headless file go; every other byte is the repository's own and stays.
+ *    content on both sides of the region -> the blank lines that framed it merge into one
+ *    content on one side only            -> none */
 export function joinHalves(above: string, below: string): string {
   const head = lines(above);
   const tail = lines(below);
@@ -97,10 +82,7 @@ export function judge(target: string, path: string, records: Records): Judgement
     : foreign("the content differs from the last write");
 }
 
-/** Why what sits at `path` may not be replaced whole, or null when it is
- *  exactly the writer's last write. For a class flip, which rewrites the
- *  whole file, repository-owned content around a split region is as much
- *  a reason as any other; blank lines around it are not. */
+/** A class flip rewrites the whole file, so repository-owned content around a split region is as much a reason as any other; blank lines around it are not. */
 export function keepReason(target: string, path: string, records: Records): string | null {
   const judgement = judge(target, path, records);
   if (judgement.verdict === "own" || judgement.verdict === "blank") return null;
@@ -111,8 +93,7 @@ export function keepReason(target: string, path: string, records: Records): stri
   return judgement.reason;
 }
 
-/** `git mv` inside the target, so the rename lands in the sync commit as
- *  one; the destination's directory is made first. */
+/** `git mv`, so the rename lands in the sync commit as one. */
 function gitMove(target: string, from: string, to: string): void {
   insideTarget(target, from);
   mkdirSync(dirname(insideTarget(target, to)), { recursive: true });
@@ -124,14 +105,7 @@ function gitMove(target: string, from: string, to: string): void {
   }
 }
 
-/** Retires the listed entries and the `stale` recorded paths (written by an
- *  earlier sync, selected by nothing now). A `moved_to` whose destination
- *  is not among the `selected` paths is a plain retirement: the platform no
- *  longer wants the file here at all. Records move with a moved file and
- *  leave with a deleted one and with a removed region. Rows are emitted
- *  only for files present; a move to a selected home happens whatever the
- *  record says, and any other unrecorded file is not the platform's to
- *  retire and gets no row. */
+/** `stale`: paths an earlier sync recorded that nothing selects now. */
 export function retire(
   target: string,
   entries: RetiredEntry[],

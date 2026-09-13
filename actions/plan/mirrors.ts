@@ -1,7 +1,4 @@
-// The mirror rules files.yml alone decides, judged twice: by the plan on
-// every PR of a managed repository (so a declaration that can never be
-// written never lands) and by the sync writer before it copies anything.
-// The writer adds the rules only the checkout can answer (mirrors.ts).
+// Judged twice: by the plan on every PR of a managed repository, so a declaration that can never be written never lands, and by the sync writer before it copies anything.
 
 import { dirname } from "node:path";
 import { MANIFEST_NAME, REGISTRATION_PATH } from "../shared/platform.ts";
@@ -16,11 +13,9 @@ export type MirrorKind = Mirror["kind"];
 /** The paths a declaration claims; its kind never changes where a target may land. */
 export type Declared = Pick<Mirror, "source" | "targets">;
 
-/** What files.yml claims in one repository. */
 export interface OwnedPaths {
   /** The managed and split entry paths: the only files a mirror may copy. */
   sources: ReadonlySet<string>;
-  /** Every selected entry path, the manifest included. */
   writes: ReadonlySet<string>;
   retires: ReadonlySet<string>;
   /** Every recorded path the run retires as no longer selected: the
@@ -122,10 +117,7 @@ export function patternMatches(pattern: string, path: string): boolean {
   );
 }
 
-/** Every declared target files.yml alone proves unwritable, each with its
- *  reason (docs/sync.md lists the rules). A target the grammar refuses is
- *  judged by that alone: the nesting and matching walks need a clean
- *  relative path. */
+/** docs/sync.md lists the rules. A target the grammar refuses is judged by that alone: the nesting and matching walks need a clean relative path. */
 export function mirrorDeclarationProblems(
   mirrors: readonly Declared[],
   owned: OwnedPaths,
