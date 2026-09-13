@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { SYNC_IDENTITY } from "../../.github/scripts/shared/git_identity.ts";
 import { extractUsesPins } from "../../scripts/check/ssot/delivery_pins.ts";
-import { AUTOMATION_PR_ACTION } from "../../scripts/check/ssot/literal_anchors.ts";
 
 interface Step {
   name?: string;
@@ -25,6 +24,7 @@ interface Workflow {
 }
 
 const ROOT = join(import.meta.dir, "../..");
+const AUTOMATION_PR_ACTION = "peter-evans/create-pull-request";
 const TOKEN = "${{ secrets.REPO_PLATFORM_TOKEN || github.token }}";
 const SIGNATURE = `${SYNC_IDENTITY.name} <${SYNC_IDENTITY.email}>`;
 

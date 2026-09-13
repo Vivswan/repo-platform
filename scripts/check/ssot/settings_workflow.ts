@@ -14,11 +14,23 @@ import {
   loadOverrideLayer,
   sectionEntries,
 } from "../../../.github/scripts/sync/writer/settings_layers.ts";
-import type { Mismatch } from "./comparison.ts";
+import { canonical, type Mismatch } from "./comparison.ts";
 import { asRecord, REPO_ROOT, read } from "./inputs.ts";
 import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
 import type { Rule } from "./rule_roster.ts";
-import { canonical, keyedMatrix, RESOLVER_ENV } from "./sync_operator.ts";
+
+/** The `include` word in the workflow, the rows from the plan's output alone: a literal could carry slugs, and
+ *  the word in the output could match a masked name. */
+const keyedMatrix = (planJob: string) => ({
+  include: `\${{ fromJSON(needs.${planJob}.outputs.matrix) }}`,
+});
+/** The row's key, what keyed it, and the listing it resolves against. */
+const RESOLVER_ENV = {
+  ROW_KEY: "${{ matrix.key }}",
+  PAT: "${{ secrets.REPO_PLATFORM_TOKEN }}",
+  GH_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
+  OWNER: "${{ github.repository_owner }}",
+};
 
 export interface WorkflowStep {
   id?: string;
@@ -445,12 +457,12 @@ export function settingsApplyInputMismatches(text: string): Mismatch[] {
     });
     if (resolverAt === -1) return mismatches;
   }
-  const resolver = applySteps[resolverAt];
-  if (canonical(resolver.env) !== canonical(RESOLVER_ENV)) {
+  const resolverEnv = applySteps[resolverAt].env ?? {};
+  if (canonical(resolverEnv) !== canonical(RESOLVER_ENV)) {
     mismatches.push({
       file: rel,
       expected: `the resolver step's env exactly ${JSON.stringify(RESOLVER_ENV)} (the row's key, what keyed it, and the listing it resolves against)`,
-      got: canonical(resolver.env),
+      got: canonical(resolverEnv),
     });
   }
   // The runner prints step env into the public log; the name rides GITHUB_ENV.

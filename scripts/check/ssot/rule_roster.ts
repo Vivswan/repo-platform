@@ -45,7 +45,6 @@ export const RULE_ROSTER = [
   "dependabot-label-tuples",
   "tracking-label-regex",
   "pr-title-workflow",
-  "pins-and-identities",
   "docs-constants",
   "owner-slug",
   "platform-name-once",
@@ -57,7 +56,6 @@ export const RULE_ROSTER = [
   "no-tests-under-actions",
   "stream-write-sync",
   "ci-harness-imports",
-  "operator-verdict-only",
   "site-config-parity",
   "root-twin-parity",
 ] as const;

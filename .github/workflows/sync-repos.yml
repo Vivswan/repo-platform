@@ -143,10 +143,9 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: sync (row ${{ matrix.row }})
     runs-on: ubuntu-latest
-    # At least the budget row_budget.ts sums from the steps' bounds (the
-    # operator-verdict-only rule judges it): every bound a step can hit
-    # before deliver.ts files a failure counts, since a row the runner kills
-    # at its timeout files nothing.
+    # Every bound a step can hit before deliver.ts files a failure counts
+    # (the listing, the target clone, the writer's own timeout, the delivery
+    # calls): a row the runner kills at its timeout files nothing.
     timeout-minutes: 65
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
