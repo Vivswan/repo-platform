@@ -1,6 +1,9 @@
 // The gate judges only what its `needs` list names, and GitHub has no "needs every job", so a gating job dropped from
 // the list keeps running and gates nothing; the list is compared with the job set here. The check's NAME is GitHub's
 // literal surface too: a renamed gate job leaves branch protection waiting forever while every job stays green.
+//
+//   name: or strategy: on the gate  -> the check run posts under that name or a matrix suffix, never as the required context
+//   if: other than always()         -> a failed dependency SKIPS the gate, and GitHub reads a skipped required check as satisfied
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -11,6 +14,9 @@ import { PLATFORM_OWNER } from "../../actions/shared/platform.ts";
 
 interface Job {
   needs?: string | string[];
+  if?: string;
+  name?: string;
+  strategy?: unknown;
 }
 interface Ruleset {
   name: string;
@@ -36,15 +42,22 @@ test("ci.yml's gate needs exactly the jobs that do not ride behind it", () => {
   expect(needsOf(ci[CHECK_NAME]).sort()).toEqual(gating.sort());
 });
 
-test("the check is spelled CHECK_NAME at each GitHub surface: both ci.yml job ids and the override ruleset's required context", () => {
+test("both gate jobs post the check as CHECK_NAME, fail closed, and the override ruleset requires that context", () => {
   const { rulesets } = parseYaml(read("files/settings/override.yml")) as { rulesets: Ruleset[] };
   const contexts = rulesets
     .find((ruleset) => ruleset.name === "main")
     ?.rules.find((rule) => rule.type === "required_status_checks")
     ?.parameters?.required_status_checks?.map((check) => check.context);
-  expect({ ci: CHECK_NAME in ci, skeleton: CHECK_NAME in skeleton, contexts }).toEqual({
-    ci: true,
-    skeleton: true,
+  const gate = (jobs: Record<string, Job>) => {
+    const job = jobs[CHECK_NAME];
+    return job === undefined
+      ? "no such job"
+      : { name: job.name, strategy: job.strategy, if: String(job.if ?? "").trim() };
+  };
+  const posted = { name: undefined, strategy: undefined, if: "always()" };
+  expect({ ci: gate(ci), skeleton: gate(skeleton), contexts }).toEqual({
+    ci: posted,
+    skeleton: posted,
     contexts: [CHECK_NAME],
   });
 });
