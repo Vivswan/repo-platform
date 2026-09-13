@@ -477,6 +477,7 @@ describe("the script", () => {
         PATH: process.env.PATH ?? "",
         HOME: process.env.HOME,
         ...env,
+        LABEL: "fuzz-nightly",
         RUNNER_TEMP: root,
         GITHUB_OUTPUT: outputs,
         ...vars,
@@ -554,6 +555,7 @@ describe("the script", () => {
       vars: { MODE: "comment" },
       error: "unknown MODE 'comment' (expected report or resolve)",
     },
+    { vars: { MODE: "resolve", LABEL: undefined }, error: "the label input is required" },
     { vars: { MODE: "resolve" }, error: "the stream input is required" },
     {
       vars: { MODE: "resolve", STREAM: "ci" },

@@ -77,14 +77,16 @@ runs:
       with:
         pin: ${{ github.action_path }}/.bun-version
 
-    # The report tuple rides along for the script's requirement check: a
-    # composite's `required: true` only documents, and the later steps would
-    # otherwise create a label with an empty color or an issue with no title.
+    # The label and the report tuple ride along for the script's requirement
+    # check: a composite's `required: true` only documents, and the later
+    # steps would otherwise list issues under an empty label, create a label
+    # with an empty color, or file an issue with no title.
     - name: Assemble the issue body or the close comment
       id: body
       shell: bash
       env:
         MODE: ${{ inputs.mode }}
+        LABEL: ${{ inputs.label }}
         ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
         ARTIFACT_NAME: ${{ inputs.artifact-name }}
         STREAM: ${{ inputs.stream }}

@@ -257,7 +257,7 @@ function requireInput(variable: string, input: string): string {
   return value;
 }
 
-/** Consumed by action.yml's label and issue steps, checked here before anything is filed. */
+/** Consumed by action.yml's label and issue steps like the label itself, checked here before anything is filed. */
 const REPORT_INPUTS = [
   ["TITLE", "title"],
   ["LABEL_COLOR", "label-color"],
@@ -269,6 +269,7 @@ function main(): void {
   if (mode !== "report" && mode !== "resolve") {
     throw new Error(`unknown MODE '${mode}' (expected report or resolve)`);
   }
+  requireInput("LABEL", "label");
   const stream = requireInput("STREAM", "stream");
   if (stream !== "fuzz" && stream !== "generic") {
     throw new Error(`unknown STREAM '${stream}' (expected fuzz or generic)`);
