@@ -27,7 +27,7 @@ const ACTIONS: Record<string, Record<string, Input>> = {
   semgrep: {},
   trivy: { mode: { required: false, default: "blocking" } },
   typos: {},
-  "validate-commit-names": {},
+  "validate-commit-names": { title: { required: false, default: "" } },
   yamllint: {},
   "validate-managed-files": {
     "github-token": { required: false, default: "${{ github.token }}" },
