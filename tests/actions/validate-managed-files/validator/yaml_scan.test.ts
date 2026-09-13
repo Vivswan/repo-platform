@@ -134,8 +134,8 @@ describe("conflict markers", () => {
     });
     expect(exitCode).toBe(1);
     expect(stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
-      "error: docs/notes.md: carries conflict-marker lines ('<<<<<<< ', '=======', or '>>>>>>> ' " +
-        "opening a line) - resolve each conflict block, or move an example so no line opens with a marker",
+      "error: docs/notes.md: carries conflict-marker lines (a line opening with '<<<<<<< ' or '>>>>>>> ', " +
+        "or reading '=======' whole) - resolve each conflict block, or move an example so no line reads as a marker",
     ]);
   });
 });

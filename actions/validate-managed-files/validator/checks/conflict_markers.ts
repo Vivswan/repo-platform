@@ -44,8 +44,8 @@ export function checkConflictMarkers(ctx: Context): Finding[] {
     if (hasConflictMarker(content)) {
       findings.push(
         error(
-          `${rel}: carries conflict-marker lines ('<<<<<<< ', '=======', or '>>>>>>> ' opening a line) - ` +
-            "resolve each conflict block, or move an example so no line opens with a marker",
+          `${rel}: carries conflict-marker lines (a line opening with '<<<<<<< ' or '>>>>>>> ', or reading ` +
+            "'=======' whole) - resolve each conflict block, or move an example so no line reads as a marker",
         ),
       );
     }
