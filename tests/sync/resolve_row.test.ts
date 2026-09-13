@@ -9,6 +9,7 @@ import { supersededNotice } from "../../.github/scripts/fleet/newest_main.ts";
 import { MIN_MASKED_NAME, maskForms } from "../../.github/scripts/shared/mask.ts";
 import { matrixRows, resolveRow, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { STUB_GIT_FAIL_REFUSAL, writeStubGit } from "../shared/stub_git";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -108,23 +109,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
       ].join("\n"),
       { mode: 0o755 },
     );
-    // main's tip as the stub `git` answers ls-remote: STUB_MAIN_TIP (the run's commit unless a case
-    // moves it), or a dead remote.
-    writeFileSync(
-      join(bin, "git"),
-      [
-        "#!/usr/bin/env bash",
-        'echo "git $*" >> "$STUB_CALLS"',
-        '[ "$1" = "ls-remote" ] || { echo "stub git: unexpected $*" >&2; exit 64; }',
-        'if [ -n "$STUB_GIT_FAIL" ]; then',
-        "  echo \"fatal: unable to access 'origin': Could not resolve host\" >&2",
-        "  exit 128",
-        "fi",
-        'printf "%s\\trefs/heads/main\\n" "$STUB_MAIN_TIP"',
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
-    );
+    writeStubGit(bin);
   });
 
   /** The workflow's env for the step; a case sets a variable to undefined to leave it unset. */
@@ -288,11 +273,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
           {
             reason: "a tip that cannot be read fails the row, never guessing",
             env: { ROW_KEY: keyOf(HIDDEN), STUB_GIT_FAIL: "1" },
-            outcome: refused(
-              1,
-              "git ls-remote could not answer (exit 128); refusing to guess: fatal: unable to access 'origin': Could not resolve host",
-              [TIP_READ],
-            ),
+            outcome: refused(1, STUB_GIT_FAIL_REFUSAL, [TIP_READ]),
           },
           {
             reason: "no commit to judge newest against",

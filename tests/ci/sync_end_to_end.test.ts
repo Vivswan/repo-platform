@@ -1184,7 +1184,7 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
     const result = spawnSync(target, join(temp.dir("sync-e2e-mirror-summary-"), "summary.json"));
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe(
-      `${error("LICENSE.md", "linked/LICENSE.md", "the target's ancestor 'linked' is a symbolic link")}\n`,
+      `${error("LICENSE.md", "linked/LICENSE.md", "the target sits under 'linked', a symbolic link")}\n`,
     );
     expect(existsSync(join(target, MANIFEST))).toBe(false);
     expect(readlinkSync(join(target, "skills/a/LICENSE.md"))).toBe("../../LICENSE.md");

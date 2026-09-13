@@ -1,18 +1,21 @@
 import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import {
+  type Claim,
   describeMirrorProblem,
-  literalPrefix,
+  judgeClaims,
   type MirrorKind,
   type MirrorProblem,
   type Mirrors,
   mirrorDeclarationProblems,
   mirrorPathProblem,
-  nestedWith,
   type OwnedPaths,
-  segmentPattern,
 } from "../../../../actions/plan/mirrors.ts";
-import { pathProblem } from "../../../../actions/shared/repo_path.ts";
+import {
+  expandPattern,
+  literalPrefix,
+  type TreeProbe,
+} from "../../../../actions/shared/mirror_pattern.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import {
   type MirrorRecord,
@@ -66,81 +69,34 @@ export function blockedPrefix(root: string, pattern: string): BlockedAncestor | 
   return prefix === "" ? null : blockedAncestor(root, `${prefix}/x`);
 }
 
-/** Probing stops at a symbolic link, or at a prefix pathProblem refuses, and the rest of the pattern rides along literally
- *  (`skills/link/sub/*.md`) so applyMirrors fails the path by its linked ancestor or by name rather than dropping it silently.
- *    link in a literal segment, or in the final segment            -> rides literally
- *    link matched by a `*` directory segment, not provably a file  -> rides literally
- *    link matched by a `*` directory segment, resolving to a file  -> skipped, like a file */
-export function expandPattern(root: string, pattern: string): string[] {
-  if (!pattern.includes("*")) return [pattern];
-  const segments = pattern.split("/");
-  const out: string[] = [];
-  const walk = (prefix: string, index: number, unprobed: boolean): void => {
-    if (index === segments.length) {
-      out.push(prefix);
-      return;
-    }
-    const segment = segments[index];
-    const rel = (name: string) => (prefix === "" ? name : `${prefix}/${name}`);
-    if (!segment.includes("*")) {
-      const next = rel(segment);
-      walk(
-        next,
-        index + 1,
-        unprobed ||
-          pathProblem(next) !== null ||
-          lstatOrNull(join(root, next))?.isSymbolicLink() === true,
-      );
-      return;
-    }
-    if (unprobed) {
-      out.push(rel(segments.slice(index).join("/")));
-      return;
-    }
-    const dir = join(root, prefix);
-    if (lstatOrNull(dir)?.isDirectory() !== true) return;
-    const final = index === segments.length - 1;
-    const names = segmentPattern(segment);
-    for (const name of readdirSync(dir).sort()) {
-      if (!names.test(name)) continue;
-      if (pathProblem(rel(name)) !== null) {
-        walk(rel(name), index + 1, true);
-        continue;
+/** The checkout as the walk sees it. Any failure to look through a link (dangling, a loop, a name too long, an untraversable
+ *  directory) is a no: the link is then failed by name instead of skipped, so no lookup failure aborts the pass. */
+export function checkoutProbe(root: string): TreeProbe {
+  return {
+    standing(path) {
+      const stat = lstatOrNull(join(root, path));
+      if (stat === null) return null;
+      if (stat.isSymbolicLink()) return "symlink";
+      if (stat.isDirectory()) return "directory";
+      return stat.isFile() ? "file" : "other";
+    },
+    linksToFile(path) {
+      try {
+        return statSync(join(root, path)).isFile();
+      } catch {
+        return false;
       }
-      const stat = lstatOrNull(join(dir, name));
-      if (stat === null) continue;
-      if (stat.isSymbolicLink()) {
-        if (final || !linksToFile(join(dir, name))) walk(rel(name), index + 1, true);
-      } else if (final ? stat.isFile() : stat.isDirectory()) {
-        walk(rel(name), index + 1, false);
-      }
-    }
+    },
+    list: (dir) => readdirSync(join(root, dir)).sort(),
   };
-  walk("", 0, false);
-  return out.sort();
-}
-
-/** Any failure to look (dangling, a loop, a name too long, an untraversable directory) is a no: the link is then failed by name
- *  instead of skipped, so no lookup failure aborts the pass. */
-function linksToFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
 }
 
 export function linkTarget(path: string, source: string): string {
   return posix.relative(posix.dirname(path), source);
 }
 
-interface Claim {
-  source: string;
-  path: string;
-  kind: MirrorKind;
-  /** What the target carries once written: the source's bytes, or the link target. */
-  placed: Buffer;
-}
+/** What the target carries once written: the source's bytes, or the link target. */
+type Placement = Claim & { placed: Buffer };
 
 type Standing = { kind: MirrorKind; carries: Buffer } | null;
 
@@ -161,7 +117,8 @@ export function applyMirrors(
   const rows: MirrorRow[] = [];
   const replaced: ReplacedText[] = [];
   const next = new Map<string, MirrorRecord>();
-  const settled = new Map<string, MirrorKind>();
+  const probe = checkoutProbe(target);
+  let settled = new Set<string>();
 
   const standing = (path: string): Standing => {
     const abs = join(target, path);
@@ -187,8 +144,8 @@ export function applyMirrors(
     patterns: { source: string; pattern: string; kind: MirrorKind }[],
     pass: Pass,
     failures: MirrorProblem[],
-  ): Claim[] => {
-    const claims: Claim[] = [];
+  ): Placement[] => {
+    const claims: Placement[] = [];
     for (const { source, pattern, kind } of patterns) {
       const bytes = written.get(source);
       if (bytes === undefined) {
@@ -199,8 +156,9 @@ export function applyMirrors(
         });
         continue;
       }
-      const claim = (path: string): Claim => ({
+      const claim = (path: string): Placement => ({
         source,
+        target: pattern,
         path,
         kind,
         placed: kind === "symlink" ? Buffer.from(linkTarget(path, source)) : bytes,
@@ -218,7 +176,7 @@ export function applyMirrors(
         });
         continue;
       }
-      const paths = expandPattern(target, pattern);
+      const paths = expandPattern(probe, pattern);
       if (paths.length === 0) {
         failures.push({ source, target: pattern, problem: "the pattern matches nothing" });
         continue;
@@ -228,67 +186,34 @@ export function applyMirrors(
     return claims;
   };
 
+  /** What the checkout shows of the path: a literal makes its directories, a glob's path must find them standing. */
   const pathFailure = (path: string, pass: Pass): string | null => {
     const problem = mirrorPathProblem(path, owned);
-    if (problem !== null) return `the target ${problem}`;
+    if (problem !== null) return problem;
     const blocked = blockedAncestor(target, path);
-    if (blocked?.is === "a symbolic link") {
-      return `the target's ancestor '${blocked.dir}' is a symbolic link`;
-    }
+    if (blocked?.is === "a symbolic link") return `sits under '${blocked.dir}', a symbolic link`;
     if (pass === "glob") {
-      if (blocked !== null) return `the target's ancestor '${blocked.dir}' is a file`;
+      if (blocked !== null) return `sits under '${blocked.dir}', a file`;
       if (lstatOrNull(join(target, dirname(path)))?.isDirectory() !== true) {
-        return `the target's directory '${dirname(path)}' does not exist`;
+        return `sits in '${dirname(path)}', a directory that does not exist`;
       }
     }
     const stat = blocked === null ? lstatOrNull(join(target, path)) : null;
     if (stat !== null && !stat.isFile() && !stat.isDirectory() && !stat.isSymbolicLink()) {
-      return "the target is neither a file nor a directory";
+      return "is neither a file nor a directory";
     }
     return null;
   };
 
-  /** Nesting fails both sides, so declaration order never picks the winner. A path an earlier pass settled is this source's own
-   *  (mirrorDeclarationProblems refuses every glob that matches another source's literal) and is current when the kinds agree. */
-  const settle = (claims: Claim[], pass: Pass, failures: MirrorProblem[]): Claim[] => {
-    const claimants = new Map<string, { sources: Set<string>; kinds: Set<MirrorKind> }>();
-    for (const { source, path, kind } of claims) {
-      const prior = settled.get(path);
-      if (prior === kind) continue;
-      const claimant = claimants.get(path) ?? {
-        sources: new Set<string>(),
-        kinds: new Set<MirrorKind>(prior === undefined ? [] : [prior]),
-      };
-      claimant.sources.add(source);
-      claimant.kinds.add(kind);
-      claimants.set(path, claimant);
-    }
-    const every = new Set([...settled.keys(), ...claimants.keys()]);
-    for (const [path, { sources, kinds }] of claimants) {
-      const problems: string[] = [];
-      const [kind] = kinds;
-      const failure = pathFailure(path, pass);
-      if (failure !== null) problems.push(failure);
-      const nested = nestedWith(path, every);
-      if (nested !== null) {
-        problems.push(
-          "under" in nested
-            ? `the target sits under another target '${nested.under}'`
-            : `the target is a path prefix of another target '${nested.above}'`,
-        );
-      }
-      if (sources.size > 1) problems.push("the target is claimed by more than one source");
-      if (kinds.size > 1) problems.push("the target is claimed as a copy and as a symbolic link");
-      for (const source of sources) {
-        for (const problem of problems) failures.push({ source, target: path, problem });
-      }
-      if (problems.length === 0) settled.set(path, kind);
-    }
+  const settle = (claims: Placement[], pass: Pass, failures: MirrorProblem[]): Placement[] => {
+    const judged = judgeClaims(claims, settled, (path) => pathFailure(path, pass));
+    failures.push(...judged.problems);
     if (failures.length > 0) throw new MirrorFailure(failures);
+    settled = judged.settled;
     return claims;
   };
 
-  const apply = (claims: Claim[]) => {
+  const apply = (claims: Placement[]) => {
     for (const { source, path, kind, placed } of claims) {
       next.set(path, mirrorRecord(kind, sha256(placed)));
       let detail = "";

@@ -17,7 +17,7 @@ import {
   applyMirrors,
   blockedAncestor,
   blockedPrefix,
-  expandPattern,
+  checkoutProbe,
   MirrorFailure,
   type MirrorRow,
 } from "../../../.github/scripts/sync/writer/mirrors.ts";
@@ -27,6 +27,7 @@ import {
   type OwnedPaths,
   patternMatches,
 } from "../../../actions/plan/mirrors.ts";
+import { expandPattern } from "../../../actions/shared/mirror_pattern.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -65,6 +66,9 @@ const failure = (source: string, target: string, problem: string): MirrorProblem
   target,
   problem,
 });
+/** A pattern's failure names the declared pattern and the path it expanded to. */
+const expands = (source: string, pattern: string, path: string, verdict: string): MirrorProblem =>
+  failure(source, pattern, `the pattern expands to '${path}', which ${verdict}`);
 
 function failuresOf(run: () => unknown): MirrorProblem[] | null {
   try {
@@ -88,26 +92,29 @@ describe("expandPattern", () => {
     symlinkSync("c.txt", join(root, "skills/l.txt"));
     symlinkSync("loop", join(root, "skills/loop"));
     symlinkSync("../other", join(root, "skills/a/sub"));
-    expect(expandPattern(root, "skills/*/LICENSE.md")).toEqual([
+    expect(expandPattern(checkoutProbe(root), "skills/*/LICENSE.md")).toEqual([
       "skills/a/LICENSE.md",
       "skills/b/LICENSE.md",
       "skills/link/LICENSE.md",
       "skills/loop/LICENSE.md",
     ]);
-    expect(expandPattern(root, "skills/*/*.txt")).toEqual([
+    expect(expandPattern(checkoutProbe(root), "skills/*/*.txt")).toEqual([
       "skills/a/x.txt",
       "skills/b/y.txt",
       "skills/link/*.txt",
       "skills/loop/*.txt",
     ]);
-    expect(expandPattern(root, "skills/*/sub/*.txt")).toEqual([
+    expect(expandPattern(checkoutProbe(root), "skills/*/sub/*.txt")).toEqual([
       "skills/a/sub/*.txt",
       "skills/link/sub/*.txt",
       "skills/loop/sub/*.txt",
     ]);
-    expect(expandPattern(root, "skills/*.txt")).toEqual(["skills/c.txt", "skills/l.txt"]);
-    expect(expandPattern(root, "plain/path.md")).toEqual(["plain/path.md"]);
-    expect(expandPattern(root, "missing/*/f")).toEqual([]);
+    expect(expandPattern(checkoutProbe(root), "skills/*.txt")).toEqual([
+      "skills/c.txt",
+      "skills/l.txt",
+    ]);
+    expect(expandPattern(checkoutProbe(root), "plain/path.md")).toEqual(["plain/path.md"]);
+    expect(expandPattern(checkoutProbe(root), "missing/*/f")).toEqual([]);
   });
 });
 
@@ -294,11 +301,7 @@ describe("applyMirrors", () => {
         "copies/HELD.md",
         "the source was held this run, so there is nothing to copy",
       ),
-      failure(
-        "LICENSE.md",
-        "linked/LICENSE.md",
-        "the target's ancestor 'linked' is a symbolic link",
-      ),
+      failure("LICENSE.md", "linked/LICENSE.md", "the target sits under 'linked', a symbolic link"),
     ]);
     expect(existsSync(join(root, "good"))).toBe(false);
     expect(existsSync(join(root, "sub/dir/L.md"))).toBe(false);
@@ -353,8 +356,8 @@ describe("applyMirrors", () => {
     } finally {
       if (denied) chmodSync(join(root, "outside/locked"), 0o755);
     }
-    const linkAbove = (path: string, dir: string) =>
-      failure("A.md", path, `the target's ancestor '${dir}' is a symbolic link`);
+    const linkAbove = (pattern: string, path: string, dir: string) =>
+      expands("A.md", pattern, path, `sits under '${dir}', a symbolic link`);
     const links = [
       ...(denied ? ["skills/denied"] : []),
       "skills/link",
@@ -374,18 +377,18 @@ describe("applyMirrors", () => {
         "skills/*/HELD.md",
         "the source was held this run, so there is nothing to copy",
       ),
-      ...links.map((link) => linkAbove(`${link}/LICENSE.md`, link)),
-      failure(
-        "A.md",
-        "skills/a/nope/LICENSE.md",
-        "the target's directory 'skills/a/nope' does not exist",
+      ...links.map((link) => linkAbove("skills/*/LICENSE.md", `${link}/LICENSE.md`, link)),
+      ...["a", "b"].map((skill) =>
+        expands(
+          "A.md",
+          "skills/*/nope/LICENSE.md",
+          `skills/${skill}/nope/LICENSE.md`,
+          `sits in 'skills/${skill}/nope', a directory that does not exist`,
+        ),
       ),
-      failure(
-        "A.md",
-        "skills/b/nope/LICENSE.md",
-        "the target's directory 'skills/b/nope' does not exist",
+      ...links.map((link) =>
+        linkAbove("skills/*/nope/LICENSE.md", `${link}/nope/LICENSE.md`, link),
       ),
-      ...links.map((link) => linkAbove(`${link}/nope/LICENSE.md`, link)),
     ]);
     expect(existsSync(join(root, "skills/a/LICENSE.md"))).toBe(false);
     expect(existsSync(join(root, "outside/LICENSE.md"))).toBe(false);
@@ -393,14 +396,14 @@ describe("applyMirrors", () => {
     expect(readlinkSync(join(root, "docs/b.md"))).toBe("a.md");
   });
 
-  test("a glob landing on a path nested with a target fails after the literals are written", () => {
-    const root = tree({ "skills/a/README.md": "", "skills/a/COPY.md": "old\n" });
+  test("two globs landing on nested paths only the checkout shows fail before either is written", () => {
+    // A directory the checkout holds where one glob names a file, and the other glob walks into it.
+    const root = tree({ "skills/LICENSE.md/keep": "", "skills/a/COPY.md": "old\n" });
     const failures = failuresOf(() =>
       applyMirrors(
         root,
         [
-          // A literal makes a directory that a glob then names as a file.
-          { source: "A.md", kind: "copy", targets: ["skills/LICENSE.md/x", "*/LICENSE.md"] },
+          { source: "A.md", kind: "copy", targets: ["*/LICENSE.md"] },
           { source: "B.md", kind: "copy", targets: ["skills/*/COPY.md"] },
         ],
         bytes({ "A.md": "A\n", "B.md": "B\n" }),
@@ -409,18 +412,20 @@ describe("applyMirrors", () => {
       ),
     );
     expect(failures).toEqual([
-      failure(
+      expands(
         "A.md",
+        "*/LICENSE.md",
         "skills/LICENSE.md",
-        "the target is a path prefix of another target 'skills/LICENSE.md/x'",
+        "is a path prefix of another target 'skills/LICENSE.md/COPY.md'",
       ),
-      failure(
+      expands(
         "B.md",
+        "skills/*/COPY.md",
         "skills/LICENSE.md/COPY.md",
-        "the target sits under another target 'skills/LICENSE.md'",
+        "sits under another target 'skills/LICENSE.md'",
       ),
     ]);
-    expect(readFileSync(join(root, "skills/LICENSE.md/x"), "utf-8")).toBe("A\n");
+    expect(existsSync(join(root, "skills/LICENSE.md/keep"))).toBe(true);
     expect(readFileSync(join(root, "skills/a/COPY.md"), "utf-8")).toBe("old\n");
     expect(existsSync(join(root, "skills/LICENSE.md/COPY.md"))).toBe(false);
   });
@@ -448,10 +453,12 @@ describe("applyMirrors", () => {
       failure("LICENSE.md", "*.md", "the pattern matches 'AGENTS.md', a path files.yml writes"),
       failure("LICENSE.md", "*.md", "the pattern matches 'LICENSE.md', a path files.yml writes"),
       failure("AGENTS.md", "*.yml", "the pattern matches '.repo-platform.yml', the registration"),
-      failure(
+      failure("LICENSE.md", "skills/a/LICENSE.md", "the target is claimed by more than one source"),
+      expands(
         "AGENTS.md",
         "skills/*/LICENSE.md",
-        "the pattern matches 'skills/a/LICENSE.md', a target of another source",
+        "skills/a/LICENSE.md",
+        "is claimed by more than one source",
       ),
     ]);
     expect(readFileSync(join(root, ".repo-platform.yml"), "utf-8")).toBe("modules: [bun]\n");
@@ -477,7 +484,7 @@ describe("applyMirrors", () => {
         ),
       ),
     );
-    const expanded = expandPattern(root, pattern);
+    const expanded = expandPattern(checkoutProbe(root), pattern);
     expect(expanded.filter((path) => mirrorPathProblem(path, claims) !== null)).toEqual(refused);
     expect(expanded.filter((path) => patternMatches(pattern, path))).toEqual(expanded);
     expect(
@@ -499,11 +506,49 @@ describe("applyMirrors", () => {
       ),
     );
     expect(failures).toEqual([
-      failure("L.md", "skills/a/sub/L.md", "the target's ancestor 'skills/a/sub' is a file"),
-      failure("L.md", "skills/b/sub/L.md", "the target's directory 'skills/b/sub' does not exist"),
+      expands(
+        "L.md",
+        "skills/*/sub/L.md",
+        "skills/a/sub/L.md",
+        "sits under 'skills/a/sub', a file",
+      ),
+      expands(
+        "L.md",
+        "skills/*/sub/L.md",
+        "skills/b/sub/L.md",
+        "sits in 'skills/b/sub', a directory that does not exist",
+      ),
     ]);
     expect(readFileSync(join(root, "skills/a/sub"), "utf-8")).toBe("");
     expect(existsSync(join(root, "skills/b/sub"))).toBe(false);
+  });
+
+  test("a directory whose name carries a `*` nests like any other: two globs meeting there fail before either is written", () => {
+    const root = tree({ "tests/a*/foo/keep": "" });
+    const failures = failuresOf(() =>
+      applyMirrors(
+        root,
+        [{ source: "L.md", kind: "copy", targets: ["tests/*/foo", "tests/a*/*/bar"] }],
+        bytes({ "L.md": "L\n" }),
+        owned(["L.md"]),
+        {},
+      ),
+    );
+    expect(failures).toEqual([
+      expands(
+        "L.md",
+        "tests/*/foo",
+        "tests/a*/foo",
+        "is a path prefix of another target 'tests/a*/foo/bar'",
+      ),
+      expands(
+        "L.md",
+        "tests/a*/*/bar",
+        "tests/a*/foo/bar",
+        "sits under another target 'tests/a*/foo'",
+      ),
+    ]);
+    expect(existsSync(join(root, "tests/a*/foo/keep"))).toBe(true);
   });
 
   test("two globs of different sources landing on one path fail both sides", () => {
@@ -521,8 +566,8 @@ describe("applyMirrors", () => {
       ),
     );
     expect(failures).toEqual([
-      failure("A.md", "skills/a/L.md", "the target is claimed by more than one source"),
-      failure("B.md", "skills/a/L.md", "the target is claimed by more than one source"),
+      expands("A.md", "skills/*/L.md", "skills/a/L.md", "is claimed by more than one source"),
+      expands("B.md", "skills/a/*.md", "skills/a/L.md", "is claimed by more than one source"),
     ]);
     expect(readFileSync(join(root, "skills/a/README.md"), "utf-8")).toBe("");
   });
@@ -585,7 +630,12 @@ describe("applyMirrors", () => {
           "/",
         );
         expect(failures).toEqual([
-          failure("LICENSE.md", rider, "the target is longer than 1024 bytes"),
+          expands(
+            "LICENSE.md",
+            `${Array(levels).fill("*").join("/")}/LICENSE.md`,
+            rider,
+            "is longer than 1024 bytes",
+          ),
         ]);
         expect(readdirSync(join(root, ...Array(4).fill(seg)))).toEqual([seg]);
       } finally {
@@ -756,26 +806,23 @@ describe("applyMirrors with kind symlink", () => {
     expect(readlinkSync(join(root, "adir"))).toBe("L.md");
   });
 
-  test("one path claimed as a copy and as a link fails both claims, in one pass or across the two", () => {
-    const root = tree({ "skills/a/README.md": "" });
+  test("two patterns of different kinds meeting at one file the checkout holds fail both claims: only the tree shows it", () => {
+    const root = tree({ "skills/a/README.md": "", "skills/a/NOTES.md": "" });
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [
-          copy("LICENSE.md", ["skills/a/LICENSE.md", "skills/*/README.md"]),
-          link("LICENSE.md", ["skills/*/LICENSE.md", "skills/a/*.md"]),
-        ],
+        [copy("LICENSE.md", ["skills/*/README.md"]), link("LICENSE.md", ["skills/a/*.md"])],
         bytes({ "LICENSE.md": "L\n" }),
         owned(["LICENSE.md"]),
         {},
       ),
     );
-    const both = "the target is claimed as a copy and as a symbolic link";
+    const both = "is claimed as a copy and as a symbolic link";
     expect(failures).toEqual([
-      failure("LICENSE.md", "skills/a/README.md", both),
-      failure("LICENSE.md", "skills/a/LICENSE.md", both),
+      expands("LICENSE.md", "skills/*/README.md", "skills/a/README.md", both),
+      expands("LICENSE.md", "skills/a/*.md", "skills/a/README.md", both),
     ]);
-    expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("L\n");
     expect(readFileSync(join(root, "skills/a/README.md"), "utf-8")).toBe("");
+    expect(lstatSync(join(root, "skills/a/NOTES.md")).isSymbolicLink()).toBe(false);
   });
 });

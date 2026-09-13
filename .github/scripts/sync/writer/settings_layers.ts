@@ -216,20 +216,6 @@ export function allLayerLabels(config: LayerConfig, tree: string): Label[] {
   return labels;
 }
 
-/** Operator data throughout, so a refusal throws. */
-export function managedSettings(
-  config: LayerConfig,
-  tree: string,
-  selection: Selection,
-): SettingsDoc {
-  const folded = foldSettings(
-    layerPaths(config, selection).map((rel) => loadLayer(join(tree, rel))),
-    "the fleet layers",
-  );
-  if ("refused" in folded) throw new Error(folded.refused);
-  return folded.settings;
-}
-
 export function declaredPrivate(overlay: unknown): boolean | null {
   const repository = isMapping(overlay) ? overlay.repository : null;
   const value = isMapping(repository) ? repository.private : null;
