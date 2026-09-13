@@ -4,7 +4,10 @@ import { describe, expect, test } from "bun:test";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import {
   describeMirrorProblem,
+  guaranteedExpansion,
   literalPrefix,
+  type Mirror,
+  type MirrorKind,
   type MirrorProblem,
   mirrorDeclarationProblems,
   mirrorPathProblem,
@@ -120,7 +123,13 @@ describe("mirrorDeclarationProblems", () => {
   test("a target the grammar refuses is judged by that alone: an absolute path ends the nesting walk", () => {
     expect(
       mirrorDeclarationProblems(
-        [{ source: "LICENSE.md", targets: ["/tmp/LICENSE.md", "/tmp/*/LICENSE.md", "copies/a"] }],
+        [
+          {
+            source: "LICENSE.md",
+            kind: "copy",
+            targets: ["/tmp/LICENSE.md", "/tmp/*/LICENSE.md", "copies/a"],
+          },
+        ],
         OWNED,
       ),
     ).toEqual([
@@ -135,23 +144,241 @@ describe("mirrorDeclarationProblems", () => {
     expect(
       mirrorDeclarationProblems(
         [
-          { source: "LICENSE.md", targets: ["skills/*/LICENSE.md", "skills/a/LICENSE.md"] },
-          { source: "AGENTS.md", targets: ["template/AGENTS.md", "skills/*/AGENTS.md", "*/x"] },
+          {
+            source: "LICENSE.md",
+            kind: "copy",
+            targets: ["skills/*/LICENSE.md", "skills/a/LICENSE.md"],
+          },
+          {
+            source: "AGENTS.md",
+            kind: "copy",
+            targets: ["template/AGENTS.md", "skills/*/AGENTS.md", "*/x"],
+          },
         ],
         OWNED,
       ),
     ).toEqual([]);
   });
 
+  test.each<{ literal: MirrorKind; pattern: MirrorKind; declares: string }>([
+    { literal: "copy", pattern: "symlink", declares: "a copy" },
+    { literal: "symlink", pattern: "copy", declares: "a symbolic link" },
+  ])(
+    "one source claiming a path as a $literal by a literal and as a $pattern by a pattern",
+    ({ literal, pattern, declares }) => {
+      expect(
+        mirrorDeclarationProblems(
+          [
+            { source: "LICENSE.md", kind: literal, targets: ["copies/LICENSE.md"] },
+            { source: "LICENSE.md", kind: pattern, targets: ["copies/*.md"] },
+          ],
+          OWNED,
+        ),
+      ).toEqual([
+        {
+          source: "LICENSE.md",
+          target: "copies/*.md",
+          problem: `the pattern matches 'copies/LICENSE.md', a target the source declares as ${declares}`,
+        },
+      ]);
+    },
+  );
+
+  const L = (kind: MirrorKind, ...targets: string[]) => ({ source: "LICENSE.md", kind, targets });
+  const A = (kind: MirrorKind, ...targets: string[]) => ({ source: "AGENTS.md", kind, targets });
+  const expands = (source: string, target: string, path: string, text: string) => ({
+    source,
+    target,
+    problem: `the pattern expands to '${path}', ${text}`,
+  });
+  test.each<{ reason: string; mirrors: Mirror[]; problems: MirrorProblem[] }>([
+    {
+      reason: "a `*` walking a directory a literal target created reaches a path above that target",
+      mirrors: [L("copy", "tests/shared/stub.ts", "te*/shared")],
+      problems: [
+        expands(
+          "LICENSE.md",
+          "te*/shared",
+          "tests/shared",
+          "which is a path prefix of another target 'tests/shared/stub.ts'",
+        ),
+      ],
+    },
+    {
+      reason: "the riding segments reach a path under the literal target",
+      mirrors: [L("copy", "tests/shared/stub.ts", "tests/shar*/stub.ts/child.md")],
+      problems: [
+        expands(
+          "LICENSE.md",
+          "tests/shar*/stub.ts/child.md",
+          "tests/shared/stub.ts/child.md",
+          "which sits under another target 'tests/shared/stub.ts'",
+        ),
+      ],
+    },
+    {
+      reason: "the riding segments reach a path under one files.yml writes",
+      mirrors: [L("copy", "docs/own.md", "do*/README.md/notes")],
+      problems: [
+        expands(
+          "LICENSE.md",
+          "do*/README.md/notes",
+          "docs/README.md/notes",
+          "which sits under 'docs/README.md', a path files.yml writes",
+        ),
+      ],
+    },
+    {
+      reason: "two sources' patterns reach one path",
+      mirrors: [
+        L("copy", "tests/shared/stub.ts", "tests/*/review.md"),
+        A("copy", "tests/shar*/review.md"),
+      ],
+      problems: [
+        expands(
+          "LICENSE.md",
+          "tests/*/review.md",
+          "tests/shared/review.md",
+          "a path claimed by more than one source",
+        ),
+        expands(
+          "AGENTS.md",
+          "tests/shar*/review.md",
+          "tests/shared/review.md",
+          "a path claimed by more than one source",
+        ),
+      ],
+    },
+    {
+      reason: "one source's patterns of both kinds reach one path",
+      mirrors: [
+        L("copy", "tests/shared/stub.ts", "tests/*/review.md"),
+        L("symlink", "tests/shar*/review.md"),
+      ],
+      problems: [
+        expands(
+          "LICENSE.md",
+          "tests/*/review.md",
+          "tests/shared/review.md",
+          "a path claimed as a copy and as a symbolic link",
+        ),
+        expands(
+          "LICENSE.md",
+          "tests/shar*/review.md",
+          "tests/shared/review.md",
+          "a path claimed as a copy and as a symbolic link",
+        ),
+      ],
+    },
+    {
+      reason: "two expansions nest with each other",
+      mirrors: [A("copy", "tests/shared/stub.ts", "te*/shared/x", "tests/sh*/x/y")],
+      problems: [
+        expands(
+          "AGENTS.md",
+          "te*/shared/x",
+          "tests/shared/x",
+          "which is a path prefix of another target 'tests/shared/x/y'",
+        ),
+        expands(
+          "AGENTS.md",
+          "tests/sh*/x/y",
+          "tests/shared/x/y",
+          "which sits under another target 'tests/shared/x'",
+        ),
+      ],
+    },
+    {
+      reason: "a pattern walking through a linked target rides on verbatim, under that target",
+      mirrors: [L("symlink", "skills/a/link"), L("copy", "skills/*/link/*/COPY.md")],
+      problems: [
+        expands(
+          "LICENSE.md",
+          "skills/*/link/*/COPY.md",
+          "skills/a/link/*/COPY.md",
+          "which sits under another target 'skills/a/link'",
+        ),
+      ],
+    },
+    {
+      reason: "one pattern declared under both kinds is reported once",
+      mirrors: [
+        L("copy", "skills/a/seed.md", "skills/*/COPY.md"),
+        L("symlink", "skills/*/COPY.md"),
+      ],
+      problems: [
+        expands(
+          "LICENSE.md",
+          "skills/*/COPY.md",
+          "skills/a/COPY.md",
+          "a path claimed as a copy and as a symbolic link",
+        ),
+      ],
+    },
+    {
+      reason:
+        "a final `*` never reaches a directory, a `*` before the end never a file, and the source's own literal of its kind is current",
+      mirrors: [L("copy", "tests/shared/stub.ts", "tests/*", "tests/*/stub.ts", "tests/shared/*")],
+      problems: [],
+    },
+  ])("$reason", ({ mirrors, problems }) => {
+    expect(mirrorDeclarationProblems(mirrors, OWNED)).toEqual(problems);
+  });
+
+  const DEEP = Array.from({ length: 4 }, (_, i) => String(i).repeat(250));
+  const LONG_DIRS = DEEP.join("/");
+  test.each<{ pattern: string; paths: string[] }>([
+    // A `*` before the end walks a directory a literal target created; the segments after the last `*` ride along.
+    { pattern: "te*/shared", paths: ["tests/shared"] },
+    { pattern: "tests/*/review.md", paths: ["tests/shared/review.md"] },
+    {
+      pattern: "*/*/stub.ts/child.md",
+      paths: [
+        `${DEEP[0]}/${DEEP[1]}/stub.ts/child.md`,
+        "skills/a/stub.ts/child.md",
+        "tests/shared/stub.ts/child.md",
+      ],
+    },
+    { pattern: "*/x", paths: [`${DEEP[0]}/x`, "docs/x", "skills/x", "tests/x"] },
+    // A final `*` matches a file or a link, so a literal target itself, never a directory; a `*` before the end never a target.
+    { pattern: "tests/shared/*", paths: ["tests/shared/stub.ts"] },
+    { pattern: "skills/a/*", paths: ["skills/a/link"] },
+    { pattern: "tests/*", paths: [] },
+    { pattern: "tests/shared/stub.ts/*", paths: [] },
+    { pattern: "skills/*/*/x", paths: [] },
+    // A literal segment landing on a linked target stops the probing, and the rest rides verbatim; on a copy, the walk ends.
+    { pattern: "skills/*/link/*/COPY.md", paths: ["skills/a/link/*/COPY.md"] },
+    { pattern: "tests/*/stub.ts/*/COPY.md", paths: [] },
+    { pattern: "skills/*/link/COPY.md", paths: ["skills/a/link/COPY.md"] },
+    // A literal segment the grammar refuses (here a path over 1024 bytes) stops the probing the same way.
+    { pattern: `*/*/*/*/${"e".repeat(30)}/*/x`, paths: [`${LONG_DIRS}/${"e".repeat(30)}/*/x`] },
+    // The literal segments must agree with the literal's own.
+    { pattern: "test/*/review.md", paths: [] },
+    { pattern: "docs/*.md", paths: ["docs/own.md"] },
+  ])("$pattern expands to $paths whatever the checkout holds", ({ pattern, paths }) => {
+    const literals = new Map<string, MirrorKind>([
+      ["tests/shared/stub.ts", "copy"],
+      ["docs/own.md", "copy"],
+      ["skills/a/link", "symlink"],
+      [`${LONG_DIRS}/f`, "copy"],
+    ]);
+    expect(guaranteedExpansion(pattern, literals)).toEqual(paths);
+  });
+
   test("a pattern that matches the registration, a written or retired path, or another source's literal target", () => {
     const problems = mirrorDeclarationProblems(
       [
-        { source: "LICENSE.md", targets: ["*.md", "skills/a/LICENSE.md", "skills/*/AGENTS.md"] },
+        {
+          source: "LICENSE.md",
+          kind: "copy",
+          targets: ["*.md", "skills/a/LICENSE.md", "skills/*/AGENTS.md"],
+        },
         {
           source: "AGENTS.md",
+          kind: "copy",
           targets: ["*.yml", "*/README.md", "docs/*", "skills/*/LICENSE.md", "*/x"],
         },
-        { source: "AGENTS.md", targets: ["skills/*/AGENTS.md", ".github/*"] },
+        { source: "AGENTS.md", kind: "copy", targets: ["skills/*/AGENTS.md", ".github/*"] },
       ],
       OWNED,
     );
@@ -175,16 +402,26 @@ describe("mirrorDeclarationProblems", () => {
         ".github/*",
         "the pattern matches '.github/repo-platform-manifest.json', a path files.yml writes",
       ),
+      // The literal 'skills/a/LICENSE.md' guarantees the directory both sources' pattern walks.
+      L(
+        "skills/*/AGENTS.md",
+        "the pattern expands to 'skills/a/AGENTS.md', a path claimed by more than one source",
+      ),
+      A(
+        "skills/*/AGENTS.md",
+        "the pattern expands to 'skills/a/AGENTS.md', a path claimed by more than one source",
+      ),
     ]);
   });
 
   test("every problem files.yml alone proves, both sides of a conflict, in declaration order", () => {
     const problems = mirrorDeclarationProblems(
       [
-        { source: "README.md", targets: ["copies/README.md"] },
-        { source: "CLAUDE.md", targets: ["copies/CLAUDE.md"] },
+        { source: "README.md", kind: "copy", targets: ["copies/README.md"] },
+        { source: "CLAUDE.md", kind: "copy", targets: ["copies/CLAUDE.md"] },
         {
           source: "LICENSE.md",
+          kind: "copy",
           targets: [
             "docs/**/LICENSE.md",
             "../LICENSE.md",
@@ -201,7 +438,7 @@ describe("mirrorDeclarationProblems", () => {
             "skills/a/*",
           ],
         },
-        { source: "AGENTS.md", targets: ["dup", "copies/c/d", "copies/c"] },
+        { source: "AGENTS.md", kind: "copy", targets: ["dup", "copies/c/d", "copies/c"] },
       ],
       OWNED,
     );

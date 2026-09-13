@@ -249,7 +249,8 @@ export function applyMirrors(
   };
 
   /** Nesting fails both sides, so declaration order never picks the winner. A path an earlier pass settled is this source's own
-   *  (mirrorDeclarationProblems refuses every glob that matches another source's literal) and is current when the kinds agree. */
+   *  and of this kind (mirrorDeclarationProblems refuses every glob that matches another source's literal, or this source's
+   *  literal of the other kind), so it is current; two patterns of different kinds can still meet at one file the checkout holds. */
   const settle = (claims: Claim[], pass: Pass, failures: MirrorProblem[]): Claim[] => {
     const claimants = new Map<string, { sources: Set<string>; kinds: Set<MirrorKind> }>();
     for (const { source, path, kind } of claims) {

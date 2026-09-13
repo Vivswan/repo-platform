@@ -393,14 +393,14 @@ describe("applyMirrors", () => {
     expect(readlinkSync(join(root, "docs/b.md"))).toBe("a.md");
   });
 
-  test("a glob landing on a path nested with a target fails after the literals are written", () => {
-    const root = tree({ "skills/a/README.md": "", "skills/a/COPY.md": "old\n" });
+  test("two globs landing on nested paths only the checkout shows fail before either is written", () => {
+    // A directory the checkout holds where one glob names a file, and the other glob walks into it.
+    const root = tree({ "skills/LICENSE.md/keep": "", "skills/a/COPY.md": "old\n" });
     const failures = failuresOf(() =>
       applyMirrors(
         root,
         [
-          // A literal makes a directory that a glob then names as a file.
-          { source: "A.md", kind: "copy", targets: ["skills/LICENSE.md/x", "*/LICENSE.md"] },
+          { source: "A.md", kind: "copy", targets: ["*/LICENSE.md"] },
           { source: "B.md", kind: "copy", targets: ["skills/*/COPY.md"] },
         ],
         bytes({ "A.md": "A\n", "B.md": "B\n" }),
@@ -412,7 +412,7 @@ describe("applyMirrors", () => {
       failure(
         "A.md",
         "skills/LICENSE.md",
-        "the target is a path prefix of another target 'skills/LICENSE.md/x'",
+        "the target is a path prefix of another target 'skills/LICENSE.md/COPY.md'",
       ),
       failure(
         "B.md",
@@ -420,7 +420,7 @@ describe("applyMirrors", () => {
         "the target sits under another target 'skills/LICENSE.md'",
       ),
     ]);
-    expect(readFileSync(join(root, "skills/LICENSE.md/x"), "utf-8")).toBe("A\n");
+    expect(existsSync(join(root, "skills/LICENSE.md/keep"))).toBe(true);
     expect(readFileSync(join(root, "skills/a/COPY.md"), "utf-8")).toBe("old\n");
     expect(existsSync(join(root, "skills/LICENSE.md/COPY.md"))).toBe(false);
   });
@@ -756,26 +756,25 @@ describe("applyMirrors with kind symlink", () => {
     expect(readlinkSync(join(root, "adir"))).toBe("L.md");
   });
 
-  test("one path claimed as a copy and as a link fails both claims, in one pass or across the two", () => {
-    const root = tree({ "skills/a/README.md": "" });
+  test("two patterns of different kinds meeting at one file the checkout holds fail both claims: only the tree shows it", () => {
+    const root = tree({ "skills/a/README.md": "", "skills/a/NOTES.md": "" });
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [
-          copy("LICENSE.md", ["skills/a/LICENSE.md", "skills/*/README.md"]),
-          link("LICENSE.md", ["skills/*/LICENSE.md", "skills/a/*.md"]),
-        ],
+        [copy("LICENSE.md", ["skills/*/README.md"]), link("LICENSE.md", ["skills/a/*.md"])],
         bytes({ "LICENSE.md": "L\n" }),
         owned(["LICENSE.md"]),
         {},
       ),
     );
-    const both = "the target is claimed as a copy and as a symbolic link";
     expect(failures).toEqual([
-      failure("LICENSE.md", "skills/a/README.md", both),
-      failure("LICENSE.md", "skills/a/LICENSE.md", both),
+      failure(
+        "LICENSE.md",
+        "skills/a/README.md",
+        "the target is claimed as a copy and as a symbolic link",
+      ),
     ]);
-    expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("L\n");
     expect(readFileSync(join(root, "skills/a/README.md"), "utf-8")).toBe("");
+    expect(lstatSync(join(root, "skills/a/NOTES.md")).isSymbolicLink()).toBe(false);
   });
 });
