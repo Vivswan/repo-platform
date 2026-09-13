@@ -103,6 +103,8 @@ describe("the website and the docs together", () => {
         "publish": "true",
         "site-dir": site,
         "link-rot-label": "rot",
+        "link-rot-color": "",
+        "link-rot-description": "",
         "site-title": "Site Docs",
       });
       expect(result.stdout).toMatch(
@@ -134,6 +136,8 @@ describe("the website and the docs together", () => {
         "publish": "true",
         "site-dir": runner.site,
         "link-rot-label": "",
+        "link-rot-color": "",
+        "link-rot-description": "",
         "site-title": SITE_TITLE,
       });
     },
@@ -159,6 +163,8 @@ describe("nothing to publish and a refused dist", () => {
         "publish": "false",
         "site-dir": "",
         "link-rot-label": "",
+        "link-rot-color": "",
+        "link-rot-description": "",
         "site-title": SITE_TITLE,
       });
       expect(existsSync(runner.site)).toBe(false);

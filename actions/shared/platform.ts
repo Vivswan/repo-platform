@@ -25,11 +25,9 @@ export const MANAGED_HEADER_PATTERN = new RegExp(
 
 export const SYNC_BOT = `${PLATFORM_NAME}-sync`;
 
+/** The moving tag the fleet's `uses:` pins ride (docs/build-provenance.md); post-green's mover pushes refs/tags/<this>. */
+export const DELIVERY_REF = "stable";
+
 export const AUTOMATION_BRANCH = `automation/${PLATFORM_NAME}`;
 export const FAILURE_ISSUE_TITLE = `[${PLATFORM_NAME}] sync failed`;
 export const SYNC_PR_TITLE_PREFIX = `chore: sync ${PLATFORM_NAME} build`;
-
-/** A sticky PR comment's header names its host (the workflow stem or the action), so two posters never edit each other's comment. */
-export function stickyCommentHeader(host: string): string {
-  return `${PLATFORM_NAME}/${host}`;
-}

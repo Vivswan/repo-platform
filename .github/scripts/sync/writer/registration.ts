@@ -21,8 +21,14 @@ export const PLACEHOLDER_SOURCE: Record<PlaceholderName, string> = {
   copyright_holder: "project.copyright_holder",
   year: "the clock",
   fuzzer_label: "labels.fuzzer (or the fuzzer module's tracking_label default)",
+  fuzzer_label_color: "the fuzzer module's tracking_label color",
+  fuzzer_label_description: "the fuzzer module's tracking_label description",
   nightly_label: "labels.nightly (or the nightly module's tracking_label default)",
+  nightly_label_color: "the nightly module's tracking_label color",
+  nightly_label_description: "the nightly module's tracking_label description",
   site_label: "labels.site (or the site module's tracking_label default)",
+  site_label_color: "the site module's tracking_label color",
+  site_label_description: "the site module's tracking_label description",
 };
 
 export interface RepositorySlug {
@@ -37,7 +43,7 @@ export function parseRepositorySlug(slug: string): RepositorySlug {
 }
 
 /** The registration never names its own owner, so the slug comes from the operator. A tracking label absent from both the registration and files.yml's module default stays absent:
- *  sync.ts then refuses any listed source that uses it (placeholders.ts, missingPlaceholders). */
+ *  sync.ts then refuses any listed source that uses it (placeholders.ts, missingPlaceholders). The label's color and description are files.yml's alone. */
 export function placeholderValues(
   registration: Registration,
   repository: RepositorySlug,
@@ -56,6 +62,7 @@ export function placeholderValues(
     year: String(now.getUTCFullYear()),
   };
   const optional: Partial<Record<PlaceholderName, string | undefined>> = {
+    ...defaults,
     fuzzer_label: labels.fuzzer ?? defaults.fuzzer_label,
     nightly_label: labels.nightly ?? defaults.nightly_label,
     site_label: labels.site ?? defaults.site_label,

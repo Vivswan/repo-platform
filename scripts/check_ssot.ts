@@ -11,28 +11,12 @@
 // Usage: bun scripts/check_ssot.ts   # prints "rule: file -> expected X, got Y" lines and exits 1 on any mismatch
 
 import type { Mismatch } from "./check/ssot/comparison.ts";
-import { deliveryPinRules } from "./check/ssot/delivery_pins.ts";
-import { labelRules } from "./check/ssot/labels.ts";
-import { literalAnchorRules } from "./check/ssot/literal_anchors.ts";
 import { postGreenRules } from "./check/ssot/post_green.ts";
 import { RULE_ROSTER, type Rule, ruleRosterMismatches } from "./check/ssot/rule_roster.ts";
 import { settingsWorkflowRules } from "./check/ssot/settings_workflow.ts";
-import { siteConfigRules } from "./check/ssot/site_config.ts";
-import { skillRules } from "./check/ssot/skills.ts";
-import { stickyCommentRules } from "./check/ssot/sticky_comments.ts";
 import { twinCopyRules } from "./check/ssot/twin_copies.ts";
 
-const rules: Rule[] = [
-  ...deliveryPinRules,
-  ...stickyCommentRules,
-  ...skillRules,
-  ...settingsWorkflowRules,
-  ...labelRules,
-  ...literalAnchorRules,
-  ...postGreenRules,
-  ...siteConfigRules,
-  ...twinCopyRules,
-];
+const rules: Rule[] = [...settingsWorkflowRules, ...postGreenRules, ...twinCopyRules];
 
 function main(): number {
   const args = process.argv.slice(2);

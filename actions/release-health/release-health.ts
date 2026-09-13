@@ -5,6 +5,7 @@
  */
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { LABEL_RE } from "../shared/label.ts";
 
 /** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
 export type GhRunner = (args: string[]) => Promise<string>;
@@ -22,14 +23,10 @@ const gh: GhRunner = async (args) => {
   return stdout;
 };
 
-/** A hand copy of the registration grammar's LABEL_RE (actions/plan/registration.ts), pinned by the tracking-label-regex ssot rule:
- * safe as a gh flag value (no leading dash), within GitHub's 50-character label limit. */
-export const LABEL_RE = /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/;
-
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
-/** One value across the fleet; files/release-please/settings.yml declares the two labels (the labels ssot rule pins it). */
+/** One value across the fleet; files/release-please/settings.yml declares the two labels (tests/files/label_names.test.ts). */
 export const BLOCKER_LABEL = "release-blocker";
 export const OVERRIDE_LABEL = "release-override";
 export const SECURITY_THRESHOLD: Severity = "high";
@@ -218,7 +215,7 @@ export async function issueGate(
   label: string,
   advice: string,
 ): Promise<GateOutcome> {
-  // Fleet gate jobs run this action without a checkout, so gh has no
+  // fleet-release.yml runs this action without a checkout, so gh has no
   // repository to infer from a working tree; every invocation names it.
   const json = await run([
     "issue",

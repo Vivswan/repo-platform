@@ -349,9 +349,7 @@ describe("fleet-ci.yml", () => {
     const GUARDS = {
       "docs-check":
         "contains(fromJSON(needs.plan.outputs.modules), 'site') && github.event_name == 'pull_request'",
-      "release-freshness":
-        "contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
-      "release-health":
+      "release-pr":
         "contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
     };
     for (const [job, guard] of Object.entries(GUARDS)) {
@@ -379,8 +377,13 @@ describe("fleet-ci.yml", () => {
     expect(fleetCi.jobs["docs-check"]?.permissions).toBeUndefined();
   });
 
-  test("release-health calls its action at @stable in pull-request mode, labels forwarded", () => {
-    const steps = fleetCi.jobs["release-health"]?.steps ?? [];
+  test("release-pr checks freshness against the PR head, then calls release-health at @stable in pull-request mode, labels forwarded", () => {
+    const steps = fleetCi.jobs["release-pr"]?.steps ?? [];
+    expect(steps[0]?.with).toEqual({
+      "fetch-depth": 0,
+      "ref": "${{ github.event.pull_request.head.sha }}",
+    });
+    expect(steps[1]?.run).toContain("git merge-base --is-ancestor");
     const action = steps.find((step) =>
       (step.uses ?? "").includes("repo-platform/actions/release-health@stable"),
     );

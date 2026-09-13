@@ -12,7 +12,14 @@ import { parseSiteConfig } from "../../../actions/pages-site/lib.ts";
 const SKILLS = { path: "skills", mount: "skills", page: "SKILL.md" };
 
 const config = (include: unknown) =>
-  JSON.stringify({ site_title: "Site", docs_path: "docs", include, link_rot_label: "" });
+  JSON.stringify({
+    site_title: "Site",
+    docs_path: "docs",
+    include,
+    link_rot_label: "",
+    link_rot_color: "",
+    link_rot_description: "",
+  });
 
 describe("parseSiteConfig include roots", () => {
   test.each([[[SKILLS]], [[]]])("the include list %j is carried as written", (include) => {
@@ -20,6 +27,8 @@ describe("parseSiteConfig include roots", () => {
       siteTitle: "Site",
       docs: { path: "docs", include },
       linkRotLabel: "",
+      linkRotColor: "",
+      linkRotDescription: "",
     });
   });
 

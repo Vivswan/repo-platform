@@ -44,6 +44,16 @@
   },
   "overrides": [
     {
+      "includes": [
+        "actions/**",
+        ".github/scripts/**",
+        "scripts/**",
+        "!**/*.test.ts",
+        "!actions/shared/platform.ts"
+      ],
+      "plugins": ["./biome/platform_name.grit"]
+    },
+    {
       "includes": ["tests/**"],
       "linter": {
         "rules": {

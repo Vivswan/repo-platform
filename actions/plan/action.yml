@@ -38,14 +38,23 @@ outputs:
   tracking-labels:
     description: Comma-separated nightly tracking-issue labels of the selected stream modules, the fleet-wide security stream last (mode default).
     value: ${{ steps.plan.outputs.tracking-labels }}
+  security-label:
+    description: The fleet-wide security stream's label, the settings baseline's (mode default).
+    value: ${{ steps.plan.outputs.security-label }}
+  security-label-color:
+    description: The security label's color, as the baseline declares it (mode default).
+    value: ${{ steps.plan.outputs.security-label-color }}
+  security-label-description:
+    description: The security label's description, as the baseline declares it (mode default).
+    value: ${{ steps.plan.outputs.security-label-description }}
   weekly:
     description: '"true" on Mondays (UTC): the scheduled run that also reruns CodeQL (mode default).'
     value: ${{ steps.plan.outputs.weekly }}
   config:
     description: >-
-      The site configuration as compact JSON {"site_title", "docs_path", "include", "link_rot_label"},
-      the pages-site action's config input; docs_path is null when the registration turns the
-      docs half off with site.path: null (mode site).
+      The site configuration as compact JSON {"site_title", "docs_path", "include", "link_rot_label",
+      "link_rot_color", "link_rot_description"}, the pages-site action's config input; docs_path is null
+      when the registration turns the docs half off with site.path: null (mode site).
     value: ${{ steps.plan.outputs.config }}
 
 runs:

@@ -266,6 +266,8 @@ describe("include roots: the registration and the pages-site config agree", () =
       docs_path: "docs",
       include,
       link_rot_label: "",
+      link_rot_color: "",
+      link_rot_description: "",
     });
     const parse = () => parseSiteConfig(config);
     if (accepted) expect(parse).not.toThrow();

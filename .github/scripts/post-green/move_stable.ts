@@ -4,12 +4,13 @@
 // Output `previous` is the base the directives read takes from the tag: the commit it named before this run moved it, "" when
 // nothing moved (the first move included).
 
+import { DELIVERY_REF } from "../../../actions/shared/platform.ts";
 import { allGreenFailure, PROBE_TIMEOUT_MS } from "../shared/all_green.ts";
 import { env, fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { gitAnswersYes, gitRemoteRef } from "../shared/git_yes_no.ts";
 import { must, mustCapture } from "../shared/proc.ts";
 
-const TAG = "refs/tags/stable";
+const TAG = `refs/tags/${DELIVERY_REF}`;
 const repository = requireEnv("GITHUB_REPOSITORY");
 
 // Main only: a dispatch aimed at a branch would run that branch's copy of

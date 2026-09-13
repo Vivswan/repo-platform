@@ -1,0 +1,11 @@
+language js
+
+// Code spells the platform's name through actions/shared/platform.ts; a string or template literal that spells it again is a second source.
+// `[\s\S]*` on both sides: a Grit regex matches the whole node text.
+or {
+  string() as $lit where { $lit <: r"[\s\S]*(?i:repo-platform)[\s\S]*" },
+  `$lit` where { $lit <: r"`[\s\S]*(?i:repo-platform)[\s\S]*`" },
+  `$lit` where { $lit <: r"/[\s\S]*(?i:repo-platform)[\s\S]*/[a-z]*" }
+} where {
+  register_diagnostic(span=$lit, message="spell the platform name through actions/shared/platform.ts (PLATFORM_NAME), not as a literal")
+}

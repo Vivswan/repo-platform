@@ -16,28 +16,12 @@ export interface Rule {
  *  to notice it; this roster is compared against the live rules in both directions (ruleRosterMismatches).
  *  Adding a rule means adding its name here; deleting one means removing its entry in the same change. */
 export const RULE_ROSTER = [
-  "fleet-refs-ride-stable",
-  "version-comments-verifiable",
-  "delivery-pin-stems",
-  "sticky-pr-comments",
-  "skill-ownership-tables",
   "settings-starter",
   "step-output-gates",
   "settings-apply-input",
   "settings-lane-newest-wins",
-  "fleet-sync-labels",
-  "labels",
-  "release-guard-labels",
-  "dependabot-label-tuples",
-  "tracking-label-regex",
-  "docs-constants",
-  "owner-slug",
-  "platform-name-once",
-  "release-gate-predicates",
-  "release-cut-wiring",
   "settings-green-gate",
   "fleet-writers-ride-post-green",
-  "site-config-parity",
   "root-twin-parity",
 ] as const;
 

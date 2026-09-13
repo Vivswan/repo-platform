@@ -68,6 +68,8 @@ export interface SiteConfigJson {
   docs_path: string | null;
   include: IncludeRoot[];
   link_rot_label: string;
+  link_rot_color: string;
+  link_rot_description: string;
 }
 
 const PATH_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;

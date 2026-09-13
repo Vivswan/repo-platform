@@ -41,7 +41,7 @@ bun .github/scripts/sync/writer/sync.ts \
 ## files.yml
 
 ```yaml
-placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, fuzzer_label]
+placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, fuzzer_label, fuzzer_label_color, fuzzer_label_description]
 modules:
   bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
@@ -139,14 +139,13 @@ The three links carry no `when`: every repository gets them.
 | `description` | the module's one-line description | docs and the PR body |
 | `codeql_language` | the CodeQL language the toolchain contributes | the fleet plan |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
-| `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the `dependabot-label-tuples` rule in `scripts/check/ssot/labels.ts`, which pins it equal to the label in `files/<module>/settings.yml` (the layer the applied roster comes from) |
 | `gitignore_sources` | the github/gitignore templates and platform-authored sections the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
 | `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
 
-Placeholders in use beyond the project block: `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. No committed source names `site_label`: the site leg does not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
+Placeholders in use beyond the project block: `fuzzer_label`, `fuzzer_label_color`, and `fuzzer_label_description` in `nightly-fuzz.yml`; `nightly_label`, `nightly_label_color`, and `nightly_label_description` in `nightly.yml`. No committed source names `site_label`: the site leg does not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
 
 A module with no files still appears under `modules` (`custom-license`) so a registration selecting it is known and a `when` can name it.
 
@@ -162,6 +161,7 @@ A module with no files still appears under `modules` (`custom-license`) so a reg
 | `copyright_holder` | `project.copyright_holder`, else the owner |
 | `year` | the current UTC year |
 | `fuzzer_label`, `nightly_label`, `site_label` | `labels.<key>` from the registration, else the `default` of the `modules.<m>.tracking_label` whose `key` is `fuzzer`, `nightly`, or `site` |
+| `<key>_label_color`, `<key>_label_description` | the `color` and `description` of the same `tracking_label`: the tuple the starter's report step creates the label with, and the render declares it with |
 
 - A token is the name inside double braces with no spaces; spaces inside the braces make it plain text.
 - A `$` before the braces marks a GitHub Actions expression, left untouched.

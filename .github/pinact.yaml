@@ -2,9 +2,9 @@
 # these are the only two refs that are not release pins by design, so pinact skips exactly them.
 version: 3
 rules:
-  # The platform's own actions and reusable workflows ride the delivery ref, which the fleet-refs-ride-stable ssot rule judges;
-  # the ref is spelled out so a mistyped one is judged (and refused) like any other branch. A rename of the delivery ref
-  # lands here too: tests/workflows/ci_shape.test.ts holds this expression to DELIVERY_REF.
+  # The platform's own actions and reusable workflows ride the delivery ref (tests/workflows/delivery_pins.test.ts judges every
+  # self pin); the ref is spelled out so a mistyped one is judged (and refused) like any other branch. A rename of the
+  # delivery ref lands here too: tests/workflows/ci_shape.test.ts holds this expression to DELIVERY_REF.
   - ignore: true
     conditions:
       - expr: ActionRepoName == "repo-platform" && ActionVersion == "stable"

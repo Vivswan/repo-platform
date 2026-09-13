@@ -2,8 +2,8 @@
 // string that drifts (a renamed owner, a marker label built differently) fails here before any repository sees it.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { SYNC_IDENTITY } from "../../.github/scripts/shared/git_identity.ts";
 import { prTitle } from "../../.github/scripts/sync/deliver.ts";
 import { renderManifest } from "../../.github/scripts/sync/writer/manifest.ts";
@@ -11,6 +11,7 @@ import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entr
 import { HASH_REGION_MARKERS, HTML_REGION_MARKERS } from "../../actions/shared/grammar.ts";
 import {
   AUTOMATION_BRANCH,
+  DELIVERY_REF,
   FAILURE_ISSUE_TITLE,
   GENERATED_NOTICE,
   MANAGED_HEADER_PATTERN,
@@ -22,11 +23,14 @@ import {
   REGISTRATION_PATH,
   SYNC_BOT,
   SYNC_PR_TITLE_PREFIX,
-  stickyCommentHeader,
 } from "../../actions/shared/platform.ts";
 import { CI_WORKSPACE_SECTION, PLATFORM_SECTIONS } from "../../scripts/generate/build_gitignore.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn.ts";
+import { tempDirs } from "../shared/temp_dir.ts";
 
-const PACKAGE_JSON = resolve(import.meta.dir, "../../package.json");
+const REPO_ROOT = resolve(import.meta.dir, "../..");
+const PACKAGE_JSON = join(REPO_ROOT, "package.json");
+const temp = tempDirs();
 
 describe("the platform slug and every string the fleet observes derived from it", () => {
   test("each derived string is the byte the fleet carries today", () => {
@@ -54,7 +58,7 @@ describe("the platform slug and every string the fleet observes derived from it"
       failureIssueTitle: FAILURE_ISSUE_TITLE,
       syncPrTitlePrefix: SYNC_PR_TITLE_PREFIX,
       syncPrTitle: prTitle("0123456789abcdef0123456789abcdef01234567"),
-      stickyHeader: stickyCommentHeader("check-file-size"),
+      deliveryRef: DELIVERY_REF,
     }).toEqual({
       packageName: "repo-platform",
       owner: "Vivswan",
@@ -91,7 +95,7 @@ describe("the platform slug and every string the fleet observes derived from it"
       failureIssueTitle: "[repo-platform] sync failed",
       syncPrTitlePrefix: "chore: sync repo-platform build",
       syncPrTitle: "chore: sync repo-platform build 0123456789ab",
-      stickyHeader: "repo-platform/check-file-size",
+      deliveryRef: "stable",
     });
   });
 
@@ -105,5 +109,59 @@ describe("the platform slug and every string the fleet observes derived from it"
     ["# managed by Vivswan/repo-platform", false],
   ])("the managed header pattern on %j", (line, matches) => {
     expect(MANAGED_HEADER_PATTERN.test(line)).toBe(matches);
+  });
+});
+
+/** Every plugin biome.json names, so a copied config resolves them beside it. */
+function biomePlugins(repoRoot: string): Record<string, string> {
+  return Object.fromEntries(
+    readdirSync(join(repoRoot, "biome"))
+      .filter((name) => name.endsWith(".grit"))
+      .map((name) => [`biome/${name}`, readFileSync(join(repoRoot, "biome", name), "utf-8")]),
+  );
+}
+
+// The ban that keeps the name above the one spelling: Biome's plugin over every code tree but the tests and platform.ts itself.
+describe("the biome ban on platform-name literals", () => {
+  test("a string, a template, and a regex literal each red under actions/, scripts/, and .github/scripts/; a test file and platform.ts are exempt", () => {
+    const lintRoot = temp.dir("platform-name-ban-");
+    const config = JSON.parse(readFileSync(join(REPO_ROOT, "biome.json"), "utf-8"));
+    const literals = [
+      'export const branch = "automation/repo-platform";',
+      "export const title = `[${branch}] Repo-Platform`;",
+      "export const managed = /REPO-PLATFORM MANAGED/;",
+      'export const fine = "another-platform";',
+      "",
+    ].join("\n");
+    const files: Record<string, string> = {
+      "biome.json": JSON.stringify({ ...config, vcs: { enabled: false } }),
+      ...biomePlugins(REPO_ROOT),
+      "actions/x/x.ts": literals,
+      "scripts/x.ts": literals,
+      ".github/scripts/x.ts": literals,
+      "actions/x/x.test.ts": literals,
+      "actions/shared/platform.ts": literals,
+      "tests/x.ts": literals,
+    };
+    for (const [rel, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(lintRoot, rel)), { recursive: true });
+      writeFileSync(join(lintRoot, rel), content);
+    }
+    const r = boundedSpawnSync(
+      [join(REPO_ROOT, "node_modules", ".bin", "biome"), "lint", "--reporter=json", "."],
+      { cwd: lintRoot },
+    );
+    const report = JSON.parse(r.stdout) as {
+      diagnostics: { category: string; location: { path: string; start: { line: number } } }[];
+    };
+    const seen = report.diagnostics
+      .filter((d) => d.category === "plugin")
+      .map((d) => `${d.location.path}:${d.location.start.line}`)
+      .sort();
+    expect(seen).toEqual(
+      [".github/scripts/x.ts", "actions/x/x.ts", "scripts/x.ts"]
+        .flatMap((file) => [1, 2, 3].map((line) => `${file}:${line}`))
+        .sort(),
+    );
   });
 });

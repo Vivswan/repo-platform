@@ -1,7 +1,5 @@
 # File ownership in a managed repository
 
-<!-- The Class and Files columns are one roster with skills/repo-platform-sync-pr/references/file-ownership.md (skills install standalone, so each ships its own table); the platform's check_ssot skill-ownership-tables rule fails on any difference between the two. The third column is this skill's own. -->
-
 Who owns what after the first sync. The classes come from the platform's `files.yml`; the sync PR's Written section names the class of every path it touched.
 
 | Class | Files | What that means |

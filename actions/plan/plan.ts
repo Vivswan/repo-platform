@@ -12,6 +12,7 @@ import {
   requireEnv,
   succeeded,
 } from "../shared/action_runtime.ts";
+import { LABEL_RE } from "../shared/label.ts";
 import { REGISTRATION_PATH } from "../shared/platform.ts";
 import {
   type FileEntry,
@@ -22,8 +23,13 @@ import {
   type RetiredEntry,
 } from "./files_config.ts";
 import { describeMirrorProblem, mirrorDeclarationProblems, ownedPaths } from "./mirrors.ts";
-import { LABEL_RE, parseRegistration, type Registration } from "./registration.ts";
-import { type LayerSources, reservedLabelNames } from "./reserved_labels.ts";
+import { parseRegistration, type Registration } from "./registration.ts";
+import {
+  declaredLabelTuple,
+  type LabelTuple,
+  type LayerSources,
+  reservedLabelNames,
+} from "./reserved_labels.ts";
 
 export const MODES = ["default", "site"] as const;
 export type Mode = (typeof MODES)[number];
@@ -103,6 +109,8 @@ export interface PlanInput {
   retired: RetiredEntry[];
   /** Lowercased: the settings layers' label names. */
   reservedLabels: ReadonlySet<string>;
+  /** The fleet security stream's tuple, the settings baseline's SECURITY_LABEL entry. */
+  securityLabel: LabelTuple;
   private: boolean;
 }
 
@@ -173,6 +181,7 @@ export interface CiPlan {
   private: boolean;
   codeqlLanguages: string[];
   trackingLabels: string[];
+  securityLabel: LabelTuple;
   weekly: boolean;
 }
 
@@ -182,7 +191,9 @@ export function weekly(now: Date): boolean {
   return now.getUTCDay() === 1;
 }
 
-/** The fleet-wide nightly security stream (docs/security-scans.md): fleet-nightly.yml files every repository's Trivy findings under it, so it joins the tracking labels without a module, and the settings baseline declares it on every repository. */
+/** The fleet-wide nightly security stream (docs/security-scans.md): fleet-nightly.yml files every repository's Trivy findings under it,
+ *  so it joins the tracking labels without a module; the settings baseline declares it on every repository, and its entry is the
+ *  tuple the plan hands fleet-nightly's report step. */
 export const SECURITY_LABEL = "security-nightly";
 
 /** Personal-account code scanning is public-only, so a private repository gets no CodeQL. */
@@ -205,7 +216,8 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
     modules: selected.map((module) => module.name),
     private: input.private,
     codeqlLanguages: codeqlLanguages(selected, input.private),
-    trackingLabels: [...trackingLabels(input, selected), SECURITY_LABEL],
+    trackingLabels: [...trackingLabels(input, selected), input.securityLabel.name],
+    securityLabel: input.securityLabel,
     weekly: weekly(now),
   };
 }
@@ -216,7 +228,8 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
 export interface SitePlan {
   siteTitle: string;
   docs: DocsConfig | null;
-  linkRotLabel: string;
+  /** The link-rot stream: the registration's label under the site module's tuple. */
+  linkRot: LabelTuple;
 }
 
 export function planSite(input: PlanInput): SitePlan {
@@ -228,6 +241,12 @@ export function planSite(input: PlanInput): SitePlan {
   }
   const labels = trackingLabels(input, selected);
   const streams = selected.flatMap((m) => (m.tracking_label ? [m.name] : []));
+  const tuple = selected.find((m) => m.name === "site")?.tracking_label;
+  if (tuple?.color === undefined || tuple.description === undefined) {
+    throw new PlanError([
+      "files.yml: modules.site.tracking_label needs a color and a description - the link-rot issue is filed under them",
+    ]);
+  }
   const site = input.registration.site;
   return {
     siteTitle: input.registration.project.name,
@@ -235,7 +254,11 @@ export function planSite(input: PlanInput): SitePlan {
       site?.path === null
         ? null
         : { path: site?.path ?? input.defaults.docsPath, include: site?.include ?? [] },
-    linkRotLabel: labels[streams.indexOf("site")],
+    linkRot: {
+      name: labels[streams.indexOf("site")],
+      color: tuple.color,
+      description: tuple.description,
+    },
   };
 }
 
@@ -245,7 +268,9 @@ export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
       site_title: plan.siteTitle,
       docs_path: plan.docs === null ? null : plan.docs.path,
       include: plan.docs === null ? [] : plan.docs.include,
-      link_rot_label: plan.linkRotLabel,
+      link_rot_label: plan.linkRot.name,
+      link_rot_color: plan.linkRot.color,
+      link_rot_description: plan.linkRot.description,
     };
     return { config: JSON.stringify(config) };
   }
@@ -254,6 +279,9 @@ export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
     "private": String(plan.private),
     "codeql-languages": JSON.stringify(plan.codeqlLanguages),
     "tracking-labels": plan.trackingLabels.join(","),
+    "security-label": plan.securityLabel.name,
+    "security-label-color": plan.securityLabel.color,
+    "security-label-description": plan.securityLabel.description,
     "weekly": String(plan.weekly),
   };
 }
@@ -305,10 +333,12 @@ function main(): number {
   const filesConfig = requireEnv("FILES_CONFIG");
   const moduleData = loadModuleData(readFilesConfig(filesConfig), filesConfig);
   const root = process.cwd();
+  const tree = requireEnv("FILES_TREE");
   const input: PlanInput = {
     registration: readRegistration(root),
     ...moduleData,
-    reservedLabels: reservedLabelNames(moduleData.layers, requireEnv("FILES_TREE")),
+    reservedLabels: reservedLabelNames(moduleData.layers, tree),
+    securityLabel: declaredLabelTuple(moduleData.layers, tree, SECURITY_LABEL),
     private:
       mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
   };

@@ -3,10 +3,12 @@
 // The squash commit carries the PR title alone (the fleet's squash_merge_commit_message is BLANK), so the opt-in rides on the merged
 // pull request's labels; a commit no pull request produced (a direct push) carries none (docs/all-green.md).
 
+import { resolve } from "node:path";
 import { z } from "zod";
 import { captureNetwork } from "../fleet/discovery.ts";
 import { fail, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
+import { loadLayer, sectionEntries } from "../sync/writer/settings_layers.ts";
 import {
   type DiffBase,
   judgedRangeEnv,
@@ -15,15 +17,34 @@ import {
   resolveBase,
 } from "./judged_range.ts";
 
-export type FleetSyncScope = "all" | "public";
+/** Other scopes (private, slugs, modules: filters) are dispatch-only: sync_scope.ts owns that grammar. */
+const scopeSchema = z.enum(["all", "public"]);
+export type FleetSyncScope = z.infer<typeof scopeSchema>;
 
 const LABEL_PREFIX = "fleet-sync:";
-/** This repository's overlay (.github/settings.local.yml) declares these labels; check_ssot's fleet-sync-labels rule holds the two
- *  rosters together. Other scopes (private, slugs, modules: filters) are dispatch-only: sync_scope.ts owns that grammar. */
-export const FLEET_SYNC_LABELS: ReadonlyMap<string, FleetSyncScope> = new Map([
-  [`${LABEL_PREFIX}all`, "all"],
-  [`${LABEL_PREFIX}public`, "public"],
-]);
+/** This repository's overlay: the one place the fleet-sync labels are declared, since only its pull requests carry them. */
+export const FLEET_SYNC_OVERLAY = resolve(import.meta.dir, "..", "..", "settings.local.yml");
+
+export type FleetSyncLabels = ReadonlyMap<string, FleetSyncScope>;
+
+/** The fleet-sync labels an overlay document declares, lowercased, each mapped to the scope its suffix names. A declared
+ *  `fleet-sync:` label with no such scope throws: the leg could never act on it, so every merge wearing it would be refused. */
+export function fleetSyncLabels(overlay: unknown, where: string): FleetSyncLabels {
+  const labels = new Map<string, FleetSyncScope>();
+  for (const entry of sectionEntries(overlay, "labels")) {
+    const name = String(entry.name).toLowerCase();
+    if (!name.startsWith(LABEL_PREFIX)) continue;
+    const scope = scopeSchema.safeParse(name.slice(LABEL_PREFIX.length));
+    if (!scope.success) {
+      throw new Error(
+        `${where}: label '${String(entry.name)}' names no sync scope (${scopeSchema.options.join(", ")})`,
+      );
+    }
+    labels.set(name, scope.data);
+  }
+  if (labels.size === 0) throw new Error(`${where}: no ${LABEL_PREFIX} label is declared`);
+  return labels;
+}
 
 export type Directive =
   | { kind: "none" }
@@ -32,7 +53,7 @@ export type Directive =
 
 /** Names fold case (GitHub keeps label names unique that way). A fleet-sync label the platform does not declare, or two scopes on
  *  one pull request, is refused: a mistyped opt-in fails loudly instead of waiting for the weekly sync. */
-export function readDirective(labels: readonly string[]): Directive {
+export function readDirective(labels: readonly string[], known: FleetSyncLabels): Directive {
   const own = labels
     .map((label) => label.toLowerCase())
     .filter((label) => label.startsWith(LABEL_PREFIX))
@@ -41,14 +62,14 @@ export function readDirective(labels: readonly string[]): Directive {
   const scopes: FleetSyncScope[] = [];
   const unknown: string[] = [];
   for (const label of own) {
-    const scope = FLEET_SYNC_LABELS.get(label);
+    const scope = known.get(label);
     if (scope === undefined) unknown.push(label);
     else scopes.push(scope);
   }
   if (unknown.length > 0) {
     return {
       kind: "error",
-      error: `unknown fleet-sync label${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")}; the platform declares ${[...FLEET_SYNC_LABELS.keys()].join(" and ")}`,
+      error: `unknown fleet-sync label${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")}; the platform declares ${[...known.keys()].sort().join(" and ")}`,
     };
   }
   if (scopes.length > 1) {
@@ -99,8 +120,10 @@ function main(): number {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const cwd = process.cwd();
   let base: DiffBase;
+  let known: FleetSyncLabels;
   try {
     base = resolveBase(cwd, sha, before);
+    known = fleetSyncLabels(loadLayer(FLEET_SYNC_OVERLAY).doc, FLEET_SYNC_OVERLAY);
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
   }
@@ -117,7 +140,7 @@ function main(): number {
       );
     }
     if (labels === null) continue;
-    const directive = readDirective(labels);
+    const directive = readDirective(labels, known);
     if (directive.kind === "none") continue;
     if (directive.kind === "error") {
       // Only the judged commit's labels are this run's fault; failing on an

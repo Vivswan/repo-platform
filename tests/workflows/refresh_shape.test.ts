@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { SYNC_IDENTITY } from "../../.github/scripts/shared/git_identity.ts";
-import { extractUsesPins } from "../../scripts/check/ssot/delivery_pins.ts";
+import { extractUsesPins } from "../shared/uses_pins.ts";
 
 interface Step {
   name?: string;

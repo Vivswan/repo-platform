@@ -21,11 +21,11 @@ How the `stable` tag gets moved, how a sync verifies the commit it names before 
 | --- | --- | --- |
 | `files.yml` and `files/` | the repository root | the sync writer ([sync.md](sync.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../actions/plan/reserved_labels.ts)), validate-managed-files |
 | `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | every managed workflow's `uses:` |
-| `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` (the `fleet-refs-ride-stable` ssot rule pins each fleet pin to a callable workflow) |
+| `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` |
 
 Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. Two constraints follow for every path on `main`: a `uses:` ref downloads the whole repository tarball at the tag, so no path may carry a name extraction cannot write (conditional landing is `files.yml`'s `when` clauses, never a filename), and a composite action must resolve from that tarball alone: its own directory plus the root files it reads by relative path (`files.yml`, `files/bun/.bun-version`), since nothing installs the repository's root dependencies on the caller's runner.
 
-Every self pin resolves: the `delivery-pin-stems` ssot rule ([delivery_pins.ts](../scripts/check/ssot/delivery_pins.ts)) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout, whatever the ref, so a renamed or deleted action fails CI here instead of the next fleet run.
+Every self pin resolves: [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout, so a renamed or deleted action, or a pin off the delivery ref, fails CI here instead of the next fleet run.
 
 ## Who can write `refs/tags/stable`?
 

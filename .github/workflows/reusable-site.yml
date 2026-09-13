@@ -18,7 +18,7 @@ on:
         type: string
         default: ""
       config:
-        description: 'Registration-less callers only: the site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label"} (docs_path null = no docs half); empty reads the registration'
+        description: 'Registration-less callers only: the site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label", "link_rot_color", "link_rot_description"} (docs_path null = no docs half); empty reads the registration'
         required: false
         type: string
         default: ""
@@ -171,10 +171,8 @@ jobs:
           label: ${{ steps.site.outputs.link-rot-label }}
           title: Docs site link rot
           artifacts-dir: ${{ runner.temp }}/link-rot
-          # The stream's create tuple, anchored to files.yml's site
-          # tracking_label by check_ssot's labels rule.
-          label-color: "D4A72C"
-          label-description: Automated docs-site link-rot report
+          label-color: ${{ steps.site.outputs.link-rot-color }}
+          label-description: ${{ steps.site.outputs.link-rot-description }}
           stream: generic
 
       - name: Close the link-rot issue on a clean night

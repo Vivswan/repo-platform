@@ -41,6 +41,8 @@ describe("placeholderValues", () => {
 describe("placeholderValues: the registration-backed names", () => {
   const defaults = {
     fuzzer_label: "fuzz-nightly",
+    fuzzer_label_color: "B60205",
+    fuzzer_label_description: "Automated nightly fuzz failure",
     nightly_label: "nightly-failure",
     site_label: "docs-link-rot",
   };
@@ -57,6 +59,8 @@ describe("placeholderValues: the registration-backed names", () => {
     const registration = { modules: [], project: PROJECT, labels: { fuzzer: "fuzz", site: "rot" } };
     expect(placeholderValues(registration, SLUG, defaults, NOW)).toMatchObject({
       fuzzer_label: "fuzz",
+      fuzzer_label_color: "B60205",
+      fuzzer_label_description: "Automated nightly fuzz failure",
       nightly_label: "nightly-failure",
       site_label: "rot",
     });

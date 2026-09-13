@@ -84,9 +84,8 @@ jobs:
           title: Nightly fuzz failures
           artifacts-dir: .fuzz-failures
           artifact-name: fuzz-failures-${{ github.run_attempt }}
-          # The create tuple is anchored to files.yml's fuzzer tracking_label by check_ssot's labels rule.
-          label-color: "B60205"
-          label-description: Automated nightly fuzz failure
+          label-color: "{{fuzzer_label_color}}"
+          label-description: "{{fuzzer_label_description}}"
           stream: fuzz
 
       - name: Close the fuzz issue on a green night

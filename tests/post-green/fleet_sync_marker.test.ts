@@ -3,9 +3,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type Directive,
-  FLEET_SYNC_LABELS,
+  FLEET_SYNC_OVERLAY,
+  fleetSyncLabels,
   readDirective,
 } from "../../.github/scripts/post-green/fleet_sync_marker.ts";
+import { loadLayer } from "../../.github/scripts/sync/writer/settings_layers.ts";
 import { argvStub } from "../shared/argv_stub";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -19,13 +21,36 @@ const TWO_SCOPES = "2 fleet-sync labels (fleet-sync:all, fleet-sync:public): one
 const UNKNOWN = (...names: string[]) =>
   `unknown fleet-sync label${names.length === 1 ? "" : "s"} ${names.join(", ")}; the platform declares fleet-sync:all and fleet-sync:public`;
 
-describe("readDirective", () => {
-  test("the roster is the two labels the overlay declares", () => {
-    expect([...FLEET_SYNC_LABELS]).toEqual([
-      ["fleet-sync:all", "all"],
+describe("fleetSyncLabels", () => {
+  test("the roster is the overlay's fleet-sync labels, lowercased, each scoped by its suffix", () => {
+    expect([...fleetSyncLabels(loadLayer(FLEET_SYNC_OVERLAY).doc, "overlay")]).toEqual([
       ["fleet-sync:public", "public"],
+      ["fleet-sync:all", "all"],
+    ]);
+    const declared = (...names: string[]) => ({
+      labels: names.map((name) => ({ name, color: "0052cc", description: "d" })),
+    });
+    expect([...fleetSyncLabels(declared("Fleet-Sync:All", "bug"), "overlay")]).toEqual([
+      ["fleet-sync:all", "all"],
     ]);
   });
+
+  test("a declared fleet-sync label the leg cannot act on, or none at all, is refused", () => {
+    const declared = (...names: string[]) => ({
+      labels: names.map((name) => ({ name, color: "0052cc", description: "d" })),
+    });
+    expect(() => fleetSyncLabels(declared("fleet-sync:all", "fleet-sync:private"), "o")).toThrow(
+      "o: label 'fleet-sync:private' names no sync scope (all, public)",
+    );
+    expect(() => fleetSyncLabels(declared("bug"), "o")).toThrow(
+      "o: no fleet-sync: label is declared",
+    );
+    expect(() => fleetSyncLabels({}, "o")).toThrow("o: no fleet-sync: label is declared");
+  });
+});
+
+describe("readDirective", () => {
+  const KNOWN = fleetSyncLabels(loadLayer(FLEET_SYNC_OVERLAY).doc, "overlay");
 
   test.each<{ reason: string; labels: string[]; expected: Directive }>([
     { reason: "no labels", labels: [], expected: NONE },
@@ -62,7 +87,7 @@ describe("readDirective", () => {
       expected: NONE,
     },
   ])("$reason", ({ labels, expected }) => {
-    expect(readDirective(labels)).toEqual(expected);
+    expect(readDirective(labels, KNOWN)).toEqual(expected);
   });
 });
 

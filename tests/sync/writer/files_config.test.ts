@@ -61,7 +61,7 @@ function writeTree(root: string, files: Record<string, string>): void {
 }
 
 describe("placeholderDefaults", () => {
-  test("come from tracking_label (as <key>_label); a stream no placeholder names rides along", () => {
+  test("come from tracking_label (as <key>_label, plus the color and description when declared); a stream no placeholder names rides along", () => {
     const config = parseFilesConfig(
       [
         "placeholders: [fuzzer_label, site_label]",
@@ -75,6 +75,7 @@ describe("placeholderDefaults", () => {
     expect(placeholderDefaults(config)).toEqual({
       defaults: {
         fuzzer_label: "fuzz-nightly",
+        fuzzer_label_color: "B60205",
         site_label: "docs-link-rot",
       },
       problems: [],

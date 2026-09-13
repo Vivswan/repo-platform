@@ -484,6 +484,8 @@ function setSiteOutputs(cfg: Config, site: string | null): void {
   setOutput("publish", site === null ? "false" : "true");
   setOutput("site-dir", site ?? "");
   setOutput("link-rot-label", cfg.linkRotLabel);
+  setOutput("link-rot-color", cfg.linkRotColor);
+  setOutput("link-rot-description", cfg.linkRotDescription);
   setOutput("site-title", cfg.siteTitle);
 }
 
