@@ -1,4 +1,4 @@
-// Judged twice: by the plan on every PR of a managed repository, so a declaration that can never be written never lands, and by the sync writer before it copies anything.
+// Judged twice: by the plan on every PR of a managed repository, so a declaration that can never be written never lands, and by the sync writer before it copies any mirror.
 
 import { dirname } from "node:path";
 import { MANIFEST_NAME, REGISTRATION_PATH } from "../shared/platform.ts";

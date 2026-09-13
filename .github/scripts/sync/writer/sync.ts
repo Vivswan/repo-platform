@@ -154,8 +154,8 @@ interface Written {
   detail?: string;
 }
 
-/** A record under another class than the entry declares is a class flip: the file is the platform's own previous write, so it is replaced whole while it still matches its record;
- *  otherwise the record is stale and the file is judged unrecorded. A flip to starter hands the file over and is never judged. */
+/** A record under another class than the entry declares is a class flip. A managed, split, or link record the file still matches marks it the platform's own previous write, replaced whole;
+ *  otherwise (a stale record, or a starter record, which carries no hash and is repo-owned) the file is judged unrecorded. A flip to starter hands the file over and is never judged. */
 function writeEntry(
   options: SyncOptions,
   config: WriterFilesConfig,
