@@ -109,32 +109,13 @@ function topLevelConst(source: string, name: string, anchor: ConstAnchor) {
   return matches[0];
 }
 
-/** A plain literal, or a `+` chain of plain literals (a formatter cannot wrap one long string): the pin stays
- *  a value a reader sees whole, with no identifier or template in it. */
+/** Only a plain literal: the pin is a value a reader sees whole, with no identifier, template, or concatenation in it. */
 export function constStringValue(source: string, name: string, anchor: ConstAnchor): string {
   const initializer = topLevelConst(source, name, anchor).getInitializer();
-  const value = initializer === undefined ? null : literalChain(initializer);
-  if (value === null) {
-    anchorLost(
-      anchor.where,
-      anchor.what,
-      `const ${name} is not a plain string literal or a + chain of them`,
-    );
+  if (initializer === undefined || !Node.isStringLiteral(initializer)) {
+    anchorLost(anchor.where, anchor.what, `const ${name} is not a plain string literal`);
   }
-  return value;
-}
-
-function literalChain(node: Expression): string | null {
-  if (Node.isStringLiteral(node)) return node.getLiteralValue();
-  if (
-    !Node.isBinaryExpression(node) ||
-    node.getOperatorToken().getKind() !== SyntaxKind.PlusToken
-  ) {
-    return null;
-  }
-  const left = literalChain(node.getLeft());
-  const right = literalChain(node.getRight());
-  return left === null || right === null ? null : left + right;
+  return initializer.getLiteralValue();
 }
 
 export function constNumberValue(source: string, name: string, anchor: ConstAnchor): number {

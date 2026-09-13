@@ -64,20 +64,13 @@ describe("constStringValue", () => {
     );
   });
 
-  test("let/var and non-literal initializers are lost anchors; a + chain of literals reads whole", () => {
+  test("let/var and every non-literal initializer are lost anchors, a + chain of literals included", () => {
     expect(() => constStringValue('let BRANCH = "build";\n', "BRANCH", anchor)).toThrow("found 0");
-    expect(constStringValue('const BRANCH =\n  "bu" +\n  "il" +\n  "d";\n', "BRANCH", anchor)).toBe(
-      "build",
-    );
-    expect(() => constStringValue('const BRANCH = "bu" + ild;\n', "BRANCH", anchor)).toThrow(
-      "not a plain string literal or a + chain of them",
-    );
-    expect(() => constStringValue('const BRANCH = "bu" + `ild`;\n', "BRANCH", anchor)).toThrow(
-      "not a plain string literal or a + chain of them",
-    );
-    expect(() => constStringValue("const BRANCH = `build`;\n", "BRANCH", anchor)).toThrow(
-      "not a plain string literal or a + chain of them",
-    );
+    for (const initializer of ['"bu" + "il" + "d"', '"bu" + ild', '"bu" + `ild`', "`build`"]) {
+      expect(() => constStringValue(`const BRANCH = ${initializer};\n`, "BRANCH", anchor)).toThrow(
+        "not a plain string literal",
+      );
+    }
   });
 
   test("an escaped quote is just a value to the AST", () => {
