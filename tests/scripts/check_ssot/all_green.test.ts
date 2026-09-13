@@ -31,7 +31,6 @@ describe("the all-green name pins", () => {
       "verdict check name",
     );
     expect(() => declaredCheckName(`const doc = '${active}';\n`)).toThrow("verdict check name");
-    // Only a plain literal is the pinned value: a + chain, of literals or not, is a lost anchor.
     expect(() => declaredCheckName('export const CHECK_NAME = "all-" + "green";\n')).toThrow(
       "verdict check name",
     );

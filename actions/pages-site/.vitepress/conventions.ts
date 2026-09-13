@@ -29,7 +29,7 @@ export function isUnwalkedEntry(name: string): boolean {
   return name.startsWith(".") || name === "node_modules";
 }
 
-/** The file names that serve at their directory's URL; a version tag without one in docs/ has nothing to render. */
+/** The landing-page basenames: a docs/ tag needs one to render, and a page with one is laid out as a landing wherever it serves (deriveRewrites decides which owns the directory URL). */
 export const LANDING_FILES: ReadonlySet<string> = new Set(["README.md", "index.md"]);
 
 /** docs/site.md, "Other roots on the site". */
