@@ -145,12 +145,6 @@ const moduleDataSchema = z.looseObject({
     })
     .optional(),
   path: z.string().min(1).optional(),
-  pin: z
-    .strictObject({
-      file: z.string().regex(/^\.[a-z][a-z0-9.-]*$/, "not a version dotfile name"),
-      version: z.string().regex(/^\d+\.\d+\.\d+$/, "not an X.Y.Z version"),
-    })
-    .optional(),
   dependabot_label: z
     .strictObject({ name: z.string().min(1), color: z.string().min(1) })
     .optional(),

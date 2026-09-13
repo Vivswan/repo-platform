@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-// files.yml's pin lines are rewritten in place, line-targeted, so its comments and layout survive; the workflow around it commits
-// and opens the PR.
+// The one writer of the toolchain pins: each version dotfile under files/ is the pin's only spelling, read by the
+// sync, the operator's workflows, and the composite actions. The workflow around this script commits and opens the PR.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { PLATFORM_NAME } from "../../../actions/shared/platform.ts";
-import { toolchainPins } from "../../../scripts/generate/toolchain_pins.ts";
+import { BUN_PIN_FILE, bunLockDirs } from "../../../scripts/bootstrap.ts";
 import { setOutput } from "../shared/gha.ts";
 import { must } from "../shared/proc.ts";
 
@@ -31,38 +31,44 @@ export function latestDenoVersion(payload: unknown): string {
   return versionFrom(tag, /^v(\d+\.\d+\.\d+)$/, "denoland/deno latest release tag");
 }
 
-export const PIN_SOURCES: Record<string, { url: string; parse: (payload: unknown) => string }> = {
+export interface PinSource {
+  /** The version dotfile the sync delivers to every repository selecting the module: the pin's one spelling. */
+  file: string;
+  url: string;
+  parse: (payload: unknown) => string;
+}
+
+export const PIN_SOURCES: Record<string, PinSource> = {
   bun: {
+    file: BUN_PIN_FILE,
     url: "https://api.github.com/repos/oven-sh/bun/releases/latest",
     parse: latestBunVersion,
   },
   deno: {
+    file: "files/deno/.dvmrc",
     url: "https://api.github.com/repos/denoland/deno/releases/latest",
     parse: latestDenoVersion,
   },
 };
 
-export function bumpFilesPin(text: string, module: string, version: string, where: string): string {
-  const lines = text.split("\n");
-  const modulesAt = lines.indexOf("modules:");
-  if (modulesAt === -1) throw new Error(`${where}: no modules section found`);
-  const moduleAt = lines.indexOf(`  ${module}:`, modulesAt + 1);
-  if (moduleAt === -1) throw new Error(`${where}: no modules.${module} entry found`);
-  for (let i = moduleAt + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trim() !== "" && !line.startsWith("    ")) break;
-    if (!line.trim().startsWith("pin:")) continue;
-    const match = /^( {4}pin: \{file: [^,}]+, version: )\d+\.\d+\.\d+\}$/.exec(line);
-    if (!match) {
-      throw new Error(
-        `${where}: modules.${module}.pin must be exactly 'pin: {file: X, version: X.Y.Z}' ` +
-          `(no quotes, no trailing comment), got '${line.trim()}'`,
-      );
-    }
-    lines[i] = `${match[1]}${version}}`;
-    return lines.join("\n");
-  }
-  throw new Error(`${where}: modules.${module} has no pin line`);
+/** Exactly the version plus a newline, what the setup actions' version-file inputs read. */
+export function pinnedVersion(text: string, where: string): string {
+  return versionFrom(text, /^(\d+\.\d+\.\d+)\n?$/, where);
+}
+
+/** Every package declaring @types/bun: the types are published per bun release and ride the runtime pin exactly, so this
+ *  script is their one writer (dependabot.yml ignores the package). A run before the matching types publish fails at the
+ *  add and the next scheduled run retries. */
+export function typesBunDirs(root: string): string[] {
+  return bunLockDirs(root).filter((dir) => {
+    const pkg = JSON.parse(readFileSync(join(root, dir, "package.json"), "utf-8")) as Record<
+      string,
+      Record<string, string> | undefined
+    >;
+    return ["dependencies", "devDependencies"].some(
+      (key) => pkg[key]?.["@types/bun"] !== undefined,
+    );
+  });
 }
 
 export interface Bump {
@@ -159,47 +165,37 @@ export async function latestVersions<T extends { module: string }>(
 }
 
 async function main(): Promise<number> {
-  const filesPath = join(REPO_ROOT, "files.yml");
-  let filesText = readFileSync(filesPath, "utf-8");
-  const pinned = toolchainPins(filesText).map(({ module, file, version }) => ({
+  const pinned = Object.entries(PIN_SOURCES).map(([module, source]) => ({
     module,
-    pin: { file, version },
+    file: source.file,
+    version: pinnedVersion(readFileSync(join(REPO_ROOT, source.file), "utf-8"), source.file),
   }));
-  for (const { module } of pinned) {
-    if (!(module in PIN_SOURCES)) {
-      throw new Error(
-        `files.yml modules.${module} declares a pin but refresh_toolchains.ts has no ` +
-          "upstream source for it - add a PIN_SOURCES entry",
-      );
-    }
-  }
-  for (const module of Object.keys(PIN_SOURCES)) {
-    if (!pinned.some((p) => p.module === module)) {
-      throw new Error(
-        `PIN_SOURCES names '${module}', which declares no pin in files.yml - remove the stale entry`,
-      );
-    }
-  }
-
-  // Every fetch, then every rewrite, then the one write: a bad upstream or
-  // a malformed pin line aborts before files.yml is touched.
+  // Every fetch and every verdict, then the writes: a bad upstream or a downgrade aborts before any dotfile is touched.
   const latests = await latestVersions(pinned);
-  const bumps: Bump[] = [];
-  for (const { module, pin, latest } of latests) {
-    if (decideBump(pin.version, latest, module) === "current") {
-      console.log(`${module}: ${pin.version} is current`);
-      continue;
+  const moved = latests.filter(({ module, version, latest }) => {
+    const verdict = decideBump(version, latest, module);
+    console.log(
+      verdict === "bump"
+        ? `${module}: ${version} -> ${latest}`
+        : `${module}: ${version} is current`,
+    );
+    return verdict === "bump";
+  });
+  for (const { file, latest } of moved) writeFileSync(join(REPO_ROOT, file), `${latest}\n`);
+  const bumps: Bump[] = moved.map(({ module, version, latest }) => ({
+    module,
+    from: version,
+    version: latest,
+  }));
+  const bun = bumps.find((bump) => bump.module === "bun");
+  if (bun !== undefined) {
+    for (const dir of typesBunDirs(REPO_ROOT)) {
+      must(["bun", "add", "--dev", "--exact", `@types/bun@${bun.version}`], {
+        cwd: join(REPO_ROOT, dir),
+      });
     }
-    filesText = bumpFilesPin(filesText, module, latest, "files.yml");
-    console.log(`${module}: ${pin.version} -> ${latest}`);
-    bumps.push({ module, from: pin.version, version: latest });
   }
-  if (bumps.length > 0) {
-    writeFileSync(filesPath, filesText);
-    must(["bun", "run", "pins"], { cwd: REPO_ROOT });
-  } else {
-    console.log("all toolchain pins are current; nothing to regenerate");
-  }
+  if (bumps.length === 0) console.log("all toolchain pins are current");
   if (process.env.GITHUB_OUTPUT) {
     setOutput("bumps", proseBumps(bumps));
     setOutput("body", prBody(bumps));

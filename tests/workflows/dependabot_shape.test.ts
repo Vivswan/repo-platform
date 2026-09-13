@@ -23,7 +23,13 @@ test("dependabot.yml is three entries, each globbing every action directory", ()
         ...CADENCE,
         "commit-message": { prefix: "ci", include: "scope" },
       },
-      { "package-ecosystem": "bun", directories: ["/", ACTIONS], ...BUILD },
+      {
+        "package-ecosystem": "bun",
+        directories: ["/", ACTIONS],
+        // @types/bun rides the runtime pin, written by refresh-toolchains alone.
+        ignore: [{ "dependency-name": "@types/bun" }],
+        ...BUILD,
+      },
       { "package-ecosystem": "pip", directories: [ACTIONS], ...BUILD },
     ],
   });

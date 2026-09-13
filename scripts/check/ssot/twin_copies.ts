@@ -49,6 +49,8 @@ export const OWN_COPIES: Record<string, string> = {
   ".github/dependabot.yml":
     "globs every action package directory for github-actions, bun, and pip bumps, grouped so one PR bumps an action everywhere at once; the fleet shape spells one directory",
   ".yamllint": "ignores files/, whose placeholder tokens are not YAML before substitution",
+  ".bun-version":
+    "the workflows pass files/bun/.bun-version, the pin's one spelling, as the version file; a root copy would be its second",
   "AGENTS.md": "the platform's own guidance; the fleet region states a fleet member's conventions",
 };
 

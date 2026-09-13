@@ -321,8 +321,7 @@ describe("fleet-ci.yml", () => {
         undefined,
       ],
     ]);
-    // The pinned version file, so the toolchain-version-files rule's
-    // contract holds here as in every other setup step.
+    // The caller's managed pin: the reusable workflow runs in the caller's checkout.
     expect(steps[1]?.with).toEqual({ "bun-version-file": ".bun-version" });
     // No SARIF, so no security-events grant.
     expect(job?.permissions).toBeUndefined();

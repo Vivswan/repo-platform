@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { bunLockDirs, missingNodeModules } from "../../scripts/bootstrap";
+import { bunLockDirs, missingNodeModules, runtimeMismatch } from "../../scripts/bootstrap";
 import { tempDirs } from "../shared/temp_dir";
 
 const root = join(import.meta.dir, "../..");
@@ -64,4 +64,22 @@ test("every bun.lock names the package.json beside it", () => {
           .name,
     ),
   );
+});
+
+describe("runtimeMismatch", () => {
+  test.each([
+    ["1.4.0", "1.4.0\n", null],
+    ["1.4.3", "1.4.0\n", null],
+    ["1.3.14", "1.4.0\n", "local bun 1.3.14 is not at the pinned 1.4 (files/bun/.bun-version)"],
+    ["2.0.0", "1.4.0\n", "local bun 2.0.0 is not at the pinned 1.4 (files/bun/.bun-version)"],
+  ])("local %s against the pin %s", (local, pinned, verdict) => {
+    const found = runtimeMismatch(local, pinned);
+    if (verdict === null) expect(found).toBeNull();
+    else expect(found).toStartWith(verdict);
+  });
+
+  test("a prerelease runtime or an unreadable pin throws instead of reading a prefix", () => {
+    expect(() => runtimeMismatch("1.4.0-canary.1", "1.4.0\n")).toThrow("the local bun runtime");
+    expect(() => runtimeMismatch("1.4.0", "")).toThrow("files/bun/.bun-version");
+  });
 });

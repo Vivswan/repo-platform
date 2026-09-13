@@ -138,7 +138,6 @@ The three links carry no `when`: every repository gets them.
 | --- | --- | --- |
 | `description` | the module's one-line description | docs and the PR body |
 | `codeql_language` | the CodeQL language the toolchain contributes | the fleet plan |
-| `pin` | `{file, version}` of the toolchain's version dotfile: `bun run pins` writes `files/<module>/<file>` from it (and the `.bun-version` copies beside the actions and at this repository's root), and the toolchain refresh bumps it | the pin writer and the toolchain refresh |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
 | `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the `dependabot-label-tuples` rule in `scripts/check/ssot/labels.ts`, which pins it equal to the label in `files/<module>/settings.yml` (the layer the applied roster comes from) |
 | `gitignore_sources` | the github/gitignore templates and platform-authored sections the module adds (its `blocks` list) | the writer |

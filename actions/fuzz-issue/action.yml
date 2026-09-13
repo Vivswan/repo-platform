@@ -75,7 +75,7 @@ runs:
       id: action-bun
       uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
-        pin: ${{ github.action_path }}/.bun-version
+        pin: ${{ github.action_path }}/../../files/bun/.bun-version
 
     # The label and the report tuple ride along for the script's requirement
     # check: a composite's `required: true` only documents, and the later
