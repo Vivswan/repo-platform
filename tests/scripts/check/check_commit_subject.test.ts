@@ -108,6 +108,12 @@ const MESSAGES: [
     [],
     { ...HOOK_ENV, GIT_CONFIG_VALUE_0: "f" },
   ],
+  [
+    "a hostile core.commentChar leaves a Unicode-whitespace line as the stripped candidate; the raw one is judged",
+    "fix: x\n\n\u00a0\n",
+    [],
+    { ...HOOK_ENV, GIT_CONFIG_VALUE_0: "f" },
+  ],
   ["a comma-scoped subject", `${COMMA_SCOPE_SUBJECT}\n\nbody text\n`, [ONE_SCOPE]],
   ["a Sentence-case description", "fix: Repair installer\n", [SUBJECT_CASE]],
   [

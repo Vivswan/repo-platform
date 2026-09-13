@@ -7,7 +7,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { ONE_SCOPE, SUBJECT_CASE, TYPE_ENUM, verdict } from "../../shared/commitlint_verdict.ts";
-import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -177,25 +176,21 @@ describe("the event's commit range", () => {
     });
   }
 
-  test(
-    "a 20-commit payload is warned about as possibly truncated, and still judged to the last entry",
-    () => {
-      const eventPath = eventFile({
-        before: "0".repeat(40),
-        after: head,
-        commits: Array.from({ length: 20 }, (_, index) => ({
-          id: String(index).repeat(40),
-          message: index === 19 ? "wip: x" : `fix: commit ${index}`,
-        })),
-      });
-      const result = runAction({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath });
-      expect([result.stdout.startsWith("::warning::"), verdict(result)]).toEqual([
-        true,
-        { exitCode: 1, stderr: "", problems: [TYPE_ENUM] },
-      ]);
-    },
-    harnessBound(60_000),
-  ); // twenty commitlint launches, one per payload message
+  test("a 20-commit payload is warned about as possibly truncated, and still judged to the last entry", () => {
+    const eventPath = eventFile({
+      before: "0".repeat(40),
+      after: head,
+      commits: Array.from({ length: 20 }, (_, index) => ({
+        id: String(index).repeat(40),
+        message: index === 19 ? "wip: x" : `fix: commit ${index}`,
+      })),
+    });
+    const result = runAction({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath });
+    expect([result.stdout.startsWith("::warning::"), verdict(result)]).toEqual([
+      true,
+      { exitCode: 1, stderr: "", problems: [TYPE_ENUM] },
+    ]);
+  });
 
   // commitlint's CLI drops a whitespace-only message before any rule sees it; the action refuses it by sha.
   test("a whitespace-only commit message is refused, not dropped", () => {
@@ -232,6 +227,17 @@ describe("the event's commit range", () => {
         stderr: "",
       },
     );
+  });
+
+  // commitlint's report echoes a refused message whole: the capture has no cap either.
+  test("a refused commit with a 1.2 MiB body gets its verdict, not a cut report", () => {
+    const eventPath = eventFile({
+      before: "0".repeat(40),
+      after: "1".repeat(40),
+      commits: [{ id: "1".repeat(40), message: `wip: x\n\n${"z\n".repeat(600 * 1024)}` }],
+    });
+    const result = runAction({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath });
+    expect(verdict(result)).toEqual({ exitCode: 1, stderr: "", problems: [TYPE_ENUM] });
   });
 
   test("another event judges nothing", () => {

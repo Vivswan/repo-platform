@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeSync } from "node:fs";
-import { commitlint, type Verdict } from "./commitlint.ts";
+import { readFileSync } from "node:fs";
+import { commitlint, type Verdict, writeStdout } from "./commitlint.ts";
 
 const zeroSha = /^0{40}$/;
 
@@ -86,28 +86,26 @@ function judged(): Commit[] {
   return [];
 }
 
-function report(verdict: Verdict): number {
-  writeSync(1, verdict.report);
+async function report(verdict: Verdict): Promise<number> {
+  await writeStdout(verdict.report);
   return verdict.status;
 }
 
-// commitlint's CLI drops a whitespace-only message before any rule sees it (a range of them lints as nothing).
-function judge(commit: Commit): number {
+async function judge(commit: Commit): Promise<number> {
   if (commit.message.trim() === "") {
-    writeSync(1, `commit ${commit.sha}: the message is empty\n`);
+    await writeStdout(`commit ${commit.sha}: the message is empty\n`);
     return 1;
   }
-  return report(commitlint(commit.message));
+  return report(await commitlint(commit.message));
 }
 
-function main(): void {
+async function main(): Promise<number> {
   const title = process.env.PR_TITLE ?? "";
-  if (title !== "") {
-    process.exitCode = report(commitlint(title));
-    return;
-  }
-  // Every commit gets its verdict before the step fails, one launch each: commitlint reads one message per stdin.
-  process.exitCode = Math.max(0, ...judged().map(judge));
+  if (title !== "") return report(await commitlint(title));
+  // Every commit gets its verdict before the step fails.
+  let status = 0;
+  for (const commit of judged()) status = Math.max(status, await judge(commit));
+  return status;
 }
 
-main();
+process.exitCode = await main();

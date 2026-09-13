@@ -8,8 +8,8 @@
 //   bun scripts/check/check_commit_subject.ts <commit-msg-file>
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, writeSync } from "node:fs";
-import { commitlint } from "../../actions/validate-commit-names/commitlint.ts";
+import { readFileSync } from "node:fs";
+import { commitlint, writeStdout } from "../../actions/validate-commit-names/commitlint.ts";
 
 // Git cleans the message AFTER this hook and the mode is unknowable here, so both messages it could store are judged
 // and the gate refuses only when neither passes (commitlint's own --edit strips comments unconditionally and reads a
@@ -51,10 +51,13 @@ export function candidates(raw: string): string[] {
       encoding: "utf8",
       maxBuffer: STRIPSPACE_MAX_BUFFER,
     });
-  return [...new Set([cleaned(["--strip-comments"]), cleaned([])])].filter((text) => text !== "");
+  // A whitespace-only candidate (JavaScript's trim, the parser's own refusal) is no candidate.
+  return [...new Set([cleaned(["--strip-comments"]), cleaned([])])].filter(
+    (text) => text.trim() !== "",
+  );
 }
 
-export function main(argv: string[]): number {
+export async function main(argv: string[]): Promise<number> {
   const messagePath = argv[0];
   if (!messagePath || argv.length !== 1) {
     console.error("usage: bun scripts/check/check_commit_subject.ts <commit-msg-file>");
@@ -62,15 +65,15 @@ export function main(argv: string[]): number {
   }
   const reports: string[] = [];
   for (const candidate of candidates(readFileSync(messagePath, "utf-8"))) {
-    const verdict = commitlint(candidate);
+    const verdict = await commitlint(candidate);
     if (verdict.status === 0) return 0;
     reports.push(verdict.report);
   }
   // The first candidate's report is the editor-mode one, the subject shown without the comment block behind it.
-  writeSync(1, reports[0] ?? "commit-subject: REFUSED, the message is empty\n");
+  await writeStdout(reports[0] ?? "commit-subject: REFUSED, the message is empty\n");
   return 1;
 }
 
 if (import.meta.main) {
-  process.exit(main(process.argv.slice(2)));
+  process.exitCode = await main(process.argv.slice(2));
 }

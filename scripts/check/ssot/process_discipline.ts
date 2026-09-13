@@ -409,7 +409,11 @@ function exitCapableAfter(source: string, at: number): boolean {
 
 /** Every exit-capable call in these files precedes the first async write, so the writes ride to a natural exit, which drains;
  *  asyncStreamWriteMismatches re-proves that per entry. */
-export const NATURAL_EXIT_WRITE_FILES: ReadonlySet<string> = new Set([]);
+export const NATURAL_EXIT_WRITE_FILES: ReadonlySet<string> = new Set([
+  // writeStdout awaits the write's completion callback (writeSync stops at the pipe's capacity on a 1.2 MiB
+  // report); its two callers, the action and the commit-msg hook, set process.exitCode and exit naturally.
+  "actions/validate-commit-names/commitlint.ts",
+]);
 
 export function asyncStreamWriteMismatches(
   rel: string,
