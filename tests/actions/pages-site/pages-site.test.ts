@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
@@ -21,6 +22,7 @@ import {
   walkMarkdown,
 } from "../../../actions/pages-site/.vitepress/derive.ts";
 import { dirTitle } from "../../../actions/pages-site/.vitepress/dir-title.ts";
+import { tokenNames } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 import {
   assertCentralTheme,
   assertDocsLanding,
@@ -575,6 +577,14 @@ describe("strict check build", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("docs build check passed");
         expect(readFileSync(page, "utf-8")).toContain("<p>Plain text here.</p>");
+        // The token layer reaches the bundle only through the virtual module config.mts serves.
+        const assets = join(buildDir, ".vitepress", "dist", "assets");
+        const css = readdirSync(assets)
+          .filter((name) => name.endsWith(".css"))
+          .map((name) => readFileSync(join(assets, name), "utf-8"))
+          .join("\n");
+        expect(tokenNames().filter((name) => !css.includes(`${name}:`))).toEqual([]);
+        expect(css).toContain('html.dark[data-fleet-hue="5"]');
       }
     },
     harnessBound(200_000),

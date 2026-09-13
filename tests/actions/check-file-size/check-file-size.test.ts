@@ -121,10 +121,6 @@ const GENERATOR_MENTIONS: [string, string][] = [
     "// Shared loader for files.yml (the writer's file table).\n//\n// scripts/generate/build_gitignore.ts derives the block files from\n// its modules; the sync writer reads them at runtime.\n",
   ],
   [
-    "a checker naming the generator it audits (theme_tokens.ts)",
-    "// Theme CSS behind `bun run theme` (scripts/generate/theme_tokens.ts +\n// actions/pages-site/.vitepress/theme/tokens.ts) agrees with the committed file\n",
-  ],
-  [
     "a table whose rows are a generated region (docs/new-repo.md)",
     "// The files table is generated from files.yml\n// (scripts/generate/files_table.ts);\n",
   ],

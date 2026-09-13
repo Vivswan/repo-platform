@@ -607,7 +607,6 @@ export const allGreenRules: Rule[] = [
         // would pass the forward pass and leak fixtures on the runner.
         "bun run test",
         "bun run pins:check",
-        "bun run theme:check",
         "bun run settings:check",
         "bun run gitignore:topology",
         "bun run files:check",

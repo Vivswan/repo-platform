@@ -1,4 +1,4 @@
-// scripts/generate/theme_tokens.ts renders this file into tokens.css, which sets carbon's --vp-* values (the authoritative
+// tokens-css.ts renders this data into the token layer at build time, which sets carbon's --vp-* values (the authoritative
 // list is packages/theme/src/theme/styles/vars.css in github.com/brenoepics/vitepress-carbon) and adds the fleet's own
 // --fleet-* tokens. The one accent is the repository's hue (config.mts sets <html data-fleet-hue="0..5"> at build time),
 // and HUES below is the only place a hue value is written.
