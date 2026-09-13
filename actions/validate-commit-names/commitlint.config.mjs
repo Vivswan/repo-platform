@@ -24,8 +24,13 @@ const scopeOne = (parsed) => {
 
 // commitlint's own exemptions (merge, revert, fixup, squash, semver subjects), judged on the subject line alone: over
 // the whole message its merge pattern is multiline, so a body line `Merge branch topic` would exempt a bad subject.
-// The split ends at every terminator that pattern's `^` honors (\r and U+2028/9 included), not only at a newline.
-const subjectIgnored = (message) => isIgnored(message.split(/[\n\r\u2028\u2029]/, 1)[0]);
+// The line ends where the parser's does (`\r?\n`), and one still holding a terminator that pattern's `^` honors is
+// exempt from nothing: cut at the `\r`, `1.2.3\rnot-a-version` was a version number; whole, the parser refuses it.
+const lineTerminator = /[\r\u2028\u2029]/;
+const subjectIgnored = (message) => {
+  const subject = message.split(/\r?\n/, 1)[0];
+  return !lineTerminator.test(subject) && isIgnored(subject);
+};
 
 export default {
   extends: ["@commitlint/config-conventional"],

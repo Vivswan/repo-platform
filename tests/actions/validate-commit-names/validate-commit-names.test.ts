@@ -48,6 +48,11 @@ const TITLES: [title: string, problems: string[]][] = [
   ["docs(all-green/build.v2_1): x", []],
   ["fix:  x", []],
   ["amend! wip", []],
+  // git stores a bare CR inside the first line; cut there, the exemption read a version number.
+  [
+    "1.2.3\rnot-a-version",
+    ["subject may not be empty [subject-empty]", "type may not be empty [type-empty]"],
+  ],
   ['Reapply "feat: x"', []],
   [HEADER_101, []],
   ["fix(a,b): x", [ONE_SCOPE]],
@@ -150,7 +155,8 @@ describe("the event's commit range", () => {
   });
 
   // A new branch's `before` is the zero sha and a force-push orphans it or re-roots the history: the payload's
-  // messages are judged instead. A body line shaped like a merge subject exempts nothing.
+  // messages are judged instead. A body line shaped like a merge subject exempts nothing; a merge subject ending in
+  // CRLF (`--cleanup=verbatim` stores it) is still the merge subject.
   const FALLBACKS: [name: string, before: string][] = [
     ["zero before sha", "0".repeat(40)],
     ["before sha no longer in the repository", "1".repeat(40)],
@@ -164,6 +170,7 @@ describe("the event's commit range", () => {
         commits: [
           "style(contract): x",
           "docs(a,b): x\n\nMerge branch 'topic' into main",
+          "Merge branch 'topic' into main\r\n\r\nbody\r\n",
           "wip: x",
         ].map((message, index) => ({ id: String(index + 1).repeat(40), message })),
       });
