@@ -7,8 +7,8 @@
 //   matched group `|| null` -> a whitespace-only description IS a subject, only "" is refused
 //   types (parseEnum)       -> split on newline, trimmed, empties dropped, each wrapped in ^ $
 //   subjectPattern          -> must match the WHOLE subject (match[0].length === subject.length)
-// Titles are single-line, so multi-line inputs are not rows: on "fix: x\ry" the parser refuses (`.` stops at \r)
-// while the gate accepts; the harmless direction, a title refused never lands.
+// Titles are single-line, so multi-line inputs are not rows: both sides refuse "fix: x\ry" (`.` stops at \r in
+// either header pattern).
 // The root twin is judged too: nothing else pins it to the managed source.
 
 import { describe, expect, test } from "bun:test";
