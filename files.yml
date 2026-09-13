@@ -79,8 +79,7 @@ settings:
     - {source: files/site/settings.yml, when: {modules: [site]}}
     - {source: files/release-please/settings.yml, when: {modules: [release-please]}}
     - {source: files/pr-title/settings.yml, when: {modules: [pr-title]}}
-    # code_scanning where CodeQL runs: the auto-assign.codeql.yml entry's selection.
-    - {source: files/settings/codeql-public.yml, when: {private: false, any: [bun, deno, uv]}}
+    - {source: files/settings/codeql-public.yml, when: {private: false, any: {declaring: codeql_language}}}
   override: files/settings/override.yml
 
 files:
@@ -106,15 +105,15 @@ files:
   - {path: .github/workflows/copilot-setup-steps.yml, class: starter, blocks: toolchain_steps}
   - {path: .gitleaks.toml, class: starter}
   - {path: .yamllint, class: managed}
-  # auto-assign: the code-scanning alert job exists where CodeQL runs (public, with a toolchain).
-  - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: false, any: [bun, deno, uv]}, source: files/base/.github/workflows/auto-assign.codeql.yml}
+  # auto-assign: the code-scanning alert job exists where CodeQL runs (public, with a CodeQL toolchain).
+  - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: false, any: {declaring: codeql_language}}, source: files/base/.github/workflows/auto-assign.codeql.yml}
   - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: true}}
-  - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: false, without: [bun, deno, uv]}}
-  - {path: .github/workflows/auto-format.yml, class: starter, when: {any: [bun, deno, uv]}, blocks: toolchain_steps}
+  - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: false, without: {declaring: codeql_language}}}
+  - {path: .github/workflows/auto-format.yml, class: starter, when: {any: {declaring: toolchain_steps}}, blocks: toolchain_steps}
   - {path: .typography-allow, class: managed, when: {without: [release-please]}}
   - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
-  - {path: AGENTS.md, class: split, region: html, when: {without: [bun, deno, uv, rust]}}
-  - {path: AGENTS.md, class: split, region: html, when: {any: [bun, deno, uv, rust]}, source: files/base/AGENTS.toolchain.md, blocks: agents_toolchain}
+  - {path: AGENTS.md, class: split, region: html, when: {without: {declaring: agents_toolchain}}}
+  - {path: AGENTS.md, class: split, region: html, when: {any: {declaring: agents_toolchain}}, source: files/base/AGENTS.toolchain.md, blocks: agents_toolchain}
   - {path: LICENSE.md, class: split, region: html, when: {without: [custom-license]}}
   - {path: CLAUDE.md, class: link, target: AGENTS.md}
   - {path: .github/agents.md, class: link, target: ../AGENTS.md}

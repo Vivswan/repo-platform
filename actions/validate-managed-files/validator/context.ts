@@ -105,7 +105,7 @@ function loadVocabulary(filesConfig: string): Vocabulary {
         problem: `${filesConfig}: the module data file carries a files entry without a string path and class`,
       };
     }
-    const when = whenOf(entry.when);
+    const when = whenOf(entry.when, modules);
     if (when === undefined) {
       return {
         problem: `${filesConfig}: the module data file carries a files entry whose when clause is not the grammar's`,
