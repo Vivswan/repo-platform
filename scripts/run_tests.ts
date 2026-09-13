@@ -10,8 +10,8 @@ import { exitCodeOf } from "../.github/scripts/shared/proc.ts";
 import { PLATFORM_NAME } from "../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
-// tests/ is the one root: check_ssot.ts's no-tests-under-actions rule keeps
-// actions/ free of test files.
+// tests/ is the one root: knip.jsonc keeps a test file under actions/ out of
+// the entries, so one there is an unused-file finding.
 const DEFAULT_TARGETS = ["./tests"];
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 const LISTED_LEFTOVERS = 20;
@@ -53,11 +53,10 @@ async function main(argv: string[]): Promise<number> {
   for (const signal of FORWARDED_SIGNALS) process.on(signal, () => child?.kill(signal));
   const scratch = mkdtempSync(join(tmpdir(), `${PLATFORM_NAME}-tests-`));
   try {
-    // Async on purpose (ASYNC_SPAWN_FILES in
-    // scripts/check/ssot/process_discipline.ts): a synchronous spawn would
-    // hold the signal until the child exited on its own. Inherited stdio,
-    // so there is no pipe to drain and no hang to bound beyond the child's
-    // own life.
+    // Async on purpose (biome.json exempts this file from the Bun.spawn ban):
+    // a synchronous spawn would hold the signal until the child exited on
+    // its own. Inherited stdio, so there is no pipe to drain and no hang to
+    // bound beyond the child's own life.
     child = Bun.spawn(["bun", "test", ...args], {
       cwd: REPO_ROOT,
       env: { ...process.env, TMPDIR: scratch },

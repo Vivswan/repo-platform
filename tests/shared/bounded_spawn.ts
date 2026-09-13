@@ -34,8 +34,7 @@ export function boundedSpawnSync(
   options: BoundedSpawnOptions = {},
 ): BoundedSpawnResult {
   const requestedMs = options.timeoutMs ?? SPAWN_TIMEOUT_MS;
-  // The ssot scanner (scripts/check/ssot/process_discipline.ts) trusts the `timeout: timeoutMs` identifier,
-  // so harnessBound is where a value bun would read as NO bound is refused.
+  // harnessBound refuses a value bun would read as NO bound (0, NaN, Infinity).
   const timeoutMs = harnessBound(requestedMs);
   const proc = Bun.spawnSync(argv, {
     cwd: options.cwd,

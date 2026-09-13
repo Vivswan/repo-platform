@@ -76,6 +76,104 @@
           }
         }
       }
+    },
+    {
+      "includes": ["tests/ci/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  },
+                  "node:fs/promises": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  }
+                },
+                "patterns": [
+                  {
+                    "group": ["**/.github/**"],
+                    "message": "a CI harness runs the script as a subprocess; an in-process import tests the module inside bun-test, not the script CI runs"
+                  }
+                ]
+              }
+            },
+            "noCommonJs": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["tests/ci/bun_setup_smoke.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  },
+                  "node:fs/promises": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  }
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/.github/**",
+                      "!**/.github/scripts/ci/bun_setup_smoke",
+                      "!**/.github/scripts/ci/bun_setup_smoke.ts"
+                    ],
+                    "message": "a CI harness runs the script as a subprocess; an in-process import tests the module inside bun-test, not the script CI runs"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "scripts/**",
+        ".github/scripts/**",
+        "tests/**",
+        "!.github/scripts/shared/proc.ts",
+        "!tests/shared/bounded_spawn.ts",
+        "!tests/fleet/select_settings_repos.test.ts",
+        "!tests/fleet/select_sync_repos.test.ts"
+      ],
+      "plugins": ["./biome/spawn_sync.grit"]
+    },
+    {
+      "includes": [
+        "scripts/**",
+        ".github/scripts/**",
+        "tests/**",
+        "actions/**",
+        "!scripts/run_tests.ts",
+        "!tests/actions/pages-site/mermaid_labels.test.ts",
+        "!actions/release-health/release-health.ts"
+      ],
+      "plugins": ["./biome/spawn_async.grit"]
+    },
+    {
+      "includes": [
+        "scripts/**",
+        ".github/scripts/**",
+        "actions/**",
+        "!actions/validate-commit-names/commitlint.ts"
+      ],
+      "plugins": ["./biome/stream_write.grit"]
     }
   ]
 }

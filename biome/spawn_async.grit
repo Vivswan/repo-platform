@@ -1,0 +1,9 @@
+// An async spawn draining its pipes has no pipe-EOF deadlock for a timeout to bound, so its bound is a
+// rationale recorded at the site; the sites are the files biome.json exempts, and a sync spawn rewritten
+// async lands here instead of escaping the sync ban.
+or {
+  `$bun.spawn`,
+  `$bun?.spawn`
+} where { $bun <: contains `Bun` } as $site where {
+  register_diagnostic(span=$site, message="async Bun.spawn is limited to the files biome.json exempts, each with its recorded bound")
+}

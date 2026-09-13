@@ -139,8 +139,7 @@ export function isExempt(path: string): boolean {
 }
 
 function main(): void {
-  // capture() carries the hang bound a bare piped spawn lacks (the
-  // spawn-sync-hang-bound SSOT rule's semantics).
+  // capture() carries the hang bound a bare piped spawn lacks.
   const proc = capture(["git", "-C", REPO_ROOT, "ls-files", "-z"]);
   if (proc.exitCode !== 0) {
     console.error(`git ls-files failed${proc.timedOut ? " (timed out)" : ""}: ${proc.stderr}`);

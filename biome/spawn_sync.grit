@@ -1,0 +1,30 @@
+// Measured on the pinned bun: a piped spawnSync without an effective timeout returns at pipe EOF, not child
+// exit, so a descendant holding the pipe fds wedges the caller. Only the files biome.json exempts spawn
+// synchronously, each with its own bound, and Bun is never aliased or destructured, so no binding can hide a spawn.
+// A member receiver that merely contains Bun (`Bun!`, `(Bun)`, `globalThis.Bun`) counts, and an initializer
+// that holds Bun without reaching into it (`Bun as typeof Bun`, `cond ? Bun : x`) is an alias: over-matching is the loud direction.
+or {
+  `$bun.spawnSync` where { $bun <: contains `Bun` },
+  `$bun?.spawnSync` where { $bun <: contains `Bun` },
+  `$bun[$key]` where { $bun <: contains `Bun` },
+  `$bun?.[$key]` where { $bun <: contains `Bun` },
+  or {
+    `$binding = $bun`,
+    `$binding: $type = $bun`,
+    assignment_expression(right=$bun)
+  } where {
+    or {
+      $bun <: `globalThis.Bun`,
+      and {
+        $bun <: contains `Bun`,
+        not $bun <: contains or {
+          member_expression(),
+          call_expression(),
+          subscript_expression()
+        }
+      }
+    }
+  }
+} where {
+  register_diagnostic(span=$bun, message="spawn through capture()/passthrough() in .github/scripts/shared/proc.ts or boundedSpawnSync() in tests/shared/bounded_spawn.ts; Bun is never aliased or destructured")
+}

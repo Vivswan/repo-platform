@@ -4,7 +4,7 @@
 //
 // When an anchor is lost:
 //   constStringValue, constNumberValue, constRegexSource        -> throw naming the file and the fact
-//   templateCarries, the type/property probes, moduleSpecifiers -> empty or false; the calling rule owns its anchor-lost throw
+//   templateCarries, the type/property probes -> empty or false; the calling rule owns its anchor-lost throw
 
 import { type Expression, Node, Project, type SourceFile, SyntaxKind } from "ts-morph";
 
@@ -58,18 +58,6 @@ export function unwrapExpression(expression: Expression): Expression {
     node = node.getExpression();
   }
   return node;
-}
-
-export function rootIdentifier(expression: Expression): string | null {
-  let node = unwrapExpression(expression);
-  while (
-    Node.isPropertyAccessExpression(node) ||
-    Node.isElementAccessExpression(node) ||
-    Node.isCallExpression(node)
-  ) {
-    node = unwrapExpression(node.getExpression());
-  }
-  return Node.isIdentifier(node) ? node.getText() : null;
 }
 
 interface ConstAnchor {
@@ -204,46 +192,4 @@ export function callCarriesLiteral(source: string, callee: string, firstArg: str
         first !== undefined && Node.isStringLiteral(first) && first.getLiteralValue() === firstArg
       );
     });
-}
-
-export function moduleSpecifiers(source: string): { literal: string[]; nonLiteral: string[] } {
-  const file = parseTs(source);
-  const literalOf = (node: Node | undefined): string | null =>
-    node !== undefined && (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node))
-      ? node.getLiteralValue()
-      : null;
-  const literal: string[] = [
-    ...file.getImportDeclarations().map((decl) => decl.getModuleSpecifierValue()),
-    ...file
-      .getExportDeclarations()
-      .map((decl) => decl.getModuleSpecifierValue())
-      .filter((value): value is string => value !== undefined),
-  ];
-  const nonLiteral: string[] = [];
-  const record = (what: string, value: string | null) => {
-    if (value === null) nonLiteral.push(what);
-    else literal.push(value);
-  };
-  for (const decl of file.getDescendantsOfKind(SyntaxKind.ImportEqualsDeclaration)) {
-    const reference = decl.getModuleReference();
-    record(
-      "import-equals",
-      Node.isExternalModuleReference(reference) ? literalOf(reference.getExpression()) : null,
-    );
-  }
-  for (const node of file.getDescendantsOfKind(SyntaxKind.ImportType)) {
-    const argument = node.getArgument();
-    record(
-      "import type",
-      Node.isLiteralTypeNode(argument) ? literalOf(argument.getLiteral()) : null,
-    );
-  }
-  for (const call of file.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const callee = call.getExpression();
-    const dynamic =
-      callee.getKind() === SyntaxKind.ImportKeyword ||
-      (Node.isIdentifier(callee) && callee.getText() === "require");
-    if (dynamic) record(`${callee.getText()}()`, literalOf(call.getArguments()[0]));
-  }
-  return { literal, nonLiteral };
 }

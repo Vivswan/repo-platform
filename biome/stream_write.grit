@@ -1,0 +1,16 @@
+// On pipe-backed stdio (the Actions runner shape) bun queues async stream writes, and a later process.exit
+// drops everything past the pipe buffer (64 KiB on bun 1.3.14, 128 KiB on 1.4.0).
+// A receiver that merely contains the stream (`(process.stdout as WriteStream)`, `globalThis.process.stdout`)
+// counts: over-matching is the loud direction.
+or {
+  `$stream.write`,
+  `$stream?.write`
+} as $site where {
+  $stream <: contains or {
+    `$process.stdout` where { $process <: contains `process` },
+    `$process.stderr` where { $process <: contains `process` },
+    `$process?.stdout` where { $process <: contains `process` },
+    `$process?.stderr` where { $process <: contains `process` }
+  },
+  register_diagnostic(span=$site, message="write child output with fs.writeSync; an async stream write is dropped past the pipe buffer when the process exits")
+}

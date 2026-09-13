@@ -5,10 +5,8 @@ import {
   constRegexSource,
   constStringValue,
   intersectionCarriesType,
-  moduleSpecifiers,
   parseTs,
   propertyAssignmentCarries,
-  rootIdentifier,
   templateCarries,
   unwrapExpression,
 } from "../../../scripts/lib/ts_extract.ts";
@@ -161,7 +159,6 @@ describe("parseTs refuses recovered trees", () => {
     expect(() => parseTs(broken)).toThrow("unauditable");
     expect(() => constStringValue(broken, "BRANCH", anchor)).toThrow("unauditable");
     expect(() => templateCarries(broken, "x")).toThrow("unauditable");
-    expect(() => moduleSpecifiers(broken)).toThrow("unauditable");
   });
 });
 
@@ -202,19 +199,12 @@ describe("callCarriesLiteral", () => {
   });
 });
 
-describe("unwrapExpression and rootIdentifier", () => {
-  test("wrappers unwrap and chains bottom out on their root identifier", () => {
-    const sf = parseTs("const x = ((Bun))!.spawnSync(cmd).stdout;\n");
+describe("unwrapExpression", () => {
+  test("parentheses and non-null assertions unwrap to the expression they dress", () => {
+    const sf = parseTs("const x = ((Bun))!;\n");
     const initializer = sf.getVariableDeclarations()[0].getInitializer();
     if (initializer === undefined) throw new Error("fixture lost its initializer");
-    expect(rootIdentifier(initializer)).toBe("Bun");
-    expect(unwrapExpression(initializer).getKindName()).toBe("PropertyAccessExpression");
-  });
-
-  test("a chain rooted elsewhere is not the receiver", () => {
-    const sf = parseTs("const x = fakeBun.spawnSync(cmd);\n");
-    const initializer = sf.getVariableDeclarations()[0].getInitializer();
-    if (initializer === undefined) throw new Error("fixture lost its initializer");
-    expect(rootIdentifier(initializer)).toBe("fakeBun");
+    expect(initializer.getKindName()).toBe("NonNullExpression");
+    expect(unwrapExpression(initializer).getKindName()).toBe("Identifier");
   });
 });

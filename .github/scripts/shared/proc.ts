@@ -66,8 +66,6 @@ function spawnEnv(
   return { ...process.env, ...(env ?? {}) };
 }
 
-/** Each call site still spells its spawn options as a literal: the spawn-sync-hang-bound ssot rule reads them structurally,
- * and a spread is opaque to it. */
 function hangBound(options: RunOptions): number {
   return options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;
 }
