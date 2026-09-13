@@ -19,4 +19,4 @@ rules:
   # commit is the whole condition, and the settings-apply-library-pin ssot rule holds the pin's comment to bun.lock's version.
   - ignore: true
     conditions:
-      - expr: ActionRepoFullName == "Vivswan/github-settings-as-code" && ActionVersion == "10b426595c44ad6427bdbd3d7020b2f4da2ddc5a"
+      - expr: ActionRepoFullName == "Vivswan/github-settings-as-code" && ActionVersion == "190f3d1b4d90c6baf0d52802ff0b5954c507d255"

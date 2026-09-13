@@ -292,6 +292,7 @@ describe("settingsApplyInputMismatches (settings-apply-input)", () => {
   ].join("\n");
   const STEP_GATE = "        if: env.TARGET != ''\n";
   const USES = `        uses: ${SETTINGS_ACTION_USES}\n`;
+  const [PINNED_ACTION, VERSION_COMMENT] = SETTINGS_ACTION_USES.split(" # ");
   const SELECT = [
     "      - name: Select settings targets",
     "        id: select",
@@ -424,29 +425,23 @@ ${RESOLVE}${APPLY_STEP}`;
     },
     {
       reason: "the pin without its version comment",
-      text: valid.replace(" # next: 2.0.1-main.450.20260913.g131780e", ""),
+      text: valid.replace(` # ${VERSION_COMMENT}`, ""),
       expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a",
+      got: PINNED_ACTION,
     },
     {
       // YAML reads this comment as the scalar's own trailing comment; the
       // release-tag verification reads the version off the uses line alone.
       reason: "the version comment on the next line, indented under the uses key",
-      text: valid.replace(
-        " # next: 2.0.1-main.450.20260913.g131780e\n",
-        "\n          # next: 2.0.1-main.450.20260913.g131780e\n",
-      ),
+      text: valid.replace(` # ${VERSION_COMMENT}\n`, `\n          # ${VERSION_COMMENT}\n`),
       expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a",
+      got: PINNED_ACTION,
     },
     {
       reason: "the version comment on the next line at the uses key's indentation",
-      text: valid.replace(
-        " # next: 2.0.1-main.450.20260913.g131780e\n",
-        "\n        # next: 2.0.1-main.450.20260913.g131780e\n",
-      ),
+      text: valid.replace(` # ${VERSION_COMMENT}\n`, `\n        # ${VERSION_COMMENT}\n`),
       expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a",
+      got: PINNED_ACTION,
     },
     {
       reason:
@@ -470,12 +465,9 @@ ${RESOLVE}${APPLY_STEP}`;
     },
     {
       reason: "a stale version comment beside the right sha",
-      text: valid.replace(
-        " # next: 2.0.1-main.450.20260913.g131780e",
-        " # next: 2.0.1-main.0.g3fad2b2",
-      ),
+      text: valid.replace(` # ${VERSION_COMMENT}`, " # next: 2.0.1-main.0.g3fad2b2"),
       expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a # next: 2.0.1-main.0.g3fad2b2",
+      got: `${PINNED_ACTION} # next: 2.0.1-main.0.g3fad2b2`,
     },
     {
       reason: "an unpinned step beside a decoy carrying the expected line elsewhere in the file",

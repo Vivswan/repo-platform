@@ -13,16 +13,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   describeProblem,
-  foldLayers,
-  type KeyedListLayering,
   type Layer,
-  mergeLayers,
+  mergeSettings,
   parseSettingsDoc,
   sectionModule,
-  silentIo,
-  stripNulls,
   validateSettings,
 } from "@vivswan/github-settings-as-code";
+import {
+  type KeyedListLayering,
+  mergeLayers,
+  stripNulls,
+} from "@vivswan/github-settings-as-code/internal";
 import {
   type ModuleData,
   parseFilesConfig,
@@ -133,14 +134,17 @@ export function sectionEntries(doc: unknown, section: string): Record<string, un
  *  (docs/settings.md, "The merge dialect"): each layer judged alone, then
  *  the fold judged as the document the apply will read, so a layer built
  *  in code (the tracking labels) meets the same gate as a file. The bytes
- *  are the raw fold rather than the judged document, whose validator
- *  reorders keys; a layer's top-level private notes (`_notes: ...`) are
- *  dropped as the library's merged file drops them. */
+ *  are the raw fold, read from the library's internal entry: its public
+ *  MergeReport.yaml renders the judged document, where the validator
+ *  reorders keys and the render folds long lines. The internal entry
+ *  carries no semver promise, so a library bump re-checks it here. A
+ *  layer's top-level private notes (`_notes: ...`) are dropped as the
+ *  library's merged file drops them. */
 export function foldSettings(
   layers: readonly Layer[],
   where: string,
 ): { settings: SettingsDoc } | { refused: string } {
-  const judged = foldLayers(layers, where, "merge", silentIo());
+  const judged = mergeSettings(layers, { source: where, layering: "merge" });
   if (judged.isErr()) return { refused: describeProblem(judged.error) };
   const merged = mergeLayers(layers, { layering: "merge" });
   // The judgment just ran this same fold, so an error or a non-mapping here cannot happen.

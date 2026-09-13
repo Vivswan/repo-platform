@@ -161,7 +161,7 @@ export const SETTINGS_WORKFLOW = ".github/workflows/settings-repos.yml";
 export const SETTINGS_SELECTOR = "bun .github/scripts/fleet/select_settings_repos.ts";
 export const SETTINGS_RESOLVER = "bun .github/scripts/fleet/resolve_settings_target.ts";
 export const SETTINGS_ACTION_USES =
-  "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a # next: 2.0.1-main.450.20260913.g131780e";
+  "Vivswan/github-settings-as-code@190f3d1b4d90c6baf0d52802ff0b5954c507d255 # next: 2.0.1-main.455.20260913.gd92b738";
 /** The writer's fold, the npm build of the action the apply runs. */
 export const SETTINGS_LIBRARY = "@vivswan/github-settings-as-code";
 
