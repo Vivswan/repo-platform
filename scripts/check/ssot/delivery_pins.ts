@@ -4,7 +4,7 @@ import { parse as parseYaml } from "yaml";
 import { PLATFORM_NAME, PLATFORM_OWNER } from "../../../actions/shared/platform.ts";
 import { actionManifestPaths } from "../../lib/action_steps.ts";
 import { constStringValue } from "../../lib/ts_extract.ts";
-import { escapeRegExp, type Mismatch, sortedSet } from "./comparison.ts";
+import { escapeRegExp, type Mismatch } from "./comparison.ts";
 import { REPO_ROOT, read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
@@ -43,90 +43,24 @@ export function actionManifestFiles(): string[] {
   return actionManifestPaths(join(REPO_ROOT, "actions"));
 }
 
-/** Third-party actions pinned to a BRANCH commit rather than a release: the
- *  value is the branch the trailing comment must name. Record the reason
- *  with each entry (an action that publishes no version tags). */
-export const BRANCH_PINNED: Record<string, string> = {
-  // Vivswan/skills publishes no release tags; ci.yml runs its validate-skills action on this repository's own catalog.
-  "Vivswan/skills": "main",
-};
-
-const SHA_RE = /^[0-9a-f]{40}$/;
-const VERSION_COMMENT_RE = /^v\d+\.\d+\.\d+$/;
-
-/** A moving tag or branch would let upstream change what the fleet runs without a PR here; `@<sha> # vX.Y.Z` is the shape Dependabot bumps.
- *  Only the platform's own refs are exempt: they ride the green-gated delivery tag (the fleet-refs-ride-stable rule judges the
- *  ones under files/). The owner's other repositories are upstream code like any third party's, the settings apply's pin included. */
-export function pinShapeMismatches(
-  pins: Pin[],
-  owner: string,
-  branchPinned: Record<string, string>,
-): Mismatch[] {
-  const mismatches: Mismatch[] = [];
-  const self = `${owner}/${PLATFORM_NAME}`.toLowerCase();
-  const thirdParty = pins.filter((pin) => pin.action.toLowerCase() !== self);
-  const shape = (action: string) =>
-    action in branchPinned
-      ? `${action}@<full 40-hex commit sha> # ${branchPinned[action]}`
-      : `${action}@<full 40-hex commit sha> # v<major>.<minor>.<patch>`;
-  for (const pin of thirdParty) {
-    const versionOk =
-      pin.action in branchPinned
-        ? pin.version === branchPinned[pin.action]
-        : pin.version !== null && VERSION_COMMENT_RE.test(pin.version);
-    if (SHA_RE.test(pin.ref) && versionOk) continue;
-    mismatches.push({
-      file: pin.file,
-      expected: shape(pin.action),
-      got: `@${pin.ref}${pin.version === null ? "" : ` # ${pin.version}`}`,
-    });
-  }
-  const commentsBySha = new Map<string, Set<string>>();
-  for (const pin of thirdParty) {
-    if (!SHA_RE.test(pin.ref) || pin.version === null) continue;
-    const key = `${pin.action}@${pin.ref}`;
-    commentsBySha.set(key, new Set([...(commentsBySha.get(key) ?? []), pin.version]));
-  }
-  for (const [key, versions] of [...commentsBySha.entries()].sort()) {
-    if (versions.size === 1) continue;
-    mismatches.push({
-      file: key,
-      expected: "one version comment per pinned sha",
-      got: [...versions].sort().join(", "),
-    });
-  }
-  for (const action of Object.keys(branchPinned).sort()) {
-    if (!thirdParty.some((pin) => pin.action === action)) {
-      mismatches.push({
-        file: action,
-        expected: "an action still pinned somewhere (branch-pinned allowlist)",
-        got: "no uses: pins found (stale allowlist entry - remove it)",
-      });
-    }
-  }
-  return mismatches;
+/** True when pinact settles the line itself: a full version it verifies against the commit, or no version comment at
+ *  all, which it refuses (code 005). False is the gap: a comment pinact reads as a version but leaves unverified, sha
+ *  included (`actions/checkout@<no such commit> # v999` exits 0). The branches follow pinact's classifier order. */
+export function pinactJudgesComment(comment: string): boolean {
+  const version = comment.replace(/^tag=/, "");
+  if (!/^v?\d/.test(version)) return true;
+  if (/\b[0-9a-f]{40}\b/.test(version)) return false;
+  return /^v?\d+\.\d+\.\d+\S*$/.test(version);
 }
 
-/** One ref per action repo-wide: two sites pinning different refs of the
- *  same action would run two versions of it across the fleet. */
-export function pinMismatches(pins: Pin[]): Mismatch[] {
-  const byAction = new Map<string, Pin[]>();
-  for (const pin of pins) {
-    byAction.set(pin.action, [...(byAction.get(pin.action) ?? []), pin]);
-  }
-  const mismatches: Mismatch[] = [];
-  for (const [action, actionPins] of [...byAction.entries()].sort()) {
-    const refs = [...new Set(actionPins.map((p) => p.ref))].sort();
-    if (refs.length === 1) continue;
-    const sites = refs
-      .map(
-        (ref) =>
-          `${ref} (${sortedSet(actionPins.filter((p) => p.ref === ref).map((p) => p.file))})`,
-      )
-      .join("; ");
-    mismatches.push({ file: action, expected: "a single pinned ref", got: sites });
-  }
-  return mismatches;
+export function unverifiableVersionCommentMismatches(pins: Pin[]): Mismatch[] {
+  return pins
+    .filter((pin) => pin.version !== null && !pinactJudgesComment(pin.version))
+    .map((pin) => ({
+      file: pin.file,
+      expected: `${pin.action}@${pin.ref} # v<major>.<minor>.<patch> (pinact verifies a full version against its commit; any other numeric comment passes unverified, sha included)`,
+      got: `# ${pin.version}`,
+    }));
 }
 
 /** A twin of move_stable.ts's TAG, pinned against it by the fleet-refs-ride-stable rule so a delivery-tag rename updates both.
@@ -280,15 +214,6 @@ function selfPinSites(): string[] {
 
 export const deliveryPinRules: Rule[] = [
   {
-    name: "action-pins",
-    run: () => {
-      const pins = pinSites().flatMap((rel) => extractUsesPins(read(rel), rel));
-      if (pins.length === 0)
-        throw new Error("no `uses: owner/action@ref` pins found anywhere - anchor lost");
-      return [...pinMismatches(pins), ...pinShapeMismatches(pins, PLATFORM_OWNER, BRANCH_PINNED)];
-    },
-  },
-  {
     // One blanket scan over files/ (exactly what the fleet receives), never per-file pins, so a planted @main reds with its file and ref.
     // move_stable.ts's TAG is read off the AST: importing the mover would run its git wiring.
     name: "fleet-refs-ride-stable",
@@ -306,6 +231,13 @@ export const deliveryPinRules: Rule[] = [
         ...fleetWorkflowPinMismatches(pins, callableWorkflowNames(workflowFiles())),
       ];
     },
+  },
+  {
+    name: "version-comments-verifiable",
+    run: () =>
+      unverifiableVersionCommentMismatches(
+        pinSites().flatMap((rel) => extractUsesPins(read(rel), rel)),
+      ),
   },
   {
     name: "delivery-pin-stems",

@@ -1,17 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
-  BRANCH_PINNED,
   callableWorkflowNames,
   deliveryRefMismatches,
   deliveryRefTwinMismatches,
   extractUsesPins,
   fleetWorkflowPinMismatches,
   type Pin,
-  pinMismatches,
-  pinShapeMismatches,
   sourceSelfPins,
   stemMismatches,
+  unverifiableVersionCommentMismatches,
   workflowFiles,
 } from "../../../scripts/check/ssot/delivery_pins.ts";
 
@@ -42,192 +39,56 @@ describe("extractUsesPins", () => {
   });
 });
 
-describe("pinShapeMismatches", () => {
-  const pin = (file: string, action: string, ref: string, version: string | null): Pin => ({
-    file,
-    action,
-    ref,
+describe("unverifiableVersionCommentMismatches (version-comments-verifiable)", () => {
+  const pin = (version: string | null): Pin => ({
+    file: "a.yml",
+    action: "actions/checkout",
+    ref: SHA,
     version,
   });
-  const branchPinned = { "dtolnay/rust-toolchain": "master" };
 
-  test("passes sha pins with release comments, the platform's own delivery ref, and the allowlisted branch pin", () => {
-    const pins = [
-      pin("a.yml", "actions/checkout", SHA, "v7.0.1"),
-      pin("b.yml", "actions/checkout", SHA, "v7.0.1"),
-      pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
-      pin("a.yml", "Vivswan/repo-platform", "build", null),
-      pin("a.yml", "vivswan/github-settings-as-code", SHA, "v2.0.0"),
+  // A full version pinact resolves against the commit, a suffixed or `tag=`-prefixed one included; a comment outside its
+  // `v?<digit>` grammar (`main`, `V7.0.1`) and no comment at all are pinact's own refusals (code 005), so the rule leaves them to it.
+  test("passes every comment pinact judges itself", () => {
+    const judged = [
+      "v7.0.1",
+      "7.0.1",
+      "v7.0.1-rc",
+      "v9.0.0.0",
+      "tag=v7.0.1",
+      "main",
+      "tag=main",
+      `main-${SHA}`,
+      "V7.0.1",
+      null,
     ];
-    expect(pinShapeMismatches(pins, "Vivswan", branchPinned)).toEqual([]);
+    expect(unverifiableVersionCommentMismatches(judged.map(pin))).toEqual([]);
   });
 
-  // Only repo-platform's own refs ride the green-gated delivery branch; the owner's other
-  // repositories are upstream code like any third party's, frozen by sha the same way.
-  test.each<{ got: string; ref: string; version: string | null; expected: Mismatch[] }>([
-    { got: "sha # main", ref: SHA, version: "main", expected: [] },
-    {
-      got: "@main",
-      ref: "main",
-      version: null,
-      expected: [
-        {
-          file: "ci.yml",
-          expected: "Vivswan/skills@<full 40-hex commit sha> # main",
-          got: "@main",
-        },
-      ],
-    },
-    {
-      got: "sha # v1.0.0",
-      ref: SHA,
-      version: "v1.0.0",
-      expected: [
-        {
-          file: "ci.yml",
-          expected: "Vivswan/skills@<full 40-hex commit sha> # main",
-          got: `@${SHA} # v1.0.0`,
-        },
-      ],
-    },
+  // The last two ride pinact's classifier order: `tag=` is dropped before classifying, and a 40-hex word anywhere makes
+  // the comment a sha before the full-version shape is even tried.
+  test.each([
+    "v999",
+    "v7",
+    "v7.0",
+    "999",
+    "7",
+    "v999-beta",
+    "2024-01",
+    "tag=v999-beta",
+    `v7.0.1-${SHA}`,
   ])(
-    "the owner's other repositories are third parties: Vivswan/skills at $got against the live allowlist",
-    ({ ref, version, expected }) => {
-      expect(BRANCH_PINNED["Vivswan/skills"]).toBe("main");
-      expect(
-        pinShapeMismatches(
-          [
-            pin("ci.yml", "Vivswan/skills", ref, version),
-            pin("a.yml", "actions/checkout", SHA, "v7.0.1"),
-          ],
-          "Vivswan",
-          BRANCH_PINNED,
-        ),
-      ).toEqual(expected);
+    "a `# %s` comment reds: pinact reads it as a version but verifies only the full shape, so the line passes unverified",
+    (version) => {
+      expect(unverifiableVersionCommentMismatches([pin(version)])).toEqual([
+        {
+          file: "a.yml",
+          expected: `actions/checkout@${SHA} # v<major>.<minor>.<patch> (pinact verifies a full version against its commit; any other numeric comment passes unverified, sha included)`,
+          got: `# ${version}`,
+        },
+      ]);
     },
   );
-
-  test.each<{ reason: string; pins: Pin[]; expected: Mismatch[] }>([
-    {
-      reason: "a moving tag",
-      pins: [
-        pin("a.yml", "actions/checkout", "v7", null),
-        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
-      ],
-      expected: [
-        {
-          file: "a.yml",
-          expected: "actions/checkout@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
-          got: "@v7",
-        },
-      ],
-    },
-    {
-      reason: "a sha without its version comment",
-      pins: [
-        pin("a.yml", "actions/checkout", SHA, null),
-        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
-      ],
-      expected: [
-        {
-          file: "a.yml",
-          expected: "actions/checkout@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
-          got: `@${SHA}`,
-        },
-      ],
-    },
-    {
-      reason: "a sha whose comment is a moving major, and an abbreviated sha",
-      pins: [
-        pin("a.yml", "actions/checkout", SHA, "v7"),
-        pin("b.yml", "actions/cache", SHA.slice(0, 12), "v6.1.0"),
-        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
-      ],
-      expected: [
-        {
-          file: "a.yml",
-          expected: "actions/checkout@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
-          got: `@${SHA} # v7`,
-        },
-        {
-          file: "b.yml",
-          expected: "actions/cache@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
-          got: `@${SHA.slice(0, 12)} # v6.1.0`,
-        },
-      ],
-    },
-    {
-      reason: "one sha carrying two version comments",
-      pins: [
-        pin("a.yml", "actions/checkout", SHA, "v7.0.1"),
-        pin("b.yml", "actions/checkout", SHA, "v7.0.0"),
-        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
-      ],
-      expected: [
-        {
-          file: `actions/checkout@${SHA}`,
-          expected: "one version comment per pinned sha",
-          got: "v7.0.0, v7.0.1",
-        },
-      ],
-    },
-    {
-      reason: "a branch-pinned action naming another branch, and a stale allowlist entry",
-      pins: [pin("a.yml", "dtolnay/rust-toolchain", SHA, "stable")],
-      expected: [
-        {
-          file: "a.yml",
-          expected: "dtolnay/rust-toolchain@<full 40-hex commit sha> # master",
-          got: `@${SHA} # stable`,
-        },
-      ],
-    },
-    {
-      reason: "an allowlisted branch pin no longer present anywhere",
-      pins: [pin("a.yml", "actions/checkout", SHA, "v7.0.1")],
-      expected: [
-        {
-          file: "dtolnay/rust-toolchain",
-          expected: "an action still pinned somewhere (branch-pinned allowlist)",
-          got: "no uses: pins found (stale allowlist entry - remove it)",
-        },
-      ],
-    },
-    {
-      reason: "the owner's other repository at a moving ref, in any owner spelling",
-      pins: [
-        pin("a.yml", "vivswan/github-settings-as-code", "latest", null),
-        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
-      ],
-      expected: [
-        {
-          file: "a.yml",
-          expected:
-            "vivswan/github-settings-as-code@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
-          got: "@latest",
-        },
-      ],
-    },
-  ])("flags $reason", ({ pins, expected }) => {
-    expect(pinShapeMismatches(pins, "Vivswan", branchPinned)).toEqual(expected);
-  });
-});
-
-describe("pinMismatches", () => {
-  const split = [
-    { file: "a.yml", action: "x/y", ref: "v1", version: null },
-    { file: "b.yml", action: "x/y", ref: "v2", version: null },
-  ];
-
-  test("passes when every action maps to one ref", () => {
-    expect(pinMismatches([{ file: "a.yml", action: "x/y", ref: "v1", version: null }])).toEqual([]);
-  });
-
-  test("flags an action pinned at two refs, naming the sites, with no allowance for a split", () => {
-    expect(pinMismatches(split)).toEqual([
-      { file: "x/y", expected: "a single pinned ref", got: "v1 (a.yml); v2 (b.yml)" },
-    ]);
-  });
 });
 
 describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-stable)", () => {

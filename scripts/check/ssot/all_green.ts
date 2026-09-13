@@ -102,7 +102,6 @@ export const ALL_GREEN_ROSTER = [
   "file-size",
   "commit-names",
   "typecheck",
-  "action-refs",
   "invariants",
   "build-tree",
   "script-tests",

@@ -45,7 +45,7 @@ export const OWN_COPIES: Record<string, string> = {
   ".github/workflows/ci.yml":
     "its gating jobs are this repository's own, with no fleet callers to hide behind (docs/all-green.md)",
   ".github/dependabot.yml":
-    "one github-actions entry over every action package directory, grouped so the action-pins rule sees one PR; the fleet shape spells one directory",
+    "one github-actions entry over every action package directory, grouped so one PR bumps an action everywhere at once; the fleet shape spells one directory",
   ".yamllint": "ignores files/, whose placeholder tokens are not YAML before substitution",
   "AGENTS.md": "the platform's own guidance; the fleet region states a fleet member's conventions",
 };
