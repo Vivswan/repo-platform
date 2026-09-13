@@ -2,7 +2,8 @@
 // (the commit-names step over a range, the pr-title workflow over the title) and this repository's commit-msg hook
 // run commitlint over this file: the grammar has one home.
 //
-// body/footer line caps off -> the house style never hard-wraps a commit body, and a squash body carries PR text
+// header/body/footer line caps off -> the fleet's titles run long by house style, the house style never hard-wraps a
+// commit body, and a squash body carries PR text
 
 import isIgnored from "@commitlint/is-ignored";
 
@@ -33,6 +34,7 @@ export default {
   ignores: [subjectIgnored],
   rules: {
     "scope-one": [2, "always"],
+    "header-max-length": [0],
     "body-max-line-length": [0],
     "footer-max-line-length": [0],
   },

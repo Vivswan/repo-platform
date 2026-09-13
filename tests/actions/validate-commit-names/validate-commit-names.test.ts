@@ -39,7 +39,8 @@ function eventFile(payload: unknown): string {
   return eventPath;
 }
 
-const HEADER_100 = `fix: ${"x".repeat(95)}`;
+// config-conventional caps the header at 100; the fleet turns that rule off (its titles run long by house style).
+const HEADER_101 = `fix: ${"x".repeat(96)}`;
 
 const TITLES: [title: string, problems: string[]][] = [
   ["fix(a): x", []],
@@ -47,7 +48,7 @@ const TITLES: [title: string, problems: string[]][] = [
   ["fix(a)!: x", []],
   ["docs(all-green/build.v2_1): x", []],
   ["fix:  x", []],
-  [HEADER_100, []],
+  [HEADER_101, []],
   ["fix(a,b): x", [ONE_SCOPE]],
   ["fix(a, b): x", [ONE_SCOPE]],
   ["fix(a,b)!: x", [ONE_SCOPE]],
@@ -61,10 +62,6 @@ const TITLES: [title: string, problems: string[]][] = [
   ["fix(core): handle fn(): safely", [ONE_SCOPE]],
   ["fix: Repair installer", [SUBJECT_CASE]],
   ["fix: x.", ["subject may not end with full stop [subject-full-stop]"]],
-  [
-    `${HEADER_100}x`,
-    ["header must not be longer than 100 characters, current length is 101 [header-max-length]"],
-  ],
   ["fix: x ", ["header must not end with whitespace [header-trim]"]],
   ["fix(a):x", ["subject may not be empty [subject-empty]", "type may not be empty [type-empty]"]],
   ["Fix(a): x", ["type must be lower-case [type-case]", TYPE_ENUM]],
