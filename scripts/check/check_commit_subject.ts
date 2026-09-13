@@ -62,7 +62,7 @@ export function main(argv: string[]): number {
   }
   const reports: string[] = [];
   for (const candidate of candidates(readFileSync(messagePath, "utf-8"))) {
-    const verdict = commitlint([], candidate);
+    const verdict = commitlint(candidate);
     if (verdict.status === 0) return 0;
     reports.push(verdict.report);
   }

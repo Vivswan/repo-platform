@@ -48,6 +48,8 @@ const TITLES: [title: string, problems: string[]][] = [
   ["fix(a)!: x", []],
   ["docs(all-green/build.v2_1): x", []],
   ["fix:  x", []],
+  ["amend! wip", []],
+  ['Reapply "feat: x"', []],
   [HEADER_101, []],
   ["fix(a,b): x", [ONE_SCOPE]],
   ["fix(a, b): x", [ONE_SCOPE]],
@@ -81,33 +83,42 @@ describe("the PR title judged as the squash subject it becomes", () => {
   }
 });
 
-/** A scratch history whose base..head holds, oldest first: an accepted commit with an unwrapped 150-character body
- *  line, a merge that brings in a comma-scoped commit, and a Sentence-case commit; `orphan` is a root unrelated to it. */
-function scratchRepo(): { repo: string; base: string; head: string; orphan: string } {
+type Git = (args: string[], stdin?: string) => string;
+
+/** A fresh repository under `scratch` holding one root commit, and its git, which throws on any failure. A message
+ *  arrives on stdin (`commit -F -`) when an argument would not carry it: Linux caps one argument at 128 KiB. */
+function scratchGit(): { repo: string; root: string; git: Git } {
   const repo = join(scratch, `repo-${serial++}`);
-  const git = (...args: string[]): string => {
+  const git: Git = (args, stdin) => {
     const result = boundedSpawnSync(["git", ...args], {
       cwd: repo,
       env: { PATH: process.env.PATH, ...GIT_PINS },
+      stdin: stdin === undefined ? undefined : Buffer.from(stdin),
     });
     if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
     return result.stdout.trim();
   };
   mkdirSync(repo);
-  git("init", "-q", "-b", "main");
-  git("commit", "-q", "--allow-empty", "-m", "chore: root");
-  const base = git("rev-parse", "HEAD");
-  git("commit", "-q", "--allow-empty", "-m", `feat(a): ok\n\n${"y".repeat(150)}`);
-  git("checkout", "-q", "-b", "side");
-  git("commit", "-q", "--allow-empty", "-m", "docs(a,b): two scopes");
-  git("checkout", "-q", "main");
-  git("merge", "-q", "--no-ff", "--no-edit", "side");
-  git("commit", "-q", "--allow-empty", "-m", "fix: Sentence case");
-  const head = git("rev-parse", "HEAD");
-  git("checkout", "-q", "--orphan", "other");
-  git("commit", "-q", "--allow-empty", "-m", "chore: other root");
-  const orphan = git("rev-parse", "HEAD");
-  git("checkout", "-q", "main");
+  git(["init", "-q", "-b", "main"]);
+  git(["commit", "-q", "--allow-empty", "-m", "chore: root"]);
+  return { repo, root: git(["rev-parse", "HEAD"]), git };
+}
+
+/** A scratch history whose base..head holds, oldest first: an accepted commit with an unwrapped 150-character body
+ *  line, a merge that brings in a comma-scoped commit, and a Sentence-case commit; `orphan` is a root unrelated to it. */
+function scratchRepo(): { repo: string; base: string; head: string; orphan: string } {
+  const { repo, root: base, git } = scratchGit();
+  git(["commit", "-q", "--allow-empty", "-m", `feat(a): ok\n\n${"y".repeat(150)}`]);
+  git(["checkout", "-q", "-b", "side"]);
+  git(["commit", "-q", "--allow-empty", "-m", "docs(a,b): two scopes"]);
+  git(["checkout", "-q", "main"]);
+  git(["merge", "-q", "--no-ff", "--no-edit", "side"]);
+  git(["commit", "-q", "--allow-empty", "-m", "fix: Sentence case"]);
+  const head = git(["rev-parse", "HEAD"]);
+  git(["checkout", "-q", "--orphan", "other"]);
+  git(["commit", "-q", "--allow-empty", "-m", "chore: other root"]);
+  const orphan = git(["rev-parse", "HEAD"]);
+  git(["checkout", "-q", "main"]);
   return { repo, base, head, orphan };
 }
 
@@ -185,6 +196,43 @@ describe("the event's commit range", () => {
     },
     harnessBound(60_000),
   ); // twenty commitlint launches, one per payload message
+
+  // commitlint's CLI drops a whitespace-only message before any rule sees it; the action refuses it by sha.
+  test("a whitespace-only commit message is refused, not dropped", () => {
+    const { repo: blank, root, git } = scratchGit();
+    git(["commit", "-q", "--allow-empty", "--allow-empty-message", "-m", " "]);
+    const sha = git(["rev-parse", "HEAD"]);
+    const refused = { exitCode: 1, stdout: `commit ${sha}: the message is empty\n`, stderr: "" };
+    const range = eventFile({ pull_request: { base: { sha: root }, head: { sha } } });
+    expect(
+      runAction({ GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: range }, blank),
+    ).toEqual(refused);
+    const payload = eventFile({
+      before: "0".repeat(40),
+      after: sha,
+      commits: [{ id: sha, message: " " }],
+    });
+    expect(runAction({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: payload }, blank)).toEqual(
+      refused,
+    );
+  });
+
+  // The range's log is the PR's size: two 600 KiB bodies exceed Node's default 1 MiB stdout cap.
+  test("a range whose log exceeds 1 MiB is judged, not cut", () => {
+    const { repo: big, root, git } = scratchGit();
+    const body = "a line of the body\n".repeat(32 * 1024);
+    git(["commit", "-q", "--allow-empty", "-F", "-"], `fix(a): first\n\n${body}`);
+    git(["commit", "-q", "--allow-empty", "-F", "-"], `fix(b): second\n\n${body}`);
+    const head = git(["rev-parse", "HEAD"]);
+    const range = eventFile({ pull_request: { base: { sha: root }, head: { sha: head } } });
+    expect(runAction({ GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: range }, big)).toEqual(
+      {
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+      },
+    );
+  });
 
   test("another event judges nothing", () => {
     const eventPath = eventFile({});

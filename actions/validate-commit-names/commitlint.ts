@@ -13,9 +13,8 @@ export interface Verdict {
   report: string;
 }
 
-/** Without a message on stdin, `args` names the commit range (--from, --to). */
-export function commitlint(args: string[], message?: string): Verdict {
-  const result = spawnSync(process.execPath, [CLI, "--config", CONFIG, ...args], {
+export function commitlint(message: string): Verdict {
+  const result = spawnSync(process.execPath, [CLI, "--config", CONFIG], {
     input: message,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "inherit"],

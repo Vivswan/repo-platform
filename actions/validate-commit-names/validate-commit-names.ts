@@ -4,8 +4,8 @@ import { commitlint, type Verdict } from "./commitlint.ts";
 
 const zeroSha = /^0{40}$/;
 
-interface PushPayloadCommit {
-  id: string;
+interface Commit {
+  sha: string;
   message: string;
 }
 
@@ -13,13 +13,11 @@ interface EventPayload {
   pull_request?: { base?: { sha?: string }; head?: { sha?: string } };
   before?: string;
   after?: string;
-  commits?: PushPayloadCommit[];
+  commits?: { id: string; message: string }[];
 }
 
-type Judged = { range: [from: string, to: string] } | { messages: string[] };
-
-// commitlint refuses a range whose ends share no merge-base, and a force-push can orphan the old tip (a shallow clone
-// may never fetch it) or re-root the history: one probe answers both, and either way the range is not judgeable.
+// A force-push can orphan the old tip (a shallow clone may never fetch it) or re-root the history; `git log` errors on
+// the first and lists the whole new history on the second. One probe answers both: no merge-base, no judgeable range.
 function rangeJudgeable(before: string, after: string): boolean {
   try {
     // stdio "ignore" keeps git's "fatal: Not a valid object name" off the log
@@ -39,7 +37,23 @@ function eventPayload(): EventPayload {
   return JSON.parse(readFileSync(eventPath, "utf8")) as EventPayload;
 }
 
-function judged(): Judged {
+// Newest first. `-z` ends each record with NUL, so a message may hold any newline shape. No output cap: the log is
+// the pull request's own size, and Node's 1 MiB default cut a two-commit range of long bodies.
+function rangeCommits(from: string, to: string): Commit[] {
+  const log = execFileSync("git", ["log", "-z", "--format=%H%n%B", `${from}..${to}`], {
+    encoding: "utf8",
+    maxBuffer: Infinity,
+  });
+  return log
+    .split("\0")
+    .filter((record) => record !== "")
+    .map((record) => {
+      const newline = record.indexOf("\n");
+      return { sha: record.slice(0, newline), message: record.slice(newline + 1) };
+    });
+}
+
+function judged(): Commit[] {
   const eventName = process.env.GITHUB_EVENT_NAME;
   const payload = eventPayload();
 
@@ -49,14 +63,14 @@ function judged(): Judged {
     if (!base || !head) {
       throw new Error("pull_request event is missing base/head SHAs.");
     }
-    return { range: [base, head] };
+    return rangeCommits(base, head);
   }
 
   if (eventName === "push") {
     const { before, after } = payload;
     // A new branch's `before` is the zero sha and a force-push orphans it: the push payload is the fallback.
     if (before && after && !zeroSha.test(before) && rangeJudgeable(before, after)) {
-      return { range: [before, after] };
+      return rangeCommits(before, after);
     }
     const listed = payload.commits ?? [];
     // GitHub truncates the push payload's commit list at 20 entries; at
@@ -66,10 +80,10 @@ function judged(): Judged {
         "::warning::push payload may be truncated (it lists 20 commits, GitHub's cap) and the base..head range is not resolvable here; commits beyond the payload, if any, were not validated",
       );
     }
-    return { messages: listed.map((commit) => commit.message) };
+    return listed.map(({ id, message }) => ({ sha: id, message }));
   }
 
-  return { messages: [] };
+  return [];
 }
 
 function report(verdict: Verdict): number {
@@ -77,22 +91,23 @@ function report(verdict: Verdict): number {
   return verdict.status;
 }
 
+// commitlint's CLI drops a whitespace-only message before any rule sees it (a range of them lints as nothing).
+function judge(commit: Commit): number {
+  if (commit.message.trim() === "") {
+    writeSync(1, `commit ${commit.sha}: the message is empty\n`);
+    return 1;
+  }
+  return report(commitlint(commit.message));
+}
+
 function main(): void {
   const title = process.env.PR_TITLE ?? "";
   if (title !== "") {
-    process.exitCode = report(commitlint([], title));
+    process.exitCode = report(commitlint(title));
     return;
   }
-  const target = judged();
-  if ("range" in target) {
-    process.exitCode = report(commitlint(["--from", target.range[0], "--to", target.range[1]]));
-    return;
-  }
-  // Every message gets its verdict before the step fails, one launch each: commitlint reads one message per stdin.
-  process.exitCode = Math.max(
-    0,
-    ...target.messages.map((message) => report(commitlint([], message))),
-  );
+  // Every commit gets its verdict before the step fails, one launch each: commitlint reads one message per stdin.
+  process.exitCode = Math.max(0, ...judged().map(judge));
 }
 
 main();
