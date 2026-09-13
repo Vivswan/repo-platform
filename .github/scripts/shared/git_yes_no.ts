@@ -1,7 +1,7 @@
 // A git yes/no question answers with exit 0 or its "no" exit (1, or 2 for ls-remote --exit-code); any other
 // exit, or a deadline expiry, is an errored look, and the helpers throw instead of guessing. Every caller acts on a "no":
 //   the stable tag mover       -> would push the tag backwards
-//   the directives range read  -> would read a base the checkout never fetched as an empty range
+//   the directives range read  -> would refuse a sound base as missing, or an ancestor as foreign
 
 import { capture, type RunOptions, type RunResult } from "./proc.ts";
 
