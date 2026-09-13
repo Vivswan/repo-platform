@@ -1,11 +1,4 @@
-// files.yml's grammar, the one loader every reader shares: the sync writer
-// (which also checks the files/ tree), the fleet plan (module order and
-// per-module data), and this repository's own checks. Loading is parse,
-// shape-check, and cross-check within the document; every problem is
-// collected and thrown at once so a broken data file is fixed in one pass.
-// It lives inside the plan action because it needs yaml and zod, which the
-// dependency-free actions/shared zone cannot carry.
-
+// Lives inside the plan action because it needs yaml and zod, which the dependency-free actions/shared zone cannot carry.
 import { dirname, normalize } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -38,8 +31,6 @@ export interface ManagedEntry extends SourcedEntry {
   class: "managed";
 }
 
-/** A managed entry with no tree source: the writer renders the settings
- *  document from the layers and the repository's overlay at `overlay`. */
 export interface RenderedEntry extends EntryBase {
   class: "managed";
   render: "settings";
@@ -63,17 +54,13 @@ export interface LinkEntry extends EntryBase {
 
 export type FileEntry = ManagedEntry | RenderedEntry | StarterEntry | SplitEntry | LinkEntry;
 
-/** One settings layer between the baseline and the override, folded for
- *  a repository when its `when` holds; a null `when` is always. */
 export interface SettingsLayerEntry {
   /** The layer file, relative to the files/ tree. */
   source: string;
   when: When | null;
 }
 
-/** The `settings` block, tree-relative: the baseline every repository
- *  starts from, the layers `when` selects in declared order, and the
- *  override that merges above every repository's own overlay. */
+/** Tree-relative; the override merges above every repository's own overlay. */
 export interface SettingsLayers {
   baseline: string;
   layers: SettingsLayerEntry[];
@@ -145,10 +132,7 @@ const retiredSchema = z.strictObject({
 /** A module name is one path segment of the files/ tree. */
 const moduleName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "not a module name");
 
-/** The module-data keys a reader resolves a repository's configuration
- *  from; every other key rides along untyped (block lists). A tracking
- *  label's `key` names the registration's `labels` key and the
- *  `<key>_label` placeholder. */
+/** looseObject: every other key rides along untyped (the block lists). A tracking label's `key` names the registration's `labels` key and the `<key>_label` placeholder. */
 const moduleDataSchema = z.looseObject({
   description: z.string().min(1).optional(),
   codeql_language: z.string().min(1).optional(),
@@ -193,7 +177,6 @@ export interface FilesConfig {
   retired: RetiredEntry[];
 }
 
-/** The entries files.yml writes for one repository. */
 export function selectEntries(
   config: Pick<FilesConfig, "files">,
   selection: Selection,
@@ -216,9 +199,6 @@ export function blockSourcePath(entryPath: string, value: string): string {
   return `${dir}${stem}.block.${value}${ext}`;
 }
 
-/** The value a block file of `entryPath` carries in its name, or null when
- *  `name` is not one: how a reader tells a module's block files apart from
- *  its other sources. */
 export function blockValueOf(entryPath: string, name: string): string | null {
   const { stem, ext } = splitEntryPath(entryPath);
   const prefix = `${stem}.block.`;
@@ -247,15 +227,11 @@ export class FilesConfigError extends Error {
   }
 }
 
-/** The repository path a link at `path` with `target` resolves to. */
 export function linkDestination(path: string, target: string): string {
   const dir = dirname(path);
   return normalize(dir === "." ? target : `${dir}/${target}`);
 }
 
-/** Why `target` cannot be the relative target of a link at `path`, or null:
- *  the target must be relative, and where it lands must be a clean
- *  repository path other than the link itself. */
 export function linkTargetProblem(path: string, target: string): string | null {
   if (target.startsWith("/")) return "target is absolute";
   if (target.includes("\\")) return "target contains a backslash";
@@ -267,9 +243,7 @@ export function linkTargetProblem(path: string, target: string): string | null {
   return null;
 }
 
-/** Whether two conditions can never both hold: a module one requires and
- *  the other forbids, an `any` list the other forbids entirely, or opposite
- *  visibilities. Anything subtler is not proven and reads as overlapping. */
+/** Only the provable cases; anything subtler reads as overlapping. */
 export function mutuallyExclusive(a: When | null, b: When | null): boolean {
   if (a === null || b === null) return false;
   if (a.private !== undefined && b.private !== undefined && a.private !== b.private) return true;
@@ -300,10 +274,7 @@ export function whenKey(when: When | null): string {
   });
 }
 
-/** Whether the starters at an overlay path are selected exactly when the
- *  rendered entry is: an unconditional rendered entry over one unconditional
- *  starter or a private true/false pair, or a rendered entry whose condition
- *  equals one starter's. Anything subtler is not proven and is refused. */
+/** Only the provable cases; anything subtler is refused. */
 export function starterCoverage(rendered: When | null, starters: (When | null)[]): boolean {
   if (rendered === null) {
     if (starters.length === 1) return starters[0] === null;
@@ -322,12 +293,8 @@ export interface CheckedFilesConfig {
   problems: string[];
 }
 
-/** The document parsed and cross-checked without throwing, so a reader
- *  with checks of its own (the writer's placeholder vocabulary) can fold
- *  them into the same list and report every problem at once. A YAML or
- *  shape error leaves no config to return and throws. Neither the files/
- *  tree nor the placeholder vocabulary is consulted here, so every reader
- *  (and a previous files.yml) parses the same way. */
+/** Problems are returned so a reader with checks of its own (the writer's placeholder vocabulary) folds them into one report.
+ *  Neither the files/ tree nor the placeholder vocabulary is consulted here, so every reader parses the same way. */
 export function checkFilesConfig(text: string, label = "files.yml"): CheckedFilesConfig {
   let raw: unknown;
   try {
@@ -532,7 +499,6 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
   };
 }
 
-/** The parsed and cross-checked data file, or one error naming every problem. */
 export function parseFilesConfig(text: string, label = "files.yml"): FilesConfig {
   const { config, problems } = checkFilesConfig(text, label);
   if (problems.length > 0) throw new FilesConfigError(label, problems);

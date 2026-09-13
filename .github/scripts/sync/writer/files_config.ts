@@ -1,8 +1,3 @@
-// The writer's side of files.yml: the placeholder defaults the module data
-// declares, the source checks against the files/ tree, and block
-// resolution. The grammar itself is actions/plan/files_config.ts, which
-// every reader shares.
-
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -34,29 +29,21 @@ import {
 } from "./placeholders.ts";
 import { readLayers } from "./settings_layers.ts";
 
-/** The color and description a tracking stream's label is written with. */
 export interface TrackingTuple {
   color: string;
   description: string;
 }
 
-/** The data file as the writer runs on it: the grammar plus the
- *  module-declared fallback for each placeholder the registration may
- *  leave unset (the tracking labels), and each tracking
- *  stream's label tuple, complete for every module that declares one when
- *  the data file renders settings. */
 export interface WriterFilesConfig extends FilesConfig {
   defaults: PlaceholderValues;
   trackingTuples: Record<string, TrackingTuple>;
 }
 
-/** Whether `text` contains either marker string anywhere. */
 export function mentionsMarkers(text: string, markers: RegionMarkers): boolean {
   return [markers.begin, markers.end].some((marker) => substringCount(text, marker) > 0);
 }
 
-/** The placeholders whose value the registration may leave unset, so a
- *  module must declare their default before a source may use them. */
+/** The registration may leave these unset, so a module must declare each default before a source may use it. */
 const DEFAULTED: readonly PlaceholderName[] = ["fuzzer_label", "nightly_label", "site_label"];
 
 export interface PlaceholderDefaults {
@@ -64,11 +51,7 @@ export interface PlaceholderDefaults {
   problems: string[];
 }
 
-/** The placeholder defaults the module data declares, each named once, and
- *  the placeholder list checked against the writer's vocabulary: a listed
- *  name the writer cannot derive, or a defaulted one no module backs, is a
- *  problem. Returned rather than thrown so the load reports them beside
- *  the grammar's. */
+/** Problems are returned, not thrown, so the load reports them beside the grammar's. */
 export function placeholderDefaults(config: FilesConfig): PlaceholderDefaults {
   const problems: string[] = [];
   const defaults: PlaceholderValues = {};
@@ -102,16 +85,11 @@ export function placeholderDefaults(config: FilesConfig): PlaceholderDefaults {
 }
 
 export interface TrackingTuples {
-  /** By module name, for every module whose tuple is complete. */
   tuples: Record<string, TrackingTuple>;
   problems: string[];
 }
 
-/** The settings render writes each selected stream's tracking label as a
- *  label tuple, so a `tracking_label` needs its color and description
- *  whenever the data file renders settings. Problems are returned rather
- *  than thrown so the load reports them beside the document's other
- *  problems. */
+/** The settings render writes each tracking label with its color and description, so the tuple is required only when the data file renders settings. */
 export function trackingTuples(config: FilesConfig): TrackingTuples {
   const tuples: Record<string, TrackingTuple> = {};
   const problems: string[] = [];
@@ -132,13 +110,9 @@ export function trackingTuples(config: FilesConfig): TrackingTuples {
 export interface BlockSource {
   module: string;
   value: string;
-  /** Tree-relative path of the block file. */
   source: string;
 }
 
-/** Every block file the entry can read: for each module in files.yml order
- *  among `modules` that carries the entry's `blocks` key, one per listed
- *  value, duplicates across modules included. */
 export function blockCandidates(
   config: FilesConfig,
   entry: FileEntry,
@@ -162,10 +136,7 @@ export function blockCandidates(
   return candidates;
 }
 
-/** The block files the entry concatenates for `modules`, in module order,
- *  byte-identical files landing once (a gitignore source three toolchains
- *  declare); files that differ are each their module's own block even under
- *  one value name (each toolchain's AGENTS.md bullets). */
+/** Deduplicated by bytes, not by value name: a gitignore block three toolchains declare lands once, while each toolchain's own AGENTS.md bullets under one value name all land. */
 export function blockSources(
   config: FilesConfig,
   entry: FileEntry,
@@ -185,24 +156,15 @@ export function blockSources(
 
 interface SourceUse {
   regions: Set<RegionKind>;
-  /** Entries reading the source, and how many of them splice blocks into
-   *  it; the anchor is allowed only when every one does. */
+  /** The anchor is allowed only when every entry reading the source splices blocks into it. */
   entries: number;
   withBlocks: number;
 }
 
-/** Every source the config can ever read from the tree exists and carries
- *  only listed placeholders, and the tree carries nothing else: a file no
- *  entry, block name, or layer declaration reads (a block file under a
- *  retired name, a layer file dropped from the declaration) would
- *  otherwise sit there unnoticed. Every declared layer must exist in turn
- *  (settings_layers.ts). */
+/** The tree may carry nothing the config never reads: a block file under a retired name or a layer file dropped from the declaration would otherwise sit there unnoticed. */
 export function verifySources(config: FilesConfig, tree: string, label = "files.yml"): void {
   const problems: string[] = [];
-  // Source -> every region grammar it feeds; a split source must not mention
-  // its own markers (the writer adds them, and a second pair leaves the
-  // file without an honest slice). A source shared with a managed entry
-  // keeps the constraint.
+  // A split source must not mention its own markers: the writer adds them, and a second pair leaves the file without an honest slice. A source shared with a managed entry keeps the constraint.
   const sources = new Map<string, SourceUse>();
   const use = (source: string): SourceUse => {
     const found = sources.get(source);
@@ -218,8 +180,7 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
     own.entries += 1;
     if (entry.blocks !== undefined) own.withBlocks += 1;
     if (entry.class === "split") own.regions.add(entry.region);
-    // A block file is spliced into the source, so it is read like one but
-    // may not carry the anchor itself.
+    // A block file is spliced into the source, so it is read like one but may not carry the anchor itself.
     for (const candidate of blockCandidates(config, entry, allModules)) {
       const block = use(candidate.source);
       block.entries += 1;
@@ -262,18 +223,14 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
   if (problems.length > 0) throw new FilesConfigError(label, problems);
 }
 
-/** The writer writes the manifest last, over whatever sits at its path, so
- *  an entry there would be written, recorded, and then silently replaced.
- *  Returned rather than thrown so the load reports it beside the document's
- *  other problems. */
+/** The writer writes the manifest last, over whatever sits at its path, so an entry there would be written, recorded, and then silently replaced. */
 export function manifestPathProblems(config: FilesConfig): string[] {
   return config.files.some((entry) => entry.path === MANIFEST_NAME)
     ? [`${MANIFEST_NAME} is the manifest the writer itself writes and cannot be a files entry`]
     : [];
 }
 
-/** Every problem of the document is reported in one error, and the document is judged before
- *  the tree so a forbidden entry is reported as such, not as a missing source. */
+/** The document is judged before the tree so a forbidden entry is reported as such, not as a missing source. */
 export function loadFilesConfig(filesPath: string, tree: string): WriterFilesConfig {
   const label = "files.yml";
   const { config, problems } = checkFilesConfig(readFileSync(filesPath, "utf-8"), label);

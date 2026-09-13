@@ -1,7 +1,4 @@
-// Pages are listed in sidebar order (sidebar.ts), so the launcher's page and directory groups follow the sidebar.
-// VitePress expands `<!-- @include -->` only in its page transform, so a page with a directive it would expand lists NO
-// heading rows (page-index.ts's sourceHeaders): the unexpanded source would shift or collide the anchors after the
-// include, and full-text search still reaches those headings.
+// Pages are listed in sidebar order (sidebar.ts), so the launcher's page and directory groups follow the sidebar. A page with an include directive VitePress would expand lists no heading rows; sourceHeaders in page-index.ts says why.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

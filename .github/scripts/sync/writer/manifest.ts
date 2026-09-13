@@ -1,6 +1,3 @@
-// The shape is actions/shared/manifest.ts's own, so its parser reads what this writer emits. The manifest's own entry carries the
-// build sha in its `commit` slot and no hash (a self-hash would be circular).
-
 import { createHash } from "node:crypto";
 import type { RegionKind } from "../../../../actions/plan/files_config.ts";
 import type { MirrorKind } from "../../../../actions/plan/mirrors.ts";
@@ -30,9 +27,7 @@ import { existingFile, writeFile } from "./target_files.ts";
 
 export { MANIFEST_NAME };
 
-/** A null hash is never written by this writer; it is carried from a
- *  record another tool left unstamped, so the file stays held rather than
- *  orphaned. */
+/** A null hash is carried from a record another tool left unstamped; retire.ts then holds the path as foreign instead of removing it. */
 export type ManifestRecord =
   | { class: "managed"; hash: string | null }
   | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string | null }
@@ -54,9 +49,8 @@ export function mirrorKind(record: MirrorRecord): MirrorKind {
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 
-/** A previous record as this writer would have written it, or null. retire.ts and mirrors.ts judge through this too, so no
- *  path is held or vouched for on a record the writer could not carry; the validator's parity check reads the same field table,
- *  so a shape refused here is a finding on the target side. */
+/** retire.ts and mirrors.ts judge through this too, so no path is held or vouched for on a record the writer could not carry; the validator's
+ *  parity check reads the same field table, so a shape refused here is a finding on the target side. */
 export function readRecord(entry: ManifestEntryShape | undefined): ManifestRecord | null {
   if (entry === undefined || !isRecordedClass(entry.class)) return null;
   if (strayFields(RECORD_FIELDS[entry.class], entry).length > 0) return null;
@@ -91,9 +85,7 @@ export type WrittenClassesRecorded = AssertNever<Exclude<ManifestRecord["class"]
 
 export type Records = Record<string, ManifestEntryShape>;
 
-/** Records on a null prototype: a path named like an inherited property
- *  (`__proto__`, `constructor`) is then looked up, assigned, and listed
- *  like any other, where a plain object would answer with the prototype. */
+/** A null prototype, so a path named `__proto__` or `constructor` is looked up, assigned, and listed like any other. */
 function recordsOf(files: Record<string, ManifestEntryShape> = {}): Records {
   return Object.assign(Object.create(null) as Records, files);
 }
@@ -125,6 +117,7 @@ const COMMENT =
   `${REGISTRATION_PATH}), link (a relative symbolic link; hash is sha256 of its target). This ` +
   "file's own entry records the build commit that wrote the tree.";
 
+/** The manifest's own entry carries the build sha and no hash: a self-hash would be circular. */
 export function renderManifest(records: Record<string, ManifestRecord>, build: string): string {
   const lines = Object.entries(records)
     .filter(([path]) => path !== MANIFEST_NAME)

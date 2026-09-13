@@ -43,18 +43,13 @@ export type Label = {
   description: string;
 };
 
-/** One module of files.yml, named. */
 export type Module = ModuleData & { name: string };
 
-/** The same, once the settings block is known to exist: what selecting
- *  and folding layers requires. */
 export interface LayerConfig {
   modules: Record<string, ModuleData>;
   settings: SettingsLayers;
 }
 
-/** The layer config of a data file, or the one error a data file with no
- *  settings block earns; every layer selection starts here. */
 export function layerConfig(config: LayerSources): LayerConfig {
   if (config.settings === null) {
     throw new Error("files.yml declares no settings block, so no settings layer can be read");
@@ -66,7 +61,6 @@ const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..", "..");
 
 const FILES_CONFIG = join(REPO_ROOT, "files.yml");
 
-/** files.yml's modules in canonical order. */
 export function loadModules(path: string = FILES_CONFIG): Module[] {
   return namedModules(parseFilesConfig(readFileSync(path, "utf-8"), path));
 }
@@ -160,16 +154,12 @@ export function foldSettings(
 }
 
 export interface ReadLayers {
-  /** Every declared layer that exists and passes the boundary, by
-   *  tree-relative path, in declaration order. */
+  /** By tree-relative path, in declaration order. */
   layers: Map<string, Layer>;
-  /** Why the tree falls short of the declaration: a declared layer
-   *  missing or refused. */
   problems: string[];
 }
 
-/** Every declared layer read through the parse boundary; a loader reports
- *  the problems beside the document's other problems. */
+/** Problems are returned so the loader reports them beside the document's other problems. */
 export function readLayers(config: LayerSources, tree: string): ReadLayers {
   const layers = new Map<string, Layer>();
   const problems: string[] = [];
@@ -192,17 +182,13 @@ export function readLayers(config: LayerSources, tree: string): ReadLayers {
   return { layers, problems };
 }
 
-/** The declared layers, or one error naming every disagreement with the tree. */
 export function loadLayers(config: LayerSources, tree: string): Map<string, Layer> {
   const { layers, problems } = readLayers(config, tree);
   if (problems.length > 0) throw new Error(problems.join("\n"));
   return layers;
 }
 
-/** The layer files a repository's selection folds, LOW to HIGH and
- *  tree-relative: the baseline, then every layer whose `when` holds in
- *  declared order. The repository's overlay and the override merge above
- *  these. */
+/** Low to high; the overlay and the override merge above these. */
 export function layerPaths(config: LayerConfig, selection: Selection): string[] {
   const { settings } = config;
   return [
@@ -213,10 +199,7 @@ export function layerPaths(config: LayerConfig, selection: Selection): string[] 
   ];
 }
 
-/** Every label tuple any layer can emit, for ANY module selection and
- *  either visibility, the override included; tracking labels excluded
- *  (those come from each repository's registration). The NAMES alone are
- *  actions/plan/reserved_labels.ts's reading, shared with the plan action. */
+/** Every selection and both visibilities, the override included; tracking labels come from each registration and are not here. actions/plan/reserved_labels.ts reads the names alone. */
 export function allLayerLabels(config: LayerConfig, tree: string): Label[] {
   const labels: Label[] = [];
   for (const layer of loadLayers(config, tree).values()) {
@@ -233,9 +216,7 @@ export function allLayerLabels(config: LayerConfig, tree: string): Label[] {
   return labels;
 }
 
-/** The fleet's document for a selection: the layers of `layerPaths`
- *  folded in order, before the overlay, the override, and the tracking
- *  labels join. Operator data throughout, so a refusal throws. */
+/** Operator data throughout, so a refusal throws. */
 export function managedSettings(
   config: LayerConfig,
   tree: string,
@@ -249,8 +230,6 @@ export function managedSettings(
   return folded.settings;
 }
 
-/** The visibility an overlay DECLARES: `repository.private` when boolean,
- *  else null (the operator's fact stands in). */
 export function declaredPrivate(overlay: unknown): boolean | null {
   const repository = isMapping(overlay) ? overlay.repository : null;
   const value = isMapping(repository) ? repository.private : null;
@@ -263,9 +242,7 @@ export interface IdentityIssue {
   got: string;
 }
 
-/** Shape hygiene for the identity keys an overlay declares (the starter
- *  seeds all four; the apply never touches an undeclared key, so drift in
- *  a missing one is never healed). */
+/** The apply never touches an undeclared key, so drift in a missing identity key is never healed; the starter seeds all four. */
 export function identityKeyIssues(repository: Record<string, unknown>): IdentityIssue[] {
   const issues: IdentityIssue[] = [];
   const got = (value: unknown) => (value === undefined ? "missing" : JSON.stringify(value));
@@ -308,17 +285,10 @@ export function identityKeyIssues(repository: Record<string, unknown>): Identity
  *  ONE required context. */
 export const ALL_GREEN_CONTEXT = "all-green";
 
-/** GitHub Actions' app id. The verdict's check run is created by an
- *  Actions workflow run, so the required-check entry pins this
- *  integration_id; without the pin, any app or plain commit status could
- *  satisfy the required context by matching its name. */
+/** GitHub Actions' app id; every required-check entry pins it so only a workflow run can satisfy the context. */
 export const GITHUB_ACTIONS_APP_ID = 15368;
 
-/** The fleet-mandatory top layer, merged ABOVE every repository's overlay
- *  so no repository can weaken what it declares. Validated here against
- *  the required-check mistakes that weaken the whole fleet: the main
- *  ruleset must require ALL_GREEN_CONTEXT, and every required-check entry
- *  must pin integration_id to GitHub Actions. */
+/** The fleet-mandatory top layer, merged above every repository's overlay so no repository can weaken what it declares. */
 export function loadOverrideLayer(path: string): Layer {
   const layer = loadLayer(path);
   const main = sectionEntries(layer.doc, "rulesets").find((entry) => entry.name === "main");

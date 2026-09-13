@@ -35,7 +35,6 @@ const INCLUDE_DIRECTIVE = /<!--\s*@include:\s*(.*?)\s*-->/g;
 const INCLUDE_REGION = /(#[\w-]+)/;
 const INCLUDE_RANGE = /\{(\d*),(\d*)\}$/;
 
-/** What VitePress resolves a page's include directives against. */
 export interface IncludeScope {
   /** The page's absolute source path; a relative include is joined to its
    *  directory. */

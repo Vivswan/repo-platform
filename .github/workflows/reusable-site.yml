@@ -1,20 +1,6 @@
-# The fleet's one GitHub Pages deploy, called by the managed ci.yml's `site`
-# leg (docs/site.md). ONE job on purpose: the repo-owned site-build hook
-# (.github/actions/site-build, a composite action in the caller's checkout,
-# run when it exists) hands its output directory to the fleet's assembly in
-# the same workspace, so the Pages artifact is the only artifact. The
-# pages-site action lays the hook's website out at the root and the docs
-# versioned beside or under it, checks every internal link, and hands back
-# the directory to upload; a repository with neither ends green with a
-# notice and no deploy, and a registration with `site.path: null` publishes
-# the website alone (docs/ stays the repository's own). A caller passing no
-# `config` is configured from its registration (the action runs the plan
-# over .repo-platform.yml); this repository's own ci.yml passes its
-# configuration as JSON. On scheduled
-# runs with a link-rot label the deployed site's external links are checked
-# after the deploy and findings ride the fleet's tracking-issue stream
-# (fuzz-issue@stable). Callers own `concurrency: pages`; this workflow
-# declares none.
+# The fleet's one GitHub Pages deploy, called by the managed ci.yml's `site` leg (docs/site.md).
+# ONE job on purpose: the repo-owned site-build hook (.github/actions/site-build in the caller's checkout) hands its output directory to the fleet's assembly in the same workspace, so the Pages artifact is the only artifact.
+# Callers own `concurrency: pages`; this workflow declares none.
 
 name: Reusable Site
 
@@ -87,8 +73,7 @@ jobs:
             echo "edit_links=^${edit_url//./\\.}"
           } >> "$GITHUB_OUTPUT"
 
-      # The repository's own website, built by its hook from the checkout;
-      # a repository that has not filled the hook in publishes docs/ alone.
+      # A repository without the hook publishes docs/ alone, when it has one.
       - name: Build the repository's website
         id: hook
         if: hashFiles('.github/actions/site-build/action.yml') != ''

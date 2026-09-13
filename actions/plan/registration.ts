@@ -1,11 +1,4 @@
-// The registration file's grammar, shared by every
-// reader: the module list the fleet plans and the sync select on (checked
-// against files.yml's modules by the reader that has it), and the strict
-// full document the plan action resolves a repository's CI from. It lives
-// inside the plan action because it needs yaml and zod, which the
-// dependency-free actions/shared zone cannot carry; the sync imports it by
-// relative path.
-
+// Lives inside the plan action because it needs yaml and zod, which the dependency-free actions/shared zone cannot carry; the sync imports it by relative path.
 import { parse } from "yaml";
 import { z } from "zod";
 import {
@@ -30,9 +23,6 @@ function describeEntry(entry: unknown): string {
   return JSON.stringify(entry) ?? String(entry);
 }
 
-/** The top-level `modules` list of parsed registration data: every entry a
- *  distinct non-empty name, or the errors. An absent key is an error (an
- *  empty selection would strip every module from the repo). */
 export function readModules(
   data: unknown,
   label = REGISTRATION_PATH,
@@ -76,10 +66,7 @@ export function readModules(
   return { modules, errors: [] };
 }
 
-/** The module names a registration TEXT declares; null when the document
- *  or its top-level modules list is unreadable. logLevel error: the
- *  parser's default level prints warned-on source lines (target content)
- *  to stderr, which the fleet plans' public logs must never carry. */
+/** logLevel error: the parser's default level prints warned-on source lines (target content) to stderr, which the fleet plans' public logs must never carry. */
 export function declaredModules(registrationText: string): string[] | null {
   let data: unknown;
   try {
@@ -90,7 +77,6 @@ export function declaredModules(registrationText: string): string[] | null {
   return readModules(data).modules;
 }
 
-// The shape constraints every value the writer substitutes must meet.
 const slug = z
   .string()
   .regex(
@@ -120,9 +106,7 @@ const label = z
     "must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters",
   );
 
-/** The full registration document. Module names and `labels` keys are
- *  checked against files.yml's module data by the reader that has it (the
- *  plan action); the schema pins the shapes. */
+/** Module names and `labels` keys are checked against files.yml by the reader that has it; the schema pins shapes alone. */
 export const registrationSchema = z.strictObject({
   modules: z.array(z.unknown()),
   project: z.strictObject({
@@ -175,9 +159,6 @@ export type Registration = Omit<z.infer<typeof registrationSchema>, "modules"> &
 
 export type RegistrationRead = { registration: Registration } | { errors: string[] };
 
-/** The registration a TEXT declares, fail-closed: a YAML error, a non-mapping
- *  document, an unknown key, a wrong type, or a malformed module list are all
- *  errors naming the file. */
 export function parseRegistration(text: string, label = REGISTRATION_PATH): RegistrationRead {
   let data: unknown;
   try {

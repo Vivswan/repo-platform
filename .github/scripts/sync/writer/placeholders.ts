@@ -1,8 +1,4 @@
-// The placeholder grammar of the files/ tree: `{{name}}` tokens, no spaces,
-// from the fixed list below. A `$` before the braces marks a GitHub Actions
-// expression (`${{ github.sha }}`), which is not a placeholder and rides
-// through untouched. Substitution runs on source files only, never on
-// content read from a target repository.
+// Substitution runs on source files only, never on content read from a target repository.
 
 export const PLACEHOLDER_NAMES = [
   "project_name",
@@ -19,14 +15,12 @@ export const PLACEHOLDER_NAMES = [
 
 export type PlaceholderName = (typeof PLACEHOLDER_NAMES)[number];
 
-/** The values a run can substitute; a name without a value here is one no
- *  listed source uses (the loader refuses a source using it). */
+/** Partial: a name without a value is one no listed source uses, and the loader refuses a source that does. */
 export type PlaceholderValues = Partial<Record<PlaceholderName, string>>;
 
-/** The line, on its own, where an entry's block files are spliced into its
- *  source; a source without one gets them appended at the end. */
 export const BLOCKS_ANCHOR = "{{blocks}}";
 
+// A `$` before the braces is a GitHub Actions expression (`${{ github.sha }}`), not a placeholder, and rides through untouched.
 const TOKEN_RE = /(\$?)\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}/g;
 
 /** Substituted values land inside quoted YAML scalars verbatim, so a
@@ -37,7 +31,6 @@ export function isPlaceholderName(name: string): name is PlaceholderName {
   return (PLACEHOLDER_NAMES as readonly string[]).includes(name);
 }
 
-/** Every placeholder-shaped token in `text`, in order, duplicates included. */
 export function placeholderTokens(text: string): string[] {
   const names: string[] = [];
   for (const match of text.matchAll(TOKEN_RE)) {
@@ -46,7 +39,6 @@ export function placeholderTokens(text: string): string[] {
   return names;
 }
 
-/** The token names in `text` outside `allowed`, deduplicated, in order. */
 export function unknownPlaceholders(text: string, allowed: readonly string[]): string[] {
   const unknown: string[] = [];
   for (const name of placeholderTokens(text)) {
@@ -55,8 +47,6 @@ export function unknownPlaceholders(text: string, allowed: readonly string[]): s
   return unknown;
 }
 
-/** Why `text` cannot carry the blocks anchor as written, or null: the
- *  anchor may appear at most once, and only as a whole line. */
 export function blocksAnchorProblem(text: string): string | null {
   const mentions = text.split(BLOCKS_ANCHOR).length - 1;
   if (mentions === 0) return null;
@@ -66,10 +56,7 @@ export function blocksAnchorProblem(text: string): string | null {
   return null;
 }
 
-/** `text` with the block bodies spliced in at the anchor line, or appended
- *  when there is none (a text without anchor or blocks is returned as is).
- *  Every piece ends in exactly one newline first, so the seams never merge
- *  two lines. */
+/** Every piece ends in exactly one newline first, so the seams never merge two lines. */
 export function spliceBlocks(text: string, blocks: string[]): string {
   const terminate = (piece: string) =>
     piece === "" || piece.endsWith("\n") ? piece : `${piece}\n`;
@@ -81,9 +68,7 @@ export function spliceBlocks(text: string, blocks: string[]): string {
   return `${above}${joined}${lines.slice(at + 1).join("\n")}`;
 }
 
-/** The placeholder names in `text` whose value is absent or empty, once
- *  each in order: an empty value is never written (a license line without
- *  its holder is wrong, not blank). */
+/** An empty value counts as missing: a license line without its holder is wrong, not blank. */
 export function missingPlaceholders(text: string, values: PlaceholderValues): string[] {
   const missing: string[] = [];
   for (const name of placeholderTokens(text)) {
@@ -93,11 +78,7 @@ export function missingPlaceholders(text: string, values: PlaceholderValues): st
   return missing;
 }
 
-/** `text` with every placeholder token replaced; throws on a token outside
- *  `values` (the loader rejects such sources first, so this is the writer's
- *  own guard, not a user-facing message) and on a value that would break
- *  the quoted scalar it lands in (the registration grammar refuses those
- *  first; this is the second gate). */
+/** The loader refuses a source with an unlisted token first, so that throw is a second gate; the unsafe-value throw is the only gate for a files.yml label default, which the registration grammar never sees. */
 export function substitute(text: string, values: PlaceholderValues): string {
   return text.replace(TOKEN_RE, (whole, dollar: string, name: string) => {
     if (dollar !== "") return whole;

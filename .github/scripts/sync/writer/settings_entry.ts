@@ -53,10 +53,8 @@ export interface SettingsRenderInput {
   /** The operator's visibility fact, used when the overlay declares none. */
   private: boolean;
   registration: Registration;
-  /** The overlay's text, or null when nothing sits at `overlayPath`. */
   overlay: string | null;
   overlayPath: string;
-  /** The operator's owner, named in the header as the applier. */
   owner: string;
 }
 
@@ -73,8 +71,6 @@ function header(input: SettingsRenderInput): string {
   ].join("\n");
 }
 
-/** The tracking label tuples for the selection: the plan's names (its
- *  refusals hold) with each stream's color and description. */
 function trackingLabelTuples(
   input: SettingsRenderInput,
   reserved: ReadonlySet<string>,

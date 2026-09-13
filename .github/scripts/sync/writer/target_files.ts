@@ -1,8 +1,4 @@
-// Every read, write, and unlink the writer performs inside the target
-// checkout goes through here. File APIs follow symbolic links, so a linked
-// ancestor directory (docs -> ../shared) would carry a write or an unlink
-// outside the checkout with the final path component looking clean; the
-// final component itself is probed with lstat and never read through.
+// File APIs follow symbolic links, so a linked ancestor (docs -> ../shared) would carry a write or an unlink outside the checkout; every ancestor is checked with lstat, and the final component is never read through.
 
 import {
   mkdirSync,
@@ -16,8 +12,6 @@ import {
 import { dirname, join } from "node:path";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 
-/** The absolute location of `path` under `target`, once no ancestor
- *  directory between them is a symbolic link. */
 export function insideTarget(target: string, path: string): string {
   for (let dir = dirname(path); dir !== "." && dir !== "/"; dir = dirname(dir)) {
     if (lstatOrNull(join(target, dir))?.isSymbolicLink()) {
@@ -29,11 +23,7 @@ export function insideTarget(target: string, path: string): string {
   return join(target, path);
 }
 
-/** What sits at a path: nothing, a regular file with its bytes, or a
- *  symbolic link with its target. Anything else (a directory, a device) is
- *  refused loudly: the writer has no honest way to replace it.
- *  The link target is raw bytes, as the mirror writer and the validator hash it: decoding would fold a malformed target
- *  onto the replacement character and let it pass as the recorded one. */
+/** The link target is raw bytes, as the mirror writer and the validator hash it: decoding would fold a malformed target onto the replacement character and let it pass as the recorded one. */
 export type Found =
   | { kind: "absent" }
   | { kind: "file"; bytes: Buffer }
@@ -61,8 +51,7 @@ export type Occupant =
   | "a directory"
   | "something that is not a regular file";
 
-/** What sits at `path`, or null when nothing does. Nothing is read through,
- *  so a directory or a device is named for a hold instead of refused. */
+/** Unlike probe, a directory or a device is named for a hold instead of refused. */
 export function occupant(target: string, path: string): Occupant | null {
   const stat = lstatOrNull(insideTarget(target, path));
   if (stat === null) return null;
@@ -72,10 +61,7 @@ export function occupant(target: string, path: string): Occupant | null {
   return "something that is not a regular file";
 }
 
-/** The bytes at `path`, null when nothing is there; a directory or symlink
- *  at the path is refused loudly rather than read through or written over.
- *  For the files the writer must be able to trust as files (the manifest,
- *  the registration); the class writers probe instead. */
+/** For the files the writer must trust as files (the manifest, the registration); the class writers probe instead. */
 export function existingFile(target: string, path: string): Buffer | null {
   const found = probe(target, path);
   if (found.kind === "link") {
@@ -98,9 +84,7 @@ export function writeFile(target: string, path: string, bytes: Buffer): void {
   writeFileSync(abs, bytes);
 }
 
-/** Creates the symbolic link, replacing a link already there; a regular
- *  file or a directory at the path is refused (the caller removes a file
- *  it has judged its own first). */
+/** A regular file at the path is refused; a caller that means to replace one removes it first. */
 export function writeLink(target: string, path: string, linkTarget: string): void {
   const abs = insideTarget(target, path);
   const stat = lstatOrNull(abs);
@@ -114,14 +98,11 @@ export function writeLink(target: string, path: string, linkTarget: string): voi
   symlinkSync(linkTarget, abs);
 }
 
-/** Removes the file or symbolic link at `path` (never what a link points at). */
 export function removeFile(target: string, path: string): void {
   unlinkSync(insideTarget(target, path));
 }
 
-/** Removes the directory at `path` with everything under it. Only a
- *  directory is taken (a link to one is unlinked by removeFile, never
- *  walked), and links inside it are unlinked, never followed. */
+/** A link to a directory is refused: removeFile unlinks it instead of walking through. */
 export function removeTree(target: string, path: string): void {
   const abs = insideTarget(target, path);
   const stat = lstatOrNull(abs);

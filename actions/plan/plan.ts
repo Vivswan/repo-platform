@@ -1,26 +1,4 @@
-// The fleet's plan: resolves one managed repository's CI configuration at
-// run time from the repository's registration and
-// files.yml, the module data at the root of the delivery commit beside this
-// action. Every managed ci.yml is byte-identical; what differs per
-// repository is computed here and handed to the jobs as step outputs.
-//
-// `default` mode resolves what fleet-ci.yml's jobs key on: the selection in
-// canonical order, the visibility, the CodeQL languages, the tracking
-// labels, and whether a scheduled run is the week's CodeQL rescan; it also
-// rejects a mirror declaration files.yml proves unwritable (mirrors.ts).
-// `site` mode resolves the site configuration the pages-site action
-// consumes (one JSON document: the site title, the docs mount path or null
-// for no docs half, the include roots, the link-rot label) from the
-// registration. Fail closed: an unknown module or key, a malformed value,
-// or a missing registration fails the step; nothing here defaults an
-// invalid registration into a green run.
-//
-// Env: MODE (default|site), PRIVATE ("true"/"false"; empty asks the API
-// for GITHUB_REPOSITORY with GH_TOKEN), FILES_CONFIG (the delivery commit's
-// files.yml: `modules` keys are the vocabulary in canonical order, values
-// the defaults the registration may leave unset), FILES_TREE (its files/
-// tree, whose settings layers name the labels no tracking stream may
-// reuse), GITHUB_OUTPUT. Runs in the caller's checkout.
+// Every managed ci.yml is byte-identical; what differs per repository is computed here and handed to the jobs as step outputs. Fail closed: nothing here defaults an invalid registration into a green run.
 
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeSync } from "node:fs";
@@ -56,13 +34,10 @@ export class PlanError extends Error {
   }
 }
 
-/** One module of files.yml, named. */
 export type Module = ModuleData & { name: string };
 
-/** The values a registration may leave unset, each declared once in
- *  files.yml by the module that owns the setting. */
 export interface PlanDefaults {
-  /** modules.site.path: the URL segment the docs mount under beside a website. */
+  /** The URL segment the docs mount under beside a website. */
   docsPath: string;
 }
 
@@ -73,28 +48,20 @@ export interface FilesData {
   /** The file entries and retirements, for the paths a mirror may name. */
   files: FileEntry[];
   retired: RetiredEntry[];
-  /** The settings layers the reserved label roster is derived from. */
   layers: LayerSources;
 }
 
-/** Where files.yml declares one default the plan reads. */
 export interface DefaultSource {
   module: string;
-  /** The key path under `modules.<module>`, dotted. */
   key: string;
   pick: (data: ModuleData) => string | undefined;
 }
 
-/** The defaults the plan cannot do without, by PlanDefaults key: the module
- *  and key must be there, or the delivery commit is broken and no repository
- *  plans. */
+/** The module and key must be there, or the delivery commit is broken and no repository plans. */
 export const REQUIRED_DEFAULTS: Readonly<Record<keyof PlanDefaults, DefaultSource>> = {
   docsPath: { module: "site", key: "path", pick: (d) => d.path },
 };
 
-/** files.yml's module data as the plan reads it: an unreadable or invalid
- *  file, or one missing a default the plan resolves from, is an error
- *  naming the file and every missing default. */
 export function loadModuleData(text: string, label = "files.yml"): FilesData {
   let config: FilesConfig;
   try {
@@ -134,14 +101,11 @@ export interface PlanInput {
   defaults: PlanDefaults;
   files: FileEntry[];
   retired: RetiredEntry[];
-  /** Lowercased names of the labels the platform manages (the settings
-   *  layers' labels): a tracking stream reusing one would let a green night
-   *  close unrelated issues and every settings apply fight over it. */
+  /** Lowercased: the settings layers' label names. */
   reservedLabels: ReadonlySet<string>;
   private: boolean;
 }
 
-/** The selected modules' data in canonical order; an unknown name fails. */
 export function selectModules(input: PlanInput): Module[] {
   const known = new Map(input.modules.map((module) => [module.name, module]));
   const unknown = input.registration.modules.filter((name) => !known.has(name));
@@ -158,9 +122,7 @@ export function selectModules(input: PlanInput): Module[] {
   return input.modules.filter((module) => selected.has(module.name));
 }
 
-/** Each selected tracking stream's label, in canonical order: the
- *  registration's `labels.<key>`, else the module's default. A `labels`
- *  key naming no selected stream fails: it would silently label nothing. */
+/** A `labels` key naming no selected stream fails: it would silently label nothing. */
 export function trackingLabels(
   input: Pick<PlanInput, "registration" | "reservedLabels">,
   selected: Module[],
@@ -220,16 +182,10 @@ export function weekly(now: Date): boolean {
   return now.getUTCDay() === 1;
 }
 
-/** The fleet-wide nightly security stream's label (docs/security-scans.md):
- *  fleet-nightly.yml's trivy-nightly job files every repository's Trivy
- *  findings under it, so it joins the tracking labels release-health
- *  blocks on without a module or an answer; the settings baseline
- *  declares it on every repository. */
+/** The fleet-wide nightly security stream (docs/security-scans.md): fleet-nightly.yml files every repository's Trivy findings under it, so it joins the tracking labels without a module, and the settings baseline declares it on every repository. */
 export const SECURITY_LABEL = "security-nightly";
 
-/** CodeQL is off for a private repository (personal-account code scanning
- *  is public-only) and where no selected module analyzes as a language;
- *  otherwise the distinct languages in canonical order. */
+/** Personal-account code scanning is public-only, so a private repository gets no CodeQL. */
 export function codeqlLanguages(selected: Module[], isPrivate: boolean): string[] {
   if (isPrivate) return [];
   return [...new Set(selected.flatMap((m) => (m.codeql_language ? [m.codeql_language] : [])))];
@@ -259,8 +215,6 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
  *  planned here. */
 export interface SitePlan {
   siteTitle: string;
-  /** The docs half (its include roots the registration's, verbatim), or
-   *  null when the registration turns it off (site.path: null). */
   docs: DocsConfig | null;
   linkRotLabel: string;
 }
@@ -285,8 +239,6 @@ export function planSite(input: PlanInput): SitePlan {
   };
 }
 
-/** The step outputs of a plan, by output name; a site plan is one row,
- *  the config document pages-site reads. */
 export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
   if ("docs" in plan) {
     const config: SiteConfigJson = {
@@ -306,7 +258,6 @@ export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
   };
 }
 
-/** files.yml's text, or an error naming the path. */
 export function readFilesConfig(path: string): string {
   try {
     return readFileSync(path, "utf-8");
@@ -328,9 +279,7 @@ export function readRegistration(root: string): Registration {
   return read.registration;
 }
 
-/** The visibility: the caller's input when it says so, else the API's word
- *  (a schedule or dispatch event still carries the repository object, but
- *  the fallback keeps an empty input from reading as public). */
+/** The API fallback keeps an empty input from reading as public. */
 export function resolvePrivate(input: string, repository: string): boolean {
   if (input === "true") return true;
   if (input === "false") return false;
@@ -370,9 +319,7 @@ function main(): number {
   return 0;
 }
 
-/** GITHUB_OUTPUT rows: `name=value` for a one-line value, the delimited
- *  form for a value spanning lines, under a random delimiter the value
- *  cannot contain. */
+/** The delimiter is random, so no value can be authored to end the output early. */
 export function outputLines(outputs: Record<string, string>): string {
   return Object.entries(outputs)
     .map(([name, value]) => {

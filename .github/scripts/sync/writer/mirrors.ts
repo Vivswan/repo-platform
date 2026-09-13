@@ -1,6 +1,3 @@
-// A declaration that cannot be written fails the run before any target of its pass is written, so no PR carries a repository out of
-// sync; actions/plan/mirrors.ts holds the declaration rules, and this file adds what only the checkout shows.
-
 import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import {
@@ -149,9 +146,9 @@ type Standing = { kind: MirrorKind; carries: Buffer } | null;
 
 type Pass = "literal" | "glob";
 
-/** Literal targets are written before any `*` pattern expands, so a directory a literal creates is matched in the same run.
- *  `owned` is what files.yml claims here plus the stale records the run retires; `records` are the previous sync's, read for the
- *  last mirror hash. */
+/** A pass's declaration failures are thrown before any target of that pass is written, so no PR carries a repository half-mirrored. Literal targets
+ *  are written before any `*` pattern expands, so a directory a literal creates is matched in the same run. `owned` is what files.yml
+ *  claims here plus the stale records the run retires; `records` are the previous sync's, read for the last mirror hash. */
 export function applyMirrors(
   target: string,
   mirrors: Mirrors,
