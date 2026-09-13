@@ -534,24 +534,12 @@ describe("bunDirsMismatches", () => {
   const ACTION = "actions/validate-managed-files";
   const green: BunDirsInputs = {
     lockDirs: [".", "actions/check-typography", ACTION],
-    dependabotBunDirs: [".", "actions/check-typography", ACTION],
     typecheckScript: `bun x tsc -p . && (cd actions/check-typography && bun x tsc -p .) && (cd ${ACTION} && bun x tsc -p .)`,
     typecheckRuns: `${TYPECHECK_TSCONFIG_LOOP}; do\n  (cd "$(dirname "$tsconfig")" && bun x tsc -p .)\ndone`,
     tsconfigDirs: [".", "actions/check-typography", ACTION],
   };
   const cases: [string, Partial<BunDirsInputs>, Mismatch[]][] = [
     ["every home covers the package", {}, []],
-    [
-      "dependabot's bun entry for the package is missing",
-      { dependabotBunDirs: [".", "actions/check-typography"] },
-      [
-        {
-          file: ".github/dependabot.yml",
-          expected: `a bun ecosystem entry for ${ACTION} (it commits bun.lock)`,
-          got: "no entry",
-        },
-      ],
-    ],
     [
       "the typecheck script leaves the package out",
       {

@@ -5,24 +5,11 @@ updates:
   # Pins under files/** are invisible to dependabot and nothing compares them with the bumped ones: bump them by
   # hand in that PR, the commented toolchain examples in checks.block.toolchain.yml included.
   - package-ecosystem: "github-actions"
+    # Dependabot expands these with Ruby's Dir.glob, where `/actions/**` alone matches one level: `**/*` also
+    # reaches an action nested under another. A matched directory with no manifest is skipped.
     directories:
       - "/"
-      - "/actions/bun-setup"
-      - "/actions/check-file-size"
-      - "/actions/check-typography"
-      - "/actions/dependency-review"
-      - "/actions/fuzz-issue"
-      - "/actions/knip"
-      - "/actions/pages-site"
-      - "/actions/plan"
-      - "/actions/release-health"
-      - "/actions/semgrep"
-      - "/actions/trivy"
-      - "/actions/typos"
-      - "/actions/validate-commit-names"
-      - "/actions/validate-managed-files"
-      - "/actions/yamllint"
-      - "/actions/zizmor"
+      - "/actions/**/*"
     groups:
       actions:
         patterns: ["*"]
@@ -37,97 +24,9 @@ updates:
       include: "scope"
 
   - package-ecosystem: "bun"
-    directory: "/"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/check-file-size"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/check-typography"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/validate-commit-names"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/fuzz-issue"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/pages-site"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/plan"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/release-health"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/trivy"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/validate-managed-files"
+    directories:
+      - "/"
+      - "/actions/**/*"
     schedule:
       interval: "monthly"
     cooldown:
@@ -137,7 +36,8 @@ updates:
       include: "scope"
 
   - package-ecosystem: "pip"
-    directory: "/actions/yamllint"
+    directories:
+      - "/actions/**/*"
     schedule:
       interval: "monthly"
     cooldown:
