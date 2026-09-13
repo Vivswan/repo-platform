@@ -41,9 +41,10 @@ export function reservedLabelNames(config: LayerSources, tree: string): Set<stri
         `settings layer ${SOURCE_PREFIX}${rel} is missing from the tree beside files.yml - the reserved label roster cannot be derived without it`,
       );
     }
-    // What the writer's layer boundary (the settings library's) accepts, no more and no less, so the two
-    // readings cannot diverge: an empty document is an empty layer, `null` is the dialect's opt-out marker, an
-    // absent section declares nothing, and the section is a list or the library's `{_undeclared, entries}` wrapper.
+    // The reader agrees with the writer's layer boundary (the settings library's) on the container shapes and
+    // the label identity, not on validation (a numeric color is collected here and refused there): an empty
+    // document is an empty layer, `null` is the dialect's opt-out marker, an absent section declares nothing,
+    // and the section is a list or the library's `{_undeclared, entries}` wrapper.
     const layer: unknown = parseYaml(readFileSync(path, "utf-8"), { logLevel: "error" }) ?? {};
     if (!isMapping(layer)) {
       throw new Error(`settings layer ${SOURCE_PREFIX}${rel}: must be a YAML mapping`);

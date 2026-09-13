@@ -100,7 +100,7 @@ export function readLayer(text: string, where: string): Layer {
   return layer;
 }
 
-/** One layer document, read from its file. */
+/** Throws naming the path when the file is missing or the document is refused. */
 export function loadLayer(path: string): Layer {
   return readLayer(readFileSync(path, "utf-8"), path);
 }
