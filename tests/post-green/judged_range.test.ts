@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { rangeCommits, rangeLabel, resolveBase } from "../../.github/scripts/fleet/judged_range.ts";
+import {
+  rangeCommits,
+  rangeLabel,
+  resolveBase,
+} from "../../.github/scripts/post-green/judged_range.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
@@ -126,7 +130,7 @@ describe("resolveBase", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
-    const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");
+    const script = join(import.meta.dir, "../../.github/scripts/post-green/fleet_sync_marker.ts");
     const outputFile = join(root, "erroring-git-output.txt");
     writeFileSync(outputFile, "");
     const result = boundedSpawnSync(["bun", script], {
@@ -152,7 +156,7 @@ describe("resolveBase", () => {
   test("a malformed base is refused by the leg's entry point before any git read, with no output line", () => {
     // judgedRangeEnv fails the process, so the whole outcome is the leg's:
     // fleet_sync_marker.ts is the one script that reads the range env.
-    const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");
+    const script = join(import.meta.dir, "../../.github/scripts/post-green/fleet_sync_marker.ts");
     const outputFile = join(root, "malformed-before-output.txt");
     writeFileSync(outputFile, "");
     const result = boundedSpawnSync(["bun", script], {

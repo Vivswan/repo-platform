@@ -20,10 +20,10 @@ import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirr
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import { pathProblem } from "../../../../actions/shared/repo_path.ts";
-import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
 import { loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
+import { parseFlags } from "./flags.ts";
 import {
   MANIFEST_NAME,
   type ManifestRecord,

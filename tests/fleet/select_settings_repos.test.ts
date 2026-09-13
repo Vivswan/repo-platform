@@ -7,9 +7,9 @@ import {
   PRIVATE_DISPLAY,
   pushProbeSkipNotice,
 } from "../../.github/scripts/fleet/discovery.ts";
+import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import { supersededNotice } from "../../.github/scripts/fleet/newest_main.ts";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
-import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
 import { tempDirs } from "../shared/temp_dir";

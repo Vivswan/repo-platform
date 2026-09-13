@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { parseFlags } from "../../.github/scripts/shared/flags.ts";
-import { boundedSpawnSync } from "./bounded_spawn";
+import { parseFlags } from "../../../.github/scripts/sync/writer/flags.ts";
+import { boundedSpawnSync } from "../../shared/bounded_spawn";
 
-const HELPER = join(import.meta.dir, "../../.github/scripts/shared/flags.ts");
+const HELPER = join(import.meta.dir, "../../../.github/scripts/sync/writer/flags.ts");
 
 // Error paths call process.exit, so exercise them in a subprocess the way
 // the adopting scripts hit them. Failures print ::error:: workflow

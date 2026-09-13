@@ -5,7 +5,7 @@ import {
   type Directive,
   FLEET_SYNC_LABELS,
   readDirective,
-} from "../../.github/scripts/fleet/fleet_sync_marker.ts";
+} from "../../.github/scripts/post-green/fleet_sync_marker.ts";
 import { argvStub } from "../shared/argv_stub";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -67,7 +67,7 @@ describe("readDirective", () => {
 });
 
 describe("main", () => {
-  const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");
+  const script = join(import.meta.dir, "../../.github/scripts/post-green/fleet_sync_marker.ts");
   const root = temp.dir("fleet-sync-marker-");
 
   function git(cwd: string, args: string[]): string {

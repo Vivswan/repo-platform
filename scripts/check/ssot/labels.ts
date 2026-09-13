@@ -1,7 +1,7 @@
 // Rules over the label rosters: the managed labels' sites, the release
 // guard's literals, dependabot's tuples, and the hand-copied label regex.
 
-import { FLEET_SYNC_LABELS } from "../../../.github/scripts/fleet/fleet_sync_marker.ts";
+import { FLEET_SYNC_LABELS } from "../../../.github/scripts/post-green/fleet_sync_marker.ts";
 import { loadLayer, sectionEntries } from "../../../.github/scripts/sync/writer/settings_layers.ts";
 import { constRegexSource, constStringValue } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch } from "./comparison.ts";

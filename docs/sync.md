@@ -298,7 +298,7 @@ The sync never targets this repository, yet it carries root copies of the files 
 | row 5: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log` |
 | row 6: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 
-The vocabulary, complete (`tests/fleet/verdict.test.ts` pins it):
+The vocabulary, complete (`tests/sync/verdict.test.ts` pins it):
 
 ```text
 plan: <N> rows
