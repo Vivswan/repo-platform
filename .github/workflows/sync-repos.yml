@@ -189,8 +189,8 @@ jobs:
       - name: Write the build into the target
         id: write
         continue-on-error: true
-        # The writer's bound: its git calls are local to the clone, so the
-        # row budget counts this step by its timeout.
+        # The writer's git calls are local to the clone, so no network bound
+        # covers this step: its timeout is its bound.
         timeout-minutes: 10
         env:
           BUILD: ${{ needs.plan.outputs.build }}
