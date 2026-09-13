@@ -15,7 +15,7 @@
     "typography": "bun actions/check-typography/check-typography.ts .",
     "file-size": "bun actions/check-file-size/check-file-size.ts .",
     "wrap:check": "bun scripts/check/check_markdown_wrap.ts",
-    "lint:yaml": "uvx yamllint -s .",
+    "lint:yaml": "uvx --with-requirements actions/yamllint/requirements.txt yamllint -s .",
     "validate": "bun actions/validate-managed-files/validator/validate_managed_files.ts --self .",
     "ssot:check": "bun scripts/check_ssot.ts",
     "files:check": "bun scripts/files_table.ts --check docs/new-repo.md",

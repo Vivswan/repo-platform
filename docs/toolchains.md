@@ -13,6 +13,8 @@ The pinned versions are the `pin` entries of the `bun` and `deno` modules in [fi
 
 Modules without a pin: uv floats on its setup action's default, and rust ships no toolchain setup in CI (its module data deliberately carries no `pin`), so rust version selection stays repository-owned.
 
+The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.txt` pins the yamllint the action installs, dependabot's pip entry for that directory bumps it, and this repository's `lint:yaml` script installs from the same file.
+
 ## How the pin reaches repositories
 
 - The dotfiles are MANAGED files (deliberately not starters): in a repo selecting the module, every sync updates them, and no registration key overrides them - the fleet shares one version per toolchain.
