@@ -13,12 +13,10 @@
 import { allGreenRules } from "./check/ssot/all_green.ts";
 import type { Mismatch } from "./check/ssot/comparison.ts";
 import { deliveryPinRules } from "./check/ssot/delivery_pins.ts";
-import { harnessImportRules } from "./check/ssot/harness_imports.ts";
 import { labelRules } from "./check/ssot/labels.ts";
 import { literalAnchorRules } from "./check/ssot/literal_anchors.ts";
 import { postGreenRules } from "./check/ssot/post_green.ts";
 import { prTitleRules } from "./check/ssot/pr_title.ts";
-import { processDisciplineRules } from "./check/ssot/process_discipline.ts";
 import { RULE_ROSTER, type Rule, ruleRosterMismatches } from "./check/ssot/rule_roster.ts";
 import { settingsWorkflowRules } from "./check/ssot/settings_workflow.ts";
 import { siteConfigRules } from "./check/ssot/site_config.ts";
@@ -38,8 +36,6 @@ const rules: Rule[] = [
   ...prTitleRules,
   ...literalAnchorRules,
   ...postGreenRules,
-  ...processDisciplineRules,
-  ...harnessImportRules,
   ...siteConfigRules,
   ...twinCopyRules,
 ];

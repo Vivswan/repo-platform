@@ -52,10 +52,6 @@ export const RULE_ROSTER = [
   "release-cut-wiring",
   "settings-green-gate",
   "fleet-writers-ride-post-green",
-  "spawn-sync-hang-bound",
-  "no-tests-under-actions",
-  "stream-write-sync",
-  "ci-harness-imports",
   "site-config-parity",
   "root-twin-parity",
 ] as const;

@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { boundedSpawnSync } from "./bounded_spawn";
 import { tempDirs } from "./temp_dir";
@@ -208,6 +216,13 @@ describe("the biome ban on bare mkdtemp under tests/", () => {
       "tests/shared/not_the_helper.ts": helperSource,
       // Outside tests/ the override does not apply; the helper's discipline is the test tree's.
       "scripts/outside.ts": bare,
+      // The config's plugin overrides resolve their .grit files beside it.
+      ...Object.fromEntries(
+        readdirSync(join(repoRoot, "biome")).map((name) => [
+          `biome/${name}`,
+          readFileSync(join(repoRoot, "biome", name), "utf-8"),
+        ]),
+      ),
     };
     for (const [rel, content] of Object.entries(files)) {
       mkdirSync(dirname(join(lintRoot, rel)), { recursive: true });

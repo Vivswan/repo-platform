@@ -13,11 +13,11 @@
     },
     "actions/*": {
       // Action entrypoints run by path from action.yml, at the action root.
-      "entry": ["*.ts"],
+      "entry": ["*.ts", "!*[._]{test,spec}.ts"],
       "project": ["**/*.{ts,mts}"]
     },
     "actions/check-file-size": {
-      "entry": ["*.ts"],
+      "entry": ["*.ts", "!*[._]{test,spec}.ts"],
       "project": ["**/*.{ts,mts}"],
       // The grammar packages are loaded as wasm files by path, never imported.
       "ignoreDependencies": [
@@ -27,7 +27,7 @@
       ]
     },
     "actions/validate-commit-names": {
-      "entry": ["*.ts"],
+      "entry": ["*.ts", "!*[._]{test,spec}.ts"],
       "project": ["**/*.{ts,mts}"],
       // commitlint.config.mjs names the preset in `extends` and commitlint's load() resolves it; nothing imports it.
       "ignoreDependencies": ["@commitlint/config-conventional"]

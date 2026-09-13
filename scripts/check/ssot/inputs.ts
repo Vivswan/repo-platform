@@ -31,7 +31,7 @@ export function read(rel: string): string {
   return readFileSync(join(REPO_ROOT, rel), "utf-8");
 }
 
-/** capture() carries the hang bound a bare piped spawn lacks: the checker must not be its own counterexample to the spawn-sync-hang-bound rule. */
+/** capture() carries the hang bound a bare piped spawn lacks. */
 export function trackedFiles(): string[] {
   const proc = capture(["git", "-C", REPO_ROOT, "ls-files", "-z"]);
   if (proc.exitCode !== 0) {

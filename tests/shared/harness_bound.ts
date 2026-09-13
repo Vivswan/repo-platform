@@ -4,7 +4,7 @@
 //   unset, load 60, 12 cores -> x5, the one-minute load average per core, rounded up
 //   unset, idle -> x1, the bound as written
 // The scaled value is validated here, the one place every bound passes through: bun reads 0, NaN, and Infinity
-// as NO bound, and scripts/check/ssot/process_discipline.ts trusts the identifier it is handed.
+// as NO bound.
 
 import os from "node:os";
 
