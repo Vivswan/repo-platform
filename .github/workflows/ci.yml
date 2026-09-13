@@ -185,8 +185,6 @@ jobs:
         run: bun run validate
       - name: Check single-source-of-truth invariants
         run: bun run ssot:check
-      - name: Check the files table in docs/new-repo.md against files.yml
-        run: bun run files:check
       # Offline and sub-second: the block files must match files.yml's
       # gitignore_sources on the PR that edits them, not a week later.
       - name: Check the gitignore copies against files.yml

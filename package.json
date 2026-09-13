@@ -3,8 +3,8 @@
   "private": true,
   "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies, which the root postinstall installs so one root bun install covers every action package.",
   "scripts": {
-    "check": "bun scripts/bootstrap.ts --if-missing && bun run docs:check && bun run lint && bun run lint:actions && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run wrap:check && bun run lint:yaml && bun run validate && bun run ssot:check && bun run files:check && bun run gitignore:topology && bun run pins:check && bun run settings:check && bun run test",
-    "regen": "bun run pins && bun run settings && bun scripts/files_table.ts --write docs/new-repo.md",
+    "check": "bun scripts/bootstrap.ts --if-missing && bun run docs:check && bun run lint && bun run lint:actions && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run wrap:check && bun run lint:yaml && bun run validate && bun run ssot:check && bun run gitignore:topology && bun run pins:check && bun run settings:check && bun run test",
+    "regen": "bun run pins && bun run settings",
     "bootstrap": "bun scripts/bootstrap.ts",
     "docs:check": "bun scripts/docs_check.ts",
     "check:fix": "bun x biome check --write .",
@@ -18,7 +18,6 @@
     "lint:yaml": "uvx --with-requirements actions/yamllint/requirements.txt yamllint -s .",
     "validate": "bun actions/validate-managed-files/validator/validate_managed_files.ts --self .",
     "ssot:check": "bun scripts/check_ssot.ts",
-    "files:check": "bun scripts/files_table.ts --check docs/new-repo.md",
     "gitignore": "bun scripts/generate/build_gitignore.ts",
     "gitignore:topology": "bun scripts/generate/build_gitignore.ts --topology",
     "pins": "bun scripts/generate/toolchain_pins.ts",

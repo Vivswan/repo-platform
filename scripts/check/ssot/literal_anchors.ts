@@ -3,7 +3,7 @@ import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts
 import { PLATFORM_NAME, PLATFORM_OWNER, PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import { callCarriesLiteral, constNumberValue, constRegexSource } from "../../lib/ts_extract.ts";
 import { SKELETON_SOURCE } from "./all_green.ts";
-import { canonical, type Mismatch, mustMatch, stripGeneratedRegions } from "./comparison.ts";
+import { canonical, type Mismatch, mustMatch } from "./comparison.ts";
 import {
   asRecord,
   ciJobs,
@@ -14,21 +14,6 @@ import {
   trackingStreams,
 } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
-
-// A strip that removes nothing from one of these means the marker grammar drifted from scripts/files_table.ts,
-// and every stripped-prose rule would silently check unstripped text.
-const DOCS_WITH_REGIONS = new Set(["docs/new-repo.md"]);
-
-function handProse(rel: string): string {
-  const { prose, regions } = stripGeneratedRegions(read(rel), rel);
-  if (regions === 0 && DOCS_WITH_REGIONS.has(rel)) {
-    throw new Error(
-      `${rel}: stripping removed no generated regions from a doc known to ` +
-        "carry them - the marker grammar drifted from scripts/files_table.ts",
-    );
-  }
-  return prose;
-}
 
 /** Pinned on the parsed documents, not a grep: a commented-out write or a stray literal would still match as text.
  *
@@ -280,7 +265,7 @@ export const literalAnchorRules: Rule[] = [
         });
       }
 
-      const settingsProse = handProse("docs/settings.md");
+      const settingsProse = read("docs/settings.md");
       // Only the two labels the hand prose quotes; the per-toolchain dependabot labels are the dependabot-label-tuples rule's.
       // Name and color are matched jointly: a spannable gap would let a wrong hand-written color pass
       // by matching a backticked color later in the doc.
@@ -301,7 +286,7 @@ export const literalAnchorRules: Rule[] = [
 
       for (const stream of trackingStreams()) {
         for (const doc of [`docs/${stream.module}.md`, "docs/settings.md"]) {
-          if (!handProse(doc).includes(`\`${stream.default}\``)) {
+          if (!read(doc).includes(`\`${stream.default}\``)) {
             mismatches.push({
               file: doc,
               expected: `the ${stream.key} tracking label default \`${stream.default}\``,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { capture } from "../../../.github/scripts/shared/proc.ts";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
@@ -9,19 +9,16 @@ import {
   blockRel,
   buildBlock,
   buildFilesBase,
-  buildSelf,
   CI_WORKSPACE_SECTION,
-  existingLocalSides,
   gitignoreSources,
   main,
   missingBlockFiles,
-  ownModules,
   PLATFORM_SECTIONS,
   sectionsIn,
-  selfSources,
   sourceId,
   strayBlockFiles,
   topologyProblems,
+  writeOwnGitignore,
 } from "../../../scripts/generate/build_gitignore";
 import { tempDirs } from "../../shared/temp_dir";
 
@@ -62,10 +59,7 @@ const ENTRIES: [string, string[]][] = [
   ["fuzzer", ["fuzzer"]],
 ];
 
-/** The generated fixture's own selection: every declaring module, so its self file carries every section. */
-const SELECTED = ["bun", "uv", "fuzzer"];
-
-function generated(): { filesDir: string; selfPath: string } {
+function generated(): { root: string; filesDir: string } {
   const root = temp.dir("build-gitignore-");
   const filesDir = join(root, "files");
   const write = (rel: string, content: string) => {
@@ -77,18 +71,8 @@ function generated(): { filesDir: string; selfPath: string } {
   for (const [module, sources] of ENTRIES) {
     for (const path of sources) write(blockRel(module, path), buildBlock(SECTIONS[path]));
   }
-  const selfPath = join(root, ".gitignore");
-  writeFileSync(
-    selfPath,
-    buildSelf(SECTIONS, selfSources(ENTRIES, SELECTED), {
-      above: "# mine\n\n",
-      below: "\n# after\n",
-    }),
-  );
-  return { filesDir, selfPath };
+  return { root, filesDir };
 }
-
-const readSelf = (path: string) => capture(["cat", path], {}).stdout;
 
 describe("the source grammar", () => {
   test("a files.yml name is a github/gitignore root stem or a platform section, and the block file carries it", () => {
@@ -109,30 +93,6 @@ describe("the source grammar", () => {
       gitignoreSources(parseFilesConfig(FILES_YML.replace("[Python]", "Python"))),
     ).toThrow("modules.uv.gitignore_sources must be a list of names");
   });
-
-  test("selfSources is the selection's sources once each in files.yml order: a registration without fuzzer gets no fuzzer section", () => {
-    const shared: [string, string[]][] = [...ENTRIES, ["deno", ["Node.gitignore"]]];
-    expect(selfSources(shared, ["bun", "uv", "fuzzer", "deno"])).toEqual([
-      "Node.gitignore",
-      "bun.gitignore",
-      "Python.gitignore",
-      "fuzzer",
-    ]);
-    expect(selfSources(shared, ["deno", "uv"])).toEqual(["Python.gitignore", "Node.gitignore"]);
-    expect(selfSources(shared, ["pages"])).toEqual([]);
-  });
-
-  test("ownModules reads the operator's registration through the writer's rule and refuses a module files.yml lacks", () => {
-    const root = temp.dir("build-gitignore-registration-");
-    const config = parseFilesConfig(FILES_YML);
-    const project = "project: {name: Demo, slug: demo, description: d}\n";
-    writeFileSync(join(root, ".repo-platform.yml"), `modules: [pages, bun]\n${project}`);
-    expect(ownModules(root, config)).toEqual(["bun", "pages"]);
-    writeFileSync(join(root, ".repo-platform.yml"), `modules: [bun, rust]\n${project}`);
-    expect(() => ownModules(root, config)).toThrow(
-      ".repo-platform.yml selects module(s) files.yml does not know: rust",
-    );
-  });
 });
 
 describe("the outputs", () => {
@@ -149,16 +109,6 @@ describe("the outputs", () => {
     );
   });
 
-  test("the self output keeps both sides and carries the base body plus every source once", () => {
-    const self = buildSelf(SECTIONS, selfSources(ENTRIES, SELECTED), {
-      above: "# mine\n",
-      below: "# after\n",
-    });
-    expect(self.startsWith("# mine\n# BEGIN REPO-PLATFORM MANAGED\n")).toBe(true);
-    expect(self.endsWith("# END REPO-PLATFORM MANAGED\n# after\n")).toBe(true);
-    expect(Object.keys(sectionsIn(self))).toEqual([...ALWAYS, ...selfSources(ENTRIES, SELECTED)]);
-  });
-
   test("sectionsIn reads each section back, upstream or platform, blank lines inside a body kept", () => {
     const text = `${buildBlock(SECTIONS["Python.gitignore"])}${buildBlock(SECTIONS.fuzzer)}${SECTIONS["Node.gitignore"]}`;
     expect(sectionsIn(text)).toEqual({
@@ -167,14 +117,54 @@ describe("the outputs", () => {
       "Node.gitignore": SECTIONS["Node.gitignore"],
     });
   });
+});
 
-  test("existingLocalSides keeps the sides of a clean file and refuses a malformed region", () => {
-    const { selfPath } = generated();
-    expect(existingLocalSides(selfPath)).toEqual({ above: "# mine\n\n", below: "\n# after\n" });
-    expect(existingLocalSides(join(temp.dir("no-self-"), ".gitignore")).below).toBe("");
-    writeFileSync(selfPath, `${readSelf(selfPath)}# BEGIN REPO-PLATFORM MANAGED\n`);
-    expect(() => existingLocalSides(selfPath)).toThrow(
-      "no single clean REPO-PLATFORM MANAGED region",
+describe("the operator's own .gitignore", () => {
+  /** The registration selects bun and fuzzer, not uv: the region carries their sources in files.yml order and no Python. */
+  const REGISTRATION =
+    "modules: [pages, fuzzer, bun]\nproject: {name: Demo, slug: demo, description: d}\n";
+  const REGION =
+    `# BEGIN REPO-PLATFORM MANAGED\n${buildFilesBase(SECTIONS)}` +
+    `${buildBlock(SECTIONS["Node.gitignore"])}${buildBlock(SECTIONS["bun.gitignore"])}${buildBlock(SECTIONS.fuzzer)}` +
+    "# END REPO-PLATFORM MANAGED\n";
+  const STALE = "# BEGIN REPO-PLATFORM MANAGED\nstale\n# END REPO-PLATFORM MANAGED\n";
+
+  function own(existing: string | null): { change: string; file: string } {
+    const { root, filesDir } = generated();
+    writeFileSync(join(root, "files.yml"), FILES_YML);
+    writeFileSync(join(root, ".repo-platform.yml"), REGISTRATION);
+    if (existing !== null) writeFileSync(join(root, ".gitignore"), existing);
+    const outcome = writeOwnGitignore(root, join(root, "files.yml"), filesDir);
+    return { change: outcome.change, file: readFileSync(join(root, ".gitignore"), "utf-8") };
+  }
+
+  test.each<{ reason: string; existing: string | null; change: string; file: string }>([
+    {
+      reason: "a stale region is replaced between the repository's own sides",
+      existing: `# mine\n\n${STALE}\n# after\n`,
+      change: "replaced local edits",
+      file: `# mine\n\n${REGION}\n# after\n`,
+    },
+    { reason: "no file becomes the region alone", existing: null, change: "created", file: REGION },
+    {
+      reason: "a marker-free file gets the region above its content",
+      existing: "# own\n",
+      change: "region added",
+      file: `${REGION}# own\n`,
+    },
+    {
+      reason: "the exact render is left alone",
+      existing: REGION,
+      change: "unchanged",
+      file: REGION,
+    },
+  ])("$reason", ({ existing, change, file }) => {
+    expect(own(existing)).toEqual({ change, file });
+  });
+
+  test("a malformed region is refused the way the writer refuses it", () => {
+    expect(() => own(`${STALE}${STALE}`)).toThrow(
+      ".gitignore: the managed-region marker text is duplicated, out of order, or buried mid-line",
     );
   });
 });
