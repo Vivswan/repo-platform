@@ -19,7 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { PLATFORM_NAME } from "../shared/platform.ts";
-import type { IncludeRoot } from "./.vitepress/conventions.ts";
+import { type IncludeRoot, isUnwalkedEntry, LANDING_FILES } from "./.vitepress/conventions.ts";
 import { collectFacts } from "./facts.ts";
 import {
   type DocsMount,
@@ -309,9 +309,9 @@ function stageIncludes(
   return includes.filter((include) => staged.has(include));
 }
 
-function assertIncludePages(target: string, include: IncludeRoot): void {
+export function assertIncludePages(target: string, include: IncludeRoot): void {
   for (const child of readdirSync(target, { withFileTypes: true })) {
-    if (!child.isDirectory()) continue;
+    if (!child.isDirectory() || isUnwalkedEntry(child.name)) continue;
     const dir = join(target, child.name);
     if (existsSync(join(dir, include.page)) && existsSync(join(dir, "index.md"))) {
       throw new Error(
@@ -440,8 +440,8 @@ function eligibleDocsTags(cfg: Config, kept: string[]): string[] {
         `${DOCS_DIR}/.vitepress exists (the theme is central; a repo-local one would be ignored)`,
       );
     }
-    if (!["README.md", "index.md"].some((name) => treeHas(cfg, tag, `${DOCS_DIR}/${name}`))) {
-      return skip(tag, `${DOCS_DIR}/ has no landing page (README.md or index.md)`);
+    if (![...LANDING_FILES].some((name) => treeHas(cfg, tag, `${DOCS_DIR}/${name}`))) {
+      return skip(tag, `${DOCS_DIR}/ has no landing page (${[...LANDING_FILES].join(" or ")})`);
     }
     return true;
   });

@@ -3,9 +3,7 @@
 // and the provenance line name the same file without either knowing the
 // staging layout.
 
-import { owningRoot } from "./conventions.ts";
-
-const LANDING_FILES = new Set(["README.md", "index.md"]);
+import { LANDING_FILES, owningRoot } from "./conventions.ts";
 
 /** An include root's page file (`includePages`, includeIndexPages) serves
  *  at its directory URL like a README but stays an article, even when the

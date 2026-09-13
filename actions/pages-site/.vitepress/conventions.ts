@@ -24,9 +24,13 @@ export function isLocaleDir(name: string): boolean {
   return match !== null && ISO_639_1.has(match[1]);
 }
 
+/** The one rule for what the site never renders: every walker and every validator of a name the walk would meet reads it here. */
 export function isUnwalkedEntry(name: string): boolean {
   return name.startsWith(".") || name === "node_modules";
 }
+
+/** The file names that serve at their directory's URL; a version tag without one in docs/ has nothing to render. */
+export const LANDING_FILES: ReadonlySet<string> = new Set(["README.md", "index.md"]);
 
 /** docs/site.md, "Other roots on the site". */
 export interface IncludeRoot {
@@ -123,6 +127,9 @@ export function includePageProblem(page: string): string | null {
   }
   if (page === "index.md") {
     return "is index.md, which is a directory's page already - name the file the include renames to it";
+  }
+  if (isUnwalkedEntry(page)) {
+    return "is a name the site never walks (dot-prefixed), so no directory's page would get a route - name a visible file";
   }
   return null;
 }

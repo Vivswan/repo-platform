@@ -24,6 +24,7 @@ import { dirTitle } from "../../../actions/pages-site/.vitepress/dir-title.ts";
 import {
   assertCentralTheme,
   assertDocsLanding,
+  assertIncludePages,
   copyInto,
   resolvePrebuilt,
   setOutput,
@@ -476,6 +477,21 @@ describe("central theme guard", () => {
     writeFileSync(join(dir, "index.md"), "# Home\n");
     expect(() => assertDocsLanding(dir)).toThrow(
       "docs/README.md does not exist - it is the docs landing page; create it",
+    );
+  });
+
+  test("an include root's page-and-index clash is judged in the directories the site walks, never in a dot directory", () => {
+    const root = temp.dir("skills-");
+    const include = { path: "skills", mount: "skills", page: "SKILL.md" };
+    for (const dir of ["alpha", ".archive"]) {
+      mkdirSync(join(root, dir));
+      writeFileSync(join(root, dir, "SKILL.md"), "# Skill\n");
+    }
+    writeFileSync(join(root, ".archive", "index.md"), "# Archived\n");
+    expect(() => assertIncludePages(root, include)).not.toThrow();
+    writeFileSync(join(root, "alpha", "index.md"), "# Also alpha\n");
+    expect(() => assertIncludePages(root, include)).toThrow(
+      "skills/alpha/ carries both SKILL.md and index.md - both would serve at skills/alpha/; remove one",
     );
   });
 });
