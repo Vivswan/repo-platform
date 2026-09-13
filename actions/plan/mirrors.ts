@@ -1,6 +1,12 @@
 // Judged twice: by the plan on every PR of a managed repository, so a declaration that can never be written never lands, and by the sync writer before it copies any mirror.
 
 import { basename, dirname } from "node:path";
+import {
+  expandPattern,
+  segmentPattern,
+  type TreeEntry,
+  type TreeProbe,
+} from "../shared/mirror_pattern.ts";
 import { MANIFEST_NAME, REGISTRATION_PATH } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
 import type { Selection } from "../shared/selection.ts";
@@ -10,8 +16,6 @@ import type { Registration } from "./registration.ts";
 export type Mirrors = NonNullable<Registration["mirrors"]>;
 export type Mirror = Mirrors[number];
 export type MirrorKind = Mirror["kind"];
-
-const KIND_NAME: Record<MirrorKind, string> = { copy: "a copy", symlink: "a symbolic link" };
 
 export interface OwnedPaths {
   /** The managed and split entry paths: the only files a mirror may copy. */
@@ -93,20 +97,6 @@ export function describeMirrorProblem({ source, target, problem }: MirrorProblem
   return `${REGISTRATION_PATH}: mirrors: source '${source}', target '${target}': ${problem}`;
 }
 
-export function literalPrefix(pattern: string): string {
-  const segments = pattern.split("/");
-  const star = segments.findIndex((segment) => segment.includes("*"));
-  return star === -1 ? pattern : segments.slice(0, star).join("/");
-}
-
-/** The writer lists directories through this and the plan matches known paths with it, so the two agree. */
-export function segmentPattern(segment: string): RegExp {
-  const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // A mirror glob segment from the repository's registration, escaped.
-  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-  return new RegExp(`^${segment.split("*").map(literal).join("[^/]*")}$`);
-}
-
 /** What the writer would expand the pattern to, if `path` were a file in the checkout. */
 export function patternMatches(pattern: string, path: string): boolean {
   const segments = pattern.split("/");
@@ -117,57 +107,105 @@ export function patternMatches(pattern: string, path: string): boolean {
   );
 }
 
-/** What the writer's expandPattern is certain to push whatever the checkout holds. The literal pass writes every literal
- *  target before any pattern expands, so those targets and their ancestor directories are the part of the tree the plan
- *  knows; the walk here is the writer's over that part alone, and an entry it does not know is left out, never assumed.
- *  A literal segment landing on a linked target, or on a path the grammar refuses, stops the probing as it does there:
- *  the rest of the pattern rides along verbatim. */
-export function guaranteedExpansion(
-  pattern: string,
-  literals: ReadonlyMap<string, MirrorKind>,
-): string[] {
-  const known = new Map<string, MirrorKind | "directory">(literals);
-  for (const literal of literals.keys()) {
-    for (let dir = dirname(literal); dir !== "."; dir = dirname(dir)) known.set(dir, "directory");
-  }
-  const segments = pattern.split("/");
-  const out = new Set<string>();
-  const walk = (prefix: string, index: number, unprobed: boolean): void => {
-    if (index === segments.length) {
-      out.add(prefix);
-      return;
-    }
-    const segment = segments[index];
-    const rel = (name: string) => (prefix === "" ? name : `${prefix}/${name}`);
-    if (!segment.includes("*")) {
-      const next = rel(segment);
-      walk(
-        next,
-        index + 1,
-        unprobed || pathProblem(next) !== null || known.get(next) === "symlink",
-      );
-      return;
-    }
-    if (unprobed) {
-      out.add(rel(segments.slice(index).join("/")));
-      return;
-    }
-    if (prefix !== "" && known.get(prefix) !== "directory") return;
-    const final = index === segments.length - 1;
-    const names = segmentPattern(segment);
-    for (const [path, kind] of known) {
-      if (dirname(path) !== (prefix === "" ? "." : prefix) || !names.test(basename(path))) continue;
-      if (kind === "directory" ? !final : final) walk(path, index + 1, false);
-    }
-  };
-  walk("", 0, false);
-  return [...out].sort();
+/** A claim on one path: `target` as the registration declares it, `path` where the claim lands. A literal claims itself;
+ *  a pattern claims each path it expands to, and its own text, since two declarations of one text expand alike. */
+export interface Claim {
+  source: string;
+  target: string;
+  path: string;
+  kind: MirrorKind;
 }
 
-function nestedProblem(nested: { under: string } | { above: string }): string {
-  return "under" in nested
-    ? `sits under another target '${nested.under}'`
-    : `is a path prefix of another target '${nested.above}'`;
+/** Every claim of a pass judged before any is written, nesting failing both sides so declaration order never picks the
+ *  winner. A `settled` path is an earlier pass's, its source's own of its kind (mirrorDeclarationProblems refuses every
+ *  pattern certain to reach another source's literal, or its own literal of the other kind), so a claim on it is current
+ *  and not judged again. `pathProblem` is what the caller can see of the path itself. */
+export function judgeClaims(
+  claims: readonly Claim[],
+  settled: ReadonlySet<string>,
+  pathProblem: (path: string) => string | null,
+): { problems: MirrorProblem[]; settled: Set<string> } {
+  const byPath = new Map<string, Claim[]>();
+  for (const claim of claims) {
+    if (settled.has(claim.path)) continue;
+    byPath.set(claim.path, [...(byPath.get(claim.path) ?? []), claim]);
+  }
+  const every = new Set([...settled, ...byPath.keys()]);
+  // A pattern's claim on its own text stands for every path it expands to. It nests with a plain path as written, and
+  // with another text only where the shorter ends in a literal segment: that segment lands as a file wherever the longer
+  // pattern needs a directory. A text ending in `*` claims files at its depth; what meets below it is the checkout's to show.
+  const texts = new Set(
+    [...byPath]
+      .filter(([, cs]) =>
+        cs.some((claim) => claim.path === claim.target && claim.target.includes("*")),
+      )
+      .map(([path]) => path),
+  );
+  const literalEnd = (path: string) => !basename(path).includes("*");
+  const partners = (path: string): ReadonlySet<string> =>
+    texts.has(path)
+      ? new Set(
+          [...every].filter(
+            (other) => !texts.has(other) || literalEnd(other.length < path.length ? other : path),
+          ),
+        )
+      : every;
+  const problems: MirrorProblem[] = [];
+  const now = new Set(settled);
+  for (const [path, claimants] of byPath) {
+    const verdicts: string[] = [];
+    const own = pathProblem(path);
+    if (own !== null) verdicts.push(own);
+    const nested = nestedWith(path, partners(path));
+    if (nested !== null) {
+      verdicts.push(
+        "under" in nested
+          ? `sits under another target '${nested.under}'`
+          : `is a path prefix of another target '${nested.above}'`,
+      );
+    }
+    if (new Set(claimants.map((claim) => claim.source)).size > 1) {
+      verdicts.push("is claimed by more than one source");
+    }
+    if (new Set(claimants.map((claim) => claim.kind)).size > 1) {
+      verdicts.push("is claimed as a copy and as a symbolic link");
+    }
+    const declarations = new Map(
+      claimants.map((claim) => [`${claim.source}\n${claim.target}`, claim]),
+    );
+    for (const { source, target } of declarations.values()) {
+      const what =
+        path !== target
+          ? `the pattern expands to '${path}', which`
+          : target.includes("*")
+            ? "the pattern"
+            : "the target";
+      for (const verdict of verdicts)
+        problems.push({ source, target, problem: `${what} ${verdict}` });
+    }
+    if (verdicts.length === 0) now.add(path);
+  }
+  return { problems, settled: now };
+}
+
+/** The part of the tree the literal pass is certain to leave: every literal target of its kind, every ancestor a directory.
+ *  A link's target is its source, written that same run, so it resolves to a file; nothing else is known, so nothing else
+ *  is listed. */
+export function knownProbe(literals: ReadonlyMap<string, MirrorKind>): TreeProbe {
+  const known = new Map<string, TreeEntry>();
+  for (const [path, kind] of literals) known.set(path, kind === "copy" ? "file" : "symlink");
+  for (const path of literals.keys()) {
+    for (let dir = dirname(path); dir !== "."; dir = dirname(dir)) known.set(dir, "directory");
+  }
+  return {
+    standing: (path) => (path === "" ? "directory" : (known.get(path) ?? null)),
+    linksToFile: () => true,
+    list: (dir) =>
+      [...known.keys()]
+        .filter((path) => dirname(path) === (dir === "" ? "." : dir))
+        .map((path) => basename(path))
+        .sort(),
+  };
 }
 
 /** docs/sync.md lists the rules. A target the grammar refuses is judged by that alone: the nesting and matching walks need a clean relative path. */
@@ -195,101 +233,25 @@ export function mirrorDeclarationProblems(
     else clean.push({ source, target, kind });
   }
   const literals = clean.filter(({ target }) => !isGlob(target));
-  const claims = new Map<string, { source: string; kind: MirrorKind }[]>();
-  for (const { source, target, kind } of literals) {
-    claims.set(target, [...(claims.get(target) ?? []), { source, kind }]);
-  }
-  const literalPaths = new Set(claims.keys());
   const literalKinds = new Map(literals.map(({ target, kind }) => [target, kind]));
-  for (const { source, target } of literals) {
-    if ((claims.get(target) ?? []).length > 1) {
-      problems.push({ source, target, problem: "the target is declared more than once" });
-    }
-    const nested = nestedWith(target, literalPaths);
-    if (nested !== null) {
-      problems.push({ source, target, problem: `the target ${nestedProblem(nested)}` });
-    }
-  }
+  const probe = knownProbe(literalKinds);
   const known: [ReadonlySet<string>, string][] = [
     [new Set([REGISTRATION_PATH]), "the registration"],
     ...reserved(owned),
   ];
-  const reached = new Map<string, { source: string; target: string; kind: MirrorKind }[]>();
+  const reservedPaths = new Set(known.flatMap(([paths]) => [...paths]));
+  const claims: Claim[] = literals.map((literal) => ({ ...literal, path: literal.target }));
   for (const { source, target, kind } of clean) {
     if (!isGlob(target)) continue;
-    const prefix = literalPrefix(target);
-    if (prefix !== "") {
-      const nested = literalPaths.has(prefix)
-        ? { under: prefix }
-        : nestedWith(prefix, literalPaths);
-      if (nested !== null && "under" in nested) {
-        problems.push({
-          source,
-          target,
-          problem: `the pattern's ancestor '${nested.under}' is another target`,
-        });
-      }
-    }
     for (const [paths, what] of known) {
       for (const path of [...paths].filter((path) => patternMatches(target, path)).sort()) {
         problems.push({ source, target, problem: `the pattern matches '${path}', ${what}` });
       }
     }
-    for (const path of guaranteedExpansion(target, literalKinds)) {
-      const claimants = claims.get(path);
-      if (claimants !== undefined) {
-        const otherKind = claimants.find((claim) => claim.kind !== kind)?.kind;
-        const problem = claimants.some((claim) => claim.source !== source)
-          ? "a target of another source"
-          : otherKind === undefined
-            ? null
-            : `a target the source declares as ${KIND_NAME[otherKind]}`;
-        if (problem !== null) {
-          problems.push({ source, target, problem: `the pattern matches '${path}', ${problem}` });
-        }
-        continue;
-      }
-      if (known.some(([paths]) => paths.has(path))) continue;
-      const problem = mirrorPathProblem(path, owned);
-      if (problem !== null) {
-        problems.push({
-          source,
-          target,
-          problem: `the pattern expands to '${path}', which ${problem}`,
-        });
-      }
-      reached.set(path, [...(reached.get(path) ?? []), { source, target, kind }]);
+    for (const path of [target, ...expandPattern(probe, target)]) {
+      if (!reservedPaths.has(path)) claims.push({ source, target, path, kind });
     }
   }
-  const every = new Set([...literalPaths, ...reached.keys()]);
-  for (const [path, claimants] of reached) {
-    const nested = nestedWith(path, every);
-    const shared =
-      new Set(claimants.map((claim) => claim.source)).size > 1
-        ? "claimed by more than one source"
-        : new Set(claimants.map((claim) => claim.kind)).size > 1
-          ? "claimed as a copy and as a symbolic link"
-          : null;
-    // One pattern declared under both kinds is one declaration to the reader.
-    const declarations = new Map(
-      claimants.map((claim) => [`${claim.source}\n${claim.target}`, claim]),
-    );
-    for (const { source, target } of declarations.values()) {
-      if (nested !== null) {
-        problems.push({
-          source,
-          target,
-          problem: `the pattern expands to '${path}', which ${nestedProblem(nested)}`,
-        });
-      }
-      if (shared !== null) {
-        problems.push({
-          source,
-          target,
-          problem: `the pattern expands to '${path}', a path ${shared}`,
-        });
-      }
-    }
-  }
-  return problems;
+  const judged = judgeClaims(claims, new Set(), (path) => mirrorPathProblem(path, owned));
+  return [...problems, ...judged.problems];
 }
