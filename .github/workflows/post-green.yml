@@ -21,20 +21,14 @@ on:
       before:
         description: >-
           The push payload's `before` (all zeros for a branch-creating
-          push): the read-directives leg's FALLBACK base, used only when
-          the mover reports no base (the tag did not move, or did not exist
-          before this run) and no build branch exists yet or its every stamp
-          is sha or a newer commit (the first publish, landed by this run or
-          a neighbouring one).
+          push): the read-directives leg's base when the mover reports
+          none (the tag did not move, or did not exist before this run).
           Explicit like sha, and verified an ancestor of it.
         required: true
         type: string
     secrets:
       REPO_PLATFORM_TOKEN:
-        description: >-
-          PAT with workflow scope: the build branch carries
-          .github/workflows/ files GITHUB_TOKEN may not push (the
-          publish-build job's checkout).
+        description: The fleet PAT, passed through to the two writers this workflow calls.
         required: true
   # The self-heal: the scripts refuse any sha that is not green main history, so re-run that commit's CI first
   # when its all-green check is missing.
@@ -42,56 +36,22 @@ on:
     inputs:
       sha:
         description: >-
-          The full 40-hex main commit to publish the build branch from and
-          move the stable tag to; must carry a green all-green check.
+          The full 40-hex main commit to move the stable tag to; must carry
+          a green all-green check.
         required: true
         type: string
 
 permissions: {}
 
 jobs:
-  # publish.ts owns the publish invariants and re-verifies the all-green check at the source before any mutation:
-  # defense in depth on the call, the sole gate on a dispatch. Ordered behind the mover: the directives read takes
-  # a build stamp over the mover's base, so a publish beside a red move would carry the base past a commit whose
-  # directive no later range reads.
-  publish-build:
-    needs: [move-stable]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # LITERAL on purpose: github.workflow inside a called workflow is the CALLER's name, which would split the lane
-    # between called and dispatched runs. ci.yml's calling job holds no lane: a caller never holds what its callee waits on.
-    concurrency:
-      group: build-branches-publish
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      checks: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          # publish.ts pushes with this persisted credential; the branch stays inert by construction
-          # (branch_tree.ts refuses a shipped workflow with any trigger beyond workflow_call).
-          token: ${{ secrets.REPO_PLATFORM_TOKEN }}
-
-      - name: Set up bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: Publish the build branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SOURCE_SHA: ${{ inputs.sha }}
-        run: bun .github/scripts/build-branches/publish.ts
-
   # move_stable.ts owns the tag's invariants and re-verifies the all-green check at the sha before the push:
   # defense in depth on the call, the sole gate on a dispatch.
   move-stable:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # One mover lane, LITERAL for the reason the publisher lane states.
+    # One mover lane, LITERAL on purpose: github.workflow inside a called workflow is the CALLER's name, which would
+    # split the lane between called and dispatched runs. ci.yml's calling job holds no lane: a caller never holds what
+    # its callee waits on.
     concurrency:
       group: stable-tag-move
       cancel-in-progress: false
@@ -120,7 +80,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/post-green/move_stable.ts
 
-  # Ordered behind the mover for its fallback base, and run on every mover result: only this run is sure to read
+  # Ordered behind the mover for its base, and run on every mover result: only this run is sure to read
   # this commit's fleet-sync label (fleet_sync_marker.ts; docs/all-green.md, "Opting a PR into an immediate fleet sync").
   read-directives:
     needs: [move-stable]
@@ -147,7 +107,7 @@ jobs:
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent
 
-      - name: Read the fleet-sync labels of the merges since the last published green main
+      - name: Read the fleet-sync labels of the merges since the commit the tag named
         id: directives
         env:
           GH_TOKEN: ${{ github.token }}

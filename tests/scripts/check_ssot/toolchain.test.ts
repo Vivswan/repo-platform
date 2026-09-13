@@ -604,17 +604,9 @@ describe("scratchScopedScriptMismatches", () => {
   });
 
   test("a drift back to a shared-scratch command fails, quoting the pin and the drift", () => {
-    // The two retired shapes, each of which passed every other gate while
-    // sibling runs trampled one another's scratch: a bare `bun test`
-    // (fixtures under the shared os.tmpdir) and a fixed --dest path a
-    // concurrent build check once wiped from under a running one.
-    const cases: [string, string][] = [
-      ["test", "bun test"],
-      [
-        "build:check",
-        "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-build-check && rm -rf /tmp/repo-platform-build-check",
-      ],
-    ];
+    // The retired shape passed every other gate while sibling runs trampled
+    // one another's fixtures under the shared os.tmpdir.
+    const cases: [string, string][] = [["test", "bun test"]];
     for (const [name, drifted] of cases) {
       const found = scratchScopedScriptMismatches(
         { ...SCRATCH_SCOPED_SCRIPTS, [name]: drifted },

@@ -15,7 +15,7 @@ describe("sticky-pr-comments", () => {
   const WORKFLOW = "files/deno/.github/workflows/deno-audit.yml";
   const VARIANT = "files/base/.github/workflows/ci.private.yml";
   const BLOCK = "files/bun/.github/workflows/auto-format.block.toolchain.yml";
-  const REPO_WORKFLOW = ".github/workflows/protect-build-branches.yml";
+  const REPO_WORKFLOW = ".github/workflows/refresh-toolchains.yml";
   const ACTION = "actions/check-file-size/action.yml";
   const SCRIPT = "actions/validate-managed-files/src/report.ts";
   const HOST = "deno-audit";
@@ -59,7 +59,7 @@ describe("sticky-pr-comments", () => {
     { rel: VARIANT, scope: strict("ci") },
     { rel: BLOCK, scope: strict("auto-format") },
     { rel: "files/bun/.block.Node.gitignore", scope: strict() },
-    { rel: REPO_WORKFLOW, scope: strict("protect-build-branches") },
+    { rel: REPO_WORKFLOW, scope: strict("refresh-toolchains") },
     { rel: ACTION, scope: lenient("check-file-size") },
     { rel: SCRIPT, scope: lenient("validate-managed-files") },
     { rel: "files/bun/.github/dependabot.block.bun.yml", scope: strict() },
@@ -278,7 +278,7 @@ describe("sticky-pr-comments", () => {
       ],
     },
   ])("$form -> a mismatch per posting command", ({ text, flagged }) => {
-    expect(stickyCommentMismatches(REPO_WORKFLOW, text, strict("protect-build-branches"))).toEqual({
+    expect(stickyCommentMismatches(REPO_WORKFLOW, text, strict("refresh-toolchains"))).toEqual({
       stickySteps: 0,
       mismatches: flaggedCommands(REPO_WORKFLOW, flagged),
     });
@@ -349,7 +349,7 @@ describe("sticky-pr-comments", () => {
 
   test("the sticky action named where no step list parses is a mismatch, not a silent pass", () => {
     const text = `steps:\n  - uses: ${PIN}\n  bad: [\n`;
-    expect(stickyCommentMismatches(REPO_WORKFLOW, text, strict("protect-build-branches"))).toEqual({
+    expect(stickyCommentMismatches(REPO_WORKFLOW, text, strict("refresh-toolchains"))).toEqual({
       stickySteps: 0,
       mismatches: [
         {
@@ -411,13 +411,13 @@ describe("sticky-pr-comments", () => {
     {
       reason: "a header under another prefix in a repo-platform workflow",
       rel: REPO_WORKFLOW,
-      scope: strict("protect-build-branches"),
-      text: step("my-repo/protect-build-branches"),
+      scope: strict("refresh-toolchains"),
+      text: step("my-repo/refresh-toolchains"),
       mismatches: [
         {
           file: `${REPO_WORKFLOW}:3`,
-          expected: "with.header: repo-platform/protect-build-branches",
-          got: "with.header: my-repo/protect-build-branches",
+          expected: "with.header: repo-platform/refresh-toolchains",
+          got: "with.header: my-repo/refresh-toolchains",
         },
       ],
     },
@@ -516,7 +516,7 @@ describe("sticky-pr-comments", () => {
       stickyTreeMismatches([
         [WORKFLOW, step(HEADER)],
         [BLOCK, step("repo-platform/auto-format")],
-        [REPO_WORKFLOW, step("repo-platform/protect-build-branches")],
+        [REPO_WORKFLOW, step("repo-platform/refresh-toolchains")],
         [ACTION, actionStep],
         ["actions/check-file-size/check-file-size.ts", "// gh pr comment is not used here\n"],
       ]),

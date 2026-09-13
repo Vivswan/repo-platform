@@ -103,7 +103,7 @@ export function tipRefusal(
   );
 }
 
-/** The Checks API can trail the gate job, so the read goes through the publisher's bounded poll. */
+/** The Checks API can trail the gate job, so the read goes through the mover's bounded poll. */
 export function calledRefusal(
   repository: string,
   sha: string,

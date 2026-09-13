@@ -24,7 +24,6 @@ export const MANAGED_HEADER_PATTERN = new RegExp(
 );
 
 export const SYNC_BOT = `${PLATFORM_NAME}-sync`;
-export const BUILD_BOT = `${PLATFORM_NAME}-build`;
 
 export const AUTOMATION_BRANCH = `automation/${PLATFORM_NAME}`;
 export const FAILURE_ISSUE_TITLE = `[${PLATFORM_NAME}] sync failed`;

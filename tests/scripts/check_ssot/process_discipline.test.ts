@@ -444,7 +444,6 @@ describe("asyncSpawnMismatches", () => {
       "actions/release-health/release-health.ts",
       "scripts/run_tests.ts",
       "tests/actions/pages-site/mermaid_labels.test.ts",
-      "tests/build-branches/publish_behavior.test.ts",
     ]);
   });
 

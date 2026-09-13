@@ -218,7 +218,7 @@ jobs:
     {
       reason: "no caller job in post-green.yml",
       text: writer,
-      postGreen: "jobs:\n  publish-build:\n    steps: []\n",
+      postGreen: "jobs:\n  move-stable:\n    steps: []\n",
       expected: "a 'settings-fleet' job calling ./.github/workflows/settings-repos.yml",
     },
     {

@@ -79,9 +79,9 @@ const OWN_OVERLAY = [
   "  topics: demo",
   "  private: false",
   "",
-  "# The build ref is append-only.",
+  "# Release branches are append-only.",
   "rulesets:",
-  "  - name: build-branches",
+  "  - name: release-branches",
   "    target: branch",
   "    enforcement: active",
   "    rules:",
@@ -406,7 +406,7 @@ describe("sync.ts end to end", () => {
       },
       { name: "fuzz-me", color: "B60205", description: "Automated nightly fuzz failure" },
     ]);
-    expect(doc.rulesets.map((r) => r.name)).toEqual(["pr-title", "main", "build-branches"]);
+    expect(doc.rulesets.map((r) => r.name)).toEqual(["pr-title", "main", "release-branches"]);
     // The baseline's disabled ruleset and the seed's own ride through whole.
     expect(doc.rulesets[0]).toEqual({
       name: "pr-title",
@@ -420,7 +420,7 @@ describe("sync.ts end to end", () => {
       ],
     });
     expect(doc.rulesets[2]).toEqual({
-      name: "build-branches",
+      name: "release-branches",
       target: "branch",
       enforcement: "active",
       rules: [{ type: "deletion" }],

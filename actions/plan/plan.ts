@@ -86,7 +86,7 @@ export interface DefaultSource {
 }
 
 /** The defaults the plan cannot do without, by PlanDefaults key: the module
- *  and key must be there, or the build tree is broken and no repository
+ *  and key must be there, or the delivery commit is broken and no repository
  *  plans. */
 export const REQUIRED_DEFAULTS: Readonly<Record<keyof PlanDefaults, DefaultSource>> = {
   docsPath: { module: "site", key: "path", pick: (d) => d.path },

@@ -104,11 +104,6 @@ function main(): number {
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
   }
-  if (base.kind !== "build-stamp") {
-    notice(
-      `no build stamp older than ${sha.slice(0, 12)} exists (nothing published before this run); reading from the fallback base, ${base.kind === "empty-tree" ? "the empty tree" : before.slice(0, 12)}`,
-    );
-  }
   let scope: FleetSyncScope | null = null;
   for (const commit of rangeCommits(cwd, sha, base)) {
     let labels: string[] | null;
@@ -126,7 +121,7 @@ function main(): number {
     if (directive.kind === "none") continue;
     if (directive.kind === "error") {
       // Only the judged commit's labels are this run's fault; failing on an
-      // older one would poison every later range until the build tree changes.
+      // older one would poison every range that starts below it.
       if (commit === sha) return fail(`${commit.slice(0, 12)}: ${directive.error}`);
       warning(
         `${commit.slice(0, 12)}: ${directive.error}; the commit contributes nothing to this range, and only the judged commit's labels fail this leg`,

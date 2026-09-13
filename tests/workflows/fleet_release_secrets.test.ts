@@ -1,4 +1,4 @@
-// A caller that passes a secret the called workflow does not declare fails at run creation, so the build branch's
+// A caller that passes a secret the called workflow does not declare fails at run creation, so the delivery ref's
 // release workflows must keep every secret the fleet's ci.yml passes them: the copy already deployed in the fleet
 // as well as the skeleton the next sync writes.
 
