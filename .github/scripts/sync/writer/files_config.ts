@@ -272,10 +272,8 @@ export function manifestPathProblems(config: FilesConfig): string[] {
     : [];
 }
 
-/** The whole load: parse, derive the placeholder defaults, and refuse the
- *  manifest path, every problem of the document in one error; then verify
- *  against the tree. The document is judged before the tree so a forbidden
- *  entry is reported as such, not as a missing source. */
+/** Every problem of the document is reported in one error, and the document is judged before
+ *  the tree so a forbidden entry is reported as such, not as a missing source. */
 export function loadFilesConfig(filesPath: string, tree: string): WriterFilesConfig {
   const label = "files.yml";
   const { config, problems } = checkFilesConfig(readFileSync(filesPath, "utf-8"), label);
