@@ -182,7 +182,7 @@ A list position may name a module-data key instead of the modules: `any: {declar
 
 - The selected modules are the registration's `modules` filtered to the names `files.yml` knows, in `files.yml` order. Unknown names are dropped and listed under Registration notes, which holds the PR.
 - Two entries for one path must be provably exclusive: a module one requires and the other forbids, an `any` list the other forbids entirely, or opposite `private` values. Anything subtler is a loader error.
-- The registration's `except` lists paths the repository keeps as its own: no entry at one is selected, whatever its `when`, and a record there is retired like a deselected module's ([Retirement](#retirement)). An `except` path no `files.yml` entry writes is a Registration note, which holds the PR.
+- The registration's `except` lists paths the repository keeps as its own: no entry at one is selected, whatever its `when`, and a record an earlier sync left there is `released` ([Retirement](#retirement)): the record leaves, the file is not touched. `except` speaks of `files.yml` entries: a [mirror](#mirrors) the registration declares at the path is still written. An `except` path no `files.yml` entry writes is a Registration note, which holds the PR.
 
 ## Classes
 
@@ -210,7 +210,7 @@ Without the rule, a managed file that becomes split would have the region prepen
 
 ## Retirement
 
-Retirement runs before writing. Rows appear only for files present. A `moved_to` whose destination is written for this repository is moved or held whatever the record says; every other retirement of an unrecorded file produces no row, since no manifest record vouches for it and it is not the platform's to retire.
+Retirement runs before writing. Rows appear only for files present, save a `released` row, which reports a record. A `moved_to` whose destination is written for this repository is moved or held whatever the record says; every other retirement of an unrecorded file produces no row, since no manifest record vouches for it and it is not the platform's to retire.
 
 | State of the retired file | Outcome |
 | --- | --- |
@@ -223,6 +223,7 @@ Retirement runs before writing. Rows appear only for files present. A `moved_to`
 | a symlink with another target; a regular file where a `link` or a `kind: symlink` mirror was recorded; a symlink where a `managed`, `split`, or `mirror` copy was recorded | `held` |
 | content differs, or a record with `hash: null` | `held` |
 | recorded as `starter` | `kept` (repo-owned) |
+| a `managed`, `split`, `link`, or `starter` record at a path the registration's `except` names, whatever sits at the path | `released`: the record leaves, nothing at the path is probed or touched, and the PR does not hold; the row appears whether or not a file is present, since the manifest changed. A `retired` entry at an excepted path is skipped: retirement never sees the path |
 | `moved_to` given, new path absent | `moved` (`git mv`; the record travels, so the following write of the new path judges it as the platform's own) |
 | `moved_to` given, new path present | `held` |
 | `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: the outcomes above apply |
