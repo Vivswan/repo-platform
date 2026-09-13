@@ -87,11 +87,11 @@ export function loadLayer(path: string): Layer {
   return readLayer(readFileSync(path, "utf-8"), path);
 }
 
-/** A declared fleet layer, judged alone as readLayers loads the tree, so
- *  the tree fails CLOSED: every render reads every layer's labels
- *  (allLayerLabels), so a damaged module layer must fail the load, not
- *  only the renders that select it. A fleet layer opts nothing out, so
- *  alone it is the document it declares. */
+/** A declared fleet layer, judged alone as readLayers loads the tree
+ *  (files_config.ts verifySources, loadLayers), so the tree fails CLOSED:
+ *  a damaged module layer fails the load, not only the renders that
+ *  select it. A fleet layer opts nothing out, so alone it is the document
+ *  it declares. */
 export function readFleetLayer(text: string, where: string): Layer {
   const layer = readLayer(text, where);
   const judged = foldSettings([layer], where);
