@@ -51,6 +51,12 @@ labels:
   - name: javascript
     color: "168700"
     description: Pull requests that update javascript code
+  - name: fleet-sync:public
+    color: 0052cc
+    description: Sync the public managed repos from this merge's green run
+  - name: fleet-sync:all
+    color: b60205
+    description: Sync the whole fleet from this merge's green run
   - name: docs-link-rot
     color: D4A72C
     description: Automated docs-site link-rot report

@@ -1,11 +1,61 @@
 // Rules over the label rosters: the managed labels' sites, the release
 // guard's literals, dependabot's tuples, and the hand-copied label regex.
 
+import { FLEET_SYNC_LABELS } from "../../../.github/scripts/fleet/fleet_sync_marker.ts";
 import { loadLayer } from "../../../.github/scripts/sync/writer/settings_layers.ts";
 import { constRegexSource, constStringValue } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch } from "./comparison.ts";
 import { managedLabelRoster, modules, read, trackingStreams } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
+
+/** This repository's overlay: the one place the fleet-sync labels are declared, since only its pull requests carry them. */
+export const FLEET_SYNC_OVERLAY = ".github/settings.local.yml";
+
+/** The fleet-sync labels the leg reads (`known`) against the overlay's `labels` list, both ways: a label the leg knows but the
+ *  overlay lacks is never on a pull request, and a fleet-sync label the overlay declares but the leg does not know is refused red
+ *  on every merge that wears it. Names fold case like the leg and GitHub do. A declared label needs its color and description,
+ *  or the apply cannot create it. */
+export function fleetSyncLabelMismatches(known: readonly string[], declared: unknown): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const labels = Array.isArray(declared) ? declared : [];
+  const byName = new Map<string, Record<string, unknown>>();
+  for (const label of labels) {
+    if (typeof label === "object" && label !== null && typeof label.name === "string") {
+      byName.set(label.name.toLowerCase(), label);
+    }
+  }
+  const folded = known.map((name) => name.toLowerCase());
+  for (const name of known) {
+    const label = byName.get(name.toLowerCase());
+    if (label === undefined) {
+      mismatches.push({
+        file: FLEET_SYNC_OVERLAY,
+        expected: `label '${name}' (fleet_sync_marker.ts FLEET_SYNC_LABELS)`,
+        got: "missing - no pull request can wear a label the repository does not declare",
+      });
+      continue;
+    }
+    for (const field of ["color", "description"]) {
+      if (typeof label[field] !== "string" || label[field] === "") {
+        mismatches.push({
+          file: `${FLEET_SYNC_OVERLAY} label '${label.name}'`,
+          expected: `a non-empty ${field}`,
+          got: "missing",
+        });
+      }
+    }
+  }
+  for (const [name, label] of byName) {
+    if (name.startsWith("fleet-sync:") && !folded.includes(name)) {
+      mismatches.push({
+        file: `${FLEET_SYNC_OVERLAY} label '${label.name}'`,
+        expected: `a scope fleet_sync_marker.ts FLEET_SYNC_LABELS knows (${known.join(", ")})`,
+        got: "a fleet-sync label the leg refuses on every merge that wears it",
+      });
+    }
+  }
+  return mismatches;
+}
 
 /** The registration grammar's LABEL_RE is the home; these are its hand-copied twins, each read off its AST as an exported const. */
 export const LABEL_RE_HOME = "actions/plan/registration.ts";
@@ -44,6 +94,11 @@ export const NIGHTLY_STARTER = "files/nightly/.github/workflows/nightly.yml";
 export const REUSABLE_SITE = ".github/workflows/reusable-site.yml";
 
 export const labelRules: Rule[] = [
+  {
+    name: "fleet-sync-labels",
+    run: () =>
+      fleetSyncLabelMismatches([...FLEET_SYNC_LABELS.keys()], loadLayer(FLEET_SYNC_OVERLAY).labels),
+  },
   {
     name: "labels",
     run: () => {
