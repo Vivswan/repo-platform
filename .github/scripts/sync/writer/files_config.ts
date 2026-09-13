@@ -1,7 +1,7 @@
 // The writer's side of files.yml: the placeholder defaults the module data
-// declares, the source checks against the files/ tree, block resolution,
-// and the retirement check against a previous data file. The grammar
-// itself is actions/plan/files_config.ts, which every reader shares.
+// declares, the source checks against the files/ tree, and block
+// resolution. The grammar itself is actions/plan/files_config.ts, which
+// every reader shares.
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,7 +13,6 @@ import {
   type FilesConfig,
   FilesConfigError,
   type ModuleData,
-  parseFilesConfig,
   type RegionKind,
   SOURCE_PREFIX,
 } from "../../../../actions/plan/files_config.ts";
@@ -263,26 +262,6 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
   if (problems.length > 0) throw new FilesConfigError(label, problems);
 }
 
-/** A path the previous data file wrote must still be written or retired: dropped, the file would
- *  stay in every repository with nothing to remove it. Starters are exempt: a written starter is
- *  repo-owned and the writer never retires one. A retired entry leaves on the owner's probe that no
- *  repository carries the path (docs/sync.md), which this check cannot see. */
-export function checkRetirements(previous: FilesConfig, current: FilesConfig): void {
-  const known = new Set([
-    ...current.files.map((entry) => entry.path),
-    ...current.retired.map((entry) => entry.path),
-  ]);
-  const problems = previous.files
-    .filter((entry) => entry.class !== "starter")
-    .map((entry) => entry.path)
-    .filter((path, index, all) => !known.has(path) && all.indexOf(path) === index)
-    .map(
-      (path) =>
-        `${path} was written by the previous files.yml but is neither written nor retired now`,
-    );
-  if (problems.length > 0) throw new FilesConfigError("files.yml", problems);
-}
-
 /** The writer writes the manifest last, over whatever sits at its path, so
  *  an entry there would be written, recorded, and then silently replaced.
  *  Returned rather than thrown so the load reports it beside the document's
@@ -295,14 +274,9 @@ export function manifestPathProblems(config: FilesConfig): string[] {
 
 /** The whole load: parse, derive the placeholder defaults, and refuse the
  *  manifest path, every problem of the document in one error; then verify
- *  against the tree, and check retirements against the previous data file
- *  when one is given. The document is judged before the tree so a forbidden
+ *  against the tree. The document is judged before the tree so a forbidden
  *  entry is reported as such, not as a missing source. */
-export function loadFilesConfig(
-  filesPath: string,
-  tree: string,
-  previousPath?: string,
-): WriterFilesConfig {
+export function loadFilesConfig(filesPath: string, tree: string): WriterFilesConfig {
   const label = "files.yml";
   const { config, problems } = checkFilesConfig(readFileSync(filesPath, "utf-8"), label);
   const { defaults, problems: placeholderProblems } = placeholderDefaults(config);
@@ -315,8 +289,5 @@ export function loadFilesConfig(
   ];
   if (all.length > 0) throw new FilesConfigError(label, all);
   verifySources(config, tree);
-  if (previousPath !== undefined) {
-    checkRetirements(parseFilesConfig(readFileSync(previousPath, "utf-8"), previousPath), config);
-  }
   return { ...config, defaults, trackingTuples: tracking.tuples };
 }

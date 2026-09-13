@@ -245,11 +245,12 @@ interface Summary {
   notes: string[];
 }
 
-function spawnSync(target: string, summaryPath: string, build = BUILD) {
+function spawnSync(target: string, summaryPath: string, build = BUILD, extra: string[] = []) {
   return boundedSpawnSync(
     [
       "bun",
       SYNC,
+      ...extra,
       "--files",
       join(FIXTURES, "files.yml"),
       "--tree",
@@ -1084,6 +1085,31 @@ describe("sync.ts over a --build that is not the build commit's full sha", () =>
     });
     expect(existsSync(join(target, MANIFEST))).toBe(false);
     expect(existsSync(join(target, "LICENSE.md"))).toBe(false);
+    expect(existsSync(summary)).toBe(false);
+  });
+});
+
+describe("sync.ts over --previous-files", () => {
+  // The retirement fact it checked is judged per target instead: a manifest record no files.yml
+  // entry declares or retires now is retired as a stale record and, while a file sits at the
+  // path, noted, which holds the PR.
+  test("is refused as an unknown flag, before anything is written", () => {
+    const target = temp.dir("sync-e2e-previous-target-");
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
+    );
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const before = snapshot(target);
+    const summary = join(temp.dir("sync-e2e-previous-summary-"), "summary.json");
+    const previous = join(FIXTURES, "files.yml");
+    expect(spawnSync(target, summary, BUILD, ["--previous-files", previous])).toEqual({
+      exitCode: 1,
+      stdout:
+        '::error::unknown or valueless argument "--previous-files" - allowed flags: --files, --tree, --target, --build, --repository, --private, --summary\n',
+      stderr: "",
+    });
+    expect(snapshot(target)).toEqual(before);
     expect(existsSync(summary)).toBe(false);
   });
 });

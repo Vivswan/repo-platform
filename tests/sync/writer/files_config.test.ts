@@ -5,7 +5,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   blockSources,
-  checkRetirements,
   loadFilesConfig,
   placeholderDefaults,
   verifySources,
@@ -367,15 +366,13 @@ describe("blockSources and verifySources", () => {
     expect(() => verifySources(config, tree)).toThrow("mentions the hash region markers");
   });
 
-  test("loadFilesConfig runs every check: defaults, sources, and retirements", () => {
+  test("loadFilesConfig runs every check: defaults and sources", () => {
     const root = temp.dir("writer-files-load-");
     writeTree(root, {
       "files.yml":
         "placeholders: [year, site_label]\nmodules:\n  site: { tracking_label: { key: site, default: docs-link-rot } }\nfiles:\n  - { path: a.txt, class: managed }\n",
       "unbacked.yml":
         "placeholders: [year, fuzzer_label]\nfiles:\n  - { path: a.txt, class: managed }\n",
-      "previous.yml":
-        "placeholders: []\nfiles:\n  - { path: a.txt, class: managed }\n  - { path: b.txt, class: managed }\n",
       "files/base/a.txt": "{{year}}\n",
     });
     const loaded = loadFilesConfig(join(root, "files.yml"), join(root, "files"));
@@ -384,9 +381,6 @@ describe("blockSources and verifySources", () => {
     expect(() => loadFilesConfig(join(root, "unbacked.yml"), join(root, "files"))).toThrow(
       "no module declares the default for {{fuzzer_label}}",
     );
-    expect(() =>
-      loadFilesConfig(join(root, "files.yml"), join(root, "files"), join(root, "previous.yml")),
-    ).toThrow("b.txt was written by the previous files.yml but is neither written nor retired now");
   });
 
   test("loadFilesConfig names the placeholder and grammar problems of a document in one error", () => {
@@ -442,36 +436,5 @@ describe("blockSources and verifySources", () => {
     expect(problems).toEqual([
       ".github/repo-platform-manifest.json is the manifest the writer itself writes and cannot be a files entry",
     ]);
-  });
-});
-
-describe("checkRetirements", () => {
-  const current = parseFilesConfig(BASE);
-
-  test("a previously written path that is retired now passes", () => {
-    const previous = parseFilesConfig(
-      "placeholders: []\nfiles:\n  - { path: SECURITY.md, class: managed }\n  - { path: .gitignore, class: managed }\n",
-    );
-    expect(() => checkRetirements(previous, current)).not.toThrow();
-  });
-
-  test("a previously written starter needs no retirement: it is repo-owned once written", () => {
-    const previous = parseFilesConfig(
-      "placeholders: []\nfiles:\n  - { path: .claude-plugin/plugin.json, class: starter }\n  - { path: SECURITY.md, class: managed }\n",
-    );
-    expect(() => checkRetirements(previous, current)).not.toThrow();
-  });
-
-  test("a previously written path neither written nor retired now is the error; a dropped retired entry is not", () => {
-    const previous = parseFilesConfig(
-      "placeholders: []\nfiles:\n  - { path: gone.yml, class: managed }\nretired:\n  - { path: old.yml }\n",
-    );
-    expect(() => checkRetirements(previous, current)).toThrow(
-      "gone.yml was written by the previous files.yml but is neither written nor retired now",
-    );
-    const onlyRetired = parseFilesConfig(
-      "placeholders: []\nfiles: []\nretired:\n  - { path: old.yml }\n",
-    );
-    expect(() => checkRetirements(onlyRetired, current)).not.toThrow();
   });
 });

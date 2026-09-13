@@ -29,14 +29,12 @@ bun .github/scripts/sync/writer/sync.ts \
   --files files.yml --tree files \
   --target <checkout> --build <full sha> \
   --repository <owner/name> --private <true|false> \
-  [--previous-files <files.yml of the delivery commit being replaced>] \
   [--summary <path for the JSON summary>]
 ```
 
 - `--tree` is the `files/` directory itself; every `source` in `files.yml` starts with `files/` and resolves under it.
 - `--build` is the delivery commit's full sha, 40 lowercase hex characters (`git fetch origin +refs/tags/stable:refs/tags/stable` then `git rev-parse stable^{commit}`, the forced refspec so a local tag left by an earlier fetch is refreshed), stamped into the manifest's `commit` field, which the fleet validator reads as a full sha; a short or uppercase one is refused before anything is written.
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the default `copyright_holder`.
-- `--previous-files` turns on the retirement check (below).
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
 - Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a `--build` that is not a full sha, a bad `files.yml`, an unreadable registration, a symlinked ancestor at a path the writer touches, a directory or a symlink at the manifest or registration path, a directory at a retired path or at a `moved_to` destination, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
 
@@ -106,7 +104,6 @@ The loader refuses, all problems at once:
 - two entries for one `path` whose conditions can both hold (below)
 - a path listed under both `files` and `retired`
 - a `files` entry at `.github/repo-platform-manifest.json`, the manifest the writer itself writes last
-- with `--previous-files`: a path the previous `files.yml` wrote that the current one neither writes nor retires, starters excepted (a written starter is repo-owned, so a dropped one needs no retirement; a retired entry may leave, the probe above being its gate)
 
 ## files.yml reference
 
