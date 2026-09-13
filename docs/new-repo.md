@@ -50,7 +50,7 @@ Four files matter later:
 
 ### What the sync writes
 
-Every written path is an entry in [files.yml](../files.yml) at the commit the `stable` tag names; [sync.md](sync.md#filesyml-reference) explains each entry's `class` and `when`.
+The list of platform files is [files.yml](../files.yml) at the commit the `stable` tag names; [sync.md](sync.md#filesyml-reference) explains each entry's `class` and `when`.
 
 ### Mirror copies of platform files
 
