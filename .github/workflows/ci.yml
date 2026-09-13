@@ -408,8 +408,6 @@ jobs:
     with:
       sha: ${{ github.sha }}
       before: ${{ github.event.before }}
-    secrets:
-      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
   # Ordered behind post-green so the deploy runs after this run's mover, and a green move's theme
   # is what @stable serves it; !cancelled() keeps a red or skipped post-green from holding the site back. No push clause in

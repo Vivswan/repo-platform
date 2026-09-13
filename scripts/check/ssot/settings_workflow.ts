@@ -8,7 +8,6 @@ import {
 } from "../../../.github/scripts/sync/writer/settings_layers.ts";
 import { canonical, type Mismatch } from "./comparison.ts";
 import { asRecord, REPO_ROOT, read } from "./inputs.ts";
-import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
 import type { Rule } from "./rule_roster.ts";
 
 /** The `include` word in the workflow, the rows from the plan's output alone: a literal could carry slugs, and
@@ -162,6 +161,9 @@ export function overlayMismatches(text: string): Mismatch[] {
 }
 
 export const SETTINGS_WORKFLOW = ".github/workflows/settings-repos.yml";
+export const POST_GREEN_REL = ".github/workflows/post-green.yml";
+/** post-green.yml's job calling the settings writer: the second holder of its lane. */
+export const SETTINGS_CALLER_JOB = "settings-fleet";
 export const SETTINGS_SELECTOR = "bun .github/scripts/fleet/select_settings_repos.ts";
 export const SETTINGS_RESOLVER = "bun .github/scripts/fleet/resolve_settings_target.ts";
 /** The apply is the installed library's own bin, so bun.lock's one resolved version is the writer's fold and the
@@ -195,10 +197,12 @@ function jobsOf(text: string, rel: string): Record<string, WorkflowJob> {
  *  cancel the newer apply mid-flight and then stand down itself (select_settings_repos.ts), leaving the fleet unapplied until
  *  the nightly. Both holders are judged: the writer's own group and the caller job's. */
 export function settingsLaneMismatches(workflowText: string, postGreenText: string): Mismatch[] {
-  const caller = FLEET_WRITERS[SETTINGS_WORKFLOW].callerJob;
   const holders: [string, unknown][] = [
     [SETTINGS_WORKFLOW, asRecord(parseYaml(workflowText), SETTINGS_WORKFLOW).concurrency],
-    [`${POST_GREEN_REL} job ${caller}`, jobsOf(postGreenText, POST_GREEN_REL)[caller]?.concurrency],
+    [
+      `${POST_GREEN_REL} job ${SETTINGS_CALLER_JOB}`,
+      jobsOf(postGreenText, POST_GREEN_REL)[SETTINGS_CALLER_JOB]?.concurrency,
+    ],
   ];
   const mismatches: Mismatch[] = [];
   for (const [file, lane] of holders) {

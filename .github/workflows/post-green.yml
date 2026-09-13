@@ -3,7 +3,8 @@
 #
 # Every leg holds three invariants:
 #   state-shaped        -> a leg evicted while pending at its lane is covered by its evictor or healed by the next trigger
-#   sha from the input  -> every leg reads the judged commit from `inputs.sha`, never from github.sha or a read of main
+#   sha from the input  -> a leg acting on the judged commit reads it from `inputs.sha`, never from github.sha or a read of main
+#                          (the sync reads the commit the stable tag names instead: this run's mover or a newer one moved it)
 #   own green check     -> a leg that mutates shared state re-verifies the all-green check itself
 
 name: Post Green
@@ -26,10 +27,6 @@ on:
           Explicit like sha, and verified an ancestor of it.
         required: true
         type: string
-    secrets:
-      REPO_PLATFORM_TOKEN:
-        description: The fleet PAT, passed through to the two writers this workflow calls.
-        required: true
   # The self-heal: the scripts refuse any sha that is not green main history, so re-run that commit's CI first
   # when its all-green check is missing.
   workflow_dispatch:
@@ -134,9 +131,6 @@ jobs:
     uses: ./.github/workflows/sync-repos.yml
     with:
       repos: ${{ needs.read-directives.outputs.repos }}
-      sha: ${{ inputs.sha }}
-    secrets:
-      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
   # Every target on every called run: the apply is idempotent and reads each target's own state, so no diff decides it.
   # Ordered behind sync-fleet whatever its result, so a synced repo is applied after its sync; holds the lane the called run keys around.
@@ -155,5 +149,3 @@ jobs:
     with:
       repos: all
       sha: ${{ inputs.sha }}
-    secrets:
-      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

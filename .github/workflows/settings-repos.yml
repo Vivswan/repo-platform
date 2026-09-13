@@ -46,9 +46,6 @@ on:
           the gate step requires and verifies green
         required: true
         type: string
-    secrets:
-      REPO_PLATFORM_TOKEN:
-        required: true
 
 permissions:
   contents: read
@@ -65,6 +62,7 @@ concurrency:
 jobs:
   plan:
     runs-on: ubuntu-latest
+    environment: fleet-operator
     # The green gate's bounded wait (require_green_commit.ts) plus the selection: three short
     # reads per target, run one after another, so a far larger fleet shows up here first.
     timeout-minutes: 60
@@ -141,6 +139,7 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: apply (row ${{ matrix.row }})
     runs-on: ubuntu-latest
+    environment: fleet-operator
     # One target's work: the install, one listing of the owner's repositories,
     # then about five minutes of apply. The fleet's size is the matrix's width,
     # never this bound.

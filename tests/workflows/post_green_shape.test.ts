@@ -12,7 +12,6 @@ interface Job {
   concurrency?: { group: string; "cancel-in-progress": boolean };
   uses?: string;
   with?: Record<string, string>;
-  secrets?: Record<string, string>;
   outputs?: Record<string, string>;
   permissions?: Record<string, string>;
   steps?: {
@@ -306,13 +305,9 @@ describe("post-green wiring", () => {
       "cancel-in-progress": false,
     });
     expect(syncFleet.uses).toBe("./.github/workflows/sync-repos.yml");
-    // The sync is handed THIS commit, never main's live HEAD.
+    // No sha rides the call: the sync reads the commit the tag names (resolve_build.ts).
     expect(syncFleet.with).toEqual({
       repos: "${{ needs.read-directives.outputs.repos }}",
-      sha: "${{ inputs.sha }}",
-    });
-    expect(syncFleet.secrets).toEqual({
-      REPO_PLATFORM_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
     });
     // settings-fleet's own verification is the called workflow's gate
     // (require_green_commit.ts's called path).
@@ -328,9 +323,6 @@ describe("post-green wiring", () => {
       repos: "all",
       sha: "${{ inputs.sha }}",
     });
-    expect(settingsFleet.secrets).toEqual({
-      REPO_PLATFORM_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
-    });
   });
 
   test("the called settings apply never waits on the lane its caller holds, and has no push way in", () => {
@@ -342,12 +334,11 @@ describe("post-green wiring", () => {
     // post-green call applies every target on every green main run.
     const settingsRepos = read(".github/workflows/settings-repos.yml");
     const doc = parseYaml(settingsRepos) as {
-      on: Record<string, { inputs?: Record<string, unknown>; secrets?: Record<string, unknown> }>;
+      on: Record<string, { inputs?: Record<string, unknown> }>;
       concurrency: { group: string; "cancel-in-progress": boolean };
     };
     expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
     expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos", "sha"]);
-    expect(Object.keys(doc.on.workflow_call.secrets ?? {})).toEqual(["REPO_PLATFORM_TOKEN"]);
     expect(doc.concurrency).toEqual({
       group:
         "${{ inputs.sha != '' && format('settings-repos-called-{0}', github.run_id) || 'settings-repos' }}",
@@ -366,12 +357,11 @@ describe("post-green wiring", () => {
     // never github.workflow) while cron and dispatch runs keep the lane.
     const syncRepos = read(".github/workflows/sync-repos.yml");
     const doc = parseYaml(syncRepos) as {
-      on: Record<string, { inputs?: Record<string, unknown>; secrets?: Record<string, unknown> }>;
+      on: Record<string, { inputs?: Record<string, unknown> }>;
       concurrency: { group: string; "cancel-in-progress": boolean };
     };
     expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
-    expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos", "sha"]);
-    expect(Object.keys(doc.on.workflow_call.secrets ?? {})).toEqual(["REPO_PLATFORM_TOKEN"]);
+    expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos"]);
     expect(doc.concurrency).toEqual({
       group:
         "${{ inputs.repos != '' && format('sync-repos-called-{0}', github.run_id) || 'sync-repos' }}",

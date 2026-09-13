@@ -2,11 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
-import { FLEET_WRITERS, POST_GREEN_REL } from "../../../scripts/check/ssot/post_green.ts";
 import {
   OWN_OVERLAY,
   overlayMismatches,
+  POST_GREEN_REL,
   SETTINGS_APPLY_RUN,
+  SETTINGS_CALLER_JOB,
   SETTINGS_STARTERS,
   SETTINGS_WORKFLOW,
   settingsApplyInputMismatches,
@@ -753,7 +754,7 @@ describe("settingsLaneMismatches (settings-lane-newest-wins)", () => {
       "    uses: ./.github/workflows/settings-repos.yml",
       "",
     ].join("\n");
-  const CALLER = `${POST_GREEN_REL} job ${FLEET_WRITERS[SETTINGS_WORKFLOW].callerJob}`;
+  const CALLER = `${POST_GREEN_REL} job ${SETTINGS_CALLER_JOB}`;
   const expected =
     "cancel-in-progress: false on the settings lane (a lane orders by arrival, so cancelling would let an older commit's late run cancel the newer apply in flight; the selector stands that run down instead)";
   const mismatch = (file: string, got: string) => ({ file, expected, got });
