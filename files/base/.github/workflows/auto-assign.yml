@@ -12,22 +12,16 @@ on:
   issues:
     types: [opened]
   pull_request:
-    types: [opened, synchronize]
-  # Nightly catch-up sweep: assigns everything open and unassigned whose
-  # creation fired no workflow - issues, PRs, and (on CodeQL repos) code
-  # scanning alerts.
+    types: [opened]
+  # Nightly sweep: every open unassigned issue and PR, whether created with a workflow token (no open event fired)
+  # or opened by Dependabot or from a fork (an open event fired, but with a token the job cannot write with).
   schedule:
     - cron: "13 6 * * *"
 
-# No workflow-level grants: each job grants its reusable workflow exactly
-# what it needs (contents:read is CODEOWNERS resolution).
 permissions: {}
 
 jobs:
   auto-assign:
-    if: >-
-      github.event_name == 'issues' || github.event_name == 'pull_request'
-      || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     permissions:
       contents: read
       issues: write

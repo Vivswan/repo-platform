@@ -50,7 +50,6 @@ export const RULE_ROSTER = [
   "platform-name-once",
   "release-gate-predicates",
   "release-cut-wiring",
-  "auto-assign-codeowners-parity",
   "settings-green-gate",
   "fleet-writers-ride-post-green",
   "spawn-sync-hang-bound",

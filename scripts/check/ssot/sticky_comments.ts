@@ -26,8 +26,8 @@ export interface StickyScope {
   postMayFail: boolean;
 }
 
-/** A block file (`<stem>.block.<value>.yml`) counts too: it is spliced into the workflow whose name it carries.
- *    files/base/.github/workflows/auto-assign.codeql.yml -> auto-assign */
+/** A variant (`<stem>.<value>.yml`) or block file (`<stem>.block.<value>.yml`) counts too: it lands in the workflow whose name it carries.
+ *    files/bun/.github/workflows/auto-format.block.toolchain.yml -> auto-format */
 export function sourceWorkflowStem(rel: string): string | null {
   const match = /^files\/[^/]+\/\.github\/workflows\/([^/.]+)[^/]*\.ya?ml$/.exec(rel);
   return match?.[1] ?? null;
