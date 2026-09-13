@@ -142,7 +142,7 @@ The `validate-managed-files` job judges the repository against the platform's cu
 | Registration | a missing or unreadable `.repo-platform.yml`, a `modules` list that is not a list, a module name `files.yml` does not know |
 | Release-please config | a `release-as` key in `release-please-config.json` ([the release pipeline](#the-release-pipeline-release-please)) |
 | YAML | a YAML file anywhere in the repository that does not parse |
-| Conflict markers | a merge's conflict markers left in a source, config, or markdown file (the validator's text suffixes) |
+| Conflict markers | a line opening with `<<<<<<< ` or `>>>>>>> `, or reading `=======`, in a source, config, or markdown file (the validator's text suffixes); a fenced example of the markers counts |
 | Manifest shape | a missing, unparsable, or malformed `.github/repo-platform-manifest.json`, an entry carrying a field the vocabulary lacks, or an entry keyed by a path the sync never writes (`./x`, `a//b`, `..`, a trailing slash, a backslash: none is a path the grammar allows, and the first two also alias a declared path the parity check would not recognise) |
 | Manifest parity | an entry recorded under a class other than the one `files.yml` writes its path under for this repository's modules and visibility (a relabel to `starter` would switch parity off; a path no selected entry writes, a mirror target say, is judged as recorded), managed content whose hash differs from its record (an edit outside a sync), or a recorded managed file missing from the repo |
 

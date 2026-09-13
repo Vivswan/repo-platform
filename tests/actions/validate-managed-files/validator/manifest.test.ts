@@ -55,7 +55,7 @@ describe("the manifest's shape", () => {
     ].join("\n");
     const { exitCode, stderr } = runValidator({ [MANIFEST]: conflicted });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(`${MANIFEST}: contains unresolved merge-conflict markers`);
+    expect(stderr).toContain(`${MANIFEST}: carries conflict-marker lines`);
     expect(stderr).not.toContain("does not parse as a manifest");
   });
 
@@ -525,6 +525,143 @@ describe("the recorded class against files.yml", () => {
   });
 });
 
+describe("parity messages name what the record and the tree show, never who made it", () => {
+  // Each input is one the tool itself produces or cannot tell from a hand edit: the sync carries a hash-null
+  // record through every held retirement, and a symlink under a file record (or the reverse) says nothing about
+  // who placed it. The validator reads no mirror declaration and no retired list, so one mirror remedy names what
+  // the re-run does at every path a record can sit on; every other class holds a wrong-kind occupant, so that
+  // occupant must go before a resync can write.
+  const REMOVE_THEN_RESYNC = `or remove what stands at the path and ${RESYNC}`;
+  const MIRROR_REACHED =
+    `${RESYNC} and read its report: a target a declaration reaches is rewritten (unless it already carries the ` +
+    "mirror) and restamped";
+  const MIRROR_FAILS =
+    "; a run the writer cannot finish (a declaration it cannot honour, a directory or a symbolic-link ancestor at " +
+    "a path it must probe) fails by name instead";
+  const MIRROR_RESYNC =
+    `${MIRROR_REACHED}; a record none reaches is dropped, or at a path files.yml retires is retired as the ` +
+    "Retirement table in docs/sync.md says (a wrong-kind or hash-null occupant is held as it stands unless a " +
+    `moved_to moves it; remove a held occupant, then re-run)${MIRROR_FAILS}`;
+  const MIRROR_DIRECTORY_RESYNC =
+    `${MIRROR_REACHED}, except under a * in the pattern's last segment, which matches files and links alone and ` +
+    "passes a directory by (the run fails when it is the pattern's only match); a record none reaches is " +
+    `dropped; a directory at a path files.yml retires fails the run (remove it, then re-run)${MIRROR_FAILS}`;
+  const LINK_RECORDED = (noun: string, remedy: string) =>
+    `CLAUDE.md: recorded as ${noun} in ${MANIFEST_NAME} but is not a symbolic link - the record (a link ` +
+    `target's hash) can verify a link alone; restore the link from git history, ${remedy}`;
+  const FILE_RECORDED = (cls: string, remedy: string) =>
+    `CLAUDE.md: recorded as ${cls} in ${MANIFEST_NAME} but is a symbolic link - the record (a file's ` +
+    `content hash) cannot verify a link, which the sync never reads through; restore the file from git ` +
+    `history, ${remedy}`;
+  const DIRECTORY = (path: string, restore: "file" | "link", remedy: string) =>
+    `${path}: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink; restore the ${restore} ` +
+    `from git history, ${remedy}`;
+  test.each([
+    {
+      reason:
+        "a hash-null managed record: a re-run stamps a selected write, retires a retired path as its row says, and holds a stale one",
+      files: { "UNHASHED.md": "# unhashed notes\n" },
+      links: {},
+      entry: ["UNHASHED.md", '{"class": "managed", "hash": null}'],
+      message:
+        `UNHASHED.md: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
+        `verify the file against - the sync carries such a record as it found it: ${RESYNC} and read its ` +
+        "report (a selected entry's write, when it goes through, stamps the hash; a path files.yml retires gets " +
+        "its Retired row; a stale path is held as it stands: delete the file and its manifest entry)",
+    },
+    {
+      reason: "a symbolic link under a managed record",
+      files: { "AGENTS.md": "agents\n" },
+      links: { "CLAUDE.md": "AGENTS.md" },
+      entry: ["CLAUDE.md", `{"class": "managed", "hash": "${sha("AGENTS.md")}"}`],
+      message: FILE_RECORDED("managed", REMOVE_THEN_RESYNC),
+    },
+    {
+      reason:
+        "a hash-null managed record over a symbolic link: the occupant's kind is judged first",
+      files: { "AGENTS.md": "agents\n" },
+      links: { "CLAUDE.md": "AGENTS.md" },
+      entry: ["CLAUDE.md", '{"class": "managed", "hash": null}'],
+      message: FILE_RECORDED("managed", REMOVE_THEN_RESYNC),
+    },
+    {
+      reason:
+        "a symbolic link under a copy-mirror record: the mirror writer replaces it at a literal target and a pattern match alike",
+      files: { "AGENTS.md": "agents\n" },
+      links: { "CLAUDE.md": "AGENTS.md" },
+      entry: ["CLAUDE.md", `{"class": "mirror", "hash": "${sha("agents\n")}"}`],
+      message: FILE_RECORDED("mirror", `or ${MIRROR_RESYNC}`),
+    },
+    {
+      reason:
+        "a directory under a copy-mirror record: written over where a declaration reaches it, passed by under a final *, refused at a retired path",
+      files: { "copies/copy.md/keep": "" },
+      links: {},
+      entry: ["copies/copy.md", `{"class": "mirror", "hash": "${sha("# copy\n")}"}`],
+      message: DIRECTORY("copies/copy.md", "file", `or ${MIRROR_DIRECTORY_RESYNC}`),
+    },
+    {
+      reason:
+        "a directory under a symlink-mirror record: the same directory remedy, not the not-a-symbolic-link one",
+      files: { "copies/copy.md/keep": "" },
+      links: {},
+      entry: [
+        "copies/copy.md",
+        `{"class": "mirror", "kind": "symlink", "hash": "${sha("../AGENTS.md")}"}`,
+      ],
+      message: DIRECTORY("copies/copy.md", "link", `or ${MIRROR_DIRECTORY_RESYNC}`),
+    },
+    {
+      reason:
+        "a hash-null copy-mirror record: a re-run restamps a reached target (deleting a pattern's only match would fail it), and a retired path holds or moves it",
+      files: { "copies/copy.md": "# copy\n" },
+      links: {},
+      entry: ["copies/copy.md", '{"class": "mirror", "hash": null}'],
+      message:
+        `copies/copy.md: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
+        `verify the file against - ${MIRROR_RESYNC}`,
+    },
+    {
+      reason: "a regular file under a link record",
+      files: { "CLAUDE.md": "AGENTS.md" },
+      links: {},
+      entry: ["CLAUDE.md", `{"class": "link", "hash": "${sha("AGENTS.md")}"}`],
+      message: LINK_RECORDED("a link", REMOVE_THEN_RESYNC),
+    },
+    {
+      reason:
+        "a directory under a link record: neither a symbolic link nor a regular file, so the directory message",
+      files: { "CLAUDE.md/keep": "" },
+      links: {},
+      entry: ["CLAUDE.md", `{"class": "link", "hash": "${sha("AGENTS.md")}"}`],
+      message: DIRECTORY("CLAUDE.md", "link", REMOVE_THEN_RESYNC),
+    },
+    {
+      reason:
+        "a regular file under a symlink-mirror record: the mirror writer replaces it at a literal target and a pattern match alike",
+      files: { "CLAUDE.md": "AGENTS.md" },
+      links: {},
+      entry: ["CLAUDE.md", `{"class": "mirror", "kind": "symlink", "hash": "${sha("AGENTS.md")}"}`],
+      message: LINK_RECORDED("a symlink mirror", `or ${MIRROR_RESYNC}`),
+    },
+  ])("$reason", ({ files, links, entry, message }) => {
+    const root = temp.dir("manifest-parity-message-");
+    for (const [rel, content] of Object.entries(files)) {
+      mkdirSync(join(root, dirname(rel)), { recursive: true });
+      writeFileSync(join(root, rel), content);
+    }
+    for (const [rel, target] of Object.entries(links)) symlinkSync(target, join(root, rel));
+    mkdirSync(join(root, ".github"), { recursive: true });
+    writeFileSync(join(root, ".repo-platform.yml"), "modules: []\n");
+    writeFileSync(join(root, "files.yml"), "modules: {}\nfiles: []\n");
+    writeFileSync(join(root, MANIFEST_NAME), manifestOf({ ...SELF_ENTRY, [entry[0]]: entry[1] }));
+    const findings = checkManifestParity(
+      loadContext(root, join(root, "files.yml"), { mode: "render", private: false }),
+    );
+    expect(findings).toEqual([{ severity: "error", message }]);
+  });
+});
+
 describe("checkManifestParity over one tree walking every dispatch branch", () => {
   test("reports exactly these verdicts, in manifest order", () => {
     const root = temp.dir("manifest-parity-");
@@ -611,7 +748,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       `docs/broken-region.md: the managed-region marker lines ('${B}' ... '${E}') recorded in ${MANIFEST_NAME} are missing, duplicated, or out of order in the file, so managed-region parity cannot be verified`,
       `${MANIFEST_NAME}: entry 'docs/unknown-grammar.md' declares split grammar "prefix", which this validator does not read (one grammar exists: managed-region)`,
       `${MANIFEST_NAME}: entry 'docs/no-grammar.md' lacks the split grammar field every sync stamps`,
-      `docs/unstamped.md: ${MANIFEST_NAME} records no hash for it (unstamped)`,
+      `docs/unstamped.md: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to verify the file against`,
       `${MANIFEST_NAME}: entry 'docs/starter.md' carries "hash", which the sync never records on a starter entry`,
       `${MANIFEST_NAME}: entry 'docs/relabeled.md' is recorded as starter but files.yml declares the path managed`,
       `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror, link)`,

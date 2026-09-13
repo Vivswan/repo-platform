@@ -98,7 +98,7 @@ describe("keepReason on symbolic links", () => {
       "mirror-copy-as-link.md": { class: "mirror", hash: sha256("AGENTS.md") },
     };
     expect(keepReason(target, "CLAUDE.md", records)).toBe(
-      "a symbolic link sits where the platform wrote a file",
+      "a symbolic link sits where a regular file is recorded",
     );
     expect(keepReason(target, "mirror-link.md", records)).toBeNull();
     expect(keepReason(target, "other.md", records)).toBe(
@@ -106,11 +106,11 @@ describe("keepReason on symbolic links", () => {
     );
     for (const path of ["as-file.md", "as-mirror-file.md"]) {
       expect(keepReason(target, path, records)).toBe(
-        "a regular file sits where the platform wrote a link",
+        "a regular file sits where a link is recorded",
       );
     }
     expect(keepReason(target, "mirror-copy-as-link.md", records)).toBe(
-      "a symbolic link sits where the platform wrote a file",
+      "a symbolic link sits where a regular file is recorded",
     );
     expect(keepReason(target, "malformed.md", records)).toBe(
       "the path is a symbolic link whose target is not the recorded one",

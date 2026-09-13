@@ -3,6 +3,7 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ManifestEntryShape, parseManifestFiles } from "../../shared/manifest.ts";
 import { MANIFEST_NAME, REGISTRATION_PATH } from "../../shared/platform.ts";
+import { pathProblem } from "../../shared/repo_path.ts";
 import { applies, type Selection, type When } from "../../shared/selection.ts";
 import { hasConflictMarker, isRecord, isRegularFile, shapeOfYaml } from "./readers.ts";
 import { whenOf } from "./when_of.ts";
@@ -25,6 +26,14 @@ const SKIP_DIRS = new Set([
   ".mypy_cache",
 ]);
 
+/** A manifest key the sync would never write (`./x`, `a//b`, a traversal), with pathProblem's reason. Read as a
+ *  record, a traversal key's hash would come from outside the root, and `./x` resolves to a declared file while
+ *  matching no declaration. */
+export interface RefusedKey {
+  key: string;
+  problem: string;
+}
+
 export type Manifest =
   | { state: "absent" }
   /** Conflict-marked text is the conflict-marker check's report; the shared
@@ -32,7 +41,11 @@ export type Manifest =
    *  must never quietly read one side of a conflicted manifest. */
   | { state: "conflicted" }
   | { state: "malformed"; problem: string }
-  | { state: "parsed"; files: Record<string, ManifestEntryShape> };
+  | {
+      state: "parsed";
+      records: Record<string, ManifestEntryShape>;
+      refused: readonly RefusedKey[];
+    };
 
 export interface Declaration {
   path: string;
@@ -144,7 +157,15 @@ function loadManifest(root: string): Manifest {
   if (hasConflictMarker(text)) return { state: "conflicted" };
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return { state: "malformed", problem: parsed.problem };
-  return { state: "parsed", files: parsed.files };
+  const refused: RefusedKey[] = [];
+  const accepted: [string, ManifestEntryShape][] = [];
+  for (const [key, entry] of Object.entries(parsed.files)) {
+    const problem = pathProblem(key);
+    if (problem === null) accepted.push([key, entry]);
+    else refused.push({ key, problem });
+  }
+  // fromEntries defines own properties, so a key spelled like an inherited one (`__proto__`) stays a record.
+  return { state: "parsed", records: Object.fromEntries(accepted), refused };
 }
 
 /** --directory reports an ignored directory collapsed, so the walk prunes it without ever descending (.claude/worktrees/

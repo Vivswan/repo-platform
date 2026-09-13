@@ -208,7 +208,7 @@ export function renderReport(report: SyncReport): string {
     parts.push("", REPLACED_HEADING, "");
     parts.push(
       "> [!WARNING]",
-      "> These files held content the platform did not write. The platform version replaced it; the text it replaced is below.",
+      "> These files held content no manifest record vouched for. The platform version replaced it; the text it replaced is below.",
     );
     for (const row of report.replaced) {
       parts.push("", `#### ${code(row.path)}`, "", ...fencedDiff(row.diff));

@@ -69,13 +69,13 @@ export function judge(target: string, path: string, records: Records): Judgement
   const found = probe(target, path);
   if (found.kind === "absent") return { verdict: "own" };
   if (linkRecorded) {
-    if (found.kind !== "link")
-      return foreign("a regular file sits where the platform wrote a link");
+    if (found.kind !== "link") return foreign("a regular file sits where a link is recorded");
     return sha256(found.target) === record.hash
       ? { verdict: "own" }
       : foreign("the path is a symbolic link whose target is not the recorded one");
   }
-  if (found.kind === "link") return foreign("a symbolic link sits where the platform wrote a file");
+  if (found.kind === "link")
+    return foreign("a symbolic link sits where a regular file is recorded");
   if (record.class === "split") {
     // latin1 round-trips every byte, so the kept halves are the file's own.
     const text = found.bytes.toString("latin1");
