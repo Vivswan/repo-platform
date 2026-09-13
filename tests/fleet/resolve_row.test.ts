@@ -290,7 +290,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
             env: { ROW_KEY: keyOf(HIDDEN), STUB_GIT_FAIL: "1" },
             outcome: refused(
               1,
-              "git ls-remote for refs/heads/main could not answer (exit 128); refusing to guess: fatal: unable to access 'origin': Could not resolve host",
+              "git ls-remote could not answer (exit 128); refusing to guess: fatal: unable to access 'origin': Could not resolve host",
               [TIP_READ],
             ),
           },

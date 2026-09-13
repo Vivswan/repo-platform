@@ -6,7 +6,7 @@
 
 import { allGreenFailure, PROBE_TIMEOUT_MS } from "../shared/all_green.ts";
 import { env, fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
-import { answered, gitAnswersYes } from "../shared/git_yes_no.ts";
+import { gitAnswersYes, gitRemoteRef } from "../shared/git_yes_no.ts";
 import { must, mustCapture } from "../shared/proc.ts";
 
 const TAG = "refs/tags/stable";
@@ -19,20 +19,6 @@ if (ref !== "" && ref !== "refs/heads/main") {
   fail(
     `the stable tag moves from main only, but this run was dispatched on '${ref}'. Re-run the workflow on the main branch.`,
   );
-}
-
-/** For an annotated tag the value is the tag object, which is what the lease must name. ls-remote --exit-code's 2 is the
- * "no tag" answer; the helper makes every other exit and a deadline expiry fatal, since read as a first move either would
- * misreport the tag in the outputs. */
-function remoteTag(): string {
-  const probe = answered(["ls-remote", "--exit-code", "origin", TAG], {
-    noExit: 2,
-    timeoutMs: PROBE_TIMEOUT_MS,
-  });
-  if (probe.exitCode === 2) return "";
-  const line = probe.stdout.split("\n").find((entry) => entry.endsWith(`\t${TAG}`));
-  if (line === undefined) fail(`git ls-remote listed no ${TAG} line:\n${probe.stdout}`);
-  return line.slice(0, line.indexOf("\t"));
 }
 
 const sourceSha = requireEnv("SOURCE_SHA");
@@ -57,7 +43,8 @@ if (notGreen !== null) {
   );
 }
 
-const previous = remoteTag();
+// For an annotated tag the listed value is the tag object, which is what the lease must name.
+const previous = gitRemoteRef("origin", TAG, { timeoutMs: PROBE_TIMEOUT_MS });
 let previousCommit = "";
 if (previous !== "") {
   must(["git", "fetch", "--quiet", "origin", `+${TAG}:${TAG}`]);

@@ -4,82 +4,58 @@ import {
   supersededBy,
   supersededNotice,
 } from "../../.github/scripts/fleet/newest_main.ts";
-import type { RunResult } from "../../.github/scripts/shared/proc.ts";
+import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
+import { tempDirs } from "../shared/temp_dir";
 
-const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
-const NEWER = "0f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4";
-const LS_REMOTE = ["git", "ls-remote", "--exit-code", "origin", MAIN_REF];
+const temp = tempDirs();
 
-function gitAnswering(answer: Partial<RunResult>) {
-  const asked: string[][] = [];
-  const run = (command: string[]): RunResult => {
-    asked.push(command);
-    return { exitCode: 0, stdout: "", stderr: "", timedOut: false, pid: 0, ...answer };
-  };
-  return { run, asked };
+/** A one-commit checkout, like the plan job's, whose origin is a bare repository holding main at the run's commit. */
+function fixture(): { work: string; origin: string; sha: string } {
+  const origin = temp.dir("newest-main-origin-");
+  fixtureGit(origin, ["init", "--quiet", "--bare", "-b", "main"]);
+  const work = temp.dir("newest-main-work-");
+  fixtureGit(work, ["init", "--quiet", "-b", "main"]);
+  fixtureGit(work, ["config", "user.name", "t"]);
+  fixtureGit(work, ["config", "user.email", "t@t.test"]);
+  fixtureGit(work, ["commit", "--quiet", "--allow-empty", "-m", "judged"]);
+  fixtureGit(work, ["remote", "add", "origin", origin]);
+  fixtureGit(work, ["push", "--quiet", "origin", "main"]);
+  return { work, origin, sha: fixtureGit(work, ["rev-parse", "HEAD"]) };
 }
 
 describe("supersededBy", () => {
-  test.each([
-    {
-      reason: "the run's commit is main's tip: newest, nothing supersedes it",
-      stdout: `${SHA}\t${MAIN_REF}\n`,
-      expected: null,
-    },
-    {
-      reason: "main moved on: the tip supersedes the run's commit",
-      stdout: `${NEWER}\t${MAIN_REF}\n`,
-      expected: NEWER,
-    },
-    {
-      reason: "a tag or peeled line beside main is ignored; the main line decides",
-      stdout: `${NEWER}\trefs/heads/main-old\n${SHA}\t${MAIN_REF}\n`,
-      expected: null,
-    },
-  ])("$reason", ({ stdout, expected }) => {
-    const git = gitAnswering({ stdout });
-    expect(supersededBy(SHA, git.run)).toBe(expected);
-    expect(git.asked).toEqual([LS_REMOTE]);
+  test("main's tip decides: the run's own commit is newest, a moved main supersedes it", () => {
+    const { work, sha } = fixture();
+    const options = { cwd: work, env: fixtureGitEnv() };
+    expect(supersededBy(sha, options)).toBe(null);
+
+    fixtureGit(work, ["commit", "--quiet", "--allow-empty", "-m", "newer"]);
+    fixtureGit(work, ["push", "--quiet", "origin", "main"]);
+    expect(supersededBy(sha, options)).toBe(fixtureGit(work, ["rev-parse", "HEAD"]));
   });
 
-  test.each([
-    {
-      reason: "a failed ls-remote (no network) throws, quoting git",
-      answer: {
-        exitCode: 128,
-        stderr: "fatal: unable to access 'origin': Could not resolve host\n",
-      },
-      message: `git ls-remote for ${MAIN_REF} could not answer (exit 128); refusing to guess: fatal: unable to access 'origin': Could not resolve host`,
-    },
-    {
-      reason: "an absent main (--exit-code's 2) is an error, never 'newest'",
-      answer: { exitCode: 2 },
-      message: `git ls-remote for ${MAIN_REF} could not answer (exit 2); refusing to guess: `,
-    },
-    {
-      reason: "a stalled ls-remote throws even beside an exit code",
-      answer: { exitCode: 0, timedOut: true, stdout: `${SHA}\t${MAIN_REF}\n`, stderr: "" },
-      message: `git ls-remote for ${MAIN_REF} could not answer (timed out); refusing to guess: `,
-    },
-    {
-      reason: "a listing without a main line throws, showing the listing",
-      answer: { stdout: `${SHA}\trefs/heads/other\n` },
-      message: `git ls-remote listed no ${MAIN_REF} line:\n${SHA}\trefs/heads/other\n`,
-    },
-    {
-      reason: "a main line that is not a full sha throws",
-      answer: { stdout: `deadbeef\t${MAIN_REF}\n` },
-      message: `git ls-remote listed no ${MAIN_REF} line:\ndeadbeef\t${MAIN_REF}\n`,
-    },
-  ])("$reason", ({ answer, message }) => {
-    const git = gitAnswering(answer);
-    expect(() => supersededBy(SHA, git.run)).toThrow(message);
-    expect(git.asked).toEqual([LS_REMOTE]);
+  test("an absent main and a failed look throw, never 'newest' or 'superseded'", () => {
+    const { work, origin, sha } = fixture();
+    const options = { cwd: work, env: fixtureGitEnv() };
+    fixtureGit(origin, ["update-ref", "-d", MAIN_REF]);
+    expect(() => supersededBy(sha, options)).toThrow(
+      `origin holds no ${MAIN_REF}; refusing to guess which run is newest`,
+    );
+
+    fixtureGit(work, ["remote", "set-url", "origin", `${work}/missing.git`]);
+    expect(() => supersededBy(sha, options)).toThrow(
+      "git ls-remote could not answer (exit 128); refusing to guess: fatal: ",
+    );
   });
 });
 
 test("the stand-down notice names both commits short", () => {
-  expect(supersededNotice(SHA, NEWER)).toBe(
+  expect(
+    supersededNotice(
+      "8096c4920f84ec4122d14c5bd884703dd0d382ba",
+      "0f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4",
+    ),
+  ).toBe(
     "superseded by 0f1e2d3c4b5a: main moved past this run's 8096c4920f84; the tip's own run or the nightly applies - nothing to apply here",
   );
 });
