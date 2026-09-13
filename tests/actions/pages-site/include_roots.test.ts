@@ -41,6 +41,7 @@ describe("parseSiteConfig include roots", () => {
       "plain markdown file name",
     ],
     ["index.md as the page", [{ ...SKILLS, page: "index.md" }], "is index.md"],
+    ["a dot-prefixed page", [{ ...SKILLS, page: ".page.md" }], "never walks"],
     [
       "two roots on one mount",
       [SKILLS, { path: "agents", mount: "skills", page: "AGENT.md" }],
