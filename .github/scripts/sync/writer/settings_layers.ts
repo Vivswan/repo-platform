@@ -135,9 +135,11 @@ export function sectionEntries(doc: unknown, section: string): Record<string, un
  *  the fold judged as the document the apply will read, so a layer built
  *  in code (the tracking labels) meets the same gate as a file. The bytes
  *  are the raw fold, read from the library's internal entry: its public
- *  MergeReport.yaml renders the judged document, whose validator reorders
- *  keys and folds long lines. A layer's top-level private notes
- *  (`_notes: ...`) are dropped as the library's merged file drops them. */
+ *  MergeReport.yaml renders the judged document, where the validator
+ *  reorders keys and the render folds long lines. The internal entry
+ *  carries no semver promise, so a library bump re-checks it here. A
+ *  layer's top-level private notes (`_notes: ...`) are dropped as the
+ *  library's merged file drops them. */
 export function foldSettings(
   layers: readonly Layer[],
   where: string,
