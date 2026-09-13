@@ -36,3 +36,13 @@ rulesets:
       - type: deletion
     # Declared EMPTY on purpose: only the explicit empty list lets the nightly heal clear an out-of-band bypass actor.
     bypass_actors: []
+
+# Holds REPO_PLATFORM_TOKEN once the post-green jobs declare this environment: then only a declaring job in a main run can
+# read the fleet PAT, and GitHub itself holds the rule. No wait timer and no reviewers: GitHub's defaults, left undeclared.
+environments:
+  - name: fleet-operator
+    deployment_branch_policy:
+      protected_branches: false
+      custom_branch_policies: true
+    deployment_branch_policies:
+      - name: main
