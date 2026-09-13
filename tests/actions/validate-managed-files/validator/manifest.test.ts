@@ -658,7 +658,7 @@ describe("parity messages name what the record and the tree show, never who made
     const findings = checkManifestParity(
       loadContext(root, join(root, "files.yml"), { mode: "render", private: false }),
     );
-    expect(findings).toEqual([{ severity: "error", message }]);
+    expect(findings).toEqual([{ message }]);
   });
 });
 
@@ -739,10 +739,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
     const findings = checkManifestParity(
       loadContext(root, join(root, "files.yml"), { mode: "render", private: false }),
     );
-    const messages = findings.map((finding) => {
-      expect(finding.severity).toBe("error");
-      return finding.message.split(" - ")[0].split(";")[0];
-    });
+    const messages = findings.map((finding) => finding.message.split(" - ")[0].split(";")[0]);
     expect(messages).toEqual([
       `docs/drifted.md: content does not match the sha256 recorded in ${MANIFEST_NAME}`,
       `docs/broken-region.md: the managed-region marker lines ('${B}' ... '${E}') recorded in ${MANIFEST_NAME} are missing, duplicated, or out of order in the file, so managed-region parity cannot be verified`,

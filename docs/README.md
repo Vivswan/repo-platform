@@ -7,7 +7,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Goal | Read |
 |---|---|
 | Create a new managed repository | [New repo](new-repo.md) |
-| Read a `validate-managed-files` result: what blocks, what only warns | [New repo: the managed files check](new-repo.md#the-managed-files-check) |
+| Read a `validate-managed-files` result: what blocks, what is not judged | [New repo: the managed files check](new-repo.md#the-managed-files-check) |
 | Get a PR auto-formatted, or make bot fix commits re-run CI | [New repo: fix commits](new-repo.md#fix-commits-and-re-triggering-ci) |
 | Add or remove a module, and get its files as the sync PR that follows | [New repo: changing the module selection](new-repo.md#changing-the-module-selection) |
 | Ship a release, or verify a release asset's provenance | [New repo: the release pipeline](new-repo.md#the-release-pipeline-release-please) |

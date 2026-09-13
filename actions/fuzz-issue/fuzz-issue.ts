@@ -103,7 +103,6 @@ export function blockTitle(dir: string, report: string): string {
   return report ? basename(dir) : `${basename(dir)} (no report.md)`;
 }
 
-/** The default must stay fuzz: fleet fuzzer starters predate the input and pass nothing. */
 export type Stream = "fuzz" | "generic";
 
 const BODY_WORDS: Record<
@@ -144,7 +143,7 @@ export function buildBody(
   dirs: string[],
   env: NodeJS.ProcessEnv,
   artifactName: string,
-  stream: Stream = "fuzz",
+  stream: Stream,
 ): string {
   const words = BODY_WORDS[stream];
   const date = new Date().toISOString().slice(0, 10);
@@ -231,8 +230,8 @@ export function buildGenericBody(env: NodeJS.ProcessEnv): string {
   return parts.join("\n");
 }
 
-/** The fuzz wording hedges on unpinned crashes, which one green night cannot prove; a test pins it for the fleet fuzzer starters that pass no STREAM. */
-export function closeComment(env: NodeJS.ProcessEnv, stream: Stream = "fuzz"): string {
+/** The fuzz wording hedges on unpinned crashes, which one green night cannot prove. */
+export function closeComment(env: NodeJS.ProcessEnv, stream: Stream): string {
   const date = new Date().toISOString().slice(0, 10);
   const url = runUrl(env);
   const run = url ? ` Run: ${url}` : "";
@@ -251,44 +250,56 @@ export function closeComment(env: NodeJS.ProcessEnv, stream: Stream = "fuzz"): s
       ].join("\n");
 }
 
-function main(): number {
-  const mode = process.env.MODE || "report";
+/** A composite's `required: true` only documents: the runner passes an empty string for an omitted input. */
+function requireInput(variable: string, input: string): string {
+  const value = process.env[variable];
+  if (!value) throw new Error(`the ${input} input is required`);
+  return value;
+}
+
+/** Consumed by action.yml's label and issue steps like the label itself, checked here before anything is filed. */
+const REPORT_INPUTS = [
+  ["TITLE", "title"],
+  ["LABEL_COLOR", "label-color"],
+  ["LABEL_DESCRIPTION", "label-description"],
+] as const;
+
+function main(): void {
+  const mode = requireInput("MODE", "mode");
   if (mode !== "report" && mode !== "resolve") {
-    console.error(`error: unknown MODE '${mode}' (expected report or resolve)`);
-    return 1;
+    throw new Error(`unknown MODE '${mode}' (expected report or resolve)`);
   }
-  const stream = process.env.STREAM || "fuzz";
+  requireInput("LABEL", "label");
+  const stream = requireInput("STREAM", "stream");
   if (stream !== "fuzz" && stream !== "generic") {
-    console.error(`error: unknown STREAM '${stream}' (expected fuzz or generic)`);
-    return 1;
+    throw new Error(`unknown STREAM '${stream}' (expected fuzz or generic)`);
   }
   const runnerTemp = process.env.RUNNER_TEMP;
   const outputFile = process.env.GITHUB_OUTPUT;
   if (!runnerTemp || !outputFile) {
-    console.error("error: RUNNER_TEMP and GITHUB_OUTPUT are required (the runner sets both)");
-    return 1;
+    throw new Error("RUNNER_TEMP and GITHUB_OUTPUT are required (the runner sets both)");
   }
   const artifactsDir = process.env.ARTIFACTS_DIR;
   let text: string;
   if (mode === "resolve") {
     text = closeComment(process.env, stream);
-  } else if (artifactsDir) {
-    text = buildBody(
-      failureDirs(artifactsDir),
-      process.env,
-      process.env.ARTIFACT_NAME || "",
-      stream,
-    );
   } else {
-    text = buildGenericBody(process.env);
+    for (const [variable, input] of REPORT_INPUTS) requireInput(variable, input);
+    text = artifactsDir
+      ? buildBody(failureDirs(artifactsDir), process.env, process.env.ARTIFACT_NAME || "", stream)
+      : buildGenericBody(process.env);
   }
   // A fresh directory per run: one job can run the action once per stream.
   const file = join(mkdtempSync(join(runnerTemp, "fuzz-issue-")), `${mode}.md`);
   writeFileSync(file, text);
   appendFileSync(outputFile, `file=${file}\n`);
-  return 0;
 }
 
 if (import.meta.main) {
-  process.exit(main());
+  try {
+    main();
+  } catch (error) {
+    console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
 }

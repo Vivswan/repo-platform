@@ -7,11 +7,6 @@ on:
         description: CodeQL language (javascript-typescript or python)
         required: true
         type: string
-      config:
-        description: Optional inline CodeQL config (e.g. paths-ignore)
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -40,22 +35,9 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The managed ci.yml cannot carry per-repo scan parameters, so a repo-owned .github/codeql/codeql-config.yml is picked up here.
-      - name: Detect the repository's CodeQL config
-        id: config
-        if: inputs.config == ''
-        run: |
-          file=""
-          for candidate in .github/codeql/codeql-config.yml .github/codeql/codeql-config.yaml; do
-            if [ -f "$candidate" ]; then file="./$candidate"; break; fi
-          done
-          echo "file=$file" >> "$GITHUB_OUTPUT"
-
       - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           languages: ${{ inputs.language }}
-          config: ${{ inputs.config }}
-          config-file: ${{ steps.config.outputs.file }}
           # Advanced setup skips the alert-suppression queries by default,
           # so inline `codeql[query-id]` comments are inert without this.
           # `packs` only works single-language - keep fanning out one call

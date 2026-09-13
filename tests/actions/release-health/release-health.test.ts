@@ -2,16 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  BLOCKER_LABEL,
   type Config,
   findReleasePr,
   type GateOutcome,
   type GhRunner,
   issueGate,
   LABEL_RE,
+  OVERRIDE_LABEL,
   overrideFromPullRequest,
   parseConfig,
   parseTrackingLabels,
   runHealthCheck,
+  SECURITY_THRESHOLD,
   securityGate,
   severitiesAtOrAbove,
 } from "../../../actions/release-health/release-health.ts";
@@ -102,9 +105,6 @@ function prConfig(overrides: Partial<Config> = {}): Config {
     context: { mode: "pull-request", eventPath },
     repo: "o/r",
     trackingLabels: ["fuzz-nightly"],
-    blockerLabel: "release-blocker",
-    overrideLabel: "release-override",
-    security: "high",
     ...overrides,
   };
 }
@@ -142,41 +142,20 @@ function issueListCall(label: string): string[] {
 }
 
 describe("parseConfig", () => {
-  const defaults: Omit<Config, "context"> = {
-    repo: "o/r",
-    trackingLabels: [],
-    blockerLabel: "release-blocker",
-    overrideLabel: "release-override",
-    security: "high",
-  };
   const cases: Array<{ reason: string; env: Record<string, string>; expected: Config }> = [
     {
-      reason: "pull-request mode with every optional input at its default",
+      reason: "pull-request mode with no tracking labels",
       env: { MODE: "pull-request", GITHUB_EVENT_PATH: eventPath },
-      expected: { ...defaults, context: { mode: "pull-request", eventPath } },
+      expected: { repo: "o/r", trackingLabels: [], context: { mode: "pull-request", eventPath } },
     },
     {
-      reason: "release mode with every optional input set explicitly",
-      env: {
-        MODE: "release",
-        TRACKING_LABELS: "fuzz-nightly,nightly-failure",
-        BLOCKER_LABEL: "no-ship",
-        OVERRIDE_LABEL: "ship-anyway",
-        SECURITY_SEVERITY: "critical",
-      },
+      reason: "release mode with tracking labels",
+      env: { MODE: "release", TRACKING_LABELS: "fuzz-nightly,nightly-failure" },
       expected: {
         context: { mode: "release", sha: "abc123" },
         repo: "o/r",
         trackingLabels: ["fuzz-nightly", "nightly-failure"],
-        blockerLabel: "no-ship",
-        overrideLabel: "ship-anyway",
-        security: "critical",
       },
-    },
-    {
-      reason: "off as the security threshold (disables the gate, not a severity)",
-      env: { MODE: "release", SECURITY_SEVERITY: "off" },
-      expected: { ...defaults, context: { mode: "release", sha: "abc123" }, security: "off" },
     },
   ];
   test.each(cases)("parses $reason", ({ env, expected }) => {
@@ -199,21 +178,8 @@ describe("parseConfig", () => {
     );
   });
 
-  test("rejects an unknown severity", () => {
-    expect(() =>
-      parseConfig({
-        ...baseEnv,
-        MODE: "release",
-        SECURITY_SEVERITY: "severe",
-      } as NodeJS.ProcessEnv),
-    ).toThrow("SECURITY_SEVERITY");
-  });
-
-  test("rejects flag-like and oversized labels", () => {
+  test("rejects flag-like and oversized tracking labels", () => {
     for (const label of ["-x", "--help", "a\nb", "x".repeat(51)]) {
-      expect(() =>
-        parseConfig({ ...baseEnv, MODE: "release", BLOCKER_LABEL: label } as NodeJS.ProcessEnv),
-      ).toThrow("BLOCKER_LABEL");
       expect(() =>
         parseConfig({
           ...baseEnv,
@@ -224,6 +190,14 @@ describe("parseConfig", () => {
         `TRACKING_LABELS must be a plain label (letters, digits, ._:- and spaces; no leading dash), got '${label}'`,
       );
     }
+  });
+
+  test("the gate labels and the severity threshold are constants, never inputs", () => {
+    expect([BLOCKER_LABEL, OVERRIDE_LABEL, SECURITY_THRESHOLD]).toEqual([
+      "release-blocker",
+      "release-override",
+      "high",
+    ]);
   });
 
   test("LABEL_RE matches the shape the registration grammar enforces", () => {
@@ -346,40 +320,50 @@ describe("securityGate", () => {
     });
   });
 
+  // Every fleet repository has Dependabot alerts enabled and the callers grant vulnerability-alerts: read,
+  // so an unreadable endpoint is a broken gate, never a repository to wave through.
+  const REMEDY =
+    "; the gate needs vulnerability-alerts: read and Dependabot alerts enabled on the repository";
   test.each([
-    [
-      "a bare 403 (missing vulnerability-alerts grant)",
-      "gh api failed (1): HTTP 403: Resource not accessible by integration",
-    ],
-    [
-      "Dependabot alerts disabled on the repository",
-      "gh api failed (1): Dependabot alerts are disabled for this repository. (HTTP 403)",
-    ],
-    ["a host without the feature (404)", "gh api failed (1): Not Found (HTTP 404)"],
-  ])("degrades to a skip on %s", async (_reason, message) => {
-    const { run } = fakeGh({ alertsError: message });
-    expect(await securityGate(run, "o/r", "high", "advice")).toEqual({
-      gate: "security",
-      status: "skip",
-      reason: message,
-    });
-  });
-
-  test("an unexpected error propagates instead of skipping", async () => {
-    const { run } = fakeGh({ alertsError: "gh api failed (1): HTTP 500: boom" });
-    expect(securityGate(run, "o/r", "high", "advice")).rejects.toThrow("HTTP 500");
-  });
-
-  test("a rate-limited 403 propagates instead of skipping the gate", async () => {
-    for (const message of [
-      "gh api failed (1): API rate limit exceeded for installation ID 1 (HTTP 403)",
-      "gh api failed (1): You have exceeded a secondary rate limit. (HTTP 403)",
-      "gh api failed (1): You have triggered an abuse detection mechanism. (HTTP 403)",
-    ]) {
+    {
+      reason: "a bare 403 (missing vulnerability-alerts grant)",
+      message: "gh api failed (1): HTTP 403: Resource not accessible by integration",
+      remedy: REMEDY,
+    },
+    {
+      reason: "Dependabot alerts disabled on the repository",
+      message: "gh api failed (1): Dependabot alerts are disabled for this repository. (HTTP 403)",
+      remedy: REMEDY,
+    },
+    {
+      reason: "a host without the feature (404)",
+      message: "gh api failed (1): Not Found (HTTP 404)",
+      remedy: REMEDY,
+    },
+    { reason: "a server error", message: "gh api failed (1): HTTP 500: boom", remedy: "" },
+    {
+      reason: "a rate-limited 403",
+      message: "gh api failed (1): API rate limit exceeded for installation ID 1 (HTTP 403)",
+      remedy: "",
+    },
+    {
+      reason: "a secondary rate limit (429)",
+      message: "gh api failed (1): You have exceeded a secondary rate limit. (HTTP 429)",
+      remedy: "",
+    },
+  ])(
+    "fails closed on $reason, naming the cause and the configuration remedy only where configuration is the cause",
+    async ({ message, remedy }) => {
       const { run } = fakeGh({ alertsError: message });
-      expect(securityGate(run, "o/r", "high", "advice")).rejects.toThrow("HTTP 403");
-    }
-  });
+      let thrown = "";
+      await securityGate(run, "o/r", "high", "advice").catch((error: Error) => {
+        thrown = error.message;
+      });
+      expect(thrown).toBe(
+        `security gate could not read the Dependabot alerts (${message})${remedy}`,
+      );
+    },
+  );
 });
 
 describe("overrideFromPullRequest", () => {
@@ -609,13 +593,6 @@ describe("runHealthCheck", () => {
     ]);
   });
 
-  test("security off runs no security gate", async () => {
-    const { run, calls } = fakeGh({ issues: {}, prViewLabels: [] });
-    const { out, setOutput } = collect();
-    expect(await runHealthCheck(prConfig({ security: "off" }), run, out, setOutput)).toBe(0);
-    expect(calls.some((c) => c[1]?.includes("/dependabot/"))).toBe(false);
-  });
-
   test("each failing gate is an ::error with its advice, exit 1", async () => {
     const { run } = fakeGh({
       issues: { "fuzz-nightly": [2], "release-blocker": [7] },
@@ -742,18 +719,15 @@ describe("runHealthCheck", () => {
     expect(calls).toEqual([COMMIT_PULLS_CALL]);
   });
 
-  test("a 403 on the alerts endpoint is a notice, not a block", async () => {
+  test("an unreadable alerts endpoint errors the run instead of passing the security gate", async () => {
     const { run } = fakeGh({
       issues: {},
       alertsError: "gh api failed (1): HTTP 403: Resource not accessible by integration",
       prViewLabels: [],
     });
     const { out, lines, setOutput } = collect();
-    expect(await runHealthCheck(prConfig(), run, out, setOutput)).toBe(0);
-    expect(lines).toEqual([
-      "::notice::security gate skipped: gh api failed (1): HTTP 403: Resource not accessible by integration",
-      "release health: all gates passed (tracking:fuzz-nightly: no open 'fuzz-nightly' issues; blocker: no open 'release-blocker' issues; security: skipped)",
-    ]);
+    expect(runHealthCheck(prConfig(), run, out, setOutput)).rejects.toThrow("HTTP 403");
+    expect(lines).toEqual([]);
   });
 
   test("a failed override lookup errors the run instead of gating blind", async () => {

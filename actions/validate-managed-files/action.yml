@@ -13,7 +13,8 @@ description: >-
 inputs:
   github-token:
     description: Token for the sticky comment (pull-requests write is enough).
-    required: true
+    required: false
+    default: ${{ github.token }}
   private:
     description: >-
       The repository's visibility, `true` or `false`, as the plan action

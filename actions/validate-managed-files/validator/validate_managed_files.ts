@@ -7,7 +7,7 @@ import { checkRegistration } from "./checks/registration.ts";
 import { checkReleasePlease } from "./checks/release_please.ts";
 import { checkYaml } from "./checks/yaml.ts";
 import { type Context, loadContext, type Target } from "./context.ts";
-import { type Finding, print, writeReports } from "./findings.ts";
+import { type Finding, print, writeReport } from "./findings.ts";
 
 const CHECKS: ((ctx: Context) => Finding[])[] = [
   checkRegistration,
@@ -63,7 +63,7 @@ function main(): number {
       };
   const ctx = loadContext(root, resolve(filesConfig), target);
   const findings = CHECKS.flatMap((check) => check(ctx));
-  writeReports(findings, process.env);
+  writeReport(findings, process.env);
   return print(findings);
 }
 

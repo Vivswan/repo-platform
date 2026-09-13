@@ -204,7 +204,7 @@ describe("buildBody", () => {
   test.each(trailers)(
     "one block per failure, oldest first, then the artifacts note and run ($reason)",
     ({ artifactName, trailer }) => {
-      expect(buildBody(failureDirs(root), env, artifactName)).toBe(
+      expect(buildBody(failureDirs(root), env, artifactName, "fuzz")).toBe(
         [
           `Nightly fuzz run on ${date} produced 2 failure report(s).`,
           "",
@@ -313,7 +313,7 @@ describe("buildBody", () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "report.md"), `# target-${i} crashed\n\n${filler}\n${filler}\n`);
     }
-    const body = buildBody(failureDirs(bigRoot), env, "a");
+    const body = buildBody(failureDirs(bigRoot), env, "a", "fuzz");
     expect(body.length).toBeLessThan(65_536);
     expect(body).toContain("omitted to stay under the GitHub body limit");
   });
@@ -356,7 +356,7 @@ describe("buildBody", () => {
       const dir = join(giantRoot, "handshake");
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "report.md"), `# handshake crashed\n${"x".repeat(70_000)}`);
-      const body = buildBody(failureDirs(giantRoot), env, artifactName);
+      const body = buildBody(failureDirs(giantRoot), env, artifactName, "fuzz");
       expect(body.length).toBeLessThan(65_536);
       expect(body).toContain("## handshake crashed");
       expect(body).toContain("... (truncated)");
@@ -364,7 +364,7 @@ describe("buildBody", () => {
   );
 
   test("files a bare notice when there are no failure dirs", () => {
-    expect(buildBody([], env, "a")).toBe(
+    expect(buildBody([], env, "a", "fuzz")).toBe(
       [
         `Nightly fuzz run on ${date} failed with no failure report.`,
         "",
@@ -433,9 +433,8 @@ describe("buildGenericBody", () => {
 describe("closeComment", () => {
   test.each([
     {
-      reason:
-        "the omitted stream is the pre-input default, pinned verbatim for fleet fuzzer starters",
-      stream: undefined,
+      reason: "the fuzz stream hedges on unpinned regression seeds",
+      stream: "fuzz" as Stream,
       comment: [
         `Nightly fuzz passed on ${date}. Run: https://github.com/o/r/actions/runs/42`,
         "",
@@ -478,6 +477,7 @@ describe("the script", () => {
         PATH: process.env.PATH ?? "",
         HOME: process.env.HOME,
         ...env,
+        LABEL: "fuzz-nightly",
         RUNNER_TEMP: root,
         GITHUB_OUTPUT: outputs,
         ...vars,
@@ -492,6 +492,14 @@ describe("the script", () => {
     };
   };
 
+  /** Report mode's required tuple; the action.yml steps consume it, the script only checks it is there. */
+  const REPORT_TUPLE = {
+    MODE: "report",
+    TITLE: "Nightly fuzz failures",
+    LABEL_COLOR: "B60205",
+    LABEL_DESCRIPTION: "Automated nightly fuzz failure",
+  };
+
   test("report mode with an artifacts dir writes the failure-report body under RUNNER_TEMP and outputs its path", () => {
     const failures = temp.dir("fuzz-issue-script-failures-");
     mkdirSync(join(failures, "nm_frame"));
@@ -500,7 +508,8 @@ describe("the script", () => {
       "# fuzz: nm_frame crashed\n\n```bash\ncargo fuzz run nm_frame crash-abc\n```\n",
     );
     const result = run({
-      MODE: "report",
+      ...REPORT_TUPLE,
+      STREAM: "fuzz",
       ARTIFACTS_DIR: failures,
       ARTIFACT_NAME: "fuzz-failures-1",
     });
@@ -519,7 +528,7 @@ describe("the script", () => {
 
   test("report mode without an artifacts dir writes the generic body", () => {
     const result = run({
-      MODE: "report",
+      ...REPORT_TUPLE,
       STREAM: "generic",
       GITHUB_WORKFLOW: "Nightly",
     });
@@ -538,19 +547,28 @@ describe("the script", () => {
     );
   });
 
+  // A composite's `required: true` only documents, so an omitted input reaches the script as an empty string.
   test.each([
+    { vars: {}, error: "the mode input is required" },
+    { vars: { MODE: "" }, error: "the mode input is required" },
     {
       vars: { MODE: "comment" },
       error: "unknown MODE 'comment' (expected report or resolve)",
     },
+    { vars: { MODE: "resolve", LABEL: undefined }, error: "the label input is required" },
+    { vars: { MODE: "resolve" }, error: "the stream input is required" },
     {
       vars: { MODE: "resolve", STREAM: "ci" },
       error: "unknown STREAM 'ci' (expected fuzz or generic)",
     },
     {
-      vars: { MODE: "report", RUNNER_TEMP: undefined },
+      vars: { ...REPORT_TUPLE, STREAM: "fuzz", RUNNER_TEMP: undefined },
       error: "RUNNER_TEMP and GITHUB_OUTPUT are required",
     },
+    ...(["TITLE", "LABEL_COLOR", "LABEL_DESCRIPTION"] as const).map((variable) => ({
+      vars: { ...REPORT_TUPLE, STREAM: "fuzz", [variable]: undefined },
+      error: `the ${variable.toLowerCase().replace("_", "-")} input is required`,
+    })),
   ])("refuses $vars and writes nothing", ({ vars, error }) => {
     const result = run(vars);
     expect([result.exitCode, result.file]).toEqual([1, undefined]);

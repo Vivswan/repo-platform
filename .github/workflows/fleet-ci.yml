@@ -62,7 +62,6 @@ jobs:
       - uses: Vivswan/repo-platform/actions/validate-managed-files@stable
         id: validate
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           private: ${{ needs.plan.outputs.private }}
       # Fail-closed: != 'success' re-raises on 'failure' AND on an output
       # that resolved empty (a broken mapping must never read as green).
@@ -153,9 +152,9 @@ jobs:
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@stable
 
-  # The fleet policy applies unless the repository carries .github/zizmor.yml. SARIF uploads on
-  # public repositories only (a private personal repository has no code scanning); != 'true' so an
-  # empty visibility output uploads, where a private repository fails loudly instead of skipping silently.
+  # SARIF uploads on public repositories only (a private personal repository has no code scanning);
+  # != 'true' so an empty visibility output uploads, where a private repository fails loudly
+  # instead of skipping silently.
   zizmor:
     needs: [plan]
     if: github.event_name != 'schedule'
@@ -171,9 +170,10 @@ jobs:
         with:
           upload-sarif: ${{ needs.plan.outputs.private != 'true' }}
 
-  # knip resolves imports through node_modules, so the repository's own bun installs first; the fleet
-  # configuration applies unless the repository carries its own knip configuration. A repository
-  # committed right after selecting the module has no package.json yet, so the job stands down then.
+  # knip resolves imports through node_modules, so the repository's own bun installs first; it runs knip's
+  # defaults, overridden by whatever knip configuration the repository carries (a configured entry or
+  # project list replaces the default list, it does not extend it). A repository committed right after
+  # selecting the module has no package.json yet, so the job stands down then.
   knip:
     needs: [plan]
     if: contains(fromJSON(needs.plan.outputs.modules), 'bun') && github.event_name != 'schedule'
@@ -273,8 +273,7 @@ jobs:
     if: contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # vulnerability-alerts read is the Dependabot alerts API key; where
-    # the token cannot see alerts the action degrades to a skipped check.
+    # vulnerability-alerts read is the Dependabot alerts API key; without it the security gate fails.
     permissions:
       contents: read
       issues: read

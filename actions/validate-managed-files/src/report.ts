@@ -41,18 +41,11 @@ switch (verdict.kind) {
 }
 const blocking = verdict.kind !== "clean";
 
-// Advisories never gate - they are the validator's own non-failing stream,
-// and folding them into the verdict would have a clean repository reading
-// as blocked.
-const advisories = verdict.kind === "not-judged" ? "" : verdict.advisories;
-const advice = advisories === "" ? "" : `\n\n${advisories}`;
-
-const body = `### Managed files check\n\n${integrity}${advice}`;
+const body = `### Managed files check\n\n${integrity}`;
 appendFileSync(summaryFile, `${body}\n`);
 
 // The sticky steps in action.yml read both: the body from the file, and
 // `report` to post it (findings) or to delete the comment an earlier run
 // left (clean) - a clean repository has nothing worth a comment.
 writeFileSync(commentFile, `${body}\n`);
-const worthSaying = blocking || advice !== "";
-appendFileSync(outputFile, `report=${worthSaying ? "findings" : "clean"}\n`);
+appendFileSync(outputFile, `report=${blocking ? "findings" : "clean"}\n`);

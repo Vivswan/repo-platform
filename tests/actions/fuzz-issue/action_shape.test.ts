@@ -113,9 +113,13 @@ describe("the fuzz-issue composite", () => {
     expect(body.run).toBe('"$ACTION_BUN" "${{ github.action_path }}/fuzz-issue.ts"');
     expect(body.env).toEqual({
       MODE: "${{ inputs.mode }}",
+      LABEL: "${{ inputs.label }}",
       ARTIFACTS_DIR: "${{ inputs.artifacts-dir }}",
       ARTIFACT_NAME: "${{ inputs.artifact-name }}",
       STREAM: "${{ inputs.stream }}",
+      TITLE: "${{ inputs.title }}",
+      LABEL_COLOR: "${{ inputs.label-color }}",
+      LABEL_DESCRIPTION: "${{ inputs.label-description }}",
       ACTION_BUN: "${{ steps.action-bun.outputs.path }}",
     });
   });

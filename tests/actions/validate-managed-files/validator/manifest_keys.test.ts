@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { checkManifestParity } from "../../../../actions/validate-managed-files/validator/checks/manifest_parity.ts";
 import { checkManifestShape } from "../../../../actions/validate-managed-files/validator/checks/manifest_shape.ts";
 import { loadContext } from "../../../../actions/validate-managed-files/validator/context.ts";
-import { errorsOf } from "../../../../actions/validate-managed-files/validator/findings.ts";
 import { tempDirs } from "../../../shared/temp_dir.ts";
 import {
   BASELINE,
@@ -62,9 +61,8 @@ describe("manifest keys are the repository paths the sync writes", () => {
         ),
         refused: [{ key, problem }],
       });
-      expect(errorsOf([...checkManifestShape(ctx), ...checkManifestParity(ctx)])).toEqual([
-        keyError(key, problem),
-      ]);
+      const findings = [...checkManifestShape(ctx), ...checkManifestParity(ctx)];
+      expect(findings.map((finding) => finding.message)).toEqual([keyError(key, problem)]);
     },
   );
 

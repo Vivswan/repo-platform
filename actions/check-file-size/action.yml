@@ -11,13 +11,8 @@ description: >-
   check that reports findings. Files carrying repo-platform's managed
   header are skipped and counted (the caller cannot fix them). Repo-owned
   exemptions live in .file-size-allow.local, one path per line with a
-  `# reason`. The calling job needs pull-requests: write for the comment.
-
-inputs:
-  path:
-    description: Directory to scan (a git checkout)
-    required: false
-    default: "."
+  `# reason`. Scans the caller's checkout; the calling job needs
+  pull-requests: write for the comment.
 
 runs:
   using: composite
@@ -49,11 +44,10 @@ runs:
       shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
-        SCAN_PATH: ${{ inputs.path }}
         REPORT_PATH: ${{ runner.temp }}/check-file-size-report.md
       run: |
         status=0
-        "$ACTION_BUN" "${{ github.action_path }}/check-file-size.ts" "$SCAN_PATH" || status=$?
+        "$ACTION_BUN" "${{ github.action_path }}/check-file-size.ts" || status=$?
         grep -q '^report=' "$GITHUB_OUTPUT" || echo "report=error" >> "$GITHUB_OUTPUT"
         exit "$status"
 
