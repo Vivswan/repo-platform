@@ -11,7 +11,7 @@
 // Usage:
 //   bun sync.ts --files <files.yml> --tree <files dir> --target <checkout>
 //     --build <full sha> --repository <owner/name> --private <true|false>
-//     [--previous-files <files.yml>] [--summary <path>]
+//     [--summary <path>]
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -68,7 +68,6 @@ export interface SyncOptions {
   build: string;
   repository: string;
   private: boolean;
-  previousFiles?: string;
 }
 
 interface Rendered {
@@ -237,7 +236,7 @@ function writeEntry(
 }
 
 export function runSync(options: SyncOptions): SyncReport {
-  const config = loadFilesConfig(options.files, options.tree, options.previousFiles);
+  const config = loadFilesConfig(options.files, options.tree);
   const slug = parseRepositorySlug(options.repository);
   const notes: string[] = [];
   const registration = readRegistration(options.target);
@@ -422,7 +421,7 @@ function main(argv: string[]): number {
   const flags = parseFlags(
     argv,
     ["--files", "--tree", "--target", "--build", "--repository", "--private"] as const,
-    ["--previous-files", "--summary"] as const,
+    ["--summary"] as const,
   );
   if (flags["--private"] !== "true" && flags["--private"] !== "false") {
     fail("--private must be true or false");
@@ -444,7 +443,6 @@ function main(argv: string[]): number {
       build: flags["--build"],
       repository: flags["--repository"],
       private: flags["--private"] === "true",
-      previousFiles: flags["--previous-files"],
     });
   } catch (error) {
     if (error instanceof MirrorFailure) fail(error.failures.map(describeMirrorProblem));
