@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { callerCeilingMismatches } from "../../scripts/check/ssot/all_green.ts";
+import { CHECK_NAME } from "../../.github/scripts/shared/all_green.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -443,46 +443,11 @@ describe("fleet-ci.yml", () => {
     expect(trivy?.steps?.[1]?.with).toBeUndefined();
   });
 
-  // GitHub rejects the whole reusable call when any nested job asks for a scope above the caller's,
-  // before the job's condition runs, so no job here may exceed the skeleton's `ci` grant
-  // (the nightly scan's issues: write is why fleet-nightly.yml is a separate call).
-  // The check-ssot rule judges the live skeleton; this copy pins the grant so a widened caller cannot let a job's grant grow unnoticed.
-  const CI_CALLER = {
-    rel: "ci.yml",
-    job: "ci",
-    permissions: {
-      "contents": "read",
-      "pull-requests": "write",
-      "security-events": "write",
-      "actions": "read",
-      "issues": "read",
-      "vulnerability-alerts": "read",
-    },
-  };
-  const called = (text: string) => ({ rel: "fleet-ci.yml", text });
-
-  test("no job's permissions exceed the skeleton ci caller's ceiling", () => {
-    expect(callerCeilingMismatches(called(source), CI_CALLER)).toEqual([]);
-  });
-
-  test("the ceiling check forces: a job over it is named", () => {
-    const text = `${source}
-  over-ceiling:
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-`;
-    const got = callerCeilingMismatches(called(text), CI_CALLER);
-    expect(got.map((m) => [m.file, m.got])).toEqual([
-      ["fleet-ci.yml job 'over-ceiling'", "issues: write"],
-    ]);
-  });
-
   test("nothing sleeps: the gate waits by failing fast", () => {
     expect(source).not.toContain("sleep ");
   });
 
   test("no job is named all-green (the gate job owns the name)", () => {
-    for (const name of Object.keys(fleetCi.jobs)) expect(name).not.toBe("all-green");
+    for (const name of Object.keys(fleetCi.jobs)) expect(name).not.toBe(CHECK_NAME);
   });
 });

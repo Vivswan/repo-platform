@@ -57,7 +57,7 @@ const DEFAULT_SLEEP_MS = 10_000;
 export function verdictPending(reason: string): boolean {
   return (
     reason.includes("verdict is still '") ||
-    reason.includes("no all-green verdict check exists") ||
+    reason.includes(`no ${CHECK_NAME} verdict check exists`) ||
     reason.includes("check runs failed")
   );
 }

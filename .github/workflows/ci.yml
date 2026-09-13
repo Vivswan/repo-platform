@@ -90,7 +90,7 @@ jobs:
           GITLEAKS_VERSION: "8.30.1"
 
   # The PR-only condition sits on the steps, not the job: the gate requires success from every needed
-  # job, so a job-level skip would fail every push and schedule run (the all-green-roster ssot rule pins this).
+  # job, so a job-level skip would fail every push and schedule run.
   dependency-review:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -167,8 +167,7 @@ jobs:
             echo "::endgroup::"
           done
 
-  # The offline invariants, each the twin of a `bun run check` gate (the
-  # local-gates rule pins the pairing both ways).
+  # The offline invariants are package.json's `invariants` script, so CI and `bun run check` run one list.
   invariants:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -181,20 +180,8 @@ jobs:
         run: |
           bun install --frozen-lockfile --silent
           bun install --frozen-lockfile --silent --cwd actions/validate-managed-files
-      - name: Validate this repository's own managed files
-        run: bun run validate
-      - name: Check single-source-of-truth invariants
-        run: bun run ssot:check
-      # Offline and sub-second: the block files must match files.yml's
-      # gitignore_sources on the PR that edits them, not a week later.
-      - name: Check the gitignore copies against files.yml
-        run: bun run gitignore:topology
-      - name: Check the toolchain pin dotfiles against files.yml
-        run: bun run pins:check
-      - name: Check this repository's rendered settings against its layers and overlay
-        run: bun run settings:check
-      - name: Check markdown is not hard-wrapped
-        run: bun run wrap:check
+      - name: Check the offline invariants
+        run: bun run invariants
 
   script-tests:
     runs-on: ubuntu-latest
@@ -370,7 +357,7 @@ jobs:
 
   # THE gate: this job's own check run is the ruleset's required check (files/settings/override.yml),
   # and alls-green passes only when every needed result is success: a skipped or cancelled gating job fails it.
-  #   needs        -> every gating job; ALL_GREEN_ROSTER (scripts/check/ssot/all_green.ts) is its authored twin, compared both ways
+  #   needs        -> every gating job (tests/workflows/all_green_gate.test.ts compares the list with the job set)
   #   if: always() -> the judgment must run over failures
   all-green:
     needs:
@@ -412,8 +399,8 @@ jobs:
       needs.all-green.result == 'success' &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
-    # The ceiling for every post-green.yml job (the caller-ceilings ssot
-    # rule): pull-requests read is read-directives' merged-PR lookup.
+    # The ceiling for every post-green.yml job (tests/workflows/caller_ceilings.test.ts):
+    # pull-requests read is read-directives' merged-PR lookup.
     permissions:
       contents: write
       checks: read
