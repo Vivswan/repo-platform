@@ -36,3 +36,15 @@ rulesets:
       - type: deletion
     # Declared EMPTY on purpose: only the explicit empty list lets the nightly heal clear an out-of-band bypass actor.
     bypass_actors: []
+
+# The fleet PAT (REPO_PLATFORM_TOKEN) is an environment secret here, so only a job declaring this environment can read it,
+# and the branch policy lets only a main run do so (docs/all-green.md, "After the gate"). GitHub itself holds the rule.
+environments:
+  - name: fleet-operator
+    wait_timer: 0
+    reviewers: []
+    deployment_branch_policy:
+      protected_branches: false
+      custom_branch_policies: true
+    deployment_branch_policies:
+      - name: main

@@ -156,3 +156,12 @@ rulesets:
       bypass_actors: []
 pages:
   build_type: workflow
+environments:
+  - name: fleet-operator
+    wait_timer: 0
+    reviewers: []
+    deployment_branch_policy:
+      protected_branches: false
+      custom_branch_policies: true
+    deployment_branch_policies:
+      - name: main
