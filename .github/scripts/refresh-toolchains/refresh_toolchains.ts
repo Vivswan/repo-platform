@@ -53,7 +53,7 @@ export const PIN_SOURCES: Record<string, PinSource> = {
 
 /** Exactly the version plus a newline, what the setup actions' version-file inputs read. */
 export function pinnedVersion(text: string, where: string): string {
-  return versionFrom(text, /^(\d+\.\d+\.\d+)\n?$/, where);
+  return versionFrom(text, /^(\d+\.\d+\.\d+)\n$/, where);
 }
 
 /** Every package declaring @types/bun: the types are published per bun release and ride the runtime pin exactly, so this

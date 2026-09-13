@@ -143,14 +143,12 @@ describe("latestDenoVersion", () => {
 });
 
 describe("pinnedVersion", () => {
-  test.each([
-    ["1.4.0\n", "1.4.0", "the dotfile as written"],
-    ["2.9.5", "2.9.5", "no trailing newline"],
-  ])("'%s' -> %s (%s)", (text, version) => {
-    expect(pinnedVersion(text, "files/bun/.bun-version")).toBe(version);
+  test("the dotfile as the refresh writes it", () => {
+    expect(pinnedVersion("1.4.0\n", "files/bun/.bun-version")).toBe("1.4.0");
   });
 
   test.each([
+    ["2.9.5", "no trailing newline"],
     ["1.4.0-canary.1\n", "a prerelease"],
     ["v1.4.0\n", "a tag prefix"],
     ["1.4.0\n\n", "a second newline"],
