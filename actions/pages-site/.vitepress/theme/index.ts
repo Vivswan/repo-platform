@@ -7,7 +7,7 @@ import { inBrowser, type Theme } from "vitepress";
 import { VPCarbon } from "vitepress-carbon";
 import { h } from "vue";
 import type { ProjectFacts } from "../../facts.ts";
-import "./tokens.css";
+import "virtual:fleet-tokens.css";
 import "./base.css";
 import "./nav.css";
 import "./sidebar.css";

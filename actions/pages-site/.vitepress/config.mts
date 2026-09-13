@@ -32,6 +32,7 @@ import { deriveSidebar, fileSource, sidebarTrees } from "./sidebar.ts";
 import { isLandingFile, sourcePathOf } from "./source-path.ts";
 import { tableWrapRule } from "./table-wrap.ts";
 import { headersRule } from "./theme/page-index.ts";
+import { tokensCssPlugin } from "./theme/tokens-css.ts";
 
 /** Carbon's theme config plus the fleet keys the version switcher and the
  *  facts surfaces read. Optional, so carbon's own baseConfig (typed
@@ -168,11 +169,12 @@ export default async () => {
     // tree (never a git checkout - see buildVitepressTier), so git-derived
     // timestamps do not exist by construction.
     vite: {
+      plugins: [tokensCssPlugin()],
       css: {
         postcss: {
           plugins: [
             {
-              // Carbon's utils.css ships fonts nothing selects once tokens.css sets the families, so both are dropped here.
+              // Carbon's utils.css ships fonts nothing selects once the token layer sets the families, so both are dropped here.
               //   @import of Google Fonts and cdnfonts  -> two third-party calls per page load
               //   the bundled Mona Sans @font-face      -> carbon's transformHead preloads it, 137 KB per page
               // A Once hook, not AtRule visitors: vite emits url() assets from its own Once hook, and PostCSS runs every Once before any visitor.

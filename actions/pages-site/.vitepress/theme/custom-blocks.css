@@ -2,7 +2,7 @@
  * material, the kind named by its title and by its --color-<kind> token on
  * the 2px rule; only warning and caution color the title too. */
 
-/* Note, tip, important, info and details carry the hue (tokens.css) with
+/* Note, tip, important, info and details carry the hue (tokens.ts) with
  * the title in the ink; warning and caution (and the ::: danger container,
  * GitHub's CAUTION) color the title too, so a risk reads apart from a hint
  * at a glance while the body stays the ink. */

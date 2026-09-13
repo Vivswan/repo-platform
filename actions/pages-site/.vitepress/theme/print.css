@@ -1,5 +1,5 @@
 /* The print sheet: the article alone on paper. The chrome is gone, the
- * palette is tokens.css's print values, the column spans the page, links
+ * palette is tokens.ts's print values, the column spans the page, links
  * print their address, and no code block or table splits across pages. */
 
 @media print {

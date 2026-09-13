@@ -1,23 +1,31 @@
 // A token nobody reads is a customization point that cannot affect rendering, so every declared custom property needs a live var() reader.
-// Carbon's :root and .dark reads of a property the theme redeclares are dead: tokens.css loads after carbon at equal specificity and wins.
-//   carbon vars.css `:root { --vp-button-alt-bg: var(--vp-c-default-3) }`  -> dead once tokens.css sets --vp-button-alt-bg
+// Carbon's :root and .dark reads of a property the theme redeclares are dead: the token layer loads after carbon at equal specificity and wins.
+//   carbon vars.css `:root { --vp-button-alt-bg: var(--vp-c-default-3) }`  -> dead once the token layer sets --vp-button-alt-bg
 //   carbon `.result.selected { ... }` reads                                -> live, a scoped rule still beats :root
 
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  HUE_TOKENS,
+  HUES,
   MODES,
   modeValues,
+  SHARED_TOKENS,
+  type SharedValue,
+  type TokenName,
   tokenNames,
 } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
+import {
+  TOKENS_CSS_ID,
+  themeTokensCss,
+  tokensCssPlugin,
+} from "../../../actions/pages-site/.vitepress/theme/tokens-css.ts";
 
 const ACTION = resolve(import.meta.dir, "../../../actions/pages-site");
 const THEME = join(ACTION, ".vitepress/theme");
 const CONFIG = join(ACTION, ".vitepress/config.mts");
 const CARBON = join(ACTION, "node_modules/vitepress-carbon/dist");
-/** The rendering of tokens.ts; its declarations are the data's, not the file's. */
-const GENERATED_CSS = join(THEME, "tokens.css");
 // shiki is the action's dependency, not the root's.
 const { createCssVariablesTheme } = (await import(Bun.resolveSync("shiki", ACTION))) as {
   createCssVariablesTheme: (options: { variablePrefix: string }) => unknown;
@@ -82,7 +90,6 @@ function shikiReads(): { all: string[]; colored: string[] } {
 function themeDeclarations(): Set<string> {
   const declared = new Set<string>(tokenNames());
   for (const file of filesUnder(THEME, [".css"])) {
-    if (file === GENERATED_CSS) continue;
     for (const token of tokens(readFileSync(file, "utf-8"), DECLARATION)) declared.add(token);
   }
   return declared;
@@ -143,4 +150,112 @@ test("the override filter drops :root reads the theme outranks and keeps scoped 
   const search = readFileSync(join(CARBON, "theme/components/VPLocalSearchBox.vue"), "utf-8");
   expect(declared.has("--vp-local-search-result-bg")).toBe(true);
   expect(liveCarbonReads(search, declared)).toContain("--vp-local-search-result-selected-bg");
+});
+
+// The token layer is tokens.ts rendered at build time, so the render is pinned to the data, block by block in
+// cascade order: shared, its media overrides, light, dark, the hue slots, and print last (its html:root selectors
+// only tie the hue blocks on specificity).
+interface CssBlock {
+  media: string | null;
+  selector: string;
+  declarations: Record<string, string>;
+}
+
+function cssBlocks(css: string): CssBlock[] {
+  const blocks: CssBlock[] = [];
+  const open: { selector: string; declarations: Record<string, string> }[] = [];
+  let text = "";
+  for (const char of css) {
+    if (char === "{") {
+      open.push({ selector: text.trim().replaceAll(/\s+/g, " "), declarations: {} });
+      text = "";
+    } else if (char === ";") {
+      const [name, ...value] = text.trim().split(":");
+      const block = open.at(-1);
+      if (block === undefined) throw new Error(`a declaration outside every block: ${text}`);
+      block.declarations[name] = value.join(":").trim();
+      text = "";
+    } else if (char === "}") {
+      const closed = open.pop();
+      if (closed === undefined) throw new Error("a `}` closes nothing");
+      const parent = open.at(-1);
+      if (closed.selector.startsWith("@")) {
+        if (parent !== undefined) throw new Error(`nested at-rule ${closed.selector}`);
+      } else {
+        blocks.push({ media: parent?.selector ?? null, ...closed });
+      }
+      text = "";
+    } else {
+      text += char;
+    }
+  }
+  expect(open).toEqual([]);
+  expect(text.trim()).toBe("");
+  return blocks;
+}
+
+function hueBlock(selector: string, values: Record<keyof typeof HUE_TOKENS, string>): CssBlock {
+  const declarations = Object.fromEntries(
+    Object.entries(HUE_TOKENS).map(([key, name]) => [name, values[key as keyof typeof HUE_TOKENS]]),
+  );
+  return { media: null, selector, declarations };
+}
+
+function modeBlock(
+  media: string | null,
+  selector: string,
+  mode: "light" | "dark" | "print",
+): CssBlock {
+  return { media, selector, declarations: Object.fromEntries(modeValues(mode)) };
+}
+
+test("the rendered token layer is the data, block by block, in cascade order", () => {
+  const shared = Object.values(SHARED_TOKENS).flatMap(
+    (group) => Object.entries(group) as [TokenName, SharedValue][],
+  );
+  const both = ":root, .dark";
+  const expected: CssBlock[] = [
+    {
+      media: null,
+      selector: both,
+      declarations: Object.fromEntries(
+        shared.map(([name, value]) => [name, typeof value === "string" ? value : value.base]),
+      ),
+    },
+    ...shared.flatMap(([name, value]) =>
+      typeof value === "string"
+        ? []
+        : value.overrides.map(
+            (override): CssBlock => ({
+              media: `@media ${override.media}`,
+              selector: both,
+              declarations: { [name]: override.value },
+            }),
+          ),
+    ),
+    modeBlock(null, ":root", "light"),
+    modeBlock(null, ".dark", "dark"),
+    ...HUES.flatMap((hue, slot) =>
+      slot === 0
+        ? []
+        : [
+            hueBlock(`html[data-fleet-hue="${slot}"]`, hue.light),
+            hueBlock(`html.dark[data-fleet-hue="${slot}"]`, hue.dark),
+          ],
+    ),
+    modeBlock("@media print", "html:root, html:root.dark", "print"),
+  ];
+  expect(expected.length).toBeGreaterThan(14);
+  expect(cssBlocks(themeTokensCss())).toEqual(expected);
+});
+
+test("the vite plugin serves the render under the virtual id and nothing else", () => {
+  const plugin = tokensCssPlugin();
+  const resolved = plugin.resolveId(TOKENS_CSS_ID);
+  expect(resolved).toBeDefined();
+  expect(resolved).toEndWith(".css");
+  expect(plugin.load(resolved as string)).toBe(themeTokensCss());
+  expect(plugin.resolveId("./base.css")).toBeUndefined();
+  expect(plugin.load(TOKENS_CSS_ID)).toBeUndefined();
+  expect(readFileSync(join(THEME, "index.ts"), "utf-8")).toContain(`import "${TOKENS_CSS_ID}";`);
 });
