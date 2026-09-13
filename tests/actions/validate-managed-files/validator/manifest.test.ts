@@ -528,9 +528,24 @@ describe("the recorded class against files.yml", () => {
 describe("parity messages name what the record and the tree show, never who made it", () => {
   // Each input is one the tool itself produces or cannot tell from a hand edit: the sync carries a hash-null
   // record through every held retirement, and a symlink under a file record (or the reverse) says nothing about
-  // who placed it. The validator reads no mirror declaration, so a mirror remedy names what each declaration shape
-  // does; every other class holds a wrong-kind occupant, so that occupant must go before a resync can write.
+  // who placed it. The validator reads no mirror declaration and no retired list, so one mirror remedy names what
+  // the re-run does at every path a record can sit on; every other class holds a wrong-kind occupant, so that
+  // occupant must go before a resync can write.
   const REMOVE_THEN_RESYNC = `or remove what stands at the path and ${RESYNC}`;
+  const MIRROR_REACHED =
+    `${RESYNC} and read its report: a target a declaration reaches is rewritten (unless it already carries the ` +
+    "mirror) and restamped";
+  const MIRROR_FAILS =
+    "; a run the writer cannot finish (a declaration it cannot honour, a directory or a symbolic-link ancestor at " +
+    "a path it must probe) fails by name instead";
+  const MIRROR_RESYNC =
+    `${MIRROR_REACHED}; a record none reaches is dropped, or at a path files.yml retires is retired as the ` +
+    "Retirement table in docs/sync.md says (a wrong-kind or hash-null occupant is held as it stands unless a " +
+    `moved_to moves it; remove a held occupant, then re-run)${MIRROR_FAILS}`;
+  const MIRROR_DIRECTORY_RESYNC =
+    `${MIRROR_REACHED}, except under a * in the pattern's last segment, which matches files and links alone and ` +
+    "passes a directory by (the run fails when it is the pattern's only match); a record none reaches is " +
+    `dropped; a directory at a path files.yml retires fails the run (remove it, then re-run)${MIRROR_FAILS}`;
   const LINK_RECORDED = (noun: string, remedy: string) =>
     `CLAUDE.md: recorded as ${noun} in ${MANIFEST_NAME} but is not a symbolic link - the record (a link ` +
     `target's hash) can verify a link alone; restore the link from git history, ${remedy}`;
@@ -538,6 +553,9 @@ describe("parity messages name what the record and the tree show, never who made
     `CLAUDE.md: recorded as ${cls} in ${MANIFEST_NAME} but is a symbolic link - the record (a file's ` +
     `content hash) cannot verify a link, which the sync never reads through; restore the file from git ` +
     `history, ${remedy}`;
+  const DIRECTORY = (path: string, restore: "file" | "link", remedy: string) =>
+    `${path}: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink; restore the ${restore} ` +
+    `from git history, ${remedy}`;
   test.each([
     {
       reason:
@@ -547,9 +565,9 @@ describe("parity messages name what the record and the tree show, never who made
       entry: ["UNHASHED.md", '{"class": "managed", "hash": null}'],
       message:
         `UNHASHED.md: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
-        "verify the file against - the sync carries such a record as it found it; for a path a selected " +
-        `entry writes now, ${RESYNC} and a write that goes through restamps the record; for any other, ` +
-        "delete the file and its entry",
+        "verify the file against - the sync carries such a record as it found it: for a path a selected " +
+        `entry writes now, ${RESYNC}, and a write that goes through stamps the hash; otherwise delete the ` +
+        "file and its manifest entry",
     },
     {
       reason: "a symbolic link under a managed record",
@@ -572,30 +590,36 @@ describe("parity messages name what the record and the tree show, never who made
       files: { "AGENTS.md": "agents\n" },
       links: { "CLAUDE.md": "AGENTS.md" },
       entry: ["CLAUDE.md", `{"class": "mirror", "hash": "${sha("agents\n")}"}`],
-      message: FILE_RECORDED("mirror", `or ${RESYNC}`),
+      message: FILE_RECORDED("mirror", `or ${MIRROR_RESYNC}`),
     },
     {
       reason:
-        "a directory under a copy-mirror record: written over or failed by name where declared, passed by under a final *, dropped where undeclared",
+        "a directory under a copy-mirror record: written over where a declaration reaches it, passed by under a final *, refused at a retired path",
       files: { "copies/copy.md/keep": "" },
       links: {},
       entry: ["copies/copy.md", `{"class": "mirror", "hash": "${sha("# copy\n")}"}`],
-      message:
-        `copies/copy.md: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink; restore the ` +
-        `file from git history, or ${RESYNC}, which writes over the directory at a target a declaration reaches ` +
-        "(a * in the pattern's last segment matches files and links alone, so it passes the directory by) or fails " +
-        "the run by name; a record no declaration reaches is dropped",
+      message: DIRECTORY("copies/copy.md", "file", `or ${MIRROR_DIRECTORY_RESYNC}`),
     },
     {
       reason:
-        "a hash-null copy-mirror record: a re-run restamps a declared target (deleting a pattern's only match would fail it), and a retired path holds it",
+        "a directory under a symlink-mirror record: the same directory remedy, not the not-a-symbolic-link one",
+      files: { "copies/copy.md/keep": "" },
+      links: {},
+      entry: [
+        "copies/copy.md",
+        `{"class": "mirror", "kind": "symlink", "hash": "${sha("../AGENTS.md")}"}`,
+      ],
+      message: DIRECTORY("copies/copy.md", "link", `or ${MIRROR_DIRECTORY_RESYNC}`),
+    },
+    {
+      reason:
+        "a hash-null copy-mirror record: a re-run restamps a reached target (deleting a pattern's only match would fail it), and a retired path holds or moves it",
       files: { "copies/copy.md": "# copy\n" },
       links: {},
       entry: ["copies/copy.md", '{"class": "mirror", "hash": null}'],
       message:
         `copies/copy.md: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
-        `verify the file against - ${RESYNC}, which restamps every target a declaration reaches; a record ` +
-        "none reaches is dropped, or held with its file at a path files.yml retires",
+        `verify the file against - ${MIRROR_RESYNC}`,
     },
     {
       reason: "a regular file under a link record",
@@ -605,11 +629,12 @@ describe("parity messages name what the record and the tree show, never who made
       message: LINK_RECORDED("a link", REMOVE_THEN_RESYNC),
     },
     {
-      reason: "a directory under a link record: not a symbolic link, and not a regular file either",
+      reason:
+        "a directory under a link record: neither a symbolic link nor a regular file, so the directory message",
       files: { "CLAUDE.md/keep": "" },
       links: {},
       entry: ["CLAUDE.md", `{"class": "link", "hash": "${sha("AGENTS.md")}"}`],
-      message: LINK_RECORDED("a link", REMOVE_THEN_RESYNC),
+      message: DIRECTORY("CLAUDE.md", "link", REMOVE_THEN_RESYNC),
     },
     {
       reason:
@@ -617,7 +642,7 @@ describe("parity messages name what the record and the tree show, never who made
       files: { "CLAUDE.md": "AGENTS.md" },
       links: {},
       entry: ["CLAUDE.md", `{"class": "mirror", "kind": "symlink", "hash": "${sha("AGENTS.md")}"}`],
-      message: LINK_RECORDED("a symlink mirror", `or ${RESYNC}`),
+      message: LINK_RECORDED("a symlink mirror", `or ${MIRROR_RESYNC}`),
     },
   ])("$reason", ({ files, links, entry, message }) => {
     const root = temp.dir("manifest-parity-message-");

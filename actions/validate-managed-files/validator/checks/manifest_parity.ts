@@ -175,18 +175,39 @@ export function checkManifestParity(ctx: Context): Finding[] {
       continue;
     }
     // The occupant's kind is judged before its hash: a hash-null record over a link where a file is recorded would
-    // otherwise be offered a resync the class writer holds. A mirror remedy never says to remove the occupant first:
-    // the writer replaces a wrong-kind file or link itself, and removing a pattern's only match can fail the run.
+    // otherwise be offered a resync the class writer holds. A directory is judged before the recorded kind: the mirror
+    // writer treats it alike under both kinds. A mirror remedy never says to remove a reached occupant first (the
+    // writer replaces a wrong-kind file or link itself, and removing a pattern's only match fails the run); it says
+    // what the re-run does at every path a record can sit on, since the validator reads no declaration and no
+    // retired list, and the removal it does name is of what a retirement held.
     const linkRecorded =
       entry.class === "link" || (entry.class === "mirror" && entry.kind === "symlink");
-    const resync =
-      entry.class === "mirror" ? `or ${RESYNC}` : `or remove what stands at the path and ${RESYNC}`;
-    const directoryResync =
-      entry.class === "mirror"
-        ? `or ${RESYNC}, which writes over the directory at a target a declaration reaches (a * in the ` +
-          "pattern's last segment matches files and links alone, so it passes the directory by) or fails the run " +
-          "by name; a record no declaration reaches is dropped"
-        : resync;
+    const removeThenResync = `or remove what stands at the path and ${RESYNC}`;
+    const mirrorReached =
+      `${RESYNC} and read its report: a target a declaration reaches is rewritten (unless it already carries the ` +
+      "mirror) and restamped";
+    const mirrorFails =
+      "; a run the writer cannot finish (a declaration it cannot honour, a directory or a symbolic-link ancestor at " +
+      "a path it must probe) fails by name instead";
+    const mirrorResync =
+      `${mirrorReached}; a record none reaches is dropped, or at a path files.yml retires is retired as the ` +
+      "Retirement table in docs/sync.md says (a wrong-kind or hash-null occupant is held as it stands unless a " +
+      `moved_to moves it; remove a held occupant, then re-run)${mirrorFails}`;
+    const mirrorDirectoryResync =
+      `${mirrorReached}, except under a * in the pattern's last segment, which matches files and links alone and ` +
+      "passes a directory by (the run fails when it is the pattern's only match); a record none reaches is " +
+      `dropped; a directory at a path files.yml retires fails the run (remove it, then re-run)${mirrorFails}`;
+    const resync = entry.class === "mirror" ? `or ${mirrorResync}` : removeThenResync;
+    if (!stat.isFile() && !stat.isSymbolicLink()) {
+      findings.push(
+        error(
+          `${rel}: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink; ` +
+            `restore the ${linkRecorded ? "link" : "file"} from git history, ` +
+            (entry.class === "mirror" ? `or ${mirrorDirectoryResync}` : removeThenResync),
+        ),
+      );
+      continue;
+    }
     if (linkRecorded && !stat.isSymbolicLink()) {
       findings.push(
         error(
@@ -207,22 +228,12 @@ export function checkManifestParity(ctx: Context): Finding[] {
       );
       continue;
     }
-    if (!linkRecorded && !stat.isFile()) {
-      findings.push(
-        error(
-          `${rel}: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink; ` +
-            `restore the file from git history, ${directoryResync}`,
-        ),
-      );
-      continue;
-    }
     if (hash === null) {
       const remedy =
         entry.class === "mirror"
-          ? `${RESYNC}, which restamps every target a declaration reaches; a record none reaches is dropped, ` +
-            "or held with its file at a path files.yml retires"
-          : "the sync carries such a record as it found it; for a path a selected entry writes now, " +
-            `${RESYNC} and a write that goes through restamps the record; for any other, delete the file and its entry`;
+          ? mirrorResync
+          : "the sync carries such a record as it found it: for a path a selected entry writes now, " +
+            `${RESYNC}, and a write that goes through stamps the hash; otherwise delete the file and its manifest entry`;
       findings.push(
         error(
           `${rel}: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
