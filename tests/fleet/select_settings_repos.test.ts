@@ -498,7 +498,7 @@ describe("select_settings_repos.ts", () => {
       expect(r).toEqual({
         exitCode: 1,
         stdout: lines(
-          "::error::git ls-remote for refs/heads/main could not answer (exit 128); refusing to guess: fatal: unable to access 'origin': Could not resolve host",
+          "::error::git ls-remote could not answer (exit 128); refusing to guess: fatal: unable to access 'origin': Could not resolve host",
         ),
         masked: [],
         stderr: "",
