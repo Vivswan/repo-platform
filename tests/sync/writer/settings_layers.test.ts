@@ -5,8 +5,8 @@ import { describe, expect, test } from "bun:test";
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
 import {
-  ALL_GREEN_CONTEXT,
   allLayerLabels,
   declaredPrivate,
   foldSettings,
@@ -133,7 +133,7 @@ describe("the managed rulesets", () => {
     ) as { rules?: { type: string; parameters?: Record<string, unknown> }[] };
     const checks = merged.rules?.find((r) => r.type === "required_status_checks")?.parameters
       ?.required_status_checks as { context: string; integration_id: number }[];
-    expect(checks).toEqual([{ context: "pr-title", integration_id: 15368 }]);
+    expect(checks).toEqual([{ context: "pr-title", integration_id: GITHUB_ACTIONS_APP_ID }]);
   });
 
   test("code_quality renders for every public repo, toolchain or not", () => {
@@ -683,9 +683,7 @@ describe("the override layer", () => {
     expect(checks).toEqual({
       strict_required_status_checks_policy: false,
       do_not_enforce_on_create: true,
-      required_status_checks: [
-        { context: ALL_GREEN_CONTEXT, integration_id: GITHUB_ACTIONS_APP_ID },
-      ],
+      required_status_checks: [{ context: CHECK_NAME, integration_id: GITHUB_ACTIONS_APP_ID }],
     });
     const pr = mainRules.find((r) => r.type === "pull_request")?.parameters as Record<
       string,
@@ -744,9 +742,9 @@ describe("the override layer", () => {
     const dropped = shipped();
     const params = checksParams(dropped);
     params.required_status_checks = params.required_status_checks.filter(
-      (entry) => entry.context !== ALL_GREEN_CONTEXT,
+      (entry) => entry.context !== CHECK_NAME,
     );
-    expect(() => load(dropped)).toThrow(`must require the ${ALL_GREEN_CONTEXT} status check`);
+    expect(() => load(dropped)).toThrow(`must require the ${CHECK_NAME} status check`);
 
     const unpinned = shipped();
     delete checksParams(unpinned).required_status_checks[0].integration_id;

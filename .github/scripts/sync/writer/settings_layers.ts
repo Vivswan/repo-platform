@@ -28,6 +28,7 @@ import {
 } from "../../../../actions/plan/files_config.ts";
 import { declaredLayers, type LayerSources } from "../../../../actions/plan/reserved_labels.ts";
 import { applies, type Selection } from "../../../../actions/shared/selection.ts";
+import { CHECK_NAME } from "../../shared/all_green.ts";
 
 /** A folded settings document: what the library's merge leaves once every
  *  opt-out marker is consumed, mapping section names to values. */
@@ -258,10 +259,6 @@ export function identityKeyIssues(repository: Record<string, unknown>): Identity
   return issues;
 }
 
-/** The check the fleet's ci.yml all-green job carries: the main ruleset's
- *  ONE required context. */
-export const ALL_GREEN_CONTEXT = "all-green";
-
 /** GitHub Actions' app id; every required-check entry pins it so only a workflow run can satisfy the context. */
 export const GITHUB_ACTIONS_APP_ID = 15368;
 
@@ -288,9 +285,9 @@ export function loadOverrideLayer(path: string): Layer {
     }
     return entry;
   });
-  if (!entries.some((entry) => entry.context === ALL_GREEN_CONTEXT)) {
+  if (!entries.some((entry) => entry.context === CHECK_NAME)) {
     throw new Error(
-      `${path}: the 'main' ruleset must require the ${ALL_GREEN_CONTEXT} status check - it is ` +
+      `${path}: the 'main' ruleset must require the ${CHECK_NAME} status check - it is ` +
         "the fleet's ONE merge gate (ci.yml's all-green job judging every gating job's " +
         "result), and dropping it from the override un-gates every managed " +
         "repository at once.",

@@ -1,12 +1,12 @@
 // repo-platform's own ci.yml: the skills catalog is validated through Vivswan/skills' action, one job per mode (structure is
 // offline, discovery needs the npm registry), and every third-party pin is judged by pinact in the actionlint job, which is
-// the job holding the written fleet trees; each gates a merge (the all-green-roster rule holds the needs list).
+// the job holding the written fleet trees; each gates a merge (it sits in the all-green job's needs).
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { ALL_GREEN_ROSTER } from "../../scripts/check/ssot/all_green.ts";
+import { CHECK_NAME } from "../../.github/scripts/shared/all_green.ts";
 import { DELIVERY_REF, extractUsesPins } from "../../scripts/check/ssot/delivery_pins.ts";
 
 interface Step {
@@ -19,7 +19,7 @@ interface Step {
 
 const SKILLS_ACTION = "Vivswan/skills/.github/actions/validate-skills";
 const source = readFileSync(join(import.meta.dir, "../../.github/workflows/ci.yml"), "utf8");
-const ci = parseYaml(source) as { jobs: Record<string, { steps?: Step[] }> };
+const ci = parseYaml(source) as { jobs: Record<string, { needs?: string[]; steps?: Step[] }> };
 
 test("the skills legs call Vivswan/skills' validate-skills action at one sha, structure and discovery, both gating", () => {
   const calls = Object.entries(ci.jobs).flatMap(([job, { steps = [] }]) =>
@@ -28,7 +28,7 @@ test("the skills legs call Vivswan/skills' validate-skills action at one sha, st
       .map((step) => ({
         job,
         mode: step.with?.mode ?? "structure",
-        gating: ALL_GREEN_ROSTER.includes(job),
+        gating: ci.jobs[CHECK_NAME].needs?.includes(job) ?? false,
       })),
   );
   expect(calls).toEqual([

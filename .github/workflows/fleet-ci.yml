@@ -4,7 +4,7 @@
 #
 #   `./` ACTION path   -> the CALLER's checkout, so action refs stay Vivswan/repo-platform/actions/<name>@stable
 #   `./` WORKFLOW ref  -> this repository (reusable-codeql.yml)
-#   job permissions    -> checked against the skeleton ci.yml's caller grant BEFORE the job's `if` runs (the fleet-caller-ceilings rule)
+#   job permissions    -> checked against the skeleton ci.yml's caller grant BEFORE the job's `if` runs (tests/workflows/caller_ceilings.test.ts)
 # A job needing more than that grant lives in fleet-nightly.yml behind its own caller.
 
 name: Fleet CI

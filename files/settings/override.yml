@@ -21,7 +21,7 @@ rulesets:
   # loadOverrideLayer refuses this file when the all-green context or its integration_id pin is missing.
   #
   #   bypass actor 5 (RepositoryRole admin)   -> direct pushes to main keep working
-  #   integration_id 15368 (GitHub Actions)    -> no other app and no plain commit status can satisfy the context by name
+  #   integration_id (the GitHub Actions app)  -> no other app and no plain commit status can satisfy the context by name
   #   files/settings/codeql-public.yml          -> appends the code_scanning rule keyed by `type`; no layer can remove or weaken a rule declared here
   - name: main
     target: branch

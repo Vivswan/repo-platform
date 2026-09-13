@@ -2,7 +2,6 @@ import { parse as parseYaml } from "yaml";
 import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
 import { PLATFORM_NAME, PLATFORM_OWNER, PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import { callCarriesLiteral, constNumberValue, constRegexSource } from "../../lib/ts_extract.ts";
-import { SKELETON_SOURCE } from "./all_green.ts";
 import { canonical, type Mismatch, mustMatch } from "./comparison.ts";
 import {
   asRecord,
@@ -383,7 +382,7 @@ export const literalAnchorRules: Rule[] = [
         workflow: read(".github/workflows/fleet-release.yml"),
         action: read("actions/release-health/action.yml"),
         script: read("actions/release-health/release-health.ts"),
-        skeleton: read(SKELETON_SOURCE),
+        skeleton: read("files/base/.github/workflows/ci.yml"),
       }),
   },
 ];

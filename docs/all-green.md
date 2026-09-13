@@ -20,7 +20,7 @@ all-green:
 
 The judgment, whole: every needed result must be `success`, or `skipped` for a job named in `allowed-skips`. Anything else (`failure`, `cancelled`, a skip the list does not name) fails the gate, and the step summary lists every job with its result. The managed skeleton names `checks` alone, so a schedule night passes on `ci` and an all-skipped run cannot pass; repo-platform's own ci.yml names nothing, since none of its gating jobs may skip.
 
-The judgment's own scenario tests are alls-green's; this repository pins the step's shape instead ([the rosters](#the-rosters-how-a-deleted-gate-stays-loud)). The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
+The judgment's own scenario tests are alls-green's. The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
 
 ## Quick triage: why is my PR red or waiting?
 
@@ -40,22 +40,6 @@ The judgment's own scenario tests are alls-green's; this repository pins the ste
 - Beside it: `validate-managed-files`; `zizmor` (every visibility, its SARIF upload on public repositories only; zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt of either pass runs once more and only the retry's result counts); `knip` (bun repositories; a repository with no package.json to install from yet stands down with a notice); `semgrep` and `dependency-review` (public repositories only); `codeql`; and the module jobs. Each check's per-finding bypass is the table in [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check).
 - Repo-platform's own ci.yml has no callers to hide behind: its gating jobs are the needs list itself. Two of them, `validate-skills` (structure, offline) and `skills-discovery` (the real `npx skills` listing, so its own job), run [Vivswan/skills' validate-skills action](https://github.com/Vivswan/skills/tree/main/.github/actions/validate-skills) on this repository's own skills catalog, pinned by sha like every other third-party action ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)).
 - A repo-owned advisory check opts out with `continue-on-error: true` on its job in checks.yml.
-
-## The rosters (how a deleted gate stays loud)
-
-The gate judges only what its `needs` list names, so a job deleted from ci.yml AND from the needs list would stop gating silently. Authored rosters in [scripts/check/ssot/all_green.ts](../scripts/check/ssot/all_green.ts) close that at authoring time:
-
-| Rule | What it pins |
-| --- | --- |
-| `all-green-roster` | Repo-platform's ci.yml: the gating job set, the gate's needs list, and `ALL_GREEN_ROSTER` held together in every direction, plus the gate's `if: always()` and its one sha-pinned alls-green step passing `toJSON(needs)` with no allowed skips or failures. |
-| `skeleton-gate` | The managed skeleton (`files/base/.github/workflows/ci.yml`): `all-green` needs exactly `checks` and `ci`, judges through alls-green under `if: always()` with one unconditioned, unsoftened, sha-pinned step allowing exactly `checks` to skip, the `ci` caller calls fleet-ci.yml unconditionally, `checks` is conditioned on the schedule alone, `nightly` runs on the schedule alone and gates nothing, every later leg reaches the gate through its needs, and each leg needing `all-green` directly carries an `&&`-chain of the skeleton's leg clauses including `needs.all-green.result == 'success'`. |
-| `fleet-ci-roster` | fleet-ci.yml's job set (`plan`, `validate-managed-files`, `base-checks`, `dependency-review`, `zizmor`, `knip`, `semgrep`, `codeql`, `docs-check`, `release-freshness`, `release-health`, `trivy`), both directions - deleting `codeql` there would drop the gate for every managed repository at once - and no job-level `continue-on-error` (a softened fleet job would read green to every caller's gate). |
-| `fleet-ci-plan-unconditional` | fleet-ci.yml's `plan` job carries no job-level `if:`: it is the one fleet-ci job that runs on every nightly schedule run (the skeleton's `checks` job skips there and `codeql` reruns only on its weekly day), so it is what keeps the `ci` caller from skipping, which the gate never allows. |
-| `fleet-nightly-roster` | fleet-nightly.yml's job set (`plan`, `trivy-nightly`), both directions: nothing judges the nightly caller's result, so a job deleted there would go quiet fleet-wide. |
-| `fleet-caller-ceilings` | Every job grant in fleet-ci.yml, fleet-nightly.yml, and reusable-site.yml under its skeleton caller's (`ci`, `nightly`, and `site` in the skeleton ci.yml under `files/base`, the one every managed repository receives), and every job grant in post-green.yml, sync-repos.yml, and settings-repos.yml under the operator job that calls it (ci.yml's `post-green`, then post-green.yml's `sync-fleet` and `settings-fleet`): GitHub checks a nested job's permissions against the caller's when the call is expanded, before the job's `if:` runs, so one scope over the ceiling fails every run of the caller at once. |
-| `all-green-name` | The check NAME, pinned once as data: the ruleset's required context (Actions-pinned by `integration_id`), the `all-green` job id at both sources, `all_green.ts`'s CHECK_NAME, and the sentence this page opens with. |
-
-The managed ci.yml is one source file under `files/base/` that the writer copies whole (its only substitution is the owner slug, in the header and the `uses:` lines), so every selection receives the same bytes: the `skeleton-gate` rule judges that one source, and validate-managed-files' parity check judges the copy in every repository.
 
 ## Consuming the gate
 
@@ -126,6 +110,6 @@ One label on the PR, before it merges. The squash commit carries the PR title al
 ## Residuals, stated
 
 - A PR can still gut a called workflow's content (checks.yml is repo-owned) or hand-condition the managed `ci` caller away; validate-managed-files' parity check blocks any edit to the managed ci.yml, the caller's condition included, and review owns the rest - the same same-repo residual every check has.
-- Any workflow in this repository could mint a look-alike `all-green` check run (the Actions app pin does not distinguish jobs). The repo is its own sole workflow author; the roster rules and review own that surface.
+- Any workflow in this repository could mint a look-alike `all-green` check run (the Actions app pin does not distinguish jobs). The repo is its own sole workflow author; review owns that surface.
 - A job-created `all-green` check from a pull_request run judged the merge tree, not the sha, and would vouch for a sha that is also a main commit. Reachable only when a PR head becomes a main commit itself; squash-only merges make that contrived.
 - Copilot code review is advisory: the `copilot_code_review` rule requests a review on every public-repo PR, but nothing blocks on it ([settings.md](settings.md#copilot-code-review)).

@@ -60,9 +60,9 @@ rulesets:
           do_not_enforce_on_create: true
           required_status_checks:
             # The managed pr-title.yml workflow's job check run, pinned to
-            # the GitHub Actions app (integration_id 15368) like the main
-            # ruleset's all-green context: no other app and no plain
-            # commit status can satisfy the context by name.
+            # the GitHub Actions app like the main ruleset's all-green
+            # context: no other app and no plain commit status can satisfy
+            # the context by name.
             - context: pr-title
               integration_id: 15368
     bypass_actors:
