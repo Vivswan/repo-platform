@@ -13,7 +13,8 @@ on:
     types: [opened]
   pull_request:
     types: [opened]
-  # Nightly catch-up sweep: assigns every open issue and PR whose creation fired no workflow.
+  # Nightly sweep: every open unassigned issue and PR, whether created with a workflow token (no open event fired)
+  # or opened by Dependabot or from a fork (an open event fired, but with a token the job cannot write with).
   schedule:
     - cron: "13 6 * * *"
 
