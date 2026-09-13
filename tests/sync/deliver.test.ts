@@ -5,7 +5,6 @@ import {
   BODY_CAP,
   boundedReport,
   closedFences,
-  DELIVERY_CALLS,
   failureBody,
   fenceFor,
   prBody,
@@ -385,14 +384,6 @@ describe("deliver.ts", () => {
     expect(result.issueBody).toContain("https://***@github.com/o/r.git");
     expect(result.issueBody).not.toContain(PAT);
     expect(result.log).not.toContain(PAT);
-  });
-
-  test("the longest delivery (a refresh that arms and closes an open failure report) is the chain the row budget counts", () => {
-    const result = run({
-      stub: { STUB_DIRTY: "1", STUB_PR: "7", STUB_ARMED: "true", STUB_ISSUE: "12 open" },
-    });
-    expect(result.verdict).toBe("refreshed");
-    expect(result.sequence).toHaveLength(DELIVERY_CALLS);
   });
 
   test("a clean delivery closes an open failure report", () => {

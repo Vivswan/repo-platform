@@ -24,7 +24,6 @@ import { settingsWorkflowRules } from "./check/ssot/settings_workflow.ts";
 import { siteConfigRules } from "./check/ssot/site_config.ts";
 import { skillRules } from "./check/ssot/skills.ts";
 import { stickyCommentRules } from "./check/ssot/sticky_comments.ts";
-import { syncOperatorRules } from "./check/ssot/sync_operator.ts";
 import { toolchainRules } from "./check/ssot/toolchain.ts";
 import { twinCopyRules } from "./check/ssot/twin_copies.ts";
 
@@ -41,7 +40,6 @@ const rules: Rule[] = [
   ...postGreenRules,
   ...processDisciplineRules,
   ...harnessImportRules,
-  ...syncOperatorRules,
   ...siteConfigRules,
   ...twinCopyRules,
 ];

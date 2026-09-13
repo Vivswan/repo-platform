@@ -24,14 +24,8 @@ export const SUMMARY_FILE = "summary.json";
 export const TAIL_BYTES = 20_000;
 /** Every subprocess here is one gh call, one git network call, or one
  *  local git call on the clone, each answering in seconds, so the fleet's
- *  stalled-network bound applies; the row's budget (row_budget.ts) counts
- *  it once per call of the longest delivery. */
+ *  stalled-network bound applies. */
 export const DELIVERY_CALL_BOUND_MS = NETWORK_TIMEOUT_MS;
-/** The longest delivery's subprocess calls: seven local git calls, the PR
- *  lookup, the disarm's two, the lease and the push, the refresh, the arm,
- *  and the three that close an open failure report (deliver.test.ts
- *  records the chain). */
-export const DELIVERY_CALLS = 17;
 
 export function prTitle(build: string): string {
   return `${SYNC_PR_TITLE_PREFIX} ${build.slice(0, 12)}`;

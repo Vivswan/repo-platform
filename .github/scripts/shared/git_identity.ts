@@ -1,5 +1,5 @@
-// TypeScript committers import these constants. The two refresh workflows cannot: their create-pull-request step spells
-// SYNC_IDENTITY, and the pins-and-identities rule (scripts/check/ssot/literal_anchors.ts) holds every such step to it.
+// TypeScript committers import these constants. The two refresh workflows cannot: their create-pull-request steps spell
+// SYNC_IDENTITY, and tests/workflows/refresh_shape.test.ts holds them to it.
 
 import { SYNC_BOT } from "../../../actions/shared/platform.ts";
 
