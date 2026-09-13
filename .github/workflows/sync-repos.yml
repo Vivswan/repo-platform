@@ -31,9 +31,9 @@ on:
       repos:
         description: >-
           "all", or a comma-separated list of owner/name slugs and the
-          visibility tokens public and private (fleet/sync_scope.ts); a
-          private repo may appear only under its token here, and the
-          dispatch-only modules: filter never does
+          visibility tokens public and private (fleet/sync_scope.ts);
+          post-green passes its label reader's public or all, and the
+          dispatch-only modules: filter never appears here
         required: true
         type: string
       sha:
@@ -41,8 +41,7 @@ on:
           The judged main commit (the mover ran on it before this call in
           the same run; the delivery commit is what the plan reads from
           the stable tag) - never main's live HEAD, which a later merge queued
-          behind this run may already have moved; a private-slug
-          refusal of the called scope names it (fleet/sync_scope.ts)
+          behind this run may already have moved
         required: true
         type: string
     secrets:
@@ -119,7 +118,6 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
           OWNER: ${{ github.repository_owner }}
           ONLY_REPO: ${{ inputs.repos }}
-          TARGET_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/select_sync_repos.ts
 
       - name: Print the plan

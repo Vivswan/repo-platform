@@ -91,10 +91,6 @@ export const FLEET_WRITERS: Record<
         run: "bun .github/scripts/fleet/select_sync_repos.ts",
         value: "${{ inputs.repos }}",
       },
-      TARGET_SHA: {
-        run: "bun .github/scripts/fleet/select_sync_repos.ts",
-        value: "${{ inputs.sha }}",
-      },
     },
   },
   ".github/workflows/settings-repos.yml": {

@@ -340,8 +340,7 @@ describe("post-green publish wiring", () => {
       "cancel-in-progress": false,
     });
     expect(syncFleet.uses).toBe("./.github/workflows/sync-repos.yml");
-    // The sync is handed THIS commit, never main's live HEAD: a refused
-    // called scope names the judged commit (select_sync_repos.ts).
+    // The sync is handed THIS commit, never main's live HEAD.
     expect(syncFleet.with).toEqual({
       repos: "${{ needs.read-directives.outputs.repos }}",
       sha: "${{ inputs.sha }}",
@@ -416,7 +415,6 @@ describe("post-green publish wiring", () => {
     // only - the dispatch input stays out of step env (private slugs).
     expect(syncRepos).toContain("ONLY_REPO: ${{ inputs.repos }}");
     expect(syncRepos).not.toContain("ONLY_REPO: ${{ inputs.repo }}");
-    expect(syncRepos).toContain("TARGET_SHA: ${{ inputs.sha }}");
   });
 
   test("ci.yml keys a push run by its commit and never cancels it; only pull-request lanes cancel", () => {

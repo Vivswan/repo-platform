@@ -95,11 +95,6 @@ export function parseScope(
   return { kind: "list", visibility, slugs, modules };
 }
 
-/** Where the scope came from: the workflow_call input (ONLY_REPO; the read-directives leg's `public` or
- *  `all` for the sync, the literal `all` for the settings apply) or the typed dispatch input (may be a
- *  private slug). */
-export type ScopeSource = { kind: "call"; sha: string } | { kind: "dispatch" };
-
 export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): boolean {
   if (scope.kind === "all") return true;
   if (scope.slugs.has(repo.toLowerCase())) return true;
@@ -126,11 +121,10 @@ export function modulesLeftOutLine(scope: Scope, leftOut: number): string | null
   return `modules filter: ${leftOut} adopted ${leftOut === 1 ? "repo" : "repos"} left out (selecting none of the listed module sets)`;
 }
 
-/** Counts only: a slug may be private. `known` maps folded slug -> private. */
+/** Counts only: a slug may be private. `known` holds the fleet's folded slugs. */
 export function scopeRefusal(
   scope: Scope,
-  known: ReadonlyMap<string, boolean>,
-  source: ScopeSource,
+  known: ReadonlySet<string>,
   owner: string,
 ): string | null {
   if (scope.kind === "all") return null;
@@ -143,12 +137,6 @@ export function scopeRefusal(
       "the grant was revoked, the repository is archived or owned by someone else, or the slug is " +
       "misspelled (matching ignores case)"
     );
-  }
-  if (source.kind === "call") {
-    const hidden = slugs.filter((slug) => known.get(slug) === true).length;
-    if (hidden > 0) {
-      return `${hidden} of ${slugs.length} scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text (the range judged at ${source.sha.slice(0, 12)})`;
-    }
   }
   return null;
 }

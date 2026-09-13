@@ -19,7 +19,6 @@ import {
   parseDiscovered,
   pushProbeSkipNotice,
   readDispatchRepo,
-  scopeSource,
   scrubSlug,
   selectedLine,
 } from "./discovery.ts";
@@ -56,8 +55,8 @@ if (discovered === null) {
   error("select_sync_repos: the discovered list must be a JSON array of {repo, private} objects");
   process.exit(1);
 }
-const known = new Map(discovered.map((row) => [row.repo.toLowerCase(), row.private]));
-const refusal = scopeRefusal(scope, known, scopeSource("TARGET_SHA"), owner);
+const known = new Set(discovered.map((row) => row.repo.toLowerCase()));
+const refusal = scopeRefusal(scope, known, owner);
 if (refusal !== null) {
   error(refusal);
   process.exit(1);
