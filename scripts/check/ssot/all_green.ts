@@ -103,7 +103,6 @@ export const ALL_GREEN_ROSTER = [
   "commit-names",
   "typecheck",
   "invariants",
-  "build-tree",
   "script-tests",
   "validate-skills",
   "skills-discovery",
@@ -733,7 +732,7 @@ export const allGreenRules: Rule[] = [
           got: declared,
         });
       }
-      // The publish/sync gates' LOOKUP must consume the same constant, or
+      // The mover's and the sync's LOOKUP must consume the same constant, or
       // they could read a differently named check than the one pinned.
       if (!templateCarries(predicate, CHECK_RUN_LOOKUP)) {
         throw new Error(

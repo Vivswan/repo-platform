@@ -166,7 +166,7 @@ function soleLocalCallerProblem(callers: WorkflowCaller[], expectedSite: string)
 
 /** post-green.yml's callers ARE the all-green gate's one exit: a second caller would run every post-green leg, the fleet writers included,
  *  behind whatever that workflow's trigger is. allGreenGateMismatches judges the caller's needs edge; the workflow_dispatch way in runs
- *  the two delivery legs alone behind their in-script gates (tests/build-branches/publish_wiring.test.ts pins that). */
+ *  the mover alone behind its in-script gate. */
 export function postGreenCallerMismatches(
   workflows: Record<string, string>,
   owner: string,
@@ -187,9 +187,7 @@ export function postGreenCallerMismatches(
  *  every holder is in FLEET_WRITERS or classified here with why it holds the token. */
 export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
   ".github/workflows/ci.yml": "passes the secret through to post-green.yml",
-  ".github/workflows/post-green.yml":
-    "pushes THIS repository's build branch (workflow-scope files GITHUB_TOKEN may not push) " +
-    "and passes the secret through to the two writers it calls",
+  ".github/workflows/post-green.yml": "passes the secret through to the two writers it calls",
   ".github/workflows/refresh-gitignore.yml": "opens PRs in THIS repository",
   ".github/workflows/refresh-toolchains.yml": "opens PRs in THIS repository",
   ".github/workflows/fleet-release.yml":

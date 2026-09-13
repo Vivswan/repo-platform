@@ -5,7 +5,7 @@ import { vitepressRenderer } from "./vitepress_renderer.ts";
 describe("githubSlug", () => {
   test.each<[string, string]>([
     ["3. Add checks to checks.yml", "3-add-checks-to-checksyml"],
-    ["Who can write refs/heads/build?", "who-can-write-refsheadsbuild"],
+    ["Who can write refs/tags/stable?", "who-can-write-refstagsstable"],
     ["2. Apply the template", "2-apply-the-template"],
     ["After the gate", "after-the-gate"],
     ["C++ & Rust", "c--rust"],
@@ -52,11 +52,11 @@ describe("heading ids through VitePress's renderer", () => {
   test("headings carry GitHub's ids, code spans included, repeats numbered like GitHub", async () => {
     const md = await vitepressRenderer();
     const html = md.render(
-      "## 3. Add checks to checks.yml\n\n## Who can write `refs/heads/build`?\n\n## A &amp; B\n\n## Use `&amp;`\n\n## Same\n\n## Same\n",
+      "## 3. Add checks to checks.yml\n\n## Who can write `refs/tags/stable`?\n\n## A &amp; B\n\n## Use `&amp;`\n\n## Same\n\n## Same\n",
       { path: "/x/index.md", relativePath: "index.md" },
     );
     expect(html).toContain('<h2 id="3-add-checks-to-checksyml"');
-    expect(html).toContain('<h2 id="who-can-write-refsheadsbuild"');
+    expect(html).toContain('<h2 id="who-can-write-refstagsstable"');
     expect(html).toContain('<h2 id="a--b"');
     expect(html).toContain('<h2 id="use-amp"');
     expect(html).toContain('<h2 id="same"');

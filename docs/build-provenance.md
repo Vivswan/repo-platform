@@ -59,7 +59,7 @@ A missing move (a failed or evicted post-green run after a green gate) heals two
 - **The lease.** The push is `--force-with-lease` naming the value just read (the tag object for an annotated tag, an empty lease when the tag is absent), so two movers racing leaves the loser red and the tag untouched.
 - **The output.** `previous`, the commit the tag named before a move (empty when nothing moved), is the `read-directives` leg's base ahead of the push's `before`. On a call that leg reads on every mover result: a newer run's range starts after its own base, which can be this very commit, so only this commit's run is sure to read it ([all-green.md](all-green.md#after-the-gate)).
 - **The credential.** The push uses the run's `GITHUB_TOKEN` with `contents: write` (ci.yml's post-green job grants that ceiling), the way GitHub's own actions/publish-action moves an action's major tag with the default token.
-- **The open question, settled by the first live move.** The docs list the ref-update endpoints as possibly needing the `workflows` permission too, with no stated condition, and no official page says whether a ref update to a commit already on the server can trip the workflow-file refusal. If GitHub refuses the push, the fallback is the `REPO_PLATFORM_TOKEN` the workflow already receives for the publisher, passed as the mover checkout's `token`, with no new secret.
+- **The open question, settled by the first live move.** The docs list the ref-update endpoints as possibly needing the `workflows` permission too, with no stated condition, and no official page says whether a ref update to a commit already on the server can trip the workflow-file refusal. If GitHub refuses the push, the fallback is the `REPO_PLATFORM_TOKEN` the workflow already receives for the fleet writers it calls, passed as the mover checkout's `token`, with no new secret.
 
 ## Provenance is the commit itself
 
@@ -73,10 +73,6 @@ The tag names a main commit whose own CI run passed, so there is no generated tr
 The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
 The recorded delivery is the full 40-hex sha of that main commit: the writer takes it from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run) and writes it into the manifest's own entry ([sync.md](sync.md#the-manifest)), so every repository names the exact commit its files came from. Old delivery commits stay reachable forever: they are main history.
-
-## The build branch, until its deletion
-
-The same post-green run still publishes the orphan `build` branch beside the tag, behind a green move (the directives read prefers its stamps to the mover's base, so a red move must not see the stamps advance): [build-branches/publish.ts](../.github/scripts/build-branches/publish.ts) assembles the judged commit's tree with [branch_tree.ts](../.github/scripts/build-branches/branch_tree.ts) (`files.yml` and `files/`, `actions/`, the fleet-facing reusable workflows, a derived `reserved-labels.yml`) and chains a stamped commit onto the branch tip in the `build-branches-publish` lane, with [sync/verify_build_provenance.ts](../.github/scripts/sync/verify_build_provenance.ts) as the tree proof a consumer would run. No source under `files/` pins the branch and no sync reads it; the only readers left are the starters already written into repositories (nightly and fuzzer workflows, never rewritten by the sync), which keep their `@build` pin until a migration moves it. The directives leg's range read ([fleet/judged_range.ts](../.github/scripts/fleet/judged_range.ts)) still takes its stamps as the base ahead of the mover's `previous`. Deleting the publisher, the branch, and the stamp machinery is the next change.
 
 ## A new action input lands as a stack
 

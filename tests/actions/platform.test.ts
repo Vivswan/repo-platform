@@ -4,14 +4,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { BUILD_IDENTITY, SYNC_IDENTITY } from "../../.github/scripts/shared/git_identity.ts";
+import { SYNC_IDENTITY } from "../../.github/scripts/shared/git_identity.ts";
 import { prTitle } from "../../.github/scripts/sync/deliver.ts";
 import { renderManifest } from "../../.github/scripts/sync/writer/manifest.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
 import { HASH_REGION_MARKERS, HTML_REGION_MARKERS } from "../../actions/shared/grammar.ts";
 import {
   AUTOMATION_BRANCH,
-  BUILD_BOT,
   FAILURE_ISSUE_TITLE,
   GENERATED_NOTICE,
   MANAGED_HEADER_PATTERN,
@@ -50,9 +49,7 @@ describe("the platform slug and every string the fleet observes derived from it"
       gitignoreCiSection: CI_WORKSPACE_SECTION,
       gitignoreFuzzerSection: PLATFORM_SECTIONS.fuzzer,
       syncBot: SYNC_BOT,
-      buildBot: BUILD_BOT,
       syncIdentity: SYNC_IDENTITY,
-      buildIdentity: BUILD_IDENTITY,
       automationBranch: AUTOMATION_BRANCH,
       failureIssueTitle: FAILURE_ISSUE_TITLE,
       syncPrTitlePrefix: SYNC_PR_TITLE_PREFIX,
@@ -86,14 +83,9 @@ describe("the platform slug and every string the fleet observes derived from it"
       gitignoreFuzzerSection:
         "## Fuzzer workspace paths (repo-platform fuzzer)\n/.fuzz-failures/\n",
       syncBot: "repo-platform-sync",
-      buildBot: "repo-platform-build",
       syncIdentity: {
         name: "repo-platform-sync",
         email: "repo-platform-sync@users.noreply.github.com",
-      },
-      buildIdentity: {
-        name: "repo-platform-build",
-        email: "repo-platform-build@users.noreply.github.com",
       },
       automationBranch: "automation/repo-platform",
       failureIssueTitle: "[repo-platform] sync failed",

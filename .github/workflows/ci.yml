@@ -200,24 +200,6 @@ jobs:
       - name: Check markdown is not hard-wrapped
         run: bun run wrap:check
 
-  # The post-green publish ships exactly this tree, so a non-deterministic assembly fails here first.
-  build-tree:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --silent
-      - name: Assemble twice and compare
-        run: |
-          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-a
-          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-b
-          diff -r --no-dereference /tmp/tree-a /tmp/tree-b
-          echo "build tree is deterministic"
-
   script-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -406,7 +388,6 @@ jobs:
       - commit-names
       - typecheck
       - invariants
-      - build-tree
       - script-tests
       - validate-skills
       - skills-discovery
@@ -428,7 +409,7 @@ jobs:
           jobs: ${{ toJSON(needs) }}
 
   # Needs-ordered behind the gate in the same run, so github.sha IS the judged commit.
-  # No concurrency group: the called publish job holds build-branches-publish, and a caller holding a lane its called job takes deadlocks the call.
+  # No concurrency group: the called mover holds stable-tag-move, and a caller holding a lane its called job takes deadlocks the call.
   post-green:
     needs: [all-green]
     if: >-

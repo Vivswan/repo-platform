@@ -1,12 +1,12 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS } from "../../../.github/scripts/build-branches/branch_tree.ts";
 import { PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import { bunLockDirs } from "../../bootstrap.ts";
 import {
   actionSetsUpBun,
   actionSteps,
   BUN_SETUP_ACTION,
+  EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS,
   usesBunSetup,
   usesSetupBun,
 } from "../../lib/action_steps.ts";
@@ -115,11 +115,10 @@ export function lockedTypesBunVersion(lockText: string, where: string): string {
 }
 
 /** package.json scripts pinned to their EXACT command because the command
- *  itself scopes scratch per run (the TMPDIR launcher, branch_tree's
- *  self-cleaning --check); a drift to a bare `bun test` would stay green. */
+ *  itself scopes scratch per run (the TMPDIR launcher); a drift to a bare
+ *  `bun test` would stay green. */
 export const SCRATCH_SCOPED_SCRIPTS: Record<string, string> = {
   test: "bun scripts/run_tests.ts",
-  "build:check": "bun .github/scripts/build-branches/branch_tree.ts --check",
   "docs:check": "bun scripts/docs_check.ts",
 };
 

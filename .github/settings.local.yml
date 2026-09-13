@@ -21,24 +21,9 @@ labels:
     description: Sync the whole fleet from this merge's green run
 
 rulesets:
-  # A publish-only ruleset is not expressible (docs/settings.md), and GitHub rejects an Integration bypass actor on a user-owned repository.
-  - name: build-branches
-    target: branch
-    enforcement: active
-    conditions:
-      ref_name:
-        include:
-          - build
-        exclude: []
-    rules:
-      - type: deletion
-      - type: non_fast_forward
-    # Declared EMPTY on purpose.
-    # Only the explicit empty list lets the nightly heal clear an out-of-band bypass actor.
-    bypass_actors: []
-
-  # The fleet's coming delivery ref (docs/build-provenance.md); post-green moves it along main with a lease push.
+  # The fleet's delivery ref (docs/build-provenance.md); post-green moves it along main with a lease push.
   # Deletion only: a lease move is a force-class update to git, so an update or non_fast_forward rule would need a bypass for the mover.
+  # A mover-only ruleset is not expressible (docs/settings.md): GitHub rejects an Integration bypass actor on a user-owned repository.
   - name: stable-tag
     target: tag
     enforcement: active
@@ -49,5 +34,5 @@ rulesets:
         exclude: []
     rules:
       - type: deletion
-    # Declared empty so the nightly heal clears an out-of-band bypass actor.
+    # Declared EMPTY on purpose: only the explicit empty list lets the nightly heal clear an out-of-band bypass actor.
     bypass_actors: []

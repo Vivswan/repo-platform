@@ -126,18 +126,6 @@ rulesets:
           required_review_thread_resolution: true
           allowed_merge_methods:
             - squash
-  - name: build-branches
-    target: branch
-    enforcement: active
-    conditions:
-      ref_name:
-        include:
-          - build
-        exclude: []
-    rules:
-      - type: deletion
-      - type: non_fast_forward
-    bypass_actors: []
   - name: stable-tag
     target: tag
     enforcement: active

@@ -843,8 +843,8 @@ describe("starterMismatches and overlayMismatches (settings-starter)", () => {
     "  topics: a, b",
     "  private: false",
     "rulesets:",
-    "  - name: build-branches",
-    "    target: branch",
+    "  - name: stable-tag",
+    "    target: tag",
     "",
   ].join("\n");
 
@@ -855,7 +855,7 @@ describe("starterMismatches and overlayMismatches (settings-starter)", () => {
   test.each([
     {
       reason: "the override layer's main ruleset redeclared",
-      text: OVERLAY.replace("name: build-branches", "name: main"),
+      text: OVERLAY.replace("name: stable-tag", "name: main"),
       mismatch: {
         file: OWN_OVERLAY,
         expected: "no 'main' ruleset (the override layer supplies it and wins over this file)",

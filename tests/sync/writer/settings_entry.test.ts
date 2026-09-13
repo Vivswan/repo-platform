@@ -84,7 +84,7 @@ const OVERLAY = [
   '  topics: ""',
   "  private: false",
   "rulesets:",
-  "  - name: build-branches",
+  "  - name: release-branches",
   "    target: branch",
   "    enforcement: active",
   "    rules: [{type: deletion}]",
@@ -167,7 +167,7 @@ describe("renderSettings", () => {
     expect(names(doc.labels)).toEqual(["bug", "dependencies", "javascript", "rust"]);
     // Baseline ruleset, the public overlay's main entry grown by the module
     // layer and the override, then the overlay's own.
-    expect(names(doc.rulesets)).toEqual(["pr-title", "main", "build-branches"]);
+    expect(names(doc.rulesets)).toEqual(["pr-title", "main", "release-branches"]);
     // The baseline's ruleset rides through whole: still disabled, its rule intact.
     expect(ruleset(doc, "pr-title")).toEqual({
       name: "pr-title",
@@ -189,8 +189,8 @@ describe("renderSettings", () => {
         },
       ],
     });
-    expect(ruleset(doc, "build-branches")).toEqual({
-      name: "build-branches",
+    expect(ruleset(doc, "release-branches")).toEqual({
+      name: "release-branches",
       target: "branch",
       enforcement: "active",
       rules: [{ type: "deletion" }],
@@ -309,7 +309,7 @@ describe("renderSettings", () => {
     });
     expect(doc.labels).toEqual(labels);
     expect(names(doc.rulesets)).toEqual(
-      overlay === "" ? ["pr-title", "main"] : ["pr-title", "main", "build-branches"],
+      overlay === "" ? ["pr-title", "main"] : ["pr-title", "main", "release-branches"],
     );
   });
 

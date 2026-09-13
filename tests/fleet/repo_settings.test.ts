@@ -1,6 +1,5 @@
-// The `stable` tag is executable fleet-wide (rendered workflows pin `uses: ...@stable` and run its actions/ subtree directly)
-// and the `build` branch is still published beside it, so a settings edit that drops the tag's deletion-only ruleset or the
-// branch's append-only ruleset must fail here, loudly.
+// The `stable` tag is executable fleet-wide (rendered workflows pin `uses: ...@stable` and run its actions/ subtree directly),
+// so a settings edit that drops the tag's deletion-only ruleset must fail here, loudly.
 // No settings layer may declare an Integration bypass actor: GitHub rejects one on a user-owned repository's ruleset
 // (POST /rulesets, 422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization")
 // and the settings apply dies at ruleset creation.
@@ -29,25 +28,6 @@ function readRulesets(path: string): Ruleset[] {
   return doc?.rulesets ?? [];
 }
 
-describe("the repo's own build-branch ruleset", () => {
-  test("the executable build ref stays append-only for everyone", () => {
-    const buildBranches = readRulesets(OWN_OVERLAY).find((r) => r.name === "build-branches");
-    expect(buildBranches).toBeDefined();
-    expect(buildBranches?.target).toBe("branch");
-    expect(buildBranches?.enforcement).toBe("active");
-    // build is the sole delivery ref this ruleset protects.
-    expect(buildBranches?.conditions?.ref_name?.include?.sort()).toEqual(["build"]);
-    expect(buildBranches?.conditions?.ref_name?.exclude).toEqual([]);
-    expect(buildBranches?.rules?.map((r) => r.type).sort()).toEqual([
-      "deletion",
-      "non_fast_forward",
-    ]);
-    // Declared EMPTY, never omitted: only the explicit empty list lets
-    // the nightly heal clear an out-of-band bypass actor.
-    expect(buildBranches?.bypass_actors).toEqual([]);
-  });
-});
-
 describe("the repo's own stable-tag ruleset", () => {
   test("the stable tag is undeletable and otherwise unruled, so the lease move stays allowed", () => {
     const stableTag = readRulesets(OWN_OVERLAY).find((r) => r.name === "stable-tag");
@@ -60,6 +40,8 @@ describe("the repo's own stable-tag ruleset", () => {
     // forced update, so an update or non_fast_forward rule would block
     // the mover (docs/build-provenance.md).
     expect(stableTag?.rules?.map((r) => r.type)).toEqual(["deletion"]);
+    // Declared EMPTY, never omitted: only the explicit empty list lets
+    // the nightly heal clear an out-of-band bypass actor.
     expect(stableTag?.bypass_actors).toEqual([]);
   });
 });

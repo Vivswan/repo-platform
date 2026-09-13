@@ -6,7 +6,6 @@ import {
   FLEET_SYNC_LABELS,
   readDirective,
 } from "../../.github/scripts/fleet/fleet_sync_marker.ts";
-import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { argvStub } from "../shared/argv_stub";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -86,10 +85,8 @@ describe("main", () => {
     return proc.stdout.trimEnd();
   }
 
-  // main's history, one commit per squash merge or direct push: the fixture
-  // every clone below is taken from. The leg's checkout sees the build branch
-  // as refs/remotes/origin/build, so each scenario is a clone of a bare origin
-  // carrying (or lacking) a build branch stamped at one commit.
+  // main's history, one commit per squash merge or direct push; the leg runs in a clone of it, as
+  // actions/checkout leaves one.
   const source = join(root, "source");
   mkdirSync(source);
   git(source, ["init", "-q", "-b", "main"]);
@@ -143,33 +140,8 @@ describe("main", () => {
     "feat: the old opt-in\n\n[fleet-sync: public]\n\n## How\n\nThe thing ships.",
   );
 
-  /** A clone whose origin carries main plus, when `stamp` is given, a
-   *  build branch of one orphan commit stamped like publish.ts stamps. */
-  function cloneWithBuild(name: string, stamp: string | null): string {
-    const bare = join(root, `${name}.git`);
-    git(root, ["clone", "-q", "--bare", source, bare]);
-    if (stamp !== null) {
-      const scratch = join(root, `${name}-build`);
-      git(root, ["clone", "-q", bare, scratch]);
-      git(scratch, ["checkout", "-q", "--orphan", "build"]);
-      writeFileSync(join(scratch, "tree.txt"), "0\n");
-      git(scratch, ["add", "-A"]);
-      git(scratch, [
-        "commit",
-        "-q",
-        "-m",
-        `build\n\n${commitStampWrite("https://x.test", "o/r", stamp)}\nrun: https://x.test/run`,
-      ]);
-      git(scratch, ["push", "-q", "origin", "build"]);
-    }
-    const clone = join(root, name);
-    git(root, ["clone", "-q", bare, clone]);
-    return clone;
-  }
-
-  const unpublished = cloneWithBuild("unpublished", null);
-  const publishedSeed = cloneWithBuild("published-seed", seed);
-  const publishedDirect = cloneWithBuild("published-direct", direct);
+  const clone = join(root, "clone");
+  git(root, ["clone", "-q", source, clone]);
 
   function run(
     cwd: string,
@@ -198,8 +170,6 @@ describe("main", () => {
 
   const short = (sha: string) => sha.slice(0, 12);
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
-  const fallback = (sha: string, before: string) =>
-    `::notice::no build stamp older than ${short(sha)} exists (nothing published before this run); reading from the fallback base, ${short(before)}`;
   const noLabel = (base: string, sha: string) =>
     `::notice::${short(base)}..${short(sha)} carries no fleet-sync label; the fleet picks it up on the weekly sync`;
   const label = (sha: string, scope: string) =>
@@ -210,34 +180,30 @@ describe("main", () => {
     `::warning::${short(sha)}: ${error}; the commit contributes nothing to this range, and only the judged commit's labels fail this leg`;
 
   test("the coalescing case: three merges within a minute, only the first opted in, and only the last one's CI run survived", () => {
-    // The stamped base covers every commit since the last publish, so the
-    // surviving run carries the first merge's label.
-    const stamped = run(publishedSeed, direct, unlabeled);
-    expect(stamped).toEqual({
+    // The base is the commit the tag named before this run moved it, so the
+    // surviving run's range carries the first merge's label.
+    const fromTag = run(clone, direct, seed);
+    expect(fromTag).toEqual({
       exitCode: 0,
       output: "armed=true\nrepos=public\n",
       stdout: lines(label(publicA, "public"), syncing(seed, direct, "public")),
       stderr: "",
     });
-    // The control, the single-commit read: the same run against an origin
-    // with no build branch reads the surviving push alone and arms nothing.
-    const pushOnly = run(unpublished, direct, unlabeled);
+    // The control, the single-commit read: the push's own before reads the
+    // surviving push alone and arms nothing.
+    const pushOnly = run(clone, direct, unlabeled);
     expect(pushOnly).toEqual({
       exitCode: 0,
       output: "armed=false\n",
-      stdout: lines(fallback(direct, unlabeled), noLabel(unlabeled, direct)),
+      stdout: lines(noLabel(unlabeled, direct)),
       stderr: "",
     });
   });
 
   test("a range unions its labels: all wins over public, and an older commit's refused labels warn without poisoning the range", () => {
-    // A malformed OLDER commit is a warning: a docs-only commit leaves the
-    // build stamp in place, so failing here would poison every later range.
-    const result = run(
-      publishedDirect,
-      publicB,
-      git(publishedDirect, ["rev-parse", `${publicB}~1`]),
-    );
+    // A malformed OLDER commit is a warning: failing here would poison every
+    // range that starts below it.
+    const result = run(clone, publicB, direct);
     expect(result).toEqual({
       exitCode: 0,
       output: "armed=true\nrepos=all\n",
@@ -259,36 +225,35 @@ describe("main", () => {
       exitCode: 0,
       output: "armed=true\nrepos=public\n",
       stdout: (base: string, sha: string) =>
-        lines(fallback(sha, base), label(sha, "public"), syncing(base, sha, "public")),
+        lines(label(sha, "public"), syncing(base, sha, "public")),
     },
     {
       reason: "a pull request with the all label arms the whole fleet",
       sha: whole,
       exitCode: 0,
       output: "armed=true\nrepos=all\n",
-      stdout: (base: string, sha: string) =>
-        lines(fallback(sha, base), label(sha, "all"), syncing(base, sha, "all")),
+      stdout: (base: string, sha: string) => lines(label(sha, "all"), syncing(base, sha, "all")),
     },
     {
       reason: "a pull request without a fleet-sync label arms nothing",
       sha: unlabeled,
       exitCode: 0,
       output: "armed=false\n",
-      stdout: (base: string, sha: string) => lines(fallback(sha, base), noLabel(base, sha)),
+      stdout: (base: string, sha: string) => lines(noLabel(base, sha)),
     },
     {
       reason: "a direct push has no pull request and arms nothing",
       sha: direct,
       exitCode: 0,
       output: "armed=false\n",
-      stdout: (base: string, sha: string) => lines(fallback(sha, base), noLabel(base, sha)),
+      stdout: (base: string, sha: string) => lines(noLabel(base, sha)),
     },
     {
       reason: "the retired body grammar on a direct push's message arms nothing",
       sha: legacy,
       exitCode: 0,
       output: "armed=false\n",
-      stdout: (base: string, sha: string) => lines(fallback(sha, base), noLabel(base, sha)),
+      stdout: (base: string, sha: string) => lines(noLabel(base, sha)),
     },
     {
       reason: "two pull requests list the commit: the one it is the merge of wins",
@@ -296,16 +261,15 @@ describe("main", () => {
       exitCode: 0,
       output: "armed=true\nrepos=public\n",
       stdout: (base: string, sha: string) =>
-        lines(fallback(sha, base), label(sha, "public"), syncing(base, sha, "public")),
+        lines(label(sha, "public"), syncing(base, sha, "public")),
     },
     {
       reason: "two pull requests claim the commit as their merge: refused, nothing armed",
       sha: ambiguous,
       exitCode: 1,
       output: "",
-      stdout: (base: string, sha: string) =>
+      stdout: (_base: string, sha: string) =>
         lines(
-          fallback(sha, base),
           `::error::${short(sha)}: repos/o/r/commits/${sha}/pulls: 2 pull requests claim this commit as their merge (#48, #49); refusing to pick one`,
         ),
     },
@@ -314,29 +278,28 @@ describe("main", () => {
       sha: twoScopes,
       exitCode: 1,
       output: "",
-      stdout: (base: string, sha: string) =>
-        lines(fallback(sha, base), `::error::${short(sha)}: ${TWO_SCOPES}`),
+      stdout: (_base: string, sha: string) => lines(`::error::${short(sha)}: ${TWO_SCOPES}`),
     },
     {
       reason: "an undeclared fleet-sync label on the judged commit's pull request: red leg",
       sha: unknown,
       exitCode: 1,
       output: "",
-      stdout: (base: string, sha: string) =>
-        lines(fallback(sha, base), `::error::${short(sha)}: ${UNKNOWN("fleet-sync:private")}`),
+      stdout: (_base: string, sha: string) =>
+        lines(`::error::${short(sha)}: ${UNKNOWN("fleet-sync:private")}`),
     },
-  ])("a one-commit push without a build stamp, $reason", ({ sha, exitCode, output, stdout }) => {
-    const before = git(unpublished, ["rev-parse", `${sha}~1`]);
+  ])("a one-commit push, $reason", ({ sha, exitCode, output, stdout }) => {
+    const before = git(clone, ["rev-parse", `${sha}~1`]);
     const seen = gh.calls().length;
-    const result = run(unpublished, sha, before);
+    const result = run(clone, sha, before);
     expect(result).toEqual({ exitCode, output, stdout: stdout(before, sha), stderr: "" });
     expect(gh.calls().slice(seen)).toEqual([lookup(sha)]);
   });
 
   test("a failed pull request lookup is red for the whole range, never a quiet armed=false", () => {
-    // The stamped range is publicA then unlabeled; the first lookup fails and names its commit.
+    // The range is publicA then unlabeled; the first lookup fails and names its commit.
     const seen = gh.calls().length;
-    const result = run(publishedSeed, unlabeled, publicA, { STUB_EXIT: "22" });
+    const result = run(clone, unlabeled, seed, { STUB_EXIT: "22" });
     expect(result).toEqual({
       exitCode: 1,
       output: "",
@@ -347,7 +310,7 @@ describe("main", () => {
   });
 
   test("a truncated judged sha is refused with no output line", () => {
-    const result = run(unpublished, unlabeled.slice(0, 12), seed);
+    const result = run(clone, unlabeled.slice(0, 12), seed);
     expect(result).toEqual({
       exitCode: 1,
       output: "",

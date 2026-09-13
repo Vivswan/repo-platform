@@ -304,11 +304,6 @@ export function spawnSyncHazard(options: string | null): string | null {
 export const ASYNC_SPAWN_FILES: Record<string, string> = {
   "actions/release-health/release-health.ts":
     "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
-  "tests/build-branches/publish_behavior.test.ts":
-    "one publish.ts child runs in the background, parked inside a PATH-stubbed rsync while a " +
-    "second publish runs to completion in the foreground; a timer SIGKILLs the child at " +
-    "SPAWN_TIMEOUT_MS, the stub bounds its own wait, and a killed child throws instead of " +
-    "yielding an outcome",
   "scripts/run_tests.ts":
     "the test launcher forwards SIGINT/SIGTERM/SIGHUP to its bun test child, fails a run that left entries in the per-run TMPDIR, and removes that TMPDIR after the child exits; inherited stdio, so no pipe to drain, bounded by the child's own life",
   "tests/actions/pages-site/mermaid_labels.test.ts":
@@ -526,8 +521,7 @@ export const processDisciplineRules: Rule[] = [
     },
   },
   {
-    // Tests never sit beside an action's sources: the launcher runs
-    // tests/ alone, and the build tree ships actions without tests (branch_tree.ts).
+    // Tests never sit beside an action's sources: the launcher runs tests/ alone.
     name: "no-tests-under-actions",
     run: () => actionTestFileMismatches(walkFiles("actions")),
   },

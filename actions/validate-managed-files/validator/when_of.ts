@@ -10,7 +10,7 @@ const isModuleList = (list: unknown): list is ModuleList =>
     Object.keys(list).join() === "declaring" &&
     typeof list.declaring === "string");
 
-/** Loose because the build branch's files.yml already passed the strict loader. An empty clause folds to null as the
+/** Loose because the delivery commit's files.yml already passed the strict loader. An empty clause folds to null as the
  *  loader's whenSchema does, so `applies` meets one spelling of "always". */
 export function whenOf(
   value: unknown,

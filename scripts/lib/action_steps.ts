@@ -4,7 +4,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { EXCLUDED_DIRS } from "../../.github/scripts/build-branches/branch_tree.ts";
+
+/** Installed dependencies never count as action directories: each action reinstalls them from its shipped lockfile. */
+export const EXCLUDED_DIRS: ReadonlySet<string> = new Set(["node_modules"]);
 
 /** Parsed structurally rather than grepped: a quoted or flow-style `uses:` counts,
  *  and a `uses:`-shaped line inside a block-scalar `run:` body never does. */
@@ -35,8 +37,7 @@ interface ActionManifest {
   abs: string;
 }
 
-/** EXCLUDED_DIRS prunes the walk exactly as publication prunes the tree (branch_tree.ts).
- *  A symlink's Dirent kind is the link's own, so isFile and isDirectory both skip it: a linked manifest is not one. */
+/** A symlink's Dirent kind is the link's own, so isFile and isDirectory both skip it: a linked manifest is not one. */
 function actionManifests(actionsDir: string): ActionManifest[] {
   const found: ActionManifest[] = [];
   const walk = (dir: string, rel: string) => {
