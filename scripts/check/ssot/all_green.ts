@@ -609,7 +609,6 @@ export const allGreenRules: Rule[] = [
         "bun run pins:check",
         "bun run settings:check",
         "bun run gitignore:topology",
-        "bun run files:check",
         "bun run validate",
       ]) {
         if (!gatingLines.has(required)) {

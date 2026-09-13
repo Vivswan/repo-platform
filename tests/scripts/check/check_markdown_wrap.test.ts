@@ -156,11 +156,6 @@ describe("scanMarkdown", () => {
       expected: clean([4]),
     },
     {
-      reason: "an inline marker comment riding the delimiter row does not break the table",
-      text: "| A | B |\n|---|---|<!-- BEGIN GENERATED: x -->\n| 1 | 2 |<!-- END GENERATED: x -->",
-      expected: clean([]),
-    },
-    {
       reason: "a literal <!-- in an inline code span is not a comment opener",
       text: "A literal `<!--` token\nwrapped continuation",
       expected: clean([2]),
@@ -228,8 +223,8 @@ describe("scanMarkdown", () => {
       expected: clean([5]),
     },
     {
-      reason: "an inline generated-region marker line does not excuse a fresh-line continuation",
-      text: "sentence with a<!-- BEGIN GENERATED: x -->\nspliced body line",
+      reason: "a closed inline comment does not excuse a fresh-line continuation",
+      text: "sentence with a<!-- note -->\nspliced body line",
       expected: clean([2]),
     },
   ])("$reason", ({ text, expected }) => {
@@ -242,7 +237,7 @@ describe("scan scope", () => {
     expect(isMarkdown("docs/guide.md")).toBe(true);
     expect(isMarkdown("files/base/AGENTS.md")).toBe(true);
     expect(isMarkdown("files/deno/AGENTS.block.toolchain.md")).toBe(true);
-    expect(isMarkdown("scripts/files_table.ts")).toBe(false);
+    expect(isMarkdown("scripts/check/check_markdown_wrap.ts")).toBe(false);
     expect(isMarkdown("files/base/.gitignore")).toBe(false);
     expect(isMarkdown("files/deno/.block.Deno.gitignore")).toBe(false);
   });

@@ -44,7 +44,7 @@ One line each, the `description` of each module in the platform's `files.yml`.
 
 ## What each module writes
 
-From the platform's `files.yml` (`bun scripts/files_table.ts` prints the live table). Managed files are rewritten on every sync; starters are written once and then repo-owned; split files get the module's block inside their managed region.
+From the platform's `files.yml`. Managed files are rewritten on every sync; starters are written once and then repo-owned; split files get the module's block inside their managed region.
 
 | Module | Files | Class |
 |---|---|---|

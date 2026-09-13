@@ -2,30 +2,33 @@
 // Nothing records the upstream SHA on purpose: the outputs change only when consumed upstream content changes,
 // so the refresh-gitignore PR diff stays worth reading.
 // --topology is the offline gate over the block files: they match files.yml's sources and every copy of a section carries
-// the same bytes; the operator's own .gitignore region is the ssot rule root-twin-parity's (scripts/check/ssot/twin_copies.ts).
+// the same bytes. The operator's own .gitignore is written through the writer, so its region is the render the ssot rule
+// root-twin-parity judges (scripts/check/ssot/twin_copies.ts), not a second one.
 // Content drift inside a block against upstream is ungated until the next refresh regenerates over it.
 //
 // Usage: bun scripts/generate/build_gitignore.ts [--topology]
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { readRegistration } from "../../.github/scripts/sync/writer/registration.ts";
+import { loadFilesConfig } from "../../.github/scripts/sync/writer/files_config.ts";
+import { regionMarkers } from "../../.github/scripts/sync/writer/manifest.ts";
+import {
+  placeholderValues,
+  readRegistration,
+} from "../../.github/scripts/sync/writer/registration.ts";
+import { renderSourced } from "../../.github/scripts/sync/writer/render_source.ts";
 import { resolveModules } from "../../.github/scripts/sync/writer/select.ts";
+import type { WriteOutcome } from "../../.github/scripts/sync/writer/write_managed.ts";
+import { writeSplit } from "../../.github/scripts/sync/writer/write_split.ts";
 import {
   blockSourcePath,
   blockValueOf,
   type FilesConfig,
   parseFilesConfig,
 } from "../../actions/plan/files_config.ts";
-import { cleanManagedRegion, HASH_REGION_MARKERS } from "../../actions/shared/grammar.ts";
-import {
-  MANAGED_REGION_LABEL,
-  PLATFORM_NAME,
-  REGISTRATION_PATH,
-} from "../../actions/shared/platform.ts";
+import { PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
-const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
 const FILES_DIR = join(REPO_ROOT, "files");
 const FILES_CONFIG = join(REPO_ROOT, "files.yml");
 const GITIGNORE = ".gitignore";
@@ -36,11 +39,6 @@ export const ALWAYS = [
   "Global/macOS.gitignore",
   "Global/Linux.gitignore",
 ];
-
-const DEFAULT_LOCAL_BODY =
-  "# Repository-specific ignore patterns go outside the managed region:\n" +
-  "# here (above BEGIN), or below the END marker where last-match-wins\n" +
-  "# can override managed patterns.\n";
 
 // Both .claude spellings are deliberate: the documented .claude/worktrees/ location plus the dotted variant.
 const AGENT_SECTION =
@@ -86,26 +84,6 @@ export function gitignoreSources(config: FilesConfig, label = "files.yml"): [str
     }
     return [[module, (names as string[]).map(sourceId)]];
   });
-}
-
-/** The operator's own selection, read the way the sync reads a target's: the registration resolved against files.yml. */
-export function ownModules(root: string, config: FilesConfig): string[] {
-  const { selected, dropped } = resolveModules(config, readRegistration(root).modules);
-  if (dropped.length > 0) {
-    throw new Error(
-      `${REGISTRATION_PATH} selects module(s) files.yml does not know: ${dropped.join(", ")}`,
-    );
-  }
-  return selected;
-}
-
-/** The selected modules' sources once each, in files.yml order: the writer's block order for the same selection. */
-export function selfSources(entries: [string, string[]][], modules: string[]): string[] {
-  return [
-    ...new Set(
-      entries.filter(([module]) => modules.includes(module)).flatMap(([, sources]) => sources),
-    ),
-  ];
 }
 
 /** Returned rather than deleted: the missing name may be the typo to fix, not the block. */
@@ -162,7 +140,7 @@ async function upstreamHead(): Promise<string> {
 async function section(sha: string, path: string): Promise<string> {
   if (Object.hasOwn(PLATFORM_SECTIONS, path)) return PLATFORM_SECTIONS[path];
   const name = blockName(path);
-  // Upstream quirks, each normalized so the outputs stay ASCII and lint-clean downstream:
+  // Upstream quirks, each normalized so the outputs stay lint-clean downstream:
   //   Windows.gitignore  -> CRLF line endings
   //   macOS.gitignore    -> `Icon[\r]`, a character class holding a raw CR byte, rewritten to the CR-free `?` glob
   //   comment lines      -> trailing spaces, which fail downstream repos' whitespace linters
@@ -171,15 +149,6 @@ async function section(sha: string, path: string): Promise<string> {
     .replaceAll("[\r]", "?")
     .replace(/[ \t]+$/gm, "")
     .trim();
-  // The outputs are written latin1 (the self file's sides are byte-owned), which is identity only for ASCII,
-  // so a non-ASCII section must fail here rather than corrupt silently on write.
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: the ASCII range check is this regex's whole job
-  if (!/^[\x00-\x7f]*$/.test(body)) {
-    throw new Error(
-      `github/gitignore ${path} contains non-ASCII content after normalization - ` +
-        "extend section()'s normalization (the outputs must stay ASCII)",
-    );
-  }
   return `## ${name} (github/gitignore ${path})\n${body}\n`;
 }
 
@@ -188,21 +157,6 @@ const HEADER_COMMENT =
   "# markers; repository-local patterns live outside the managed region\n" +
   "# (above BEGIN, or below END where last-match-wins can override).\n" +
   "\n";
-
-/** Regenerating around a malformed region would silently drop local content or duplicate markers, so it throws;
- *  cleanManagedRegion is the same accept/reject the writer applies. */
-export function existingLocalSides(output: string): { above: string; below: string } {
-  if (!existsSync(output)) return { above: `${DEFAULT_LOCAL_BODY}\n`, below: "" };
-  // latin1, not utf-8: the sides are repo-owned bytes, and a utf-8 decode
-  // would fold invalid sequences onto U+FFFD - silent corruption on rewrite.
-  const slice = cleanManagedRegion(readFileSync(output).toString("latin1"), HASH_REGION_MARKERS);
-  if (slice === null) {
-    throw new Error(
-      `${output} has no single clean ${MANAGED_REGION_LABEL} region (markers missing, duplicated, out of order, or marker text outside the region); fix its markers by hand, then rerun`,
-    );
-  }
-  return { above: slice.above, below: slice.below };
-}
 
 /** The writer adds the markers and splices the selected modules' blocks after this body. */
 export function buildFilesBase(sections: Record<string, string>): string {
@@ -218,17 +172,29 @@ export function buildBlock(section: string): string {
   return `${section}\n`;
 }
 
-export function buildSelf(
-  sections: Record<string, string>,
-  sources: string[],
-  sides: { above: string; below: string },
-): string {
-  const parts = [sides.above, `${HASH_REGION_MARKERS.begin}\n`, buildFilesBase(sections)];
-  for (const path of sources) {
-    parts.push(sections[path], "\n");
+/** The operator's .gitignore is a target's: the writer's loader, render, and split write, over the block files just
+ *  written, so the tree is also proven to be one the writer accepts. */
+export function writeOwnGitignore(
+  root: string,
+  filesConfig: string,
+  filesDir: string,
+): WriteOutcome {
+  const config = loadFilesConfig(filesConfig, filesDir);
+  const registration = readRegistration(root);
+  const entry = config.files.find((candidate) => candidate.path === GITIGNORE);
+  if (entry === undefined || entry.class !== "split") {
+    throw new Error(`files.yml: no split entry at ${GITIGNORE} - anchor lost`);
   }
-  parts.push(`${HASH_REGION_MARKERS.end}\n`, sides.below);
-  return parts.join("");
+  const { selected } = resolveModules(config, registration.modules);
+  const slug = { owner: PLATFORM_OWNER, name: PLATFORM_NAME };
+  const values = placeholderValues(registration, slug, config.defaults);
+  const region = renderSourced(config, filesDir, entry, selected, values);
+  if (typeof region !== "string") {
+    throw new Error(
+      `${GITIGNORE}: no value for ${region.missing.map((name) => `{{${name}}}`).join(", ")}`,
+    );
+  }
+  return writeSplit(root, GITIGNORE, region, regionMarkers(entry.region), null);
 }
 
 export function topologyProblems(input: {
@@ -331,18 +297,11 @@ async function run(topology: boolean): Promise<number> {
     );
     return 0;
   }
-  const modules = ownModules(REPO_ROOT, config);
-  // Before any fetch: a malformed self output must abort while every
-  // output still stands as committed, rather than behind a half-written
-  // set.
-  const selfSides = existingLocalSides(OUTPUT_SELF);
-
   // One resolved SHA for the whole run: fetching each file from "main"
   // could straddle an upstream push and mix two commits' content.
   const sha = await upstreamHead();
   console.log(`github/gitignore HEAD is ${sha}`);
   const sections: Record<string, string> = {};
-  // Every declared source feeds a block file; the self output takes only this repository's selection.
   const declared = new Set([...ALWAYS, ...entries.flatMap(([, paths]) => paths)]);
   for (const path of declared) sections[path] = await section(sha, path);
 
@@ -354,15 +313,14 @@ async function run(topology: boolean): Promise<number> {
         buildBlock(sections[path]),
       ]),
     ),
-    [OUTPUT_SELF, buildSelf(sections, selfSources(entries, modules), selfSides)],
   ];
   for (const [out, content] of outputs) {
-    // latin1, the read decoding's inverse: the self output's repo-owned
-    // sides are byte-owned, and a utf-8 encode would widen any non-ASCII
-    // byte (generated content is ASCII, so this is identity for it).
-    writeFileSync(out, Buffer.from(content, "latin1"));
+    writeFileSync(out, content);
     console.log(`wrote ${relative(REPO_ROOT, out)}`);
   }
+  const own = writeOwnGitignore(REPO_ROOT, FILES_CONFIG, FILES_DIR);
+  if (own.change === "held") throw new Error(`${GITIGNORE}: ${own.reason}`);
+  if (own.change !== "unchanged") console.log(`wrote ${GITIGNORE}`);
   return 0;
 }
 

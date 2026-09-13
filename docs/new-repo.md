@@ -50,49 +50,7 @@ Four files matter later:
 
 ### What the sync writes
 
-Every path below comes from `files.yml` at the commit the `stable` tag names ([sync.md](sync.md) has the writer's contract). Class `managed` is rewritten whole on every sync, `split` rewrites only the BEGIN/END-bounded region and keeps what the repository wrote around it, `starter` is written once and repo-owned from then on, `link` is a relative symlink placed and repaired on every sync. A path listed more than once has one variant per condition.
-
-<!-- BEGIN GENERATED: files-table (scripts/files_table.ts - edit files.yml, not this block) -->
-| File | Class | When |
-| --- | --- | --- |
-| `.editorconfig` | split | always |
-| `.gitattributes` | split | always |
-| `.gitignore` | split | always |
-| `.github/CODEOWNERS` | split | always |
-| `.github/dependabot.yml` | managed | always |
-| `.github/actionlint.yaml` | starter | always |
-| `.github/instructions/review.instructions.md` | managed | always |
-| `.github/settings.local.yml` | starter | public |
-| `.github/settings.local.yml` | starter | private |
-| `.github/settings.yml` | managed | always |
-| `.github/workflows/ci.yml` | managed | always |
-| `.github/workflows/checks.yml` | starter | always |
-| `.github/workflows/post-green.yml` | starter | always |
-| `.github/workflows/update-release.yml` | starter | always |
-| `.github/workflows/update-release-pr.yml` | starter | always |
-| `.github/actions/site-build/action.yml` | starter | always |
-| `.github/workflows/copilot-setup-steps.yml` | starter | always |
-| `.gitleaks.toml` | starter | always |
-| `.yamllint` | managed | always |
-| `.github/workflows/auto-assign.yml` | managed | always |
-| `.github/workflows/auto-format.yml` | starter | any of `bun`, `deno`, `uv` |
-| `.typography-allow` | managed | without `release-please` |
-| `.typography-allow` | managed | modules: `release-please` |
-| `AGENTS.md` | split | without `bun`, `deno`, `uv`, `rust` |
-| `AGENTS.md` | split | any of `bun`, `deno`, `uv`, `rust` |
-| `LICENSE.md` | split | without `custom-license` |
-| `CLAUDE.md` | link | always |
-| `.github/agents.md` | link | always |
-| `.github/copilot-instructions.md` | link | always |
-| `.bun-version` | managed | modules: `bun` |
-| `.dvmrc` | managed | modules: `deno` |
-| `.github/workflows/deno-audit.yml` | managed | modules: `deno` |
-| `.release-please-manifest.json` | starter | modules: `release-please` |
-| `release-please-config.json` | starter | modules: `release-please` |
-| `.github/workflows/pr-title.yml` | managed | modules: `pr-title` |
-| `.github/workflows/nightly-fuzz.yml` | starter | modules: `fuzzer` |
-| `.github/workflows/nightly.yml` | starter | modules: `nightly` |
-<!-- END GENERATED: files-table -->
+The list of platform files is [files.yml](../files.yml) at the commit the `stable` tag names; [sync.md](sync.md#filesyml-reference) explains each entry's `class` and `when`.
 
 ### Mirror copies of platform files
 
