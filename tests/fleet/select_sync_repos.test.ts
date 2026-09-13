@@ -7,7 +7,6 @@ import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts"
 import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
 import { tempDirs } from "../shared/temp_dir";
 
-const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 const RUN_ID = "4242";
 const keyOf = rowKeyOf("stub-token", RUN_ID);
 const outputFor = (rows: { repo: string; private: boolean }[]) =>
@@ -203,10 +202,7 @@ describe("select_sync_repos.ts", () => {
       // Control first: with the persona in the discovered list the same
       // stubs select it, so its absence from the main run's exact rows and
       // every channel is discovery's doing, not a stub that never admitted it.
-      const control = run("gone-present", { ONLY_REPO: "private", TARGET_SHA: SHA }, [
-        ...discovered,
-        HIDDEN_GONE,
-      ]);
+      const control = run("gone-present", { ONLY_REPO: "private" }, [...discovered, HIDDEN_GONE]);
       expect(control.exitCode).toBe(0);
       expect(control.rows?.map((row) => row.repo)).toEqual([
         "Vivswan/hidden-gone",
@@ -257,9 +253,8 @@ describe("select_sync_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  // The called path (post-green's sync-fleet leg): the scope is public text
-  // off the merged PRs of the judged range, so a private repo rides only
-  // under the token. Whole outcome per row: every log line, the rows, exit code.
+  // The scope as the call input passes it (ONLY_REPO; post-green's sync-fleet leg sends `public`
+  // or `all`). Whole outcome per row: every log line, the rows, exit code.
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
   const UNADOPTED = `::notice::${notAdoptedNotice("Vivswan/unadopted")}`;
   const LOCKED = `::notice::${pushProbeSkipNotice("a private repository")}`;
@@ -305,6 +300,13 @@ describe("select_sync_repos.ts", () => {
       stdout: lines(LOCKED, "syncing: Vivswan/steady and 1 private repository"),
     },
     {
+      reason: "a slug list selects every listed repo, the private one counted, never named",
+      scope: "Vivswan/steady,Vivswan/hidden-server",
+      discoveredList: discovered,
+      rows: [HIDDEN_SERVER_ROW, STEADY_ROW],
+      stdout: lines("syncing: Vivswan/steady and 1 private repository"),
+    },
+    {
       reason:
         "a repo discovery did not list is not in the fleet: public simply never sees it, no warning",
       scope: "public",
@@ -321,7 +323,7 @@ describe("select_sync_repos.ts", () => {
     ({ scope, discoveredList, rows, stdout }) => {
       const r = run(
         `called-${Bun.hash(scope + discoveredList.length).toString(16)}`,
-        { ONLY_REPO: scope, TARGET_SHA: SHA },
+        { ONLY_REPO: scope },
         discoveredList,
       );
       expect(r).toEqual({
@@ -339,13 +341,6 @@ describe("select_sync_repos.ts", () => {
   );
 
   test.each([
-    {
-      reason:
-        "a private slug on the called path is refused, naming the judged commit: private repos ride under the token",
-      scope: "Vivswan/steady,Vivswan/hidden-server",
-      stdout: `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text (the range judged at ${SHA.slice(0, 12)})\n`,
-      withheld: "hidden-server",
-    },
     {
       reason: "a list with one miss fails the whole plan",
       scope: "Vivswan/steady,Vivswan/hidden-servr",
@@ -372,7 +367,7 @@ describe("select_sync_repos.ts", () => {
     ({ scope, stdout, withheld, discoveredList = discovered }) => {
       const r = run(
         `refused-${Bun.hash(scope + discoveredList.length).toString(16)}`,
-        { ONLY_REPO: scope, TARGET_SHA: SHA },
+        { ONLY_REPO: scope },
         discoveredList,
       );
       expect(r).toEqual({ exitCode: 1, stdout, stderr: "", output: "", rows: null });

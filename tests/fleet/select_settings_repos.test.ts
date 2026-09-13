@@ -218,7 +218,6 @@ describe("select_settings_repos.ts", () => {
         // tests supply their own.
         GITHUB_EVENT_PATH: "",
         ONLY_REPO: "",
-        SOURCE_SHA: "",
         ...env,
       },
     });
@@ -479,7 +478,7 @@ describe("select_settings_repos.ts", () => {
   test(
     "a run whose commit main moved past stands down with an empty plan, before any discovery",
     () => {
-      const r = run("superseded", { STUB_MAIN_TIP: NEWER_SHA, SOURCE_SHA: SHA, ONLY_REPO: "all" });
+      const r = run("superseded", { STUB_MAIN_TIP: NEWER_SHA, ONLY_REPO: "all" });
       expect(r).toEqual({
         exitCode: 0,
         stdout: lines(`::notice::${supersededNotice(SHA, NEWER_SHA)}`),
@@ -510,9 +509,8 @@ describe("select_settings_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  // The called path (post-green's settings-fleet leg): the scope is public
-  // text off the judged main commit, so a private repo rides only under the
-  // token. Whole outcome per scope: every log line, the summary, the outputs.
+  // The scope as the call input passes it (ONLY_REPO; post-green's settings-fleet leg sends
+  // `all`). Whole outcome per scope: every log line, the summary, the outputs.
   test.each<{ reason: string; scope: string; repos: string[]; stdout: string; summary: string }>([
     {
       reason: "a public slug selects it alone, and slugs alone never probe other repos",
@@ -552,10 +550,7 @@ describe("select_settings_repos.ts", () => {
   ])(
     "called with $scope: $reason",
     ({ scope, repos, stdout, summary }) => {
-      const r = run(`called-${Bun.hash(scope).toString(16)}`, {
-        ONLY_REPO: scope,
-        SOURCE_SHA: SHA,
-      });
+      const r = run(`called-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope });
       expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
         exitCode: 0,
         stdout,
@@ -654,42 +649,29 @@ describe("select_settings_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  test(
-    "a private slug on the called path is refused, counting only, naming the judged commit",
-    () => {
-      const r = run("called-private", {
-        ONLY_REPO: "Vivswan/steady, vivswan/hidden-server",
-        SOURCE_SHA: SHA,
-      });
-      expect({ ...r, masked: r.masked.length }).toEqual({
-        exitCode: 1,
-        stdout: lines(
-          `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text (the range judged at ${SHA.slice(0, 12)})`,
-        ),
+  // The two transports of one scope meet at readDispatchRepo; past it the selector cannot tell them apart.
+  const LIST = "Vivswan/steady, vivswan/hidden-server";
+  test.each<{ transport: string; env: () => Record<string, string> }>([
+    { transport: "the call input", env: () => ({ ONLY_REPO: LIST }) },
+    {
+      transport: "the dispatch payload",
+      env: () => {
+        const eventFile = join(root, "dispatch-list-event.json");
+        writeFileSync(eventFile, JSON.stringify({ inputs: { repo: LIST } }));
+        return { GITHUB_EVENT_PATH: eventFile };
+      },
+    },
+  ])(
+    "a slug list from $transport selects every listed target, the private one counted, never named",
+    ({ transport, env }) => {
+      const r = run(`list-${Bun.hash(transport).toString(16)}`, env());
+      expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
+        exitCode: 0,
+        stdout: lines("settings targets: Vivswan/steady and 1 private repository"),
         masked: PRIVATE_SLUGS.flatMap(maskForms).length,
         stderr: "",
-        output: "",
+        output: { count: "2", repos: ["Vivswan/hidden-server", "Vivswan/steady"] },
         summary: "",
-      });
-      for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-server");
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "a dispatched comma list scopes the apply to every listed target, the private one unnamed",
-    () => {
-      const eventFile = join(root, "dispatch-list-event.json");
-      writeFileSync(
-        eventFile,
-        JSON.stringify({ inputs: { repo: "Vivswan/steady, vivswan/hidden-server" } }),
-      );
-      const r = run("list", { GITHUB_EVENT_PATH: eventFile });
-      expect(r.exitCode).toBe(0);
-      expect(r.stdout).toBe(lines("settings targets: Vivswan/steady and 1 private repository"));
-      expect(outputsOf(r)).toEqual({
-        count: "2",
-        repos: ["Vivswan/hidden-server", "Vivswan/steady"],
       });
       for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-server");
     },
@@ -742,7 +724,7 @@ describe("select_settings_repos.ts", () => {
       // that follows a fleet sync must not go red for a target whose sync
       // PR has not merged. Count 0 skips the apply job; the empty matrix
       // is still valid JSON for its fromJSON.
-      const r = run(`none-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope, SOURCE_SHA: SHA });
+      const r = run(`none-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope });
       expect({ ...r, masked: r.masked.length }).toEqual({
         exitCode: 0,
         stdout: lines(

@@ -6,14 +6,10 @@ import {
   modulesLeftOutLine,
   parseScope,
   type Scope,
-  type ScopeSource,
   scopeRefusal,
   scopeSelects,
 } from "../../.github/scripts/fleet/sync_scope.ts";
 import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
-
-const CALL: ScopeSource = { kind: "call", sha: "8096c4920f84ec4122d14c5bd884703dd0d382ba" };
-const DISPATCH: ScopeSource = { kind: "dispatch" };
 
 // The real roster: the filter tests name real modules so a renamed module
 // fails here, not in a fleet run.
@@ -296,55 +292,29 @@ describe("modules filters", () => {
 });
 
 describe("scopeRefusal", () => {
-  const known = new Map<string, boolean>([
-    ["o/pub", false],
-    ["o/priv", true],
-  ]);
-  const PRIVATE_BY_SLUG =
-    "1 of 2 scoped repos are private: name private repositories with the `private` token, never by slug - a directive is public text (the range judged at 8096c4920f84)";
-  test.each<{ reason: string; scope: Scope; source: ScopeSource; expected: string | null }>([
-    { reason: "all is never refused", scope: ALL, source: CALL, expected: null },
-    {
-      reason: "tokens alone are never refused",
-      scope: list(["private"], []),
-      source: CALL,
-      expected: null,
-    },
+  const known = new Set(["o/pub", "o/priv"]);
+  test.each<{ reason: string; scope: Scope; expected: string | null }>([
+    { reason: "all is never refused", scope: ALL, expected: null },
+    { reason: "tokens alone are never refused", scope: list(["private"], []), expected: null },
     {
       reason: "a modules filter alone is never refused",
       scope: list([], [], [["site"]]),
-      source: CALL,
       expected: null,
     },
     {
-      reason: "a public slug on the called path runs",
-      scope: list([], ["o/pub"]),
-      source: CALL,
-      expected: null,
-    },
-    {
-      reason:
-        "a private slug on the called path is refused, counting only, naming the judged commit",
+      reason: "known slugs run, a private one included (the writers count it, never name it)",
       scope: list(["public"], ["o/pub", "o/priv"]),
-      source: CALL,
-      expected: PRIVATE_BY_SLUG,
-    },
-    {
-      reason: "the same private slug from a dispatch runs (the typed input never prints)",
-      scope: list(["public"], ["o/pub", "o/priv"]),
-      source: DISPATCH,
       expected: null,
     },
     {
-      reason: "an unknown slug is refused before visibility is judged",
+      reason: "an unknown slug is refused",
       scope: list([], ["o/priv", "o/nope"]),
-      source: CALL,
       expected:
         "1 of 2 scoped repos matched no fleet repository (values withheld - they may be private slugs): " +
         "not among the fleet token's pushable repositories under o - the grant was revoked, the " +
         "repository is archived or owned by someone else, or the slug is misspelled (matching ignores case)",
     },
-  ])("$reason", ({ scope, source, expected }) => {
-    expect(scopeRefusal(scope, known, source, "o")).toBe(expected);
+  ])("$reason", ({ scope, expected }) => {
+    expect(scopeRefusal(scope, known, "o")).toBe(expected);
   });
 });

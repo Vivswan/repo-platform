@@ -7,7 +7,7 @@ import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { env } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
-import { classifyEntry, type ScopeSource } from "./sync_scope.ts";
+import { classifyEntry } from "./sync_scope.ts";
 
 /** A stalled-network backstop, not a latency budget: the slowest call is the paginated user/repos
  * listing, and two minutes covers several hundred repos. The plan jobs' timeout-minutes are sized
@@ -138,12 +138,6 @@ export function readDispatchRepo(owner?: string): string {
     )
     .join(",")
     .toLowerCase();
-}
-
-/** Which input readDispatchRepo read: the workflow_call scope rides in as ONLY_REPO, with the
- *  judged commit in `shaEnv` (the writer's own name for the call's sha input). */
-export function scopeSource(shaEnv: string): ScopeSource {
-  return env("ONLY_REPO") === "" ? { kind: "dispatch" } : { kind: "call", sha: env(shaEnv) };
 }
 
 // Case-insensitive replaceAll: GitHub identity is case-insensitive, so a

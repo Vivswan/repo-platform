@@ -35,9 +35,9 @@ on:
       repos:
         description: >-
           "all", or a comma-separated list of owner/name slugs and the
-          visibility tokens public and private (fleet/sync_scope.ts); a
-          private repo may appear only under its token here, and the
-          dispatch-only modules: filter never does
+          visibility tokens public and private (fleet/sync_scope.ts);
+          post-green passes the literal all, and the dispatch-only
+          modules: filter never appears here
         required: true
         type: string
       sha:
@@ -119,9 +119,6 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
           OWNER: ${{ github.repository_owner }}
           ONLY_REPO: ${{ inputs.repos }}
-          # The judged commit a refused called scope names; empty
-          # on cron and dispatch runs like ONLY_REPO.
-          SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/select_settings_repos.ts
 
   # One job per matrix row: an index for the job name, which never carries a repository name, and

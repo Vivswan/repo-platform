@@ -22,7 +22,6 @@ import {
   PRIVATE_DISPLAY,
   pushProbeSkipNotice,
   readDispatchRepo,
-  scopeSource,
   scrubSlug,
   selectedLine,
 } from "./discovery.ts";
@@ -178,8 +177,8 @@ for (const row of discovered) {
 }
 
 // A slug the probes later DROP is a routine notice, so a valid scope may select nothing.
-const known = new Map(discovered.map((row) => [row.repo.toLowerCase(), row.private]));
-const refusal = scopeRefusal(scope, known, scopeSource("SOURCE_SHA"), owner);
+const known = new Set(discovered.map((row) => row.repo.toLowerCase()));
+const refusal = scopeRefusal(scope, known, owner);
 if (refusal !== null) {
   error(refusal);
   process.exit(1);
