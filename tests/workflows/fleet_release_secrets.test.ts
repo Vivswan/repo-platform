@@ -26,7 +26,7 @@ const root = join(import.meta.dir, "../..");
 const read = (rel: string): string => readFileSync(join(root, rel), "utf8");
 const declaredSecrets = (rel: string): Record<string, { required?: boolean }> | undefined =>
   (parseYaml(read(rel)) as CalledWorkflow).on.workflow_call?.secrets;
-// The steps that write to the repository, each bound to the run's own token.
+// The steps whose token the fleet PAT used to back, each now bound to the run's own token.
 const releaseWorkflows: Record<string, { step: string; binding: "with.token" | "env.GH_TOKEN" }[]> =
   {
     ".github/workflows/fleet-release.yml": [
