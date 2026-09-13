@@ -55,7 +55,7 @@ jobs:
           echo "$RUNNER_TEMP/pinact-bin" >>"$GITHUB_PATH"
       # Networked, so outside `bun run check`: a dangling pin passes every offline gate and fails at job start, fleet-wide
       # once synced. Every third-party pin is a full sha whose comment names the tag GitHub resolves to that sha (pinact
-      # codes 001 and 005; the version-comments-verifiable ssot rule refuses the `# v7` comment shapes pinact would pass
+      # codes 001 and 005; tests/workflows/delivery_pins.test.ts refuses the `# v7` comment shapes pinact would pass
       # unverified); the config names the two refs that are not release pins by design, and reaches the written trees
       # only through the variable (pinact discovers a config relative to its working directory).
       - name: Verify every pin in the checkout and the written workflows
@@ -226,16 +226,21 @@ jobs:
         with:
           mode: discovery
 
-  # The config is the site job's, byte for byte: a dead internal link fails here instead of the deploy.
+  # The configuration is the plan's reading of this repository's registration, as in the deploy; this checkout's plan, not
+  # @stable's, so a PR changing files.yml judges its own docs. A dead internal link fails here instead of the deploy.
   docs-check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./actions/plan
+        id: plan
+        with:
+          mode: site
       - uses: ./actions/pages-site
         with:
           check: "true"
-          config: '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}'
+          config: ${{ steps.plan.outputs.config }}
 
   # vitepress in the runner's directory topology (workspace, action tree, and RUNNER_TEMP apart): the
   # build's module resolution breaks only under that separation, which a laptop layout cannot
@@ -426,5 +431,4 @@ jobs:
     uses: ./.github/workflows/reusable-site.yml
     with:
       sha: ${{ github.sha }}
-      config: '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}'
       custom_domain: ${{ vars.CUSTOM_DOMAIN }}

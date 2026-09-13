@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { CHECK_NAME } from "../../.github/scripts/shared/all_green.ts";
-import { DELIVERY_REF, extractUsesPins } from "../../scripts/check/ssot/delivery_pins.ts";
+import { DELIVERY_REF } from "../../actions/shared/platform.ts";
+import { extractUsesPins } from "../shared/uses_pins.ts";
 
 interface Step {
   name?: string;

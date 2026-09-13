@@ -4,6 +4,7 @@
 // all-green check, the two facts the mover verified at the move, re-read here because the ruleset cannot pin the tag to
 // one writer.
 
+import { DELIVERY_REF } from "../../../actions/shared/platform.ts";
 import { allGreenFailure } from "../shared/all_green.ts";
 import { fail, requireEnv, setOutput } from "../shared/gha.ts";
 import { gitAnswersYes } from "../shared/git_yes_no.ts";
@@ -11,7 +12,7 @@ import { lastLine } from "../shared/lines.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
 
 export const FILES_CONFIG = "files.yml";
-const TAG = "refs/tags/stable";
+const TAG = `refs/tags/${DELIVERY_REF}`;
 const MAIN = "refs/remotes/origin/main";
 
 const repository = requireEnv("GITHUB_REPOSITORY");

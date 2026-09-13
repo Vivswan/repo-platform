@@ -5,8 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { PLATFORM_OWNER, PLATFORM_SLUG } from "../../actions/shared/platform.ts";
-import { DELIVERY_REF } from "../../scripts/check/ssot/delivery_pins.ts";
+import { DELIVERY_REF, PLATFORM_OWNER, PLATFORM_SLUG } from "../../actions/shared/platform.ts";
 
 interface Workflow {
   on: unknown;

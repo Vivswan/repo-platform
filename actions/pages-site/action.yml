@@ -28,7 +28,7 @@ inputs:
     required: false
     default: ""
   config:
-    description: 'The site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label"} (docs_path null = no docs half); empty reads the registration through the plan action'
+    description: 'The site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label", "link_rot_color", "link_rot_description"} (docs_path null = no docs half); empty reads the registration through the plan action'
     required: false
     default: ""
   check:
@@ -54,6 +54,12 @@ outputs:
   link-rot-label:
     description: The nightly external-link check's tracking label from the configuration ("" disables the check)
     value: ${{ steps.assemble.outputs.link-rot-label }}
+  link-rot-color:
+    description: The color the link-rot label is created with, from the configuration
+    value: ${{ steps.assemble.outputs.link-rot-color }}
+  link-rot-description:
+    description: The description the link-rot label is created with, from the configuration
+    value: ${{ steps.assemble.outputs.link-rot-description }}
   site-title:
     description: The docs title as built, the configuration's site_title verbatim
     value: ${{ steps.assemble.outputs.site-title }}

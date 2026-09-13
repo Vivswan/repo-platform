@@ -234,14 +234,20 @@ jobs:
       - if: hashFiles('docs/**') == ''
         run: echo "::notice::docs-check stood down, this repository has no docs/ directory"
 
-  # Fails when the release-please PR head lacks main's tip at CHECK time:
-  # a stale release PR cuts a release missing commits already on main.
-  # Other PRs stay mergeable while behind.
-  release-freshness:
+  # The release PR's two gates, one job so they share one condition. Freshness fails when the PR head lacks main's tip at
+  # CHECK time: a stale release PR cuts a release missing commits already on main (other PRs stay mergeable while behind).
+  # Health can go stale between check and release, so the release path re-runs the same action as its pre-flight.
+  release-pr:
     needs: [plan]
     if: contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # vulnerability-alerts read is the Dependabot alerts API key; without it the security gate fails.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      vulnerability-alerts: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -261,21 +267,6 @@ jobs:
               "Do not merge; release-please refreshes the PR after the next green run on ${GITHUB_BASE_REF}."
             exit 1
           fi
-
-  # Can go stale between check and release, so the release path re-runs the same action as its
-  # pre-flight.
-  release-health:
-    needs: [plan]
-    if: contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # vulnerability-alerts read is the Dependabot alerts API key; without it the security gate fails.
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: read
-      vulnerability-alerts: read
-    steps:
       - uses: Vivswan/repo-platform/actions/release-health@stable
         with:
           mode: pull-request

@@ -43,6 +43,8 @@ export function siteConfig(
     docs_path: "docs",
     include: [],
     link_rot_label: "",
+    link_rot_color: "",
+    link_rot_description: "",
     ...overrides,
   });
 }

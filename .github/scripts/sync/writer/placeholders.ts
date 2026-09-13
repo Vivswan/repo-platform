@@ -9,8 +9,14 @@ export const PLACEHOLDER_NAMES = [
   "copyright_holder",
   "year",
   "fuzzer_label",
+  "fuzzer_label_color",
+  "fuzzer_label_description",
   "nightly_label",
+  "nightly_label_color",
+  "nightly_label_description",
   "site_label",
+  "site_label_color",
+  "site_label_description",
 ] as const;
 
 export type PlaceholderName = (typeof PLACEHOLDER_NAMES)[number];

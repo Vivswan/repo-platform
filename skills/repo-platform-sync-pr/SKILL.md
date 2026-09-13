@@ -89,7 +89,7 @@ Every changed path must be one of:
 - a Mirrors row reading `written`, `replaced local edits`, or `replaced` (a `replaced` row also explains the deleted paths under its target and the ancestor file its detail names)
 - `.github/repo-platform-manifest.json` (rewritten every sync, no row)
 
-Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. One exception: a body carrying a section-ending warning of the form `<N> characters of this section were cut to fit GitHub's body limit.` lost the rows after the cut, so judge those paths by their class in [references/file-ownership.md](references/file-ownership.md) instead. A replaced diff cut at 40 lines is read in full from git:
+Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. One exception: a body carrying a section-ending warning of the form `<N> characters of this section were cut to fit GitHub's body limit.` lost the rows after the cut, so read those paths' classes from `.github/repo-platform-manifest.json` (the PR head's; the base's for a path the sync retired) and judge them by [references/file-ownership.md](references/file-ownership.md) instead. A replaced diff cut at 40 lines is read in full from git:
 
 ```bash
 git fetch origin main automation/repo-platform
@@ -184,4 +184,4 @@ A row reading `failed before the target was resolved; re-run the workflow` means
 
 Closing the PR is not an opt-out: the next run rewrites the branch and opens a fresh PR with the same report. To pause syncs, revoke the fleet token's access to the repo or delete `.repo-platform.yml`. To detach permanently, see the platform's [docs/eject.md](https://github.com/Vivswan/repo-platform/blob/main/docs/eject.md).
 
-Worked examples of report rows and their resolutions are in [references/worked-examples.md](references/worked-examples.md); the class of every path is in [references/file-ownership.md](references/file-ownership.md).
+Worked examples of report rows and their resolutions are in [references/worked-examples.md](references/worked-examples.md); the class of every platform-written path is recorded in the PR head's `.github/repo-platform-manifest.json`, and what each class means is in [references/file-ownership.md](references/file-ownership.md).

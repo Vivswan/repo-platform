@@ -1,22 +1,40 @@
 #!/usr/bin/env bun
 
 // The local twin of ci.yml's docs-check job; the build inputs are set here the way the pages-site action's step sets them, so an
-// exported copy of one cannot change the build. RUNNER_TEMP is per run and removed in the finally: the action's scratch is otherwise
-// one fixed path under the system tmpdir that it never cleans and that concurrent worktrees would wipe from under each other.
+// exported copy of one cannot change the build, and the site configuration is the plan's reading of this repository's registration,
+// as in every deploy. RUNNER_TEMP is per run and removed in the finally: the action's scratch is otherwise one fixed path under the
+// system tmpdir that it never cleans and that concurrent worktrees would wipe from under each other.
 //
 // Usage: bun scripts/docs_check.ts
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { passthrough } from "../.github/scripts/shared/proc.ts";
+import {
+  loadModuleData,
+  outputsOf,
+  planSite,
+  readRegistration,
+  SECURITY_LABEL,
+} from "../actions/plan/plan.ts";
+import { declaredLabelTuple, reservedLabelNames } from "../actions/plan/reserved_labels.ts";
 import { PLATFORM_NAME, PLATFORM_SLUG } from "../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
-/** The configuration ci.yml's docs-check and site jobs pass (the site-config-parity ssot rule pins the three). */
-const SITE_CONFIG =
-  '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}';
+function siteConfig(): string {
+  const files = loadModuleData(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
+  const tree = join(REPO_ROOT, "files");
+  const plan = planSite({
+    registration: readRegistration(REPO_ROOT),
+    ...files,
+    reservedLabels: reservedLabelNames(files.layers, tree),
+    securityLabel: declaredLabelTuple(files.layers, tree, SECURITY_LABEL),
+    private: false,
+  });
+  return outputsOf(plan).config;
+}
 
 function main(): number {
   // No-op handlers replace bun's default disposition, which would end the
@@ -33,7 +51,7 @@ function main(): number {
         RUNNER_TEMP: scratch,
         CHECK: "true",
         SITE_DIR: "",
-        CONFIG: SITE_CONFIG,
+        CONFIG: siteConfig(),
         MAX_VERSIONS: "5",
         CUSTOM_DOMAIN: "",
         DEFAULT_BRANCH: "main",

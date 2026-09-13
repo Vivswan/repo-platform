@@ -61,24 +61,32 @@ describe("parseSiteConfig", () => {
       docs_path: "docs",
       include: [skills],
       link_rot_label: "docs-link-rot",
+      link_rot_color: "D4A72C",
+      link_rot_description: "Link rot",
       ...overrides,
     });
 
-  test("reads the four keys, the docs half as one value: its path and include roots, or null when the path is", () => {
+  test("reads the six keys, the docs half as one value: its path and include roots, or null when the path is", () => {
+    const linkRot = {
+      linkRotLabel: "docs-link-rot",
+      linkRotColor: "D4A72C",
+      linkRotDescription: "Link rot",
+    };
     expect(parseSiteConfig(config())).toEqual({
       siteTitle: "Site",
       docs: { path: "docs", include: [skills] },
-      linkRotLabel: "docs-link-rot",
+      ...linkRot,
     });
     expect(parseSiteConfig(config({ include: [], link_rot_label: "" }))).toEqual({
       siteTitle: "Site",
       docs: { path: "docs", include: [] },
+      ...linkRot,
       linkRotLabel: "",
     });
     expect(parseSiteConfig(config({ docs_path: null, include: [] }))).toEqual({
       siteTitle: "Site",
       docs: null,
-      linkRotLabel: "docs-link-rot",
+      ...linkRot,
     });
   });
 
@@ -551,7 +559,8 @@ describe("strict check build", () => {
           RUNNER_TEMP: join(root, "runner-temp"),
           CHECK: "true",
           SITE_DIR: "",
-          CONFIG: '{"site_title": "t", "docs_path": "docs", "include": [], "link_rot_label": ""}',
+          CONFIG:
+            '{"site_title": "t", "docs_path": "docs", "include": [], "link_rot_label": "", "link_rot_color": "", "link_rot_description": ""}',
         },
         timeoutMs: 180_000,
       });
@@ -606,7 +615,8 @@ describe("check mode with the docs half off", () => {
         RUNNER_TEMP: join(root, "runner-temp"),
         CHECK: "true",
         SITE_DIR: "",
-        CONFIG: '{"site_title": "t", "docs_path": null, "include": [], "link_rot_label": ""}',
+        CONFIG:
+          '{"site_title": "t", "docs_path": null, "include": [], "link_rot_label": "", "link_rot_color": "", "link_rot_description": ""}',
       },
       timeoutMs: 60_000,
     });

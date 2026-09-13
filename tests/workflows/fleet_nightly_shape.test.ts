@@ -53,7 +53,12 @@ describe("fleet-nightly.yml", () => {
     expect(steps[1]?.id).toBe("plan");
     expect(steps[1]?.with).toEqual({ private: "${{ github.event.repository.private }}" });
     expect(steps[1]?.env).toEqual({ GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" });
-    expect(job?.outputs).toEqual({ private: "${{ steps.plan.outputs.private }}" });
+    expect(job?.outputs).toEqual({
+      "private": "${{ steps.plan.outputs.private }}",
+      "security-label": "${{ steps.plan.outputs.security-label }}",
+      "security-label-color": "${{ steps.plan.outputs.security-label-color }}",
+      "security-label-description": "${{ steps.plan.outputs.security-label-description }}",
+    });
   });
 
   test("no job carries a condition (the skeleton's caller is the schedule gate) and none reads an input", () => {
@@ -92,16 +97,20 @@ describe("fleet-nightly.yml", () => {
     expect(report.if).toBe("steps.scan.outputs.found == 'true'");
     expect(report.with).toEqual({
       "mode": "report",
-      "label": "security-nightly",
+      "label": "${{ needs.plan.outputs.security-label }}",
       "title": "Nightly security scan findings",
       "artifacts-dir": "${{ steps.scan.outputs.report-dir }}",
       "artifact-name": String(artifact.with?.name),
-      "label-color": "1d76db",
-      "label-description": "Automated nightly security scan findings",
+      "label-color": "${{ needs.plan.outputs.security-label-color }}",
+      "label-description": "${{ needs.plan.outputs.security-label-description }}",
       "stream": "generic",
     });
     expect(resolve.if).toBe("steps.scan.outputs.found == 'false'");
-    expect(resolve.with).toEqual({ mode: "resolve", label: "security-nightly", stream: "generic" });
+    expect(resolve.with).toEqual({
+      mode: "resolve",
+      label: "${{ needs.plan.outputs.security-label }}",
+      stream: "generic",
+    });
     // Personal-account code scanning is public-only: the exact literal
     // 'false', so an empty visibility output uploads nothing.
     expect(sarif.if).toBe("needs.plan.outputs.private == 'false'");

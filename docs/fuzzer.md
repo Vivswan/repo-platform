@@ -15,7 +15,7 @@ Repo-owned also means a fix to the starter never reaches repos that already rece
 
 | Key in `.repo-platform.yml` | Meaning | Default |
 |---|---|---|
-| `labels.fuzzer` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | `fuzz-nightly` |
+| `labels.fuzzer` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | the fuzzer module's `tracking_label` default in [files.yml](../files.yml) |
 
 The label is a registration key rather than a starter edit alone because the settings layer must declare it too; [Tracking issues: the label is the stream](tracking-issues.md#the-label-is-the-stream) has the reasoning and the reserved-name rules.
 
@@ -37,7 +37,7 @@ The [fuzz-issue action](../actions/fuzz-issue/fuzz-issue.ts) knows nothing about
   stray-file.txt      # files at the top level are ignored
 ```
 
-- A failure subdirectory's name identifies the failure (the fuzz target, the suite) and must match `[A-Za-z0-9._-]+`.
+- A failure subdirectory's name identifies the failure (the fuzz target, the suite) and must match `DIR_NAME` in [actions/fuzz-issue/fuzz-issue.ts](../actions/fuzz-issue/fuzz-issue.ts): letters, digits, dots, underscores, dashes.
 - If the job fails and the directory is absent or empty, the action files a bare notice pointing at the run log; that covers failures outside the fuzz step itself.
 - `report.md` line 1 is a markdown heading, `# <title>`; the action strips the `#` and uses the rest as the failure's section heading in the issue.
 - The body must contain a fenced code block with the exact replay command(s), runnable from the repository root or starting with an explicit `cd`. The producer owns the replay command; the action never constructs one.
@@ -47,10 +47,12 @@ Size limits:
 
 | Budget | Value |
 |---|---|
-| per failure, lines included | the heading plus the first 60 lines after it (keep the replay block near the top; the rest survives only in the artifact) |
-| per failure, size | at most 8,000 characters |
+| per failure, lines included | the heading plus the first `REPORT_LINES` lines after it (keep the replay block near the top; the rest survives only in the artifact) |
+| per failure, size | at most `MAX_BLOCK_CHARS` characters |
 | without an `artifact-name` | no per-failure cap: the body is the only record, so every report rides whole, each cut at its share of the body budget with a count of the lines missing |
-| whole issue body | 60,000 characters; failures included oldest-first by directory mtime, then a note says how many were omitted |
+| whole issue body | `MAX_BODY` characters, under GitHub's cap; failures included oldest-first by directory mtime, then a note says how many were omitted |
+
+The three constants live in [actions/fuzz-issue/fuzz-issue.ts](../actions/fuzz-issue/fuzz-issue.ts).
 
 Re-extracting artifacts (the [shard aggregation](#sharding) below) stamps fresh mtimes, so the ordering only means something when the reports are read where they were written.
 

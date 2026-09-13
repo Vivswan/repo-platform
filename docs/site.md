@@ -169,7 +169,7 @@ broken internal links (page -> link):
 
 The nightly run checks the deployed site's EXTERNAL links after publishing with [lychee](https://github.com/lycheeverse/lychee) (internal ones are fatal at build time). The check runs on the schedule alone, so a fixed link closes the issue on the next clean night, never on a push.
 
-Findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the label of the `labels.site` registration key (default `docs-link-rot`), closed automatically on the first clean night. While it is open it holds releases on repositories with the release-please module; `release-override` is the escape hatch.
+Findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the label of the `labels.site` registration key (its default is the site module's `tracking_label` in `files.yml`), closed automatically on the first clean night. While it is open it holds releases on repositories with the release-please module; `release-override` is the escape hatch.
 
 The issue body is lychee's report: a count table, then every failing URL with its status and the page and position linking it, grouped by page. A report past GitHub's issue body limit is cut at whole lines, naming how many are missing. A timed-out or rate-limited (429) request is retried three times before it counts, and one that keeps failing is reported under its own status.
 
@@ -186,9 +186,9 @@ The issue body is lychee's report: a count table, then every failing URL with it
 |---|---|---|
 | `site.path` | the URL segment the docs mount under when the hook also builds a website; `null` turns the docs half off ([above](#turning-the-docs-half-off-sitepath-null)) | `docs` (`modules.site.path` in `files.yml`) |
 | `site.include` | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude)) | none |
-| `labels.site` | the link-rot tracking issue's label | `docs-link-rot` |
+| `labels.site` | the link-rot tracking issue's label | the site module's `tracking_label` default in [files.yml](../files.yml) |
 
-The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label`); a registration-less caller such as this repository's own ci.yml passes the same document by hand, and its `site_title` must be non-empty like the registration's `project.name`.
+The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label` with its `link_rot_color` and `link_rot_description`); a caller without a registration passes the same document by hand, and its `site_title` must be non-empty like the registration's `project.name`.
 
 ## Pages enablement
 

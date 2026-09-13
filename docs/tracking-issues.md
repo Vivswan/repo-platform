@@ -35,11 +35,11 @@ The registration grammar and fleet-ci's `plan` job enforce:
 
 ## Release gating
 
-With the release-please module also selected, an open tracking issue blocks releases twice over: the release PR's `release-health` CI job fails early and visibly, and the release pipeline's authoritative pre-flight blocks the cut itself. fleet-ci's `plan` job outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open. It self-scopes to release-cut pushes, so release-PR refreshes and ordinary main runs are never blocked.
+With the release-please module also selected, an open tracking issue blocks releases twice over: the release PR's `release-pr` CI job fails early and visibly, and the release pipeline's authoritative pre-flight blocks the cut itself. fleet-ci's `plan` job outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open. The release PR's job blocks that PR on every refresh; the pipeline's pre-flight self-scopes to release-cut pushes, so ordinary main runs are never blocked.
 
 To unblock:
 
-- Fix the failure and let the next green night close the issue, or hand-close it once fixed. Closing re-triggers nothing: re-run the release PR's failed `release-health` job afterwards (the pre-flight reads issue state fresh at release time).
+- Fix the failure and let the next green night close the issue, or hand-close it once fixed. Closing re-triggers nothing: re-run the release PR's failed `release-pr` job afterwards (the pre-flight reads issue state fresh at release time).
 - To ship despite the open issue, apply the `release-override` label to the release PR: it waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([all-green.md](all-green.md)).
 
 ## Renaming the label

@@ -20,6 +20,9 @@ export interface SiteConfig {
   docs: DocsConfig | null;
   /** "" disables the nightly external-link check. */
   linkRotLabel: string;
+  /** The tuple the link-rot issue's label is created with. */
+  linkRotColor: string;
+  linkRotDescription: string;
 }
 
 export interface DocsMount {
@@ -104,17 +107,27 @@ export function parseSiteConfig(json: string): SiteConfig {
   }
   if (typeof data !== "object" || data === null || Array.isArray(data)) {
     throw new Error(
-      "the config input must be a JSON object {site_title, docs_path, include, link_rot_label}",
+      "the config input must be a JSON object {site_title, docs_path, include, link_rot_label, link_rot_color, link_rot_description}",
     );
   }
-  const { site_title, docs_path, include, link_rot_label, ...rest } = data as Record<
-    string,
-    unknown
-  >;
+  const {
+    site_title,
+    docs_path,
+    include,
+    link_rot_label,
+    link_rot_color,
+    link_rot_description,
+    ...rest
+  } = data as Record<string, unknown>;
   const extra = Object.keys(rest);
   if (extra.length > 0) throw new Error(`the config input has unknown keys: ${extra.join(", ")}`);
-  // The two reach the step outputs and the page title as one line each.
-  for (const [key, text] of Object.entries({ site_title, link_rot_label })) {
+  // These reach the step outputs and the page title as one line each.
+  for (const [key, text] of Object.entries({
+    site_title,
+    link_rot_label,
+    link_rot_color,
+    link_rot_description,
+  })) {
     if (typeof text !== "string") throw new Error(`config.${key} must be a string`);
     if (/[\r\n]/.test(text)) {
       throw new Error(`config.${key} must be one line - it contains a line break`);
@@ -136,6 +149,8 @@ export function parseSiteConfig(json: string): SiteConfig {
     siteTitle: site_title as string,
     docs: docs_path === null ? null : { path: docs_path, include: roots },
     linkRotLabel: link_rot_label as string,
+    linkRotColor: link_rot_color as string,
+    linkRotDescription: link_rot_description as string,
   };
 }
 

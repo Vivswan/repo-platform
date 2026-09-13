@@ -8,7 +8,6 @@ import {
   type GateOutcome,
   type GhRunner,
   issueGate,
-  LABEL_RE,
   OVERRIDE_LABEL,
   overrideFromPullRequest,
   parseConfig,
@@ -18,6 +17,7 @@ import {
   securityGate,
   severitiesAtOrAbove,
 } from "../../../actions/release-health/release-health.ts";
+import { LABEL_RE } from "../../../actions/shared/label.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -37,7 +37,7 @@ interface Fixture {
 
 const REPO = "o/r";
 
-// The fleet gate job runs with no checkout, so gh cannot infer the repository: every call must name it.
+// fleet-release.yml runs the action with no checkout, so gh cannot infer the repository: every call must name it.
 function assertNamesRepo(args: string[]): void {
   if (args[0] === "api") {
     const path = args.slice(1).find((arg) => !arg.startsWith("--"));

@@ -23,6 +23,7 @@ import { walkFiles } from "../walk.ts";
 import {
   blocksAnchorProblem,
   isPlaceholderName,
+  PLACEHOLDER_NAMES,
   type PlaceholderName,
   type PlaceholderValues,
   unknownPlaceholders,
@@ -44,7 +45,9 @@ export function mentionsMarkers(text: string, markers: RegionMarkers): boolean {
 }
 
 /** The registration may leave these unset, so a module must declare each default before a source may use it. */
-const DEFAULTED: readonly PlaceholderName[] = ["fuzzer_label", "nightly_label", "site_label"];
+const DEFAULTED: readonly PlaceholderName[] = PLACEHOLDER_NAMES.filter((name) =>
+  /_label(_color|_description)?$/.test(name),
+);
 
 export interface PlaceholderDefaults {
   defaults: PlaceholderValues;
@@ -70,8 +73,12 @@ export function placeholderDefaults(config: FilesConfig): PlaceholderDefaults {
   };
   for (const [module, data] of Object.entries<ModuleData>(config.modules)) {
     if (data.tracking_label !== undefined) {
-      const { key, default: value } = data.tracking_label;
-      declare(`${key}_label`, value, module, `modules.${module}.tracking_label`);
+      const { key, default: value, color, description } = data.tracking_label;
+      const where = `modules.${module}.tracking_label`;
+      declare(`${key}_label`, value, module, where);
+      if (color !== undefined) declare(`${key}_label_color`, color, module, where);
+      if (description !== undefined)
+        declare(`${key}_label_description`, description, module, where);
     }
   }
   for (const name of config.placeholders) {

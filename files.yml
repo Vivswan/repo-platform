@@ -9,14 +9,17 @@ placeholders:
   - github_username_lower
   - copyright_holder
   - fuzzer_label
+  - fuzzer_label_color
+  - fuzzer_label_description
   - nightly_label
+  - nightly_label_color
+  - nightly_label_description
 
 modules:
   bun:
     description: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
     codeql_language: javascript-typescript
     dependabot_ecosystems: [bun]
-    dependabot_label: {name: javascript, color: "168700"}
     gitignore_sources: [Node, bun]
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
@@ -24,7 +27,6 @@ modules:
     description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
     codeql_language: javascript-typescript
     dependabot_ecosystems: [deno]
-    dependabot_label: {name: deno, color: "70ffaf"}
     gitignore_sources: [Deno, Node]
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
@@ -32,14 +34,12 @@ modules:
     description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
     codeql_language: python
     dependabot_ecosystems: [uv]
-    dependabot_label: {name: "python:uv", color: "2b67c6"}
     gitignore_sources: [Python]
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
   rust:
     description: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
     dependabot_ecosystems: [cargo]
-    dependabot_label: {name: rust, color: "000000"}
     gitignore_sources: [Rust]
     agents_toolchain: [toolchain]
   site:

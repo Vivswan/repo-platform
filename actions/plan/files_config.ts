@@ -145,9 +145,6 @@ const moduleDataSchema = z.looseObject({
     })
     .optional(),
   path: z.string().min(1).optional(),
-  dependabot_label: z
-    .strictObject({ name: z.string().min(1), color: z.string().min(1) })
-    .optional(),
 });
 
 export type ModuleData = z.infer<typeof moduleDataSchema>;

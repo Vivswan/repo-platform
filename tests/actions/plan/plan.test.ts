@@ -20,7 +20,7 @@ import {
   weekly,
 } from "../../../actions/plan/plan.ts";
 import { parseRegistration, type Registration } from "../../../actions/plan/registration.ts";
-import { reservedLabelNames } from "../../../actions/plan/reserved_labels.ts";
+import { declaredLabelTuple, reservedLabelNames } from "../../../actions/plan/reserved_labels.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
@@ -42,6 +42,7 @@ const MINIMAL_FILES = [
 ].join("\n");
 
 const RESERVED = reservedLabelNames(FILES_DATA.layers, FILES_TREE);
+const SECURITY = declaredLabelTuple(FILES_DATA.layers, FILES_TREE, "security-nightly");
 
 const PROJECT = "project: { name: Demo Project, slug: demo, description: A demo }\n";
 
@@ -59,6 +60,7 @@ function input(text: string, isPrivate = false, modules: Module[] = MODULES): Pl
     files: FILES_DATA.files,
     retired: FILES_DATA.retired,
     reservedLabels: RESERVED,
+    securityLabel: SECURITY,
     private: isPrivate,
   };
 }
@@ -161,6 +163,11 @@ describe("planCi", () => {
       private: false,
       codeqlLanguages: ["javascript-typescript", "python"],
       trackingLabels: ["docs-link-rot", "fuzz-nightly", "nightly-failure", "security-nightly"],
+      securityLabel: {
+        name: "security-nightly",
+        color: "1d76db",
+        description: "Automated nightly security scan findings",
+      },
       weekly: true,
     });
     expect(outputsOf(plan)).toEqual({
@@ -168,6 +175,9 @@ describe("planCi", () => {
       "private": "false",
       "codeql-languages": '["javascript-typescript","python"]',
       "tracking-labels": "docs-link-rot,fuzz-nightly,nightly-failure,security-nightly",
+      "security-label": "security-nightly",
+      "security-label-color": "1d76db",
+      "security-label-description": "Automated nightly security scan findings",
       "weekly": "true",
     });
   });
@@ -208,6 +218,9 @@ describe("planCi", () => {
       "private": "false",
       "codeql-languages": "[]",
       "tracking-labels": "security-nightly",
+      "security-label": "security-nightly",
+      "security-label-color": "1d76db",
+      "security-label-description": "Automated nightly security scan findings",
       "weekly": "false",
     });
   });
@@ -315,7 +328,7 @@ describe("planSite", () => {
     expect(planSite(input(text))).toEqual({
       siteTitle: "Demo Project",
       docs: { path: "manual", include },
-      linkRotLabel: "rot",
+      linkRot: { name: "rot", color: "D4A72C", description: "Automated docs-site link-rot report" },
     });
     expect(outputsOf(planSite(input(text)))).toEqual({
       config: JSON.stringify({
@@ -323,6 +336,8 @@ describe("planSite", () => {
         docs_path: "manual",
         include,
         link_rot_label: "rot",
+        link_rot_color: "D4A72C",
+        link_rot_description: "Automated docs-site link-rot report",
       }),
     });
   });
@@ -330,16 +345,24 @@ describe("planSite", () => {
   test("a bare selection takes every default: the project name as the title, files.yml's path, no include roots, the stream's default label", () => {
     expect(outputsOf(planSite(input("modules: [site]")))).toEqual({
       config:
-        '{"site_title":"Demo Project","docs_path":"docs","include":[],"link_rot_label":"docs-link-rot"}',
+        '{"site_title":"Demo Project","docs_path":"docs","include":[],"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}',
     });
   });
 
   test("site.path: null plans no docs half: the config carries a null docs_path for the website alone", () => {
     const plan = planSite(input("modules: [site]\nsite: { path: null }"));
-    expect(plan).toEqual({ siteTitle: "Demo Project", docs: null, linkRotLabel: "docs-link-rot" });
+    expect(plan).toEqual({
+      siteTitle: "Demo Project",
+      docs: null,
+      linkRot: {
+        name: "docs-link-rot",
+        color: "D4A72C",
+        description: "Automated docs-site link-rot report",
+      },
+    });
     expect(outputsOf(plan)).toEqual({
       config:
-        '{"site_title":"Demo Project","docs_path":null,"include":[],"link_rot_label":"docs-link-rot"}',
+        '{"site_title":"Demo Project","docs_path":null,"include":[],"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}',
     });
   });
 
@@ -404,7 +427,7 @@ describe("plan.ts as a child", () => {
     };
   }
 
-  test("default mode writes the five fleet-ci rows and echoes them", () => {
+  test("default mode writes the fleet-ci rows and echoes them", () => {
     const result = run(
       { ".repo-platform.yml": `modules: [bun, fuzzer, release-please]\n${PROJECT}` },
       { PRIVATE: "false" },
@@ -416,6 +439,9 @@ describe("plan.ts as a child", () => {
         "private=false",
         'codeql-languages=["javascript-typescript"]',
         "tracking-labels=fuzz-nightly,security-nightly",
+        "security-label=security-nightly",
+        "security-label-color=1d76db",
+        "security-label-description=Automated nightly security scan findings",
         `weekly=${new Date().getUTCDay() === 1}`,
         "",
       ].join("\n"),
@@ -445,7 +471,7 @@ describe("plan.ts as a child", () => {
     );
     expect(result.exitCode).toBe(0);
     expect(result.output).toBe(
-      'config={"site_title":"Site","docs_path":"docs","include":[{"path":"skills","mount":"skills","page":"SKILL.md"}],"link_rot_label":"docs-link-rot"}\n',
+      'config={"site_title":"Site","docs_path":"docs","include":[{"path":"skills","mount":"skills","page":"SKILL.md"}],"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}\n',
     );
   });
 
@@ -548,6 +574,9 @@ describe("plan.ts as a child", () => {
         "private=false",
         "codeql-languages=[]",
         "tracking-labels=docs-link-rot,security-nightly",
+        "security-label=security-nightly",
+        "security-label-color=1d76db",
+        "security-label-description=Automated nightly security scan findings",
         `weekly=${new Date().getUTCDay() === 1}`,
         "",
       ].join("\n"),
@@ -558,7 +587,7 @@ describe("plan.ts as a child", () => {
     );
     expect(site.exitCode).toBe(0);
     expect(site.output).toBe(
-      'config={"site_title":"Demo Project","docs_path":"manual","include":[],"link_rot_label":"docs-link-rot"}\n',
+      'config={"site_title":"Demo Project","docs_path":"manual","include":[],"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}\n',
     );
     const missingPath = join(dir, "missing-path.yml");
     writeFileSync(missingPath, real.replace("    path: docs\n", ""));

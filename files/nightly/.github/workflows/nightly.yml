@@ -54,9 +54,8 @@ jobs:
           mode: report
           label: "{{nightly_label}}"
           title: Nightly CI failures
-          # The create tuple is anchored to files.yml's nightly tracking_label by check_ssot's labels rule.
-          label-color: "D93F0B"
-          label-description: Automated nightly CI failure
+          label-color: "{{nightly_label_color}}"
+          label-description: "{{nightly_label_description}}"
           stream: generic
 
       - name: Close the nightly issue on a green night

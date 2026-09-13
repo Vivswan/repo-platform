@@ -115,7 +115,8 @@ describe("the page index under the action's build topology", () => {
           RUNNER_TEMP: join(root, "runner-temp"),
           CHECK: "true",
           SITE_DIR: "",
-          CONFIG: '{"site_title": "t", "docs_path": "docs", "include": [], "link_rot_label": ""}',
+          CONFIG:
+            '{"site_title": "t", "docs_path": "docs", "include": [], "link_rot_label": "", "link_rot_color": "", "link_rot_description": ""}',
         },
         timeoutMs: 180_000,
       });

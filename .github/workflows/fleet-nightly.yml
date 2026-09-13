@@ -18,6 +18,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       private: ${{ steps.plan.outputs.private }}
+      security-label: ${{ steps.plan.outputs.security-label }}
+      security-label-color: ${{ steps.plan.outputs.security-label-color }}
+      security-label-description: ${{ steps.plan.outputs.security-label-description }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,21 +62,19 @@ jobs:
         uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
-          label: security-nightly
+          label: ${{ needs.plan.outputs.security-label }}
           title: Nightly security scan findings
           artifacts-dir: ${{ steps.scan.outputs.report-dir }}
           artifact-name: trivy-findings-${{ github.run_attempt }}
-          # The stream's create tuple, anchored to the settings baseline's
-          # label by check_ssot's labels rule.
-          label-color: "1d76db"
-          label-description: Automated nightly security scan findings
+          label-color: ${{ needs.plan.outputs.security-label-color }}
+          label-description: ${{ needs.plan.outputs.security-label-description }}
           stream: generic
       - name: Close the security issue on a clean night
         if: steps.scan.outputs.found == 'false'
         uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
           mode: resolve
-          label: security-nightly
+          label: ${{ needs.plan.outputs.security-label }}
           stream: generic
       # Personal-account code scanning is public-only.
       - name: Upload the SARIF to code scanning

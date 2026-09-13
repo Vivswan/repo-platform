@@ -17,7 +17,7 @@ This stream passes no `artifacts-dir`, so the [fuzz-issue action](tracking-issue
 
 | Key in `.repo-platform.yml` | Meaning | Default |
 |---|---|---|
-| `labels.nightly` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | `nightly-failure` |
+| `labels.nightly` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | the nightly module's `tracking_label` default in [files.yml](../files.yml) |
 
 The label is a registration key rather than a starter edit alone; [Tracking issues: the label is the stream](tracking-issues.md#the-label-is-the-stream) has the reasoning, the reserved-name rules, and why `labels.nightly` must differ from `labels.fuzzer`.
 
