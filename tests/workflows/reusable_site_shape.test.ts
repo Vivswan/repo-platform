@@ -228,6 +228,7 @@ describe("reusable-site.yml", () => {
     expect(usesIndex("actions/deploy-pages@")).toBeLessThan(stepIndex((s) => s.id === "links"));
     expect(links?.with).toEqual({
       workingDirectory: "${{ steps.site.outputs.site-dir }}",
+      token: "",
       args: [
         "--no-progress",
         "--root-dir ${{ steps.site.outputs.site-dir }}",

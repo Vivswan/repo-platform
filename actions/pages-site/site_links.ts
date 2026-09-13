@@ -27,10 +27,10 @@ function sitePath(url: string): string | null {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
-/** Every HTML page (`.html` or `.htm`, as Pages serves both) in the site,
- *  as server-root-relative paths. Each one seeds the crawl: version tiers
- *  are navigated through a <select>, not anchors, so a crawl from the
- *  root alone would never reach them. */
+/** Every HTML page (`.html` or `.htm`, as Pages serves both) in the site.
+ *  Each page of a strict tier seeds the crawl: version tiers are navigated
+ *  through a <select>, not anchors, so a crawl from the root alone would
+ *  never reach them. */
 export function walkHtml(dir: string, prefix = ""): string[] {
   const pages: string[] = [];
   for (const name of readdirSync(join(dir, prefix)).sort()) {

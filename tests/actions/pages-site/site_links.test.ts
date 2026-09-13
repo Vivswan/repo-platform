@@ -337,7 +337,7 @@ describe("checkSiteLinks", () => {
 });
 
 describe("walkHtml", () => {
-  test("enumerates every page, .htm included, so unlinked version tiers still seed the crawl", () => {
+  test("enumerates every page, .htm included, so every page of a strict tier can seed the crawl", () => {
     const dir = temp.dir("site-");
     mkdirSync(join(dir, "v1.0.0", "assets"), { recursive: true });
     writeFileSync(join(dir, "index.html"), "<html></html>");

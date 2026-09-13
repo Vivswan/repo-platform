@@ -128,14 +128,19 @@ jobs:
       # ones were fatal at assembly), on the schedule alone so a fixed link
       # closes the issue on the next clean night, never on a push. Green
       # whatever lychee finds (fail: false): the deploy has shipped, so
-      # findings become the tracking issue below. lychee's own empty-run
-      # guard still fails the step when the site held no link to judge.
+      # findings become the tracking issue below. lychee-action still fails
+      # the step when lychee extracted no link at all (excluded ones count).
       - name: Check external links
         id: links
         if: github.event_name == 'schedule' && steps.site.outputs.publish == 'true' && steps.site.outputs.link-rot-label != ''
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           workingDirectory: ${{ steps.site.outputs.site-dir }}
+          # Anonymous on purpose: given a token, lychee answers a 404 on a
+          # github.com URL by asking the API, which calls a private repository
+          # alive whatever the path. A deleted deep link into this repository
+          # would then read as fixed and close the link-rot issue.
+          token: ""
           # http(s) links alone and none of the site's own: relative links
           # resolve to files under --root-dir, absolute ones match own_links,
           # and the assembly judged both against the artifact. The theme's
