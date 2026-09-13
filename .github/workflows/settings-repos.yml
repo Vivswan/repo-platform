@@ -171,7 +171,7 @@ jobs:
       # this checkout's own document.
       - name: Apply repository settings
         if: env.TARGET != ''
-        uses: Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84 # v2.0.0
+        uses: Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a # next: 2.0.1-main.450.20260913.g131780e
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}

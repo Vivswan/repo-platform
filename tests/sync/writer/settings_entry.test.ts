@@ -141,9 +141,12 @@ const held = (overrides: Partial<SettingsRenderInput>) => {
   return "held" in result ? result.held : `rendered:\n${result.content}`;
 };
 
-const names = (list: unknown) => (list as { name: string }[]).map((entry) => entry.name);
+/** A name-keyed section's entries out of the fold's `{entries, _undeclared}` wrapper. */
+const entries = (section: unknown) =>
+  (section as { entries: Record<string, unknown>[] } | undefined)?.entries;
+const names = (section: unknown) => (entries(section) ?? []).map((entry) => entry.name);
 const ruleset = (doc: Record<string, unknown>, name: string) =>
-  (doc.rulesets as Record<string, unknown>[]).find((entry) => entry.name === name);
+  entries(doc.rulesets)?.find((entry) => entry.name === name);
 
 describe("renderSettings", () => {
   test("folds the layers low to high for a public selection, the override last", () => {
@@ -163,8 +166,12 @@ describe("renderSettings", () => {
       allow_merge_commit: false,
       squash_merge_commit_title: "PR_TITLE",
     });
-    // Baseline, then each selected module's layer in files.yml order.
+    // Baseline, then each selected module's layer in files.yml order, in the
+    // wrapper form the apply reads: undeclared labels are deleted, undeclared
+    // rulesets kept, both spelled out by the fold.
     expect(names(doc.labels)).toEqual(["bug", "dependencies", "javascript", "rust"]);
+    expect(doc.labels).toMatchObject({ _undeclared: "delete" });
+    expect(doc.rulesets).toMatchObject({ _undeclared: "keep" });
     // Baseline ruleset, the public overlay's main entry grown by the module
     // layer and the override, then the overlay's own.
     expect(names(doc.rulesets)).toEqual(["pr-title", "main", "release-branches"]);
@@ -253,7 +260,7 @@ describe("renderSettings", () => {
         "",
       ].join("\n"),
     });
-    expect((doc.labels as unknown[])[0]).toEqual({
+    expect(entries(doc.labels)?.[0]).toEqual({
       name: "bug",
       color: "000000",
       description: "Restyled",
@@ -267,7 +274,7 @@ describe("renderSettings", () => {
       modules: ["bun", "fuzzer", "nightly"],
       registration: registration("modules: [bun, fuzzer, nightly]\nlabels: {fuzzer: fuzz-me}\n"),
     });
-    expect(doc.labels).toEqual([
+    expect(entries(doc.labels)).toEqual([
       { name: "bug", color: "d73a4a", description: "Something isn't working" },
       { name: "dependencies", color: "0366d6", description: "Dependency updates" },
       { name: "javascript", color: "168700", description: "JS updates" },
@@ -276,7 +283,12 @@ describe("renderSettings", () => {
     ]);
   });
 
-  test.each<{ reason: string; modules: string[]; overlay: string; labels: unknown }>([
+  test.each<{
+    reason: string;
+    modules: string[];
+    overlay: string;
+    labels: Record<string, unknown>[] | undefined;
+  }>([
     {
       reason: "labels: null with a tracking stream renders no labels key",
       modules: ["fuzzer"],
@@ -307,20 +319,10 @@ describe("renderSettings", () => {
       overlay,
       registration: registration(`modules: [${modules}]\n`),
     });
-    expect(doc.labels).toEqual(labels);
+    expect(entries(doc.labels)).toEqual(labels);
     expect(names(doc.rulesets)).toEqual(
       overlay === "" ? ["pr-title", "main"] : ["pr-title", "main", "release-branches"],
     );
-  });
-
-  test("an overlay label without a name rides through for the apply to refuse", () => {
-    const { doc } = rendered({ overlay: `${OVERLAY}labels:\n  - {color: fff}\n` });
-    expect(doc.labels).toEqual([
-      { name: "bug", color: "d73a4a", description: "Something isn't working" },
-      { name: "dependencies", color: "0366d6", description: "Dependency updates" },
-      { name: "javascript", color: "168700", description: "JS updates" },
-      { color: "fff" },
-    ]);
   });
 
   test("a layer naming one label twice is the operator's error: the render throws, naming the layer", () => {
@@ -331,14 +333,65 @@ describe("renderSettings", () => {
         'labels:\n  - {name: javascript, color: "168700"}\n  - {name: JavaScript, color: "168700"}\n',
     });
     expect(() => renderSettings(input({ tree: damaged }))).toThrow(
-      `${join(damaged, "bun/settings.yml")}: labels "javascript" and "JavaScript" are one name to the merge; a layer declares each name once`,
+      `layer "${join(damaged, "bun/settings.yml")}": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer`,
     );
   });
 
-  test("an alias reused without a cycle renders the shared value at both keys", () => {
-    const { doc } = rendered({ overlay: "repository: &r {description: Mine}\ncopy: *r\n" });
+  test("two fleet layers valid alone but not together are the operator's error: the render throws, never holds", () => {
+    // Each layer passes its own judgment; only the fold refuses. The overlay
+    // is the one per-repository input, so a fold the fleet layers alone
+    // already fail cannot be the repository's to fix.
+    const conflicting = tree({
+      ...LAYERS,
+      "settings/baseline.yml": `${LAYERS["settings/baseline.yml"]}actions: {allowed_actions: all}\n`,
+      "settings/public.yml": `${LAYERS["settings/public.yml"]}actions: {selected_actions: {github_owned_allowed: true}}\n`,
+    });
+    expect(() => renderSettings(input({ tree: conflicting }))).toThrow(
+      "the fleet settings layers has malformed section entries: actions.selected_actions",
+    );
+  });
+
+  test("a fleet label renaming into a tracking label's name reserves that name too", () => {
+    // The library pairs a renaming label by both names, so without the
+    // reservation the tracking layer would replace the fleet's rename and
+    // the apply would delete the old label instead of renaming it.
+    const renaming = tree({
+      ...LAYERS,
+      "settings/baseline.yml": LAYERS["settings/baseline.yml"].replace(
+        "{name: bug, color: d73a4a,",
+        "{name: bug, new_name: Fuzz-Nightly, color: d73a4a,",
+      ),
+    });
+    expect(
+      held({
+        tree: renaming,
+        modules: ["bun", "fuzzer"],
+        registration: registration("modules: [bun, fuzzer]\n"),
+      }),
+    ).toBe(
+      'tracking label "fuzz-nightly" (fuzzer) is a label the platform already manages; a green night would close whatever issues carry it and every settings apply would fight over it',
+    );
+  });
+
+  test("an undeclared-policy knob in the overlay is the repository's choice and rides through", () => {
+    const { doc } = rendered({ overlay: `${OVERLAY}labels: {_undeclared: keep, entries: []}\n` });
+    expect(names(doc.labels)).toEqual(["bug", "dependencies", "javascript"]);
+    expect(doc.labels).toMatchObject({ _undeclared: "keep" });
+  });
+
+  test("a private note carrying the directive's name is a note, not a directive", () => {
+    // Only a section wrapper or the top level can carry `_layering`; any
+    // other `_`-prefixed key is the library's private-note space and is
+    // dropped from the render.
+    const { doc } = rendered({ overlay: `${OVERLAY}_notes: {_layering: why this layer exists}\n` });
+    expect(doc).not.toHaveProperty("_notes");
+    expect(names(doc.labels)).toEqual(["bug", "dependencies", "javascript"]);
+  });
+
+  test("an alias reused without a cycle is legal; a private note is not rendered", () => {
+    const { doc } = rendered({ overlay: "repository: &r {description: Mine}\n_notes: *r\n" });
     expect((doc.repository as Record<string, unknown>).description).toBe("Mine");
-    expect(doc.copy).toEqual({ description: "Mine" });
+    expect(doc).not.toHaveProperty("_notes");
   });
 
   test("two renders of the same inputs are byte-identical, long descriptions unwrapped", () => {
@@ -352,7 +405,7 @@ describe("renderSettings", () => {
     expect(first.text).toContain(`description: ${long}\n`);
   });
 
-  test.each<{ reason: string; overrides: Partial<SettingsRenderInput>; detail: string }>([
+  test.each<{ reason: string; overrides: Partial<SettingsRenderInput>; detail: unknown }>([
     {
       reason: "no overlay",
       overrides: { overlay: null },
@@ -362,23 +415,45 @@ describe("renderSettings", () => {
       reason: "a malformed overlay",
       overrides: { overlay: "labels: {bug: x}\n" },
       detail:
-        ".github/settings.local.yml: labels: labels must be a list of mappings, got a mapping. " +
-        "The merge unions labels by name; any other shape would replace the managed labels " +
-        "wholesale, and the apply would silently enforce less than the layers declare. Declare " +
-        "each entry as a '- name: ...' list item.",
+        'layer ".github/settings.local.yml": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
     },
     {
       reason: "an overlay whose alias names its own ancestor",
       overrides: { overlay: "repository: &r {self: *r}\n" },
       detail:
-        ".github/settings.local.yml: a cyclic alias at repository.self - the document contains itself and cannot be merged",
+        'layer ".github/settings.local.yml": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees',
     },
     {
       reason: "an overlay declaring one label twice",
       overrides: {
         overlay: `${OVERLAY}labels:\n  - {name: mine, color: "000000"}\n  - {name: Mine, color: "000000"}\n`,
       },
-      detail: `the repository's .github/settings.local.yml declares labels "mine" and "Mine", which the apply treats as one name - only the first entry takes effect in the merge; remove the duplicate`,
+      detail:
+        'layer ".github/settings.local.yml": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer',
+    },
+    {
+      // Formerly rode through to the apply, which refused it by name; the
+      // library's boundary refuses it where the repository can read why.
+      reason: "an overlay label without a name",
+      overrides: { overlay: `${OVERLAY}labels:\n  - {color: fff}\n` },
+      detail:
+        'layer ".github/settings.local.yml": labels[0] carries no string "name", which every entry needs to layer by',
+    },
+    {
+      reason: "an overlay naming a section the apply does not know",
+      overrides: { overlay: `${OVERLAY}labels_v2: []\n` },
+      detail: expect.stringContaining(
+        "unknown top-level section(s) in .github/settings.local.yml: labels_v2",
+      ),
+    },
+    {
+      // Legal at the layer boundary (a null is an opt-out marker until the
+      // fold sees what it meets); the fold names the overlay.
+      reason: "an overlay nulling a section the apply does not know",
+      overrides: { overlay: `${OVERLAY}labels_v2: null\n` },
+      detail: expect.stringContaining(
+        "unknown top-level section(s) in .github/settings.local.yml: labels_v2",
+      ),
     },
     {
       reason: "a tracking label the layers already manage",
@@ -407,6 +482,32 @@ describe("renderSettings", () => {
         'tracking label "same" is shared by two streams (GitHub label names are case-insensitive); each stream needs its own',
     },
     {
+      // The library pairs a renaming label by BOTH its names, so the tracking
+      // layer would replace the whole entry and the rename would vanish.
+      reason: "an overlay label renaming into a tracking label's name",
+      overrides: {
+        modules: ["bun", "fuzzer"],
+        registration: registration("modules: [bun, fuzzer]\n"),
+        overlay: `${OVERLAY}labels:\n  - {name: old-fuzz, new_name: Fuzz-Nightly, color: "000000"}\n`,
+      },
+      detail:
+        'the repository\'s .github/settings.local.yml declares label "old-fuzz", one name to GitHub with the tracking label "fuzz-nightly" (label names are case-insensitive, and a rename claims both its names); rename one',
+    },
+    {
+      // `_layering: replace` would drop the fleet roster and have the apply
+      // delete every managed label; the fleet's sections union by name.
+      reason: "an overlay re-layering a section",
+      overrides: { overlay: `${OVERLAY}labels: {_layering: replace, entries: [{name: mine}]}\n` },
+      detail:
+        "the repository's .github/settings.local.yml declares _layering under labels; the fleet's sections union by name and only labels: null opts out",
+    },
+    {
+      reason: "an overlay re-layering every section",
+      overrides: { overlay: `_layering: replace\n${OVERLAY}` },
+      detail:
+        "the repository's .github/settings.local.yml declares _layering at the top level; the fleet's sections union by name and only labels: null opts out",
+    },
+    {
       reason: "an overlay label colliding with a tracking label",
       overrides: {
         modules: ["bun", "fuzzer"],
@@ -414,9 +515,9 @@ describe("renderSettings", () => {
         overlay: `${OVERLAY}labels:\n  - {name: Fuzz-Nightly, color: "000000", description: mine}\n`,
       },
       detail:
-        'the repository\'s .github/settings.local.yml declares label "Fuzz-Nightly", one name to GitHub with the tracking label "fuzz-nightly" (label names are case-insensitive); rename one',
+        'the repository\'s .github/settings.local.yml declares label "Fuzz-Nightly", one name to GitHub with the tracking label "fuzz-nightly" (label names are case-insensitive, and a rename claims both its names); rename one',
     },
   ])("holds on $reason", ({ overrides, detail }) => {
-    expect(held(overrides)).toBe(detail);
+    expect<unknown>(held(overrides)).toEqual(detail);
   });
 });

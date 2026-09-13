@@ -1,5 +1,5 @@
 # pinact judges every third-party pin in this checkout and in the written fleet trees (ci.yml's actionlint job);
-# these are the only two refs that are not release pins by design, so pinact skips exactly them.
+# these are the only three refs that are not release pins by design, so pinact skips exactly them.
 version: 3
 rules:
   # The platform's own actions and reusable workflows ride the delivery ref, which the fleet-refs-ride-stable ssot rule judges;
@@ -14,3 +14,9 @@ rules:
   - ignore: true
     conditions:
       - expr: ActionRepoFullName == "Vivswan/skills" && ActionVersion matches "^[0-9a-f]{40}$"
+  # The settings apply runs the packaged build of the library version the writer folds with (its `next` channel, no
+  # release tag until the library cuts one); its `next: <version>` comment is no version comment to pinact, so the one
+  # commit is the whole condition, and the settings-apply-library-pin ssot rule holds the pin's comment to bun.lock's version.
+  - ignore: true
+    conditions:
+      - expr: ActionRepoFullName == "Vivswan/github-settings-as-code" && ActionVersion == "10b426595c44ad6427bdbd3d7020b2f4da2ddc5a"

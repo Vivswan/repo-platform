@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { ALL_GREEN_ROSTER } from "../../scripts/check/ssot/all_green.ts";
 import { DELIVERY_REF, extractUsesPins } from "../../scripts/check/ssot/delivery_pins.ts";
+import { SETTINGS_ACTION_USES } from "../../scripts/check/ssot/settings_workflow.ts";
 
 interface Step {
   name?: string;
@@ -89,6 +90,16 @@ test("the actionlint job installs one checksummed pinact release and verifies ev
         conditions: [
           {
             expr: 'ActionRepoFullName == "Vivswan/skills" && ActionVersion matches "^[0-9a-f]{40}$"',
+          },
+        ],
+      },
+      // The one commit the settings apply pins (settings_workflow.ts SETTINGS_ACTION_USES), so a moved pin
+      // is judged again until this line moves with it.
+      {
+        ignore: true,
+        conditions: [
+          {
+            expr: `ActionRepoFullName == "Vivswan/github-settings-as-code" && ActionVersion == "${SETTINGS_ACTION_USES.split("@")[1].split(" ")[0]}"`,
           },
         ],
       },
