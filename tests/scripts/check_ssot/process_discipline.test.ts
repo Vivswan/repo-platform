@@ -469,9 +469,9 @@ describe("asyncSpawnMismatches", () => {
     // the file's name is not in the enumeration, and nothing but a
     // reviewed entry can satisfy that.
     const rewritten = 'const proc = Bun.spawn(["bun", entry], { stdout: "pipe" });\n';
-    const found = asyncSpawnMismatches("tests/shared/flags.test.ts", rewritten, false);
+    const found = asyncSpawnMismatches("tests/sync/writer/flags.test.ts", rewritten, false);
     expect(found).toHaveLength(1);
-    expect(found[0].file).toBe("tests/shared/flags.test.ts:1");
+    expect(found[0].file).toBe("tests/sync/writer/flags.test.ts:1");
   });
 
   test("an enumerated file with a site passes; one with none left is a stale entry", () => {

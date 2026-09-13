@@ -9,7 +9,6 @@ import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
-import { moduleRoster } from "../sync/modules.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { ROWS_FILE } from "../sync/verdict.ts";
 import {
@@ -22,6 +21,7 @@ import {
   scrubSlug,
   selectedLine,
 } from "./discovery.ts";
+import { moduleRoster } from "./modules.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import {
   modulesAdmit,

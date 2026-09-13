@@ -1,4 +1,4 @@
-import { fail } from "./gha.ts";
+import { fail } from "../../shared/gha.ts";
 
 function isAllowed<K extends string>(flag: string, allowed: readonly K[]): flag is K {
   return allowed.some((candidate) => candidate === flag);

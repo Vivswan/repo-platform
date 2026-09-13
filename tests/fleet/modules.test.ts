@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { FILES_CONFIG, moduleRoster } from "../../.github/scripts/sync/modules";
+import { FILES_CONFIG, moduleRoster } from "../../.github/scripts/fleet/modules";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();

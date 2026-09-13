@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { notAdoptedNotice, pushProbeSkipNotice } from "../../.github/scripts/fleet/discovery.ts";
-import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
+import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
 import { tempDirs } from "../shared/temp_dir";

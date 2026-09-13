@@ -10,7 +10,6 @@ import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { addMask, env, error, fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
-import { moduleRoster } from "../sync/modules.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../sync/writer/settings_entry.ts";
 import {
@@ -25,6 +24,7 @@ import {
   scrubSlug,
   selectedLine,
 } from "./discovery.ts";
+import { moduleRoster } from "./modules.ts";
 import { supersededBy, supersededNotice } from "./newest_main.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import {

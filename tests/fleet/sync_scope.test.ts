@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import {
   classifyEntry,
   modulesAdmit,
@@ -9,7 +10,6 @@ import {
   scopeRefusal,
   scopeSelects,
 } from "../../.github/scripts/fleet/sync_scope.ts";
-import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
 
 // The real roster: the filter tests name real modules so a renamed module
 // fails here, not in a fleet run.

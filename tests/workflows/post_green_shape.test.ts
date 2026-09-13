@@ -265,7 +265,7 @@ describe("post-green wiring", () => {
     //   fetch-depth: 0          -> the tag's previous commit can sit many commits below the judged one
     const readSteps = jobs["read-directives"].steps ?? [];
     const readStep = readSteps.find((step) =>
-      (step.run ?? "").includes("fleet/fleet_sync_marker.ts"),
+      (step.run ?? "").includes("post-green/fleet_sync_marker.ts"),
     );
     if (readStep === undefined) throw new Error("read-directives has no fleet_sync_marker.ts step");
     const checkout = readSteps.find((step) => (step.uses ?? "").startsWith("actions/checkout@"));

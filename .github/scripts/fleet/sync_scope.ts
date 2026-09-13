@@ -29,7 +29,7 @@ export type Scope =
   | { kind: "list"; visibility: Set<Visibility>; slugs: Set<string>; modules: Set<string>[] };
 
 /** Messages carry counts, never entries: a dispatch entry may be a private slug and the caller's log is public. A filter naming a
- *  module outside `roster` (sync/modules.ts's moduleRoster) is refused here, before any repository is probed. */
+ *  module outside `roster` (modules.ts's moduleRoster) is refused here, before any repository is probed. */
 export function parseScope(
   raw: string,
   roster: ReadonlySet<string>,

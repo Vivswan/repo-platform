@@ -4,9 +4,9 @@
 // pull request's labels; a commit no pull request produced (a direct push) carries none (docs/all-green.md).
 
 import { z } from "zod";
+import { captureNetwork } from "../fleet/discovery.ts";
 import { fail, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
-import { captureNetwork } from "./discovery.ts";
 import {
   type DiffBase,
   judgedRangeEnv,
