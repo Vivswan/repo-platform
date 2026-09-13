@@ -390,14 +390,16 @@ describe("overrideFromPullRequest", () => {
       JSON.stringify({ pull_request: { number: 8, labels: [{ name: "release-override" }] } }),
     );
     const { run } = fakeGh({});
-    expect(overrideFromPullRequest(run, REPO, path, "release-override")).rejects.toThrow(
+    await expect(overrideFromPullRequest(run, REPO, path, "release-override")).rejects.toThrow(
       "gh pr view failed",
     );
   });
 
   test("malformed pr view JSON propagates as an error", async () => {
     const run: GhRunner = async () => "not json";
-    expect(overrideFromPullRequest(run, REPO, eventPath, "release-override")).rejects.toThrow();
+    await expect(
+      overrideFromPullRequest(run, REPO, eventPath, "release-override"),
+    ).rejects.toThrow();
   });
 
   test("no label on the live PR means no override, naming the PR", async () => {
@@ -523,12 +525,12 @@ describe("findReleasePr", () => {
         },
       ],
     });
-    expect(findReleasePr(run, REPO, "abc123")).rejects.toThrow("#4, #6");
+    await expect(findReleasePr(run, REPO, "abc123")).rejects.toThrow("#4, #6");
   });
 
   test("malformed commit-pulls JSON propagates as an error", async () => {
     const run: GhRunner = async () => "not json";
-    expect(findReleasePr(run, REPO, "abc123")).rejects.toThrow();
+    await expect(findReleasePr(run, REPO, "abc123")).rejects.toThrow();
   });
 });
 
@@ -726,13 +728,15 @@ describe("runHealthCheck", () => {
       prViewLabels: [],
     });
     const { out, lines, setOutput } = collect();
-    expect(runHealthCheck(prConfig(), run, out, setOutput)).rejects.toThrow("HTTP 403");
+    await expect(runHealthCheck(prConfig(), run, out, setOutput)).rejects.toThrow("HTTP 403");
     expect(lines).toEqual([]);
   });
 
   test("a failed override lookup errors the run instead of gating blind", async () => {
     const { run } = fakeGh({ issues: {}, alerts: [], prViewLabels: undefined });
     const { out, setOutput } = collect();
-    expect(runHealthCheck(prConfig(), run, out, setOutput)).rejects.toThrow("gh pr view failed");
+    await expect(runHealthCheck(prConfig(), run, out, setOutput)).rejects.toThrow(
+      "gh pr view failed",
+    );
   });
 });
