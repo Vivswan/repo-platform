@@ -254,7 +254,7 @@ describe("select_sync_repos.ts", () => {
   );
 
   // The scope as the call input passes it (ONLY_REPO; post-green's sync-fleet leg sends `public`
-  // or `all`). Whole outcome per row.
+  // or `all`).
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
   const UNADOPTED = `::notice::${notAdoptedNotice("Vivswan/unadopted")}`;
   const LOCKED = `::notice::${pushProbeSkipNotice("a private repository")}`;

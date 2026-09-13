@@ -510,7 +510,7 @@ describe("select_settings_repos.ts", () => {
   );
 
   // The scope as the call input passes it (ONLY_REPO; post-green's settings-fleet leg sends
-  // `all`). Whole outcome per scope.
+  // `all`).
   test.each<{ reason: string; scope: string; repos: string[]; stdout: string; summary: string }>([
     {
       reason: "a public slug selects it alone, and slugs alone never probe other repos",
