@@ -146,7 +146,7 @@ type Standing = { kind: MirrorKind; carries: Buffer } | null;
 
 type Pass = "literal" | "glob";
 
-/** A pass's failures are thrown before any target of that pass is written, so no PR carries a repository half-mirrored. Literal targets
+/** A pass's declaration failures are thrown before any target of that pass is written, so no PR carries a repository half-mirrored. Literal targets
  *  are written before any `*` pattern expands, so a directory a literal creates is matched in the same run. `owned` is what files.yml
  *  claims here plus the stale records the run retires; `records` are the previous sync's, read for the last mirror hash. */
 export function applyMirrors(

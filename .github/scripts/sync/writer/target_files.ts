@@ -84,7 +84,7 @@ export function writeFile(target: string, path: string, bytes: Buffer): void {
   writeFileSync(abs, bytes);
 }
 
-/** A regular file at the path is refused; the caller removes one it has judged its own first. */
+/** A regular file at the path is refused; a caller that means to replace one removes it first. */
 export function writeLink(target: string, path: string, linkTarget: string): void {
   const abs = insideTarget(target, path);
   const stat = lstatOrNull(abs);
