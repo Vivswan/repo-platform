@@ -1,0 +1,46 @@
+// The fleet's commit grammar: @commitlint/config-conventional plus one scope per subject. Both feeders of the action
+// (the commit-names step over a range, the pr-title workflow over the title) and this repository's commit-msg hook
+// run commitlint over this file: the grammar has one home.
+//
+// header/body/footer line caps off -> the fleet's titles run long by house style, the house style never hard-wraps a
+// commit body, and a squash body carries PR text
+
+import isIgnored from "@commitlint/is-ignored";
+
+// The comma case is named: a committer read `style(contract,tests): ...` refused by the bare grammar as a validator
+// bug. Judged on the scope as the parser reads it, which is how release-please (the same parser) will read the
+// landed subject: `fix(a):(c): x` carries the scope `a):(c`, `fix(core): handle fn(): safely` the scope
+// `core): handle fn(`. The parser reads `fix(): x` as no scope at all, so an empty pair is read off the header.
+const scopeToken = /^[A-Za-z0-9._/-]+$/;
+
+const scopeOne = (parsed) => {
+  const scope = parsed.scope ?? (/^\w*\(\)/.test(parsed.header ?? "") ? "" : null);
+  if (scope === null || scopeToken.test(scope)) return [true];
+  return [
+    false,
+    "one scope per subject, spelled [A-Za-z0-9._/-]: split the change or pick the scope that names it",
+  ];
+};
+
+// commitlint's own exemptions (merge, revert, fixup, squash, semver subjects), judged on the subject line alone: over
+// the whole message its merge pattern is multiline, so a body line `Merge branch topic` would exempt a bad subject.
+// The line ends where the parser's does (`\r?\n`), and one still holding a terminator that pattern's `^` honors is
+// exempt from nothing: cut at the `\r`, `1.2.3\rnot-a-version` was a version number; whole, the parser refuses it.
+const lineTerminator = /[\r\u2028\u2029]/;
+const subjectIgnored = (message) => {
+  const subject = message.split(/\r?\n/, 1)[0];
+  return !lineTerminator.test(subject) && isIgnored(subject);
+};
+
+export default {
+  extends: ["@commitlint/config-conventional"],
+  plugins: [{ rules: { "scope-one": scopeOne } }],
+  defaultIgnores: false,
+  ignores: [subjectIgnored],
+  rules: {
+    "scope-one": [2, "always"],
+    "header-max-length": [0],
+    "body-max-line-length": [0],
+    "footer-max-line-length": [0],
+  },
+};

@@ -26,6 +26,12 @@
         "@tree-sitter-grammars/tree-sitter-yaml"
       ]
     },
+    "actions/validate-commit-names": {
+      "entry": ["*.ts"],
+      "project": ["**/*.{ts,mts}"],
+      // commitlint.config.mjs names the preset in `extends` and commitlint's load() resolves it; nothing imports it.
+      "ignoreDependencies": ["@commitlint/config-conventional"]
+    },
     "actions/validate-managed-files": {
       // The two orchestrator scripts and the validator directory action.yml runs.
       "entry": ["src/run.ts", "src/report.ts", "validator/validate_managed_files.ts"],

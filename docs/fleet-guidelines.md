@@ -49,7 +49,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Conventional Commits, squash-merged
 
-- Rule: PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/); PRs squash-merge, so the PR title becomes the commit subject. One scope per subject: `fix(sync,writer): ...` is refused, so split the change or pick the scope that names it.
+- Rule: PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/) as [commitlint](https://commitlint.js.org/)'s config-conventional judges them, with one scope per subject; PRs squash-merge, so the PR title becomes the commit subject. Refused: a scope list (`fix(sync,writer): ...`: split the change or pick the scope that names it), a Sentence-case description (`fix: Repair installer`), a trailing period. Merge, revert, reapply, fixup, squash, amend, and bare version-number subjects are exempt (commitlint's default ignores, applied to the subject line); no line has a length cap.
 - Why: release-please derives versions and changelogs from the subjects.
 - How: `fix(sync): ...`, `feat(writer)!: ...`, `docs: ...`.
 - Enforced by: the [`pr-title` check](settings.md#the-pr-title-ruleset) on the PR title (pr-title module); the `commit-names` job (actions/validate-commit-names) on the subjects; squash-only merging with the PR title as subject is the [settings override layer](settings.md), applied to every managed repository.
@@ -149,7 +149,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | gitleaks | base-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
 | typography | base-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
 | file-size | base-checks | a hard-cap finding or an allowlist defect fails the step; the fleet-ci step carries `continue-on-error` for now, so the PR stays green (repo-platform's own ci.yml gates) | the path in the repo-owned `.file-size-allow.local` with a `# reason` (every finding on that path); a `comment-cap: ignore <reason>` line inside or above a comment block ([file size caps](#file-size-caps)) |
-| commit-names | base-checks | a non-conventional subject | none: reword the commit |
+| commit-names | base-checks | a subject commitlint refuses under config-conventional plus one scope ([the grammar](#conventional-commits-squash-merged)) | none: reword the commit |
 | typos | base-checks | any finding | an entry in the repo-owned `_typos.toml` (or `typos.toml`, `.typos.toml`), which typos layers under the fleet config: `[default.extend-words]` for the repository's vocabulary, `[files] extend-exclude` for fixture paths spelled wrong on purpose, `[default.extend-identifiers]` for one identifier; or `# typos: ignore` or `// typos: ignore` at the end of the line for a one-off |
 | zizmor | zizmor | a high finding (zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt runs once more and only the retry's result counts); code scanning shows high findings only | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it |
 | knip | knip (bun repos with a package.json to install from; a repo without one stands down with a notice) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
