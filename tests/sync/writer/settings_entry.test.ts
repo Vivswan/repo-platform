@@ -380,8 +380,9 @@ describe("renderSettings", () => {
   });
 
   test("a private note carrying the directive's name is a note, not a directive", () => {
-    // Only a section wrapper can carry `_layering`; a `_`-prefixed key is
-    // the library's private-note space and is dropped from the render.
+    // Only a section wrapper or the top level can carry `_layering`; any
+    // other `_`-prefixed key is the library's private-note space and is
+    // dropped from the render.
     const { doc } = rendered({ overlay: `${OVERLAY}_notes: {_layering: why this layer exists}\n` });
     expect(doc).not.toHaveProperty("_notes");
     expect(names(doc.labels)).toEqual(["bug", "dependencies", "javascript"]);
