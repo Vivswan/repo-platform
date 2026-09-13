@@ -379,6 +379,14 @@ describe("renderSettings", () => {
     expect(doc.labels).toMatchObject({ _undeclared: "keep" });
   });
 
+  test("a private note carrying the directive's name is a note, not a directive", () => {
+    // Only a section wrapper can carry `_layering`; a `_`-prefixed key is
+    // the library's private-note space and is dropped from the render.
+    const { doc } = rendered({ overlay: `${OVERLAY}_notes: {_layering: why this layer exists}\n` });
+    expect(doc).not.toHaveProperty("_notes");
+    expect(names(doc.labels)).toEqual(["bug", "dependencies", "javascript"]);
+  });
+
   test("an alias reused without a cycle is legal; a private note is not rendered", () => {
     const { doc } = rendered({ overlay: "repository: &r {description: Mine}\n_notes: *r\n" });
     expect((doc.repository as Record<string, unknown>).description).toBe("Mine");
