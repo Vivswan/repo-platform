@@ -559,15 +559,15 @@ describe("parity messages name what the record and the tree show, never who made
   test.each([
     {
       reason:
-        "a held retirement's hash-null record at a path no selected entry writes: a re-run retires it, and a mirror declared over it is refused",
+        "a hash-null managed record: a re-run stamps a selected write, retires a retired path as its row says, and holds a stale one",
       files: { "UNHASHED.md": "# unhashed notes\n" },
       links: {},
       entry: ["UNHASHED.md", '{"class": "managed", "hash": null}'],
       message:
         `UNHASHED.md: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
-        "verify the file against - the sync carries such a record as it found it: for a path a selected " +
-        `entry writes now, ${RESYNC}, and a write that goes through stamps the hash; otherwise delete the ` +
-        "file and its manifest entry",
+        `verify the file against - the sync carries such a record as it found it: ${RESYNC} and read its ` +
+        "report (a selected entry's write, when it goes through, stamps the hash; a path files.yml retires gets " +
+        "its Retired row; a stale path is held as it stands: delete the file and its manifest entry)",
     },
     {
       reason: "a symbolic link under a managed record",

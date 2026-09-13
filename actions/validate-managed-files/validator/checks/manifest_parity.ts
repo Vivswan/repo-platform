@@ -232,8 +232,9 @@ export function checkManifestParity(ctx: Context): Finding[] {
       const remedy =
         entry.class === "mirror"
           ? mirrorResync
-          : "the sync carries such a record as it found it: for a path a selected entry writes now, " +
-            `${RESYNC}, and a write that goes through stamps the hash; otherwise delete the file and its manifest entry`;
+          : `the sync carries such a record as it found it: ${RESYNC} and read its report (a selected entry's ` +
+            "write, when it goes through, stamps the hash; a path files.yml retires gets its Retired row; a stale " +
+            "path is held as it stands: delete the file and its manifest entry)";
       findings.push(
         error(
           `${rel}: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
