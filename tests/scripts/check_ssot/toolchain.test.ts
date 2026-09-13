@@ -395,10 +395,6 @@ ${RUN_STEP}`;
     expect(actionsBunGuardMismatches(FILE, text)).toEqual([]);
   });
 
-  test("the manifest walk sees nested actions", () => {
-    expect(actionManifestFiles()).toContain("actions/pages-site/check-links/action.yml");
-  });
-
   test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries one pinned bun setup", () => {
     // The live-file forcing test: handing check-typography's shared step
     // the CALLER's pin goes red here.

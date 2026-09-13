@@ -29,7 +29,6 @@ import {
   setOutput,
   tierStrictLinks,
 } from "../../../actions/pages-site/build.ts";
-import { collectBroken, reportBody, walkHtml } from "../../../actions/pages-site/check_links.ts";
 import {
   type DocsMount,
   type Layout,
@@ -592,90 +591,5 @@ describe("check mode with the docs half off", () => {
     expect(existsSync(join(realpathSync(join(root, "runner-temp")), "pages-site", "build-0"))).toBe(
       false,
     );
-  });
-});
-
-describe("link-rot reporting", () => {
-  test("walkHtml enumerates every page, .htm included, so unlinked version tiers still get crawled", () => {
-    const dir = temp.dir("site-");
-    mkdirSync(join(dir, "v1.0.0", "assets"), { recursive: true });
-    writeFileSync(join(dir, "index.html"), "<html></html>");
-    writeFileSync(join(dir, "about.htm"), "<html></html>");
-    writeFileSync(join(dir, "v1.0.0", "index.html"), "<html></html>");
-    writeFileSync(join(dir, "v1.0.0", "assets", "app.js"), "js");
-    writeFileSync(join(dir, "v1.0.0", "assets", "html.txt"), "not a page");
-    expect(walkHtml(dir)).toEqual(["about.htm", "index.html", "v1.0.0/index.html"]);
-  });
-
-  test("collects distinct broken external links with their local parents", () => {
-    const broken = collectBroken([
-      {
-        url: "https://gone.example/a",
-        state: "BROKEN",
-        status: 404,
-        parent: "http://localhost:8080/guide/intro.html",
-      },
-      {
-        url: "https://gone.example/a",
-        state: "BROKEN",
-        status: 404,
-        parent: "http://localhost:8080/index.html",
-      },
-      { url: "http://localhost:8080/missing.html", state: "BROKEN", status: 404 },
-      { url: "https://fine.example/", state: "OK", status: 200 },
-    ]);
-    expect(broken).toEqual([
-      {
-        url: "https://gone.example/a",
-        status: 404,
-        parents: ["/guide/intro.html", "/index.html"],
-      },
-    ]);
-    expect(reportBody(broken)).toBe(
-      [
-        "# 1 broken external link",
-        "",
-        "The nightly link check found external links in the deployed site that no longer resolve.",
-        "The site still deployed; fix or remove the links in the source markdown.",
-        "",
-        "- https://gone.example/a (status 404)",
-        "  - linked from /guide/intro.html",
-        "  - linked from /index.html",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  test("linkinator's result shape still carries the fields check_links reads", async () => {
-    // Guards linkinator upgrades: check_links.ts consumes url/state/status/
-    // parent from result.links, and a major bump that reshapes them must
-    // fail here, not in the nightly. Offline by construction - the crawl
-    // stays on linkinator's local static server over this temp site.
-    const dir = temp.dir("crawl-");
-    writeFileSync(join(dir, "index.html"), '<a href="/other.html">o</a>');
-    writeFileSync(join(dir, "other.html"), '<a href="/missing.html">m</a>');
-    // Resolved from the action's own dependency tree, so the version under
-    // test is the one check_links.ts loads, not a root install.
-    const { LinkChecker } = await import(Bun.resolveSync("linkinator", ACTION_DIR));
-    const result = await new LinkChecker().check({
-      path: ["index.html", "other.html"],
-      serverRoot: dir,
-      concurrency: 5,
-      timeout: harnessBound(5_000),
-      retry: true,
-      linksToSkip: async () => false,
-    });
-    // Typed as what check_links reads: the shape this test exists to pin.
-    const links: Parameters<typeof collectBroken>[0] = result.links;
-    const judged = links.filter((link) => link.state !== "SKIPPED");
-    expect(judged.length).toBeGreaterThan(0);
-    const broken = links.filter((link) => link.state === "BROKEN");
-    expect(broken).toHaveLength(1);
-    // Suffix matches: check_links.ts never depends on linkinator's URL
-    // normalization (relative vs loopback-absolute), so this test must not
-    // false-alarm if a future version changes it.
-    expect(broken[0]?.url).toEndWith("missing.html");
-    expect(broken[0]?.status).toBe(404);
-    expect(broken[0]?.parent).toEndWith("other.html");
   });
 });

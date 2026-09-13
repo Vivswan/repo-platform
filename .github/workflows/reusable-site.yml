@@ -62,18 +62,30 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.sha }}
 
+      # Hosts are lowercased: lychee reports them that way, so the own-site
+      # exclude matches a custom domain however the variable spells it. The
+      # two excludes are regexes, hence the escaped dots (the assembly's
+      # ownSitePattern escapes the same way).
       - name: Resolve the site URLs
         id: urls
         env:
           CUSTOM_DOMAIN: ${{ inputs.custom_domain }}
         run: |
           if [ -n "$CUSTOM_DOMAIN" ]; then
-            echo "base_path=/" >> "$GITHUB_OUTPUT"
-            echo "origin=https://$CUSTOM_DOMAIN" >> "$GITHUB_OUTPUT"
+            base_path=/
+            origin="https://$(echo "$CUSTOM_DOMAIN" | tr '[:upper:]' '[:lower:]')"
           else
-            echo "base_path=/${GITHUB_REPOSITORY#*/}/" >> "$GITHUB_OUTPUT"
-            echo "origin=https://$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]').github.io" >> "$GITHUB_OUTPUT"
+            base_path="/${GITHUB_REPOSITORY#*/}/"
+            origin="https://$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]').github.io"
           fi
+          site_url="$origin${base_path%/}"
+          edit_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/edit/"
+          {
+            echo "base_path=$base_path"
+            echo "origin=$origin"
+            echo "own_links=^${site_url//./\\.}([/?#]|$)"
+            echo "edit_links=^${edit_url//./\\.}"
+          } >> "$GITHUB_OUTPUT"
 
       # The repository's own website, built by its hook from the checkout;
       # a repository that has not filled the hook in publishes docs/ alone.
@@ -114,25 +126,57 @@ jobs:
 
       # Nightly link rot over what shipped: external links only (internal
       # ones were fatal at assembly), on the schedule alone so a fixed link
-      # closes the issue on the next clean night, never on a push.
+      # closes the issue on the next clean night, never on a push. Green
+      # whatever lychee finds (fail: false): the deploy has shipped, so
+      # findings become the tracking issue below. lychee-action still fails
+      # the step when lychee extracted no link at all (excluded ones count).
       - name: Check external links
         id: links
         if: github.event_name == 'schedule' && steps.site.outputs.publish == 'true' && steps.site.outputs.link-rot-label != ''
-        uses: Vivswan/repo-platform/actions/pages-site/check-links@stable
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
-          site-dir: ${{ steps.site.outputs.site-dir }}
+          workingDirectory: ${{ steps.site.outputs.site-dir }}
+          # Anonymous on purpose: given a token, lychee answers a 404 on a
+          # github.com URL by asking the API, which calls a private repository
+          # alive whatever the path. A deleted deep link into this repository
+          # would then read as fixed and close the link-rot issue.
+          token: ""
+          # http(s) links alone and none of the site's own: relative links
+          # resolve to files under --root-dir, absolute ones match own_links,
+          # and the assembly judged both against the artifact. The theme's
+          # "Edit this page" links are theme output an anonymous crawl cannot
+          # judge (auth redirect, 404 on a private repository).
+          args: >-
+            --no-progress
+            --root-dir ${{ steps.site.outputs.site-dir }}
+            --scheme https --scheme http
+            --exclude-all-private
+            --exclude '${{ steps.urls.outputs.own_links }}'
+            --exclude '${{ steps.urls.outputs.edit_links }}'
+            --timeout 30 --max-retries 3 --retry-wait-time 5
+            --glob-ignore-case '**/*.html' '**/*.htm'
+          fail: false
+          format: markdown
+          # One failure directory of the fuzz-issue action's report contract
+          # (docs/fuzzer.md): <artifacts-dir>/<failure>/report.md, its first
+          # line lychee's `# Summary` heading.
+          output: ${{ runner.temp }}/link-rot/external-links/report.md
 
-      # A count the gates below can test positively (check_ssot's
-      # step-output-gates rule): an absent count fails here rather than
-      # reading as a clean night, and neither the report nor the close runs.
-      - name: Read the link-rot count
+      # A verdict the gates below can test positively (check_ssot's
+      # step-output-gates rule): anything but lychee's two verdicts fails
+      # here rather than reading as a clean night, and neither the report
+      # nor the close runs.
+      - name: Read the link-rot verdict
         id: rot
         if: steps.links.outcome == 'success'
         env:
-          BROKEN: ${{ steps.links.outputs.broken }}
+          EXIT_CODE: ${{ steps.links.outputs.exit_code }}
         run: |
-          [[ "$BROKEN" =~ ^[0-9]+$ ]] || { echo "::error::check-links published no broken count: '$BROKEN'"; exit 1; }
-          echo "found=$([ "$BROKEN" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          case "$EXIT_CODE" in
+            0) echo "found=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "found=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::lychee published no verdict: exit code '$EXIT_CODE' (0 = clean, 2 = broken links)"; exit 1 ;;
+          esac
 
       - name: File or update the link-rot issue
         if: steps.rot.outputs.found == 'true'
@@ -141,7 +185,7 @@ jobs:
           mode: report
           label: ${{ steps.site.outputs.link-rot-label }}
           title: Docs site link rot
-          artifacts-dir: ${{ steps.links.outputs.report-dir }}
+          artifacts-dir: ${{ runner.temp }}/link-rot
           # The stream's create tuple, anchored to files.yml's site
           # tracking_label by check_ssot's labels rule.
           label-color: "D4A72C"

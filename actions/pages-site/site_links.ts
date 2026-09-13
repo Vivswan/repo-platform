@@ -8,12 +8,41 @@
 // seeds: history cannot be fixed (build.ts's tierStrictLinks draws the same
 // line).
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { decodeHTML } from "entities";
 import { LinkChecker } from "linkinator";
 import { decodePathSegments, encodePathSegments } from "./.vitepress/url-path.ts";
-import { sitePath, walkHtml } from "./check_links.ts";
+
+/** linkinator spells its own server's URLs both server-root-relative and
+ *  loopback-absolute; both read as the site's, every other http(s) URL
+ *  is external. */
+const LOCAL_SERVER = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?=[/?#]|$)/;
+
+/** A crawl result URL as a site path ("/docs/x.html#id"), or null for an
+ *  external one. */
+function sitePath(url: string): string | null {
+  if (/^https?:\/\//.test(url) && !LOCAL_SERVER.test(url)) return null;
+  const path = url.replace(LOCAL_SERVER, "");
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+/** Every HTML page (`.html` or `.htm`, as Pages serves both) in the site.
+ *  Each page of a strict tier seeds the crawl: version tiers are navigated
+ *  through a <select>, not anchors, so a crawl from the root alone would
+ *  never reach them. */
+export function walkHtml(dir: string, prefix = ""): string[] {
+  const pages: string[] = [];
+  for (const name of readdirSync(join(dir, prefix)).sort()) {
+    const rel = prefix === "" ? name : `${prefix}/${name}`;
+    if (statSync(join(dir, rel)).isDirectory()) {
+      pages.push(...walkHtml(dir, rel));
+    } else if (/\.html?$/i.test(name)) {
+      pages.push(rel);
+    }
+  }
+  return pages;
+}
 
 /** One tier's place in the artifact and whether its content is current. */
 export interface TierScope {

@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   checkSiteLinks,
   collectInternalBroken,
@@ -11,10 +11,13 @@ import {
   resolvesFragment,
   seedPages,
   servedFile,
+  walkHtml,
 } from "../../../actions/pages-site/site_links.ts";
+import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
+const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 
 describe("ownSitePattern", () => {
   test("matches the site's own links alone: the origin normalized, its dots literal, the base included", () => {
@@ -330,5 +333,50 @@ describe("checkSiteLinks", () => {
     await expect(checkSiteLinks(dir, "/", [{ rel: "v1/", strict: false }], null)).rejects.toThrow(
       "no page built from HEAD",
     );
+  });
+});
+
+describe("walkHtml", () => {
+  test("enumerates every page, .htm included, so every page of a strict tier can seed the crawl", () => {
+    const dir = temp.dir("site-");
+    mkdirSync(join(dir, "v1.0.0", "assets"), { recursive: true });
+    writeFileSync(join(dir, "index.html"), "<html></html>");
+    writeFileSync(join(dir, "about.htm"), "<html></html>");
+    writeFileSync(join(dir, "v1.0.0", "index.html"), "<html></html>");
+    writeFileSync(join(dir, "v1.0.0", "assets", "app.js"), "js");
+    writeFileSync(join(dir, "v1.0.0", "assets", "html.txt"), "not a page");
+    expect(walkHtml(dir)).toEqual(["about.htm", "index.html", "v1.0.0/index.html"]);
+  });
+});
+
+describe("linkinator's result shape", () => {
+  test("still carries the fields collectInternalBroken reads", async () => {
+    // Guards linkinator upgrades: a major bump that reshapes url/state/
+    // status/parent must fail here, not in the docs PR check. Offline by
+    // construction - the crawl stays on linkinator's local static server.
+    const dir = temp.dir("crawl-");
+    writeFileSync(join(dir, "index.html"), '<a href="/other.html">o</a>');
+    writeFileSync(join(dir, "other.html"), '<a href="/missing.html">m</a>');
+    // Resolved from the action's own dependency tree, so the version under
+    // test is the one site_links.ts loads, not a root install.
+    const { LinkChecker } = await import(Bun.resolveSync("linkinator", ACTION_DIR));
+    const result = await new LinkChecker().check({
+      path: ["index.html", "other.html"],
+      serverRoot: dir,
+      concurrency: 5,
+      timeout: harnessBound(5_000),
+      retry: true,
+      linksToSkip: async () => false,
+    });
+    const links: Parameters<typeof collectInternalBroken>[0] = result.links;
+    const judged = links.filter((link) => link.state !== "SKIPPED");
+    expect(judged.length).toBeGreaterThan(0);
+    const broken = links.filter((link) => link.state === "BROKEN");
+    expect(broken).toHaveLength(1);
+    // Suffix matches: site_links.ts never depends on linkinator's URL
+    // normalization (relative vs loopback-absolute).
+    expect(broken[0]?.url).toEndWith("missing.html");
+    expect(broken[0]?.status).toBe(404);
+    expect(broken[0]?.parent).toEndWith("other.html");
   });
 });

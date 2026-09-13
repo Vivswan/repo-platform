@@ -1,14 +1,19 @@
 // The fleet's site deploy in one job: the repo-owned hook runs from the checkout before the fleet's assembly,
 // so its output crosses no job boundary and the Pages artifact is the only artifact.
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { buildBody, failureDirs } from "../../actions/fuzz-issue/fuzz-issue.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
+// buildBody stamps the UTC day at call time, so the clock is frozen for the file and the expected date is a literal.
+const DATE = "2026-03-04";
+beforeAll(() => setSystemTime(new Date(`${DATE}T12:00:00Z`)));
+afterAll(() => setSystemTime());
 
 interface Step {
   id?: string;
@@ -115,6 +120,7 @@ describe("reusable-site.yml", () => {
       env: {
         PATH: process.env.PATH ?? "",
         GITHUB_OUTPUT: output,
+        GITHUB_SERVER_URL: "https://github.com",
         GITHUB_REPOSITORY: "Vivswan/Example-Repo",
         CUSTOM_DOMAIN: customDomain,
       },
@@ -122,12 +128,33 @@ describe("reusable-site.yml", () => {
     return { status: result.status, stdout: result.stdout, output: readFileSync(output, "utf8") };
   };
 
+  const CUSTOM_DOMAIN_OUTPUT = [
+    "base_path=/",
+    "origin=https://docs.example.com",
+    "own_links=^https://docs\\.example\\.com([/?#]|$)",
+    "edit_links=^https://github\\.com/Vivswan/Example-Repo/edit/",
+    "",
+  ].join("\n");
+
   test.each([
     {
       customDomain: "",
-      output: "base_path=/Example-Repo/\norigin=https://vivswan.github.io\n",
+      output: [
+        "base_path=/Example-Repo/",
+        "origin=https://vivswan.github.io",
+        "own_links=^https://vivswan\\.github\\.io/Example-Repo([/?#]|$)",
+        "edit_links=^https://github\\.com/Vivswan/Example-Repo/edit/",
+        "",
+      ].join("\n"),
     },
-    { customDomain: "docs.example.com", output: "base_path=/\norigin=https://docs.example.com\n" },
+    {
+      customDomain: "docs.example.com",
+      output: CUSTOM_DOMAIN_OUTPUT,
+    },
+    {
+      customDomain: "Docs.Example.com",
+      output: CUSTOM_DOMAIN_OUTPUT,
+    },
   ])(
     "the urls step, executed with CUSTOM_DOMAIN=$customDomain, resolves the base path and origin",
     ({ customDomain, output }) => {
@@ -157,29 +184,108 @@ describe("reusable-site.yml", () => {
     expect(steps.filter((step) => (step.uses ?? "").includes("download-artifact@"))).toEqual([]);
   });
 
-  test("link rot runs on the schedule alone, after a deploy, over the assembled site, and files under the assembly's label", () => {
+  // lychee's markdown report as the action writes it (lychee 0.24.2 over a
+  // fixture site, the run link appended by lychee-action), before the
+  // fuzz-issue action reads it as a contract-v1 failure report.
+  const LYCHEE_REPORT = [
+    "# Summary",
+    "",
+    "| Status         | Count |",
+    "|----------------|-------|",
+    "| 🔍 Total       | 12    |",
+    "| 🔗 Unique      | 11    |",
+    "| ✅ Successful  | 1     |",
+    "| ⏳ Timeouts    | 0     |",
+    "| 🔀 Redirected  | 0     |",
+    "| 👻 Excluded    | 8     |",
+    "| ❓ Unknown     | 0     |",
+    "| 🚫 Errors      | 3     |",
+    "| ⛔ Unsupported | 0     |",
+    "",
+    "## Errors per input",
+    "",
+    "### Errors in docs/latest/index.html",
+    "",
+    "* [404] <https://github.com/o/r/blob/main/docs/no-such-page.md> (at 3:10) | Rejected status code: 404 Not Found",
+    "* [ERROR] <https://no-such-host.example-fixture.org/a> (at 2:10) | Connection failed. Check network connectivity and firewall settings",
+    "",
+    "### Errors in index.html",
+    "",
+    "* [ERROR] <https://no-such-host.example-fixture.org/a> (at 10:10) | Connection failed. Check network connectivity and firewall settings",
+    "",
+    "[Full Github Actions output](https://github.com/o/r/actions/runs/42?check_suite_focus=true)",
+    "",
+  ].join("\n");
+  const LINK_ROT_LABEL = "${{ steps.site.outputs.link-rot-label }}";
+  const ARTIFACTS_DIR = "${{ runner.temp }}/link-rot";
+
+  test("link rot runs on the schedule alone, after a deploy: lychee over the assembled site's html, http(s) links only, never failing the deploy that shipped", () => {
     const links = steps.find((step) => step.id === "links");
     expect(links?.if).toBe(
       `github.event_name == 'schedule' && ${PUBLISH} && steps.site.outputs.link-rot-label != ''`,
     );
-    expect(links?.uses).toContain("repo-platform/actions/pages-site/check-links@stable");
-    expect(links?.with).toEqual({ "site-dir": "${{ steps.site.outputs.site-dir }}" });
+    expect(links?.uses).toMatch(/^lycheeverse\/lychee-action@[0-9a-f]{40}$/);
     expect(usesIndex("actions/deploy-pages@")).toBeLessThan(stepIndex((s) => s.id === "links"));
+    expect(links?.with).toEqual({
+      workingDirectory: "${{ steps.site.outputs.site-dir }}",
+      token: "",
+      args: [
+        "--no-progress",
+        "--root-dir ${{ steps.site.outputs.site-dir }}",
+        "--scheme https --scheme http",
+        "--exclude-all-private",
+        "--exclude '${{ steps.urls.outputs.own_links }}'",
+        "--exclude '${{ steps.urls.outputs.edit_links }}'",
+        "--timeout 30 --max-retries 3 --retry-wait-time 5",
+        "--glob-ignore-case '**/*.html' '**/*.htm'",
+      ].join(" "),
+      fail: false,
+      format: "markdown",
+      output: `${ARTIFACTS_DIR}/external-links/report.md`,
+    });
     const rot = steps.find((step) => step.id === "rot");
     expect(rot?.if).toBe("steps.links.outcome == 'success'");
-    expect(rot?.run).toContain("exit 1");
+    expect(rot?.env).toEqual({ EXIT_CODE: "${{ steps.links.outputs.exit_code }}" });
     const issues = steps.filter((step) => (step.uses ?? "").includes("actions/fuzz-issue@stable"));
     expect(issues.map((step) => [step.if, step.with?.mode, step.with?.label])).toEqual([
-      ["steps.rot.outputs.found == 'true'", "report", "${{ steps.site.outputs.link-rot-label }}"],
-      ["steps.rot.outputs.found == 'false'", "resolve", "${{ steps.site.outputs.link-rot-label }}"],
+      ["steps.rot.outputs.found == 'true'", "report", LINK_ROT_LABEL],
+      ["steps.rot.outputs.found == 'false'", "resolve", LINK_ROT_LABEL],
     ]);
-    expect(issues[0]?.with?.["artifacts-dir"]).toBe("${{ steps.links.outputs.report-dir }}");
+    expect(issues[0]?.with?.["artifacts-dir"]).toBe(ARTIFACTS_DIR);
   });
 
-  // The count step's bash EXECUTED as the runner runs it: each row is one
-  // whole verdict (exit code, log, the found output), so a flipped
-  // comparison reads as the wrong verdict, not a missing substring.
-  const readCount = (broken: string | undefined) => {
+  test("lychee's report is the one failure of the fuzz-issue contract: written under the artifacts-dir, it rides into the issue body whole", () => {
+    const output = String(steps.find((step) => step.id === "links")?.with?.output);
+    const report = steps.find((step) => step.with?.mode === "report");
+    const artifactsDir = String(report?.with?.["artifacts-dir"]);
+    expect(output.startsWith(`${artifactsDir}/`)).toBe(true);
+    const rel = output.slice(artifactsDir.length + 1);
+    expect(rel).toMatch(/^[A-Za-z0-9._-]+\/report\.md$/);
+    const root = temp.dir("link-rot-");
+    mkdirSync(join(root, dirname(rel)), { recursive: true });
+    writeFileSync(join(root, rel), LYCHEE_REPORT);
+    const env = {
+      GITHUB_SERVER_URL: "https://github.com",
+      GITHUB_REPOSITORY: "o/r",
+      GITHUB_RUN_ID: "42",
+    } as NodeJS.ProcessEnv;
+    expect(buildBody(failureDirs(root), env, "", "generic")).toBe(
+      [
+        `Nightly run on ${DATE} produced 1 report(s).`,
+        "",
+        ...LYCHEE_REPORT.split("\n")
+          .slice(0, -1)
+          .map((line, index) => (index === 0 ? "## Summary" : line)),
+        "",
+        "Run: https://github.com/o/r/actions/runs/42",
+      ].join("\n"),
+    );
+  });
+
+  // The verdict step's bash EXECUTED as the runner runs it: each row is one
+  // whole verdict (exit code, log, the found output), so a flipped case
+  // reads as the wrong verdict, not a missing substring.
+  const readVerdict = (exitCode: string | undefined) => {
     const run = steps.find((step) => step.id === "rot")?.run ?? "";
     const output = join(temp.dir("reusable-site-rot-"), "output");
     writeFileSync(output, "");
@@ -188,43 +294,28 @@ describe("reusable-site.yml", () => {
       env: {
         PATH: process.env.PATH ?? "",
         GITHUB_OUTPUT: output,
-        ...(broken === undefined ? {} : { BROKEN: broken }),
+        ...(exitCode === undefined ? {} : { EXIT_CODE: exitCode }),
       },
     });
     return { status: result.status, stdout: result.stdout, output: readFileSync(output, "utf8") };
   };
+  const noVerdict = (exitCode: string) => ({
+    status: 1,
+    stdout: `::error::lychee published no verdict: exit code '${exitCode}' (0 = clean, 2 = broken links)\n`,
+    output: "",
+  });
 
   test.each([
-    { broken: "0", verdict: { status: 0, stdout: "", output: "found=false\n" } },
-    { broken: "3", verdict: { status: 0, stdout: "", output: "found=true\n" } },
-    {
-      broken: "",
-      verdict: {
-        status: 1,
-        stdout: "::error::check-links published no broken count: ''\n",
-        output: "",
-      },
-    },
-    {
-      broken: "many",
-      verdict: {
-        status: 1,
-        stdout: "::error::check-links published no broken count: 'many'\n",
-        output: "",
-      },
-    },
-    {
-      broken: undefined,
-      verdict: {
-        status: 1,
-        stdout: "::error::check-links published no broken count: ''\n",
-        output: "",
-      },
-    },
+    { exitCode: "0", verdict: { status: 0, stdout: "", output: "found=false\n" } },
+    { exitCode: "2", verdict: { status: 0, stdout: "", output: "found=true\n" } },
+    { exitCode: "1", verdict: noVerdict("1") },
+    { exitCode: "3", verdict: noVerdict("3") },
+    { exitCode: "", verdict: noVerdict("") },
+    { exitCode: undefined, verdict: noVerdict("") },
   ])(
-    "the count step, executed with BROKEN=$broken, yields one whole verdict",
-    ({ broken, verdict }) => {
-      expect(readCount(broken)).toEqual(verdict);
+    "the verdict step, executed with EXIT_CODE=$exitCode, yields one whole verdict",
+    ({ exitCode, verdict }) => {
+      expect(readVerdict(exitCode)).toEqual(verdict);
     },
   );
 
