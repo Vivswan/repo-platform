@@ -58,16 +58,18 @@ export function pinnedVersion(text: string, where: string): string {
 
 /** Every package declaring @types/bun: the types are published per bun release and ride the runtime pin exactly, so this
  *  script is their one writer (dependabot.yml ignores the package). A run before the matching types publish fails at the
- *  add and the next scheduled run retries. */
+ *  add and the next scheduled run retries. Types are a dev dependency; a declaration under `dependencies` would be
+ *  re-added under devDependencies here, so it is refused instead. */
 export function typesBunDirs(root: string): string[] {
   return bunLockDirs(root).filter((dir) => {
     const pkg = JSON.parse(readFileSync(join(root, dir, "package.json"), "utf-8")) as Record<
       string,
       Record<string, string> | undefined
     >;
-    return ["dependencies", "devDependencies"].some(
-      (key) => pkg[key]?.["@types/bun"] !== undefined,
-    );
+    if (pkg.dependencies?.["@types/bun"] !== undefined) {
+      throw new Error(`${dir}/package.json: @types/bun belongs under devDependencies`);
+    }
+    return pkg.devDependencies?.["@types/bun"] !== undefined;
   });
 }
 

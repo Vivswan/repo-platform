@@ -161,7 +161,7 @@ describe("pinnedVersion", () => {
 });
 
 describe("typesBunDirs", () => {
-  test("every lock-carrying package declaring @types/bun under either key; the rest are not bumped", () => {
+  test("every lock-carrying package declaring @types/bun as a dev dependency; the rest are not bumped", () => {
     const root = temp.dir("types-bun-dirs-");
     const plant = (dir: string, pkg: Record<string, unknown>, lock = true) => {
       mkdirSync(join(root, dir), { recursive: true });
@@ -170,10 +170,14 @@ describe("typesBunDirs", () => {
     };
     plant(".", { devDependencies: { "@types/bun": "0.0.0" } });
     plant("actions/dev", { devDependencies: { "@types/bun": "0.0.0" } });
-    plant("actions/prod", { dependencies: { "@types/bun": "0.0.0" } });
     plant("actions/plain", { devDependencies: { typescript: "^7" } });
     plant("actions/unlocked", { devDependencies: { "@types/bun": "0.0.0" } }, false);
-    expect(typesBunDirs(root)).toEqual([".", "actions/dev", "actions/prod"]);
+    expect(typesBunDirs(root)).toEqual([".", "actions/dev"]);
+    // The bump runs `bun add --dev`, which would leave a second declaration behind.
+    plant("actions/prod", { dependencies: { "@types/bun": "0.0.0" } });
+    expect(() => typesBunDirs(root)).toThrow(
+      "actions/prod/package.json: @types/bun belongs under devDependencies",
+    );
   });
 });
 
