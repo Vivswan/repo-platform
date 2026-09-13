@@ -19,6 +19,7 @@ interface Job {
 }
 interface Workflow {
   on: Record<string, { secrets?: unknown } | null>;
+  env?: unknown;
   jobs: Record<string, Job>;
 }
 
@@ -29,24 +30,32 @@ const workflows = readdirSync(join(root, workflowsDir))
     doc: parseYaml(readFileSync(join(root, workflowsDir, name), "utf8")) as Workflow,
   }));
 
-// Conservative: any secrets-context read that is not a literal OTHER name (`toJSON(secrets)`, a computed index) counts
-// as a read of this one. Case-insensitive like Actions.
+// Fails closed: a secrets read that is not a literal OTHER name counts as this one. Actions ignores case, and a
+// workflow-level `env` is every job's.
 const NAMED_SECRET =
   /\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)\b|\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\])/gi;
-const readsSecret = (job: Job) =>
-  [...JSON.stringify(job).matchAll(/\$\{\{([\s\S]*?)\}\}/g)].some(([, expression]) => {
-    let named = false;
-    const rest = expression.replace(NAMED_SECRET, (_, dot, bracket) => {
-      if ((dot ?? bracket).toUpperCase() === SECRET) named = true;
-      return "";
+const strings = (node: unknown): string[] =>
+  typeof node === "string"
+    ? [node]
+    : typeof node === "object" && node !== null
+      ? Object.entries(node).flatMap(([key, value]) => [key, ...strings(value)])
+      : [];
+const readsSecret = (job: Job, workflowEnv: unknown) =>
+  strings([workflowEnv, job])
+    .flatMap((text) => [...text.matchAll(/\$\{\{([\s\S]*)\}\}/g)].map(([, e]) => e))
+    .some((expression) => {
+      let named = false;
+      const rest = expression.replace(NAMED_SECRET, (_, dot, bracket) => {
+        if ((dot ?? bracket).toUpperCase() === SECRET) named = true;
+        return "";
+      });
+      return named || /\bsecrets\b/i.test(rest);
     });
-    return named || /\bsecrets\b/i.test(rest);
-  });
 
 describe(`the ${SECRET} readers`, () => {
   const readers = workflows.flatMap(({ rel, doc }) =>
     Object.entries(doc.jobs)
-      .filter(([, job]) => readsSecret(job))
+      .filter(([, job]) => readsSecret(job, doc.env))
       .map(([id, job]) => ({ site: `${rel} job ${id}`, job })),
   );
 
@@ -59,7 +68,11 @@ describe(`the ${SECRET} readers`, () => {
   test("no workflow declares the secret as a call input or passes it on a call", () => {
     // A caller job cannot declare an environment, so a passed copy is the empty string: dead plumbing.
     const declaring = workflows
-      .filter(({ doc }) => Object.keys(doc.on.workflow_call?.secrets ?? {}).includes(SECRET))
+      .filter(({ doc }) =>
+        Object.keys(doc.on.workflow_call?.secrets ?? {}).some(
+          (name) => name.toUpperCase() === SECRET,
+        ),
+      )
       .map(({ rel }) => rel);
     expect(declaring).toEqual([]);
     const passing = workflows.flatMap(({ rel, doc }) =>
