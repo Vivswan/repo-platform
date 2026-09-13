@@ -43,10 +43,10 @@ const ROWS: Row[] = [
     branch: "automation/gitignore-refresh",
     title: "chore: refresh gitignore outputs from github/gitignore",
     body:
-      "Automated regeneration of the gitignore outputs (`files/base/.gitignore`, the per-module block files, " +
-      "this repo's own `.gitignore`) from [github/gitignore](https://github.com/github/gitignore)'s current HEAD. " +
+      "Automated regeneration of the gitignore outputs (`files/base/.gitignore` and the per-module block files) " +
+      "from [github/gitignore](https://github.com/github/gitignore)'s current HEAD. " +
       "The diff is the upstream change to the sections we consume. Merging this moves the stable tag once green; " +
-      "the next sync pushes it to the fleet.",
+      "the next sync pushes it to the fleet, this repository included.",
   },
   {
     workflow: "refresh-toolchains",

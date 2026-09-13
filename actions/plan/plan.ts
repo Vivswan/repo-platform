@@ -208,6 +208,7 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
     const owned = ownedPaths(input, {
       modules: selected.map((module) => module.name),
       private: input.private,
+      except: input.registration.except,
     });
     const problems = mirrorDeclarationProblems(input.registration.mirrors, owned);
     if (problems.length > 0) throw new PlanError(problems.map(describeMirrorProblem));

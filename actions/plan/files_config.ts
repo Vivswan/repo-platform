@@ -5,10 +5,10 @@ import { z } from "zod";
 import { MANIFEST_NAME } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
 import {
-  applies,
   type ModuleList,
   moduleList,
   type Selection,
+  selects,
   type When,
 } from "../shared/selection.ts";
 
@@ -172,7 +172,7 @@ export function selectEntries(
   config: Pick<FilesConfig, "files">,
   selection: Selection,
 ): FileEntry[] {
-  return config.files.filter((entry) => applies(entry.when, selection));
+  return config.files.filter((entry) => selects(entry, selection));
 }
 
 export const SOURCE_PREFIX = "files/";

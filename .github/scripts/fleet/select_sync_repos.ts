@@ -36,7 +36,6 @@ const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
 const runId = requireEnv("GITHUB_RUN_ID");
 const owner = requireEnv("OWNER");
-const selfRepo = requireEnv("GITHUB_REPOSITORY");
 
 const scope = parseScope(readDispatchRepo(), new Set(moduleRoster()));
 if (scope.kind === "error") {
@@ -67,7 +66,6 @@ let leftOut = 0;
 for (const entry of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
   const slug = entry.repo;
   const display = entry.private ? PRIVATE_DISPLAY : slug;
-  if (slug.toLowerCase() === selfRepo.toLowerCase()) continue;
   if (!scopeSelects(scope, slug, entry.private)) continue;
   const probeCode = pushProbeStatus(slug, pat);
   if (probeCode === 401 || probeCode === 403 || probeCode === 404) {

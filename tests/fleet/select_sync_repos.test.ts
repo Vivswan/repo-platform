@@ -32,7 +32,6 @@ describe("select_sync_repos.ts", () => {
     { repo: "Vivswan/hidden-server", private: true },
     { repo: "Vivswan/hidden-locked", private: true },
     { repo: "Vivswan/locked", private: false },
-    { repo: "Vivswan/repo-platform", private: false },
   ];
   const HIDDEN_GONE = { repo: "Vivswan/hidden-gone", private: true };
   const HIDDEN_NOMODS = { repo: "Vivswan/hidden-nomods", private: true };
@@ -178,10 +177,16 @@ describe("select_sync_repos.ts", () => {
     expect(main.output).toBe(outputFor([HIDDEN_SERVER_ROW, STEADY_ROW]));
   });
 
-  test("the operator repository is discovered but never a row", () => {
-    expect(main.rows?.map((row) => row.repo)).not.toContain("Vivswan/repo-platform");
-    expect(main.stdout).not.toContain("Vivswan/repo-platform");
-  });
+  test(
+    "the operator repository is a row like any other adopted repository",
+    () => {
+      const OPERATOR_ROW = { repo: "Vivswan/repo-platform", private: false };
+      const own = run("operator", {}, [OPERATOR_ROW]);
+      expect(own.exitCode).toBe(0);
+      expect(own.rows).toEqual([OPERATOR_ROW]);
+    },
+    TEST_TIMEOUT_MS,
+  );
 
   test("no private slug reaches stdout, stderr, or the job output", () => {
     for (const channel of [main.stdout, main.stderr, main.output]) {

@@ -11,6 +11,7 @@ import {
 } from "../pages-site/.vitepress/conventions.ts";
 import { LABEL_RE } from "../shared/label.ts";
 import { REGISTRATION_PATH } from "../shared/platform.ts";
+import { pathProblem } from "../shared/repo_path.ts";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -138,6 +139,9 @@ export const registrationSchema = z.strictObject({
     })
     .optional(),
   labels: z.record(z.string(), label).optional(),
+  // Paths the repository keeps as its own: no files.yml entry there is
+  // written for it (docs/sync.md, Selection).
+  except: z.array(judged(pathProblem)).optional(),
   mirrors: z
     .array(
       z.strictObject({

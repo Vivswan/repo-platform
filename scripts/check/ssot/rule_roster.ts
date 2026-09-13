@@ -20,7 +20,6 @@ export const RULE_ROSTER = [
   "step-output-gates",
   "settings-apply-input",
   "settings-lane-newest-wins",
-  "root-twin-parity",
 ] as const;
 
 /** Not a rule itself: it runs unconditionally in main(), before the loop it audits,

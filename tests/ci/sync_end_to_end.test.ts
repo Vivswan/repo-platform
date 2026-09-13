@@ -1265,3 +1265,30 @@ describe("sync.ts over a starter record it cannot read under a linked directory"
     expect(readlinkSync(join(target, "docs"))).toBe("elsewhere");
   });
 });
+
+describe("sync.ts over a registration with except", () => {
+  test("an excepted path is neither written nor recorded; one no entry writes is a note that holds", () => {
+    const target = temp.dir("sync-e2e-except-target-");
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n" +
+        "except: [.github/workflows/ci.yml, docs/nothing.md]\n",
+    );
+    mkdirSync(join(target, ".github/workflows"), { recursive: true });
+    writeFileSync(join(target, ".github/workflows/ci.yml"), LOCAL_CI);
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const { summary } = runSync(target, join(temp.dir("sync-e2e-except-summary-"), "summary.json"));
+    const paths = summary.written.map((row) => row.path);
+    expect(paths).not.toContain(".github/workflows/ci.yml");
+    expect(paths).toContain("LICENSE.md");
+    expect(readFileSync(join(target, ".github/workflows/ci.yml"), "utf-8")).toBe(LOCAL_CI);
+    const note = "`except` names `docs/nothing.md`, a path no files.yml entry writes";
+    expect(summary.notes).toEqual([note]);
+    expect(summary.hold).toBe(true);
+    expect(summary.holdReasons).toContain(`registration: ${note}`);
+    const manifest = JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as {
+      files: Record<string, unknown>;
+    };
+    expect(manifest.files[".github/workflows/ci.yml"]).toBeUndefined();
+  });
+});

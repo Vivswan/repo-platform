@@ -8,6 +8,7 @@ import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirr
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import { pathProblem } from "../../../../actions/shared/repo_path.ts";
+import type { Selection } from "../../../../actions/shared/selection.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
 import { loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
@@ -225,11 +226,21 @@ export function runSync(options: SyncOptions): SyncReport {
   const { records, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
 
-  const entries = selectEntries(config, { modules: selected, private: options.private });
+  const selection: Selection = {
+    modules: selected,
+    private: options.private,
+    except: registration.except,
+  };
+  const entries = selectEntries(config, selection);
   const entryPaths = new Set(entries.map((entry) => entry.path));
-  const owned = ownedPaths(config, { modules: selected, private: options.private });
-  // A stale record at no declared and no retired path is one files.yml cannot account for (a hand edit, or an entry deleted with no `retired` row), so its retirement is noted, which holds the PR.
+  const owned = ownedPaths(config, selection);
   const declared = new Set(config.files.map((entry) => entry.path));
+  notes.push(
+    ...(registration.except ?? [])
+      .filter((path) => !declared.has(path))
+      .map((path) => `\`except\` names \`${path}\`, a path no files.yml entry writes`),
+  );
+  // A stale record at no declared and no retired path is one files.yml cannot account for (a hand edit, or an entry deleted with no `retired` row), so its retirement is noted, which holds the PR.
   // Manifest keys are target-repo content: a stale record is retired only
   // when its path is one the writer could have written.
   const stale: string[] = [];

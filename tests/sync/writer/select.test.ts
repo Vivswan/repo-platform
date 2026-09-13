@@ -28,6 +28,14 @@ describe("selectEntries", () => {
       "toolchain.yml<base/toolchain.yml",
     ]);
   });
+
+  test("an excepted path is dropped whatever its clause; a path no entry has changes nothing", () => {
+    const paths = (except: string[]) =>
+      selectEntries(CONFIG, { modules: ["bun"], private: false, except }).map((e) => e.path);
+    expect(paths([])).toEqual(["ci.yml", "toolchain.yml"]);
+    expect(paths(["ci.yml"])).toEqual(["toolchain.yml"]);
+    expect(paths(["ci.yml", "toolchain.yml", "nothing.yml"])).toEqual([]);
+  });
 });
 
 describe("resolveModules", () => {

@@ -5,22 +5,13 @@ import { error, type Finding } from "../findings.ts";
 
 export const RESYNC = `re-run the sync (dispatch sync-repos.yml in ${PLATFORM_NAME} with repo=<owner>/<name>), which replaces platform files whole`;
 
-/** The manifest is itself a managed file, so managed repositories carry it and the platform itself must NOT (self mode
- *  inverts). The guarantee is VISIBILITY, not tamper-proofing, and nothing lists the selection's paths against the keys.
+/** The manifest is itself a managed file, so every managed repository carries it. The guarantee is VISIBILITY, not
+ *  tamper-proofing, and nothing lists the selection's paths against the keys.
  *    caught here or at parity  -> a field outside the vocabulary or on a class that does not carry it, a damaged self
  *                                 entry, a class other than the one files.yml writes the path under for this
  *                                 repository, a hash or marker pair the file does not verify
  *    not caught                -> an entry removed whole */
 export function checkManifestShape(ctx: Context): Finding[] {
-  if (ctx.mode === "self") {
-    if (ctx.manifest.state === "absent") return [];
-    return [
-      error(
-        `${MANIFEST_NAME}: exists in the operator repository - the ownership ` +
-          "manifest lands only in the repositories the sync writes; delete it",
-      ),
-    ];
-  }
   switch (ctx.manifest.state) {
     case "absent":
       return [

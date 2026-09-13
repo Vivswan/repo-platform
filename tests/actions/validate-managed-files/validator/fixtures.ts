@@ -136,10 +136,9 @@ export function validatorRunner(temp: TempDirs) {
     const tree: Record<string, string> = { ...BASELINE, ...extra };
     for (const rel of opts.omit ?? []) delete tree[rel];
     const selfMode = args.includes("--self");
-    // Managed repositories need a stamped manifest (absence is strict);
-    // self mode must NOT have one, and manifest-behavior tests bring their
-    // own.
-    if (!opts.noManifest && !selfMode && !Object.hasOwn(tree, MANIFEST)) {
+    // Every target needs a stamped manifest (absence is strict);
+    // manifest-behavior tests bring their own.
+    if (!opts.noManifest && !Object.hasOwn(tree, MANIFEST)) {
       tree[MANIFEST] = manifestOf(stampedBaseline());
     }
     for (const [rel, content] of Object.entries(tree)) {
@@ -159,7 +158,7 @@ export function validatorRunner(temp: TempDirs) {
     // The module data file sits beside the tree in self mode (the
     // operator's own files.yml) and outside it otherwise (the build
     // branch's, named with --files).
-    const filesArgs: string[] = selfMode ? [] : ["--private", String(opts.private ?? false)];
+    const filesArgs: string[] = ["--private", String(opts.private ?? false)];
     if (opts.filesPath !== undefined) filesArgs.push("--files", opts.filesPath);
     else if (opts.filesYml !== null) {
       const text = opts.filesYml ?? FILES_YML;

@@ -12,7 +12,7 @@ The sync writer copies the platform's files into a managed repository. It reads 
 | What does `files.yml` look like, and what does the loader refuse? | [actions/plan/files_config.ts](../actions/plan/files_config.ts), the grammar every reader shares (the writer, the fleet plan, the checks); the writer's own checks against the `files/` tree and the placeholder defaults are in [sync/writer/files_config.ts](../.github/scripts/sync/writer/files_config.ts) |
 | Which placeholder tokens exist? | `PLACEHOLDER_NAMES` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | How are the values derived from `.repo-platform.yml`? | [sync/writer/registration.ts](../.github/scripts/sync/writer/registration.ts) |
-| Which entries apply to one repository? | `applies` in [actions/shared/selection.ts](../actions/shared/selection.ts), the one rule the writer, the fleet plan, and the validator select by; `selectEntries` in [actions/plan/files_config.ts](../actions/plan/files_config.ts) |
+| Which entries apply to one repository? | `selects` in [actions/shared/selection.ts](../actions/shared/selection.ts), the one rule the writer, the fleet plan, and the validator select by; `selectEntries` in [actions/plan/files_config.ts](../actions/plan/files_config.ts) |
 | How is each class written? | [sync/writer/write_managed.ts](../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../.github/scripts/sync/writer/write_starter.ts), [write_link.ts](../.github/scripts/sync/writer/write_link.ts) |
 | Where do blocks land, and what may a value contain? | `spliceBlocks` and `substitute` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | What happens when an entry's class differs from its record? | `writeEntry` in [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) |
@@ -182,6 +182,7 @@ A list position may name a module-data key instead of the modules: `any: {declar
 
 - The selected modules are the registration's `modules` filtered to the names `files.yml` knows, in `files.yml` order. Unknown names are dropped and listed under Registration notes, which holds the PR.
 - Two entries for one path must be provably exclusive: a module one requires and the other forbids, an `any` list the other forbids entirely, or opposite `private` values. Anything subtler is a loader error.
+- The registration's `except` lists paths the repository keeps as its own: no entry at one is selected, whatever its `when`, and a record there is retired like a deselected module's ([Retirement](#retirement)). An `except` path no `files.yml` entry writes is a Registration note, which holds the PR.
 
 ## Classes
 
@@ -269,7 +270,7 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 | Written | path, class, change, detail for every selected entry (detail is a held row's reason, or the stale-class explanation on a class-flip row) |
 | Replaced local edits | one unified diff per replaced file, capped at 40 lines |
 | Retired | path, outcome, detail |
-| Registration notes | dropped unknown modules; an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry; a stale record no `files.yml` entry declares or retires now, while a file sits at its path; a mirror record no declaration reaches |
+| Registration notes | dropped unknown modules; an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry; a stale record no `files.yml` entry declares or retires now, while a file sits at its path; a mirror record no declaration reaches; an `except` path no `files.yml` entry writes |
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
@@ -277,9 +278,9 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 
 The PR body stays under GitHub's 65,536-character limit (`BODY_CAP` in [sync/deliver.ts](../.github/scripts/sync/deliver.ts)): the header and the Review section take their room first, then the tables and notes, then the replaced-edit diffs; a section the room runs out on ends in a warning naming how many characters were cut, and one with no room left is dropped.
 
-## This repository's own copies
+## This repository as a target
 
-The sync never targets this repository, yet it carries root copies of the files it ships. The `root-twin-parity` rule ([scripts/check/ssot/twin_copies.ts](../scripts/check/ssot/twin_copies.ts)) renders every entry `.repo-platform.yml` selects the way the writer would and holds the copy to it: a managed file whole, a split file's region, a link's target; starters are repo-owned here as everywhere, and the settings document is `bun run settings`'s. The files at a managed path that are this repository's own (its `ci.yml`, `dependabot.yml`, `.yamllint`, `AGENTS.md`) are listed in the rule with the reason each cannot be the fleet's.
+The sync targets this repository like any other: its [.repo-platform.yml](../.repo-platform.yml) registers it, and the writer keeps its root copies of the files it ships (`.editorconfig`, the `.gitignore` region, `LICENSE.md`, the `AGENTS.md` region, the rendered `.github/settings.yml`, the links) by sync PR, recorded in its own manifest. The paths whose file is this repository's own and cannot be the fleet's (its `ci.yml`, `dependabot.yml`, `.yamllint`, and the starters it does not take) are its registration's `except`. Its CI runs the [plan action](../actions/plan/action.yml) over the registration on every PR, as fleet CI does, and `bun run validate` judges the manifest.
 
 ## The operator
 
@@ -288,7 +289,7 @@ The sync never targets this repository, yet it carries root copies of the files 
 | Step | Script | What it does |
 | --- | --- | --- |
 | plan: resolve the build | [sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts) | the commit the `stable` tag names, re-verified main history with a green `all-green` check ([build-provenance.md](build-provenance.md)) and carrying `files.yml`; every row checks out exactly this commit |
-| plan: discover and select | [fleet/discover_repos.ts](../.github/scripts/fleet/discover_repos.ts), [fleet/select_sync_repos.ts](../.github/scripts/fleet/select_sync_repos.ts) | the rows: the repositories the fleet token can push to that have adopted the platform (this repository excepted), narrowed by the dispatch `repo` input or the called `repos` scope ([fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts)), written sorted to `$RUNNER_TEMP/rows.json`, and the matrix rows: one `{row, key}` per row, the key an HMAC of the slug under the fleet token and the run id in three-character groups (`edd~166~...`: opaque in the public log, so a private row is identified without being named, and spelling no four characters of a private name, since the runner drops a job output that carries a masked value); the log names the public slugs and counts the private ones |
+| plan: discover and select | [fleet/discover_repos.ts](../.github/scripts/fleet/discover_repos.ts), [fleet/select_sync_repos.ts](../.github/scripts/fleet/select_sync_repos.ts) | the rows: the repositories the fleet token can push to that have adopted the platform, narrowed by the dispatch `repo` input or the called `repos` scope ([fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts)), written sorted to `$RUNNER_TEMP/rows.json`, and the matrix rows: one `{row, key}` per row, the key an HMAC of the slug under the fleet token and the run id in three-character groups (`edd~166~...`: opaque in the public log, so a private row is identified without being named, and spelling no four characters of a private name, since the runner drops a job output that carries a masked value); the log names the public slugs and counts the private ones |
 | plan: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `plan` | `plan: <N> rows` |
 | row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/` |
 | row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | one listing of the owner's writable repositories (the same call discovery makes, no re-selection), the row's key recomputed over it and the one repository carrying it taken (no such repository: the step refuses, naming no repository); every form of the name is registered with the masker before anything else prints, and the name and its visibility ride `GITHUB_ENV` (which the runner never echoes) from here |

@@ -1,10 +1,20 @@
-# The operator's own registration: this repository is a settings target like any other, and
-# `bun run settings` renders its settings.yml from the modules here.
-# The sync never targets this repository (its files are the sources).
+# The operator's own registration: the sync and the settings apply target this repository like any other.
 modules:
   - bun
   - pr-title
   - site
+# Paths this repository keeps as its own: the fleet's ci.yml, dependabot.yml, and .yamllint cannot serve the platform that
+# ships them, and the repo-owned starters it has not taken.
+except:
+  - .github/workflows/ci.yml
+  - .github/dependabot.yml
+  - .yamllint
+  - .github/workflows/checks.yml
+  - .github/workflows/update-release.yml
+  - .github/workflows/update-release-pr.yml
+  - .github/actions/site-build/action.yml
+  - .github/workflows/copilot-setup-steps.yml
+  - .github/workflows/auto-format.yml
 project:
   name: repo-platform
   slug: repo-platform

@@ -2,31 +2,20 @@
 // Nothing records the upstream SHA on purpose: the outputs change only when consumed upstream content changes,
 // so the refresh-gitignore PR diff stays worth reading.
 // --topology is the offline gate over the block files: they match files.yml's sources and every copy of a section carries
-// the same bytes. The operator's own .gitignore is written through the writer, so its region is the render the ssot rule
-// root-twin-parity judges (scripts/check/ssot/twin_copies.ts), not a second one.
+// the same bytes. The root .gitignore is the sync's, written from these files like any target's.
 // Content drift inside a block against upstream is ungated until the next refresh regenerates over it.
 //
 // Usage: bun scripts/generate/build_gitignore.ts [--topology]
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { loadFilesConfig } from "../../.github/scripts/sync/writer/files_config.ts";
-import { regionMarkers } from "../../.github/scripts/sync/writer/manifest.ts";
-import {
-  placeholderValues,
-  readRegistration,
-} from "../../.github/scripts/sync/writer/registration.ts";
-import { renderSourced } from "../../.github/scripts/sync/writer/render_source.ts";
-import { resolveModules } from "../../.github/scripts/sync/writer/select.ts";
-import type { WriteOutcome } from "../../.github/scripts/sync/writer/write_managed.ts";
-import { writeSplit } from "../../.github/scripts/sync/writer/write_split.ts";
 import {
   blockSourcePath,
   blockValueOf,
   type FilesConfig,
   parseFilesConfig,
 } from "../../actions/plan/files_config.ts";
-import { PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform.ts";
+import { PLATFORM_NAME } from "../../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 const FILES_DIR = join(REPO_ROOT, "files");
@@ -172,31 +161,6 @@ export function buildBlock(section: string): string {
   return `${section}\n`;
 }
 
-/** The operator's .gitignore is a target's: the writer's loader, render, and split write, over the block files just
- *  written, so the tree is also proven to be one the writer accepts. */
-export function writeOwnGitignore(
-  root: string,
-  filesConfig: string,
-  filesDir: string,
-): WriteOutcome {
-  const config = loadFilesConfig(filesConfig, filesDir);
-  const registration = readRegistration(root);
-  const entry = config.files.find((candidate) => candidate.path === GITIGNORE);
-  if (entry === undefined || entry.class !== "split") {
-    throw new Error(`files.yml: no split entry at ${GITIGNORE} - anchor lost`);
-  }
-  const { selected } = resolveModules(config, registration.modules);
-  const slug = { owner: PLATFORM_OWNER, name: PLATFORM_NAME };
-  const values = placeholderValues(registration, slug, config.defaults);
-  const region = renderSourced(config, filesDir, entry, selected, values);
-  if (typeof region !== "string") {
-    throw new Error(
-      `${GITIGNORE}: no value for ${region.missing.map((name) => `{{${name}}}`).join(", ")}`,
-    );
-  }
-  return writeSplit(root, GITIGNORE, region, regionMarkers(entry.region), null);
-}
-
 export function topologyProblems(input: {
   entries: [string, string[]][];
   filesDir: string;
@@ -318,9 +282,6 @@ async function run(topology: boolean): Promise<number> {
     writeFileSync(out, content);
     console.log(`wrote ${relative(REPO_ROOT, out)}`);
   }
-  const own = writeOwnGitignore(REPO_ROOT, FILES_CONFIG, FILES_DIR);
-  if (own.change === "held") throw new Error(`${GITIGNORE}: ${own.reason}`);
-  if (own.change !== "unchanged") console.log(`wrote ${GITIGNORE}`);
   return 0;
 }
 

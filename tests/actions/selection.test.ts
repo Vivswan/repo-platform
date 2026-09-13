@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applies, type Selection, type When } from "../../actions/shared/selection.ts";
+import { applies, type Selection, selects, type When } from "../../actions/shared/selection.ts";
 
 // Every selection two modules can form, crossed with both visibilities; a
 // row pins the whole set a clause admits, so a clause that drifts on any
@@ -48,4 +48,14 @@ describe("applies", () => {
       expect(EVERY.filter((label) => applies(when, SELECTIONS[label]))).toEqual(admits);
     },
   );
+});
+
+describe("selects", () => {
+  test("an entry is selected when its clause holds and its path is not excepted", () => {
+    const entry = { path: "ci.yml", when: { modules: ["a"] } };
+    expect(selects(entry, { modules: ["a"], private: false })).toBe(true);
+    expect(selects(entry, { modules: ["a"], private: false, except: ["ci.yml"] })).toBe(false);
+    expect(selects(entry, { modules: ["a"], private: false, except: ["other.yml"] })).toBe(true);
+    expect(selects(entry, { modules: [], private: false, except: [] })).toBe(false);
+  });
 });
