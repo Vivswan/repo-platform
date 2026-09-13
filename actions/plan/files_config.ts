@@ -294,7 +294,7 @@ export interface CheckedFilesConfig {
 }
 
 /** Problems are returned so a reader with checks of its own (the writer's placeholder vocabulary) folds them into one report.
- *  Neither the files/ tree nor the placeholder vocabulary is consulted here, so every reader, and a previous files.yml, parses the same way. */
+ *  Neither the files/ tree nor the placeholder vocabulary is consulted here, so every reader parses the same way. */
 export function checkFilesConfig(text: string, label = "files.yml"): CheckedFilesConfig {
   let raw: unknown;
   try {
