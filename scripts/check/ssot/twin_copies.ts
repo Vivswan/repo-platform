@@ -20,8 +20,10 @@ import {
 } from "../../../.github/scripts/sync/writer/registration.ts";
 import { renderSourced } from "../../../.github/scripts/sync/writer/render_source.ts";
 import { resolveModules } from "../../../.github/scripts/sync/writer/select.ts";
-import { parseSettingsDoc } from "../../../.github/scripts/sync/writer/settings_document.ts";
-import { declaredPrivate } from "../../../.github/scripts/sync/writer/settings_layers.ts";
+import {
+  declaredPrivate,
+  readLayer,
+} from "../../../.github/scripts/sync/writer/settings_layers.ts";
 import { insideTarget, probe } from "../../../.github/scripts/sync/writer/target_files.ts";
 import {
   type FileEntry,
@@ -62,9 +64,7 @@ export interface TwinFacts {
 function declaredVisibility(root: string, entry: RenderedEntry): boolean {
   const overlay = probe(root, entry.overlay);
   if (overlay.kind !== "file") throw new Error(`${entry.overlay}: no regular file - anchor lost`);
-  const visibility = declaredPrivate(
-    parseSettingsDoc(overlay.bytes.toString("utf-8"), entry.overlay),
-  );
+  const visibility = declaredPrivate(readLayer(overlay.bytes.toString("utf-8"), entry.overlay).doc);
   if (visibility === null) {
     throw new Error(`${entry.overlay}: repository.private is not declared - anchor lost`);
   }

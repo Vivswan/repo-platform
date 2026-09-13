@@ -12,7 +12,8 @@ import {
 import {
   identityKeyIssues,
   loadOverrideLayer,
-} from "../../../.github/scripts/sync/writer/merge_settings_layers.ts";
+  sectionEntries,
+} from "../../../.github/scripts/sync/writer/settings_layers.ts";
 import type { Mismatch } from "./comparison.ts";
 import { asRecord, REPO_ROOT, read } from "./inputs.ts";
 import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
@@ -160,7 +161,56 @@ export const SETTINGS_WORKFLOW = ".github/workflows/settings-repos.yml";
 export const SETTINGS_SELECTOR = "bun .github/scripts/fleet/select_settings_repos.ts";
 export const SETTINGS_RESOLVER = "bun .github/scripts/fleet/resolve_settings_target.ts";
 export const SETTINGS_ACTION_USES =
-  "Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84 # v2.0.0";
+  "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a # next: 2.0.1-main.450.20260913.g131780e";
+/** The writer's fold, the npm build of the action the apply runs. */
+export const SETTINGS_LIBRARY = "@vivswan/github-settings-as-code";
+
+/** The writer folds with the library and the apply runs the action, and the two must be one source commit or they
+ *  read different dialects (a v2.0.0 apply refuses the `_undeclared` wrapper a v3 library renders). package.json names
+ *  the channel, bun.lock the version it resolved to, and the apply's comment repeats that version:
+ *
+ *    "next"   -> # next: <the version bun.lock resolved>   (the library's pre-release channel, until it cuts releases)
+ *    "3.0.0"  -> # v3.0.0
+ */
+export function libraryPinMismatches(
+  packageJson: string,
+  bunLock: string,
+  applyPins: string[],
+): Mismatch[] {
+  const manifest = JSON.parse(packageJson) as { dependencies?: Record<string, string> };
+  const spec = manifest.dependencies?.[SETTINGS_LIBRARY];
+  if (spec === undefined) {
+    throw new Error(`package.json: no ${SETTINGS_LIBRARY} dependency - anchor lost`);
+  }
+  const resolved = bunLock.match(
+    new RegExp(String.raw`^\s*"${SETTINGS_LIBRARY}": \["${SETTINGS_LIBRARY}@([^"]+)"`, "m"),
+  )?.[1];
+  if (resolved === undefined) {
+    throw new Error(`bun.lock: no resolved ${SETTINGS_LIBRARY} package - anchor lost`);
+  }
+  const comment =
+    spec === "next" ? `next: ${resolved}` : /^\d+\.\d+\.\d+$/.test(spec) ? `v${spec}` : null;
+  if (comment === null) {
+    return [
+      {
+        file: `package.json ${SETTINGS_LIBRARY}`,
+        expected: "the next dist-tag or an exact release (X.Y.Z) of the library",
+        got: spec,
+      },
+    ];
+  }
+  return applyPins.flatMap((pin) => {
+    const [uses, got] = pin.split(" # ");
+    if (got === comment) return [];
+    return [
+      {
+        file: `${SETTINGS_WORKFLOW} apply step`,
+        expected: `${uses.split("@")[0]}@<the packaged commit of ${resolved}> # ${comment} (bun.lock resolves ${SETTINGS_LIBRARY} ${spec} to ${resolved}; the apply and the writer share one library commit)`,
+        got: got === undefined ? "no version comment" : `# ${got}`,
+      },
+    ];
+  });
+}
 
 /** YAML also attaches an indented comment on the NEXT line as the scalar's
  *  trailing comment; the release-tag verification reads the `uses` line
@@ -450,7 +500,7 @@ export const settingsWorkflowRules: Rule[] = [
       // The override layer must still own the rulesets the overlay is
       // judged against, or the judgment is vacuous.
       const override = loadOverrideLayer(join(REPO_ROOT, "files/settings/override.yml"));
-      const overrideRulesets = (override.rulesets ?? []) as Record<string, unknown>[];
+      const overrideRulesets = sectionEntries(override.doc, "rulesets");
       for (const name of OVERRIDE_RULESETS) {
         if (!overrideRulesets.some((ruleset) => ruleset.name === name)) {
           throw new Error(`files/settings/override.yml: no ${name} ruleset - anchor lost`);
@@ -480,6 +530,15 @@ export const settingsWorkflowRules: Rule[] = [
     // tagged pin, one job per target.
     name: "settings-apply-input",
     run: () => settingsApplyInputMismatches(read(SETTINGS_WORKFLOW)),
+  },
+  {
+    name: "settings-apply-library-pin",
+    run: () =>
+      libraryPinMismatches(
+        read("package.json"),
+        read("bun.lock"),
+        applyUsesPins(read(SETTINGS_WORKFLOW)),
+      ),
   },
   {
     // Newest wins has two halves: the selector stands a superseded run

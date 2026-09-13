@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import { FLEET_WRITERS, POST_GREEN_REL } from "../../../scripts/check/ssot/post_green.ts";
 import {
+  libraryPinMismatches,
   OWN_OVERLAY,
   overlayMismatches,
   SETTINGS_ACTION_USES,
@@ -423,23 +424,29 @@ ${RESOLVE}${APPLY_STEP}`;
     },
     {
       reason: "the pin without its version comment",
-      text: valid.replace(" # v2.0.0", ""),
+      text: valid.replace(" # next: 2.0.1-main.450.20260913.g131780e", ""),
       expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84",
+      got: "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a",
     },
     {
       // YAML reads this comment as the scalar's own trailing comment; the
       // release-tag verification reads the version off the uses line alone.
       reason: "the version comment on the next line, indented under the uses key",
-      text: valid.replace(" # v2.0.0\n", "\n          # v2.0.0\n"),
+      text: valid.replace(
+        " # next: 2.0.1-main.450.20260913.g131780e\n",
+        "\n          # next: 2.0.1-main.450.20260913.g131780e\n",
+      ),
       expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84",
+      got: "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a",
     },
     {
       reason: "the version comment on the next line at the uses key's indentation",
-      text: valid.replace(" # v2.0.0\n", "\n        # v2.0.0\n"),
+      text: valid.replace(
+        " # next: 2.0.1-main.450.20260913.g131780e\n",
+        "\n        # next: 2.0.1-main.450.20260913.g131780e\n",
+      ),
       expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84",
+      got: "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a",
     },
     {
       reason:
@@ -463,9 +470,12 @@ ${RESOLVE}${APPLY_STEP}`;
     },
     {
       reason: "a stale version comment beside the right sha",
-      text: valid.replace(" # v2.0.0", " # v1.9.0"),
+      text: valid.replace(
+        " # next: 2.0.1-main.450.20260913.g131780e",
+        " # next: 2.0.1-main.0.g3fad2b2",
+      ),
       expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84 # v1.9.0",
+      got: "Vivswan/github-settings-as-code@10b426595c44ad6427bdbd3d7020b2f4da2ddc5a # next: 2.0.1-main.0.g3fad2b2",
     },
     {
       reason: "an unpinned step beside a decoy carrying the expected line elsewhere in the file",
@@ -873,5 +883,106 @@ describe("starterMismatches and overlayMismatches (settings-starter)", () => {
     },
   ])("$reason is the one mismatch", ({ text, mismatch }) => {
     expect(overlayMismatches(text)).toEqual([mismatch]);
+  });
+});
+
+describe("libraryPinMismatches", () => {
+  const manifest = (spec: string) =>
+    JSON.stringify({ dependencies: { "@vivswan/github-settings-as-code": spec } });
+  const lock = (resolved: string) =>
+    `{\n  "packages": {\n    "@vivswan/github-settings-as-code": ["@vivswan/github-settings-as-code@${resolved}", "", {}, "sha512-x"],\n  }\n}\n`;
+  const pin = (comment: string) => `Vivswan/github-settings-as-code@${"a".repeat(40)} # ${comment}`;
+  const NEXT = "2.0.1-main.5.20260913.g1234abc";
+  const LATER = "2.0.1-main.6.20260914.gabcdef0";
+
+  test.each<{
+    reason: string;
+    spec: string;
+    resolved: string;
+    pins: string[];
+    mismatches: Mismatch[];
+  }>([
+    {
+      reason: "the next channel: the comment repeats the version the lockfile resolved",
+      spec: "next",
+      resolved: NEXT,
+      pins: [pin(`next: ${NEXT}`)],
+      mismatches: [],
+    },
+    {
+      reason: "a release names its tag",
+      spec: "3.0.0",
+      resolved: "3.0.0",
+      pins: [pin("v3.0.0")],
+      mismatches: [],
+    },
+    {
+      // The Copilot finding this rule exists for: the writer moved to the
+      // v3 library while the apply still ran v2.0.0, whose validation
+      // refuses the `_undeclared` wrapper every render now carries.
+      reason: "the apply left on an older release than the writer's library",
+      spec: "next",
+      resolved: NEXT,
+      pins: [pin("v2.0.0")],
+      mismatches: [
+        {
+          file: ".github/workflows/settings-repos.yml apply step",
+          expected: `Vivswan/github-settings-as-code@<the packaged commit of ${NEXT}> # next: ${NEXT} (bun.lock resolves @vivswan/github-settings-as-code next to ${NEXT}; the apply and the writer share one library commit)`,
+          got: "# v2.0.0",
+        },
+      ],
+    },
+    {
+      // A `bun update` moved the lockfile and nobody moved the apply.
+      reason: "the lockfile ahead of the apply's comment on the next channel",
+      spec: "next",
+      resolved: LATER,
+      pins: [pin(`next: ${NEXT}`)],
+      mismatches: [
+        {
+          file: ".github/workflows/settings-repos.yml apply step",
+          expected: `Vivswan/github-settings-as-code@<the packaged commit of ${LATER}> # next: ${LATER} (bun.lock resolves @vivswan/github-settings-as-code next to ${LATER}; the apply and the writer share one library commit)`,
+          got: `# next: ${NEXT}`,
+        },
+      ],
+    },
+    {
+      reason: "a pin with no version comment",
+      spec: "3.0.0",
+      resolved: "3.0.0",
+      pins: [`Vivswan/github-settings-as-code@${"a".repeat(40)}`],
+      mismatches: [
+        {
+          file: ".github/workflows/settings-repos.yml apply step",
+          expected:
+            "Vivswan/github-settings-as-code@<the packaged commit of 3.0.0> # v3.0.0 (bun.lock resolves @vivswan/github-settings-as-code 3.0.0 to 3.0.0; the apply and the writer share one library commit)",
+          got: "no version comment",
+        },
+      ],
+    },
+    {
+      reason: "a library spec that is neither the next channel nor a release (a range, latest)",
+      spec: "^3.0.0",
+      resolved: "3.0.0",
+      pins: [pin("v3.0.0")],
+      mismatches: [
+        {
+          file: "package.json @vivswan/github-settings-as-code",
+          expected: "the next dist-tag or an exact release (X.Y.Z) of the library",
+          got: "^3.0.0",
+        },
+      ],
+    },
+  ])("$reason", ({ spec, resolved, pins, mismatches }) => {
+    expect(libraryPinMismatches(manifest(spec), lock(resolved), pins)).toEqual(mismatches);
+  });
+
+  test("a manifest or lockfile without the library is an anchor lost, never a clean pass", () => {
+    expect(() =>
+      libraryPinMismatches(JSON.stringify({ dependencies: {} }), lock("3.0.0"), [pin("v3.0.0")]),
+    ).toThrow("no @vivswan/github-settings-as-code dependency - anchor lost");
+    expect(() => libraryPinMismatches(manifest("next"), "{}", [pin("v3.0.0")])).toThrow(
+      "bun.lock: no resolved @vivswan/github-settings-as-code package - anchor lost",
+    );
   });
 });

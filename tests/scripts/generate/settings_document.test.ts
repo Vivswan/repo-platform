@@ -39,7 +39,8 @@ function run(root: string, ...args: string[]) {
   return { exitCode: result.exitCode, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
 }
 
-const names = (list: unknown) => (list as { name: string }[]).map((entry) => entry.name);
+const names = (section: unknown) =>
+  (section as { entries: { name: string }[] }).entries.map((entry) => entry.name);
 
 describe("renderOwnSettings", () => {
   test("the committed file is the render: header, the overlay's identity and ruleset beside the fleet's, the registration's tracking label", () => {
@@ -76,7 +77,7 @@ describe("renderOwnSettings", () => {
     ]);
     // The baseline's pr-title (activated by the module), the override's two, the overlay's own.
     expect(names(doc.rulesets).sort()).toEqual(
-      ["pr-title", "main", "non-bypassable", ...names(overlay.rulesets)].sort(),
+      ["pr-title", "main", "non-bypassable", ...overlay.rulesets.map((r) => r.name)].sort(),
     );
     const check = capture(["bun", SCRIPT, "--check"], { cwd: REPO_ROOT });
     expect([check.exitCode, check.stdout.trim()]).toEqual([

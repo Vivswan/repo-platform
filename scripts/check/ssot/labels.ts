@@ -2,7 +2,7 @@
 // guard's literals, dependabot's tuples, and the hand-copied label regex.
 
 import { FLEET_SYNC_LABELS } from "../../../.github/scripts/fleet/fleet_sync_marker.ts";
-import { loadLayer } from "../../../.github/scripts/sync/writer/settings_layers.ts";
+import { loadLayer, sectionEntries } from "../../../.github/scripts/sync/writer/settings_layers.ts";
 import { constRegexSource, constStringValue } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch } from "./comparison.ts";
 import { managedLabelRoster, modules, read, trackingStreams } from "./inputs.ts";
@@ -105,7 +105,10 @@ export const labelRules: Rule[] = [
   {
     name: "fleet-sync-labels",
     run: () =>
-      fleetSyncLabelMismatches([...FLEET_SYNC_LABELS.keys()], loadLayer(FLEET_SYNC_OVERLAY).labels),
+      fleetSyncLabelMismatches(
+        [...FLEET_SYNC_LABELS.keys()],
+        sectionEntries(loadLayer(FLEET_SYNC_OVERLAY).doc, "labels"),
+      ),
   },
   {
     name: "labels",
@@ -236,9 +239,7 @@ export const labelRules: Rule[] = [
     run: () => {
       const mismatches: Mismatch[] = [];
       const layer = "files/release-please/settings.yml";
-      const releaseLabels = (loadLayer(layer).labels ?? []) as {
-        name: string;
-      }[];
+      const releaseLabels = sectionEntries(loadLayer(layer).doc, "labels");
       if (releaseLabels.length === 0) {
         throw new Error(`${layer} declares no labels - anchor lost`);
       }
@@ -300,11 +301,7 @@ export const labelRules: Rule[] = [
         const tuple = module.dependabot_label;
         if (tuple === undefined) continue;
         const rel = `files/${module.name}/settings.yml`;
-        const declared = (loadLayer(rel).labels ?? []) as {
-          name: string;
-          color: string;
-          description: string;
-        }[];
+        const declared = sectionEntries(loadLayer(rel).doc, "labels");
         const entry = declared.find((label) => label.name === tuple.name);
         if (entry === undefined) {
           mismatches.push({
@@ -318,7 +315,7 @@ export const labelRules: Rule[] = [
           mismatches.push({
             file: `${rel} label '${tuple.name}' color`,
             expected: `${tuple.color} (files.yml modules.${module.name}.dependabot_label.color)`,
-            got: entry.color,
+            got: String(entry.color),
           });
         }
       }
