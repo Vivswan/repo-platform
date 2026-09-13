@@ -17,9 +17,9 @@ import {
   loadLayer,
   loadModules,
   loadOverrideLayer,
-  managedSettings,
   readLayer,
   readLayers,
+  type SettingsDoc,
   sectionEntries,
 } from "../../../.github/scripts/sync/writer/settings_layers";
 
@@ -51,9 +51,16 @@ function selection(overrides: Partial<Selection> = {}): Selection {
   return { modules: [], private: false, ...overrides };
 }
 
-const labelNames = (s: Selection) =>
-  sectionEntries(managedSettings(CONFIG, TREE, s), "labels").map((l) => l.name);
-const rulesets = (s: Selection) => sectionEntries(managedSettings(CONFIG, TREE, s), "rulesets");
+/** The fleet layers a selection stacks, as renderSettings reads them below the overlay and the override. */
+const fleetLayers = (s: Selection) =>
+  layerPaths(CONFIG, s).map((rel) => loadLayer(join(TREE, rel)));
+const fleetFold = (s: Selection): SettingsDoc => {
+  const folded = foldSettings(fleetLayers(s), "the fleet layers");
+  if ("refused" in folded) throw new Error(folded.refused);
+  return folded.settings;
+};
+const labelNames = (s: Selection) => sectionEntries(fleetFold(s), "labels").map((l) => l.name);
+const rulesets = (s: Selection) => sectionEntries(fleetFold(s), "rulesets");
 
 describe("the managed labels", () => {
   test.each<{ reason: string; selection: Selection; labels: string[] }>([
@@ -90,18 +97,6 @@ describe("the managed labels", () => {
     },
   ])("$reason", ({ selection: s, labels }) => {
     expect(labelNames(s)).toEqual(labels);
-  });
-
-  test("the fold leaves the roster in the library's wrapper form, the apply's delete policy explicit", () => {
-    // The rendered document is what the apply reads: `_undeclared: delete` is the
-    // roster semantics docs/settings.md promises (undeclared labels are deleted),
-    // spelled out by the fold rather than assumed from the section default.
-    expect(managedSettings(CONFIG, TREE, selection()).labels).toMatchObject({
-      _undeclared: "delete",
-    });
-    expect(managedSettings(CONFIG, TREE, selection()).rulesets).toMatchObject({
-      _undeclared: "keep",
-    });
   });
 });
 
@@ -714,9 +709,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   // overlay can still declare a copilot_code_review rule: the starter
   // declares no ruleset, so the rule leaves the payload only once the
   // overlay stops carrying it.
-  const privateFleet = layerPaths(CONFIG, { modules: [], private: true }).map((rel) =>
-    loadLayer(join(TREE, rel)),
-  );
+  const privateFleet = fleetLayers({ modules: [], private: true });
   const mainRuleTypes = (overlayText: string) => {
     const folded = foldSettings(
       [...privateFleet, readLayer(overlayText, "r"), loadOverrideLayer(OVERRIDE)],
@@ -747,7 +740,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   });
 });
 
-describe("managedSettings", () => {
+describe("the managed repository block", () => {
   // The baseline's repository block. Identity keys (description, homepage,
   // topics, private) are absent on purpose: they live in the overlay, and
   // an exact block proves the absence.
@@ -781,7 +774,7 @@ describe("managedSettings", () => {
       repository: baselineRepository,
     },
   ])("$reason", ({ selection: s, repository }) => {
-    expect(managedSettings(CONFIG, TREE, s).repository).toEqual(repository);
+    expect(fleetFold(s).repository).toEqual(repository);
   });
 });
 

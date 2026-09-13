@@ -12,6 +12,7 @@ import { supersededNotice } from "../../.github/scripts/fleet/newest_main.ts";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
+import { STUB_GIT_FAIL_REFUSAL, writeStubGit } from "../shared/stub_git";
 import { tempDirs } from "../shared/temp_dir";
 
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
@@ -155,22 +156,7 @@ describe("select_settings_repos.ts", () => {
       { mode: 0o755 },
     );
     writeFileSync(join(bin, "sleep"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
-    // The newest-wins read: main's tip is STUB_MAIN_TIP (the run's own
-    // commit unless a test moves it), or a dead remote.
-    writeFileSync(
-      join(bin, "git"),
-      [
-        "#!/usr/bin/env bash",
-        '[ "$1" = "ls-remote" ] || { echo "stub git: unexpected $*" >&2; exit 64; }',
-        'if [ -n "$STUB_GIT_FAIL" ]; then',
-        "  echo \"fatal: unable to access 'origin': Could not resolve host\" >&2",
-        "  exit 128",
-        "fi",
-        'printf "%s\\trefs/heads/main\\n" "$STUB_MAIN_TIP"',
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
-    );
+    writeStubGit(bin);
   });
 
   interface Run {
@@ -475,36 +461,33 @@ describe("select_settings_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  test(
-    "a run whose commit main moved past stands down with an empty plan, before any discovery",
-    () => {
-      const r = run("superseded", { STUB_MAIN_TIP: NEWER_SHA, ONLY_REPO: "all" });
-      expect(r).toEqual({
+  // The tip read comes before any discovery, so neither run masks or lists anything.
+  test.each<{
+    reason: string;
+    name: string;
+    env: Record<string, string>;
+    outcome: Pick<Run, "exitCode" | "stdout" | "output">;
+  }>([
+    {
+      reason: "a run whose commit main moved past stands down with an empty plan",
+      name: "superseded",
+      env: { STUB_MAIN_TIP: NEWER_SHA, ONLY_REPO: "all" },
+      outcome: {
         exitCode: 0,
         stdout: lines(`::notice::${supersededNotice(SHA, NEWER_SHA)}`),
-        masked: [],
-        stderr: "",
         output: `count=0\nmatrix=${JSON.stringify(matrixRows([], keyOf))}\n`,
-        summary: "",
-      });
+      },
     },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "a tip that cannot be read fails the run, never guessing newest or superseded",
-    () => {
-      const r = run("no-tip", { STUB_GIT_FAIL: "1" });
-      expect(r).toEqual({
-        exitCode: 1,
-        stdout: lines(
-          "::error::git ls-remote could not answer (exit 128); refusing to guess: fatal: unable to access 'origin': Could not resolve host",
-        ),
-        masked: [],
-        stderr: "",
-        output: "",
-        summary: "",
-      });
+    {
+      reason: "a tip that cannot be read fails the run, never guessing newest or superseded",
+      name: "no-tip",
+      env: { STUB_GIT_FAIL: "1" },
+      outcome: { exitCode: 1, stdout: lines(`::error::${STUB_GIT_FAIL_REFUSAL}`), output: "" },
+    },
+  ])(
+    "$reason",
+    ({ name, env, outcome }) => {
+      expect(run(name, env)).toEqual({ masked: [], stderr: "", summary: "", ...outcome });
     },
     TEST_TIMEOUT_MS,
   );
