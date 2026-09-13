@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-// Every package committing a bun.lock is typechecked, the same walk the bootstrap installs: a package without a tsconfig.json fails here.
+// A package without a tsconfig.json fails here rather than typechecking nothing.
 //
 // Usage: bun scripts/typecheck.ts
 
