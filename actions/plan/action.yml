@@ -58,7 +58,7 @@ runs:
       id: action-bun
       uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
-        pin: ${{ github.action_path }}/.bun-version
+        pin: ${{ github.action_path }}/../../files/bun/.bun-version
 
     - name: Install the action's dependencies
       shell: bash

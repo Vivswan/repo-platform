@@ -86,14 +86,13 @@ describe("parseFilesConfig", () => {
         "placeholders: []",
         "files: []",
         "modules:",
-        "  bun: { codeql_language: javascript-typescript, pin: { file: .bun-version, version: 1.4.0 } }",
+        "  bun: { codeql_language: javascript-typescript }",
         "  site: { path: docs, tracking_label: { key: site, default: docs-link-rot, color: D4A72C, description: Link rot } }",
       ].join("\n"),
     );
     expect(config.modules).toEqual({
       bun: {
         codeql_language: "javascript-typescript",
-        pin: { file: ".bun-version", version: "1.4.0" },
       },
       site: {
         path: "docs",

@@ -20,11 +20,9 @@ import { settingsWorkflowRules } from "./check/ssot/settings_workflow.ts";
 import { siteConfigRules } from "./check/ssot/site_config.ts";
 import { skillRules } from "./check/ssot/skills.ts";
 import { stickyCommentRules } from "./check/ssot/sticky_comments.ts";
-import { toolchainRules } from "./check/ssot/toolchain.ts";
 import { twinCopyRules } from "./check/ssot/twin_copies.ts";
 
 const rules: Rule[] = [
-  ...toolchainRules,
   ...deliveryPinRules,
   ...stickyCommentRules,
   ...skillRules,

@@ -104,11 +104,6 @@ export function repoSlug(): string {
   return String(pkg.name);
 }
 
-export function packageScripts(): Record<string, string> {
-  const pkg = asRecord(JSON.parse(read("package.json")), "package.json");
-  return asRecord(pkg.scripts, "package.json scripts") as Record<string, string>;
-}
-
 export function repoCi(): Record<string, unknown> {
   return asRecord(parseYaml(read(".github/workflows/ci.yml")), "ci.yml");
 }

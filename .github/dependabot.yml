@@ -27,6 +27,9 @@ updates:
     directories:
       - "/"
       - "/actions/**/*"
+    # @types/bun is published per bun release and rides the runtime pin exactly: refresh-toolchains bumps it with files/bun/.bun-version.
+    ignore:
+      - dependency-name: "@types/bun"
     schedule:
       interval: "monthly"
     cooldown:

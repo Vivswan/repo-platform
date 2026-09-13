@@ -1,13 +1,13 @@
 name: Bun Setup
 description: >-
   The one bun setup for repo-platform's composite actions: given the path
-  of a .bun-version pin (a caller passes its own generated one, so its
-  scripts and lockfiles never ride the CALLING repository's bun
-  resolution), reuses a bun already on PATH at that version or installs it
-  with oven-sh/setup-bun, one retry for the known network flake, and
-  records the absolute path of the bun that prints the pin. One call per
-  job: setup-bun installs every version at the same path, so `path` is
-  valid only until another setup-bun runs in that job.
+  of a .bun-version pin (a caller passes the fleet's files/bun/.bun-version
+  from the delivery checkout, so its scripts and lockfiles never ride the
+  CALLING repository's bun resolution), reuses a bun already on PATH at
+  that version or installs it with oven-sh/setup-bun, one retry for the
+  known network flake, and records the absolute path of the bun that prints
+  the pin. One call per job: setup-bun installs every version at the same
+  path, so `path` is valid only until another setup-bun runs in that job.
 
 inputs:
   pin:

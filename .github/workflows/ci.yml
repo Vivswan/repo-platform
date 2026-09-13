@@ -31,7 +31,7 @@ jobs:
       - uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: files/bun/.bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - name: Write the fleet's workflows
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: files/bun/.bun-version
       - name: Install tooling
         run: bun install --frozen-lockfile --silent
       - name: Biome (lint + format check)
@@ -155,17 +155,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
-      # The glob is the roster: the bun-dirs ssot rule pins it and requires every dir committing a
-      # bun.lock to carry a tsconfig.json.
+          bun-version-file: files/bun/.bun-version
       - name: Typecheck repo and action scripts
         run: |
-          for tsconfig in tsconfig.json actions/*/tsconfig.json; do
-            dir="$(dirname "$tsconfig")"
-            echo "::group::$dir"
-            (cd "$dir" && bun install --frozen-lockfile --silent && bun x tsc -p .)
-            echo "::endgroup::"
-          done
+          bun scripts/bootstrap.ts
+          bun run typecheck
 
   # The offline invariants are package.json's `invariants` script, so CI and `bun run check` run one list.
   invariants:
@@ -175,7 +169,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: files/bun/.bun-version
       - name: Install dependencies
         run: |
           bun install --frozen-lockfile --silent
@@ -190,7 +184,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: files/bun/.bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       # The typos action's end-to-end cases run the binary the action pins
@@ -253,7 +247,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: files/bun/.bun-version
       - name: Install the action's pinned dependencies
         run: bun install --frozen-lockfile --cwd actions/pages-site
       - name: Build the fixture site and assert the artifact
@@ -295,7 +289,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: files/bun/.bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - uses: ./actions/knip
@@ -317,7 +311,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: files/bun/.bun-version
       - name: Plant the two pins
         id: pins
         run: bun .github/scripts/ci/bun_setup_smoke.ts plant

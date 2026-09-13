@@ -1,19 +1,24 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import {
   type Bump,
-  bumpFilesPin,
   decideBump,
   fetchJson,
   latestBunVersion,
   latestDenoVersion,
   latestVersions,
   PIN_SOURCES,
+  pinnedVersion,
   prBody,
   proseBumps,
+  typesBunDirs,
 } from "../../.github/scripts/refresh-toolchains/refresh_toolchains";
-import { toolchainPins } from "../../scripts/generate/toolchain_pins";
+import { parseFilesConfig } from "../../actions/plan/files_config";
+import { tempDirs } from "../shared/temp_dir";
+
+const REPO_ROOT = join(import.meta.dir, "../..");
+const temp = tempDirs();
 
 describe("fetchJson", () => {
   test("a malformed body rejects with the fixed diagnostic, never the body", async () => {
@@ -68,8 +73,8 @@ describe("fetchJson", () => {
 
 describe("latestVersions", () => {
   const pinned = [
-    { module: "bun", pin: { file: ".bun-version", version: "1.4.0" } },
-    { module: "deno", pin: { file: ".dvmrc", version: "2.9.5" } },
+    { module: "bun", version: "1.4.0" },
+    { module: "deno", version: "2.9.5" },
   ];
   const upstream = (failing: string) => async (url: string) => {
     if (url.includes(failing)) throw new Error(`GET ${url} failed: 503`);
@@ -137,64 +142,42 @@ describe("latestDenoVersion", () => {
   });
 });
 
-describe("bumpFilesPin", () => {
-  const files = [
-    "placeholders: []",
-    "",
-    "modules:",
-    "  bun:",
-    "    description: bun",
-    "    pin: {file: .bun-version, version: 1.4.0}",
-    "  deno:",
-    "    pin: {file: .dvmrc, version: 2.9.5}",
-    "  uv:",
-    "    description: no pin",
-    "",
-    "files: []",
-    "",
-  ].join("\n");
+describe("pinnedVersion", () => {
+  test("the dotfile as the refresh writes it", () => {
+    expect(pinnedVersion("1.4.0\n", "files/bun/.bun-version")).toBe("1.4.0");
+  });
 
   test.each([
-    ["bun", "1.4.1", "    pin: {file: .bun-version, version: 1.4.0}"],
-    ["deno", "3.0.0", "    pin: {file: .dvmrc, version: 2.9.5}"],
-  ])("bumps only modules.%s's pin line to %s", (module, version, line) => {
-    expect(bumpFilesPin(files, module, version, "files.yml")).toBe(
-      files.replace(line, line.replace(/\d+\.\d+\.\d+/, version)),
+    ["2.9.5", "no trailing newline"],
+    ["1.4.0-canary.1\n", "a prerelease"],
+    ["v1.4.0\n", "a tag prefix"],
+    ["1.4.0\n\n", "a second newline"],
+    ["", "an empty file"],
+  ])("'%s' throws, naming the file (%s)", (text) => {
+    expect(() => pinnedVersion(text, "files/bun/.bun-version")).toThrow(
+      "files/bun/.bun-version: '",
     );
   });
+});
 
-  test("the current version is idempotent", () => {
-    expect(bumpFilesPin(files, "bun", "1.4.0", "files.yml")).toBe(files);
-  });
-
-  test.each([
-    ["the module carries no pin line", files, "uv", "no pin line"],
-    ["the module is not under modules", files, "rust", "no modules.rust entry"],
-    ["there is no modules section", "files: []\n", "bun", "no modules section"],
-    [
-      "the pin is not the one-line flow mapping",
-      files.replace(
-        "    pin: {file: .bun-version, version: 1.4.0}",
-        "    pin:\n      file: .bun-version\n      version: 1.4.0",
-      ),
-      "bun",
-      "pin: {file: X, version: X.Y.Z}",
-    ],
-    [
-      "the pin line carries a trailing comment",
-      files.replace("version: 1.4.0}", "version: 1.4.0} # keep"),
-      "bun",
-      "pin: {file: X, version: X.Y.Z}",
-    ],
-  ])("throws when %s", (_reason, text, module, thrown) => {
-    expect(() => bumpFilesPin(text, module, "9.9.9", "files.yml")).toThrow(thrown);
-  });
-
-  test("the committed files.yml carries a bumpable pin for every PIN_SOURCES module", () => {
-    const text = readFileSync(join(import.meta.dir, "../../files.yml"), "utf-8");
-    for (const module of Object.keys(PIN_SOURCES)) {
-      expect(bumpFilesPin(text, module, "0.0.0", "files.yml")).not.toBe(text);
-    }
+describe("typesBunDirs", () => {
+  test("every lock-carrying package declaring @types/bun as a dev dependency; the rest are not bumped", () => {
+    const root = temp.dir("types-bun-dirs-");
+    const plant = (dir: string, pkg: Record<string, unknown>, lock = true) => {
+      mkdirSync(join(root, dir), { recursive: true });
+      writeFileSync(join(root, dir, "package.json"), JSON.stringify(pkg));
+      if (lock) writeFileSync(join(root, dir, "bun.lock"), "");
+    };
+    plant(".", { devDependencies: { "@types/bun": "0.0.0" } });
+    plant("actions/dev", { devDependencies: { "@types/bun": "0.0.0" } });
+    plant("actions/plain", { devDependencies: { typescript: "^7" } });
+    plant("actions/unlocked", { devDependencies: { "@types/bun": "0.0.0" } }, false);
+    expect(typesBunDirs(root)).toEqual([".", "actions/dev"]);
+    // The bump runs `bun add --dev`, which would leave a second declaration behind.
+    plant("actions/prod", { dependencies: { "@types/bun": "0.0.0" } });
+    expect(() => typesBunDirs(root)).toThrow(
+      "actions/prod/package.json: @types/bun belongs under devDependencies",
+    );
   });
 });
 
@@ -247,11 +230,50 @@ describe("prBody", () => {
   });
 });
 
-describe("PIN_SOURCES coverage", () => {
-  test("exactly the pin-carrying files.yml modules have upstream sources", () => {
-    const pinned = toolchainPins(readFileSync(join(import.meta.dir, "../../files.yml"), "utf-8"))
-      .map((pin) => pin.module)
-      .sort();
-    expect(Object.keys(PIN_SOURCES).sort()).toEqual(pinned);
+describe("PIN_SOURCES", () => {
+  test("each source is a version dotfile files.yml delivers, managed, to the repositories selecting its module", () => {
+    const config = parseFilesConfig(
+      readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"),
+      "files.yml",
+    );
+    const delivery = Object.entries(PIN_SOURCES).map(([module, source]) => {
+      pinnedVersion(readFileSync(join(REPO_ROOT, source.file), "utf-8"), source.file);
+      const entry = config.files.find((candidate) => candidate.path === basename(source.file));
+      return [
+        module,
+        entry === undefined
+          ? undefined
+          : {
+              class: entry.class,
+              source: "source" in entry ? entry.source : undefined,
+              when: entry.when,
+            },
+      ];
+    });
+    expect(delivery).toEqual(
+      Object.entries(PIN_SOURCES).map(([module, source]) => [
+        module,
+        {
+          class: "managed",
+          source: source.file.replace(/^files\//, ""),
+          when: { modules: [module] },
+        },
+      ]),
+    );
+  });
+
+  test("the committed @types/bun pins equal the bun runtime pin, the shape one refresh writes", () => {
+    const version = pinnedVersion(
+      readFileSync(join(REPO_ROOT, PIN_SOURCES.bun.file), "utf-8"),
+      "bun",
+    );
+    const declared = typesBunDirs(REPO_ROOT).map((dir) => {
+      const pkg = JSON.parse(readFileSync(join(REPO_ROOT, dir, "package.json"), "utf-8")) as {
+        devDependencies: Record<string, string>;
+      };
+      return [dir, pkg.devDependencies["@types/bun"]];
+    });
+    expect(declared.length).toBeGreaterThan(0);
+    expect(declared).toEqual(declared.map(([dir]) => [dir, version]));
   });
 });

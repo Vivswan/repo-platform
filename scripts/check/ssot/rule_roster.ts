@@ -16,11 +16,6 @@ export interface Rule {
  *  to notice it; this roster is compared against the live rules in both directions (ruleRosterMismatches).
  *  Adding a rule means adding its name here; deleting one means removing its entry in the same change. */
 export const RULE_ROSTER = [
-  "bun-dirs",
-  "bun-types-pin",
-  "toolchain-version-files",
-  "actions-bun-guard",
-  "local-bun-runtime",
   "fleet-refs-ride-stable",
   "version-comments-verifiable",
   "delivery-pin-stems",
