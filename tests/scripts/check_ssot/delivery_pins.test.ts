@@ -220,7 +220,6 @@ describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-stable)", ()
       "fleet-release.yml",
       "fleet-release-publish.yml",
       "reusable-auto-assign.yml",
-      "reusable-auto-assign-alerts.yml",
       "reusable-codeql.yml",
       "reusable-site.yml",
       "post-green.yml",
