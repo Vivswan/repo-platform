@@ -16,14 +16,10 @@ import {
   type Layer,
   mergeSettings,
   parseSettingsDoc,
+  type SectionModule,
   sectionModule,
-  validateSettings,
+  silentIo,
 } from "@vivswan/github-settings-as-code";
-import {
-  type KeyedListLayering,
-  mergeLayers,
-  stripNulls,
-} from "@vivswan/github-settings-as-code/internal";
 import {
   type ModuleData,
   parseFilesConfig,
@@ -74,30 +70,33 @@ export function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** THE parse boundary for a settings document: YAML text in, a layer the
- *  library will fold out, or a throw naming `where` and the path inside
- *  it, so a loader can report the file before any fold. The library's
- *  layer boundary (a duplicated name, a keyless entry, a cyclic alias, a
- *  shape it cannot merge) has no entry of its own, so a one-layer merge is
- *  it. Not the library's one-layer fold: that would refuse the fleet's
- *  `labels: null` opt-out, a null over nothing failing its merged
- *  judgment. A null on a key the apply does not know passes here; the
- *  fold's own per-layer view refuses it, naming this layer. An empty
- *  document is an empty layer. */
+/** THE parse boundary for a settings document: YAML text in, a layer for
+ *  the fold, or a throw naming `where`, so a loader can report the file.
+ *  A repository's overlay is read here and judged only in its stack: a
+ *  null inside it (`rules: null` under a ruleset) opts out of what lies
+ *  BELOW, and alone it reads as a value over nothing, which the apply's
+ *  validation refuses. An empty document is an empty layer. */
 export function readLayer(text: string, where: string): Layer {
   const parsed = parseSettingsDoc(text);
   if (parsed.isErr()) throw new Error(`${where}: ${parsed.error.reason.split("\n")[0]}`);
-  const layer: Layer = { name: where, doc: parsed.value };
-  const admitted = mergeLayers([layer], { layering: "merge" });
-  if (admitted.isErr()) throw new Error(describeProblem(admitted.error));
-  const judged = validateSettings(stripNulls(layer.doc), { source: where });
-  if (judged.isErr()) throw new Error(describeProblem(judged.error));
-  return layer;
+  return { name: where, doc: parsed.value };
 }
 
-/** Throws naming the path when the file is missing or the document is refused. */
+/** Throws naming the path when the file is missing or the text is not YAML; the fold judges the layer. */
 export function loadLayer(path: string): Layer {
   return readLayer(readFileSync(path, "utf-8"), path);
+}
+
+/** A declared fleet layer, judged alone as readLayers loads the tree, so
+ *  the tree fails CLOSED: every render reads every layer's labels
+ *  (allLayerLabels), so a damaged module layer must fail the load, not
+ *  only the renders that select it. A fleet layer opts nothing out, so
+ *  alone it is the document it declares. */
+export function readFleetLayer(text: string, where: string): Layer {
+  const layer = readLayer(text, where);
+  const judged = foldSettings([layer], where);
+  if ("refused" in judged) throw new Error(judged.refused);
+  return layer;
 }
 
 /** The library's own pairing of label entries, the one its union replaces
@@ -105,7 +104,7 @@ export function loadLayer(path: string): Layer {
  *  GitHub folds them. Read once so a library bump that drops it fails here;
  *  actions/plan/reserved_labels.ts reads the same claims without the
  *  library, and its test pins the two readings to each other. */
-const LABEL_LAYERING: KeyedListLayering = (() => {
+const LABEL_LAYERING: NonNullable<SectionModule["layering"]> = (() => {
   const layering = sectionModule("labels").layering;
   if (layering === undefined) {
     throw new Error("the settings library's labels section declares no layering key");
@@ -131,30 +130,18 @@ export function sectionEntries(doc: unknown, section: string): Record<string, un
 }
 
 /** Every layer folded low to high, the library's own `mode: merge`
- *  (docs/settings.md, "The merge dialect"): each layer judged alone, then
- *  the fold judged as the document the apply will read, so a layer built
- *  in code (the tracking labels) meets the same gate as a file. The bytes
- *  are the raw fold, read from the library's internal entry: its public
- *  MergeReport.yaml renders the judged document, where the validator
- *  reorders keys and the render folds long lines. The internal entry
- *  carries no semver promise, so a library bump re-checks it here. A
- *  layer's top-level private notes (`_notes: ...`) are dropped as the
- *  library's merged file drops them. */
+ *  (docs/settings.md, "The merge dialect"): the ONE judgment of a layer,
+ *  each seen as the fold leaves it and then the fold as the document the
+ *  apply will read, so a layer built in code (the tracking labels) meets
+ *  the same gate as a file. `yaml` is the bytes the apply's own merge
+ *  writes. */
 export function foldSettings(
   layers: readonly Layer[],
   where: string,
-): { settings: SettingsDoc } | { refused: string } {
-  const judged = mergeSettings(layers, { source: where, layering: "merge" });
-  if (judged.isErr()) return { refused: describeProblem(judged.error) };
-  const merged = mergeLayers(layers, { layering: "merge" });
-  // The judgment just ran this same fold, so an error or a non-mapping here cannot happen.
-  if (merged.isErr() || !isMapping(merged.value.settings)) {
-    throw new Error(`${where}: the judged layers did not fold to a mapping`);
-  }
-  const settings = Object.fromEntries(
-    Object.entries(merged.value.settings).filter(([key]) => !key.startsWith("_")),
-  );
-  return { settings };
+): { settings: SettingsDoc; yaml: string } | { refused: string } {
+  const merged = mergeSettings(layers, { source: where, layering: "merge", io: silentIo() });
+  if (merged.isErr()) return { refused: describeProblem(merged.error) };
+  return { settings: merged.value.settings, yaml: merged.value.yaml };
 }
 
 export interface ReadLayers {
@@ -178,7 +165,7 @@ export function readLayers(config: LayerSources, tree: string): ReadLayers {
       continue;
     }
     try {
-      layers.set(rel, readLayer(readFileSync(abs, "utf-8"), `${SOURCE_PREFIX}${rel}`));
+      layers.set(rel, readFleetLayer(readFileSync(abs, "utf-8"), `${SOURCE_PREFIX}${rel}`));
     } catch (error) {
       problems.push(error instanceof Error ? error.message : String(error));
     }

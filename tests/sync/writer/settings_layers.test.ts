@@ -17,6 +17,7 @@ import {
   loadLayer,
   loadModules,
   loadOverrideLayer,
+  readFleetLayer,
   readLayer,
   readLayers,
   type SettingsDoc,
@@ -382,38 +383,8 @@ describe("the layer topology fails CLOSED", () => {
 });
 
 describe("readLayer", () => {
-  test.each<{ reason: string; text: string; message: string }>([
-    {
-      reason: "a YAML syntax error",
-      text: "labels: [\n",
-      message: "here: YAMLParseError:",
-    },
-    {
-      reason: "an alias naming its own ancestor",
-      text: "repository: &r {self: *r}\n",
-      message:
-        'layer "here": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees',
-    },
-    {
-      reason: "a name-keyed section that is not a list of mappings",
-      text: "labels: {bug: x}\n",
-      message:
-        'layer "here": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
-    },
-    {
-      reason: "a ruleset rule without a type",
-      text: "rulesets:\n  - name: main\n    rules: [{parameters: {}}]\n",
-      message:
-        'layer "here": rulesets[0].rules[0] carries no string "type", which every entry needs to layer by',
-    },
-    {
-      reason: "a label without a name",
-      text: "labels:\n  - {color: fff}\n",
-      message:
-        'layer "here": labels[0] carries no string "name", which every entry needs to layer by',
-    },
-  ])("refuses $reason, naming the document", ({ text, message }) => {
-    expect(() => readLayer(text, "here")).toThrow(message);
+  test("refuses a YAML syntax error, naming the document", () => {
+    expect(() => readLayer("labels: [\n", "here")).toThrow("here: YAMLParseError:");
   });
 
   test("nulls are legal input, the fold's opt-out marker; an empty document is an empty layer", () => {
@@ -424,10 +395,88 @@ describe("readLayer", () => {
     expect(readLayer("", "here").doc).toEqual({});
     expect(readLayer("# nothing\n", "here").doc).toEqual({});
   });
+
+  test("an overlay is never judged alone: a null inside an entry opts out of what lies below", () => {
+    const overlay = "rulesets: [{name: main, rules: null}]\n";
+    expect(readLayer(overlay, "over").doc).toEqual({ rulesets: [{ name: "main", rules: null }] });
+    expect(() => readFleetLayer(overlay, "fleet")).toThrow(
+      "fleet has malformed section entries: rulesets.entries[0].rules: Invalid input: expected array, received null",
+    );
+  });
 });
 
 describe("foldSettings", () => {
   const layer = (name: string, text: string) => readLayer(text, name);
+
+  test.each<{ reason: string; text: string; message: string }>([
+    {
+      reason: "an alias naming its own ancestor",
+      text: "repository: &r {self: *r}\n",
+      message:
+        'layer "here": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees',
+    },
+    {
+      reason: "a name-keyed section that is not a list of mappings",
+      text: "labels: {bug: x}\n",
+      message: "here has malformed section entries: labels.entries: Invalid input: expected array",
+    },
+    {
+      reason: "a ruleset rule without a type",
+      text: "rulesets:\n  - name: main\n    rules: [{parameters: {}}]\n",
+      message:
+        "here has malformed section entries: rulesets[0].rules[0].type: Invalid input: expected string",
+    },
+    {
+      reason: "a label without a name",
+      text: "labels:\n  - {color: fff}\n",
+      message: "here has malformed section entries: labels[0].name: Invalid input: expected string",
+    },
+    {
+      // A label entry replaces wholesale, so a null field inside it is a
+      // value the apply would read, and the library refuses it where written.
+      reason: "a null inside a replaced entry (not an opt-out)",
+      text: "labels: [{name: bug, color: d73a4a, description: null}]\n",
+      message: "here has malformed section entries: labels[0].description",
+    },
+    {
+      reason: "a null on a section the apply does not know",
+      text: "labels_v2: null\n",
+      message: "unknown top-level section(s) in here: labels_v2",
+    },
+    {
+      reason: "an underscore key outside the library's two directives (no private notes)",
+      text: "_notes: {why: mine}\nrepository: {has_wiki: false}\n",
+      message: "unknown underscore key(s) in here: _notes",
+    },
+  ])("refuses $reason, naming the layer", ({ text, message }) => {
+    expect(foldSettings([layer("here", text)], "f")).toEqual({
+      refused: expect.stringContaining(message),
+    });
+  });
+
+  test("a null inside an entry is an opt-out of what lies below, so a layer alone is never judged", () => {
+    // `rules: null` on the overlay's main ruleset drops the lower layers'
+    // rules and cannot touch the override's (docs/settings.md, "Apply semantics").
+    const folded = foldSettings(
+      [
+        layer("fleet", "rulesets: [{name: main, target: branch, rules: [{type: deletion}]}]\n"),
+        layer("overlay", "rulesets: [{name: main, rules: null}]\n"),
+        layer("override", "rulesets: [{name: main, rules: [{type: required_linear_history}]}]\n"),
+      ],
+      "f",
+    );
+    expect(folded).toEqual({
+      settings: {
+        rulesets: {
+          entries: [
+            { name: "main", target: "branch", rules: [{ type: "required_linear_history" }] },
+          ],
+          _undeclared: "keep",
+        },
+      },
+      yaml: expect.any(String),
+    });
+  });
 
   test("the dialect the fleet relies on: higher wins, null opts out, name-keyed unions, rules append by type", () => {
     const folded = foldSettings(
@@ -494,14 +543,35 @@ describe("foldSettings", () => {
         // Met nothing below, so it stays with the apply's meaning.
         pages: null,
       },
+      yaml: expect.any(String),
     });
   });
 
-  test("a null on a section the apply does not know is named with its layer at the fold", () => {
-    // readLayer lets it through (a null there is an opt-out marker until the
-    // fold sees what it meets); the fold's own per-layer view names the file.
-    expect(foldSettings([layer("over", "labels_v2: null\n")], "f")).toEqual({
-      refused: expect.stringContaining("unknown top-level section(s) in over: labels_v2"),
+  test("the bytes are the apply's own merged file: the layers' key order, the knob leading its wrapper", () => {
+    const folded = foldSettings(
+      [
+        layer(
+          "base",
+          "repository: {has_issues: true, has_wiki: false}\nlabels: [{name: bug, color: d73a4a}]\n",
+        ),
+        layer("over", "repository: {description: mine}\n"),
+      ],
+      "the fold",
+    );
+    expect(folded).toEqual({
+      settings: expect.any(Object),
+      yaml: [
+        "repository:",
+        "  has_issues: true",
+        "  has_wiki: false",
+        "  description: mine",
+        "labels:",
+        "  _undeclared: delete",
+        "  entries:",
+        "    - name: bug",
+        "      color: d73a4a",
+        "",
+      ].join("\n"),
     });
   });
 
@@ -511,15 +581,10 @@ describe("foldSettings", () => {
       [layer("over", "pages: null\nrepository: {has_wiki: false}\n")],
       "f",
     );
-    expect(folded).toEqual({ settings: { repository: { has_wiki: false }, pages: null } });
-  });
-
-  test("a null inside a replaced entry is not an opt-out: the layer is refused by name", () => {
-    // A label entry replaces wholesale, so a null field inside it is a
-    // value the apply would read, and the library refuses it where written.
-    expect(() =>
-      readLayer("labels: [{name: bug, color: d73a4a, description: null}]\n", "over"),
-    ).toThrow("over has malformed section entries: labels[0].description");
+    expect(folded).toEqual({
+      settings: { repository: { has_wiki: false }, pages: null },
+      yaml: "pages: null\nrepository:\n  has_wiki: false\n",
+    });
   });
 
   test("a layer built in code meets the apply's judgment at the fold, never in the render", () => {
@@ -532,14 +597,6 @@ describe("foldSettings", () => {
     expect(folded).toEqual({
       refused: expect.stringContaining("tracking has malformed section entries: labels[0].color"),
     });
-  });
-
-  test("a layer's top-level private notes never reach the rendered document", () => {
-    const folded = foldSettings(
-      [layer("over", "_notes: {why: mine}\nrepository: {has_wiki: false}\n")],
-      "f",
-    );
-    expect(folded).toEqual({ settings: { repository: { has_wiki: false } } });
   });
 });
 
@@ -601,6 +658,7 @@ describe("the override layer", () => {
           _undeclared: "keep",
         },
       },
+      yaml: expect.any(String),
     });
   });
 

@@ -313,7 +313,9 @@ describe("blockSources and verifySources", () => {
       [
         "a layer whose labels are not a list",
         { ...LAYERS, "bun/settings.yml": "labels: {javascript: x}\n" },
-        'layer "files/bun/settings.yml": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
+        expect.stringContaining(
+          "files/bun/settings.yml has malformed section entries: labels.entries: Invalid input: expected array",
+        ),
       ],
     ])("%s is a load problem naming the file", (_reason, files, problem) => {
       expect(problemsOf(files)).toEqual([problem]);

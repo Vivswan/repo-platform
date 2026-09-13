@@ -1,5 +1,5 @@
 # A plan job selects the targets into a keyed matrix; one apply job per row resolves its target
-# and runs github-settings-as-code on it, from its own rendered .github/settings.yml
+# and runs the github-settings-as-code CLI on it, from its own rendered .github/settings.yml
 # (docs/settings.md). No push trigger: a merge reaches the fleet only through post-green.yml's
 # call, behind the all-green gate.
 
@@ -167,22 +167,14 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: bun .github/scripts/fleet/resolve_settings_target.ts
 
-      # Gated on the resolved name: an empty repos input is the action's single-repo mode over
-      # this checkout's own document.
+      # Gated on the resolved name: an empty --repos is the CLI's single-repo mode over this checkout's
+      # own document. The CLI is the installed library's own bin, so bun.lock names the one version the
+      # writer folds with and the apply runs; a drift under check exits 1 and reds the row.
       - name: Apply repository settings
         if: env.TARGET != ''
-        uses: Vivswan/github-settings-as-code@190f3d1b4d90c6baf0d52802ff0b5954c507d255 # next: 2.0.1-main.455.20260913.gd92b738
-        with:
-          token: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          mode: ${{ inputs.check_only && 'check' || 'apply' }}
-          repos: ${{ env.TARGET }}
-          # A private target appears in this public log as "private
-          # repository #1"; its failure or drift details land as a reused
-          # issue on the target repository instead (needs the PAT's Issues
-          # write).
-          private-repos: redact
-          private-report: issue
-          # Strict: a token that cannot reach a declared section fails that
-          # target (the action's default) - drift must not hide behind a
-          # green run.
-          on-missing-permission: fail
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          MODE: ${{ inputs.check_only && 'check' || 'apply' }}
+        run: >-
+          bun run gsac "$MODE" --repos "$TARGET" --private-repos redact --private-report issue
+          --on-missing-permission fail --summary "$GITHUB_STEP_SUMMARY"

@@ -8,7 +8,6 @@
 
 import { join } from "node:path";
 import { type Layer, UNDECLARED_POLICY_SECTIONS } from "@vivswan/github-settings-as-code";
-import { stringify as stringifyYaml } from "yaml";
 import type { FilesConfig } from "../../../../actions/plan/files_config.ts";
 import { PlanError, trackingLabels } from "../../../../actions/plan/plan.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
@@ -95,8 +94,7 @@ function trackingLabelTuples(
 
 /** The hold an overlay earns for re-layering a section, or null. The
  *  library reads the directive at the top level and on a knobbed section's
- *  wrapper alone; the same key inside a private note (`_notes`) or any
- *  other mapping is data. */
+ *  wrapper alone; the same key inside any other mapping is data. */
 function layeringDirective(overlay: Layer, overlayPath: string): string | null {
   if (!isMapping(overlay.doc)) return null;
   const doc = overlay.doc;
@@ -185,5 +183,5 @@ export function renderSettings(input: SettingsRenderInput): SettingsRender {
     `the render of ${input.overlayPath} with the fleet layers`,
   );
   if ("refused" in folded) return { held: folded.refused };
-  return { content: header(input) + stringifyYaml(folded.settings, { lineWidth: 0 }) };
+  return { content: header(input) + folded.yaml };
 }

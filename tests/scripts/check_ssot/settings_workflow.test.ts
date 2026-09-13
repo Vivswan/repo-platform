@@ -4,10 +4,9 @@ import { parse as parseYaml } from "yaml";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import { FLEET_WRITERS, POST_GREEN_REL } from "../../../scripts/check/ssot/post_green.ts";
 import {
-  libraryPinMismatches,
   OWN_OVERLAY,
   overlayMismatches,
-  SETTINGS_ACTION_USES,
+  SETTINGS_APPLY_RUN,
   SETTINGS_STARTERS,
   SETTINGS_WORKFLOW,
   settingsApplyInputMismatches,
@@ -282,17 +281,14 @@ describe("settingsApplyInputMismatches (settings-apply-input)", () => {
   // A minimal well-wired plan job and matrix apply job, mutated per red
   // case below: the negative controls proving the judgment fails through
   // the path its green run takes.
-  const APPLY_WITH = [
-    "          token: ${{ secrets.REPO_PLATFORM_TOKEN }}",
-    "          mode: ${{ inputs.check_only && 'check' || 'apply' }}",
-    "          repos: ${{ env.TARGET }}",
-    "          private-repos: redact",
-    "          private-report: issue",
-    "          on-missing-permission: fail",
+  const APPLY_ENV = [
+    "        env:",
+    "          GITHUB_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}",
+    "          MODE: ${{ inputs.check_only && 'check' || 'apply' }}",
+    "",
   ].join("\n");
   const STEP_GATE = "        if: env.TARGET != ''\n";
-  const USES = `        uses: ${SETTINGS_ACTION_USES}\n`;
-  const [PINNED_ACTION, VERSION_COMMENT] = SETTINGS_ACTION_USES.split(" # ");
+  const RUN = `        run: >-\n          ${SETTINGS_APPLY_RUN}\n`;
   const SELECT = [
     "      - name: Select settings targets",
     "        id: select",
@@ -309,7 +305,7 @@ describe("settingsApplyInputMismatches (settings-apply-input)", () => {
     "        run: bun .github/scripts/fleet/resolve_settings_target.ts",
     "",
   ].join("\n");
-  const APPLY_STEP = `      - name: Apply repository settings\n${STEP_GATE}${USES}        with:\n${APPLY_WITH}\n`;
+  const APPLY_STEP = `      - name: Apply repository settings\n${STEP_GATE}${APPLY_ENV}${RUN}`;
   const MATRIX = "      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.matrix) }}\n";
   const JOB_NAME = "    name: apply (row ${{ matrix.row }})\n";
   const valid = `
@@ -326,12 +322,12 @@ ${SELECT}  apply:
       fail-fast: false
 ${MATRIX}${JOB_NAME}    steps:
 ${RESOLVE}${APPLY_STEP}`;
-  const expectedWith =
-    "the apply step's with: exactly " +
-    '{"token":"${{ secrets.REPO_PLATFORM_TOKEN }}",' +
-    "\"mode\":\"${{ inputs.check_only && 'check' || 'apply' }}\"," +
-    '"repos":"${{ env.TARGET }}","private-repos":"redact",' +
-    '"private-report":"issue","on-missing-permission":"fail"}';
+  const expectedRun = `run: ${SETTINGS_APPLY_RUN}`;
+  const expectedEnv =
+    "the apply step's env exactly " +
+    '{"GITHUB_TOKEN":"${{ secrets.REPO_PLATFORM_TOKEN }}",' +
+    "\"MODE\":\"${{ inputs.check_only && 'check' || 'apply' }}\"}" +
+    " (the fleet token the CLI reads, and the mode check_only picks)";
   const expectedMatrix =
     'the apply job\'s matrix the plan\'s row indexes and keys alone: matrix: {"include":"${{ fromJSON(needs.plan.outputs.matrix) }}"}';
   const expectedResolver =
@@ -342,140 +338,99 @@ ${RESOLVE}${APPLY_STEP}`;
     '"GH_TOKEN":"${{ secrets.REPO_PLATFORM_TOKEN }}","OWNER":"${{ github.repository_owner }}"}' +
     " (the row's key, what keyed it, and the listing it resolves against)";
 
-  /** The with: block as the rule reports it (keys sorted): the pinned inputs with `changes` applied, an undefined value dropping its key. */
-  const withGot = (changes: Record<string, string | undefined>) => {
-    const inputs: Record<string, string | undefined> = {
-      token: "${{ secrets.REPO_PLATFORM_TOKEN }}",
-      mode: "${{ inputs.check_only && 'check' || 'apply' }}",
-      repos: "${{ env.TARGET }}",
-      "private-repos": "redact",
-      "private-report": "issue",
-      "on-missing-permission": "fail",
-      ...changes,
-    };
-    const kept = Object.fromEntries(Object.entries(inputs).filter(([, v]) => v !== undefined));
-    return JSON.stringify(kept, Object.keys(kept).sort());
+  /** The run line with `changes` applied: a flag's value replaced, or a flag appended. */
+  const run = (changes: Record<string, string>, appended = "") => {
+    let line = SETTINGS_APPLY_RUN;
+    for (const [flag, value] of Object.entries(changes)) {
+      line = line.replace(new RegExp(`${flag} (\\S+)`), `${flag} ${value}`);
+    }
+    return `run: ${line}${appended}`;
   };
+  const RUN_LINE = `          ${SETTINGS_APPLY_RUN}\n`;
 
   test("the synthetic fixture is judged clean - the control for every red case below", () => {
     expect(settingsApplyInputMismatches(valid)).toEqual([]);
   });
 
-  test.each([
+  test.each<{
+    reason: string;
+    text: string;
+    expected: string;
+    got: string;
+    also?: Pick<Mismatch, "expected" | "got">;
+  }>([
     {
-      reason: "a repository input beside repos (single-repo mode over a scratch document)",
-      text: valid.replace(APPLY_WITH, `${APPLY_WITH}\n          repository: Vivswan/x`),
-      expected: expectedWith,
-      got: withGot({ repository: "Vivswan/x" }),
+      reason: "a --repository flag beside --repos (single-repo mode over a scratch document)",
+      text: valid.replace(RUN_LINE, `${RUN_LINE}          --repository Vivswan/x\n`),
+      expected: expectedRun,
+      got: run({}, " --repository Vivswan/x"),
     },
     {
-      reason: "a settings-file input (a document other than each target's own)",
-      text: valid.replace(APPLY_WITH, `${APPLY_WITH}\n          settings-file: merged.yml`),
-      expected: expectedWith,
-      got: withGot({ "settings-file": "merged.yml" }),
+      reason: "a --settings-file flag (a document other than each target's own)",
+      text: valid.replace(RUN_LINE, `${RUN_LINE}          --settings-file merged.yml\n`),
+      expected: expectedRun,
+      got: run({}, " --settings-file merged.yml"),
     },
     {
-      reason: "a defaults-file input",
-      text: valid.replace(APPLY_WITH, `${APPLY_WITH}\n          defaults-file: d.yml`),
-      expected: expectedWith,
-      got: withGot({ "defaults-file": "d.yml" }),
+      reason: "a --defaults-file flag",
+      text: valid.replace(RUN_LINE, `${RUN_LINE}          --defaults-file d.yml\n`),
+      expected: expectedRun,
+      got: run({}, " --defaults-file d.yml"),
     },
     {
-      reason: "a repos-dir input",
-      text: valid.replace(APPLY_WITH, `${APPLY_WITH}\n          repos-dir: repos`),
-      expected: expectedWith,
-      got: withGot({ "repos-dir": "repos" }),
+      reason: "a --repos-dir flag",
+      text: valid.replace(RUN_LINE, `${RUN_LINE}          --repos-dir repos\n`),
+      expected: expectedRun,
+      got: run({}, " --repos-dir repos"),
     },
     {
-      reason: 'repos: "*" - the action would discover the fleet itself, adopted or not',
-      text: valid.replace("repos: ${{ env.TARGET }}", 'repos: "*"'),
-      expected: expectedWith,
-      got: withGot({ repos: "*" }),
+      reason: '--repos "*" - the CLI would discover the fleet itself, adopted or not',
+      text: valid.replace('--repos "$TARGET"', '--repos "*"'),
+      expected: expectedRun,
+      got: run({ "--repos": '"*"' }),
     },
     {
-      reason: "repos read from the matrix instead of the resolved name",
-      text: valid.replace("repos: ${{ env.TARGET }}", "repos: ${{ matrix.key }}"),
-      expected: expectedWith,
-      got: withGot({ repos: "${{ matrix.key }}" }),
+      reason: "--repos read from the matrix instead of the resolved name",
+      text: valid.replace('--repos "$TARGET"', '--repos "${{ matrix.key }}"'),
+      expected: expectedRun,
+      got: run({ "--repos": '"${{ matrix.key }}"' }),
     },
     {
       reason:
-        "a dropped on-missing-permission (the action's default is fail, but the pin is explicit)",
-      text: valid.replace("\n          on-missing-permission: fail", ""),
-      expected: expectedWith,
-      got: withGot({ "on-missing-permission": undefined }),
+        "a dropped --on-missing-permission (the CLI's default is fail, but the pin is explicit)",
+      text: valid.replace(" --on-missing-permission fail", ""),
+      expected: expectedRun,
+      got: `run: ${SETTINGS_APPLY_RUN.replace(" --on-missing-permission fail", "")}`,
+    },
+    {
+      reason: "--private-repos show (a private slug in this public log)",
+      text: valid.replace("--private-repos redact", "--private-repos show"),
+      expected: expectedRun,
+      got: run({ "--private-repos": "show" }),
+    },
+    {
+      reason: "the summary left off (the step summary is the run's readable surface)",
+      text: valid.replace(' --summary "$GITHUB_STEP_SUMMARY"', ""),
+      expected: expectedRun,
+      got: `run: ${SETTINGS_APPLY_RUN.replace(' --summary "$GITHUB_STEP_SUMMARY"', "")}`,
     },
     {
       reason: "a mode that ignores check_only",
-      text: valid.replace("mode: ${{ inputs.check_only && 'check' || 'apply' }}", "mode: apply"),
-      expected: expectedWith,
-      got: withGot({ mode: "apply" }),
+      text: valid.replace("MODE: ${{ inputs.check_only && 'check' || 'apply' }}", "MODE: apply"),
+      expected: expectedEnv,
+      got: '{"GITHUB_TOKEN":"${{ secrets.REPO_PLATFORM_TOKEN }}","MODE":"apply"}',
     },
     {
-      reason: "private-repos: show (a private slug in this public log)",
-      text: valid.replace("private-repos: redact", "private-repos: show"),
-      expected: expectedWith,
-      got: withGot({ "private-repos": "show" }),
-    },
-    {
-      reason: "an unpinned uses (a moving tag)",
-      text: valid.replace(USES, "        uses: Vivswan/github-settings-as-code@v2\n"),
-      expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@v2",
-    },
-    {
-      reason: "the pin without its version comment",
-      text: valid.replace(` # ${VERSION_COMMENT}`, ""),
-      expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: PINNED_ACTION,
-    },
-    {
-      // YAML reads this comment as the scalar's own trailing comment; the
-      // release-tag verification reads the version off the uses line alone.
-      reason: "the version comment on the next line, indented under the uses key",
-      text: valid.replace(` # ${VERSION_COMMENT}\n`, `\n          # ${VERSION_COMMENT}\n`),
-      expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: PINNED_ACTION,
-    },
-    {
-      reason: "the version comment on the next line at the uses key's indentation",
-      text: valid.replace(` # ${VERSION_COMMENT}\n`, `\n        # ${VERSION_COMMENT}\n`),
-      expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: PINNED_ACTION,
-    },
-    {
-      reason:
-        "the uses value folded into a block scalar, beside a decoy scalar spelling the pinned line",
+      reason: "the token handed as a flag instead of the env the CLI reads",
       text: valid
-        .replace(USES, "        uses: >-\n          Vivswan/github-settings-as-code@v2\n")
-        .replace("jobs:\n", `env:\n  DECOY: |\n    uses: ${SETTINGS_ACTION_USES}\njobs:\n`),
-      expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@v2",
-    },
-    {
-      reason: "the uses value reached through a YAML alias (no pin on the step itself)",
-      text: valid
-        .replace(USES, "        uses: *settings_action\n")
-        .replace(
-          "jobs:\n",
-          "env:\n  SETTINGS_ACTION: &settings_action Vivswan/github-settings-as-code@v2\njobs:\n",
-        ),
-      expected: `uses: ${SETTINGS_ACTION_USES} as a plain scalar on every apply step`,
-      got: "0 readable pin(s) for 1 step(s) (an alias or a non-scalar uses)",
-    },
-    {
-      reason: "a stale version comment beside the right sha",
-      text: valid.replace(` # ${VERSION_COMMENT}`, " # next: 2.0.1-main.0.g3fad2b2"),
-      expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: `${PINNED_ACTION} # next: 2.0.1-main.0.g3fad2b2`,
-    },
-    {
-      reason: "an unpinned step beside a decoy carrying the expected line elsewhere in the file",
-      text: valid
-        .replace(USES, "        uses: Vivswan/github-settings-as-code@v2\n")
-        .replace("jobs:\n", `env:\n  DECOY: "${SETTINGS_ACTION_USES}"\njobs:\n`),
-      expected: `uses: ${SETTINGS_ACTION_USES}`,
-      got: "Vivswan/github-settings-as-code@v2",
+        .replace("          GITHUB_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}\n", "")
+        .replace(RUN_LINE, `${RUN_LINE}          --token "\${{ secrets.REPO_PLATFORM_TOKEN }}"\n`),
+      expected: expectedRun,
+      got: run({}, ' --token "${{ secrets.REPO_PLATFORM_TOKEN }}"'),
+      also: {
+        expected: expectedEnv,
+        got: "{\"MODE\":\"${{ inputs.check_only && 'check' || 'apply' }}\"}",
+      },
     },
     {
       reason: "no gate on the resolved name (an empty repos input is single-repo mode)",
@@ -584,13 +539,14 @@ ${RESOLVE}${APPLY_STEP}`;
     },
     {
       reason: "TARGET set in the apply step's env (the runner prints step env)",
-      text: valid.replace(
-        `${STEP_GATE}${USES}`,
-        `${STEP_GATE}        env:\n          TARGET: Vivswan/x\n${USES}`,
-      ),
+      text: valid.replace(APPLY_ENV, `${APPLY_ENV}          TARGET: Vivswan/x\n`),
       expected:
         "no TARGET in an apply step's env (the runner prints step env; the name rides GITHUB_ENV)",
       got: 'step "Apply repository settings" declares TARGET',
+      also: {
+        expected: expectedEnv,
+        got: '{"GITHUB_TOKEN":"${{ secrets.REPO_PLATFORM_TOKEN }}","MODE":"${{ inputs.check_only && \'check\' || \'apply\' }}","TARGET":"Vivswan/x"}',
+      },
     },
     {
       reason: "a re-selection in the apply job (the plan's probes re-run per row)",
@@ -599,21 +555,107 @@ ${RESOLVE}${APPLY_STEP}`;
         "one selection step in the whole workflow (a re-selection could move a row onto another repository)",
       got: "2 steps running bun .github/scripts/fleet/select_settings_repos.ts, in jobs plan, apply",
     },
-  ])("$reason is the one mismatch", ({ text, expected, got }) => {
+  ])("$reason is the one mismatch", ({ text, expected, got, also }) => {
     expect(settingsApplyInputMismatches(text)).toEqual([
       { file: SETTINGS_WORKFLOW, expected, got },
+      ...(also === undefined ? [] : [{ file: SETTINGS_WORKFLOW, ...also }]),
     ]);
   });
 
-  test("a second job running the action is refused even when both are well-formed", () => {
+  test("a second job running the CLI is refused even when both are well-formed", () => {
     const secondJob = `${valid}  apply-again:\n    needs: plan\n    steps:\n${RESOLVE}${APPLY_STEP}`;
     expect(settingsApplyInputMismatches(secondJob)).toEqual([
       {
         file: SETTINGS_WORKFLOW,
-        expected: "one job running github-settings-as-code (the matrix job, one target per row)",
+        expected: "one job running the settings library (the matrix job, one target per row)",
         got: "2 jobs",
       },
     ]);
+  });
+
+  test.each([
+    {
+      // A fetch at run time would read whatever the registry serves, not bun.lock's version.
+      reason: "the CLI fetched from the registry instead of the installed bin",
+      text: valid.replace("bun run gsac", "bunx @vivswan/github-settings-as-code@next"),
+      mismatches: [
+        {
+          expected: expectedRun,
+          got: `run: ${SETTINGS_APPLY_RUN.replace("bun run gsac", "bunx @vivswan/github-settings-as-code@next")}`,
+        },
+      ],
+    },
+    {
+      reason: "the apply as an action step (a second version pin beside bun.lock)",
+      text: valid.replace(
+        `${APPLY_ENV}${RUN}`,
+        "        uses: Vivswan/github-settings-as-code@v2\n        with:\n          repos: ${{ env.TARGET }}\n",
+      ),
+      mismatches: [
+        { expected: expectedRun, got: "uses: Vivswan/github-settings-as-code@v2" },
+        { expected: expectedEnv, got: "no env" },
+      ],
+    },
+    {
+      reason: "a registry-fetched second step beside the installed one",
+      text: valid.replace(
+        APPLY_STEP,
+        APPLY_STEP +
+          APPLY_STEP.replace("Apply repository settings", "Apply again").replace(
+            "bun run gsac",
+            "npx @vivswan/github-settings-as-code@latest",
+          ),
+      ),
+      mismatches: [
+        {
+          expected: "one settings-library step in the apply job (one target per row)",
+          got: "2 steps",
+        },
+        {
+          expected: expectedRun,
+          got: `run: ${SETTINGS_APPLY_RUN.replace("bun run gsac", "npx @vivswan/github-settings-as-code@latest")}`,
+        },
+      ],
+    },
+    {
+      reason: "the library run through another action's inputs beside the installed one",
+      text: valid.replace(
+        APPLY_STEP,
+        `${APPLY_STEP}      - uses: actions/github-script@${"b".repeat(40)} # v8.0.0\n        with:\n          script: await exec.exec("npx", ["--yes", "@vivswan/github-settings-as-code@next", "apply", "--repos", process.env.TARGET])\n`,
+      ),
+      mismatches: [
+        {
+          expected: "one settings-library step in the apply job (one target per row)",
+          got: "2 steps",
+        },
+        { expected: "the apply step gated on if: env.TARGET != ''", got: "no condition" },
+        { expected: expectedRun, got: `uses: actions/github-script@${"b".repeat(40)}` },
+        { expected: expectedEnv, got: "no env" },
+      ],
+    },
+    {
+      // The bin on PATH, named at the start of the run's second line: the
+      // name is read as written, never through a serialization.
+      reason: "the bin run from PATH on a later line of a second step",
+      text: valid.replace(
+        APPLY_STEP,
+        `${APPLY_STEP}      - if: env.TARGET != ''\n${APPLY_ENV}        run: |\n          export PATH="$PWD/node_modules/.bin:$PATH"\n          gsac "$MODE" --repos "$TARGET"\n`,
+      ),
+      mismatches: [
+        {
+          expected: "one settings-library step in the apply job (one target per row)",
+          got: "2 steps",
+        },
+        {
+          expected: expectedRun,
+          got: 'run: export PATH="$PWD/node_modules/.bin:$PATH"\ngsac "$MODE" --repos "$TARGET"',
+        },
+      ],
+    },
+  ])("$reason is red, never a pass", ({ text, mismatches }) => {
+    expect(settingsApplyInputMismatches(text)).toEqual(
+      mismatches.map((mismatch) => ({ file: SETTINGS_WORKFLOW, ...mismatch })),
+    );
   });
 
   test("a second apply step is refused even when both are well-formed", () => {
@@ -624,7 +666,7 @@ ${RESOLVE}${APPLY_STEP}`;
     expect(settingsApplyInputMismatches(second)).toEqual([
       {
         file: SETTINGS_WORKFLOW,
-        expected: "one github-settings-as-code step in the apply job (one target per row)",
+        expected: "one settings-library step in the apply job (one target per row)",
         got: "2 steps",
       },
     ]);
@@ -635,7 +677,7 @@ ${RESOLVE}${APPLY_STEP}`;
 jobs:
   apply:
     steps:
-${SELECT}${APPLY_STEP.replace(STEP_GATE, "        if: steps.select.outputs.repos != ''\n").replace("repos: ${{ env.TARGET }}", "repos: ${{ steps.select.outputs.repos }}")}`;
+${SELECT}${APPLY_STEP.replace(STEP_GATE, "        if: steps.select.outputs.repos != ''\n").replace('--repos "$TARGET"', '--repos "${{ steps.select.outputs.repos }}"')}`;
     const shape = [
       {
         expected: "the apply in a matrix job of its own, fed by the selecting job's outputs",
@@ -680,15 +722,8 @@ ${SELECT}${APPLY_STEP.replace(STEP_GATE, "        if: steps.select.outputs.repos
 
   test.each([
     {
-      reason: "no github-settings-as-code step",
+      reason: "no apply step",
       text: valid.replace(APPLY_STEP, ""),
-    },
-    {
-      reason: "no selector step",
-      text: valid.replace(
-        "run: bun .github/scripts/fleet/select_settings_repos.ts",
-        "run: echo bun .github/scripts/fleet/select_settings_repos.ts",
-      ),
     },
   ])("$reason is anchor-lost, never a pass", ({ text }) => {
     expect(() => settingsApplyInputMismatches(text)).toThrow("anchor lost");
@@ -875,106 +910,5 @@ describe("starterMismatches and overlayMismatches (settings-starter)", () => {
     },
   ])("$reason is the one mismatch", ({ text, mismatch }) => {
     expect(overlayMismatches(text)).toEqual([mismatch]);
-  });
-});
-
-describe("libraryPinMismatches", () => {
-  const manifest = (spec: string) =>
-    JSON.stringify({ dependencies: { "@vivswan/github-settings-as-code": spec } });
-  const lock = (resolved: string) =>
-    `{\n  "packages": {\n    "@vivswan/github-settings-as-code": ["@vivswan/github-settings-as-code@${resolved}", "", {}, "sha512-x"],\n  }\n}\n`;
-  const pin = (comment: string) => `Vivswan/github-settings-as-code@${"a".repeat(40)} # ${comment}`;
-  const NEXT = "2.0.1-main.5.20260913.g1234abc";
-  const LATER = "2.0.1-main.6.20260914.gabcdef0";
-
-  test.each<{
-    reason: string;
-    spec: string;
-    resolved: string;
-    pins: string[];
-    mismatches: Mismatch[];
-  }>([
-    {
-      reason: "the next channel: the comment repeats the version the lockfile resolved",
-      spec: "next",
-      resolved: NEXT,
-      pins: [pin(`next: ${NEXT}`)],
-      mismatches: [],
-    },
-    {
-      reason: "a release names its tag",
-      spec: "3.0.0",
-      resolved: "3.0.0",
-      pins: [pin("v3.0.0")],
-      mismatches: [],
-    },
-    {
-      // The Copilot finding this rule exists for: the writer moved to the
-      // v3 library while the apply still ran v2.0.0, whose validation
-      // refuses the `_undeclared` wrapper every render now carries.
-      reason: "the apply left on an older release than the writer's library",
-      spec: "next",
-      resolved: NEXT,
-      pins: [pin("v2.0.0")],
-      mismatches: [
-        {
-          file: ".github/workflows/settings-repos.yml apply step",
-          expected: `Vivswan/github-settings-as-code@<the packaged commit of ${NEXT}> # next: ${NEXT} (bun.lock resolves @vivswan/github-settings-as-code next to ${NEXT}; the apply and the writer share one library commit)`,
-          got: "# v2.0.0",
-        },
-      ],
-    },
-    {
-      // A `bun update` moved the lockfile and nobody moved the apply.
-      reason: "the lockfile ahead of the apply's comment on the next channel",
-      spec: "next",
-      resolved: LATER,
-      pins: [pin(`next: ${NEXT}`)],
-      mismatches: [
-        {
-          file: ".github/workflows/settings-repos.yml apply step",
-          expected: `Vivswan/github-settings-as-code@<the packaged commit of ${LATER}> # next: ${LATER} (bun.lock resolves @vivswan/github-settings-as-code next to ${LATER}; the apply and the writer share one library commit)`,
-          got: `# next: ${NEXT}`,
-        },
-      ],
-    },
-    {
-      reason: "a pin with no version comment",
-      spec: "3.0.0",
-      resolved: "3.0.0",
-      pins: [`Vivswan/github-settings-as-code@${"a".repeat(40)}`],
-      mismatches: [
-        {
-          file: ".github/workflows/settings-repos.yml apply step",
-          expected:
-            "Vivswan/github-settings-as-code@<the packaged commit of 3.0.0> # v3.0.0 (bun.lock resolves @vivswan/github-settings-as-code 3.0.0 to 3.0.0; the apply and the writer share one library commit)",
-          got: "no version comment",
-        },
-      ],
-    },
-    {
-      reason: "a library spec that is neither the next channel nor a release (a range, latest)",
-      spec: "^3.0.0",
-      resolved: "3.0.0",
-      pins: [pin("v3.0.0")],
-      mismatches: [
-        {
-          file: "package.json @vivswan/github-settings-as-code",
-          expected: "the next dist-tag or an exact release (X.Y.Z) of the library",
-          got: "^3.0.0",
-        },
-      ],
-    },
-  ])("$reason", ({ spec, resolved, pins, mismatches }) => {
-    expect(libraryPinMismatches(manifest(spec), lock(resolved), pins)).toEqual(mismatches);
-  });
-
-  test("a manifest or lockfile without the library is an anchor lost, never a clean pass", () => {
-    expect(() =>
-      libraryPinMismatches(JSON.stringify({ dependencies: {} }), lock("3.0.0"), [pin("v3.0.0")]),
-    ).toThrow("no @vivswan/github-settings-as-code dependency - anchor lost");
-    expect(() => libraryPinMismatches(manifest("next"), "{}", [pin("v3.0.0")])).toThrow(
-      "bun.lock: no resolved @vivswan/github-settings-as-code package - anchor lost",
-    );
   });
 });
