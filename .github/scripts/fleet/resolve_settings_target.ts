@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The settings apply's row resolver: sync/resolve_row.ts's step under the apply's own GITHUB_ENV
-// contract, TARGET alone (settings-repos.yml reads it as the action's repos input).
+// contract, TARGET alone (settings-repos.yml hands it to the library CLI as --repos).
 
 import { fail, notice, requireEnv } from "../shared/gha.ts";
 import { resolveTarget } from "../sync/resolve_row.ts";

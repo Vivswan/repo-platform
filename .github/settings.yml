@@ -15,7 +15,8 @@ repository:
       status: enabled
     secret_scanning_push_protection:
       status: enabled
-  description: Standards files, CI, and settings for Vivswan's repositories, pushed from one place
+  description: Standards files, CI, and settings for Vivswan's repositories,
+    pushed from one place
   homepage: ""
   topics: github-actions, reusable-workflows, standards
   private: false
@@ -27,6 +28,7 @@ repository:
   allow_auto_merge: true
   enable_vulnerability_alerts: true
 labels:
+  _undeclared: delete
   entries:
     - name: dependencies
       color: 0366d6
@@ -61,8 +63,8 @@ labels:
     - name: docs-link-rot
       color: D4A72C
       description: Automated docs-site link-rot report
-  _undeclared: delete
 rulesets:
+  _undeclared: keep
   entries:
     - name: pr-title
       target: branch
@@ -152,6 +154,5 @@ rulesets:
         - type: deletion
         - type: required_linear_history
       bypass_actors: []
-  _undeclared: keep
 pages:
   build_type: workflow
