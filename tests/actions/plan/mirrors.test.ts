@@ -362,6 +362,25 @@ describe("mirrorDeclarationProblems", () => {
       ],
     },
     {
+      reason:
+        "a literal target one source spells twice under one kind is declared more than once, at that source alone",
+      mirrors: [
+        L("copy", "copies/L.md", "copies/L.md"),
+        L("symlink", "copies/L.md"),
+        L("copy", "copies/*.md", "copies/*.md"),
+        A("copy", "copies/L.md"),
+      ],
+      problems: [
+        at("LICENSE.md", "copies/L.md", TWO_SOURCES),
+        at("LICENSE.md", "copies/L.md", BOTH_KINDS),
+        at("LICENSE.md", "copies/L.md", "is declared more than once"),
+        at("AGENTS.md", "copies/L.md", TWO_SOURCES),
+        at("AGENTS.md", "copies/L.md", BOTH_KINDS),
+        expands("LICENSE.md", "copies/*.md", "copies/L.md", TWO_SOURCES),
+        expands("LICENSE.md", "copies/*.md", "copies/L.md", BOTH_KINDS),
+      ],
+    },
+    {
       reason: "a pattern's own text nests with a literal target as written, both sides",
       mirrors: [L("copy", "skills", "skills/*/LICENSE.md")],
       problems: [

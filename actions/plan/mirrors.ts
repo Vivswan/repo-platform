@@ -108,7 +108,8 @@ export function patternMatches(pattern: string, path: string): boolean {
 }
 
 /** A claim on one path: `target` as the registration declares it, `path` where the claim lands. A literal claims itself;
- *  a pattern claims each path it expands to, and its own text, since two declarations of one text expand alike. */
+ *  a pattern claims each path it expands to. The plan alone also claims a pattern's own text, since two declarations of
+ *  one text expand alike; the writer has the expansions themselves. */
 export interface Claim {
   source: string;
   target: string;
@@ -134,6 +135,8 @@ export function judgeClaims(
   // A pattern's claim on its own text stands for every path it expands to. It nests with a plain path as written, and
   // with another text only where the shorter ends in a literal segment: that segment lands as a file wherever the longer
   // pattern needs a directory. A text ending in `*` claims files at its depth; what meets below it is the checkout's to show.
+  // Two different texts are nested as written, never by what they can match (`tests/*/foo` and `tests/a*/foo/bar` pass
+  // here and fail at the writer on any checkout with a `tests/a*` directory): their conflicts fall to sync time.
   const texts = new Set(
     [...byPath]
       .filter(([, cs]) =>
@@ -170,6 +173,15 @@ export function judgeClaims(
     if (new Set(claimants.map((claim) => claim.kind)).size > 1) {
       verdicts.push("is claimed as a copy and as a symbolic link");
     }
+    // Two globs of one source and kind meeting at a path write it once; a literal spelled twice is a slip, refused at its
+    // own declaration alone.
+    const literals = claimants.filter((claim) => claim.target === path && !texts.has(path));
+    const spellings = literals.map((claim) => `${claim.source}\n${claim.kind}`);
+    const spelledTwice = new Set(
+      literals
+        .filter((_, index) => spellings.indexOf(spellings[index]) !== index)
+        .map((claim) => claim.source),
+    );
     const declarations = new Map(
       claimants.map((claim) => [`${claim.source}\n${claim.target}`, claim]),
     );
@@ -180,10 +192,13 @@ export function judgeClaims(
           : target.includes("*")
             ? "the pattern"
             : "the target";
-      for (const verdict of verdicts)
-        problems.push({ source, target, problem: `${what} ${verdict}` });
+      const own =
+        target === path && spelledTwice.has(source)
+          ? [...verdicts, "is declared more than once"]
+          : verdicts;
+      for (const verdict of own) problems.push({ source, target, problem: `${what} ${verdict}` });
     }
-    if (verdicts.length === 0) now.add(path);
+    if (verdicts.length === 0 && spelledTwice.size === 0) now.add(path);
   }
   return { problems, settled: now };
 }
