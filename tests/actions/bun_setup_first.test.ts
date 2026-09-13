@@ -39,8 +39,9 @@ test.each(manifests)(
           .map((line) => line.trim())
           .filter((line) => line.startsWith("bun ")),
       ),
-      // A later bun-using step before or without the setup rides the CALLER's bun.
-      laterSetups: rest.filter((step) => String(step.uses ?? "").includes("bun-setup")).length,
+      // A second setup, shared or direct, can overwrite the binary behind the recorded path.
+      laterSetups: rest.filter((step) => /bun-setup|setup-bun/i.test(String(step.uses ?? "")))
+        .length,
       mentionsBun: /bun/i.test(JSON.stringify(steps)),
     };
     expect(shape).toEqual(
