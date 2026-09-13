@@ -1,14 +1,6 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import {
-  isMap,
-  isScalar,
-  isSeq,
-  LineCounter,
-  parseDocument,
-  parse as parseYaml,
-  type Scalar,
-} from "yaml";
+import { parse as parseYaml } from "yaml";
 import {
   identityKeyIssues,
   loadOverrideLayer,
@@ -172,89 +164,14 @@ export function overlayMismatches(text: string): Mismatch[] {
 export const SETTINGS_WORKFLOW = ".github/workflows/settings-repos.yml";
 export const SETTINGS_SELECTOR = "bun .github/scripts/fleet/select_settings_repos.ts";
 export const SETTINGS_RESOLVER = "bun .github/scripts/fleet/resolve_settings_target.ts";
-export const SETTINGS_ACTION_USES =
-  "Vivswan/github-settings-as-code@190f3d1b4d90c6baf0d52802ff0b5954c507d255 # next: 2.0.1-main.455.20260913.gd92b738";
-/** The writer's fold, the npm build of the action the apply runs. */
-export const SETTINGS_LIBRARY = "@vivswan/github-settings-as-code";
-
-/** The writer folds with the library and the apply runs the action, and the two must be one source commit or they
- *  read different dialects (a v2.0.0 apply refuses the `_undeclared` wrapper a v3 library renders). package.json names
- *  the channel, bun.lock the version it resolved to, and the apply's comment repeats that version:
- *
- *    "next"   -> # next: <the version bun.lock resolved>   (the library's pre-release channel, until it cuts releases)
- *    "3.0.0"  -> # v3.0.0
- */
-export function libraryPinMismatches(
-  packageJson: string,
-  bunLock: string,
-  applyPins: string[],
-): Mismatch[] {
-  const manifest = JSON.parse(packageJson) as { dependencies?: Record<string, string> };
-  const spec = manifest.dependencies?.[SETTINGS_LIBRARY];
-  if (spec === undefined) {
-    throw new Error(`package.json: no ${SETTINGS_LIBRARY} dependency - anchor lost`);
-  }
-  const resolved = bunLock.match(
-    new RegExp(String.raw`^\s*"${SETTINGS_LIBRARY}": \["${SETTINGS_LIBRARY}@([^"]+)"`, "m"),
-  )?.[1];
-  if (resolved === undefined) {
-    throw new Error(`bun.lock: no resolved ${SETTINGS_LIBRARY} package - anchor lost`);
-  }
-  const comment =
-    spec === "next" ? `next: ${resolved}` : /^\d+\.\d+\.\d+$/.test(spec) ? `v${spec}` : null;
-  if (comment === null) {
-    return [
-      {
-        file: `package.json ${SETTINGS_LIBRARY}`,
-        expected: "the next dist-tag or an exact release (X.Y.Z) of the library",
-        got: spec,
-      },
-    ];
-  }
-  return applyPins.flatMap((pin) => {
-    const [uses, got] = pin.split(" # ");
-    if (got === comment) return [];
-    return [
-      {
-        file: `${SETTINGS_WORKFLOW} apply step`,
-        expected: `${uses.split("@")[0]}@<the packaged commit of ${resolved}> # ${comment} (bun.lock resolves ${SETTINGS_LIBRARY} ${spec} to ${resolved}; the apply and the writer share one library commit)`,
-        got: got === undefined ? "no version comment" : `# ${got}`,
-      },
-    ];
-  });
-}
-
-/** YAML also attaches an indented comment on the NEXT line as the scalar's
- *  trailing comment; the release-tag verification reads the `uses` line
- *  alone, so only a comment on the scalar's own line counts. */
-function sameLineComment(scalar: Scalar, lines: LineCounter): string | null {
-  const token = scalar.srcToken;
-  if (typeof scalar.comment !== "string" || scalar.range == null || token === undefined) {
-    return null;
-  }
-  const comment = "end" in token ? token.end?.find((t) => t.type === "comment") : undefined;
-  if (comment === undefined) return null;
-  const sameLine = lines.linePos(comment.offset).line === lines.linePos(scalar.range[1]).line;
-  return sameLine ? scalar.comment : null;
-}
-
-function applyUsesPins(text: string): string[] {
-  const pins: string[] = [];
-  const lines = new LineCounter();
-  const jobs = parseDocument(text, { keepSourceTokens: true, lineCounter: lines }).get("jobs");
-  if (!isMap(jobs)) return pins;
-  for (const job of jobs.items) {
-    const steps = isMap(job.value) ? job.value.get("steps") : undefined;
-    if (!isSeq(steps)) continue;
-    for (const step of steps.items) {
-      const uses = isMap(step) ? step.get("uses", true) : undefined;
-      if (!isScalar(uses) || !String(uses.value).includes("github-settings-as-code")) continue;
-      const comment = sameLineComment(uses, lines);
-      pins.push(`${String(uses.value)}${comment === null ? "" : ` #${comment.trimEnd()}`}`);
-    }
-  }
-  return pins;
-}
+/** The apply is the installed library's own bin, so bun.lock's one resolved version is the writer's fold and the
+ *  apply's engine at once; `$TARGET` rides GITHUB_ENV from the resolver, `$MODE` the step's env. */
+export const SETTINGS_APPLY_RUN =
+  'bun run gsac "$MODE" --repos "$TARGET" --private-repos redact --private-report issue --on-missing-permission fail --summary "$GITHUB_STEP_SUMMARY"';
+export const SETTINGS_APPLY_ENV = {
+  GITHUB_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
+  MODE: "${{ inputs.check_only && 'check' || 'apply' }}",
+};
 
 interface WorkflowJob {
   name?: string;
@@ -304,12 +221,26 @@ export function settingsLaneMismatches(workflowText: string, postGreenText: stri
 
 const stepsIn = (job: WorkflowJob): WorkflowStep[] => (Array.isArray(job.steps) ? job.steps : []);
 const runOf = (step: WorkflowStep): string => String(step.run ?? "").trim();
+/** Any step that names the library in one of its strings (a run line, a `uses`, a script handed to another
+ *  action) is an invocation; the rule then requires the one route bun.lock pins, so a second route is a mismatch,
+ *  never a pass. Each string is tested as written: a serialized step would spell a newline `\\n`, and that `n`
+ *  would defeat the word boundary before `gsac`. */
+const SETTINGS_INVOCATION = /\bgsac\b|github-settings-as-code/;
+function strings(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (typeof value !== "object" || value === null) return [];
+  return Object.values(value).flatMap(strings);
+}
+const isApply = (step: WorkflowStep): boolean =>
+  strings(step).some((text) => SETTINGS_INVOCATION.test(text));
+const invocationOf = (step: WorkflowStep): string =>
+  step.run === undefined ? `uses: ${String(step.uses)}` : `run: ${runOf(step)}`;
 
 /** The apply is a matrix of one target per job, each row keyed by the selector and resolved in its own job:
  *  a slug in the matrix or a re-selection in the apply job would name a private repository or re-run the plan's
- *  probes per row, and an empty repos input is the action's single-repo mode over this checkout's document.
- *  The with: block is matched whole: `repository`, `settings-file`, `defaults-file`, or `repos-dir` would apply
- *  a document other than each target's own rendered file. */
+ *  probes per row, and an empty --repos is the CLI's single-repo mode over this checkout's document.
+ *  The run line is matched whole: a `--repository`, `--settings-file`, `--defaults-file`, or `--repos-dir` would
+ *  apply a document other than each target's own rendered file. */
 export function settingsApplyInputMismatches(text: string): Mismatch[] {
   const rel = SETTINGS_WORKFLOW;
   const jobs = jobsOf(text, rel);
@@ -321,11 +252,9 @@ export function settingsApplyInputMismatches(text: string): Mismatch[] {
   const selectors = Object.values(jobs).flatMap((job) =>
     stepsIn(job).filter((step) => runOf(step) === SETTINGS_SELECTOR),
   );
-  const applying = Object.entries(jobs).filter(([, job]) =>
-    stepsIn(job).some((step) => String(step.uses ?? "").includes("github-settings-as-code")),
-  );
+  const applying = Object.entries(jobs).filter(([, job]) => stepsIn(job).some(isApply));
   if (applying.length === 0)
-    throw new Error(`${rel}: no github-settings-as-code step - anchor lost`);
+    throw new Error(`${rel}: no step running the settings library - anchor lost`);
   const mismatches: Mismatch[] = [];
   if (selectors.length !== 1) {
     mismatches.push({
@@ -338,7 +267,7 @@ export function settingsApplyInputMismatches(text: string): Mismatch[] {
   if (applying.length !== 1) {
     mismatches.push({
       file: rel,
-      expected: "one job running github-settings-as-code (the matrix job, one target per row)",
+      expected: "one job running the settings library (the matrix job, one target per row)",
       got: `${applying.length} jobs`,
     });
   }
@@ -413,31 +342,13 @@ export function settingsApplyInputMismatches(text: string): Mismatch[] {
   }
 
   const applySteps = stepsIn(apply);
-  const isApply = (step: WorkflowStep) =>
-    String(step.uses ?? "").includes("github-settings-as-code");
   const applies = applySteps.filter(isApply);
   if (applies.length !== 1) {
     mismatches.push({
       file: rel,
-      expected: "one github-settings-as-code step in the apply job (one target per row)",
+      expected: "one settings-library step in the apply job (one target per row)",
       got: `${applies.length} steps`,
     });
-  }
-  // The version comment is not in the parsed step, so the pin is read off
-  // the document's own `uses` scalar (value plus trailing comment): text
-  // elsewhere in the file can neither satisfy nor hide it.
-  const usesLine = `uses: ${SETTINGS_ACTION_USES}`;
-  const pins = applyUsesPins(text);
-  const allApplies = Object.values(jobs).flatMap((job) => stepsIn(job).filter(isApply));
-  if (pins.length !== allApplies.length) {
-    mismatches.push({
-      file: rel,
-      expected: `${usesLine} as a plain scalar on every apply step`,
-      got: `${pins.length} readable pin(s) for ${allApplies.length} step(s) (an alias or a non-scalar uses)`,
-    });
-  }
-  for (const pin of pins) {
-    if (pin !== SETTINGS_ACTION_USES) mismatches.push({ file: rel, expected: usesLine, got: pin });
   }
 
   // TARGET is job env, so only the step right before the apply may write it: a step between the
@@ -477,14 +388,7 @@ export function settingsApplyInputMismatches(text: string): Mismatch[] {
     }
   }
   const stepGate = "env.TARGET != ''";
-  const wanted = {
-    token: "${{ secrets.REPO_PLATFORM_TOKEN }}",
-    mode: "${{ inputs.check_only && 'check' || 'apply' }}",
-    repos: "${{ env.TARGET }}",
-    "private-repos": "redact",
-    "private-report": "issue",
-    "on-missing-permission": "fail",
-  };
+  const allApplies = Object.values(jobs).flatMap((job) => stepsIn(job).filter(isApply));
   for (const step of allApplies) {
     if (String(step.if ?? "").trim() !== stepGate) {
       mismatches.push({
@@ -493,12 +397,18 @@ export function settingsApplyInputMismatches(text: string): Mismatch[] {
         got: step.if === undefined ? "no condition" : `if: ${String(step.if)}`,
       });
     }
-    const got = JSON.stringify(step.with ?? {}, Object.keys(step.with ?? {}).sort());
-    if (got !== JSON.stringify(wanted, Object.keys(wanted).sort())) {
+    if (runOf(step) !== SETTINGS_APPLY_RUN) {
       mismatches.push({
         file: rel,
-        expected: `the apply step's with: exactly ${JSON.stringify(wanted)}`,
-        got,
+        expected: `run: ${SETTINGS_APPLY_RUN}`,
+        got: invocationOf(step),
+      });
+    }
+    if (canonical(step.env) !== canonical(SETTINGS_APPLY_ENV)) {
+      mismatches.push({
+        file: rel,
+        expected: `the apply step's env exactly ${JSON.stringify(SETTINGS_APPLY_ENV)} (the fleet token the CLI reads, and the mode check_only picks)`,
+        got: step.env === undefined ? "no env" : canonical(step.env),
       });
     }
   }
@@ -538,19 +448,10 @@ export const settingsWorkflowRules: Rule[] = [
   {
     // The apply reconciles labels and rulesets on every target it is
     // handed, so what it is handed is load-bearing: the plan's keyed row
-    // and nothing else, each target's own rendered document, under the
-    // tagged pin, one job per target.
+    // and nothing else, each target's own rendered document, through the
+    // installed library's bin, one job per target.
     name: "settings-apply-input",
     run: () => settingsApplyInputMismatches(read(SETTINGS_WORKFLOW)),
-  },
-  {
-    name: "settings-apply-library-pin",
-    run: () =>
-      libraryPinMismatches(
-        read("package.json"),
-        read("bun.lock"),
-        applyUsesPins(read(SETTINGS_WORKFLOW)),
-      ),
   },
   {
     // Newest wins has two halves: the selector stands a superseded run

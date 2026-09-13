@@ -379,30 +379,29 @@ describe("renderSettings", () => {
     expect(doc.labels).toMatchObject({ _undeclared: "keep" });
   });
 
-  test("a private note carrying the directive's name is a note, not a directive", () => {
-    // Only a section wrapper or the top level can carry `_layering`; any
-    // other `_`-prefixed key is the library's private-note space and is
-    // dropped from the render.
-    const { doc } = rendered({ overlay: `${OVERLAY}_notes: {_layering: why this layer exists}\n` });
-    expect(doc).not.toHaveProperty("_notes");
-    expect(names(doc.labels)).toEqual(["bug", "dependencies", "javascript"]);
+  test("rules: null in the overlay drops the lower layers' rules and keeps the override's", () => {
+    const { doc } = rendered({ overlay: `${OVERLAY}  - {name: main, rules: null}\n` });
+    const entries = (doc.rulesets as { entries: { name: string; rules: { type: string }[] }[] })
+      .entries;
+    expect(entries.find((r) => r.name === "main")?.rules.map((r) => r.type)).toEqual([
+      "deletion",
+      "required_status_checks",
+    ]);
   });
 
-  test("an alias reused without a cycle is legal; a private note is not rendered", () => {
-    const { doc } = rendered({ overlay: "repository: &r {description: Mine}\n_notes: *r\n" });
-    expect((doc.repository as Record<string, unknown>).description).toBe("Mine");
-    expect(doc).not.toHaveProperty("_notes");
-  });
-
-  test("two renders of the same inputs are byte-identical, long descriptions unwrapped", () => {
-    // Spaced, so the default folding would wrap it.
+  test("two renders of the same inputs are byte-identical, the library's own merged-file bytes", () => {
     const long = "word ".repeat(24).trim();
     const overrides = {
       overlay: `${OVERLAY}labels:\n  - {name: wide, color: "000000", description: ${long}}\n`,
     };
     const first = rendered(overrides);
     expect(first.text).toBe(rendered(overrides).text);
-    expect(first.text).toContain(`description: ${long}\n`);
+    // The library folds a long plain scalar at its width; the apply reads it back as one string.
+    expect((first.doc.labels as { entries: unknown[] }).entries.at(-1)).toEqual({
+      name: "wide",
+      color: "000000",
+      description: long,
+    });
   });
 
   test.each<{ reason: string; overrides: Partial<SettingsRenderInput>; detail: unknown }>([
@@ -414,8 +413,9 @@ describe("renderSettings", () => {
     {
       reason: "a malformed overlay",
       overrides: { overlay: "labels: {bug: x}\n" },
-      detail:
-        'layer ".github/settings.local.yml": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
+      detail: expect.stringContaining(
+        ".github/settings.local.yml has malformed section entries: labels.entries: Invalid input: expected array",
+      ),
     },
     {
       reason: "an overlay whose alias names its own ancestor",
@@ -436,8 +436,9 @@ describe("renderSettings", () => {
       // library's boundary refuses it where the repository can read why.
       reason: "an overlay label without a name",
       overrides: { overlay: `${OVERLAY}labels:\n  - {color: fff}\n` },
-      detail:
-        'layer ".github/settings.local.yml": labels[0] carries no string "name", which every entry needs to layer by',
+      detail: expect.stringContaining(
+        ".github/settings.local.yml has malformed section entries: labels[0].name: Invalid input: expected string",
+      ),
     },
     {
       reason: "an overlay naming a section the apply does not know",
@@ -447,8 +448,6 @@ describe("renderSettings", () => {
       ),
     },
     {
-      // Legal at the layer boundary (a null is an opt-out marker until the
-      // fold sees what it meets); the fold names the overlay.
       reason: "an overlay nulling a section the apply does not know",
       overrides: { overlay: `${OVERLAY}labels_v2: null\n` },
       detail: expect.stringContaining(
