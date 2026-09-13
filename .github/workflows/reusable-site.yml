@@ -73,7 +73,7 @@ jobs:
             echo "edit_links=^${edit_url//./\\.}"
           } >> "$GITHUB_OUTPUT"
 
-      # A repository without the hook publishes docs/ alone.
+      # A repository without the hook publishes docs/ alone, when it has one.
       - name: Build the repository's website
         id: hook
         if: hashFiles('.github/actions/site-build/action.yml') != ''

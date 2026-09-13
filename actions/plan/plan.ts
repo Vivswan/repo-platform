@@ -319,7 +319,7 @@ function main(): number {
   return 0;
 }
 
-/** A random delimiter, so the value cannot contain it. */
+/** The delimiter is random, so no value can be authored to end the output early. */
 export function outputLines(outputs: Record<string, string>): string {
   return Object.entries(outputs)
     .map(([name, value]) => {

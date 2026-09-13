@@ -1,4 +1,4 @@
-// File APIs follow symbolic links, so a linked ancestor (docs -> ../shared) would carry a write or an unlink outside the checkout; every path here is probed with lstat and never read through.
+// File APIs follow symbolic links, so a linked ancestor (docs -> ../shared) would carry a write or an unlink outside the checkout; every ancestor is checked with lstat, and the final component is never read through.
 
 import {
   mkdirSync,

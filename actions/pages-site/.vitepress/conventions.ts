@@ -69,7 +69,7 @@ export interface SiteConfigJson {
 const PATH_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 const URL_SEGMENT_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
-/** A "." or ".." segment could resolve outside the tree, and a dist escaping the tree publishes the whole checkout. */
+/** A ".." segment could resolve outside the tree and a "." segment to its root, and a dist escaping the tree publishes the whole checkout. */
 export function relPathProblem(value: string): string | null {
   const parts = value.split("/");
   if (

@@ -1,5 +1,5 @@
 // Stateless by design: every deploy re-enumerates the version tags and rebuilds every docs tier, so theme updates restyle every version and nothing accumulates between runs.
-// Both modes need a committed git checkout at GITHUB_WORKSPACE: each docs tier's project facts and commit are read from the ref's tree with git, never from the working files.
+// Any run that builds a docs tier needs a committed git checkout at GITHUB_WORKSPACE: the tier's project facts and commit are read from the ref's tree with git, never from the working files.
 
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
