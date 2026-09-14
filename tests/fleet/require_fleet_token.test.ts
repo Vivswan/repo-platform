@@ -32,12 +32,13 @@ test.each([
   (_, env) => {
     const run = boundedSpawnSync(["bun", SCRIPT], { cwd: ROOT, env: { PATH, ...env } });
     expect([run.exitCode, run.stderr]).toEqual([1, ""]);
-    // The runner unescapes %25 back to %: the recipe's own query string reaches the log intact.
     expect(run.stdout).toMatch(
       new RegExp(
-        `^::error::[^\\n]*\\b${FLEET_SECRET}\\b[^\\n]*\\b${FLEET_ENVIRONMENT}\\b[^\\n]*${escapeData(PAT_RECIPE_URL).replaceAll(/[.?+]/g, "\\$&")}[^\\n]*\\n$`,
+        `^::error::[^\\n]*\\b${FLEET_SECRET}\\b[^\\n]*\\b${FLEET_ENVIRONMENT}\\b[^\\n]*\\n$`,
       ),
     );
+    // The runner unescapes %25 back to %: the recipe's own query string reaches the log intact.
+    expect(run.stdout).toContain(escapeData(PAT_RECIPE_URL));
   },
 );
 
