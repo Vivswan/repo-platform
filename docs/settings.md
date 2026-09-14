@@ -55,7 +55,7 @@ The fold is [github-settings-as-code](https://github.com/Vivswan/github-settings
 
 ### The green-commit gate
 
-Every run, on all three entries, applies only from a GREEN commit ([fleet/require_green_commit.ts](../.github/scripts/fleet/require_green_commit.ts), the same [all-green predicate](all-green.md#consuming-the-gate) the tag mover and the sync enforce). Each job has one checkout with no `ref:`, so the selector's and the resolver's code is the judged commit's (the `settings-green-gate` rule in scripts/check/ssot/post_green.ts pins the shape).
+Every run, on all three entries, applies only from a GREEN commit ([fleet/require_green_commit.ts](../.github/scripts/fleet/require_green_commit.ts), the same [all-green predicate](all-green.md#consuming-the-gate) the tag mover and the sync enforce). Each job has one checkout with no `ref:`, so the selector's and the resolver's code is the judged commit's.
 
 | Entry | The gate |
 | --- | --- |

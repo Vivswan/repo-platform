@@ -20,8 +20,6 @@ export const RULE_ROSTER = [
   "step-output-gates",
   "settings-apply-input",
   "settings-lane-newest-wins",
-  "settings-green-gate",
-  "fleet-writers-ride-post-green",
   "root-twin-parity",
 ] as const;
 

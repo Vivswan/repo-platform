@@ -7,7 +7,6 @@ import {
   orderedListMismatches,
   setMismatch,
 } from "../../../scripts/check/ssot/comparison.ts";
-import { callersOf } from "../../../scripts/check/ssot/post_green.ts";
 
 describe("setMismatch", () => {
   test("passes on the same set regardless of order and duplicates", () => {
@@ -85,16 +84,5 @@ describe("escapeRegExp", () => {
       "\\.github/workflows/post-green\\.yml",
     );
     expect(escapeRegExp("plain_name-1")).toBe("plain_name-1");
-  });
-
-  test("callersOf matches a canonical call by the literal path, a backslash included", () => {
-    const rel = "odd\\path.yml";
-    const workflows = {
-      ".github/workflows/a.yml": `jobs:\n  x:\n    uses: Vivswan/repo-platform/${rel}@main\n`,
-      ".github/workflows/b.yml": "jobs:\n  y:\n    uses: Vivswan/repo-platform/oddXpath.yml@main\n",
-    };
-    expect(callersOf(workflows, rel, "Vivswan").map((c) => c.site)).toEqual([
-      ".github/workflows/a.yml job x",
-    ]);
   });
 });

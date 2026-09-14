@@ -36,17 +36,6 @@ on:
           dispatch-only modules: filter never appears here
         required: true
         type: string
-      sha:
-        description: >-
-          The judged main commit (the mover ran on it before this call in
-          the same run; the delivery commit is what the plan reads from
-          the stable tag) - never main's live HEAD, which a later merge queued
-          behind this run may already have moved
-        required: true
-        type: string
-    secrets:
-      REPO_PLATFORM_TOKEN:
-        required: true
 
 permissions:
   contents: read
@@ -60,6 +49,7 @@ concurrency:
 jobs:
   plan:
     runs-on: ubuntu-latest
+    environment: fleet-operator
     # The probe bounds at ten adopted repos: discovery 2 x 120 s,
     # selection's two 300 s stages, 10 x 2 x 120 s.
     timeout-minutes: 60
@@ -81,7 +71,7 @@ jobs:
             echo "::error::push sync cannot run: the REPO_PLATFORM_TOKEN secret is not set, and the default GITHUB_TOKEN cannot write to other"\
               "repos. Create a fine-grained PAT with the permissions pre-selected at"\
               "https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write&actions=read&environments=write"\
-              "scoped to the managed repos, then store it with 'gh secret set REPO_PLATFORM_TOKEN' in this repo."
+              "scoped to the managed repos, then store it with 'gh secret set REPO_PLATFORM_TOKEN --env fleet-operator' in this repo."
             exit 1
           fi
 
@@ -143,6 +133,7 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: sync (row ${{ matrix.row }})
     runs-on: ubuntu-latest
+    environment: fleet-operator
     # Every bound a step can hit before deliver.ts files a failure counts
     # (the listing, the target clone, the writer's own timeout, the delivery
     # calls): a row the runner kills at its timeout files nothing.
