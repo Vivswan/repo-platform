@@ -23,7 +23,12 @@ describe("normalizeUpstream", () => {
     ["CRLF line endings", "a\r\nb\r\n", "a\nb"],
     ["a bare CR inside a line, which is not a line ending", "Icon[\r]\n", "Icon[\r]"],
     ["trailing spaces and tabs on any line", "# c  \nx\t\n", "# c\nx"],
-    ["surrounding blank lines", "\n\nx\n\n", "x"],
+    ["surrounding blank lines, whitespace-only ones included", " \n\nx\n \t\n", "x"],
+    [
+      "an indented first line, which a trim would flatten",
+      "  - name: x\n    v: 1\n",
+      "  - name: x\n    v: 1",
+    ],
   ])("%s", (_case, input, expected) => {
     expect(normalizeUpstream(input)).toBe(expected);
   });

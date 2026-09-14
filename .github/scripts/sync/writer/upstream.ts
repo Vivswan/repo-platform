@@ -9,13 +9,14 @@ export const RAW_HOST = "https://raw.githubusercontent.com";
 
 export type Fetch = (url: string, headers?: Record<string, string>) => Promise<string>;
 
-/** CRLF and trailing whitespace would fail the fleet's text gates on the rendered file; the trim leaves the renderer
- *  every newline around the body. */
+/** CRLF and trailing whitespace would fail the fleet's text gates on the rendered file; only the blank lines around the
+ *  body go, so an indented first line (a YAML list item) keeps its indentation, and the renderer owns every newline. */
 export function normalizeUpstream(text: string): string {
   return text
     .replaceAll("\r\n", "\n")
     .replace(/[ \t]+$/gm, "")
-    .trim();
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "");
 }
 
 /** Both messages are fixed text: fetch()'s own rejection text is runtime-generated, and this is the run's one ::error:: line. */
