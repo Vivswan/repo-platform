@@ -299,7 +299,7 @@ describe("resolve_row.ts with a dispatched branch", () => {
   const eventFile = join(temp.dir("resolve-row-branch-"), "event.json");
   writeFileSync(eventFile, JSON.stringify({ inputs: { branch: BRANCH } }));
   const probe = (row: Row) =>
-    `git ls-remote --exit-code https://x-access-token:${PAT}@github.com/${row.repo}.git refs/heads/${BRANCH}`;
+    `git ls-remote --exit-code --symref https://x-access-token:${PAT}@github.com/${row.repo}.git HEAD refs/heads/${BRANCH}`;
   const dispatched = (env: Record<string, string>) =>
     run(script, { GITHUB_EVENT_PATH: eventFile, ...env });
 
@@ -314,6 +314,12 @@ describe("resolve_row.ts with a dispatched branch", () => {
   });
 
   test.each<{ reason: string; env: Record<string, string>; error: string }>([
+    {
+      reason: "the target's default branch",
+      env: { STUB_DEFAULT_BRANCH: BRANCH },
+      error:
+        "the dispatched branch is the target's default branch: a branch sync commits onto a PR branch; a plain dispatch syncs the default branch through a PR",
+    },
     {
       reason: "a branch the target does not carry",
       env: { STUB_MISSING_REF: `refs/heads/${BRANCH}` },

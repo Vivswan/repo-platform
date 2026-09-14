@@ -83,9 +83,10 @@ export function resolveTarget(
   appendFileSync(envFile, handOn(resolved.target));
 }
 
-/** A dispatched branch the target does not carry refuses here, so the row prints the unresolved line and delivers
- *  nothing; git's streams stay captured (they spell the token URL). ls-remote matches a pattern against ref SUFFIXES, so
- *  the answer must spell the exact ref: `refs/heads/nested/refs/heads/x` answers a probe for `refs/heads/x` with exit 0. */
+/** A dispatched branch the target does not carry, or its default branch, refuses here, so the row prints the unresolved
+ *  line and delivers nothing; git's streams stay captured (they spell the token URL). One ls-remote answers both: HEAD's
+ *  symref line names the default branch, and the branch's own line must spell the exact ref, since ls-remote matches a
+ *  pattern against ref SUFFIXES (`refs/heads/nested/refs/heads/x` answers a probe for `refs/heads/x`). */
 export function branchRefusal(target: DiscoveredRepo): string | null {
   const branch = readDispatchBranch();
   if (branch === "") return null;
@@ -94,13 +95,20 @@ export function branchRefusal(target: DiscoveredRepo): string | null {
     "git",
     "ls-remote",
     "--exit-code",
+    "--symref",
     tokenUrl(target.repo, requireEnv("PAT")),
+    "HEAD",
     ref,
   ]);
-  if (probe.exitCode !== 0 && probe.exitCode !== 2) {
+  if (probe.exitCode !== 0) {
     return `git ls-remote could not read the target's branches (exit ${probe.exitCode}); re-run the workflow`;
   }
-  const listed = probe.stdout.split("\n").some((line) => line.split("\t")[1] === ref);
+  const lines = probe.stdout.split("\n").map((line) => line.split("\t"));
+  const isDefault = lines.some(([left, right]) => left === `ref: ${ref}` && right === "HEAD");
+  if (isDefault) {
+    return "the dispatched branch is the target's default branch: a branch sync commits onto a PR branch; a plain dispatch syncs the default branch through a PR";
+  }
+  const listed = lines.some(([, right]) => right === ref);
   return listed ? null : "the dispatched branch does not exist in the target repository";
 }
 

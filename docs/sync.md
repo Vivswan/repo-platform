@@ -335,7 +335,7 @@ The same row runs against that branch: the clone checks it out, the writer reads
 
 - No sync PR, no auto-merge, and no issue touched on a clean run: the failure issue is the default-branch sync's. A failed checkout, writer, or push files it as any delivery failure does.
 - The report the PR body would carry goes to the run's job summary, for a public repository; a private repository's summary says the report is withheld, and the commit on the branch is the record.
-- `repo` names exactly one repository (no list, no `all`, no visibility token, no `modules:` filter), and `manual` is refused beside `branch`: both refuse in the plan job, before any repository is probed. A branch the repository does not have refuses in the row's resolve step, so the row prints `failed before the target was resolved`.
+- `repo` names exactly one repository (no list, no `all`, no visibility token, no `modules:` filter), and `manual` is refused beside `branch`: both refuse in the plan job, before any repository is probed. A branch the repository does not have, or its default branch (a direct push there would pass the repository's PR gate; the plain dispatch syncs it through a PR), refuses in the row's resolve step, so the row prints `failed before the target was resolved`.
 - The branch name rides the event payload as the repository name does, never step env, and never reaches the log; a public repository's job summary is the one place that names it.
 
 ## Private repositories
