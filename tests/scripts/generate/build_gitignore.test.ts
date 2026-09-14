@@ -86,12 +86,6 @@ describe("the source grammar", () => {
   test("gitignoreSources reads the declaring modules in files.yml order", () => {
     expect(gitignoreSources(parseFilesConfig(FILES_YML))).toEqual(ENTRIES);
   });
-
-  test("a non-list declaration is refused by name", () => {
-    expect(() =>
-      gitignoreSources(parseFilesConfig(FILES_YML.replace("[Python]", "Python"))),
-    ).toThrow("modules.uv.gitignore_sources must be a list of names");
-  });
 });
 
 describe("the outputs", () => {

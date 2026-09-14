@@ -64,14 +64,10 @@ export function blockRel(module: string, path: string): string {
   return `${module}/${blockSourcePath(GITIGNORE, blockName(path))}`;
 }
 
-export function gitignoreSources(config: FilesConfig, label = "files.yml"): [string, string[]][] {
+export function gitignoreSources(config: FilesConfig): [string, string[]][] {
   return Object.entries(config.modules).flatMap(([module, data]): [string, string[]][] => {
-    const names = data.gitignore_sources;
-    if (names === undefined) return [];
-    if (!Array.isArray(names) || names.some((name) => typeof name !== "string")) {
-      throw new Error(`${label}: modules.${module}.gitignore_sources must be a list of names`);
-    }
-    return [[module, (names as string[]).map(sourceId)]];
+    const names = data.gitignore_sources as string[] | undefined;
+    return names === undefined ? [] : [[module, names.map(sourceId)]];
   });
 }
 

@@ -185,7 +185,7 @@ describe("the managed rulesets", () => {
     // at apply time. The tuple is the fleet's high-or-critical bar: a
     // non-security warning or a medium security alert never blocks a merge.
     const codeqlModules = loadModules()
-      .filter((m) => m.codeql_language !== undefined)
+      .filter((m) => m.codeql_languages !== undefined)
       .map((m) => m.name);
     expect(codeqlModules).toEqual(["bun", "deno", "uv"]);
     for (const module of codeqlModules) {

@@ -19,21 +19,21 @@ placeholders:
 modules:
   bun:
     description: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
-    codeql_language: javascript-typescript
+    codeql_languages: [javascript-typescript]
     dependabot_ecosystems: [bun]
     gitignore_sources: [Node, bun]
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
   deno:
     description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
-    codeql_language: javascript-typescript
+    codeql_languages: [javascript-typescript]
     dependabot_ecosystems: [deno]
     gitignore_sources: [Deno, Node]
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
   uv:
     description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
-    codeql_language: python
+    codeql_languages: [python]
     dependabot_ecosystems: [uv]
     gitignore_sources: [Python]
     agents_toolchain: [toolchain]
@@ -78,7 +78,7 @@ settings:
     - {source: files/site/settings.yml, when: {modules: [site]}}
     - {source: files/release-please/settings.yml, when: {modules: [release-please]}}
     - {source: files/pr-title/settings.yml, when: {modules: [pr-title]}}
-    - {source: files/settings/codeql-public.yml, when: {private: false, any: {declaring: codeql_language}}}
+    - {source: files/settings/codeql-public.yml, when: {private: false, any: {declaring: codeql_languages}}}
   override: files/settings/override.yml
 
 files:

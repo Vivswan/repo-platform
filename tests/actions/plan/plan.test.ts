@@ -80,9 +80,9 @@ describe("loadModuleData", () => {
       "custom-license",
     ]);
     const byName = new Map(MODULES.map((m) => [m.name, m]));
-    expect(byName.get("bun")?.codeql_language).toBe("javascript-typescript");
-    expect(byName.get("uv")?.codeql_language).toBe("python");
-    expect(byName.get("rust")?.codeql_language).toBeUndefined();
+    expect(byName.get("bun")?.codeql_languages).toEqual(["javascript-typescript"]);
+    expect(byName.get("uv")?.codeql_languages).toEqual(["python"]);
+    expect(byName.get("rust")?.codeql_languages).toBeUndefined();
     expect(byName.get("fuzzer")?.tracking_label).toMatchObject({
       key: "fuzzer",
       default: "fuzz-nightly",
@@ -220,6 +220,15 @@ describe("planCi", () => {
     expect(codeqlLanguages(selectModules(input("modules: [deno, bun]")), false)).toEqual([
       "javascript-typescript",
     ]);
+  });
+
+  test("two languages on one module reach the matrix once each", () => {
+    const twoLanguages = loadModuleData(
+      `${MINIMAL_FILES}  poly: { codeql_languages: [python, go] }\n  uv: { codeql_languages: [python] }\n`,
+    ).modules;
+    expect(
+      codeqlLanguages(selectModules(input("modules: [poly, uv]", false, twoLanguages)), false),
+    ).toEqual(["python", "go"]);
   });
 
   test("an empty selection plans an empty repository: the fleet security label is still tracked", () => {
