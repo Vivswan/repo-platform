@@ -1,6 +1,6 @@
 import { cleanManagedRegion, type RegionMarkers } from "../../../../actions/shared/grammar.ts";
+import { sha256 } from "../../../../actions/shared/values.ts";
 import { mentionsMarkers } from "./files_config.ts";
-import { sha256 } from "./manifest.ts";
 import { probe, writeFile } from "./target_files.ts";
 import { LINK_IN_THE_WAY, type WriteOutcome } from "./write_managed.ts";
 

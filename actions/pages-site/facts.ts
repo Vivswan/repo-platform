@@ -3,6 +3,8 @@
 //   an absent or malformed file       -> null or [], never a failed build
 //   a failed git read in the reader   -> still throws: a broken checkout is a build fault, not a missing fact
 
+import { isMapping } from "../shared/values.ts";
+
 export interface ProjectFacts {
   /** owner/name */
   repository: string;
@@ -129,15 +131,10 @@ function splitTopics(value: unknown): string[] {
     .filter((topic) => topic !== "");
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function parseYamlRecord(text: string): Record<string, unknown> | null {
   try {
-    return asRecord(Bun.YAML.parse(text));
+    const doc: unknown = Bun.YAML.parse(text);
+    return isMapping(doc) ? doc : null;
   } catch {
     return null;
   }
@@ -148,7 +145,7 @@ function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null
   const text = read(SETTINGS_FILE);
   if (text === null) return null;
   const settings = parseYamlRecord(text);
-  return settings === null ? null : asRecord(settings.repository);
+  return settings !== null && isMapping(settings.repository) ? settings.repository : null;
 }
 
 function readIdentity(read: FactsReader): Identity {

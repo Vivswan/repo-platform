@@ -1,10 +1,6 @@
 import { lstatSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export function isRegularFile(path: string): boolean {
   try {
     const stat = lstatSync(path);

@@ -1,12 +1,12 @@
 import { type ModuleList, moduleList, type When } from "../../shared/selection.ts";
-import { isRecord } from "./readers.ts";
+import { isMapping } from "../../shared/values.ts";
 
 const LIST_KEYS = ["modules", "any", "without"] as const;
 const WHEN_KEYS = new Set<string>([...LIST_KEYS, "private"]);
 
 const isModuleList = (list: unknown): list is ModuleList =>
   (Array.isArray(list) && list.every((name) => typeof name === "string")) ||
-  (isRecord(list) &&
+  (isMapping(list) &&
     Object.keys(list).join() === "declaring" &&
     typeof list.declaring === "string");
 
@@ -17,7 +17,7 @@ export function whenOf(
   modules: Readonly<Record<string, unknown>>,
 ): When | null | undefined {
   if (value === undefined) return null;
-  if (!isRecord(value) || Object.keys(value).some((key) => !WHEN_KEYS.has(key))) return undefined;
+  if (!isMapping(value) || Object.keys(value).some((key) => !WHEN_KEYS.has(key))) return undefined;
   const when: When = {};
   for (const key of LIST_KEYS) {
     const list = value[key];

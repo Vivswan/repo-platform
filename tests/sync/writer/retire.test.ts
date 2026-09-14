@@ -4,12 +4,12 @@ import { join } from "node:path";
 import {
   type Records,
   readRecords,
-  sha256,
   writeManifest,
 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import { keepReason, retire } from "../../../.github/scripts/sync/writer/retire.ts";
 import { renderRegion } from "../../../.github/scripts/sync/writer/write_split.ts";
 import { HASH_REGION_MARKERS } from "../../../actions/shared/grammar.ts";
+import { sha256 } from "../../../actions/shared/values.ts";
 import { fixtureGit } from "../../shared/fixture_git";
 import { tempDirs } from "../../shared/temp_dir";
 

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { cleanManagedRegion, knownGrammar } from "../../../shared/grammar.ts";
@@ -11,13 +10,10 @@ import {
   strayFields,
 } from "../../../shared/manifest.ts";
 import { MANIFEST_NAME } from "../../../shared/platform.ts";
+import { sha256 } from "../../../shared/values.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 import { REPAIR, RESYNC } from "./manifest_shape.ts";
-
-function sha256(data: Buffer): string {
-  return createHash("sha256").update(data).digest("hex");
-}
 
 export function checkManifestParity(ctx: Context): Finding[] {
   if (ctx.manifest.state !== "parsed") return [];

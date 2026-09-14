@@ -9,6 +9,7 @@ import type { Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import { pathProblem } from "../../../../actions/shared/repo_path.ts";
 import type { Selection } from "../../../../actions/shared/selection.ts";
+import { sha256 } from "../../../../actions/shared/values.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
 import { loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
@@ -21,7 +22,6 @@ import {
   readRecord,
   readRecords,
   regionMarkers,
-  sha256,
   writeManifest,
 } from "./manifest.ts";
 import { applyMirrors, blockedAncestor, MirrorFailure } from "./mirrors.ts";

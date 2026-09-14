@@ -28,6 +28,7 @@ import {
 } from "../../../../actions/plan/files_config.ts";
 import { declaredLayers, type LayerSources } from "../../../../actions/plan/reserved_labels.ts";
 import { applies, type Selection } from "../../../../actions/shared/selection.ts";
+import { isMapping } from "../../../../actions/shared/values.ts";
 import { CHECK_NAME } from "../../shared/all_green.ts";
 
 /** A folded settings document: what the library's merge leaves once every
@@ -65,10 +66,6 @@ export function loadModules(path: string = FILES_CONFIG): Module[] {
 
 export function namedModules(config: LayerSources): Module[] {
   return Object.entries(config.modules).map(([name, data]) => ({ ...data, name }));
-}
-
-export function isMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** THE parse boundary for a settings document: YAML text in, a layer for

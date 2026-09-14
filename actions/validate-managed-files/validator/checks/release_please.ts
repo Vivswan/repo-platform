@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isMapping } from "../../../shared/values.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
-import { hasConflictMarker, isRecord, isRegularFile } from "../readers.ts";
+import { hasConflictMarker, isRegularFile } from "../readers.ts";
 
 const CONFIG_PATH = "release-please-config.json";
 
@@ -30,12 +31,12 @@ export function checkReleasePlease(ctx: Context): Finding[] {
       ),
     ];
   }
-  if (!isRecord(config)) return [];
+  if (!isMapping(config)) return [];
   const pinned: string[] = [];
   if ("release-as" in config) pinned.push("the top level");
-  if (isRecord(config.packages)) {
+  if (isMapping(config.packages)) {
     for (const [name, pkg] of Object.entries(config.packages)) {
-      if (isRecord(pkg) && "release-as" in pkg) pinned.push(`package "${name}"`);
+      if (isMapping(pkg) && "release-as" in pkg) pinned.push(`package "${name}"`);
     }
   }
   if (pinned.length === 0) return [];

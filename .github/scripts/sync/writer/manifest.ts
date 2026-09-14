@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { RegionKind } from "../../../../actions/plan/files_config.ts";
 import type { MirrorKind } from "../../../../actions/plan/mirrors.ts";
 import {
@@ -83,10 +82,6 @@ export type Records = Record<string, ManifestEntryShape>;
 /** A null prototype, so a path named `__proto__` or `constructor` is looked up, assigned, and listed like any other. */
 function recordsOf(files: Record<string, ManifestEntryShape> = {}): Records {
   return Object.assign(Object.create(null) as Records, files);
-}
-
-export function sha256(data: Buffer | string): string {
-  return createHash("sha256").update(data).digest("hex");
 }
 
 export function regionMarkers(kind: RegionKind): RegionMarkers {

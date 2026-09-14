@@ -18,11 +18,11 @@ import {
   REGISTRATION_PATH,
 } from "../../../../actions/shared/platform.ts";
 import type { Selection } from "../../../../actions/shared/selection.ts";
+import { isMapping } from "../../../../actions/shared/values.ts";
 import type { WriterFilesConfig } from "./files_config.ts";
 import {
   declaredPrivate,
   foldSettings,
-  isMapping,
   type Label,
   labelClaims,
   layerConfig,

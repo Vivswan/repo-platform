@@ -16,6 +16,7 @@ import {
   literalPrefix,
   type TreeProbe,
 } from "../../../../actions/shared/mirror_pattern.ts";
+import { sha256 } from "../../../../actions/shared/values.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import {
   type MirrorRecord,
@@ -23,7 +24,6 @@ import {
   mirrorRecord,
   type Records,
   readRecord,
-  sha256,
 } from "./manifest.ts";
 import { removeFile, removeTree, writeFile, writeLink } from "./target_files.ts";
 

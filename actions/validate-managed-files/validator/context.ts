@@ -5,7 +5,8 @@ import { type ManifestEntryShape, parseManifestFiles } from "../../shared/manife
 import { MANIFEST_NAME, REGISTRATION_PATH } from "../../shared/platform.ts";
 import { pathProblem } from "../../shared/repo_path.ts";
 import { type Selection, selects, type When } from "../../shared/selection.ts";
-import { hasConflictMarker, isRecord, isRegularFile, shapeOfYaml } from "./readers.ts";
+import { isMapping } from "../../shared/values.ts";
+import { hasConflictMarker, isRegularFile, shapeOfYaml } from "./readers.ts";
 import { whenOf } from "./when_of.ts";
 
 const SKIP_DIRS = new Set([
@@ -91,7 +92,7 @@ function loadRegistration(root: string): { modules: unknown; except: unknown } |
   } catch {
     data = {};
   }
-  return isRecord(data)
+  return isMapping(data)
     ? { modules: data.modules, except: data.except }
     : { modules: null, except: null };
 }
@@ -106,17 +107,17 @@ function loadVocabulary(filesConfig: string): Vocabulary {
   } catch {
     return { problem: `${filesConfig}: the module data file does not parse as YAML` };
   }
-  const modules = isRecord(data) ? data.modules : undefined;
-  if (!isRecord(modules)) {
+  const modules = isMapping(data) ? data.modules : undefined;
+  if (!isMapping(modules)) {
     return { problem: `${filesConfig}: the module data file carries no modules mapping` };
   }
-  const files = isRecord(data) ? data.files : undefined;
+  const files = isMapping(data) ? data.files : undefined;
   if (!Array.isArray(files)) {
     return { problem: `${filesConfig}: the module data file carries no files list` };
   }
   const declarations: Declaration[] = [];
   for (const entry of files) {
-    if (!isRecord(entry) || typeof entry.path !== "string" || typeof entry.class !== "string") {
+    if (!isMapping(entry) || typeof entry.path !== "string" || typeof entry.class !== "string") {
       return {
         problem: `${filesConfig}: the module data file carries a files entry without a string path and class`,
       };
