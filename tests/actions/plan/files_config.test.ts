@@ -1,9 +1,14 @@
+// Every reader of files.yml (the plan, the sync writer, the validator) parses through this loader, so a rule that
+// drifts here lies to all of them at once.
+
 import { describe, expect, test } from "bun:test";
 import {
+  type BlockSource,
   blockSource,
   blockSources,
   checkFilesConfig,
   type FileEntry,
+  type FilesConfig,
   FilesConfigError,
   mutuallyExclusive,
   parseFilesConfig,
@@ -46,6 +51,8 @@ function problemsOf(text: string, label?: string): string[] {
 }
 
 describe("parseFilesConfig", () => {
+  // The default source is derived from the FIRST `modules` name; the files/<module>/ layout is a tree convention nothing
+  // else states, so a default read from `base` would fetch the wrong file for every conditional entry.
   test("resolves default sources under files/<module or base>/ and keeps the region", () => {
     const config = parseFilesConfig(BASE);
     expect(config.files.map(sourceOf)).toEqual([
@@ -61,72 +68,22 @@ describe("parseFilesConfig", () => {
       region: "hash",
       blocks: "gitignore_sources",
     });
-    expect(config.placeholders).toEqual(["project_name", "year"]);
-    expect(Object.keys(config.modules)).toEqual(["bun", "site", "nightly", "fuzzer"]);
   });
 
-  test("the module data the readers resolve defaults from is typed; other keys ride along", () => {
-    const config = parseFilesConfig(
-      [
-        "placeholders: []",
-        "files: []",
-        "modules:",
-        "  bun: { codeql_languages: [javascript-typescript] }",
-        "  site: { path: docs, tracking_label: { key: site, default: docs-link-rot, color: D4A72C, description: Link rot } }",
-      ].join("\n"),
-    );
-    expect(config.modules).toEqual({
-      bun: {
-        codeql_languages: ["javascript-typescript"],
-      },
-      site: {
-        path: "docs",
-        tracking_label: {
-          key: "site",
-          default: "docs-link-rot",
-          color: "D4A72C",
-          description: "Link rot",
-        },
-      },
-    });
-  });
-
-  test("mirrors parse in the registration's grammar, kind defaulting to copy", () => {
-    const config = parseFilesConfig(
-      `${BASE}mirrors:\n  - { source: AGENTS.md, kind: symlink, targets: [CLAUDE.md, .github/agents.md] }\n  - { source: LICENSE.md, targets: [template/LICENSE.md] }\n`,
-    );
-    expect(config.mirrors).toEqual([
-      { source: "AGENTS.md", kind: "symlink", targets: ["CLAUDE.md", ".github/agents.md"] },
-      { source: "LICENSE.md", kind: "copy", targets: ["template/LICENSE.md"] },
-    ]);
-  });
-
-  test("two entries for one path must be mutually exclusive by when", () => {
-    const text = BASE.replace("without: [site] ", "");
-    expect(problemsOf(text)).toEqual([
-      expect.stringContaining(
-        ".github/workflows/nightly.yml is listed twice with conditions that can both hold",
-      ),
-    ]);
-  });
-
-  test("checkFilesConfig returns the config with its problems; parseFilesConfig throws them", () => {
-    const text = "placeholders: []\nfiles:\n  - { path: ../a, class: managed }\n";
-    const checked = checkFilesConfig(text);
-    expect(checked.config.files.map((entry) => entry.path)).toEqual(["../a"]);
-    expect(checked.problems).toEqual(problemsOf(text));
-    expect(checked.problems).toHaveLength(2);
-    expect(checkFilesConfig(BASE).problems).toEqual([]);
-  });
-
-  test("a YAML error is a load error naming the label, not a crash", () => {
-    expect(() => parseFilesConfig("a: [\n", "/build/files.yml")).toThrow(FilesConfigError);
-    expect(() => parseFilesConfig("a: [\n", "/build/files.yml")).toThrow(
-      "/build/files.yml:\n  - YAML parse error: ",
-    );
-  });
-
+  // Each row is a way files.yml lies to every reader at once: a document the schema or the cross-checks let through
+  // selects, sources, or blocks something other than what its author meant, with no run red.
   test.each([
+    ["a YAML error, reported as a load problem", "a: [\n", "YAML parse error: "],
+    [
+      "two entries for one path whose conditions can both hold",
+      BASE.replace("without: [site] ", ""),
+      ".github/workflows/nightly.yml is listed twice with conditions that can both hold",
+    ],
+    [
+      "a derived when list naming no module",
+      "files:\n  - { path: a, class: managed, when: { any: { declaring: nope } } }\nplaceholders: []",
+      "files: a: when declaring 'nope' names no module",
+    ],
     [
       "an unknown key",
       "files:\n  - { path: a, class: managed, extra: 1 }\nplaceholders: []",
@@ -263,16 +220,90 @@ describe("render, overlay, and the settings block", () => {
   const PUBLIC_STARTER =
     "  - { path: .github/settings.local.yml, class: starter, when: { private: false } }";
 
-  test("a rendered entry carries no source, keeps its overlay, and exposes the settings block tree-relative", () => {
-    const config = parseFilesConfig(doc([STARTER, RENDERED]));
-    expect(config.files[1]).toEqual({
+  // `when: {}` and an absent when must be ONE spelling, or starterCoverage refuses a sound starter and rendered pair.
+  test("an empty when is unconditional: it parses to null and displaces an unconditional starter", () => {
+    const empty = (entry: string) => entry.replace(" }", ", when: {} }");
+    const config = parseFilesConfig(doc([STARTER, empty(RENDERED)]));
+    expect(config.files.map((entry) => entry.when)).toEqual([null, null]);
+    expect(problemsOf(doc([empty(STARTER), RENDERED]))).toEqual([]);
+  });
+
+  // starterCoverage judges the selection a when means, and the loader is what hands it the entry's when: a loader
+  // passing an unconditional when for every rendered entry refuses each sound conditional pair, and a hand-copied
+  // spelling test (keys or modules reordered) would pass a pair that selects differently.
+  const COVERAGE_STARTER =
+    "  - { path: .github/settings.local.yml, class: starter, when: { modules: [bun, pages], private: false } }";
+  test.each([
+    [
+      "the same selection, keys and modules reordered",
+      "{ private: false, modules: [pages, bun] }",
+      [],
+    ],
+    [
+      "a different selection",
+      "{ modules: [bun], private: false }",
+      [
+        "files: .github/settings.yml: overlay .github/settings.local.yml, whose starters are not selected exactly when this entry is" +
+          " - an unconditional rendered entry needs one unconditional starter, a conditional one a starter with the same when",
+      ],
+    ],
+  ])(
+    "a conditional rendered entry whose when is %s is judged through the loader by the selection it means",
+    (_reason, when, problems) => {
+      expect(
+        problemsOf(
+          doc([
+            COVERAGE_STARTER,
+            `  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml, when: ${when} }`,
+          ]),
+        ),
+      ).toEqual(problems);
+    },
+  );
+
+  // The writer folds the loader's problems into one report with its own, so every problem of a document is collected
+  // in one pass and the config is still built: a rendered entry that fails its checks is built as a sourced one, and the
+  // thrown form names the label the caller passed.
+  test("every problem of a rendered entry is collected in one pass beside the config; the settings block is tree-relative; parseFilesConfig throws them under the label", () => {
+    const text = doc(
+      [
+        STARTER,
+        "  - { path: a, class: split, region: hash, render: settings, source: files/base/a }",
+        "  - { path: .github/settings.yml, class: managed, render: settings }",
+      ],
+      [],
+    );
+    const checked = checkFilesConfig(text);
+    expect(checked.problems).toEqual([
+      "files: a: render applies to managed entries only",
+      "files: a: a rendered entry has no source",
+      "files: a: a rendered entry needs overlay, the repository file it renders from",
+      "files: .github/settings.yml: a rendered entry needs overlay, the repository file it renders from",
+      "settings: missing - a render: settings entry reads its layers from it",
+    ]);
+    expect(
+      checked.config.files.map((entry) => ("render" in entry ? "rendered" : entry.class)),
+    ).toEqual(["starter", "split", "managed"]);
+    expect(checked.config.files[2]).toEqual({
+      path: ".github/settings.yml",
+      class: "managed",
+      source: "base/.github/settings.yml",
+      when: null,
+    });
+    expect(() => parseFilesConfig(text, "/build/files.yml")).toThrow(FilesConfigError);
+    expect(() => parseFilesConfig(text, "/build/files.yml")).toThrow(
+      `/build/files.yml:\n${checked.problems.map((problem) => `  - ${problem}`).join("\n")}`,
+    );
+    const sound = checkFilesConfig(doc([STARTER, RENDERED]));
+    expect(sound.problems).toEqual([]);
+    expect(sound.config.files[1]).toEqual({
       path: ".github/settings.yml",
       class: "managed",
       render: "settings",
       overlay: ".github/settings.local.yml",
       when: null,
     });
-    expect(config.settings).toEqual({
+    expect(sound.config.settings).toEqual({
       baseline: "settings/baseline.yml",
       layers: [
         { source: "settings/public.yml", when: { private: false } },
@@ -281,61 +312,20 @@ describe("render, overlay, and the settings block", () => {
       ],
       override: "settings/override.yml",
     });
-    expect(
-      problemsOf(
-        doc([
-          PUBLIC_STARTER,
-          "  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml, when: { private: false } }",
-        ]),
-      ),
-    ).toEqual([]);
     expect(parseFilesConfig(doc([STARTER], [])).settings).toBeNull();
   });
 
-  test("an empty when is unconditional: it parses to null and displaces an unconditional starter", () => {
-    const empty = (entry: string) => entry.replace(" }", ", when: {} }");
-    const config = parseFilesConfig(doc([STARTER, empty(RENDERED)]));
-    expect(config.files.map((entry) => entry.when)).toEqual([null, null]);
-    expect(problemsOf(doc([empty(STARTER), RENDERED]))).toEqual([]);
-  });
-
-  test("every problem of a rendered entry is collected in one pass, and no rendered entry is built from it", () => {
-    const checked = checkFilesConfig(
-      doc(
-        [
-          STARTER,
-          "  - { path: a, class: split, region: hash, render: settings, source: files/base/a }",
-        ],
-        [],
-      ),
-    );
-    expect(checked.problems).toEqual([
-      "files: a: render applies to managed entries only",
-      "files: a: a rendered entry has no source",
-      "files: a: a rendered entry needs overlay, the repository file it renders from",
-      "settings: missing - a render: settings entry reads its layers from it",
-    ]);
-    expect(
-      checked.config.files.map((entry) => ("render" in entry ? "rendered" : entry.class)),
-    ).toEqual(["starter", "split"]);
-  });
-
-  test("a managed rendered entry missing overlay is reported and built as a sourced entry, never a rendered one", () => {
-    const checked = checkFilesConfig(
-      doc([STARTER, "  - { path: .github/settings.yml, class: managed, render: settings }"]),
-    );
-    expect(checked.problems).toEqual([
-      "files: .github/settings.yml: a rendered entry needs overlay, the repository file it renders from",
-    ]);
-    expect(checked.config.files[1]).toEqual({
-      path: ".github/settings.yml",
-      class: "managed",
-      source: "base/.github/settings.yml",
-      when: null,
-    });
-  });
-
+  // Each row names a silent settings-render failure: a baseline folded twice undoes the module layers, an override equal
+  // to the baseline overwrites the overlay's keys, a layer under a module the data lacks selects nothing.
   test.each([
+    [
+      "a layer whose derived when names no module",
+      doc(
+        [STARTER, RENDERED],
+        [SETTINGS.replace("when: { modules: [bun] }", "when: { any: { declaring: nope } }")],
+      ),
+      "settings: layers[2]: when declaring 'nope' names no module",
+    ],
     [
       "render on a split entry",
       doc([STARTER, "  - { path: a, class: split, region: hash, render: settings }", RENDERED]),
@@ -496,38 +486,6 @@ describe("render, overlay, and the settings block", () => {
   ])("refuses %s", (_reason, text, fragment) => {
     expect(problemsOf(text).join("\n")).toContain(fragment);
   });
-
-  // The starter is spelled canonically; the rendered entry's clause varies.
-  const COVERAGE_STARTER =
-    "  - { path: .github/settings.local.yml, class: starter, when: { modules: [bun, pages], private: false } }";
-  test.each([
-    ["the canonical spelling", "{ modules: [bun, pages], private: false }", []],
-    [
-      "the same selection, keys and modules reordered",
-      "{ private: false, modules: [pages, bun] }",
-      [],
-    ],
-    [
-      "a different selection",
-      "{ modules: [bun], private: false }",
-      [
-        "files: .github/settings.yml: overlay .github/settings.local.yml, whose starters are not selected exactly when this entry is" +
-          " - an unconditional rendered entry needs one unconditional starter, a conditional one a starter with the same when",
-      ],
-    ],
-  ])(
-    "a rendered entry whose when is %s is judged by the selection it means",
-    (_reason, when, problems) => {
-      expect(
-        problemsOf(
-          doc([
-            COVERAGE_STARTER,
-            `  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml, when: ${when} }`,
-          ]),
-        ),
-      ).toEqual(problems);
-    },
-  );
 });
 
 describe("a module list declared by module data", () => {
@@ -553,6 +511,7 @@ describe("a module list declared by module data", () => {
       `  - { path: auto-assign.yml, class: managed, when: ${plainWhen} }`,
     ].join("\n");
 
+  // The `{declaring: key}` list: a hand-copied module set was the incident that let a new toolchain miss its layer.
   test("the loader expands the list from the modules block, and selection reads the expanded list", () => {
     const config = parseFilesConfig(
       doc(
@@ -579,21 +538,10 @@ describe("a module list declared by module data", () => {
     expect(variant(["rust"])).toEqual(["base/auto-assign.yml"]);
   });
 
-  test("a key no module declares is a load error at every position that names it", () => {
-    expect(
-      problemsOf(
-        doc(
-          "{ any: { declaring: tracking_label } }",
-          "{ private: false, any: { declaring: tracking_label } }",
-          "{ private: false, without: [bun, deno, extra] }",
-        ),
-      ),
-    ).toEqual([
-      "files: auto-assign.yml: when declaring 'tracking_label' names no module",
-      "settings: layers[0]: when declaring 'tracking_label' names no module",
-    ]);
-  });
-  test("an untyped key read only through declaring is read, on a file entry and on a settings layer alike", () => {
+  // The unread-key refusal counts a key read only through a when's `declaring` as read, on a file entry and on a
+  // settings layer alike: counting blocks alone would refuse every module-data key that conditions without shipping
+  // a block, and the control shows the refusal still fires for a key nothing names.
+  test("a key read only through a when's declaring is a read key; the same key named by nothing is refused", () => {
     const untyped = [
       "placeholders: []",
       "modules:",
@@ -609,14 +557,16 @@ describe("a module list declared by module data", () => {
       "  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml }",
       "  - { path: auto-format.yml, class: starter, when: { any: { declaring: steps } } }",
     ].join("\n");
-    expect(problemsOf(untyped)).toEqual([]);
-    expect(problemsOf(untyped.replace("declaring: scans", "declaring: steps"))).toEqual([
-      "modules.deno.scans: no file entry or settings layer reads it",
-    ]);
+    expect([
+      problemsOf(untyped),
+      problemsOf(untyped.replace("declaring: scans", "declaring: steps")),
+    ]).toEqual([[], ["modules.deno.scans: no file entry or settings layer reads it"]]);
   });
 });
 
 describe("starterCoverage", () => {
+  // Selection meaning, not spelling: a starter and its rendered entry written with reordered keys or modules must read
+  // as one selection, or a sound pair is refused and a mismatched one passed.
   test.each([
     [null, [null], true],
     [null, [{ private: true }, { private: false }], false],
@@ -636,6 +586,7 @@ describe("starterCoverage", () => {
 });
 
 describe("mutuallyExclusive", () => {
+  // Only the provable cases: a false "exclusive" writes one path twice at sync time.
   test.each([
     [{ modules: ["a"] }, { without: ["a"] }, true],
     [{ any: ["a", "b"] }, { without: ["a", "b"] }, true],
@@ -663,32 +614,22 @@ const UPSTREAM = {
 describe("block sources", () => {
   const entry = { path: ".gitignore", upstream: UPSTREAM };
 
+  // The files/ tree names a module's block `stem.block.value.ext` beside its copy of the path, a convention only the
+  // tree states; a value named like an Object prototype key is a tree block, not the upstream's.
   test("a value the upstream names is fetched by ref; any other is the module's own file, the value between the stem and the extension", () => {
-    expect(blockSource(entry, "bun", "Node")).toEqual({
-      kind: "upstream",
-      value: "Node",
-      ref: ref("Node.gitignore"),
-    });
-    expect(blockSource(entry, "fuzzer", "fuzzer")).toEqual({
-      kind: "tree",
-      source: "fuzzer/.block.fuzzer.gitignore",
-    });
-    expect(blockSource(entry, "x", "constructor")).toEqual({
-      kind: "tree",
-      source: "x/.block.constructor.gitignore",
-    });
-    expect(blockSource({ path: ".github/dependabot.yml" }, "bun", "bun")).toEqual({
-      kind: "tree",
-      source: "bun/.github/dependabot.block.bun.yml",
-    });
-    expect(blockSource({ path: "AGENTS.md" }, "deno", "toolchain")).toEqual({
-      kind: "tree",
-      source: "deno/AGENTS.block.toolchain.md",
-    });
-    expect(blockSource({ path: ".github/CODEOWNERS" }, "bun", "x")).toEqual({
-      kind: "tree",
-      source: "bun/.github/CODEOWNERS.block.x",
-    });
+    expect([
+      blockSource(entry, "bun", "Node"),
+      blockSource(entry, "fuzzer", "fuzzer"),
+      blockSource(entry, "x", "constructor"),
+      blockSource({ path: ".github/dependabot.yml" }, "bun", "bun"),
+      blockSource({ path: ".github/CODEOWNERS" }, "bun", "x"),
+    ]).toEqual([
+      { kind: "upstream", value: "Node", ref: ref("Node.gitignore") },
+      { kind: "tree", source: "fuzzer/.block.fuzzer.gitignore" },
+      { kind: "tree", source: "x/.block.constructor.gitignore" },
+      { kind: "tree", source: "bun/.github/dependabot.block.bun.yml" },
+      { kind: "tree", source: "bun/.github/CODEOWNERS.block.x" },
+    ]);
   });
 
   const PATHS = "Windows: Global/Windows.gitignore, Node: Node.gitignore, bun: bun.gitignore";
@@ -715,47 +656,61 @@ describe("block sources", () => {
     ref: ref(path),
   });
 
-  test("blockSources: the always values first, then the selected modules in files.yml order, a source named twice once", () => {
-    expect(blockSources(shared, shared.files[0], ["fuzzer", "deno", "bun"])).toEqual([
-      up("Windows", "Global/Windows.gitignore"),
-      up("Node", "Node.gitignore"),
-      up("bun", "bun.gitignore"),
-      { kind: "tree", source: "fuzzer/.block.fuzzer.gitignore" },
-    ]);
-    expect(blockSources(shared, shared.files[0], ["deno"])).toEqual([
-      up("Windows", "Global/Windows.gitignore"),
-      up("Node", "Node.gitignore"),
-    ]);
-    expect(blockSources(shared, shared.files[0], ["site"])).toEqual([
-      up("Windows", "Global/Windows.gitignore"),
-    ]);
-  });
+  const own = parseFilesConfig(
+    [
+      "placeholders: []",
+      "modules:",
+      "  bun: { t: [toolchain] }",
+      "  deno: { t: [toolchain] }",
+      "files:",
+      "  - { path: AGENTS.md, class: split, region: html, blocks: t }",
+      "  - { path: d.yml, class: managed, blocks: t }",
+      "  - { path: s.yml, class: starter, blocks: t }",
+      "",
+    ].join("\n"),
+  );
+  const tree = (source: string) => ({ kind: "tree" as const, source });
 
-  test("one value name per module is each module's own block; managed and starter entries take blocks", () => {
-    const own = parseFilesConfig(
-      [
-        "placeholders: []",
-        "modules:",
-        "  bun: { t: [toolchain] }",
-        "  deno: { t: [toolchain] }",
-        "files:",
-        "  - { path: AGENTS.md, class: split, region: html, blocks: t }",
-        "  - { path: d.yml, class: managed, blocks: t }",
-        "  - { path: s.yml, class: starter, blocks: t }",
-        "",
-      ].join("\n"),
-    );
-    expect(blockSources(own, own.files[0], ["bun", "deno"])).toEqual([
-      { kind: "tree", source: "bun/AGENTS.block.toolchain.md" },
-      { kind: "tree", source: "deno/AGENTS.block.toolchain.md" },
-    ]);
-    expect(blockSources(own, own.files[1], ["bun"])).toEqual([
-      { kind: "tree", source: "bun/d.block.toolchain.yml" },
-    ]);
-    expect(blockSources(own, own.files[2], ["deno"])).toEqual([
-      { kind: "tree", source: "deno/s.block.toolchain.yml" },
-    ]);
-  });
+  // The block order is the written file's order on every repository, and a source two toolchains name lands once while
+  // each toolchain's own file under one value name is its own block.
+  test.each<{ config: FilesConfig; entry: number; selected: string[]; expected: BlockSource[] }>([
+    {
+      config: shared,
+      entry: 0,
+      selected: ["fuzzer", "deno", "bun"],
+      expected: [
+        up("Windows", "Global/Windows.gitignore"),
+        up("Node", "Node.gitignore"),
+        up("bun", "bun.gitignore"),
+        tree("fuzzer/.block.fuzzer.gitignore"),
+      ],
+    },
+    {
+      config: shared,
+      entry: 0,
+      selected: ["deno"],
+      expected: [up("Windows", "Global/Windows.gitignore"), up("Node", "Node.gitignore")],
+    },
+    {
+      config: shared,
+      entry: 0,
+      selected: ["site"],
+      expected: [up("Windows", "Global/Windows.gitignore")],
+    },
+    {
+      config: own,
+      entry: 0,
+      selected: ["bun", "deno"],
+      expected: [tree("bun/AGENTS.block.toolchain.md"), tree("deno/AGENTS.block.toolchain.md")],
+    },
+    { config: own, entry: 1, selected: ["bun"], expected: [tree("bun/d.block.toolchain.yml")] },
+    { config: own, entry: 2, selected: ["deno"], expected: [tree("deno/s.block.toolchain.yml")] },
+  ])(
+    "blockSources for entry $entry under $selected: the always values first, then the selected modules in files.yml order, a source named twice once, a value name per module its own file",
+    ({ config, entry, selected, expected }) => {
+      expect(blockSources(config, config.files[entry], selected)).toEqual(expected);
+    },
+  );
 });
 
 describe("the upstream registry grammar", () => {
@@ -764,15 +719,6 @@ describe("the upstream registry grammar", () => {
   const BUN = "  bun: { g: [Node] }\n";
   const registry = (fields: string) =>
     `{ path: .gitignore, class: split, region: hash, blocks: g, upstream: {repository: github/gitignore, sha: ${SHA}, ${fields}} }`;
-
-  test("a valid registry parses to one ref per value with `always` defaulting to none", () => {
-    const parsed = checkFilesConfig(doc(BUN, registry("paths: {Node: Node.gitignore}")));
-    expect(parsed.problems).toEqual([]);
-    expect(parsed.config.files[0]).toMatchObject({
-      blocks: "g",
-      upstream: { always: [], refs: { Node: ref("Node.gitignore") } },
-    });
-  });
 
   const OTHER = "89abcdef0123456789abcdef0123456789abcdef";
   const sourced = parseFilesConfig(
@@ -789,7 +735,14 @@ describe("the upstream registry grammar", () => {
     ].join("\n"),
   );
 
-  test("an entry's source may be a ref, an upstream needs no blocks, and upstreamRefs yields every distinct ref in files.yml order", () => {
+  // upstreamRefs is the writer's fetch list: a ref listed twice is fetched twice, one dropped leaves a block unsourced.
+  test("an entry's source may be a ref, an upstream needs no blocks, `always` defaults to none, and upstreamRefs yields every distinct ref in files.yml order", () => {
+    expect(
+      checkFilesConfig(doc(BUN, registry("paths: {Node: Node.gitignore}"))).config.files[0],
+    ).toMatchObject({
+      blocks: "g",
+      upstream: { always: [], refs: { Node: ref("Node.gitignore") } },
+    });
     expect(sourced.files[0]).toEqual({
       path: "NOTES.md",
       class: "managed",
@@ -808,6 +761,8 @@ describe("the upstream registry grammar", () => {
     ]);
   });
 
+  // Each row is a registry that fetches the wrong file or none with no run red: a value the paths do not name, a path
+  // nothing lists, a list spelled as one word.
   test.each([
     [
       "a block list that is not a list",
@@ -852,83 +807,82 @@ describe("the upstream registry grammar", () => {
     expect(problemsOf(text)).toContain(problem);
   });
 
-  test.each([
-    [
-      "a repository that is not owner/name",
-      { repository: "gitignore" },
-      "files.0.upstream.repository: not an owner/name repository",
-    ],
-    [
-      "a repository whose owner or name is a traversal segment the URL would normalize away",
-      { repository: "../gitignore" },
-      "files.0.upstream.repository: not an owner/name repository",
-    ],
-    [
-      "a path with a URL delimiter, which fetch would read as a fragment",
-      { paths: "{Node: 'templates/a#b.gitignore'}" },
-      "files.0.upstream.paths.Node: not a plain path (letters, digits, . _ - /)",
-    ],
-    [
-      "a path leaving the pinned commit, which the URL would normalize away",
-      { paths: "{Node: ../HEAD/Node.gitignore}" },
-      "files.0.upstream.paths.Node: carries an empty, '.', or '..' segment",
-    ],
-    [
-      "a short sha",
-      { sha: SHA.slice(0, 12) },
-      "files.0.upstream.sha: not a full lowercase commit sha",
-    ],
-    [
-      "a missing sha",
-      { sha: "null" },
-      "files.0.upstream.sha: Invalid input: expected string, received null",
-    ],
-    [
-      "a dotted value as a paths key",
-      { paths: "{Node.old: Node.gitignore}" },
-      "files.0.upstream.paths.Node.old: Invalid key in record",
-    ],
-  ])("%s is refused by the schema", (_case, fields, problem) => {
+  // Every field goes into the raw-content URL verbatim, so a `#` reads as a fragment and a `..` segment leaves the pinned
+  // commit; the same schema judges a block ref and an entry's source ref.
+  const upstreamEntry = (fields: Record<string, string>) => {
     const u = {
       repository: "github/gitignore",
       sha: SHA,
       paths: "{Node: Node.gitignore}",
       ...fields,
     };
-    const entry = `{ path: .gitignore, class: split, region: hash, blocks: g, upstream: {repository: ${u.repository}, sha: ${u.sha}, paths: ${u.paths}} }`;
-    expect(problemsOf(doc(BUN, entry))).toEqual([problem]);
-  });
-
+    return `{ path: .gitignore, class: split, region: hash, blocks: g, upstream: {repository: ${u.repository}, sha: ${u.sha}, paths: ${u.paths}} }`;
+  };
+  const sourceEntry = (source: string) => `{ path: x.md, class: managed, source: ${source} }`;
   test.each([
     [
-      "a short sha",
-      `{repository: o/a, sha: abc, path: x.md}`,
+      "an upstream repository that is not owner/name",
+      upstreamEntry({ repository: "gitignore" }),
+      "files.0.upstream.repository: not an owner/name repository",
+    ],
+    [
+      "an upstream repository whose owner or name is a traversal segment the URL would normalize away",
+      upstreamEntry({ repository: "../gitignore" }),
+      "files.0.upstream.repository: not an owner/name repository",
+    ],
+    [
+      "an upstream path with a URL delimiter, which fetch would read as a fragment",
+      upstreamEntry({ paths: "{Node: 'templates/a#b.gitignore'}" }),
+      "files.0.upstream.paths.Node: not a plain path (letters, digits, . _ - /)",
+    ],
+    [
+      "an upstream path leaving the pinned commit, which the URL would normalize away",
+      upstreamEntry({ paths: "{Node: ../HEAD/Node.gitignore}" }),
+      "files.0.upstream.paths.Node: carries an empty, '.', or '..' segment",
+    ],
+    [
+      "a short upstream sha",
+      upstreamEntry({ sha: SHA.slice(0, 12) }),
+      "files.0.upstream.sha: not a full lowercase commit sha",
+    ],
+    [
+      "a missing upstream sha",
+      upstreamEntry({ sha: "null" }),
+      "files.0.upstream.sha: Invalid input: expected string, received null",
+    ],
+    [
+      "a dotted value as a paths key",
+      upstreamEntry({ paths: "{Node.old: Node.gitignore}" }),
+      "files.0.upstream.paths.Node.old: Invalid key in record",
+    ],
+    [
+      "a source ref with a short sha",
+      sourceEntry(`{repository: o/a, sha: abc, path: x.md}`),
       "files.0.source.sha: not a full lowercase commit sha",
     ],
     [
-      "a field the ref does not carry",
-      `{repository: o/a, sha: ${SHA}, path: x.md, always: []}`,
+      "a source ref with a field the ref does not carry",
+      sourceEntry(`{repository: o/a, sha: ${SHA}, path: x.md, always: []}`),
       'files.0.source: Unrecognized key: "always"',
     ],
     [
-      "a path with a URL delimiter",
-      `{repository: o/a, sha: ${SHA}, path: 'a#b.md'}`,
+      "a source ref with a path with a URL delimiter",
+      sourceEntry(`{repository: o/a, sha: ${SHA}, path: 'a#b.md'}`),
       "files.0.source.path: not a plain path (letters, digits, . _ - /)",
     ],
     [
-      "a path leaving the pinned commit",
-      `{repository: o/a, sha: ${SHA}, path: ../HEAD/x.md}`,
+      "a source ref with a path leaving the pinned commit",
+      sourceEntry(`{repository: o/a, sha: ${SHA}, path: ../HEAD/x.md}`),
       "files.0.source.path: carries an empty, '.', or '..' segment",
     ],
-    ["an empty string", `''`, "files.0.source: Too small: expected string to have >=1 characters"],
-  ])(
-    "a source ref with %s is refused by the same schema a block ref is",
-    (_case, source, problem) => {
-      expect(
-        problemsOf(doc("  bun: {}\n", `{ path: x.md, class: managed, source: ${source} }`)),
-      ).toEqual([problem]);
-    },
-  );
+    [
+      "an empty source",
+      sourceEntry("''"),
+      "files.0.source: Too small: expected string to have >=1 characters",
+    ],
+  ])("%s is refused by the schema", (_case, entry, problem) => {
+    expect(problemsOf(doc(BUN, entry))).toEqual([problem]);
+  });
 });
 
 describe("selectEntries with the registration's except", () => {

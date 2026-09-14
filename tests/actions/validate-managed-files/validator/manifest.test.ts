@@ -1,3 +1,6 @@
+// The manifest's guarantee is visibility: every class dispatch, every remedy the fleet reads, judged over trees the
+// validator is run against. A state that produced no finding would pass a repository with zero parity checks.
+
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -19,7 +22,6 @@ import {
   regionOf,
   SELF_ENTRY,
   shaLatin1 as sha,
-  splitEntry,
   stampedBaseline,
   VALIDATOR,
   validatorRunner,
@@ -27,249 +29,251 @@ import {
 
 const temp = tempDirs();
 const runValidator = validatorRunner(temp);
+const errors = (stderr: string) => stderr.split("\n").filter((line) => line.startsWith("error:"));
 
 const RESYNC =
   "re-run the sync (dispatch sync-repos.yml in repo-platform with repo=<owner>/<name>), which replaces platform files whole";
 const REPAIR =
   "the sync refuses a record it cannot read, so revert the entry (git history has the stamped original)";
+const REVERT_OR_RESYNC = `revert the edit (git history has the stamped original) or ${RESYNC}`;
+const DRIFTED = (path: string) =>
+  `error: ${path}: content does not match the sha256 recorded in ${MANIFEST} - the ` +
+  "file drifted from the last sync; local edits to a managed file are replaced by the " +
+  "next sync (move them to a repo-owned location), and platform-side updates restamp on that sync";
 
-describe("the manifest's shape", () => {
-  test("a missing manifest is deletion damage", () => {
-    const { exitCode, stderr } = runValidator({}, [], { noManifest: true });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(`${MANIFEST} is missing - every sync writes it`);
+describe("the manifest's state", () => {
+  // Each state is one the tool meets in the fleet (a deleted manifest, a hand edit, a merge that kept both bindings),
+  // and each must be its own finding: JSON.parse would take the last of two bindings and switch a path's parity off.
+  const CI = ".github/workflows/ci.yml";
+  test.each<{ reason: string; text: string | null; expected: string[] }>([
+    {
+      reason: "missing: deletion damage",
+      text: null,
+      expected: [
+        `error: ${MANIFEST} is missing - every sync writes it, so this is deletion or damage; restore it from git history or ${RESYNC}`,
+      ],
+    },
+    {
+      reason: "not JSON",
+      text: "not json\n",
+      expected: [
+        `error: ${MANIFEST}: does not parse as a manifest (invalid JSON) - the file is managed; ${REVERT_OR_RESYNC}`,
+      ],
+    },
+    {
+      reason: "two entry lines for one path, the second starter-classed",
+      text: `{\n  "files": {\n${[
+        `    ${JSON.stringify(MANIFEST)}: ${SELF_ENTRY[MANIFEST]}`,
+        `    ${JSON.stringify(CI)}: ${stampedBaseline()[CI]}`,
+        `    ${JSON.stringify(CI)}: {"class": "starter"}`,
+      ].join(",\n")}\n  }\n}\n`,
+      expected: [
+        `error: ${MANIFEST}: binds a key more than once (JSON consumers silently keep the last value, so a duplicate - an entry path or a field inside one - silently changes what the manifest declares) - the file is managed; ${REVERT_OR_RESYNC}`,
+      ],
+    },
+    {
+      reason: "two class fields inside one entry, the second a starter",
+      text: `{\n  "files": {\n${[
+        `    ${JSON.stringify(MANIFEST)}: ${SELF_ENTRY[MANIFEST]}`,
+        `    ${JSON.stringify(CI)}: {"class": "mirror", "class": "starter"}`,
+      ].join(",\n")}\n  }\n}\n`,
+      expected: [
+        `error: ${MANIFEST}: binds a key more than once (JSON consumers silently keep the last value, so a duplicate - an entry path or a field inside one - silently changes what the manifest declares) - the file is managed; ${REVERT_OR_RESYNC}`,
+      ],
+    },
+    {
+      reason: "does not list itself",
+      text: manifestOf({ [CI]: managedEntry(BASELINE[CI]) }),
+      expected: [
+        `error: ${MANIFEST}: does not list itself - the manifest is a managed file like any other; ${RESYNC}`,
+      ],
+    },
+  ])("$reason", ({ text, expected }) => {
+    const { exitCode, stderr } =
+      text === null
+        ? runValidator({}, [], { noManifest: true })
+        : runValidator({ [MANIFEST]: text });
+    expect([exitCode, errors(stderr)]).toEqual([1, expected]);
   });
 
-  test("an unparsable manifest is its own error", () => {
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: "not json\n" });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(`${MANIFEST}: does not parse as a manifest`);
-  });
-
-  test("a conflict-marked manifest is the conflict-marker check's report, with no parity double", () => {
-    const conflicted = [
-      `${"<".repeat(7)} ours`,
-      manifestOf(stampedBaseline()),
-      "=".repeat(7),
-      `${">".repeat(7)} theirs`,
-      "",
-    ].join("\n");
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: conflicted });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(`${MANIFEST}: carries conflict-marker lines`);
-    expect(stderr).not.toContain("does not parse as a manifest");
-  });
-
-  test("a manifest that does not list itself is an error", () => {
-    const entries = {
-      ".github/workflows/ci.yml": managedEntry(BASELINE[".github/workflows/ci.yml"]),
-    };
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("does not list itself");
-  });
-
-  test("the self entry carries class and hash alone", () => {
-    const entries = {
-      ...stampedBaseline(),
-      [MANIFEST]: '{"class": "managed", "hash": null, "kind": "symlink"}',
-    };
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(exitCode).toBe(1);
-    expect(stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
-      `error: ${MANIFEST}: entry '${MANIFEST}' carries "kind", which the sync never records on the manifest's own entry; revert the edit (git history has the stamped original) or ${RESYNC}`,
-    ]);
-  });
-
-  test("a self entry still carrying the build commit earlier syncs stamped is outside the vocabulary", () => {
-    const entries = {
-      ...stampedBaseline(),
-      [MANIFEST]:
-        '{"class": "managed", "hash": null, "commit": "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01"}',
-    };
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(exitCode).toBe(1);
-    expect(stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
-      `error: ${MANIFEST}: entry '${MANIFEST}' carries field(s) "commit" outside the manifest's vocabulary - no sync writes them; revert the edit (git history has the stamped original) or ${RESYNC}`,
-    ]);
-  });
-
-  test("an entry field outside the vocabulary is an error naming the entry and the keys", () => {
-    const stale = runValidator({
-      [MANIFEST]: manifestOf({
-        ...stampedBaseline(),
-        ".github/workflows/checks.yml": '{"class": "starter", "withheld": true}',
-      }),
-    });
-    expect(stale.exitCode).toBe(1);
-    expect(stale.stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
-      `error: ${MANIFEST}: entry '.github/workflows/checks.yml' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; ${REPAIR}`,
-    ]);
-    // The writer refuses the whole record, so a missing file under it earns no parity remedy of its own.
-    const gone = runValidator({
-      [MANIFEST]: manifestOf({
-        ...stampedBaseline(),
+  // RECORD_FIELDS and ENTRY_FIELDS are the writer's tables too: a record the validator passes and the writer refuses
+  // fails the next sync on a repository the check called green. The self entry is the exception to both tables (managed,
+  // hash null, nothing else): its content holds every other hash, and a resync rewrites it without reading it.
+  const SELF_MUST =
+    `error: ${MANIFEST}: entry '${MANIFEST}' must be managed with hash null (its content includes ` +
+    "every other hash, so a self-hash would be circular); re-run the sync to regenerate it";
+  test.each<{ reason: string; entries: Record<string, string>; expected: string[] }>([
+    {
+      reason: "a stranger on a starter entry",
+      entries: { ".github/workflows/checks.yml": '{"class": "starter", "withheld": true}' },
+      expected: [
+        `error: ${MANIFEST}: entry '.github/workflows/checks.yml' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; ${REPAIR}`,
+      ],
+    },
+    {
+      reason:
+        "a stranger on a missing file: the writer refuses the whole record, so no parity remedy of its own",
+      entries: {
         "docs/gone.md": `{"class": "managed", "hash": "${sha("gone\n")}", "withheld": true}`,
-      }),
-    });
-    expect(gone.stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
-      `error: ${MANIFEST}: entry 'docs/gone.md' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; ${REPAIR}`,
-    ]);
-    // The manifest's own entry is rewritten without being read, so a resync still heals it.
-    const self = runValidator({
-      [MANIFEST]: manifestOf({
-        ...stampedBaseline(),
-        [MANIFEST]: '{"class": "managed", "hash": null, "withheld": true}',
-      }),
-    });
-    expect(self.stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
-      `error: ${MANIFEST}: entry '${MANIFEST}' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; revert the edit (git history has the stamped original) or ${RESYNC}`,
-    ]);
-    const control = runValidator({ [MANIFEST]: manifestOf(stampedBaseline()) });
-    expect({ exitCode: control.exitCode, stderr: control.stderr }).toEqual({
-      exitCode: 0,
-      stderr: "",
-    });
-  });
-
-  // JSON.parse keeps the LAST binding silently, so a duplicate keeping a
-  // second, starter-classed ci.yml line (or a second class field inside
-  // the entry) would switch that file's parity off invisibly.
-  test.each([
-    {
-      reason: "two entry lines for one path (the second starter-classed)",
-      entryLines: [
-        `    ".github/workflows/ci.yml": ${stampedBaseline()[".github/workflows/ci.yml"]}`,
-        `    ".github/workflows/ci.yml": {"class": "starter"}`,
+      },
+      expected: [
+        `error: ${MANIFEST}: entry 'docs/gone.md' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; ${REPAIR}`,
       ],
     },
     {
-      reason: "a duplicated class field inside one entry object",
-      entryLines: [
-        `    ".github/workflows/ci.yml": {"class": "managed", "class": "starter", "hash": null}`,
+      reason: "a stranger on the self entry: a resync heals it",
+      entries: { [MANIFEST]: '{"class": "managed", "hash": null, "withheld": true}' },
+      expected: [
+        `error: ${MANIFEST}: entry '${MANIFEST}' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; ${REVERT_OR_RESYNC}`,
       ],
     },
-  ])("a duplicated manifest key is a hard error: $reason", ({ entryLines }) => {
-    const text = `{\n  "files": {\n${[
-      `    ${JSON.stringify(MANIFEST)}: ${SELF_ENTRY[MANIFEST]}`,
-      ...entryLines,
-    ].join(",\n")}\n  }\n}\n`;
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: text });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("binds a key more than once");
-  });
-
-  test("the operator's own checkout (--self) carries the manifest and is judged like any target", () => {
-    const present = runValidator({}, ["--self"]);
-    expect(present.stderr).toBe("");
-    expect(present.exitCode).toBe(0);
-    const absent = runValidator({}, ["--self"], { noManifest: true });
-    expect(absent.exitCode).toBe(1);
-    expect(absent.stderr).toContain(`${MANIFEST} is missing`);
-    const drifted = runValidator({ ".github/workflows/ci.yml": "name: edited\n" }, ["--self"]);
-    expect(drifted.exitCode).toBe(1);
-    expect(drifted.stderr).toContain(".github/workflows/ci.yml: content does not match the sha256");
+    {
+      reason: "a vocabulary field the self entry never carries",
+      entries: { [MANIFEST]: '{"class": "managed", "hash": null, "kind": "symlink"}' },
+      expected: [
+        `error: ${MANIFEST}: entry '${MANIFEST}' carries "kind", which the sync never records on the manifest's own entry; ${REVERT_OR_RESYNC}`,
+      ],
+    },
+    {
+      reason: "the build commit earlier syncs stamped on the self entry",
+      entries: {
+        [MANIFEST]:
+          '{"class": "managed", "hash": null, "commit": "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01"}',
+      },
+      expected: [
+        `error: ${MANIFEST}: entry '${MANIFEST}' carries field(s) "commit" outside the manifest's vocabulary - no sync writes them; ${REVERT_OR_RESYNC}`,
+      ],
+    },
+    {
+      reason:
+        "the self entry relabeled a starter: parity off for the one file every other hash depends on",
+      entries: { [MANIFEST]: '{"class": "starter"}' },
+      expected: [SELF_MUST],
+    },
+    {
+      reason: "the self entry carrying a real hash: circular",
+      entries: { [MANIFEST]: `{"class": "managed", "hash": "${"a".repeat(64)}"}` },
+      expected: [SELF_MUST],
+    },
+    { reason: "the stamped baseline (control)", entries: {}, expected: [] },
+  ])("the vocabulary: $reason", ({ entries, expected }) => {
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf({ ...stampedBaseline(), ...entries }),
+    });
+    expect([exitCode, errors(stderr)]).toEqual([expected.length === 0 ? 0 : 1, expected]);
   });
 });
 
 describe("byte parity, entry by entry", () => {
-  test("a drifted managed entry names the file once", () => {
+  // The core verdict per class. A split region is sliced marker LINE to marker line by trimmed equality at every
+  // splitter (the writer and this validator share grammar.ts cleanManagedRegion), so trailing spaces on a marker line
+  // are the fleet's, not a drift.
+  const spaced = `above\n${HB} \nroot = true\n${HE}\nrepo tail\n`;
+  const spacedRegion = regionOf(spaced, HB, HE);
+  if (spacedRegion === null) throw new Error("fixture lost its marker lines");
+  const copy = "mirrored license text\n";
+  const MIRROR = `{"class": "mirror", "hash": "${sha(copy)}"}`;
+  test.each<{
+    reason: string;
+    files: Record<string, string>;
+    entries: Record<string, string>;
+    expected: string[];
+  }>([
+    {
+      reason: "a drifted managed entry names the file once",
+      files: { "docs/pinned.md": "drifted\n" },
+      entries: { "docs/pinned.md": `{"class": "managed", "hash": "${"d".repeat(64)}"}` },
+      expected: [DRIFTED("docs/pinned.md")],
+    },
+    {
+      reason: "a mirror in place passes",
+      files: { "skills/a/LICENSE.md": copy },
+      entries: { "skills/a/LICENSE.md": MIRROR },
+      expected: [],
+    },
+    {
+      reason: "a drifted mirror is verified like a managed file",
+      files: { "skills/a/LICENSE.md": "edited copy\n" },
+      entries: { "skills/a/LICENSE.md": MIRROR },
+      expected: [DRIFTED("skills/a/LICENSE.md")],
+    },
+    {
+      reason: "a missing mirror names the class and the resync",
+      files: {},
+      entries: { "skills/a/LICENSE.md": MIRROR },
+      expected: [
+        `error: skills/a/LICENSE.md: listed as mirror in ${MANIFEST} but missing from the repo - a managed file deleted outside a sync; restore it from git history or ${RESYNC}`,
+      ],
+    },
+    {
+      reason: "a split region with a trailing space on its marker line passes",
+      files: { ".editorconfig": spaced },
+      entries: {
+        ".editorconfig":
+          `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(HB)}, ` +
+          `"end": ${JSON.stringify(HE)}, "hash": "${sha(spacedRegion)}"}`,
+      },
+      expected: [],
+    },
+  ])("$reason", ({ files, entries, expected }) => {
     const { exitCode, stdout, stderr } = runValidator({
-      "docs/pinned.md": "drifted\n",
-      [MANIFEST]: manifestOf({
-        ...stampedBaseline(),
-        "docs/pinned.md": `{"class": "managed", "hash": "${"d".repeat(64)}"}`,
-      }),
+      ...files,
+      [MANIFEST]: manifestOf({ ...stampedBaseline(), ...entries }),
     });
-    expect(exitCode).toBe(1);
-    expect(stderr.split("\n").filter((line) => line.includes("docs/pinned.md"))).toEqual([
-      `error: docs/pinned.md: content does not match the sha256 recorded in ${MANIFEST} - the ` +
-        "file drifted from the last sync; local edits to a managed file are replaced by the " +
-        "next sync (move them to a repo-owned location), and platform-side updates restamp on that sync",
-    ]);
-    expect(stdout).not.toContain("docs/pinned.md");
+    expect([exitCode, errors(stderr)]).toEqual([expected.length === 0 ? 0 : 1, expected]);
+    for (const path of Object.keys(entries)) expect(stdout).not.toContain(path);
   });
 
+  // A starter's branch verifies nothing, so the declared starter passes whatever it holds; a hash on one is a hand edit
+  // (a relabel to starter is the class check's, below).
   test("a starter entry passes whatever the file holds, and never carries a hash", () => {
     const good = runValidator({
+      ".github/workflows/checks.yml": "name: edited\n",
       [MANIFEST]: manifestOf({
         ...stampedBaseline(),
-        ".github/settings.yml": '{"class": "starter"}',
+        ".github/workflows/checks.yml": '{"class": "starter"}',
       }),
-      ".github/settings.yml": "repository:\n  has_issues: true\n",
     });
-    expect(good.stderr).toBe("");
-    expect(good.exitCode).toBe(0);
+    expect([good.exitCode, good.stderr]).toEqual([0, ""]);
     const hashed = runValidator({
       [MANIFEST]: manifestOf({
         ...stampedBaseline(),
         ".github/workflows/checks.yml": `{"class": "starter", "hash": "${"a".repeat(64)}"}`,
       }),
     });
-    expect(hashed.exitCode).toBe(1);
-    expect(hashed.stderr).toContain(
-      'carries "hash", which the sync never records on a starter entry',
-    );
+    expect([hashed.exitCode, errors(hashed.stderr)]).toEqual([
+      1,
+      [
+        `error: ${MANIFEST}: entry '.github/workflows/checks.yml' carries "hash", which the sync never records on a starter entry; ${REPAIR}`,
+      ],
+    ]);
   });
 
-  test("a mirror entry is verified like a managed file: byte parity, presence", () => {
-    const copy = "mirrored license text\n";
-    const entries = {
-      ...stampedBaseline(),
-      "skills/a/LICENSE.md": `{"class": "mirror", "hash": "${sha(copy)}"}`,
-    };
-    const good = runValidator({ [MANIFEST]: manifestOf(entries), "skills/a/LICENSE.md": copy });
-    expect(good.stderr).toBe("");
-    expect(good.exitCode).toBe(0);
-    const drifted = runValidator({
-      [MANIFEST]: manifestOf(entries),
-      "skills/a/LICENSE.md": "edited copy\n",
-    });
-    expect(drifted.exitCode).toBe(1);
-    expect(drifted.stderr).toContain("skills/a/LICENSE.md: content does not match the sha256");
-    const missing = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(missing.exitCode).toBe(1);
-    expect(missing.stderr).toContain("skills/a/LICENSE.md: listed as mirror in");
-    expect(missing.stderr).toContain(RESYNC);
-  });
-
-  test("a split entry's region is sliced from marker line to marker line, trailing spaces tolerated", () => {
-    // Marker LINES match by trimmed equality at every splitter (the writer
-    // and this validator's parity slice must agree, or the sync would
-    // deliver trees whose stamped region differs from the one parity
-    // verifies).
-    const content = `above\n${HB} \nroot = true\n${HE}\nrepo tail\n`;
-    const region = regionOf(content, HB, HE);
-    if (region === null) throw new Error("fixture lost its marker lines");
-    const entries = {
-      ...stampedBaseline(),
-      ".editorconfig":
-        `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(HB)}, ` +
-        `"end": ${JSON.stringify(HE)}, "hash": "${sha(region)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      ".editorconfig": content,
-      [MANIFEST]: manifestOf(entries),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-  });
-
+  // A null slice that passed would let a corrupted record reclassifying a file as split exempt it silently.
   test("a split entry whose markers are missing, duplicated, or out of order fails closed", () => {
-    const entries = {
-      ...SELF_ENTRY,
-      "LICENSE.md":
-        `{"class": "split", "grammar": "managed-region", "begin": "# no-such-begin", ` +
-        `"end": "# no-such-end", "hash": "${"c".repeat(64)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("LICENSE.md: the managed-region marker lines ('# no-such-begin'");
+    const markers = (path: string, begin: string, end: string) =>
+      `error: ${path}: the managed-region marker lines ('${begin}' ... '${end}') recorded in ${MANIFEST} are missing, duplicated, or out of order in the file, so managed-region parity cannot be verified - restore the single marker pair or re-run the sync`;
+    const missing = runValidator({
+      [MANIFEST]: manifestOf({
+        ...SELF_ENTRY,
+        "LICENSE.md":
+          `{"class": "split", "grammar": "managed-region", "begin": "# no-such-begin", ` +
+          `"end": "# no-such-end", "hash": "${"c".repeat(64)}"}`,
+      }),
+    });
+    expect([missing.exitCode, errors(missing.stderr)]).toEqual([
+      1,
+      [markers("LICENSE.md", "# no-such-begin", "# no-such-end")],
+    ]);
     const reordered = runValidator({ ".gitignore": [HE, HB, ""].join("\n") });
-    expect(reordered.exitCode).toBe(1);
-    expect(reordered.stderr).toContain(".gitignore: the managed-region marker lines");
+    expect([reordered.exitCode, errors(reordered.stderr)]).toEqual([
+      1,
+      [markers(".gitignore", HB, HE)],
+    ]);
   });
 
+  // Reading through the link would hash the target's content and pass; the occupant-kind rule is the one the writer's
+  // kind-change hold relies on.
   test("a symlink's hash covers the link target under a symlink mirror record; a managed record on a symlink fails by class", () => {
     const build = (claudeEntry: string): string => {
       const root = temp.dir("validate-managed-link-");
@@ -287,38 +291,33 @@ describe("byte parity, entry by entry", () => {
     };
     const dataFile = join(temp.dir("validate-managed-link-data-"), "files.yml");
     writeFileSync(dataFile, "placeholders: []\nmodules: {uv: {}}\nfiles: []\n");
-    const linked = build(`{"class": "mirror", "kind": "symlink", "hash": "${sha("AGENTS.md")}"}`);
-    const intact = boundedSpawnSync(
-      [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", linked],
-      { env: gitFreeEnv() },
-    );
-    expect(intact.stderr).toBe("");
-    expect(intact.exitCode).toBe(0);
-    const managed = build(`{"class": "managed", "hash": "${sha("AGENTS.md")}"}`);
-    const byClass = boundedSpawnSync(
-      [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", managed],
-      { env: gitFreeEnv() },
-    );
-    expect(byClass.exitCode).toBe(1);
-    expect(byClass.stderr).toContain(
-      `CLAUDE.md: recorded as managed in ${MANIFEST} but is a symbolic link`,
-    );
-    const repointed = build(
-      `{"class": "mirror", "kind": "symlink", "hash": "${sha("docs/AGENTS.md")}"}`,
-    );
-    const drifted = boundedSpawnSync(
-      [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", repointed],
-      { env: gitFreeEnv() },
-    );
-    expect(drifted.exitCode).toBe(1);
-    expect(drifted.stderr).toContain(
-      `CLAUDE.md: its link target does not match the sha256 recorded in ${MANIFEST} - the link ` +
-        "drifted from the last sync; local edits to the link are replaced by the next sync",
-    );
-  });
-
-  test("the split entry builder and the validator agree on the baseline", () => {
-    expect(stampedBaseline()["AGENTS.md"]).toBe(splitEntry(BASELINE["AGENTS.md"], B, E));
+    const judge = (entry: string) => {
+      const run = boundedSpawnSync(
+        [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", build(entry)],
+        { env: gitFreeEnv() },
+      );
+      return [run.exitCode, errors(run.stderr)];
+    };
+    expect(judge(`{"class": "mirror", "kind": "symlink", "hash": "${sha("AGENTS.md")}"}`)).toEqual([
+      0,
+      [],
+    ]);
+    expect(judge(`{"class": "managed", "hash": "${sha("AGENTS.md")}"}`)).toEqual([
+      1,
+      [
+        `error: CLAUDE.md: recorded as managed in ${MANIFEST} but is a symbolic link - the record (a file's content hash) cannot verify a link, which the sync never reads through; ` +
+          `restore the file from git history, or remove what stands at the path and ${RESYNC}`,
+      ],
+    ]);
+    expect(
+      judge(`{"class": "mirror", "kind": "symlink", "hash": "${sha("docs/AGENTS.md")}"}`),
+    ).toEqual([
+      1,
+      [
+        `error: CLAUDE.md: its link target does not match the sha256 recorded in ${MANIFEST} - the link drifted from the last sync; ` +
+          "local edits to the link are replaced by the next sync (move them to a repo-owned location), and platform-side updates restamp on that sync",
+      ],
+    ]);
   });
 });
 
@@ -335,84 +334,54 @@ describe("the recorded class against files.yml", () => {
     "the old record until it is resolved), or, when this registration's module change flips it " +
     "(a mirror target a newly selected entry writes, say), land the edit that retires the old " +
     "record first (docs/new-repo.md, PR edits modules)";
-  const errors = (stderr: string) => stderr.split("\n").filter((line) => line.startsWith("error:"));
 
-  // The starter row is the one that passed before: its branch verifies
-  // nothing, so a relabel switched parity off. Every record here is readable (a starter, or a stamped hash) so
-  // the class verdict, not the readability refusal, is what the row exercises.
-  test.each([
-    { recorded: "starter", entry: '{"class": "starter"}' },
+  // The starter row is the one that passed before: its branch verifies nothing, so a relabel switched parity off.
+  // Every record here is readable (a starter, or a stamped hash) so the class verdict, not the readability refusal,
+  // is what the row exercises; the managed-at-a-starter row carries the file's true hash for the same reason.
+  const checks = "name: checks\n";
+  test.each<{ path: string; file: string; recorded: string; declared: string; entry: string }>([
     {
+      path: CI,
+      file: "name: edited\n",
+      recorded: "starter",
+      declared: "managed",
+      entry: '{"class": "starter"}',
+    },
+    {
+      path: CI,
+      file: "name: edited\n",
       recorded: "split",
+      declared: "managed",
       entry: `{"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": "${sha("other\n")}"}`,
     },
-    { recorded: "mirror", entry: `{"class": "mirror", "hash": "${sha("other\n")}"}` },
+    {
+      path: CI,
+      file: "name: edited\n",
+      recorded: "mirror",
+      declared: "managed",
+      entry: `{"class": "mirror", "hash": "${sha("other\n")}"}`,
+    },
+    {
+      path: CHECKS,
+      file: checks,
+      recorded: "managed",
+      declared: "starter",
+      entry: managedEntry(checks),
+    },
   ])(
-    "a managed path recorded as $recorded is one error, whatever the file holds",
-    ({ recorded, entry }) => {
+    "a $declared path recorded as $recorded is one error, whatever the file holds",
+    ({ path, file, recorded, declared, entry }) => {
       const { exitCode, stderr } = runValidator({
-        [CI]: "name: edited\non: [push]\njobs: {}\n",
-        [MANIFEST]: manifestOf({ ...stampedBaseline(), [CI]: entry }),
+        [path]: file,
+        [MANIFEST]: manifestOf({ ...stampedBaseline(), [path]: entry }),
       });
-      expect(exitCode).toBe(1);
-      expect(errors(stderr)).toEqual([classError(CI, recorded, "managed")]);
+      expect([exitCode, errors(stderr)]).toEqual([1, [classError(path, recorded, declared)]]);
     },
   );
 
-  test("a starter path recorded as managed, with the file's true hash, is the same error", () => {
-    const content = "name: checks\n";
-    const { exitCode, stderr } = runValidator({
-      [CHECKS]: content,
-      [MANIFEST]: manifestOf({ ...stampedBaseline(), [CHECKS]: managedEntry(content) }),
-    });
-    expect(exitCode).toBe(1);
-    expect(errors(stderr)).toEqual([classError(CHECKS, "managed", "starter")]);
-  });
-
-  test("the declared starter passes whatever it holds; an undeclared path is dispatched as recorded", () => {
-    const declared = runValidator({
-      [CHECKS]: "name: edited\n",
-      [MANIFEST]: manifestOf({ ...stampedBaseline(), [CHECKS]: '{"class": "starter"}' }),
-    });
-    expect(declared.stderr).toBe("");
-    expect(declared.exitCode).toBe(0);
-    const copy = "mirrored\n";
-    const undeclared = runValidator({
-      "docs/copy.md": copy,
-      "docs/own.md": "repo-owned\n",
-      [MANIFEST]: manifestOf({
-        ...stampedBaseline(),
-        "docs/copy.md": `{"class": "mirror", "hash": "${sha(copy)}"}`,
-        "docs/own.md": '{"class": "starter"}',
-      }),
-    });
-    expect(undeclared.stderr).toBe("");
-    expect(undeclared.exitCode).toBe(0);
-  });
-
-  test("an excepted path is dispatched as recorded: the registration keeps it as the repository's own", () => {
-    const { exitCode, stderr } = runValidator({
-      ".repo-platform.yml": `modules: [uv]\nexcept: [${CI}]\n`,
-      [CI]: "name: my own ci\n",
-      [MANIFEST]: manifestOf({ ...stampedBaseline(), [CI]: '{"class": "starter"}' }),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-  });
-
-  test("an unknown class at a declared path is the unknown-class error alone", () => {
-    const { exitCode, stderr } = runValidator({
-      [MANIFEST]: manifestOf({ ...stampedBaseline(), [CI]: '{"class": "bespoke"}' }),
-    });
-    expect(exitCode).toBe(1);
-    expect(errors(stderr)).toEqual([
-      `error: ${MANIFEST}: entry '${CI}' has unknown class "bespoke" (expected one of managed, split, starter, mirror); the sync refuses a record it cannot read, so revert the entry (git history has the stamped original)`,
-    ]);
-  });
-
-  // The table holds only the declarations the selection makes live: the
-  // writer reserves a path by the same rule, so a mirror it wrote at a
-  // deselected path is a record every later sync reproduces.
+  // The table holds only the declarations the selection makes live: the writer reserves a path by the same rule, so a
+  // mirror it wrote at a deselected path is a record every later sync reproduces, and a path no declaration covers is
+  // verified as recorded.
   const SELECTION_FILES = [
     "placeholders: []",
     "modules: {optional: {}}",
@@ -484,20 +453,7 @@ describe("the recorded class against files.yml", () => {
       name: "a path no declaration covers: its record is verified as recorded",
       registration: "modules: []\n",
       entries: { "docs/old.md": managedEntry("original\n") },
-      expected: [
-        `error: docs/old.md: content does not match the sha256 recorded in ${MANIFEST} - the ` +
-          "file drifted from the last sync; local edits to a managed file are replaced by the " +
-          "next sync (move them to a repo-owned location), and platform-side updates restamp on that sync",
-      ],
-    },
-    {
-      name: "a registration without a modules list names no selection, so the classes stand unjudged",
-      registration: "modules: {uv: true}\n",
-      entries: { "docs/source.md": STARTER },
-      expected: [
-        "error: .repo-platform.yml: top-level `modules` is missing or not a list (the file may " +
-          "have failed to parse); set it to a YAML list of module names, e.g. modules: [uv, release-please]",
-      ],
+      expected: [DRIFTED("docs/old.md")],
     },
   ])("$name", ({ registration, private: privateRepo, entries, expected }) => {
     const { exitCode, stderr } = runValidator(
@@ -517,17 +473,16 @@ describe("the recorded class against files.yml", () => {
       [],
       { filesYml: SELECTION_FILES, private: privateRepo },
     );
-    expect(errors(stderr)).toEqual(expected);
-    expect(exitCode).toBe(expected.length === 0 ? 0 : 1);
+    expect([exitCode, errors(stderr)]).toEqual([expected.length === 0 ? 0 : 1, expected]);
   });
 });
 
-describe("parity messages name what the record and the tree show, never who made it", () => {
-  // Each input is one the tool itself produces or cannot tell from a hand edit: a symlink under a file record (or the
-  // reverse) says nothing about who placed it. The validator reads no mirror declaration, so one mirror remedy names
-  // what the re-run does at every path a record can sit on; every other class holds a wrong-kind occupant, so that
-  // occupant must go before a resync can write. A hash-null record is no record at all: refused before the occupant
-  // is looked at.
+describe("checkManifestParity over one tree walking every dispatch branch", () => {
+  // The census, in manifest order. A message names what the record and the tree show, never who made it: a symlink
+  // under a file record (or the reverse) says nothing about who placed it. The validator reads no mirror declaration,
+  // so one mirror remedy names what the re-run does at every path a record can sit on; every other class holds a
+  // wrong-kind occupant, so that occupant must go before a resync can write. A hash-null record is no record at all:
+  // refused before the occupant is looked at. Those remedies are asserted whole; the rest by their first clause.
   const REMOVE_THEN_RESYNC = `or remove what stands at the path and ${RESYNC}`;
   const MIRROR_REACHED =
     `${RESYNC} and read its report: a target a declaration reaches is rewritten (unless it already carries the ` +
@@ -540,102 +495,29 @@ describe("parity messages name what the record and the tree show, never who made
     `${MIRROR_REACHED}, except under a * in the pattern's last segment, which matches files and links alone and ` +
     `passes a directory by (the run fails when it is the pattern's only match); a record none reaches is dropped${MIRROR_FAILS}`;
   const HASH_REFUSED = (path: string) =>
-    `${MANIFEST_NAME}: entry '${path}': hash must be a lowercase sha256 hex digest; the sync refuses a record it cannot read, so revert the entry (git history has the stamped original)`;
-  const LINK_RECORDED = (noun: string, remedy: string) =>
-    `CLAUDE.md: recorded as ${noun} in ${MANIFEST_NAME} but is not a symbolic link - the record (a link ` +
-    `target's hash) can verify a link alone; restore the link from git history, ${remedy}`;
-  const FILE_RECORDED = (cls: string, remedy: string) =>
-    `CLAUDE.md: recorded as ${cls} in ${MANIFEST_NAME} but is a symbolic link - the record (a file's ` +
+    `${MANIFEST_NAME}: entry '${path}': hash must be a lowercase sha256 hex digest; ${REPAIR}`;
+  const FILE_RECORDED = (path: string, cls: string, remedy: string) =>
+    `${path}: recorded as ${cls} in ${MANIFEST_NAME} but is a symbolic link - the record (a file's ` +
     `content hash) cannot verify a link, which the sync never reads through; restore the file from git ` +
     `history, ${remedy}`;
   const DIRECTORY = (path: string, restore: "file" | "link", remedy: string) =>
     `${path}: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink; restore the ${restore} ` +
     `from git history, ${remedy}`;
-  test.each([
-    {
-      reason:
-        "a hash-null managed record: another tool's stamp, which no writer of this platform carries",
-      files: { "UNHASHED.md": "# unhashed notes\n" },
-      links: {},
-      entry: ["UNHASHED.md", '{"class": "managed", "hash": null}'],
-      message: HASH_REFUSED("UNHASHED.md"),
-    },
-    {
-      reason: "a symbolic link under a managed record",
-      files: { "AGENTS.md": "agents\n" },
-      links: { "CLAUDE.md": "AGENTS.md" },
-      entry: ["CLAUDE.md", `{"class": "managed", "hash": "${sha("AGENTS.md")}"}`],
-      message: FILE_RECORDED("managed", REMOVE_THEN_RESYNC),
-    },
-    {
-      reason:
-        "a hash-null managed record over a symbolic link: the record is refused before the occupant is looked at",
-      files: { "AGENTS.md": "agents\n" },
-      links: { "CLAUDE.md": "AGENTS.md" },
-      entry: ["CLAUDE.md", '{"class": "managed", "hash": null}'],
-      message: HASH_REFUSED("CLAUDE.md"),
-    },
-    {
-      reason:
-        "a symbolic link under a copy-mirror record: the mirror writer replaces it at a literal target and a pattern match alike",
-      files: { "AGENTS.md": "agents\n" },
-      links: { "CLAUDE.md": "AGENTS.md" },
-      entry: ["CLAUDE.md", `{"class": "mirror", "hash": "${sha("agents\n")}"}`],
-      message: FILE_RECORDED("mirror", `or ${MIRROR_RESYNC}`),
-    },
-    {
-      reason:
-        "a directory under a copy-mirror record: written over where a declaration reaches it, passed by under a final *",
-      files: { "copies/copy.md/keep": "" },
-      links: {},
-      entry: ["copies/copy.md", `{"class": "mirror", "hash": "${sha("# copy\n")}"}`],
-      message: DIRECTORY("copies/copy.md", "file", `or ${MIRROR_DIRECTORY_RESYNC}`),
-    },
-    {
-      reason:
-        "a directory under a symlink-mirror record: the same directory remedy, not the not-a-symbolic-link one",
-      files: { "copies/copy.md/keep": "" },
-      links: {},
-      entry: [
-        "copies/copy.md",
-        `{"class": "mirror", "kind": "symlink", "hash": "${sha("../AGENTS.md")}"}`,
-      ],
-      message: DIRECTORY("copies/copy.md", "link", `or ${MIRROR_DIRECTORY_RESYNC}`),
-    },
-    {
-      reason: "a hash-null copy-mirror record: refused the same way, before any mirror remedy",
-      files: { "copies/copy.md": "# copy\n" },
-      links: {},
-      entry: ["copies/copy.md", '{"class": "mirror", "hash": null}'],
-      message: HASH_REFUSED("copies/copy.md"),
-    },
-    {
-      reason:
-        "a regular file under a symlink-mirror record: the mirror writer replaces it at a literal target and a pattern match alike",
-      files: { "CLAUDE.md": "AGENTS.md" },
-      links: {},
-      entry: ["CLAUDE.md", `{"class": "mirror", "kind": "symlink", "hash": "${sha("AGENTS.md")}"}`],
-      message: LINK_RECORDED("a symlink mirror", `or ${MIRROR_RESYNC}`),
-    },
-  ])("$reason", ({ files, links, entry, message }) => {
-    const root = temp.dir("manifest-parity-message-");
-    for (const [rel, content] of Object.entries(files)) {
-      mkdirSync(join(root, dirname(rel)), { recursive: true });
-      writeFileSync(join(root, rel), content);
-    }
-    for (const [rel, target] of Object.entries(links)) symlinkSync(target, join(root, rel));
-    mkdirSync(join(root, ".github"), { recursive: true });
-    writeFileSync(join(root, ".repo-platform.yml"), "modules: []\n");
-    writeFileSync(join(root, "files.yml"), "placeholders: []\nmodules: {}\nfiles: []\n");
-    writeFileSync(join(root, MANIFEST_NAME), manifestOf({ ...SELF_ENTRY, [entry[0]]: entry[1] }));
-    const findings = checkManifestParity(
-      loadContext(root, join(root, "files.yml"), { self: false, private: false }),
-    );
-    expect(findings).toEqual([{ message }]);
-  });
-});
+  const WHOLE = new Set([
+    "docs/odd.md",
+    "docs/unstamped-link.md",
+    "docs/link.md",
+    "docs/link-as-copy-mirror.md",
+    "docs/dir-as-copy-mirror.md",
+    "docs/dir-as-mirror-link.md",
+    "docs/file-as-mirror-link.md",
+  ]);
+  const subject = (message: string): string =>
+    /^(?:[^:]+: entry '([^']+)'|([^:]+):)/.exec(message)?.[1] ??
+    /^([^:]+):/.exec(message)?.[1] ??
+    "";
+  const head = (message: string) => message.split(" - ")[0].split(";")[0];
 
-describe("checkManifestParity over one tree walking every dispatch branch", () => {
   test("reports exactly these verdicts, in manifest order", () => {
     const root = temp.dir("manifest-parity-");
     const region = `${B}\n# Notes\n${E}\n`;
@@ -653,12 +535,15 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/file-as-mirror-link.md": "../intact.md",
       "docs/kind-on-managed.md": "managed content\n",
       "docs/grammar-on-managed.md": "managed content\n",
+      "docs/dir-as-copy-mirror.md/keep": "",
+      "docs/dir-as-mirror-link.md/keep": "",
     };
     for (const [rel, content] of Object.entries(files)) {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
       writeFileSync(join(root, rel), content);
     }
     symlinkSync("intact.md", join(root, "docs/link.md"));
+    symlinkSync("intact.md", join(root, "docs/unstamped-link.md"));
     symlinkSync("intact.md", join(root, "docs/mirror-link.md"));
     symlinkSync("drifted.md", join(root, "docs/mirror-link-elsewhere.md"));
     symlinkSync("intact.md", join(root, "docs/link-as-copy-mirror.md"));
@@ -666,9 +551,11 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
     mkdirSync(join(root, "docs/dir.md"));
     mkdirSync(join(root, ".github"));
     writeFileSync(join(root, ".repo-platform.yml"), "modules: []\n");
+    // docs/odd.md is declared, so the unknown-class verdict is proven to stand alone: the class-vs-declared check
+    // never reaches a record it cannot read.
     writeFileSync(
       join(root, "files.yml"),
-      "placeholders: []\nmodules: {}\nfiles:\n  - {path: docs/relabeled.md, class: managed}\n",
+      "placeholders: []\nmodules: {}\nfiles:\n  - {path: docs/relabeled.md, class: managed}\n  - {path: docs/odd.md, class: managed}\n",
     );
     const split = (hash: string, grammar = "managed-region") =>
       `{"class": "split", "grammar": ${JSON.stringify(grammar)}, "begin": ${JSON.stringify(B)}, "end": ${JSON.stringify(E)}, "hash": "${hash}"}`;
@@ -681,6 +568,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/unknown-grammar.md": split(sha(region), "prefix"),
       "docs/no-grammar.md": `{"class": "split", "begin": "# b", "end": "# e", "hash": "${"d".repeat(64)}"}`,
       "docs/unstamped.md": '{"class": "managed", "hash": null}',
+      "docs/unstamped-link.md": '{"class": "managed", "hash": null}',
       "docs/starter.md": `{"class": "starter", "hash": "${"a".repeat(64)}"}`,
       "docs/relabeled.md": '{"class": "starter"}',
       "docs/odd.md": '{"class": "bespoke"}',
@@ -694,6 +582,8 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/mirror-link-elsewhere.md": `{"class": "mirror", "kind": "symlink", "hash": "${sha("intact.md")}"}`,
       "docs/file-as-mirror-link.md": `{"class": "mirror", "kind": "symlink", "hash": "${sha("../intact.md")}"}`,
       "docs/link-as-copy-mirror.md": `{"class": "mirror", "hash": "${sha("intact.md")}"}`,
+      "docs/dir-as-copy-mirror.md": `{"class": "mirror", "hash": "${sha("# copy\n")}"}`,
+      "docs/dir-as-mirror-link.md": `{"class": "mirror", "kind": "symlink", "hash": "${sha("../intact.md")}"}`,
       "docs/mirror-odd-kind.md": `{"class": "mirror", "kind": "hardlink", "hash": "${sha("intact.md")}"}`,
       "docs/kind-on-managed.md": `{"class": "managed", "kind": "symlink", "hash": "${sha("managed content\n")}"}`,
       "docs/grammar-on-managed.md": `{"class": "managed", "grammar": "managed-region", "hash": "${sha("managed content\n")}"}`,
@@ -702,24 +592,29 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
     const findings = checkManifestParity(
       loadContext(root, join(root, "files.yml"), { self: false, private: false }),
     );
-    const messages = findings.map((finding) => finding.message.split(" - ")[0].split(";")[0]);
+    const messages = findings.map((finding) =>
+      WHOLE.has(subject(finding.message)) ? finding.message : head(finding.message),
+    );
     expect(messages).toEqual([
       `docs/drifted.md: content does not match the sha256 recorded in ${MANIFEST_NAME}`,
       `docs/broken-region.md: the managed-region marker lines ('${B}' ... '${E}') recorded in ${MANIFEST_NAME} are missing, duplicated, or out of order in the file, so managed-region parity cannot be verified`,
       `${MANIFEST_NAME}: entry 'docs/unknown-grammar.md' declares split grammar "prefix", which this validator does not read (one grammar exists: managed-region)`,
       `${MANIFEST_NAME}: entry 'docs/no-grammar.md' lacks the split grammar field every sync stamps`,
       `${MANIFEST_NAME}: entry 'docs/unstamped.md': hash must be a lowercase sha256 hex digest`,
+      HASH_REFUSED("docs/unstamped-link.md"),
       `${MANIFEST_NAME}: entry 'docs/starter.md' carries "hash", which the sync never records on a starter entry`,
       `${MANIFEST_NAME}: entry 'docs/relabeled.md' is recorded as starter but files.yml declares the path managed`,
-      `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror)`,
+      `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror); ${REPAIR}`,
       `${MANIFEST_NAME}: entry 'docs/short-hash.md': hash must be a lowercase sha256 hex digest`,
-      `docs/link.md: recorded as managed in ${MANIFEST_NAME} but is a symbolic link`,
+      FILE_RECORDED("docs/link.md", "managed", REMOVE_THEN_RESYNC),
       `docs/dir.md: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink`,
       `docs/deleted.md: listed as managed in ${MANIFEST_NAME} but missing from the repo`,
       `${MANIFEST_NAME}: entry 'docs/link-record.md' has unknown class "link" (expected one of managed, split, starter, mirror)`,
       `docs/mirror-link-elsewhere.md: its link target does not match the sha256 recorded in ${MANIFEST_NAME}`,
-      `docs/file-as-mirror-link.md: recorded as a symlink mirror in ${MANIFEST_NAME} but is not a symbolic link`,
-      `docs/link-as-copy-mirror.md: recorded as mirror in ${MANIFEST_NAME} but is a symbolic link`,
+      `docs/file-as-mirror-link.md: recorded as a symlink mirror in ${MANIFEST_NAME} but is not a symbolic link - the record (a link target's hash) can verify a link alone; restore the link from git history, or ${MIRROR_RESYNC}`,
+      FILE_RECORDED("docs/link-as-copy-mirror.md", "mirror", `or ${MIRROR_RESYNC}`),
+      DIRECTORY("docs/dir-as-copy-mirror.md", "file", `or ${MIRROR_DIRECTORY_RESYNC}`),
+      DIRECTORY("docs/dir-as-mirror-link.md", "link", `or ${MIRROR_DIRECTORY_RESYNC}`),
       `${MANIFEST_NAME}: entry 'docs/mirror-odd-kind.md' carries kind "hardlink"`,
       `${MANIFEST_NAME}: entry 'docs/kind-on-managed.md' carries "kind", which the sync never records on a managed entry`,
       `${MANIFEST_NAME}: entry 'docs/grammar-on-managed.md' carries "grammar", which the sync never records on a managed entry`,

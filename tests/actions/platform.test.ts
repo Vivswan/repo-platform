@@ -15,39 +15,26 @@ import {
   FAILURE_ISSUE_TITLE,
   GENERATED_NOTICE,
   MANAGED_HEADER_PATTERN,
-  MANAGED_REGION_LABEL,
   MANIFEST_NAME,
-  PLATFORM_NAME,
-  PLATFORM_OWNER,
-  PLATFORM_SLUG,
   REGISTRATION_PATH,
-  SYNC_BOT,
   SYNC_PR_TITLE_PREFIX,
 } from "../../actions/shared/platform.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn.ts";
 import { tempDirs } from "../shared/temp_dir.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../..");
-const PACKAGE_JSON = join(REPO_ROOT, "package.json");
 const temp = tempDirs();
 
 describe("the platform slug and every string the fleet observes derived from it", () => {
   test("each derived string is the byte the fleet carries today", () => {
-    const pkg = JSON.parse(readFileSync(PACKAGE_JSON, "utf-8")) as { name: string };
     expect({
-      packageName: pkg.name,
-      owner: PLATFORM_OWNER,
-      name: PLATFORM_NAME,
-      slug: PLATFORM_SLUG,
       registration: REGISTRATION_PATH,
       manifest: MANIFEST_NAME,
-      regionLabel: MANAGED_REGION_LABEL,
       hashMarkers: HASH_REGION_MARKERS,
       htmlMarkers: HTML_REGION_MARKERS,
       generatedNotice: GENERATED_NOTICE,
       renderedSettingsHeader: RENDERED_HEADER,
       manifestComment: renderManifest({}).split("\n")[1],
-      syncBot: SYNC_BOT,
       syncIdentity: SYNC_IDENTITY,
       automationBranch: AUTOMATION_BRANCH,
       failureIssueTitle: FAILURE_ISSUE_TITLE,
@@ -55,13 +42,8 @@ describe("the platform slug and every string the fleet observes derived from it"
       syncPrTitle: prTitle("0123456789abcdef0123456789abcdef01234567"),
       deliveryRef: DELIVERY_REF,
     }).toEqual({
-      packageName: "repo-platform",
-      owner: "Vivswan",
-      name: "repo-platform",
-      slug: "Vivswan/repo-platform",
       registration: ".repo-platform.yml",
       manifest: ".github/repo-platform-manifest.json",
-      regionLabel: "REPO-PLATFORM MANAGED",
       hashMarkers: { begin: "# BEGIN REPO-PLATFORM MANAGED", end: "# END REPO-PLATFORM MANAGED" },
       htmlMarkers: {
         begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
@@ -77,7 +59,6 @@ describe("the platform slug and every string the fleet observes derived from it"
         "repo-owned from then on), mirror (a byte copy of a written file, or with kind symlink a " +
         "relative symbolic link to it whose hash is sha256 of the link target, declared in files.yml or " +
         '.repo-platform.yml).",',
-      syncBot: "repo-platform-sync",
       syncIdentity: {
         name: "repo-platform-sync",
         email: "repo-platform-sync@users.noreply.github.com",

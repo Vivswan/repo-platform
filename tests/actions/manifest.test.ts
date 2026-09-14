@@ -1,72 +1,75 @@
+// The manifest's problem strings reach public logs (the sync's warnings and thrown errors, the validator's findings) and
+// its text is target-repository content, so no branch may quote manifest bytes. The duplicated-key row is the one a naive
+// report would name a private path in: JSON.parse keeps the last binding, so the check has to walk the text itself.
+
 import { describe, expect, test } from "bun:test";
 import {
+  ENTRY_FIELDS,
   entryBody,
+  type JsonValue,
   type ManifestEntryShape,
   parseManifestFiles,
+  RECORD_FIELDS,
+  RECORDED_CLASSES,
+  SELF_ENTRY_FIELDS,
   unknownEntryFields,
 } from "../../actions/shared/manifest";
 import { MANIFEST_NAME } from "../../actions/shared/platform";
 
-describe("parseManifestFiles problem strings are value-free", () => {
-  // Problem strings reach public logs (the sync's warnings and thrown errors, the validator's findings), so no branch may quote manifest bytes.
-  // That includes the key a duplicated-key report would name: a private repo's path.
+describe("parseManifestFiles", () => {
   const SENTINEL = "SECRET-private-repo/path/to/leak.ts";
-  const rejecting: [string, string][] = [
-    ["invalid JSON", `{ not json "${SENTINEL}"`],
-    ["no files mapping", `{"files": ["${SENTINEL}"]}`],
-    ["bad entry shape", `{"files": {"${SENTINEL}": 5}}`],
-    [
-      "duplicated key",
-      `{"files": {"${SENTINEL}": {"class": "split"}, "${SENTINEL}": {"class": "starter"}}}`,
-    ],
-  ];
-  test.each(rejecting)("%s rejects without quoting manifest content", (_name, text) => {
-    const parsed = parseManifestFiles(text);
-    expect(parsed.problem).not.toBeNull();
-    expect(parsed.problem).not.toContain("SECRET");
-    expect(parsed.files).toBeNull();
-  });
-
-  test("a well-formed manifest still parses (the branches above are not always-erroring)", () => {
-    const text = '{"files": {"a.txt": {"class": "starter"}}}';
-    expect(parseManifestFiles(text)).toEqual({
+  test.each<{ reason: string; text: string; files: Record<string, ManifestEntryShape> | null }>([
+    { reason: "invalid JSON", text: `{ not json "${SENTINEL}"`, files: null },
+    { reason: "no files mapping", text: `{"files": ["${SENTINEL}"]}`, files: null },
+    { reason: "bad entry shape", text: `{"files": {"${SENTINEL}": 5}}`, files: null },
+    {
+      reason: "duplicated key",
+      text: `{"files": {"${SENTINEL}": {"class": "split"}, "${SENTINEL}": {"class": "starter"}}}`,
+      files: null,
+    },
+    {
+      reason: "a well-formed manifest (the branches above are not always-erroring)",
+      text: '{"files": {"a.txt": {"class": "starter"}}}',
       files: { "a.txt": { class: "starter" } },
-      problem: null,
-    });
-  });
-});
-
-describe("entryBody", () => {
-  test("prints the fields in the given order as one inline object", () => {
-    expect(entryBody({ class: "managed", hash: "abc" })).toBe(
-      '{"class": "managed", "hash": "abc"}',
-    );
-    expect(
-      entryBody({
-        class: "split",
-        grammar: "managed-region",
-        begin: "# b",
-        end: "# e",
-        hash: null,
-      }),
-    ).toBe(
-      '{"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": null}',
-    );
+    },
+  ])("$reason: refused without quoting manifest content, or parsed whole", ({ text, files }) => {
+    const parsed = parseManifestFiles(text);
+    expect({
+      files: parsed.files,
+      refused: parsed.problem !== null,
+      quotes: parsed.problem?.includes("SECRET") ?? false,
+    }).toEqual({ files, refused: files === null, quotes: false });
   });
 });
 
 describe("unknownEntryFields", () => {
-  test("names each entry's keys outside the closed vocabulary; every field the writer records is known", () => {
-    const lines = [
-      `    "a.md": ${entryBody({ class: "starter" })}`,
-      `    "b.md": ${entryBody({ class: "managed", hash: "h" })}`,
-      `    ${JSON.stringify(MANIFEST_NAME)}: ${entryBody({ class: "managed", hash: null })}`,
-      `    "c.md": ${entryBody({ class: "split", grammar: "managed-region", begin: "# b", end: "# e", hash: "h" })}`,
-      `    "d.md": ${entryBody({ class: "mirror", kind: "symlink", hash: "h" })}`,
-    ];
+  // RECORD_FIELDS is the writer's table and ENTRY_FIELDS the validator's: a field the writer records that the validator
+  // does not know makes every fresh sync's manifest red, and a field the validator knows that no class carries lets a
+  // hand edit pass as vocabulary. The self entry is the one record RECORD_FIELDS does not describe.
+  const SAMPLE: Record<string, JsonValue> = {
+    hash: "h",
+    grammar: "managed-region",
+    kind: "symlink",
+  };
+  test("every field the writer records is known, through the writer's own line format; a stranger is named per entry", () => {
+    const recorded = RECORDED_CLASSES.map((cls) => [
+      `${cls}.md`,
+      Object.fromEntries(
+        RECORD_FIELDS[cls].map((field) => [
+          field,
+          field === "class" ? cls : (SAMPLE[field] ?? "# m"),
+        ]),
+      ),
+    ]) as [string, Record<string, JsonValue>][];
+    const self: Record<string, JsonValue> = Object.fromEntries(
+      SELF_ENTRY_FIELDS.map((field) => [field, field === "class" ? "managed" : null]),
+    );
+    const lines = [...recorded, [MANIFEST_NAME, self] as const].map(
+      ([path, fields]) => `    ${JSON.stringify(path)}: ${entryBody(fields)}`,
+    );
     const rendered = parseManifestFiles(`{"files": {\n${lines.join(",\n")}\n}}`);
-    expect(rendered.problem).toBeNull();
-    expect(unknownEntryFields(rendered.files ?? {})).toEqual([]);
+    expect([rendered.problem, unknownEntryFields(rendered.files ?? {})]).toEqual([null, []]);
+    expect(new Set(Object.values(RECORD_FIELDS).flat())).toEqual(new Set(ENTRY_FIELDS));
     expect(
       unknownEntryFields({
         "x.yml": { class: "managed", hash: null, withheld: true } as ManifestEntryShape,
