@@ -254,7 +254,7 @@ A module with no files still appears under `modules` (`custom-license`) so a reg
 
 **A list position may name a module-data key instead of the modules:** `any: {declaring: codeql_languages}` is the list of every module whose data carries `codeql_languages`, in `modules` order. The loader expands it, so a list spelled this way follows the modules block and a new module joins it by declaring the key; a key no module declares is a loader error.
 
-- **The selected modules** are the registration's `modules` in `files.yml` order. A name `files.yml` does not offer fails the sync in the plan's words (the refusal the `plan` step gives the PR that introduces it); nothing is dropped.
+- **The selected modules** are the registration's `modules` in `files.yml` order. A name `files.yml` does not offer fails the sync in the plan's words (the refusal the `plan` step of fleet CI gives the PR that introduces it); nothing is dropped.
 
 - **Two entries for one path must be provably exclusive:** a module one requires and the other forbids, an `any` list the other forbids entirely, or opposite `private` values. Anything subtler is a loader error.
 
