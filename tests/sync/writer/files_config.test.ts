@@ -153,7 +153,7 @@ describe("blockSources and verifySources", () => {
     ]);
   });
 
-  test("blocks apply to managed and starter entries too, and never to links", () => {
+  test("blocks apply to managed and starter entries too", () => {
     const own = temp.dir("writer-files-blocks-classes-");
     writeTree(own, { "bun/d.block.bun.yml": "d\n", "bun/s.block.bun.yml": "s\n" });
     const config = parseFilesConfig(
