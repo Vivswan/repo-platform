@@ -137,6 +137,19 @@ describe("planCi", () => {
       },
     },
     {
+      reason: "one label overridden, the other stream on its own default",
+      text: "modules: [nightly, fuzzer]\nlabels: { fuzzer: 'fuzz: nightly' }\n",
+      now: THURSDAY,
+      outputs: {
+        "modules": '["fuzzer","nightly"]',
+        "private": "false",
+        "codeql-languages": "[]",
+        "tracking-labels": "fuzz: nightly,nightly-failure,security-nightly",
+        ...SECURITY_ROWS,
+        "weekly": "false",
+      },
+    },
+    {
       reason: "an empty selection",
       text: "modules: []",
       now: THURSDAY,
@@ -391,8 +404,6 @@ describe("outputLines", () => {
   });
 });
 
-// The script as the action runs it: a caller checkout with its registration, the checkout's files.yml as the delivery
-// commit carries it, and GITHUB_OUTPUT collecting the rows.
 describe("plan.ts as a child", () => {
   function run(
     files: Record<string, string>,
@@ -427,8 +438,7 @@ describe("plan.ts as a child", () => {
   const SITE_CONFIG = (title: string, include: string) =>
     `config={"site_title":"${title}","docs_path":"docs","include":${include},"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}\n`;
 
-  // The executed entry point with the env names the action manifest sets: default mode writes the fleet-ci rows and
-  // echoes them, site mode the one config row without asking for the visibility, a private registration no CodeQL.
+  // The row names are fleet-ci's `needs.plan.outputs` contract: a renamed or missing row leaves its jobs unselected, green.
   test.each<{ reason: string; registration: string; env: Record<string, string>; output: string }>([
     {
       reason: "default mode",
@@ -469,14 +479,17 @@ describe("plan.ts as a child", () => {
       env: { MODE: "site" },
       output: SITE_CONFIG("Site", '[{"path":"skills","mount":"skills","page":"SKILL.md"}]'),
     },
-  ])("$reason writes its rows and echoes them", ({ registration, env, output }) => {
-    const result = run({ ".repo-platform.yml": registration }, env);
-    expect([result.exitCode, result.output, result.stdout.trimEnd()]).toEqual([
-      0,
-      output,
-      output.trimEnd(),
-    ]);
-  });
+  ])(
+    "$reason writes every row fleet-ci reads, and echoes them",
+    ({ registration, env, output }) => {
+      const result = run({ ".repo-platform.yml": registration }, env);
+      expect([result.exitCode, result.output, result.stdout.trimEnd()]).toEqual([
+        0,
+        output,
+        output.trimEnd(),
+      ]);
+    },
+  );
 
   const missingFiles = () => join(temp.dir("plan-files-missing-"), "files.yml");
   const invalidFiles = () => {
@@ -495,7 +508,7 @@ describe("plan.ts as a child", () => {
     env: Record<string, string> | ((path: string) => Record<string, string>);
     path?: () => string;
     error: (path: string) => string;
-    /** The text after the expected head is the OS's or the schema library's. */
+    /** The text after the expected head is the OS's, the schema library's, or the live module roster of files.yml. */
     detail?: true;
   }>([
     {

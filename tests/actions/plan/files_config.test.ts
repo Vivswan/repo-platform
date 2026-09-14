@@ -262,8 +262,8 @@ describe("render, overlay, and the settings block", () => {
   );
 
   // The writer folds the loader's problems into one report with its own, so every problem of a document is collected
-  // in one pass and the config is still built: a rendered entry that fails its checks is built as a sourced one, and the
-  // thrown form names the label the caller passed.
+  // in one pass and the config is still built: a managed entry with render and overlay present keeps its rendered shape
+  // (a missing overlay, or any other class, makes it a sourced entry), and the thrown form names the label the caller passed.
   test("every problem of a rendered entry is collected in one pass beside the config; the settings block is tree-relative; parseFilesConfig throws them under the label", () => {
     const text = doc(
       [
@@ -737,9 +737,9 @@ describe("the upstream registry grammar", () => {
 
   // upstreamRefs is the writer's fetch list: a ref listed twice is fetched twice, one dropped leaves a block unsourced.
   test("an entry's source may be a ref, an upstream needs no blocks, `always` defaults to none, and upstreamRefs yields every distinct ref in files.yml order", () => {
-    expect(
-      checkFilesConfig(doc(BUN, registry("paths: {Node: Node.gitignore}"))).config.files[0],
-    ).toMatchObject({
+    const valid = checkFilesConfig(doc(BUN, registry("paths: {Node: Node.gitignore}")));
+    expect(valid.problems).toEqual([]);
+    expect(valid.config.files[0]).toMatchObject({
       blocks: "g",
       upstream: { always: [], refs: { Node: ref("Node.gitignore") } },
     });
