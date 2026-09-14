@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, requireEnv, setOutput } from "../shared/gha.ts";
 
-export const DELIVERY_VERDICTS = ["unchanged", "opened", "refreshed", "failed"] as const;
+export const DELIVERY_VERDICTS = ["unchanged", "opened", "refreshed", "pushed", "failed"] as const;
 export type DeliveryVerdict = (typeof DELIVERY_VERDICTS)[number];
 
 export const VERDICT_FILE = "verdict.txt";
@@ -20,6 +20,7 @@ export const ROW_LINES: Record<DeliveryVerdict, string> = {
   unchanged: "unchanged",
   opened: "PR opened",
   refreshed: "PR refreshed",
+  pushed: "branch pushed",
   failed: "failed, report filed in the target repository",
 };
 

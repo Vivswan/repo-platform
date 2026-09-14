@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Nothing this script says reaches the public log: every line goes to $RUNNER_TEMP/deliver.log, and the verdict verdict.ts reads
-// goes to $RUNNER_TEMP/verdict.txt, `failed` only once the issue is filed.
+// goes to $RUNNER_TEMP/verdict.txt, `failed` only once the issue is filed. The one exception is a branch delivery's report,
+// written to the public job summary for a public target and withheld for a private one.
 
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,10 +11,11 @@ import {
   PLATFORM_NAME,
   SYNC_PR_TITLE_PREFIX,
 } from "../../../actions/shared/platform.ts";
-import { NETWORK_TIMEOUT_MS } from "../fleet/discovery.ts";
+import { NETWORK_TIMEOUT_MS, readDispatchBranch } from "../fleet/discovery.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, redactText } from "../shared/proc.ts";
+import { tokenUrl } from "../shared/token_url.ts";
 import { type DeliveryVerdict, VERDICT_FILE } from "./verdict.ts";
 import { REPLACED_HEADING, REVIEW_HEADING } from "./writer/report.ts";
 
@@ -170,6 +172,26 @@ export function prBody(input: {
   ].join("\n");
 }
 
+/** The job summary is as public as the run, so a private target's report and branch stay in the target: the commit is the
+ *  record. It spells no repository, not even in a run link: the resolve step registered the target's name with the masker,
+ *  which Actions applies to the summary too, so a spelled name renders as `***` (the operator's own, on a self-sync). */
+export function branchSummary(input: {
+  private: boolean;
+  branch: string;
+  build: string;
+  report: string;
+}): string {
+  if (input.private) {
+    return `Build \`${input.build}\` pushed onto the dispatched branch. The report is withheld: the repository is private, and the commit on the branch is the record.\n`;
+  }
+  return [
+    `Build \`${input.build}\` pushed onto \`${input.branch}\`.`,
+    "",
+    boundedReport(input.report).replace(/\n$/, ""),
+    "",
+  ].join("\n");
+}
+
 /** `git <subcommand>` or `<program> <word>`: the log names the command, never its arguments. */
 function commandLabel(argv: string[]): string {
   const words = argv[1] === "-C" ? [argv[0], ...argv.slice(3)] : argv;
@@ -185,6 +207,8 @@ class Delivery {
   readonly targetDir = env("TARGET_DIR", "target");
   readonly build = requireEnv("BUILD");
   readonly runUrl = requireEnv("RUN_URL");
+  /** Set on a branch dispatch: the row cloned this branch and the delivery commits onto it (docs/sync.md, "Syncing a branch"). */
+  readonly branch = readDispatchBranch();
   readonly logFile = join(this.runnerTemp, DELIVER_LOG);
 
   constructor() {
@@ -439,8 +463,10 @@ class Delivery {
     );
     if (status.trim() === "") {
       this.log("the tree already matches the build; nothing to deliver");
-      this.closeObsoletePr();
-      this.closeFailureIssue();
+      if (this.branch === "") {
+        this.closeObsoletePr();
+        this.closeFailureIssue();
+      }
       this.verdict("unchanged");
       return;
     }
@@ -452,6 +478,10 @@ class Delivery {
     ).trim();
     if (!head.startsWith("refs/heads/")) this.fileFailure("the target checkout is not on a branch");
     const base = head.slice("refs/heads/".length);
+    if (this.branch !== "") {
+      this.deliverOntoBranch(report);
+      return;
+    }
     this.must(
       this.git("checkout", "-q", "-B", AUTOMATION_BRANCH),
       "creating the automation branch failed",
@@ -463,26 +493,13 @@ class Delivery {
     const existing = this.openPr();
     if (existing !== null) this.disarm(existing.number);
 
-    // The checkout kept no credentials; the push alone authenticates, with
-    // a lease on the branch's remote tip so a concurrent writer fails loudly.
-    const pushUrl = `https://x-access-token:${requireEnv("PAT")}@github.com/${this.target}.git`;
+    // The lease is the branch's remote tip, so a concurrent writer fails loudly.
     const lease = this.must(
-      this.git("ls-remote", pushUrl, `refs/heads/${AUTOMATION_BRANCH}`),
+      this.git("ls-remote", this.authUrl(), `refs/heads/${AUTOMATION_BRANCH}`),
       "reading the automation branch's remote tip failed",
       "git ls-remote",
     );
-    const tip = lease.trim().split("\t")[0] ?? "";
-    this.must(
-      this.git(
-        "push",
-        "--quiet",
-        `--force-with-lease=${AUTOMATION_BRANCH}:${tip}`,
-        pushUrl,
-        `HEAD:refs/heads/${AUTOMATION_BRANCH}`,
-      ),
-      "pushing the automation branch failed",
-      "git push",
-    );
+    this.push(AUTOMATION_BRANCH, lease.trim().split("\t")[0] ?? "", "the automation branch");
 
     const bodyFile = join(this.runnerTemp, "pr-body.md");
     writeFileSync(
@@ -556,6 +573,47 @@ class Delivery {
     }
     this.closeFailureIssue();
     this.verdict(outcome);
+  }
+
+  /** The checkout kept no credentials; the push alone authenticates. */
+  authUrl(): string {
+    return tokenUrl(this.target, requireEnv("PAT"));
+  }
+
+  push(branch: string, lease: string, what: string): void {
+    this.must(
+      this.git(
+        "push",
+        "--quiet",
+        `--force-with-lease=${branch}:${lease}`,
+        this.authUrl(),
+        `HEAD:refs/heads/${branch}`,
+      ),
+      `pushing ${what} failed`,
+      "git push",
+    );
+  }
+
+  /** One commit onto the dispatched branch, no PR and no issue: the failure issue is the default-branch sync's, and the
+   *  branch's own PR carries this commit. The lease is the commit the row cloned, so a commit pushed to the branch
+   *  meanwhile fails the push instead of being overwritten. */
+  deliverOntoBranch(report: string): void {
+    const tip = this.must(
+      this.git("rev-parse", "HEAD"),
+      "reading the checkout's commit failed",
+    ).trim();
+    this.must(this.git("commit", "-q", "-m", prTitle(this.build)), "committing the sync failed");
+    this.push(this.branch, tip, "the branch");
+    appendFileSync(
+      requireEnv("GITHUB_STEP_SUMMARY"),
+      branchSummary({
+        private: env("TARGET_PRIVATE") === "true",
+        branch: this.branch,
+        build: this.build,
+        report,
+      }),
+    );
+    this.verdict("pushed");
   }
 }
 

@@ -293,6 +293,113 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
   });
 });
 
+// The sync row alone probes a dispatched branch, after the listing and before the name is written: the probe is one
+// ls-remote of that ref, and a missing branch is a refusal, so the row prints the unresolved line and delivers nothing.
+describe("resolve_row.ts with a dispatched branch", () => {
+  const { script, handOn } = ENTRIES[0];
+  const root = temp.dir("resolve-row-branch-");
+  const bin = join(root, "bin");
+  const BRANCH = "feat/add-site";
+  const probe = (row: Row) =>
+    `git ls-remote --exit-code https://x-access-token:${PAT}@github.com/${row.repo}.git refs/heads/${BRANCH}`;
+
+  beforeAll(() => {
+    mkdirSync(bin);
+    const pages = `[[${rows
+      .map((row) =>
+        JSON.stringify({
+          full_name: row.repo,
+          archived: false,
+          private: row.private,
+          owner: { login: "Vivswan" },
+          permissions: { push: true },
+        }),
+      )
+      .join(",")}]]`;
+    writeFileSync(join(root, "pages.json"), `${pages}\n`);
+    writeFileSync(join(root, "event.json"), JSON.stringify({ inputs: { branch: BRANCH } }));
+    writeFileSync(
+      join(bin, "gh"),
+      ["#!/usr/bin/env bash", 'echo "gh $*" >> "$STUB_CALLS"', 'cat "$STUB_PAGES"', ""].join("\n"),
+      { mode: 0o755 },
+    );
+    writeStubGit(bin);
+  });
+
+  function run(env: Record<string, string>): Run {
+    const work = temp.dir("resolve-row-branch-run-");
+    const envFile = join(work, "env.txt");
+    const callsFile = join(work, "calls.txt");
+    writeFileSync(envFile, "");
+    writeFileSync(callsFile, "");
+    const result = boundedSpawnSync(
+      ["bun", join(import.meta.dir, "../../.github/scripts", script)],
+      {
+        env: {
+          PATH: `${bin}:${process.env.PATH}`,
+          HOME: process.env.HOME,
+          STUB_PAGES: join(root, "pages.json"),
+          STUB_CALLS: callsFile,
+          STUB_MAIN_TIP: SHA,
+          GITHUB_ENV: envFile,
+          GITHUB_EVENT_PATH: join(root, "event.json"),
+          GITHUB_RUN_ID: RUN_ID,
+          PAT,
+          OWNER: "Vivswan",
+          ...env,
+        },
+      },
+    );
+    return {
+      ...result,
+      env: readFileSync(envFile, "utf-8"),
+      calls: readFileSync(callsFile, "utf-8")
+        .split("\n")
+        .filter((line) => line !== ""),
+    };
+  }
+  const masks = (row: Row) =>
+    maskForms(row.repo)
+      .map((form) => `::add-mask::${form}\n`)
+      .join("");
+
+  test("a branch the target carries: the row resolves after the listing and one probe", () => {
+    expect(run({ ROW_KEY: keyOf(rows[1].repo) })).toEqual({
+      exitCode: 0,
+      stdout: masks(rows[1]),
+      stderr: "",
+      env: handOn(rows[1]),
+      calls: [LISTING, probe(rows[1])],
+    });
+  });
+
+  test.each<{ reason: string; env: Record<string, string>; error: string }>([
+    {
+      reason: "a branch the target does not carry",
+      env: { STUB_MISSING_REF: `refs/heads/${BRANCH}` },
+      error: "the dispatched branch does not exist in the target repository",
+    },
+    {
+      reason: "a ref that only ends in the branch's name (ls-remote matches ref suffixes)",
+      env: { STUB_REF_PREFIX: "refs/heads/nested/" },
+      error: "the dispatched branch does not exist in the target repository",
+    },
+    {
+      reason: "a probe git cannot answer",
+      env: { STUB_GIT_FAIL: "1" },
+      error: "git ls-remote could not read the target's branches (exit 128); re-run the workflow",
+    },
+  ])("$reason refuses after the masks, writing no TARGET", ({ env, error }) => {
+    expect(run({ ROW_KEY: keyOf(rows[0].repo), ...env })).toEqual({
+      exitCode: 1,
+      stdout: `${masks(rows[0])}::error::${error}\n`,
+      stderr: "",
+      env: "",
+      calls: [LISTING, probe(rows[0])],
+    });
+  });
+});
+
 describe("resolveRow", () => {
   test("the listed repository carrying the key, at whatever index the listing put it", () => {
     expect(resolveRow(rows, keyOf(HIDDEN), keyOf)).toEqual({ target: rows[0] });

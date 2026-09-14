@@ -4,12 +4,16 @@
 
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
+import { readDispatchBranch } from "../fleet/discovery.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { capture, redactText } from "../shared/proc.ts";
+import { tokenUrl } from "../shared/token_url.ts";
 
 const target = requireEnv("TARGET");
 const targetDir = env("TARGET_DIR", "target");
 const logFile = join(requireEnv("RUNNER_TEMP"), "checkout.log");
+/** A dispatched branch is the clone's branch; resolve_row.ts already proved it exists. */
+const branch = readDispatchBranch();
 
 function logged(argv: string[], label: string): number {
   const result = capture(argv);
@@ -29,7 +33,8 @@ const cloned = logged(
     "--quiet",
     "--depth",
     "1",
-    `https://x-access-token:${requireEnv("PAT")}@github.com/${target}.git`,
+    ...(branch === "" ? [] : ["--branch", branch]),
+    tokenUrl(target, requireEnv("PAT")),
     targetDir,
   ],
   "git clone",

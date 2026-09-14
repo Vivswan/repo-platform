@@ -101,26 +101,31 @@ export function parseDiscovered(data: unknown): DiscoveredRepo[] | null {
 // nullish: schedule and release events carry no `inputs` key, and an inputs-less API dispatch
 // writes `"inputs": null`.
 const dispatchEvent = z.object({
-  inputs: z.object({ repo: z.string().optional() }).nullish(),
+  inputs: z.object({ repo: z.string().optional(), branch: z.string().optional() }).nullish(),
 });
 
-/** Read from the event payload on disk, never step env: the value may name a private repository,
- * and the runner prints step env into the public log group. */
-function dispatchInput(): string {
-  if (env("GITHUB_EVENT_PATH") === "") return "";
+/** Read from the event payload on disk, never step env: the values may name a private repository
+ * and its work, and the runner prints step env into the public log group. */
+function dispatchInputs(): { repo: string; branch: string } {
+  if (env("GITHUB_EVENT_PATH") === "") return { repo: "", branch: "" };
   const event = parseJsonWith(
     dispatchEvent,
     readFileSync(env("GITHUB_EVENT_PATH"), "utf-8"),
-    "readDispatchRepo: event payload",
+    "dispatch inputs: event payload",
   );
-  return event.inputs?.repo ?? "";
+  return { repo: event.inputs?.repo ?? "", branch: event.inputs?.branch ?? "" };
+}
+
+/** The branch a dispatch syncs onto (docs/sync.md, "Syncing a branch"); empty on every other run. Case kept: branch names are case-sensitive. */
+export function readDispatchBranch(): string {
+  return dispatchInputs().branch.trim();
 }
 
 /** Lowercased because GitHub identity is case-insensitive. A non-empty ONLY_REPO wins over the
  * dispatch input: the post-green call, the harnesses, and local runs pass the scope that way. */
 export function readDispatchRepo(): string {
   let repo = env("ONLY_REPO");
-  if (repo === "") repo = dispatchInput();
+  if (repo === "") repo = dispatchInputs().repo;
   // Empty entries survive on purpose (",", "a/b,,c/d"): the scope parser
   // rejects them loudly, where dropping one here would silently widen or
   // narrow the scope.

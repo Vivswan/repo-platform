@@ -301,11 +301,11 @@ The sync targets this repository like any other: its [.repo-platform.yml](../.re
 | plan: discover and select | [fleet/discover_repos.ts](../.github/scripts/fleet/discover_repos.ts), [fleet/select_sync_repos.ts](../.github/scripts/fleet/select_sync_repos.ts) | the rows: the repositories the fleet token can push to that have adopted the platform, narrowed by the dispatch `repo` input or the called `repos` scope ([fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts)), written sorted to `$RUNNER_TEMP/rows.json`, and the matrix rows: one `{row, key}` per row, the key an HMAC of the slug under the fleet token and the run id in three-character groups (`edd~166~...`: opaque in the public log, so a private row is identified without being named, and spelling no four characters of a private name, since the runner drops a job output that carries a masked value); the log names the public slugs and counts the private ones |
 | plan: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `plan` | `plan: <N> rows` |
 | row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/` |
-| row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | one listing of the owner's writable repositories (the same call discovery makes, no re-selection), the row's key recomputed over it and the one repository carrying it taken (no such repository: the step refuses, naming no repository); every form of the name is registered with the masker before anything else prints, and the name and its visibility ride `GITHUB_ENV` from here (the next run step's preamble spells them under `env:`, masked by then) |
-| row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text); the token is stripped from the remote afterwards; `continue-on-error` |
+| row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | one listing of the owner's writable repositories (the same call discovery makes, no re-selection), the row's key recomputed over it and the one repository carrying it taken (no such repository: the step refuses, naming no repository); every form of the name is registered with the masker before anything else prints; a dispatched branch is probed with one `git ls-remote` and a branch the repository does not have refuses too; the name and its visibility ride `GITHUB_ENV` from here (the next run step's preamble spells them under `env:`, masked by then) |
+| row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text), at the dispatched branch when there is one; the token is stripped from the remote afterwards; `continue-on-error` |
 | row 4: migrate | [sync/migrate.ts](../.github/scripts/sync/migrate.ts) | every rung of the build's `migrations/` over the target, in name order ([Migrations](#migrations)); its log is `sync.log` until the writer's report replaces it; `continue-on-error`, and a failed rung skips the writer |
 | row 5: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
-| row 6: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log` |
+| row 6: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log`; on a branch dispatch the commit lands on the dispatched branch instead ([syncing a branch](#syncing-a-branch)) |
 | row 7: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 
 The vocabulary, complete (`tests/sync/verdict.test.ts` pins it):
@@ -315,13 +315,28 @@ plan: <N> rows
 row <i>: unchanged
 row <i>: PR opened
 row <i>: PR refreshed
+row <i>: branch pushed
 row <i>: failed, report filed in the target repository
 row <i>: failed before the target was resolved; re-run the workflow
 ```
 
 - A row is red only when a step before or at the resolve failed (the install, the build checkout, the listing, the resolve itself): the printer then prints the unresolved line, and the failed step's exit status is the whole public signal; the plan job listed the same repositories moments earlier, so re-running the workflow is the remedy. From the checkout on, the steps continue on error and the failure is delivered to the target; the row stays green with its verdict line. The one exception is a target that cannot take the failure report (no Issues grant): that row prints nothing and is red.
 - Where the detail is: a delivered row's PR body; a failed row's issue (the tails of the checkout, writer, and delivery logs).
+- `branch pushed` is a branch dispatch's clean row ([syncing a branch](#syncing-a-branch)); the other lines mean the same on it.
 - A row is bound to its repository by the key of its slug, not by index, and the listing is the check, not a re-selection: a repository the listing no longer names (a private one revoked from the grant, any one renamed) has no listed slug carrying the key, so the row refuses (red, `re-run the workflow`); a public one revoked stays listed (the listing reports the user's permission, not the token's grant) and its row fails where the token first writes; one that un-adopted mid-run is still listed, so its row runs and the writer's failure on the missing registration is delivered to it (the next plan drops it); one adopted mid-run has no row until the next run; no count or order change moves a row onto another repository. The residual is a slug another writable repository takes within the run: the row syncs that repository as the plan's.
+
+### Syncing a branch
+
+```bash
+gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>
+```
+
+The same row runs against that branch: the clone checks it out, the writer reads the registration on it, and the delivery commits the writer's output onto it as one commit (`chore: sync repo-platform build <sha>`), pushed with a lease on the commit the row cloned, so a commit pushed to the branch meanwhile fails the push instead of being overwritten. A PR that changes a module selection carries its own files this way, declared and delivered together ([new-repo.md](new-repo.md#changing-the-module-selection)).
+
+- No sync PR, no auto-merge, and no issue touched on a clean run: the failure issue is the default-branch sync's. A failed checkout, writer, or push files it as any delivery failure does.
+- The report the PR body would carry goes to the run's job summary, for a public repository; a private repository's summary says the report is withheld, and the commit on the branch is the record.
+- `repo` names exactly one repository (no list, no `all`, no visibility token, no `modules:` filter), and `manual` is refused beside `branch`: both refuse in the plan job, before any repository is probed. A branch the repository does not have refuses in the row's resolve step, so the row prints `failed before the target was resolved`.
+- The branch name rides the event payload as the repository name does, never step env, and never prints.
 
 ## Private repositories
 
@@ -334,7 +349,7 @@ repo-platform is public, and GitHub Actions has no log-level access control: run
 | **Logs to files.** Every later `run:` step writes its whole output to a `$RUNNER_TEMP` file; the writer's report and the delivery log never touch stdout. The only lines printed are the operator's vocabulary above. | the row job's step shape |
 | **Details in the target repository.** The report becomes the sync PR's body; a failure's log tails become one reused `[repo-platform] sync failed` issue there. Both are exactly as private as the repository. | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) |
 
-The same job runs for public and private targets: nothing is conditional on visibility except the report's `Visibility` cell.
+The same job runs for public and private targets: nothing is conditional on visibility except the report's `Visibility` cell and a branch dispatch's job summary, which withholds a private repository's report ([syncing a branch](#syncing-a-branch)).
 
 What a run still shows:
 

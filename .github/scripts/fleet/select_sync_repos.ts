@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
-import { error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
+import { env, error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { ROWS_FILE } from "../sync/verdict.ts";
@@ -17,6 +17,7 @@ import {
   PRIVATE_DISPLAY,
   parseDiscovered,
   pushProbeSkipNotice,
+  readDispatchBranch,
   readDispatchRepo,
   scrubSlug,
   selectedLine,
@@ -24,6 +25,7 @@ import {
 import { moduleRoster } from "./modules.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import {
+  branchDispatchRefusal,
   modulesAdmit,
   modulesFilterFor,
   modulesLeftOutLine,
@@ -41,6 +43,13 @@ const scope = parseScope(readDispatchRepo(), new Set(moduleRoster()));
 if (scope.kind === "error") {
   error(scope.message);
   process.exit(1);
+}
+if (readDispatchBranch() !== "") {
+  const refusal = branchDispatchRefusal(scope, env("MANUAL") === "true");
+  if (refusal !== null) {
+    error(refusal);
+    process.exit(1);
+  }
 }
 
 // parseJson, not JSON.parse: a SyntaxError would echo the real slugs into this public log.

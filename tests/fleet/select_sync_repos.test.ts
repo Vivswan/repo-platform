@@ -242,6 +242,67 @@ describe("select_sync_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
+  // A branch dispatch: the same selection over exactly one repository; the branch never prints (it may name private work).
+  describe("a branch dispatch", () => {
+    const BRANCH = "feat/add-hidden-module";
+    const event = (name: string, inputs: Record<string, string>) => {
+      const file = join(root, `branch-${name}-event.json`);
+      writeFileSync(file, JSON.stringify({ inputs }));
+      return file;
+    };
+
+    test(
+      "over one repository selects that row and nothing else",
+      () => {
+        const r = run("branch-one", {
+          GITHUB_EVENT_PATH: event("one", { repo: "Vivswan/steady", branch: BRANCH }),
+        });
+        expect(r.exitCode).toBe(0);
+        expect(r.rows).toEqual([STEADY_ROW]);
+        expect(r.stdout + r.stderr + r.output).not.toContain(BRANCH);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test.each<{
+      reason: string;
+      inputs: Record<string, string>;
+      env: Record<string, string>;
+      error: string;
+    }>([
+      {
+        reason: "over two repositories",
+        inputs: { repo: "Vivswan/steady,Vivswan/hidden-server", branch: BRANCH },
+        env: {},
+        error:
+          "branch takes exactly one owner/name in repo: the sync commits onto that one repository's branch (no list, no all, no visibility token, no modules: filter)",
+      },
+      {
+        reason: "beside manual",
+        inputs: { repo: "Vivswan/steady", branch: BRANCH },
+        env: { MANUAL: "true" },
+        error:
+          "manual is meaningless with branch: a branch sync commits onto the branch and opens no PR; drop manual",
+      },
+    ])(
+      "$reason is refused before any repository is probed",
+      ({ reason, inputs, env, error }) => {
+        const r = run(`branch-${reason.replaceAll(" ", "-")}`, {
+          GITHUB_EVENT_PATH: event(reason.replaceAll(" ", "-"), inputs),
+          ...env,
+        });
+        expect(r).toEqual({
+          exitCode: 1,
+          stdout: `::error::${error}\n`,
+          stderr: "",
+          output: "",
+          rows: null,
+        });
+      },
+      TEST_TIMEOUT_MS,
+    );
+  });
+
   test(
     "a mistyped private dispatch input is withheld from the no-match error",
     () => {
