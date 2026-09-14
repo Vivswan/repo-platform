@@ -243,7 +243,7 @@ export function mirrorDeclarationProblems(
   const literals = clean.filter(({ target }) => !isGlob(target));
   const literalKinds = new Map(literals.map(({ target, kind }) => [target, kind]));
   const probe = knownProbe(literalKinds);
-  const known = new Map([[REGISTRATION_PATH, "the registration"], ...owned.reserved]);
+  const known = new Map([...owned.reserved, [REGISTRATION_PATH, "the registration"]]);
   const claims: Claim[] = literals.map((literal) => ({ ...literal, path: literal.target }));
   for (const { source, target, kind } of clean) {
     if (!isGlob(target)) continue;

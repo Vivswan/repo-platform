@@ -451,6 +451,20 @@ describe("mirrorDeclarationProblems", () => {
     },
   );
 
+  test("the registration outranks its own listing in except", () => {
+    const owned: OwnedPaths = {
+      sources: OWNED.sources,
+      reserved: new Map([[".repo-platform.yml", EXCEPTED]]),
+    };
+    expect(mirrorDeclarationProblems([A("copy", "*.yml")], owned)).toEqual([
+      {
+        source: "AGENTS.md",
+        target: "*.yml",
+        problem: "the pattern matches '.repo-platform.yml', the registration",
+      },
+    ]);
+  });
+
   test("a pattern that matches the registration, a written, retired, or excepted path, or a literal target", () => {
     const problems = mirrorDeclarationProblems(
       [
