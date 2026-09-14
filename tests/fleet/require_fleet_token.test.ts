@@ -8,7 +8,6 @@ import {
   FLEET_ENVIRONMENT,
   FLEET_SECRET,
   PAT_RECIPE_URL,
-  requireFleetToken,
 } from "../../.github/scripts/fleet/require_fleet_token.ts";
 import { escapeData } from "../../.github/scripts/shared/gha.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -17,28 +16,22 @@ const ROOT = join(import.meta.dir, "../..");
 const SCRIPT = ".github/scripts/fleet/require_fleet_token.ts";
 const PATH = process.env.PATH ?? "";
 
-test("a present token is returned, and the step prints nothing", () => {
-  expect(requireFleetToken({ PAT: "ghp_present" })).toBe("ghp_present");
-  expect(
-    boundedSpawnSync(["bun", SCRIPT], { cwd: ROOT, env: { PATH, PAT: "ghp_present" } }),
-  ).toEqual({ exitCode: 0, stdout: "", stderr: "" });
-});
+// One ::error:: line naming the secret, the environment, and the recipe. The runner unescapes %25 back to %, so the
+// recipe's own query string reaches the log intact where a raw % would misparse the workflow command.
+const ERROR_LINE = new RegExp(
+  `^::error::[^\\n]*\\b${FLEET_SECRET}\\b[^\\n]*\\b${FLEET_ENVIRONMENT}\\b[^\\n]*` +
+    `${RegExp.escape(escapeData(PAT_RECIPE_URL))}[^\\n]*\\n$`,
+);
 
-test.each([
-  ["missing", {}],
-  ["empty", { PAT: "" }],
+test.each<{ token: string; env: Record<string, string>; exitCode: number; stdout: RegExp }>([
+  { token: "present", env: { PAT: "ghp_present" }, exitCode: 0, stdout: /^$/ },
+  { token: "missing", env: {}, exitCode: 1, stdout: ERROR_LINE },
+  { token: "empty", env: { PAT: "" }, exitCode: 1, stdout: ERROR_LINE },
 ])(
-  "a %s token fails the step with one ::error:: line naming the secret, the environment, and the recipe",
-  (_, env) => {
+  "the step with a $token token: an absent one fails with one ::error:: line naming the secret, the environment, and the recipe",
+  ({ env, exitCode, stdout }) => {
     const run = boundedSpawnSync(["bun", SCRIPT], { cwd: ROOT, env: { PATH, ...env } });
-    expect([run.exitCode, run.stderr]).toEqual([1, ""]);
-    expect(run.stdout).toMatch(
-      new RegExp(
-        `^::error::[^\\n]*\\b${FLEET_SECRET}\\b[^\\n]*\\b${FLEET_ENVIRONMENT}\\b[^\\n]*\\n$`,
-      ),
-    );
-    // The runner unescapes %25 back to %: the recipe's own query string reaches the log intact.
-    expect(run.stdout).toContain(escapeData(PAT_RECIPE_URL));
+    expect(run).toEqual({ exitCode, stdout: expect.stringMatching(stdout), stderr: "" });
   },
 );
 

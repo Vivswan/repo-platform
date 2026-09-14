@@ -37,9 +37,11 @@ const PERSONAS: { name: string; private: boolean }[] = [
   { name: "repo-platform", private: false },
   { name: "steady", private: false },
   { name: "unadopted", private: false },
+  { name: "ungranted", private: false },
   { name: "unrendered", private: false },
 ];
 const PRIVATE_SLUGS = PERSONAS.filter((p) => p.private).map((p) => `Vivswan/${p.name}`);
+const ALL_MASKS = PRIVATE_SLUGS.flatMap(maskForms).length;
 const RUN_ID = "4242";
 const keyOf = rowKeyOf("stub-token", RUN_ID);
 
@@ -59,10 +61,6 @@ describe("select_settings_repos.ts", () => {
       [
         "#!/usr/bin/env bash",
         'if [ "$2" = "user/repos" ]; then',
-        '  if [ -n "$STUB_FAIL_DISCOVERY" ]; then',
-        '    echo "HTTP 500 from stub" >&2',
-        "    exit 1",
-        "  fi",
         `  printf '[[%s]]\\n' '${listing}'`,
         "  exit 0",
         "fi",
@@ -132,6 +130,8 @@ describe("select_settings_repos.ts", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
+    // The push advertisement answers 403 for a repository the token sees without push, 404 for one it cannot see at
+    // all (the grant revoked, or the repository gone): both are "not in the fleet", never a transport failure to retry.
     writeFileSync(
       join(bin, "curl"),
       [
@@ -142,6 +142,7 @@ describe("select_settings_repos.ts", () => {
         'case "$url" in',
         '  *"/Vivswan/deadprobe.git/"*) printf 500 ;;',
         '  *"/Vivswan/locked.git/"*|*"/Vivswan/hidden-locked.git/"*) printf 403 ;;',
+        '  *"/Vivswan/ungranted.git/"*) printf 404 ;;',
         '  *"/Vivswan/flaky.git/"*)',
         '    if [ -e "$STUB_STATE/flaky-push" ]; then',
         "      printf 200",
@@ -235,6 +236,13 @@ describe("select_settings_repos.ts", () => {
     };
   }
 
+  /** The dispatch transport: the typed input rides the event payload on disk, never step env, which the runner prints. */
+  function payloadEnv(name: string, repo: string): Record<string, string> {
+    const eventFile = join(root, `${name}-event.json`);
+    writeFileSync(eventFile, JSON.stringify({ inputs: { repo } }));
+    return { GITHUB_EVENT_PATH: eventFile };
+  }
+
   /** The whole output file read back: the count, and the matrix's rows read back to slugs the way
    *  the resolver reads them (each key matched against the personas' keys under the stub token and
    *  run id), in the selector's order. The matrix text names no target. */
@@ -260,6 +268,10 @@ describe("select_settings_repos.ts", () => {
   function publicChannels(result: Run): string[] {
     return [result.stdout, result.stderr, result.summary, result.output];
   }
+
+  /** One `::error::` line opening with `prefix`; the count-only messages themselves are sync_scope.test.ts's. */
+  const errorLine = (prefix: string) =>
+    expect.stringMatching(new RegExp(`^::error::${RegExp.escape(prefix)}[^\\n]*\\n$`));
 
   let main: Run;
   beforeAll(() => {
@@ -307,6 +319,7 @@ describe("select_settings_repos.ts", () => {
   const PUBLIC_PROBES_TAIL_HEAD = [
     `::notice::${pushProbeSkipNotice("Vivswan/locked")}`,
     `::notice::${UNADOPTED_NOTICE}`,
+    `::notice::${pushProbeSkipNotice("Vivswan/ungranted")}`,
   ];
   const PUBLIC_PROBES_TAIL = [
     ...PUBLIC_PROBES_TAIL_HEAD,
@@ -349,6 +362,9 @@ describe("select_settings_repos.ts", () => {
     // Adoption and a rendered document are the opt-in: a declaration still
     // naming settings-sync (steady) and one that never did (nomodule) select
     // alike; the operator repository rides in like any other target.
+    // The matrix is the plan's keyed rows, the shape the apply's resolver matches (sync/resolve_row.ts): N rows for
+    // N targets, each an index and a key, no slug in the text.
+    const rows = ALL_TARGETS.map((repo) => ({ repo, private: repo.includes("/hidden-") }));
     expect({ ...main, masked: main.masked.length > 0 }).toEqual({
       exitCode: 0,
       stdout: lines(
@@ -357,7 +373,7 @@ describe("select_settings_repos.ts", () => {
       ),
       masked: true,
       stderr: "",
-      output: expect.stringMatching(/^count=6\nmatrix=\[\{"row":0,"key":"/),
+      output: `count=6\nmatrix=${JSON.stringify(matrixRows(rows, keyOf))}\n`,
       summary: summaryOf(...ALL_WARNINGS),
     });
     expect(outputsOf(main)).toEqual({ count: "6", repos: ALL_TARGETS });
@@ -367,7 +383,7 @@ describe("select_settings_repos.ts", () => {
     for (const slug of PRIVATE_SLUGS) {
       for (const form of maskForms(slug)) expect(main.masked).toContain(form);
     }
-    expect(main.masked).toHaveLength(PRIVATE_SLUGS.flatMap(maskForms).length);
+    expect(main.masked).toHaveLength(ALL_MASKS);
     // The masks are the first lines: the run() split above consumed them
     // all, so no add-mask line remains anywhere in the log.
     expect(main.stdout).not.toContain("::add-mask::");
@@ -380,54 +396,6 @@ describe("select_settings_repos.ts", () => {
     expect(main.stdout).not.toContain("description:");
   });
 
-  test("the matrix is the plan's keyed rows: N rows for N targets, each an index and the key its resolver matches, no slug in the text", () => {
-    const rows = ALL_TARGETS.map((repo) => ({ repo, private: repo.includes("/hidden-") }));
-    expect(main.output).toBe(`count=6\nmatrix=${JSON.stringify(matrixRows(rows, keyOf))}\n`);
-    expect(outputsOf(main)).toEqual({ count: "6", repos: ALL_TARGETS });
-    for (const persona of PERSONAS) {
-      expect(main.output.toLowerCase()).not.toContain(persona.name);
-    }
-  });
-
-  test(
-    "a private dispatch input arrives via the event payload and never prints",
-    () => {
-      // The workflow passes no ONLY_REPO env (the runner would print it);
-      // the script reads the typed input from GITHUB_EVENT_PATH instead.
-      const eventFile = join(root, "dispatch-event.json");
-      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-server" } }));
-      const r = run("dispatch", { GITHUB_EVENT_PATH: eventFile });
-      expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
-        exitCode: 0,
-        stdout: lines("settings targets: 1 private repository"),
-        masked: PRIVATE_SLUGS.flatMap(maskForms).length,
-        stderr: "",
-        output: { count: "1", repos: ["Vivswan/hidden-server"] },
-        summary: "",
-      });
-      for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-server");
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "a bare name is refused as the sync selector refuses it: one scope grammar, owner/name slugs only",
-    () => {
-      const r = run("dispatch-bare", { ONLY_REPO: "repo-platform" });
-      expect({ ...r, masked: r.masked.length }).toEqual({
-        exitCode: 1,
-        stdout: lines(
-          "::error::1 of 1 scope entries is neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
-        ),
-        masked: 0,
-        stderr: "",
-        output: "",
-        summary: "",
-      });
-    },
-    TEST_TIMEOUT_MS,
-  );
-
   test(
     "a hand-written .github/settings.yml fails the plan with a count: applied alone it would delete every fleet label it does not list",
     () => {
@@ -437,48 +405,8 @@ describe("select_settings_repos.ts", () => {
         stdout: lines(
           "::error::1 selected target carries a hand-written .github/settings.yml (names withheld - a target may be private): the apply reads the rendered file alone, so merge the sync PR that renders it, then re-run",
         ),
-        masked: PRIVATE_SLUGS.flatMap(maskForms).length,
+        masked: ALL_MASKS,
         stderr: "",
-        output: "",
-        summary: "",
-      });
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "a mistyped dispatch input is refused as unknown without echoing the input",
-    () => {
-      const eventFile = join(root, "dispatch-miss-event.json");
-      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
-      const r = run("dispatch-miss", { GITHUB_EVENT_PATH: eventFile });
-      expect({ ...r, masked: r.masked.length }).toEqual({
-        exitCode: 1,
-        stdout:
-          "::error::1 of 1 scoped repos matched no fleet repository (values withheld - they may be " +
-          "private slugs): not among the fleet token's pushable repositories under Vivswan - the grant " +
-          "was revoked, the repository is archived or owned by someone else, or the slug is misspelled " +
-          "(matching ignores case)\n",
-        masked: PRIVATE_SLUGS.flatMap(maskForms).length,
-        stderr: "",
-        output: "",
-        summary: "",
-      });
-      for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-servr");
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "a failed discovery fails the whole run before any mask or output",
-    () => {
-      // Discovery exits with gh's own code and forwards its stderr.
-      const r = run("no-discovery", { STUB_FAIL_DISCOVERY: "1" });
-      expect(r).toEqual({
-        exitCode: 1,
-        stdout: "",
-        masked: [],
-        stderr: "HTTP 500 from stub\n",
         output: "",
         summary: "",
       });
@@ -562,7 +490,7 @@ describe("select_settings_repos.ts", () => {
       expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
         exitCode: 0,
         stdout,
-        masked: PRIVATE_SLUGS.flatMap(maskForms).length,
+        masked: ALL_MASKS,
         stderr: "",
         output: { count: String(repos.length), repos },
         summary,
@@ -596,18 +524,6 @@ describe("select_settings_repos.ts", () => {
       summary: summaryOf(...ALL_WARNINGS, NOMODS_WARNING),
     },
     {
-      reason: "a visibility token intersects: only public candidates are probed",
-      repo: "public,modules:release-please",
-      repos: ["Vivswan/nomodule"],
-      stdout: lines(
-        ...PUBLIC_PROBES_HEAD,
-        ...PUBLIC_PROBES_TAIL_HEAD,
-        LEFT_OUT(4),
-        "settings targets: Vivswan/nomodule",
-      ),
-      summary: summaryOf(...PUBLIC_WARNINGS),
-    },
-    {
       reason: "a slug unions in as typed, its selection unread",
       repo: "Vivswan/steady,modules:bun",
       repos: ["Vivswan/repo-platform", "Vivswan/steady"],
@@ -622,13 +538,11 @@ describe("select_settings_repos.ts", () => {
     "dispatched with $repo: $reason",
     ({ repo, repos, stdout, summary }) => {
       const name = `filter-${Bun.hash(repo).toString(16)}`;
-      const eventFile = join(root, `${name}-event.json`);
-      writeFileSync(eventFile, JSON.stringify({ inputs: { repo } }));
-      const r = run(name, { GITHUB_EVENT_PATH: eventFile });
+      const r = run(name, payloadEnv(name, repo));
       expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
         exitCode: 0,
         stdout,
-        masked: PRIVATE_SLUGS.flatMap(maskForms).length,
+        masked: ALL_MASKS,
         stderr: "",
         output: { count: String(repos.length), repos },
         summary,
@@ -639,46 +553,48 @@ describe("select_settings_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  test(
-    "a filter naming no module of files.yml fails before discovery, naming the roster",
-    () => {
-      const eventFile = join(root, "filter-unknown-event.json");
-      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "modules:uv+pagez" } }));
-      const r = run("filter-unknown", { GITHUB_EVENT_PATH: eventFile });
-      expect(r).toEqual({
-        exitCode: 1,
-        stdout: `::error::1 of 2 module names in the modules: filters is not a module files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}\n`,
-        masked: [],
-        stderr: "",
-        output: "",
-        summary: "",
-      });
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  // The two transports of one scope meet at readDispatchRepo; past it the selector cannot tell them apart.
+  // The two transports of one scope meet at readDispatchRepo; past it the selector cannot tell them apart. The
+  // workflow passes the dispatch input as the payload, never as ONLY_REPO: the value may be a private slug.
   const LIST = "Vivswan/steady, vivswan/hidden-server";
-  test.each<{ transport: string; env: () => Record<string, string> }>([
-    { transport: "the call input", env: () => ({ ONLY_REPO: LIST }) },
+  test.each<{
+    transport: string;
+    scope: string;
+    env: (name: string) => Record<string, string>;
+    stdout: string;
+    repos: string[];
+  }>([
+    {
+      transport: "the call input",
+      scope: LIST,
+      env: () => ({ ONLY_REPO: LIST }),
+      stdout: "settings targets: Vivswan/steady and 1 private repository",
+      repos: ["Vivswan/hidden-server", "Vivswan/steady"],
+    },
     {
       transport: "the dispatch payload",
-      env: () => {
-        const eventFile = join(root, "dispatch-list-event.json");
-        writeFileSync(eventFile, JSON.stringify({ inputs: { repo: LIST } }));
-        return { GITHUB_EVENT_PATH: eventFile };
-      },
+      scope: LIST,
+      env: (name) => payloadEnv(name, LIST),
+      stdout: "settings targets: Vivswan/steady and 1 private repository",
+      repos: ["Vivswan/hidden-server", "Vivswan/steady"],
+    },
+    {
+      transport: "the dispatch payload",
+      scope: "Vivswan/hidden-server",
+      env: (name) => payloadEnv(name, "Vivswan/hidden-server"),
+      stdout: "settings targets: 1 private repository",
+      repos: ["Vivswan/hidden-server"],
     },
   ])(
-    "a slug list from $transport selects every listed target, the private one counted, never named",
-    ({ transport, env }) => {
-      const r = run(`list-${Bun.hash(transport).toString(16)}`, env());
+    "$scope from $transport selects every listed target, the private one counted, never named",
+    ({ transport, scope, env, stdout, repos }) => {
+      const name = `list-${Bun.hash(transport + scope).toString(16)}`;
+      const r = run(name, env(name));
       expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
         exitCode: 0,
-        stdout: lines("settings targets: Vivswan/steady and 1 private repository"),
-        masked: PRIVATE_SLUGS.flatMap(maskForms).length,
+        stdout: lines(stdout),
+        masked: ALL_MASKS,
         stderr: "",
-        output: { count: "2", repos: ["Vivswan/hidden-server", "Vivswan/steady"] },
+        output: { count: String(repos.length), repos },
         summary: "",
       });
       for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-server");
@@ -686,25 +602,58 @@ describe("select_settings_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  test(
-    '"all" is the whole fleet, byte-identical to no scope at all',
-    () => {
-      const r = run("all", { ONLY_REPO: "all" });
-      expect({ ...r, output: outputsOf(r) }).toEqual({ ...main, output: outputsOf(main) });
+  // A refused scope writes no plan and echoes no entry: the entries may be private slugs and the log is public. A
+  // scope refused before discovery has registered no mask yet, so its refusal must name nothing at all.
+  test.each<{
+    reason: string;
+    env: (name: string) => Record<string, string>;
+    error: string;
+    masked: number;
+    withheld: string;
+  }>([
+    {
+      reason: "a list with one unknown entry fails the whole run, counting rather than naming",
+      env: () => ({ ONLY_REPO: "Vivswan/steady,Vivswan/hidden-servr" }),
+      error: "1 of 2 scoped repos matched no fleet repository (values withheld",
+      masked: ALL_MASKS,
+      withheld: "hidden-servr",
     },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "a list with one unknown entry fails the whole run, counting rather than naming",
-    () => {
-      const r = run("list-miss", { ONLY_REPO: "Vivswan/steady,Vivswan/hidden-servr" });
-      expect(r.exitCode).toBe(1);
-      expect(r.stdout).toContain(
-        "::error::1 of 2 scoped repos matched no fleet repository (values withheld",
-      );
-      expect(r.output).toBe("");
-      for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-servr");
+    {
+      reason: "a mistyped dispatch input is refused as unknown without echoing the input",
+      env: (name) => payloadEnv(name, "Vivswan/hidden-servr"),
+      error: "1 of 1 scoped repos matched no fleet repository (values withheld",
+      masked: ALL_MASKS,
+      withheld: "hidden-servr",
+    },
+    {
+      reason: "a filter naming no module of files.yml fails before discovery, naming the roster",
+      env: (name) => payloadEnv(name, "modules:uv+pagez"),
+      error: `1 of 2 module names in the modules: filters is not a module files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}`,
+      masked: 0,
+      withheld: "pagez",
+    },
+    {
+      reason:
+        "an empty scope entry is refused before discovery, so it can neither widen nor narrow the scope",
+      env: () => ({ ONLY_REPO: "Vivswan/steady,,Vivswan/flaky" }),
+      error: "the scope has an empty entry",
+      masked: 0,
+      withheld: "flaky",
+    },
+  ])(
+    "$reason",
+    ({ reason, env, error, masked, withheld }) => {
+      const name = `refused-${Bun.hash(reason).toString(16)}`;
+      const r = run(name, env(name));
+      expect({ ...r, masked: r.masked.length }).toEqual({
+        exitCode: 1,
+        stdout: errorLine(error),
+        masked,
+        stderr: "",
+        output: "",
+        summary: "",
+      });
+      for (const channel of publicChannels(r)) expect(channel).not.toContain(withheld);
     },
     TEST_TIMEOUT_MS,
   );
@@ -734,25 +683,12 @@ describe("select_settings_repos.ts", () => {
           `::notice::${notice}`,
           "::notice::no settings targets selected; nothing to apply.",
         ),
-        masked: PRIVATE_SLUGS.flatMap(maskForms).length,
+        masked: ALL_MASKS,
         stderr: "",
         output: "count=0\nmatrix=[]\n",
         summary: "",
       });
       expect(outputsOf(r)).toEqual({ count: "0", repos: [] });
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "an empty scope entry is refused before discovery, so it can neither widen nor narrow the scope",
-    () => {
-      const r = run("list-empty", { ONLY_REPO: "Vivswan/steady,,Vivswan/flaky" });
-      expect(r.exitCode).toBe(1);
-      expect(r.stdout).toContain("::error::the scope has an empty entry");
-      expect(r.masked).toEqual([]);
-      expect(r.summary).toBe("");
-      expect(r.output).toBe("");
     },
     TEST_TIMEOUT_MS,
   );

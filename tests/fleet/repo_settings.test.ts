@@ -3,8 +3,9 @@
 // No settings layer may declare an Integration bypass actor: GitHub rejects one on a user-owned repository's ruleset
 // (POST /rulesets, 422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization")
 // and the settings apply dies at ruleset creation.
-// The rendered `main-up-to-date` ruleset is this repository's up-to-date requirement (docs/all-green.md); the overlay
-// says why it is not a field of `main`.
+// The overlay's `main-up-to-date` ruleset is this repository's up-to-date requirement (docs/all-green.md); the overlay
+// says why it is not a field of `main`. Every read here is of a SOURCE layer: the writer rewrites the rendered
+// .github/settings.yml on each self-sync, so a render would hide an overlay edit until the next one.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -26,8 +27,11 @@ import { tempDirs } from "../shared/temp_dir";
 const temp = tempDirs();
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 const OWN_OVERLAY = join(REPO_ROOT, ".github/settings.local.yml");
-const OWN_RENDER = join(REPO_ROOT, ".github/settings.yml");
 const FILES = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
+const SETTINGS = FILES.settings;
+if (SETTINGS === null) throw new Error("files.yml declares no settings block");
+const LAYER_TREE = join(REPO_ROOT, SOURCE_PREFIX);
+const OVERRIDE = join(LAYER_TREE, SETTINGS.override);
 
 type Rule = { type: string; parameters?: Record<string, unknown> };
 type Ruleset = {
@@ -87,50 +91,42 @@ describe("the repo's own stable-tag ruleset", () => {
 });
 
 describe("the repo's own main-up-to-date ruleset", () => {
-  test("the rendered default branch requires an up-to-date branch beside the fleet's main ruleset", () => {
-    const rulesets = readRulesets(OWN_RENDER);
-    const main = rulesets.find((r) => r.name === "main");
-    // The fleet's flag stays false: sync and Dependabot pull requests would stall behind every merge.
+  test("the strict flag rides with the check listed again and no bypass actor, beside main's admin bypass", () => {
+    const upToDate = readRulesets(OWN_OVERLAY).find((r) => r.name === "main-up-to-date");
+    // A disabled ruleset, or a scope that misses the default branch, leaves every merge unprotected without a word from GitHub.
+    expect(upToDate?.enforcement).toBe("active");
+    expect(upToDate?.conditions).toEqual({
+      ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] },
+    });
+    // GitHub ignores the flag on a ruleset that requires no check, so all-green is listed a second time here.
+    expect(requiredChecks(upToDate)).toEqual({
+      strict_required_status_checks_policy: true,
+      do_not_enforce_on_create: true,
+      required_status_checks: [{ context: CHECK_NAME, integration_id: GITHUB_ACTIONS_APP_ID }],
+    });
+    // The stale merges this rule refuses are admin merges: main keeps its admin bypass for direct pushes, so a bypass
+    // here would pass them silently. The fleet's own flag stays false, or sync and Dependabot pull requests would stall
+    // behind every merge.
+    expect(upToDate?.bypass_actors).toEqual([]);
+    const main = readRulesets(OVERRIDE).find((r) => r.name === "main");
     expect(requiredChecks(main)?.strict_required_status_checks_policy).toBe(false);
-    // Main's admin bypass stays; the new ruleset has none, or the admin merges it exists for would pass it silently.
     expect(main?.bypass_actors).toEqual([
       { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" },
     ]);
-    // The check is listed again: GitHub ignores the flag on a ruleset that requires no check.
-    expect(rulesets.find((r) => r.name === "main-up-to-date")).toEqual({
-      name: "main-up-to-date",
-      target: "branch",
-      enforcement: "active",
-      conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-      rules: [
-        {
-          type: "required_status_checks",
-          parameters: {
-            strict_required_status_checks_policy: true,
-            do_not_enforce_on_create: true,
-            required_status_checks: [
-              { context: CHECK_NAME, integration_id: GITHUB_ACTIONS_APP_ID },
-            ],
-          },
-        },
-      ],
-      bypass_actors: [],
-    });
   });
 });
 
 describe("every settings layer", () => {
   test("no declared layer, nor the overlay, declares an Integration bypass actor", () => {
-    const files = [...layerFiles(FILES, join(REPO_ROOT, SOURCE_PREFIX)), OWN_OVERLAY].sort();
+    const files = [...layerFiles(FILES, LAYER_TREE), OWN_OVERLAY].sort();
     // Controls: the layers known to carry bypass actors are among the files, or an empty roster would pass vacuously.
-    expect(files).toContain(join(REPO_ROOT, "files/settings/override.yml"));
+    expect(files).toContain(OVERRIDE);
     expect(files).toContain(join(REPO_ROOT, "files/release-please/settings.yml"));
     const { actorsSeen, violations } = integrationBypasses(files);
     expect(actorsSeen).toBeGreaterThan(0);
     expect(violations).toEqual([]);
-  });
 
-  test("a layer declared at a path no shipped layer uses is judged all the same", () => {
+    // Control: the sweep reads the declarations, not the tree, so a layer at a path no shipped layer uses is judged too.
     const tree = temp.dir("repo-settings-tree-");
     const layers = {
       "settings/baseline.yml": "rulesets: []\n",
@@ -162,19 +158,12 @@ describe("the override's ruleset policy", () => {
     // The override merges above every overlay (docs/settings.md), so the
     // policy it declares is the fleet's answer: no repository can hold a
     // dropped ruleset alive by declaring keep.
-    const settings = FILES.settings;
-    if (settings === null) throw new Error("files.yml declares no settings block");
-    const tree = join(REPO_ROOT, SOURCE_PREFIX);
     const overlay = readLayer(
       "rulesets:\n  _undeclared: keep\n  entries:\n    - {name: mine, target: branch, enforcement: active, rules: [{type: deletion}]}\n",
       ".github/settings.local.yml",
     );
     const folded = foldSettings(
-      [
-        loadLayer(join(tree, settings.baseline)),
-        overlay,
-        loadOverrideLayer(join(tree, settings.override)),
-      ],
+      [loadLayer(join(LAYER_TREE, SETTINGS.baseline)), overlay, loadOverrideLayer(OVERRIDE)],
       "the fold",
     );
     if ("refused" in folded) throw new Error(folded.refused);

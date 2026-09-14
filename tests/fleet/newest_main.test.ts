@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  MAIN_REF,
-  supersededBy,
-  supersededNotice,
-} from "../../.github/scripts/fleet/newest_main.ts";
+import { MAIN_REF, supersededBy } from "../../.github/scripts/fleet/newest_main.ts";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -47,15 +43,4 @@ describe("supersededBy", () => {
       "git ls-remote could not answer (exit 128); refusing to guess: fatal: ",
     );
   });
-});
-
-test("the stand-down notice names both commits short", () => {
-  expect(
-    supersededNotice(
-      "8096c4920f84ec4122d14c5bd884703dd0d382ba",
-      "0f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4",
-    ),
-  ).toBe(
-    "superseded by 0f1e2d3c4b5a: main moved past this run's 8096c4920f84; the tip's own run or the nightly applies - nothing to apply here",
-  );
 });
