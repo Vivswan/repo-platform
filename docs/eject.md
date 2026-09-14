@@ -32,7 +32,7 @@ Settings stop being applied too: the central run only manages enrolled repos car
    - drop the copied `plan` job, which reads the registration you deleted: remove `plan` from every copied job's `needs` list and replace each `needs.plan.outputs.*` condition and value with your repo's literals
    - the `release` and `site` legs need `ci` and read `needs.ci.outputs.*` in their conditions and inputs (`modules`, `tracking-labels`): delete the legs you do not keep and replace every such read in the rest with your repo's literals
    - after every job you remove, rewire each surviving job's `needs` to jobs that still exist (actionlint reports a dangling one)
-   - the `nightly` caller runs `fleet-nightly.yml` on the schedule, and its plan job reads the registration too: delete the job, or inline the scan with literal configuration
+   - the `nightly` caller runs `fleet-nightly.yml` on the schedule in a public repository, and its plan job reads the registration too: delete the job, or inline the scan with literal configuration
    - ci.yml's `all-green` job keeps judging whatever its needs list names; drop it too if you drop the `all-green` required check from your branch protection
    - the `site` job calls `reusable-site.yml`, which configures the deploy from `.repo-platform.yml` and takes no other configuration: replace the job with your own deploy that runs `.github/actions/site-build`, passes the pages-site action its `config` by hand, and uploads the output; the hook itself is already yours
 

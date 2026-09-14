@@ -10,12 +10,12 @@ Every managed repository is scanned by [Trivy](https://trivy.dev) through the sk
 | Half | Job | Runs on | Scans | Blocking? | Findings go to |
 |---|---|---|---|---|---|
 | Blocking | `trivy` in fleet-ci.yml | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the job fails, so `all-green` fails | the job log |
-| Nightly | `trivy-nightly` in fleet-nightly.yml | the `schedule` trigger | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
+| Nightly | `trivy-nightly` in fleet-nightly.yml | the `schedule` trigger, public repositories only | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
 
 ## The blocking half
 
 - The gate is `trivy fs .` with `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1`. A vulnerability blocks only when the advisory is HIGH or CRITICAL and a fixed version exists, so its fix is a dependency bump; `--ignore-unfixed` filters vulnerabilities only, so a HIGH or CRITICAL misconfiguration (a Dockerfile, an infrastructure file) blocks too, and its fix is the file or a bypass entry.
-- Unfixed HIGH and CRITICAL vulnerabilities never block; they surface in the nightly issue. MEDIUM and below neither block nor surface: both scans run at `--severity HIGH,CRITICAL`.
+- Unfixed HIGH and CRITICAL vulnerabilities never block; they surface in the nightly issue (public repositories). MEDIUM and below neither block nor surface: both scans run at `--severity HIGH,CRITICAL`.
 - The same job runs in repo-platform's own CI (`trivy` in [ci.yml](../.github/workflows/ci.yml), a gating job), so a lockfile here is held to the same bar.
 
 ## Bypassing a finding: `.trivyignore.yaml`
@@ -41,7 +41,7 @@ misconfigurations:
 
 ## The nightly half
 
-- Trigger: the managed ci.yml's `schedule` event, on which its `nightly` job calls fleet-nightly.yml and fleet-ci's `trivy` stands down. The nightly job lives in its own reusable workflow because it files an issue: `issues: write` exceeds the `ci` caller's permission ceiling, and GitHub checks a called job's grant before its condition runs, so a job asking for more inside fleet-ci.yml would fail every fleet run. The `nightly` caller carries exactly the scan's grant and is not in all-green's needs. The cron's cadence, and which other jobs stand down on it, belong to the skeleton ci.yml and the per-job conditions, not to the scan.
+- Trigger: the managed ci.yml's `schedule` event, on which its `nightly` job calls fleet-nightly.yml and fleet-ci's `trivy` stands down. Public repositories only: the `nightly` job skips in a private repository, which pays for every job that runs and nothing for a skipped one. The nightly job lives in its own reusable workflow because it files an issue: `issues: write` exceeds the `ci` caller's permission ceiling, and GitHub checks a called job's grant before its condition runs, so a job asking for more inside fleet-ci.yml would fail every fleet run. The `nightly` caller carries exactly the scan's grant and is not in all-green's needs. The cron's cadence, and which other jobs stand down on it, belong to the skeleton ci.yml and the per-job conditions, not to the scan.
 - Findings: the action writes one report per scanned target in the [fuzz-issue action's](../actions/fuzz-issue/action.yml) report-directory contract ([fuzzer.md](fuzzer.md#the-failure-report-contract-v1)), and the job files or updates the one open issue labeled `security-nightly`; a clean night closes it ([tracking-issues.md](tracking-issues.md)). The full JSON rides the run's artifact.
 - Code scanning: the SARIF is uploaded under the `trivy` category when the repository is public (personal-account code scanning is public-only).
 - Release gating: `security-nightly` is fleet data, not a module answer. The [settings baseline](../files/settings/baseline.yml) declares the label on every repository, [actions/plan](../actions/plan/plan.ts) appends it to every repository's `tracking-labels`, and `release-health` refuses to release while the issue is open ([tracking-issues.md](tracking-issues.md#release-gating)).
