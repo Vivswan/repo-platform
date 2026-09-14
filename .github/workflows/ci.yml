@@ -428,7 +428,6 @@ jobs:
       github.ref == 'refs/heads/main'
     concurrency:
       group: pages
-      cancel-in-progress: false
     permissions:
       contents: read
       pages: write
@@ -437,4 +436,3 @@ jobs:
     uses: ./.github/workflows/reusable-site.yml
     with:
       sha: ${{ github.sha }}
-      custom_domain: ${{ vars.CUSTOM_DOMAIN }}

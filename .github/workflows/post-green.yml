@@ -51,7 +51,6 @@ jobs:
     # its callee waits on.
     concurrency:
       group: stable-tag-move
-      cancel-in-progress: false
     # contents: write is the token's tag push (the caller job in ci.yml
     # grants the same, a called job's ceiling).
     permissions:
@@ -124,7 +123,6 @@ jobs:
       needs.read-directives.outputs.armed == 'true'
     concurrency:
       group: sync-repos
-      cancel-in-progress: false
     permissions:
       contents: read
       checks: read

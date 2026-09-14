@@ -188,7 +188,6 @@ jobs:
       contains(needs.ci.outputs.modules, '"site"')
     concurrency:
       group: pages
-      cancel-in-progress: false
     permissions:
       contents: read
       pages: write
@@ -197,4 +196,3 @@ jobs:
     uses: {{github_username}}/repo-platform/.github/workflows/reusable-site.yml@stable
     with:
       sha: ${{ github.sha }}
-      custom_domain: ${{ vars.CUSTOM_DOMAIN }}

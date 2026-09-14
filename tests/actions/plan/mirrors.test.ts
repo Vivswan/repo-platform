@@ -17,22 +17,26 @@ import {
 } from "../../../actions/plan/mirrors.ts";
 import { expandPattern, literalPrefix } from "../../../actions/shared/mirror_pattern.ts";
 
+const WRITES = "a path files.yml writes";
+const STALE = "a path a stale manifest record retires";
+const EXCEPTED = "a path the registration excepts";
 const OWNED: OwnedPaths = {
   sources: new Set(["LICENSE.md", "AGENTS.md"]),
-  writes: new Set([
-    "LICENSE.md",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "nightly.yml",
-    "docs/README.md",
-    ".github/repo-platform-manifest.json",
+  reserved: new Map([
+    ["LICENSE.md", WRITES],
+    ["AGENTS.md", WRITES],
+    ["CLAUDE.md", WRITES],
+    ["nightly.yml", WRITES],
+    ["docs/README.md", WRITES],
+    [".github/repo-platform-manifest.json", WRITES],
+    ["docs/GONE.md", STALE],
+    ["docs/OWN.md", EXCEPTED],
+    ["own/KEEP.md", EXCEPTED],
   ]),
-  stale: new Set(["docs/GONE.md"]),
-  excepted: new Set(["docs/OWN.md", "own/KEEP.md"]),
 };
 
 describe("ownedPaths", () => {
-  test("the selected entries by class, the manifest among the writes", () => {
+  test("the selected entries by class; the writes, the manifest, the stale records, and the excepts reserved by why", () => {
     const config = parseFilesConfig(`
 placeholders: []
 modules: { bun: {}, pages: {} }
@@ -45,17 +49,17 @@ files:
   - { path: private.yml, class: managed, when: { private: true } }
 `);
     expect(
-      ownedPaths(config, { modules: ["bun"], private: false, except: ["checks.yml"] }),
+      ownedPaths(config, { modules: ["bun"], private: false, except: ["checks.yml"] }, ["OLD.md"]),
     ).toEqual({
       sources: new Set(["LICENSE.md", "AGENTS.md"]),
-      writes: new Set([
-        "LICENSE.md",
-        "AGENTS.md",
-        "CLAUDE.md",
-        ".github/repo-platform-manifest.json",
+      reserved: new Map([
+        ["LICENSE.md", WRITES],
+        ["AGENTS.md", WRITES],
+        ["CLAUDE.md", WRITES],
+        [".github/repo-platform-manifest.json", WRITES],
+        ["OLD.md", STALE],
+        ["checks.yml", EXCEPTED],
       ]),
-      stale: new Set(),
-      excepted: new Set(["checks.yml"]),
     });
     expect(ownedPaths(config, { modules: ["pages"], private: true }).sources).toEqual(
       new Set(["LICENSE.md", "AGENTS.md", "docs/NOTES.md", "private.yml"]),
@@ -447,6 +451,20 @@ describe("mirrorDeclarationProblems", () => {
     },
   );
 
+  test("the registration outranks its own listing in except", () => {
+    const owned: OwnedPaths = {
+      sources: OWNED.sources,
+      reserved: new Map([[".repo-platform.yml", EXCEPTED]]),
+    };
+    expect(mirrorDeclarationProblems([A("copy", "*.yml")], owned)).toEqual([
+      {
+        source: "AGENTS.md",
+        target: "*.yml",
+        problem: "the pattern matches '.repo-platform.yml', the registration",
+      },
+    ]);
+  });
+
   test("a pattern that matches the registration, a written, retired, or excepted path, or a literal target", () => {
     const problems = mirrorDeclarationProblems(
       [
@@ -465,9 +483,9 @@ describe("mirrorDeclarationProblems", () => {
       Ap("*.yml", "the pattern matches '.repo-platform.yml', the registration"),
       Ap("*.yml", "the pattern matches 'nightly.yml', a path files.yml writes"),
       Ap("*/README.md", "the pattern matches 'docs/README.md', a path files.yml writes"),
-      Ap("docs/*", "the pattern matches 'docs/README.md', a path files.yml writes"),
       Ap("docs/*", "the pattern matches 'docs/GONE.md', a path a stale manifest record retires"),
       Ap("docs/*", "the pattern matches 'docs/OWN.md', a path the registration excepts"),
+      Ap("docs/*", "the pattern matches 'docs/README.md', a path files.yml writes"),
       Ap(
         ".github/*",
         "the pattern matches '.github/repo-platform-manifest.json', a path files.yml writes",

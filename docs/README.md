@@ -17,7 +17,6 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Understand the `pr-title` required check | [Settings: the pr-title ruleset](settings.md#the-pr-title-ruleset) |
 | Publish a site to GitHub Pages: the repo's own website, its docs/, or both | [Site](site.md) |
 | Fill in the site-build hook that builds my website | [Site: the hook](site.md#the-hook-githubactionssite-buildactionyml) |
-| Serve the site from my own domain | [Site: custom domain](site.md#custom-domain) |
 | Translate docs (zh-cn/, ja/, ...) | [Site: docs conventions](site.md#docs-conventions) |
 | Move slow or flaky checks into a nightly run | [Nightly: customizing the starter](nightly.md#customizing-the-starter) |
 | Write the fuzz step the nightly-fuzz starter needs | [Fuzzer: customizing the starter](fuzzer.md#customizing-the-starter) |

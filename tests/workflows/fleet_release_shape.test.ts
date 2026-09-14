@@ -17,7 +17,7 @@ interface Step {
   env?: Record<string, string>;
 }
 interface Job {
-  concurrency?: { group: string; "cancel-in-progress": boolean };
+  concurrency?: { group: string };
   steps?: Step[];
 }
 
@@ -66,10 +66,7 @@ describe("fleet-release.yml's release-please job", () => {
   test("the judged sha is a required input with no default: the lane and the head check read it alone, never github.sha", () => {
     expect(releaseWorkflow.on.workflow_call.inputs.sha).toMatchObject({ required: true });
     expect(releaseWorkflow.on.workflow_call.inputs.sha).not.toHaveProperty("default");
-    expect(job.concurrency).toEqual({
-      "group": "release-cut-${{ inputs.sha }}",
-      "cancel-in-progress": false,
-    });
+    expect(job.concurrency).toEqual({ group: "release-cut-${{ inputs.sha }}" });
     expect(steps.find((step) => step.id === "head")).toMatchObject({
       env: { GH_TOKEN: "${{ github.token }}", JUDGED: "${{ inputs.sha }}" },
     });

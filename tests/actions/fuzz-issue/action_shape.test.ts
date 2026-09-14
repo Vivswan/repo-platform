@@ -16,7 +16,7 @@ const LABEL = "fuzz-nightly";
 const CLOSE_COMMENT = "Nightly fuzz passed on 2026-03-04.\n\nClosing.";
 
 const fills = {
-  "${{ inputs.token }}": "t",
+  "${{ github.token }}": "t",
   "${{ inputs.label }}": LABEL,
   "${{ inputs.label-color }}": "B60205",
   "${{ inputs.label-description }}": "Automated nightly fuzz failure",
@@ -84,7 +84,7 @@ describe("the fuzz-issue composite", () => {
     expect(issue.if).toBe(REPORT);
     expect(issue.uses).toMatch(/^peter-evans\/create-issue-from-file@[0-9a-f]{40}$/);
     expect(issue.with).toEqual({
-      token: "${{ inputs.token }}",
+      token: "${{ github.token }}",
       "issue-number": "${{ steps.open.outputs.number }}",
       title: "${{ inputs.title }}",
       "content-filepath": "${{ steps.body.outputs.file }}",
