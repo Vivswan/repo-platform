@@ -229,7 +229,6 @@ export function runSync(options: SyncOptions): SyncReport {
   };
   const entries = selectEntries(config, selection);
   const entryPaths = new Set(entries.map((entry) => entry.path));
-  const owned = ownedPaths(config, selection);
   const declared = new Set(config.files.map((entry) => entry.path));
   notes.push(
     ...(registration.except ?? [])
@@ -280,6 +279,7 @@ export function runSync(options: SyncOptions): SyncReport {
         "then dispatch the sync again",
     );
   }
+  const owned = ownedPaths(config, selection, stale);
   const retired = [...retire(options.target, stale, records), ...released];
 
   // A Map, so a path named like an inherited property (constructor) is
@@ -354,13 +354,7 @@ export function runSync(options: SyncOptions): SyncReport {
   const mirrors =
     registration.mirrors === undefined
       ? { rows: [], replaced: [], records: new Map<string, MirrorRecord>() }
-      : applyMirrors(
-          options.target,
-          registration.mirrors,
-          written,
-          { ...owned, stale: new Set(stale) },
-          records,
-        );
+      : applyMirrors(options.target, registration.mirrors, written, owned, records);
   for (const [path, record] of mirrors.records) next.set(path, record);
   for (const { path, before, after } of mirrors.replaced) {
     replaced.push({ path, diff: unifiedDiff(path, before, after) });

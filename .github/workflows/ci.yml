@@ -436,4 +436,3 @@ jobs:
     uses: ./.github/workflows/reusable-site.yml
     with:
       sha: ${{ github.sha }}
-      custom_domain: ${{ vars.CUSTOM_DOMAIN }}

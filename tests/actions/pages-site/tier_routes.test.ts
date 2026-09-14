@@ -13,8 +13,6 @@ const LATEST: Tier = { base: "/repo/latest/", roots: ROOT.roots };
 /** A versioned site before its first tag: the root is built from HEAD and
  *  latest/ is the one version served. */
 const NO_TAGS: Tier = { base: "/repo/", roots: ["/repo/latest/"] };
-/** A custom-domain site, served at the origin's root. */
-const DOMAIN_ROOT: Tier = { base: "/", roots: ["/latest/", "/v2.0.0/"] };
 /** The docs mount of a site that also has a website at the repo root. */
 const MOUNTED_LATEST: Tier = {
   base: "/repo/docs/latest/",
@@ -73,8 +71,6 @@ const CASES: [string, Case][] = [
     { tier: LATEST, to: "/other-repo/", outcome: "left" },
   ],
   ["latest from an untagged root tier", { tier: NO_TAGS, to: "/repo/latest/", outcome: "left" }],
-  ["a page of a custom-domain root tier", { tier: DOMAIN_ROOT, to: "/guide/", outcome: "routed" }],
-  ["latest from a custom-domain root tier", { tier: DOMAIN_ROOT, to: "/latest/", outcome: "left" }],
   [
     "a page of a mounted latest tier",
     { tier: MOUNTED_LATEST, to: "/repo/docs/latest/api.html", outcome: "routed" },

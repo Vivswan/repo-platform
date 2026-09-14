@@ -55,10 +55,6 @@ inputs:
       and crashing inputs and hedges on unpinned regression seeds; generic
       carries no fuzz notions.
     required: true
-  token:
-    description: Token used by gh and the issue action; needs issues write
-    required: false
-    default: ${{ github.token }}
 
 outputs:
   issue-number:
@@ -105,7 +101,7 @@ runs:
       id: open
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.token }}
+        GH_TOKEN: ${{ github.token }}
         LABEL: ${{ inputs.label }}
       run: number=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty') && echo "number=$number" >> "$GITHUB_OUTPUT"
 
@@ -116,7 +112,7 @@ runs:
       if: inputs.mode == 'report'
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.token }}
+        GH_TOKEN: ${{ github.token }}
         LABEL: ${{ inputs.label }}
         LABEL_COLOR: ${{ inputs.label-color }}
         LABEL_DESCRIPTION: ${{ inputs.label-description }}
@@ -127,7 +123,7 @@ runs:
       id: issue
       uses: peter-evans/create-issue-from-file@fca9117c27cdc29c6c4db3b86c48e4115a786710 # v6.0.0
       with:
-        token: ${{ inputs.token }}
+        token: ${{ github.token }}
         issue-number: ${{ steps.open.outputs.number }}
         title: ${{ inputs.title }}
         content-filepath: ${{ steps.body.outputs.file }}
@@ -141,7 +137,7 @@ runs:
       if: inputs.mode == 'resolve'
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.token }}
+        GH_TOKEN: ${{ github.token }}
         LABEL: ${{ inputs.label }}
         COMMENT_FILE: ${{ steps.body.outputs.file }}
       run: gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 100 --json number --jq '.[].number' | xargs -r -I{} gh issue close {} --repo "$GITHUB_REPOSITORY" --reason completed --comment "$(cat "$COMMENT_FILE")"
