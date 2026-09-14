@@ -62,18 +62,6 @@ jobs:
       count: ${{ steps.plan.outputs.count }}
       matrix: ${{ steps.select.outputs.matrix }}
     steps:
-      - name: Require the fleet token
-        env:
-          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: |
-          if [ -z "$PAT" ]; then
-            echo "::error::push sync cannot run: the REPO_PLATFORM_TOKEN secret is not set, and the default GITHUB_TOKEN cannot write to other"\
-              "repos. Create a fine-grained PAT with the permissions pre-selected at"\
-              "https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write&actions=read&environments=write"\
-              "scoped to the managed repos, then store it with 'gh secret set REPO_PLATFORM_TOKEN --env fleet-operator' in this repo."
-            exit 1
-          fi
-
       # Full history: the resolve proves the tagged commit is main history.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,6 +73,11 @@ jobs:
 
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent
+
+      - name: Require the fleet token
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bun .github/scripts/fleet/require_fleet_token.ts
 
       # Once for the whole run: every row checks out exactly this commit.
       - name: Resolve the build
@@ -146,6 +139,11 @@ jobs:
 
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent > "$RUNNER_TEMP/install.log" 2>&1
+
+      - name: Require the fleet token
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bun .github/scripts/fleet/require_fleet_token.ts
 
       - name: Check out the build
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

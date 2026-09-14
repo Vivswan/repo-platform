@@ -20,22 +20,9 @@ jobs:
     environment: fleet-operator
     timeout-minutes: 15
     steps:
-      # The fleet PAT's push starts the PR's CI; a default-token push would leave it waiting for approval.
-      - name: Require the fleet token
-        env:
-          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: |
-          if [ -z "$PAT" ]; then
-            echo "::error::the refresh cannot run: the REPO_PLATFORM_TOKEN secret is not set. Create a fine-grained PAT with the permissions pre-selected at"\
-              "https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write&actions=read&environments=write"\
-              "and store it with 'gh secret set REPO_PLATFORM_TOKEN --env fleet-operator' in this repo."
-            exit 1
-          fi
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
-          token: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
       - name: Set up bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -44,6 +31,11 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Require the fleet token
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bun .github/scripts/fleet/require_fleet_token.ts
 
       - name: Bump pins to the latest upstream versions
         id: refresh
@@ -55,6 +47,7 @@ jobs:
       # A run that bumped nothing with a refresh PR still open means main already carries those pins (the script aborts on
       # an unreachable source and on a latest older than the pin, so "nothing bumped" is not one of those views): the action
       # closes that PR and deletes its branch, so it runs unconditionally. An empty bumps output never reaches a PR: no diff.
+      # The push rides the fleet PAT: a default-token push would leave the PR's CI waiting for approval.
       - name: Commit, push, and open PR
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
