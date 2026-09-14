@@ -19,6 +19,10 @@ placeholders:
 modules:
   bun:
     description: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
+    pin:
+      file: files/bun/.bun-version
+      repository: oven-sh/bun
+      tag: bun-v{version}
     codeql_languages: [javascript-typescript]
     dependabot_ecosystems: [bun]
     gitignore_sources: [Node, bun]
@@ -26,6 +30,10 @@ modules:
     toolchain_steps: [toolchain]
   deno:
     description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
+    pin:
+      file: files/deno/.dvmrc
+      repository: denoland/deno
+      tag: v{version}
     codeql_languages: [javascript-typescript]
     dependabot_ecosystems: [deno]
     gitignore_sources: [Deno, Node]
@@ -85,7 +93,8 @@ files:
   # --- base: every repository
   - {path: .editorconfig, class: split, region: hash}
   - {path: .gitattributes, class: split, region: hash}
-  # The github/gitignore templates are fetched at the pin by every sync; refresh-upstream.yml moves the pin weekly.
+  # The github/gitignore templates are fetched at the pin by every sync; refresh-upstream.yml moves the pin weekly, as
+  # it moves each module's `pin` above.
   # macOS names its Finder icon file "Icon\r", which the template spells as a class holding a bare CR byte; text gates
   # refuse the byte, so the rendered line matches the file by a one-character glob instead.
   - path: .gitignore

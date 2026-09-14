@@ -111,7 +111,7 @@ mirrors:
 | Key | Meaning |
 | --- | --- |
 | `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
-| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. A key is a typed one (`description`, `path`, `tracking_label`, `codeql_languages`) or a list some entry's `blocks` or a `declaring` clause reads; anything else is refused (the rule under the module data table). One key carries a placeholder default: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder (below). |
+| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. A key is a typed one (`description`, `path`, `tracking_label`, `codeql_languages`, `pin`) or a list some entry's `blocks` or a `declaring` clause reads; anything else is refused (the rule under the module data table). One key carries a placeholder default: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
 | `files[].class` | `managed`, `split`, or `starter` (below). |
 | `files[].source` | The source file, under `files/`, or an upstream ref `{repository, sha, path}` fetched at sync time ([Upstream refs](#upstream-refs)). Default: `files/<first when.modules entry, or base>/<path>`. |
@@ -146,6 +146,8 @@ The loader refuses, all problems at once:
 
 - a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
 
+- a `pin` whose `file` is not a clean path under `files/`, whose `repository` is not `owner/name`, or whose `tag` does not spell `{version}` exactly once
+
 - `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source`, `blocks`, `upstream`, or `replace`, or without `overlay`
 
 - a block list that is not a list of names (letters, digits, `_`, `-`)
@@ -170,7 +172,7 @@ An upstream ref is `{repository, sha, path}`: a file of a github.com repository 
 
 - The body is normalized (CRLF to LF, trailing spaces and tabs stripped, surrounding blank lines dropped), then rewritten by the entry's `replace`. As a source it is the entry's text; as a block it is headed by the entry's region (`files[].upstream` above).
 
-- Two syncs render the same bytes until [refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) moves the pin: weekly, every distinct `{repository, sha}` the data file spells moves to that repository's HEAD by one PR here, its body each fetched file's diff between the two commits; the next sync renders the change wherever the file lands.
+- Two syncs render the same bytes until [refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) moves the pin: weekly, its `commit` leg moves every distinct `{repository, sha}` the data file spells to that repository's HEAD by one PR on `automation/refresh-commit-pins`, its body each fetched file's diff between the two commits; the next sync renders the change wherever the file lands. The workflow's other leg moves the modules' release pins ([toolchains.md](toolchains.md#keeping-the-pins-fresh)) on a branch of their own.
 
 ## files.yml reference
 
@@ -214,8 +216,9 @@ A fleet mirror carries no `when`: every repository gets its targets, save one it
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
 | `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
+| `pin` | `{file, repository, tag}`: the module's version dotfile under `files/`, the github.com repository whose latest release it follows, and that repository's release tag with `{version}` where the version stands ([toolchains.md](toolchains.md#keeping-the-pins-fresh)) | the refresh workflow |
 
-- **Every many-of key is a list,** `codeql_languages` and the block lists alike: a key outside `description`, `path`, and `tracking_label` must hold a non-empty list of names, and one spelled as a single word is a loader error naming the module and key.
+- **Every many-of key is a list,** `codeql_languages` and the block lists alike: a key outside `description`, `path`, `tracking_label`, and `pin` must hold a non-empty list of names, and one spelled as a single word is a loader error naming the module and key.
 
 - **An untyped key no file entry's `blocks` and no `declaring` clause reads** is a loader error naming the module and key too: a typo'd or retired key is refused, never silently skipped.
 

@@ -1,4 +1,4 @@
-// TypeScript committers import these constants. The two refresh workflows cannot: their create-pull-request steps spell
+// TypeScript committers import these constants. The refresh workflow cannot: its create-pull-request step spells
 // SYNC_IDENTITY, and tests/workflows/refresh_shape.test.ts holds them to it.
 
 import { SYNC_BOT } from "../../../actions/shared/platform.ts";

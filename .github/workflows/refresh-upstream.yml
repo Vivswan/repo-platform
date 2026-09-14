@@ -1,4 +1,6 @@
-# Moves every upstream pin in files.yml to its repository's HEAD; the PR body carries each fetched file's diff between
+# Moves every upstream pin in files.yml: a commit pin (an upstream ref's sha) to its repository's HEAD, a release pin (a
+# module's version dotfile under files/) to its repository's latest release. One matrix leg and one PR branch per kind,
+# so a toolchain bump is never held behind a gitignore diff. A commit PR's body carries each fetched file's diff between
 # the two commits, which the next sync renders, after each entry's `replace`, wherever the file lands.
 
 name: Refresh upstream pins
@@ -12,16 +14,19 @@ permissions:
   contents: write
   pull-requests: write
 
-# Schedule and dispatch both push the same PR branch; queue runs,
-# never cancel one mid-push.
-concurrency:
-  group: refresh-upstream
-
 jobs:
   refresh:
     runs-on: ubuntu-latest
     environment: fleet-operator
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [commit, release]
+    # Schedule and dispatch both push the same PR branch; queue runs,
+    # never cancel one mid-push.
+    concurrency:
+      group: refresh-upstream-${{ matrix.kind }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,21 +45,22 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/fleet/require_fleet_token.ts
 
-      - name: Move the pins to upstream HEAD
+      - name: Move the ${{ matrix.kind }} pins
         id: refresh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bun .github/scripts/refresh-upstream/refresh_upstream.ts
+        run: bun .github/scripts/refresh-upstream/refresh_upstream.ts ${{ matrix.kind }}
 
       # A later run moves the pins further on the same branch, so the open PR's title and body are refreshed with it. A run
-      # that moved nothing with a refresh PR still open means main already carries HEAD (the script aborts on an unreachable
-      # upstream, so "nothing moved" is not that view): the action closes that PR and deletes its branch, so it runs
-      # unconditionally. The push rides the fleet PAT: a default-token push would leave the PR's CI waiting for approval.
+      # that moved nothing with a refresh PR still open means main already carries upstream's newest (the script aborts on
+      # an unreachable upstream and on a release older than the pin, so "nothing moved" is not that view): the action
+      # closes that PR and deletes its branch, so it runs unconditionally. The push rides the fleet PAT: a default-token
+      # push would leave the PR's CI waiting for approval.
       - name: Commit, push, and open PR
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          branch: automation/upstream-refresh
+          branch: automation/refresh-${{ matrix.kind }}-pins
           delete-branch: true
           committer: repo-platform-sync <repo-platform-sync@users.noreply.github.com>
           author: repo-platform-sync <repo-platform-sync@users.noreply.github.com>

@@ -63,12 +63,20 @@ Rules that follow:
 
 ## Keeping the pins fresh
 
-The refresh-toolchains workflow (weekly cron plus manual dispatch, mirroring refresh-upstream) bumps the pins when upstream moved:
+Each pinned module declares its pin in `files.yml` (`modules.<name>.pin`), data the refresh reads and never content the sync writes:
 
-1. **Fetch the latest upstream versions:** bun's latest GitHub release, Deno's latest stable release. An unreachable source, or a "latest" older than the pin (a backport surfacing as latest), aborts the run: such a view cannot tell "nothing moved" from "could not see upstream's newest".
+| Key | Meaning | bun |
+|---|---|---|
+| `file` | the version dotfile under `files/` | `files/bun/.bun-version` |
+| `repository` | the github.com repository whose latest release the pin follows | `oven-sh/bun` |
+| `tag` | its release tag with `{version}` where the version stands | `bun-v{version}` |
 
-2. **Write the version dotfile** under `files/` of each toolchain that moved. A bun bump also pins `@types/bun` to the same version in every package declaring it (`bun add --dev --exact`), which is why `.github/dependabot.yml` ignores that package; the types publish per bun release, so a run before they exist fails at the add and the next run retries.
+[refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) (weekly cron plus manual dispatch) runs `release` pins as one matrix leg beside the `commit` pins of [sync.md](sync.md#upstream-refs), each on its own PR branch, so a toolchain bump is never held behind a gitignore diff:
 
-3. **Open or refresh a PR** on the `automation/toolchain-refresh` branch when anything moved. When nothing moved and that PR is still open, main already carries its pins, so the PR is closed and its branch deleted.
+1. **Fetch each pin's latest release** (`releases/latest`, never a prerelease) and read the version through `tag`; a tag of another shape is refused. An unreachable source, or a "latest" older than the pin (a backport surfacing as latest), aborts the run: such a view cannot tell "nothing moved" from "could not see upstream's newest".
+
+2. **Write the dotfile** of each pin that moved. A bun bump also pins `@types/bun` to the same version in every package declaring it (`bun add --dev --exact`), which is why `.github/dependabot.yml` ignores that package; the types publish per bun release, so a run before they exist fails at the add and the next run retries.
+
+3. **Open or refresh a PR** on the `automation/refresh-release-pins` branch when anything moved; a bump across a major line leads the body with a callout. When nothing moved and that PR is still open, main already carries its pins, so the PR is closed and its branch deleted.
 
 Merging the PR moves the `stable` tag once its gate is green; the next sync rolls the pin out to the fleet.
