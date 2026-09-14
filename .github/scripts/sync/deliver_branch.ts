@@ -39,7 +39,7 @@ const COMMENT_LOGIN = "github-actions[bot]";
 const WORKFLOWS_DIR = ".github/workflows/";
 
 type Outcome =
-  | { kind: "writer failed"; log: string }
+  | { kind: "failed"; what: "a migration rung" | "the writer"; log: string }
   | { kind: "held"; report: string }
   | { kind: "workflow files"; paths: string[]; report: string }
   | { kind: "unchanged"; tipIsOurs: boolean }
@@ -63,8 +63,8 @@ function commentBody(
   };
   const lines = (() => {
     switch (outcome.kind) {
-      case "writer failed":
-        return [`${build} NOT pushed: the writer failed ${run}.`, ...fenced(outcome.log)];
+      case "failed":
+        return [`${build} NOT pushed: ${outcome.what} failed ${run}.`, ...fenced(outcome.log)];
       case "held":
         return [
           `${build} NOT pushed: the writer holds ${branch} for review, see the Review section ${run}.`,
@@ -192,12 +192,9 @@ class BranchDelivery {
     const migrate = requireEnv("MIGRATE_OUTCOME");
     const writer = requireEnv("WRITER_OUTCOME");
     if (migrate !== "success" || writer !== "success") {
-      this.comment({ kind: "writer failed", log: tail(join(this.runnerTemp, SYNC_LOG)) });
-      fail(
-        migrate === "success"
-          ? "the writer exited with an error; its log is in the pull request comment"
-          : "a migration rung failed; its log is in the pull request comment",
-      );
+      const what = migrate === "success" ? "the writer" : "a migration rung";
+      this.comment({ kind: "failed", what, log: tail(join(this.runnerTemp, SYNC_LOG)) });
+      fail(`${what} failed; its log is in the pull request comment`);
     }
     const summary = JSON.parse(readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8")) as {
       hold: boolean;

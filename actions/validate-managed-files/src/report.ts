@@ -28,7 +28,7 @@ const commentFile = requireEnv("COMMENT_FILE");
 const REMEDY = [
   "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed",
   "files whole but holds a path whose kind changed (a link in a file's place) for this repository to restore.",
-  `Adding the \`${SYNC_LABEL}\` label to this pull request runs the sync on its branch and reports what it would replace.`,
+  `On a pull request, the \`${SYNC_LABEL}\` label runs the sync on its branch and reports what it would replace.`,
   "This FAILS the check.",
 ].join(" ");
 
