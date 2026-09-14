@@ -300,10 +300,7 @@ describe("post-green wiring", () => {
     );
     // The fleet's single-writer lane is held HERE (the raw group census
     // below cannot tell which job holds it).
-    expect(syncFleet.concurrency).toEqual({
-      group: "sync-repos",
-      "cancel-in-progress": false,
-    });
+    expect(syncFleet.concurrency).toEqual({ group: "sync-repos" });
     expect(syncFleet.uses).toBe("./.github/workflows/sync-repos.yml");
     // No sha rides the call: the sync reads the commit the tag names (resolve_build.ts).
     expect(syncFleet.with).toEqual({
@@ -356,14 +353,13 @@ describe("post-green wiring", () => {
     const syncRepos = read(".github/workflows/sync-repos.yml");
     const doc = parseYaml(syncRepos) as {
       on: Record<string, { inputs?: Record<string, unknown> }>;
-      concurrency: { group: string; "cancel-in-progress": boolean };
+      concurrency: { group: string };
     };
     expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
     expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos"]);
     expect(doc.concurrency).toEqual({
       group:
         "${{ inputs.repos != '' && format('sync-repos-called-{0}', github.run_id) || 'sync-repos' }}",
-      "cancel-in-progress": false,
     });
     // The scope reaches the selector as ONLY_REPO from the call input
     // only - the dispatch input stays out of step env (private slugs).
@@ -397,10 +393,7 @@ describe("post-green wiring", () => {
     // name and would split a lane between called and dispatched runs.
     // ci.yml legitimately keys its RUN-level serialization on
     // github.workflow (a trigger workflow, never workflow_call'd).
-    expect(postGreenDoc.jobs["move-stable"].concurrency).toEqual({
-      group: "stable-tag-move",
-      "cancel-in-progress": false,
-    });
+    expect(postGreenDoc.jobs["move-stable"].concurrency).toEqual({ group: "stable-tag-move" });
     const groupsOf = (text: string) => [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
     expect(groupsOf(postGreen)).toEqual(["stable-tag-move", "sync-repos", "settings-repos"]);
     for (const group of groupsOf(postGreen)) {

@@ -50,7 +50,6 @@ jobs:
     # so a release commit's call could be cancelled.
     concurrency:
       group: release-cut-${{ inputs.sha }}
-      cancel-in-progress: false
     # Caps a caller that grants more; the read keys feed release-health.
     permissions:
       contents: write
