@@ -43,6 +43,7 @@ describe("reservedLabelNames", () => {
       "fix-lint",
       "merge-when-green",
       "security-nightly",
+      "repo-platform:sync",
       "settings-as-code-report",
       "javascript",
       "deno",

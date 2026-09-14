@@ -573,6 +573,33 @@ A PR that changes a module selection carries its own files this way, declared an
 
 - **The branch name** rides the event payload as the repository name does, never step env, and never reaches the log; a public repository's job summary is the one place that names it.
 
+### Syncing a branch by label
+
+A human adds the `repo-platform:sync` label to a pull request; the repository's own managed [sync-branch.yml](../files/base/.github/workflows/sync-branch.yml) syncs the branch with the repository token, so nothing reaches the operator and no fleet token is involved. Nothing adds the label but a human.
+
+```text
+label added -> checks out the branch and the platform at `stable`
+            -> the migrations, then the writer over the branch (the operator's row 4 and 5)
+            -> the delivery step takes the label off
+            -> one commit onto the branch, pushed with a lease on the commit it checked out
+            -> one sticky comment on the pull request carrying the report
+```
+
+| Outcome | Job | Comment says |
+| --- | --- | --- |
+| files written | green | pushed as `<commit>`, push an empty commit to run the checks, then the report |
+| tree already matches | green | nothing pushed |
+| the writer holds (a replaced local edit, a registration note, a link in a managed file's place) | red, nothing pushed | the report with its Review section: a hold is a human's call, and the branch is a human's |
+| the sync changes a file under `.github/workflows/` | red, nothing pushed | the paths, and the operator's branch dispatch as the way: the repository token cannot create or update a workflow file |
+| a rung or the writer failed | red, nothing pushed | the log tail |
+| the push refused (a commit reached the branch meanwhile, a rule the token cannot meet) | red | git's message; add the label again once the branch is where you want it |
+
+- Same-repository branches only: a fork's pull request skips the job at zero billed minutes (its token could not push), and so does any other label.
+- The checks do not run on the pushed commit: a push with the repository token fires no `pull_request` run. A dispatched `ci.yml` run would post an `all-green` check on the head, but one that judged less than a pull request run (the pull-request-only gates skip, and the `pr-title` module's check never posts), so the platform dispatches nothing and the comment asks for an empty commit.
+- The job holds `contents: write` and `pull-requests: write` (the comment and the label), nothing else, with no secret.
+- A run that goes red before the delivery step (a checkout or the install) leaves the label on: remove it and add it again to retry.
+- The label is declared in the baseline settings layer ([settings.md](settings.md#what-the-baseline-contains)); the validator's red comment names it as the remedy for managed drift.
+
 ## Private repositories
 
 repo-platform is public, and GitHub Actions has no log-level access control: run logs, job names, step headers, and annotations are as readable as the repository they run in. The operator therefore never lets a private repository's name or content reach that log. Four rules carry the whole model; the job shape enforces them, not a per-step discipline.

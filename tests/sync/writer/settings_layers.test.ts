@@ -31,8 +31,8 @@ const OVERRIDE = join(TREE, "settings/override.yml");
 const FILES = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
 const CONFIG = layerConfig(FILES);
 
-// The baseline's unconditional roster: dependabot's base pair, the triage
-// trio, then the fleet-wide nightly security stream. Every selection starts from it.
+// The baseline's unconditional roster: dependabot's base pair, the triage trio, the fleet-wide nightly security
+// stream, then the human's branch-sync trigger. Every selection starts from it.
 const BASELINE_LABELS = [
   "dependencies",
   "github_actions",
@@ -41,6 +41,7 @@ const BASELINE_LABELS = [
   "fix-lint",
   "merge-when-green",
   "security-nightly",
+  "repo-platform:sync",
 ];
 
 function selection(overrides: Partial<Selection> = {}): Selection {

@@ -4,6 +4,7 @@
 
 import { appendFileSync, writeFileSync } from "node:fs";
 import { env, requireEnv } from "../../shared/action_runtime.ts";
+import { SYNC_LABEL } from "../../shared/platform.ts";
 import { type Integrity, readVerdict } from "./verdict.ts";
 
 // Unless the clear step succeeded, the validator never ran: any verdict on
@@ -24,8 +25,12 @@ const summaryFile = requireEnv("GITHUB_STEP_SUMMARY");
 const commentFile = requireEnv("COMMENT_FILE");
 
 /** The kind-change hold is write_managed.ts's and write_split.ts's rule (LINK_IN_THE_WAY). */
-const REMEDY =
-  "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a link in a file's place) for this repository to restore. This FAILS the check.";
+const REMEDY = [
+  "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed",
+  "files whole but holds a path whose kind changed (a link in a file's place) for this repository to restore.",
+  `Adding the \`${SYNC_LABEL}\` label to this pull request runs the sync on its branch and reports what it would replace.`,
+  "This FAILS the check.",
+].join(" ");
 
 let integrity: string;
 switch (verdict.kind) {

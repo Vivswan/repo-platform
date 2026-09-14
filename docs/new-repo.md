@@ -155,7 +155,7 @@ The `validate-managed-files` step judges the repository against the platform's c
 
 ### Changing the module selection
 
-A module change is one PR when the branch sync carries the files onto it: edit the registration on a branch, dispatch `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>`, and the module's files and the manifest stamp land on the same branch as one commit ([sync.md](sync.md#syncing-a-branch)).
+A module change is one PR when the branch sync carries the files onto it: edit the registration on a branch, then dispatch `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>` (or add the `repo-platform:sync` label to the PR, when the module writes no workflow file: the repository token cannot push one), and the module's files and the manifest stamp land on the same branch as one commit ([sync.md](sync.md#syncing-a-branch-by-label)).
 
 Without that dispatch it is two PRs: the registration edit, then the sync PR carrying the module's files and the manifest stamp that records them. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` step reads the new list on the next run, validating the registration on the first PR.
 
@@ -170,6 +170,7 @@ PR edits modules: in .repo-platform.yml
   -> plan reads the registration and checks it against the module data at the `stable` commit's root (an unknown module or a malformed file fails the job)
   -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet (unless the edit flips a recorded path's class: see the table)
   -> either: gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f branch=<pr-branch>
+             (or the repo-platform:sync label on the PR, when the module writes no workflow file)
              one commit on the PR branch carries the files and the new manifest stamp; review and merge the one PR
   -> or: merge the registration edit, then
              gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f manual=true
@@ -185,7 +186,7 @@ It fails closed, so an unknown module or a malformed registration never merges t
 
 **The one edit that does fail the PR:** a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say); the writer refuses the declaration that now conflicts, so no sync, the branch sync included, restamps the record until it is gone. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules.
 
-**Enforced by:** [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` step. The sync side is a dispatch of sync-repos.yml: onto the PR's branch ([sync.md](sync.md#syncing-a-branch)) or after the merge ([the manual run](#the-manual-run)).
+**Enforced by:** [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` step. The sync side is a dispatch of sync-repos.yml onto the PR's branch or the `repo-platform:sync` label ([sync.md](sync.md#syncing-a-branch-by-label)), or a dispatch after the merge ([the manual run](#the-manual-run)).
 
 #### The manual run
 

@@ -130,8 +130,12 @@ function play(scenario: Scenario): Outcome {
 
 // The remedy is the operator's whole instruction on a red check; the kind-change hold it names is write_managed.ts's
 // LINK_IN_THE_WAY, which write_split.ts shares.
-const REMEDY =
-  "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a link in a file's place) for this repository to restore. This FAILS the check.";
+const REMEDY = [
+  "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed",
+  "files whole but holds a path whose kind changed (a link in a file's place) for this repository to restore.",
+  "On a pull request, the `repo-platform:sync` label runs the sync on its branch and reports what it would replace.",
+  "This FAILS the check.",
+].join(" ");
 const notJudged = (text: string) =>
   `${HEADING}Not judged: ${text}. See the [run log](${RUN_URL}). This FAILS the check.\n`;
 const BLOCKED = `integrity=failure\nreport=${REPORT.post}\n`;

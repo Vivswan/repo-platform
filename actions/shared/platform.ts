@@ -34,3 +34,6 @@ export const DELIVERY_REF = "stable";
 export const AUTOMATION_BRANCH = `automation/${PLATFORM_NAME}`;
 export const FAILURE_ISSUE_TITLE = `[${PLATFORM_NAME}] sync failed`;
 export const SYNC_PR_TITLE_PREFIX = `chore: sync ${PLATFORM_NAME} build`;
+
+/** A human's label on a pull request: the repository's sync-branch workflow syncs the branch and takes the label off. */
+export const SYNC_LABEL = `${PLATFORM_NAME}:sync`;
