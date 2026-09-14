@@ -2,8 +2,9 @@
 // The row's transport and its resolver. A row rides the public matrix as an index and a key; the
 // resolver reads the key back against ONE listing of the owner's writable repositories, masks every
 // form of the name before anything else reaches stdout, and hands the name on through GITHUB_ENV
-// (TARGET, TARGET_PRIVATE), which the runner never echoes. fleet/resolve_settings_target.ts is the
-// settings apply's entry to the same resolver.
+// (TARGET, TARGET_PRIVATE), which the runner spells under `env:` in the next run step's preamble, so
+// the masks must precede it. fleet/resolve_settings_target.ts is the settings apply's entry to the
+// same resolver.
 
 import { createHmac } from "node:crypto";
 import { appendFileSync } from "node:fs";
