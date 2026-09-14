@@ -59,9 +59,10 @@ function isFailStep(step: Step): boolean {
   const prints = (line: string) => {
     if (!/^(echo|printf)\b/.test(line)) return false;
     // Quoted text prints, read left to right in ONE pass so a quote of one kind inside the other is
-    // text: single quotes hide everything, double quotes hide operators but not a substitution.
+    // text: single quotes hide everything, double quotes hide operators but not a substitution
+    // (`$(` or a backtick pair still runs inside them).
     const shell = line.replaceAll(/'[^']*'|"[^"]*"/g, (quoted) =>
-      quoted.startsWith("'") ? "" : quoted.replaceAll(/[;|&<>`]/g, ""),
+      quoted.startsWith("'") ? "" : quoted.replaceAll(/[;|&<>]/g, ""),
     );
     return !/[;|&<>`]|\$\(/.test(shell);
   };
@@ -214,6 +215,12 @@ jobs:
       shape: "an effect between two double-quoted apostrophes",
     },
     { run: "echo <(gh pr merge)\nexit 1", red: true, shape: "a process substitution in an echo" },
+    {
+      run: 'echo "`gh pr merge`"\nexit 1',
+      red: true,
+      shape: "a backtick substitution inside double quotes",
+    },
+    { run: "echo 'a `b` c'\nexit 1", red: false, shape: "backticks inside single quotes" },
     {
       run: 'echo failed > "$GITHUB_OUTPUT"\nexit 1',
       red: true,
