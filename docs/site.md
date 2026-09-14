@@ -16,7 +16,7 @@ repo-platform dogfoods the docs half: this guide and the rest of `docs/` are the
 
 ## The leg and its triggers
 
-The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and `publish-release`, and runs on every run of ci.yml on main whose gate passed: a push, the nightly schedule (the rebuild), and a manual dispatch (the manual deploy). There is no workflow of its own and no tag trigger: a tag created without a push lands on the nightly rebuild, or right away via dispatch. The job calls reusable-site.yml`@stable` with `github.sha` (the judged commit, so a red main never reaches the site) and `vars.CUSTOM_DOMAIN`, and holds the `pages` concurrency lane.
+The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and `publish-release`, and runs on every run of ci.yml on main whose gate passed: a push, the nightly schedule (the rebuild), and a manual dispatch (the manual deploy). There is no workflow of its own and no tag trigger: a tag created without a push lands on the nightly rebuild, or right away via dispatch. The job calls reusable-site.yml`@stable` with `github.sha` (the judged commit, so a red main never reaches the site), and holds the `pages` concurrency lane.
 
 The release legs sit before it as an ORDER, not a gate: the condition leads with `!cancelled()`, so the deploy waits for the release chain and then runs whatever its result, and a release commit's own deploy serves its new tag. Without the release-please module the release legs skip and the deploy follows the repo-owned post-green hook directly ([all-green.md](all-green.md#after-the-gate)).
 
@@ -25,9 +25,9 @@ The called workflow is one job, in this order:
 | Step | Runs when | What |
 |---|---|---|
 | checkout | always | the judged commit, full history (the tag list is the version set) |
-| urls | always | computes the base path (`/<repo>/`, or `/` with a custom domain) and the origin |
+| urls | always | computes the base path `/<repo>/` and the origin `https://<owner>.github.io` |
 | hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
-| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes `versions.json` under the docs mount and `CNAME` with a custom domain |
+| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes `versions.json` under the docs mount |
 | configure, upload, deploy | something was built | the one Pages artifact, deployed to the `github-pages` environment |
 | link rot | the schedule alone, after a deploy | checks the site's external links with lychee and files the tracking issue ([below](#link-rot)) |
 
@@ -39,8 +39,8 @@ The hook is a universal starter: the sync seeds it once in every repository, mod
 
 | Contract | Value |
 |---|---|
-| input `base-path` | the URL path the site is served under: `/<repo>/`, or `/` with a custom domain |
-| input `origin` | `https://<owner>.github.io`, or `https://<domain>` |
+| input `base-path` | the URL path the site is served under, `/<repo>/` |
+| input `origin` | `https://<owner>.github.io` |
 | output `dist` | the built site's directory, relative to the repository root, with an `index.html`; empty (the seeded default) means no repository website |
 | runs as | a step of the deploy job, on the checked-out judged commit, under that job's token (contents read, pages and id-token write, issues write) |
 | refused | an absolute `dist`, one that leaves the repository (`..`, or a symlink resolving outside it), a missing directory, or one without `index.html`: the leg goes red naming the path |
@@ -98,7 +98,7 @@ The website is one build of the judged commit: version navigation belongs to the
 | `vX.Y.Z/` | that tag's docs, one directory per served tag |
 | `versions.json` | the version index the theme's dropdown reads |
 
-Versions are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest `PAGES_MAX_VERSIONS` of them (a repository Actions variable; unset means 5). Every deploy rebuilds every tier, so a theme or pipeline change restyles the whole site on the next run. A tag whose tree has no `docs/`, or a `docs/` with no landing page (`README.md` or `index.md`), is skipped with a notice, and dead links inside old tags never fail the deploy: history cannot be fixed.
+Versions are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../actions/pages-site/build.ts)). Every deploy rebuilds every tier, so a theme or pipeline change restyles the whole site on the next run. A tag whose tree has no `docs/`, or a `docs/` with no landing page (`README.md` or `index.md`), is skipped with a notice, and dead links inside old tags never fail the deploy: history cannot be fixed.
 
 ## Docs conventions
 
@@ -193,16 +193,6 @@ The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolv
 ## Pages enablement
 
 Nothing to do: the module's settings layer enables Pages with Actions-workflow builds on the next fleet settings apply ([settings.md](settings.md)). Only a deploy that must run before that apply needs the manual toggle: Settings -> Pages -> Source: GitHub Actions. The `github-pages` environment needs no protection rule: deploys never run on tag refs, and a required-reviewers rule there parks every deploy "waiting for review" with the later runs queued behind it on the `pages` lane. The settings apply does not manage environments, so remove such a rule by hand (Settings -> Environments -> github-pages).
-
-## Custom domain
-
-Three pieces have to agree; the repository variable only flips the build side:
-
-1. DNS: point the domain at [GitHub Pages](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site) (a CNAME record to `<owner>.github.io` for a subdomain, the Pages A/AAAA records for an apex domain).
-2. Pages settings: Settings -> Pages -> Custom domain -> enter the domain (GitHub verifies DNS and provisions TLS here; the `CNAME` file in the artifact alone does not configure this).
-3. Repository variable: set `CUSTOM_DOMAIN` (Settings -> Secrets and variables -> Actions -> Variables), e.g. `example.com`. The next deploy builds with the matching URLs: the base path becomes `/`, the hook's `origin` becomes `https://example.com`, and the artifact carries `CNAME`.
-
-To go back, undo all three together (in particular, remove the variable AND clear the custom domain in Pages settings, or URLs and routing will disagree).
 
 ## Caveats
 

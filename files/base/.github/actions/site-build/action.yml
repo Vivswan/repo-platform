@@ -7,10 +7,10 @@ description: Builds this repository's own website for the fleet's Pages deploy.
 
 inputs:
   base-path:
-    description: The URL path the site is served under ("/" with a custom domain, else "/<repo>/")
+    description: The URL path the site is served under, "/<repo>/"
     required: true
   origin:
-    description: The site's origin (https://<owner>.github.io, or https://<domain>)
+    description: The site's origin, https://<owner>.github.io
     required: true
 
 outputs:

@@ -34,7 +34,7 @@ Settings stop being applied too: the central run only manages enrolled repos car
    - after every job you remove, rewire each surviving job's `needs` to jobs that still exist (actionlint reports a dangling one)
    - the `nightly` caller runs `fleet-nightly.yml` on the schedule, and its plan job reads the registration too: delete the job, or inline the scan with literal configuration
    - ci.yml's `all-green` job keeps judging whatever its needs list names; drop it too if you drop the `all-green` required check from your branch protection
-   - the `site` job calls `reusable-site.yml`, which configures the deploy from `.repo-platform.yml` unless its `config` input is set: pass `config` explicitly, or replace the job with your own deploy that runs `.github/actions/site-build` and uploads its output; the hook itself is already yours
+   - the `site` job calls `reusable-site.yml`, which configures the deploy from `.repo-platform.yml` and takes no other configuration: replace the job with your own deploy that runs `.github/actions/site-build`, passes the pages-site action its `config` by hand, and uploads the output; the hook itself is already yours
 
 3. (Optional) Inline the reusable workflows. Skip this if repo-platform continues to exist - the pinned references keep working unchanged. Otherwise:
    - replace each thin caller (`auto-assign.yml`, the `site` job's `reusable-site.yml` call, the `ci` job's `fleet-ci.yml` call) with a copy of the corresponding `reusable-*.yml`/fleet job from repo-platform; the `all-green` job already runs a third-party action and needs nothing
