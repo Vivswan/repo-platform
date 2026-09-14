@@ -17,6 +17,8 @@ afterAll(() => setSystemTime());
 
 interface Step {
   id?: string;
+  if?: string;
+  uses?: string;
   run?: string;
   with?: Record<string, string | number | boolean>;
   env?: Record<string, string>;
@@ -106,15 +108,23 @@ describe("reusable-site.yml", () => {
     "",
   ].join("\n");
 
-  test("the repository's root .lycheeignore is staged into lychee's working directory after the upload (never served) and before the check, on the check's own condition", () => {
-    const stage = stepIndex((step) => (step.run ?? "").startsWith("cp .lycheeignore"));
-    const links = stepIndex((step) => step.id === "links");
-    expect(stage).toBeGreaterThan(usesIndex("actions/upload-pages-artifact@"));
+  // lychee reads .lycheeignore from its working directory alone, so the file is copied into the site directory: after the
+  // upload, or the served site carries it; before the check, or the ignores are lost and the link-rot issue opens on links
+  // the repository chose not to judge. Both silent. The copy runs on the check's own condition, plus the file existing.
+  test("the root .lycheeignore is staged after the upload and before lychee, on the check's own condition", () => {
+    const index = (predicate: (step: Step) => boolean) => steps.findIndex(predicate);
+    const stage = index((candidate) => (candidate.run ?? "").startsWith("cp .lycheeignore"));
+    const upload = index((candidate) =>
+      (candidate.uses ?? "").includes("actions/upload-pages-artifact@"),
+    );
+    const links = index((candidate) => candidate.id === "links");
+    expect([upload, stage, links].every((at) => at >= 0)).toBe(true);
+    expect(upload).toBeLessThan(stage);
     expect(stage).toBeLessThan(links);
-    expect(steps[stage]).toEqual({
-      name: expect.any(String),
-      if: `${steps[links]?.if} && hashFiles('.lycheeignore') != ''`,
-      env: { SITE_DIR: "${{ steps.site.outputs.site-dir }}" },
+    expect(steps[stage].if).toBe(`${steps[links].if} && hashFiles('.lycheeignore') != ''`);
+    // The copy lands in the directory lychee runs in, whatever that directory is called.
+    expect({ env: steps[stage].env, run: steps[stage].run }).toEqual({
+      env: { SITE_DIR: String(steps[links].with?.workingDirectory) },
       run: 'cp .lycheeignore "$SITE_DIR/"',
     });
   });
