@@ -12,7 +12,7 @@
     ".github/repo-platform-manifest.json": {"class": "managed", "hash": null},
     ".github/settings.local.yml": {"class": "starter"},
     ".github/settings.yml": {"class": "managed", "hash": "a8bd3ff5782df363308babc111d3fb3040ca6a5ee710a299acb4dbd0f6264f90"},
-    ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "b92705881de9581d82936d0c3fccc9eaa9f5f96ef755f6ceabbb614cb1942e80"},
+    ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "bd512e0e114675a95f42468802fc9e8bb118215f38ed7c7b70d4235a88592f54"},
     ".github/workflows/post-green.yml": {"class": "starter"},
     ".github/workflows/pr-title.yml": {"class": "managed", "hash": "326d410993608ac254abf1e7d978c66008575335a111529adf3cb54dfe022fa9"},
     ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "6d80de65faf04c05963b941289c5e1d98ad49749e26150c326585d6c79068e8f"},

@@ -55,6 +55,6 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 8. [Sync](sync.md) - the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
 9. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
 10. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
-11. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking gate (fixable HIGH-or-CRITICAL vulnerabilities, any HIGH-or-CRITICAL misconfiguration), the expiring bypass file, and the nightly scan that files one tracking issue per repository; semgrep on public repositories.
+11. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking gate (fixable HIGH-or-CRITICAL vulnerabilities, any HIGH-or-CRITICAL misconfiguration), the expiring bypass file, and the nightly scan that files one tracking issue per public repository; semgrep on public repositories.
 12. [Build provenance](build-provenance.md) - why the `stable` delivery tag is trustworthy, and what residual trust remains.
 13. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
