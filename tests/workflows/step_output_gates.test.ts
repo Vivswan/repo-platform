@@ -48,10 +48,15 @@ function unsafeStepCondition(raw: string): string | null {
 }
 
 /** A FAIL step's gate opening on an absent output turns the job red, which is the point, so it is
- *  exempt. Its lines print and nothing else: no chained command, pipe, or substitution rides on an echo. */
+ *  exempt. Its lines print and nothing else: no chained command, pipe, or substitution rides on an echo.
+ *  The exemption is a heuristic over this repository's own workflows, all authored here: quotes are paired
+ *  left to right, and an escaped quote or any construct outside the listed forms is judged effectful, so
+ *  the scanner errs toward reporting. */
 function isFailStep(step: Step): boolean {
   if (step["continue-on-error"]) return false;
-  const lines = String(step.run ?? "")
+  const run = String(step.run ?? "");
+  if (/\\["']/.test(run)) return false;
+  const lines = run
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("#"));
@@ -221,6 +226,11 @@ jobs:
       shape: "a backtick substitution inside double quotes",
     },
     { run: "echo 'a `b` c'\nexit 1", red: false, shape: "backticks inside single quotes" },
+    {
+      run: 'echo "x\\""; gh pr merge; echo "x"\nexit 1',
+      red: true,
+      shape: "an escaped quote desynchronizing the pairs",
+    },
     {
       run: 'echo failed > "$GITHUB_OUTPUT"\nexit 1',
       red: true,
