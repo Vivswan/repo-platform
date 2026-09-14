@@ -108,7 +108,7 @@ export function outputs(stdout: string): Record<string, string> {
   );
 }
 
-/** A refusal judged before any tier builds: the error line, no vitepress run, no output set. */
+/** A refusal lands before any build and any output, so no half-built site is handed on. */
 export function expectRefusedBeforeBuild(result: BuildResult, message: string): void {
   expect(result.exitCode, describeRun(result)).toBe(1);
   expect(result.stderr).toContain(`::error::${message}`);
@@ -116,7 +116,6 @@ export function expectRefusedBeforeBuild(result: BuildResult, message: string): 
   expect(outputs(result.stdout)).toEqual({});
 }
 
-/** The paths under `site` that exist, out of `rels`: an empty result is the whole negative. */
 export function present(site: string, rels: string[]): string[] {
   return rels.filter((rel) => existsSync(join(site, rel)));
 }

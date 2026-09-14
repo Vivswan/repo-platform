@@ -67,7 +67,7 @@ describe("the versioned vitepress deploy", () => {
   });
 
   test("isolates each tier's content: the HEAD edit in latest alone, the v0.2.0 line at the root", () => {
-    // Each tier builds from its own git tree, not the working tree; the layout case stays green
+    // Tag tiers build from their git trees, HEAD from the checkout; the layout case stays green
     // on a build that copies HEAD everywhere.
     expect(readSite(site, "latest/setup.html")).toContain("HEAD-only line");
     expect(readSite(site, "setup.html")).not.toContain("HEAD-only line");

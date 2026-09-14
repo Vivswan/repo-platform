@@ -1,6 +1,6 @@
 // docs/site.md's Layout rows as the artifact tree a deploy lands from the hook's dist and docs/,
 // with the outputs reusable-site.yml gates on: siteLayout's unit table pins the rows as values,
-// step_output_gates pins the read of `publish`, this pins its write.
+// this pins the artifact and the `publish` output the deploy step reads.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";

@@ -30,7 +30,8 @@ const REPO = "fixture-owner/inc-repo";
  *  "/docs/". */
 const INCLUDE = [{ path: "skills", mount: "skills", page: "SKILL.md" }];
 
-/** The agents/ root mounted INSIDE the skills root's mount, listed child first. */
+/** Listed child first, so a staging that followed list order would land agents/ where its
+ *  parent has yet to be copied. */
 const NESTED_INCLUDE = [{ path: "agents", mount: "skills/agents", page: "AGENT.md" }, ...INCLUDE];
 
 /** The website's one page links INTO the docs mount, into an include page
@@ -256,7 +257,7 @@ function refusalFixture(repo: string, mutate: (repo: string) => void): void {
 
 describe("include root staging refusals", () => {
   // Only the "carries both" message has a unit home (pages-site.test.ts); the staging judges
-  // the others against the tree, so a refusal that slipped would surface as a built collision.
+  // the others against the tree.
   test.each<{
     reason: string;
     include: typeof INCLUDE;
@@ -341,8 +342,8 @@ describe("nested include mounts", () => {
   test(
     "a root mounted inside another's mount stages whichever is listed first, and links cross between them",
     () => {
-      // Staging order is the mount's depth, never the list's: a child staged first lands outside
-      // its parent's tree and its links go to GitHub, which the gate never judges.
+      // Staging order is the mount's depth, never the list's: a child staged first is refused
+      // as the skills mount's collision at exit 1, before any vitepress run.
       const workspace = temp.dir("pages-site-include-nested-");
       nestedFixture(workspace);
       const runner = runnerTemp(temp);
