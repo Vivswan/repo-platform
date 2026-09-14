@@ -5,7 +5,7 @@ group: Fleet operations
 
 # Tracking issues
 
-The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open GitHub issue per failure stream: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating). The [site](site.md) module's nightly link-rot check rides the same machinery under its `labels.site` registration key. The fleet-wide nightly [security scan](security-scans.md) rides it too, under the fixed `security-nightly` label the settings baseline declares on every repository (no module, no answer). This page is the machinery the streams share; the module pages cover what each one runs.
+The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open GitHub issue per failure stream: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating). The [site](site.md) module's nightly link-rot check rides the same machinery under its `labels.site` registration key. The nightly [security scan](security-scans.md) of every public repository rides it too, under the fixed `security-nightly` label the settings baseline declares on every repository (no module, no answer). This page is the machinery the streams share; the module pages cover what each one runs.
 
 ## The action
 
