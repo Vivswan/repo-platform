@@ -1010,10 +1010,17 @@ describe("sync.ts over an upstream that does not serve a registered block", () =
 
 describe("sync.ts refusing at the command line or the registration", () => {
   // The --build regex lives in sync.ts's main, not flags.ts, so this is its only home: the build is recorded as
-  // given into the PR body and the commit subject (#215). The module refusal is the plan's; that it comes before
-  // any write is the run's.
+  // given into the PR body and the commit subject (#215). The flag set is sync.ts's too; flags.test parses a
+  // synthetic set, so the retired --previous-files staying refused is pinned here. The module refusal is the
+  // plan's; that it comes before any write is the run's.
   const REGISTRATION = "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n";
-  test.each<{ reason: string; build?: string; registration?: string; error: string }>([
+  test.each<{
+    reason: string;
+    build?: string;
+    registration?: string;
+    extra?: string[];
+    error: string;
+  }>([
     {
       reason: "a short --build sha",
       build: BUILD.slice(0, 12),
@@ -1025,6 +1032,12 @@ describe("sync.ts refusing at the command line or the registration", () => {
       error: `--build must be the build commit's full sha (40 lowercase hex characters), got "${BUILD.toUpperCase()}"`,
     },
     {
+      reason: "the retired --previous-files flag",
+      extra: ["--previous-files", join(FIXTURES, "files.yml")],
+      error:
+        'unknown or valueless argument "--previous-files" - allowed flags: --files, --tree, --target, --build, --repository, --private, --summary, --upstream',
+    },
+    {
       reason: "a registration naming a module files.yml does not offer",
       registration: "modules: [bun, uv]\nproject: {name: Demo, slug: demo, description: A demo}\n",
       error:
@@ -1032,13 +1045,13 @@ describe("sync.ts refusing at the command line or the registration", () => {
     },
   ])(
     "$reason is refused before anything is written",
-    ({ build = BUILD, registration = REGISTRATION, error }) => {
+    ({ build = BUILD, registration = REGISTRATION, extra = [], error }) => {
       const target = temp.dir("sync-e2e-refused-target-");
       writeFileSync(join(target, ".repo-platform.yml"), registration);
       fixtureGit(target, ["init", "-q", "-b", "main"]);
       const before = snapshotTree(target);
       const summary = join(temp.dir("sync-e2e-refused-summary-"), "summary.json");
-      expect(spawnSync(target, summary, build)).toEqual({
+      expect(spawnSync(target, summary, build, extra)).toEqual({
         exitCode: 1,
         stdout: `::error::${error}\n`,
         stderr: "",

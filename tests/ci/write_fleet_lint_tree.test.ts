@@ -11,10 +11,8 @@ const temp = tempDirs();
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 const SCRIPT = join(REPO_ROOT, ".github/scripts/ci/write_fleet_lint_tree.ts");
 // The lint reads workflows, so every upstream file is a stub and never the network.
-const upstream = await spawnStubUpstream(
-  parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
-  temp.dir("fleet-lint-upstream-"),
-);
+const FILES = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
+const upstream = await spawnStubUpstream(FILES, temp.dir("fleet-lint-upstream-"));
 afterAll(() => upstream.stop());
 
 describe("write_fleet_lint_tree.ts", () => {
@@ -41,9 +39,17 @@ describe("write_fleet_lint_tree.ts", () => {
       }
       landed[name] = workflows;
     }
-    // The all tree carries the module workflows over the base ones; two equal trees would lint one selection twice.
+    // The registrations the script wrote: all of files.yml's modules, and none; a module left out of `all`
+    // leaves its workflows unlinted while both trees still lint.
+    const registered = (name: string) =>
+      (
+        parseYaml(readFileSync(join(dest, name, ".repo-platform.yml"), "utf-8")) as {
+          modules: string[];
+        }
+      ).modules;
+    expect(registered("all")).toEqual(Object.keys(FILES.modules));
+    expect(registered("none")).toEqual([]);
     expect(landed.none.filter((file) => !landed.all.includes(file))).toEqual([]);
-    expect(landed.all.length).toBeGreaterThan(landed.none.length);
     for (const name of ["all", "none"]) {
       expect(existsSync(join(dest, name, ".git"))).toBe(true);
       expect(existsSync(join(dest, name, ".github/actionlint.yaml"))).toBe(true);
