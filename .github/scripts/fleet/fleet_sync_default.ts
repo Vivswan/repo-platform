@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-// A change on the delivered surface (shared/delivered_surface.ts) reaches the fleet only when a sync runs; any other workflow or
-// action change is live at `stable` on the next green merge with no sync. So a pull request that touches it gets the public sync
+// A change on the delivered surface (shared/delivered_surface.ts) moves what a sync delivers, and only a sync carries it; a change
+// off the surface is live at `stable` on the next green merge with no sync. So a pull request that touches it gets the public sync
 // by default: the label is added, one sticky comment says so, and a human removing it is final for that pull request
 // (docs/all-green.md). Information only: every failure is a warning and exit 0, and the job is outside all-green's needs.
 //

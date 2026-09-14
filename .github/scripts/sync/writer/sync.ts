@@ -204,7 +204,7 @@ function writeEntry(
 
 /** The commit the manifest names from here on: the recorded one while the delivered surface is the same at this build,
  *  else this build. The repository is judged against that commit (actions/validate-managed-files/check.ts), so it moves
- *  only when what a sync writes moved. `files.yml` sits at the platform root, which is the checkout the diff reads. */
+ *  only when the delivered surface moved. `files.yml` sits at the platform root, which is the checkout the diff reads. */
 function judgedCommit(options: SyncOptions, records: Records): string {
   const recorded = recordedCommit(records);
   if (recorded === null || recorded === options.build) return options.build;

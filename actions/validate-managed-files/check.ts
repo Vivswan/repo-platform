@@ -61,9 +61,25 @@ function walk(root: string, prefix = ""): string[] {
   });
 }
 
+/** A path under a symbolic link inside the root is left out: the link itself is copied, and a copy of its descendants
+ *  would write through the scratch's link to wherever it points (the writer refuses such paths too). */
+function underLink(root: string, path: string, links: Map<string, boolean>): boolean {
+  for (let dir = dirname(path); dir !== "."; dir = dirname(dir)) {
+    let linked = links.get(dir);
+    if (linked === undefined) {
+      linked = lstatOrNull(join(root, dir))?.isSymbolicLink() === true;
+      links.set(dir, linked);
+    }
+    if (linked) return true;
+  }
+  return false;
+}
+
 function treeOf(root: string, paths: string[]): Tree {
   const tree: Tree = new Map();
+  const links = new Map<string, boolean>();
   for (const path of paths) {
+    if (underLink(root, path, links)) continue;
     const abs = join(root, path);
     const stat = lstatOrNull(abs);
     if (stat?.isSymbolicLink()) {

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -68,8 +69,7 @@ function sync(target: string) {
 }
 
 /** The scratch copy lands under TMPDIR, so an empty one after the run proves the copy was removed. */
-function check(target: string) {
-  const scratch = temp.dir("check-scratch-");
+function check(target: string, scratch = temp.dir("check-scratch-")) {
   const run = boundedSpawnSync(
     [
       "bun",
@@ -140,6 +140,36 @@ describe("check.ts reports what the writer would hold", () => {
     expect(run.stdout).toMatch(new RegExp(`^${MANAGED.replace(".", "\\.")} held: `, "m"));
     expect(snapshotTree(target)).toEqual(before);
     expect(run.leftovers).toEqual([]);
+  });
+});
+
+describe("check.ts never writes through a link in the target", () => {
+  test("a tracked directory swapped for a relative link: the link is copied, its files are not, a file beyond it is untouched", () => {
+    const outer = temp.dir("check-escape-");
+    const target = join(outer, "repo");
+    mkdirSync(target);
+    writeFileSync(join(target, ".repo-platform.yml"), REGISTRATION);
+    expect(sync(target).exitCode).toBe(0);
+    mkdirSync(join(target, "notes"));
+    writeFileSync(join(target, "notes/f"), "tracked\n");
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    fixtureGit(target, ["add", "-A"]);
+    fixtureGit(target, ["-c", "user.name=t", "-c", "user.email=t@e", "commit", "-q", "-m", "seed"]);
+    renameSync(join(target, "notes"), join(outer, "source"));
+    symlinkSync("../source", join(target, "notes"));
+    // Control: the index still lists notes/f under the link, the input that made the copy write through it.
+    expect(
+      fixtureGit(target, ["ls-files", "--cached", "--others", "--exclude-standard"]),
+    ).toContain("notes/f");
+    // The scratch's ../source is a different directory from the target's; a write through the link lands here.
+    const scratch = temp.dir("check-scratch-");
+    mkdirSync(join(scratch, "source"));
+    writeFileSync(join(scratch, "source/f"), "sentinel\n");
+    const run = check(target, scratch);
+    expect(readFileSync(join(scratch, "source/f"), "utf-8")).toBe("sentinel\n");
+    expect(readFileSync(join(outer, "source/f"), "utf-8")).toBe("tracked\n");
+    expect(run.exitCode).toBe(0);
+    expect(run.leftovers).toEqual(["source"]);
   });
 });
 

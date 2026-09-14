@@ -90,7 +90,7 @@ The sync also requires `files.yml` at the commit's root, since a commit without 
 
 **The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run), named in full in the PR body and by its first 12 characters in the sync commit's subject.
 
-**The manifest's own entry** records the commit the repository is judged against: the build when the delivered surface changed since the recorded commit, else the recorded commit, so an unchanged tree still opens no PR ([sync.md](sync.md#the-manifest)).
+**The manifest's own entry** records the commit the repository is judged against: the build when the delivered surface changed since the recorded commit, else the recorded commit, so it moves only when the delivered surface moved ([sync.md](sync.md#the-manifest)).
 
 Old delivery commits stay reachable forever: they are main history.
 
