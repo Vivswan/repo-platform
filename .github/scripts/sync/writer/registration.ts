@@ -20,6 +20,7 @@ export const PLACEHOLDER_SOURCE: Record<PlaceholderName, string> = {
   github_username_lower: "the repository slug",
   copyright_holder: "project.copyright_holder",
   year: "the clock",
+  private: "the writer's --private flag",
   fuzzer_label: "labels.fuzzer (or the fuzzer module's tracking_label default)",
   fuzzer_label_color: "the fuzzer module's tracking_label color",
   fuzzer_label_description: "the fuzzer module's tracking_label description",
@@ -47,6 +48,7 @@ export function parseRepositorySlug(slug: string): RepositorySlug {
 export function placeholderValues(
   registration: Registration,
   repository: RepositorySlug,
+  isPrivate: boolean,
   defaults: PlaceholderValues = {},
   now: Date = new Date(),
 ): PlaceholderValues {
@@ -60,6 +62,7 @@ export function placeholderValues(
     github_username_lower: repository.owner.toLowerCase(),
     copyright_holder: project.copyright_holder ?? repository.owner,
     year: String(now.getUTCFullYear()),
+    private: String(isPrivate),
   };
   const optional: Partial<Record<PlaceholderName, string | undefined>> = {
     ...defaults,

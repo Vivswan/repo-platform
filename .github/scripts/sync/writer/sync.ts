@@ -216,7 +216,7 @@ export function runSync(options: SyncOptions): SyncReport {
   const facts: Facts = {
     registration,
     slug,
-    values: placeholderValues(registration, slug, config.defaults),
+    values: placeholderValues(registration, slug, options.private, config.defaults),
   };
   const selected = selectModules(config, registration.modules);
   const { records, problem } = readRecords(options.target);

@@ -9,6 +9,7 @@ placeholders:
   - copyright_holder
   - year
   - fuzzer_label
+  - private
 modules:
   bun:
     gitignore_sources: [Node, Bun]
@@ -65,11 +66,6 @@ files:
     class: starter
   - path: .github/settings.local.yml
     class: starter
-    when: {private: false}
-  - path: .github/settings.local.yml
-    class: starter
-    when: {private: true}
-    source: files/base/.github/settings.local.private.yml
   - path: .github/settings.yml
     class: managed
     render: settings
