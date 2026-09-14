@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
-  blockSourcePath,
-  blockValueOf,
+  blockSource,
+  blockSources,
   checkFilesConfig,
   type FileEntry,
   FilesConfigError,
@@ -648,24 +648,196 @@ describe("mutuallyExclusive", () => {
   });
 });
 
-describe("block file names", () => {
-  test("the value sits between the stem and the extension, the directory untouched", () => {
-    expect(blockSourcePath(".github/dependabot.yml", "bun")).toBe(
-      ".github/dependabot.block.bun.yml",
-    );
-    expect(blockSourcePath("AGENTS.md", "toolchain")).toBe("AGENTS.block.toolchain.md");
-    expect(blockSourcePath(".gitignore", "Node")).toBe(".block.Node.gitignore");
-    expect(blockSourcePath(".github/CODEOWNERS", "x")).toBe(".github/CODEOWNERS.block.x");
+const SHA = "0123456789abcdef0123456789abcdef01234567";
+const UPSTREAM = {
+  repository: "github/gitignore",
+  sha: SHA,
+  always: ["Windows"],
+  paths: { Windows: "Global/Windows.gitignore", Node: "Node.gitignore", bun: "bun.gitignore" },
+};
+
+describe("block sources", () => {
+  const entry = { path: ".gitignore", upstream: UPSTREAM };
+
+  test("a value the upstream names is fetched by path; any other is the module's own file, the value between the stem and the extension", () => {
+    expect(blockSource(entry, "bun", "Node")).toEqual({
+      kind: "upstream",
+      value: "Node",
+      path: "Node.gitignore",
+    });
+    expect(blockSource(entry, "fuzzer", "fuzzer")).toEqual({
+      kind: "tree",
+      source: "fuzzer/.block.fuzzer.gitignore",
+    });
+    expect(blockSource(entry, "x", "constructor")).toEqual({
+      kind: "tree",
+      source: "x/.block.constructor.gitignore",
+    });
+    expect(blockSource({ path: ".github/dependabot.yml" }, "bun", "bun")).toEqual({
+      kind: "tree",
+      source: "bun/.github/dependabot.block.bun.yml",
+    });
+    expect(blockSource({ path: "AGENTS.md" }, "deno", "toolchain")).toEqual({
+      kind: "tree",
+      source: "deno/AGENTS.block.toolchain.md",
+    });
+    expect(blockSource({ path: ".github/CODEOWNERS" }, "bun", "x")).toEqual({
+      kind: "tree",
+      source: "bun/.github/CODEOWNERS.block.x",
+    });
   });
 
-  test("blockValueOf reads the value back and refuses every other name", () => {
-    expect(blockValueOf(".gitignore", ".block.Node.gitignore")).toBe("Node");
-    expect(blockValueOf("dependabot.yml", "dependabot.block.bun.yml")).toBe("bun");
-    expect(blockValueOf("CODEOWNERS", "CODEOWNERS.block.x")).toBe("x");
-    expect(blockValueOf(".gitignore", ".gitignore.block.Node")).toBeNull();
-    expect(blockValueOf(".gitignore", ".gitignore")).toBeNull();
-    expect(blockValueOf(".gitignore", ".block..gitignore")).toBeNull();
-    expect(blockValueOf(".gitignore", ".block.a.b.gitignore")).toBeNull();
-    expect(blockValueOf("dependabot.yml", "dependabot.block.bun.yaml")).toBeNull();
+  const PATHS = "Windows: Global/Windows.gitignore, Node: Node.gitignore, bun: bun.gitignore";
+  const shared = parseFilesConfig(
+    [
+      "placeholders: []",
+      "modules:",
+      "  bun: { g: [Node, bun] }",
+      "  deno: { g: [Node] }",
+      "  fuzzer: { g: [fuzzer] }",
+      "  site: {}",
+      "files:",
+      "  - path: .gitignore",
+      "    class: split",
+      "    region: hash",
+      "    blocks: g",
+      `    upstream: {repository: github/gitignore, sha: ${SHA}, always: [Windows], paths: {${PATHS}}}`,
+      "",
+    ].join("\n"),
+  );
+  const up = (value: string, path: string) => ({ kind: "upstream" as const, value, path });
+
+  test("blockSources: the always values first, then the selected modules in files.yml order, a source named twice once", () => {
+    expect(blockSources(shared, shared.files[0], ["fuzzer", "deno", "bun"])).toEqual([
+      up("Windows", "Global/Windows.gitignore"),
+      up("Node", "Node.gitignore"),
+      up("bun", "bun.gitignore"),
+      { kind: "tree", source: "fuzzer/.block.fuzzer.gitignore" },
+    ]);
+    expect(blockSources(shared, shared.files[0], ["deno"])).toEqual([
+      up("Windows", "Global/Windows.gitignore"),
+      up("Node", "Node.gitignore"),
+    ]);
+    expect(blockSources(shared, shared.files[0], ["site"])).toEqual([
+      up("Windows", "Global/Windows.gitignore"),
+    ]);
+  });
+
+  test("one value name per module is each module's own block; managed and starter entries take blocks", () => {
+    const own = parseFilesConfig(
+      [
+        "placeholders: []",
+        "modules:",
+        "  bun: { t: [toolchain] }",
+        "  deno: { t: [toolchain] }",
+        "files:",
+        "  - { path: AGENTS.md, class: split, region: html, blocks: t }",
+        "  - { path: d.yml, class: managed, blocks: t }",
+        "  - { path: s.yml, class: starter, blocks: t }",
+        "",
+      ].join("\n"),
+    );
+    expect(blockSources(own, own.files[0], ["bun", "deno"])).toEqual([
+      { kind: "tree", source: "bun/AGENTS.block.toolchain.md" },
+      { kind: "tree", source: "deno/AGENTS.block.toolchain.md" },
+    ]);
+    expect(blockSources(own, own.files[1], ["bun"])).toEqual([
+      { kind: "tree", source: "bun/d.block.toolchain.yml" },
+    ]);
+    expect(blockSources(own, own.files[2], ["deno"])).toEqual([
+      { kind: "tree", source: "deno/s.block.toolchain.yml" },
+    ]);
+  });
+});
+
+describe("the upstream registry grammar", () => {
+  const doc = (modules: string, entry: string) =>
+    `placeholders: []\nmodules:\n${modules}files:\n  - ${entry}\n`;
+  const BUN = "  bun: { g: [Node] }\n";
+  const registry = (fields: string) =>
+    `{ path: .gitignore, class: split, region: hash, blocks: g, upstream: {repository: github/gitignore, sha: ${SHA}, ${fields}} }`;
+
+  test("a valid registry parses with `always` defaulting to none", () => {
+    const parsed = checkFilesConfig(doc(BUN, registry("paths: {Node: Node.gitignore}")));
+    expect(parsed.problems).toEqual([]);
+    expect(parsed.config.files[0]).toMatchObject({
+      blocks: "g",
+      upstream: {
+        repository: "github/gitignore",
+        sha: SHA,
+        always: [],
+        paths: { Node: "Node.gitignore" },
+      },
+    });
+  });
+
+  test.each([
+    [
+      "a block list that is not a list",
+      doc("  bun: { g: Node }\n", registry("paths: {Node: Node.gitignore}")),
+      "modules.bun.g must be a list of block names (letters, digits, _ -)",
+    ],
+    [
+      "a block value that is a path or a dotted name",
+      doc("  bun: { g: [../x, Node.old] }\n", registry("paths: {}")),
+      "modules.bun.g must be a list of block names (letters, digits, _ -)",
+    ],
+    [
+      "upstream on an entry without blocks",
+      doc(
+        BUN,
+        `{ path: .gitignore, class: split, region: hash, upstream: {repository: github/gitignore, sha: ${SHA}, paths: {}} }`,
+      ),
+      "files: .gitignore: upstream applies to entries with blocks only",
+    ],
+    [
+      "a path that leaves the repository",
+      doc(BUN, registry("paths: {Node: ../Node.gitignore}")),
+      "files: .gitignore: upstream.paths.Node is ../Node.gitignore, which carries an empty, '.', or '..' segment",
+    ],
+    [
+      "an always value the paths do not name",
+      doc(BUN, registry("always: [Linux], paths: {Node: Node.gitignore}")),
+      "files: .gitignore: upstream.always names 'Linux', which upstream.paths does not",
+    ],
+    [
+      "a registered path no module lists",
+      doc(BUN, registry("paths: {Node: Node.gitignore, Rust: Rust.gitignore}")),
+      "files: .gitignore: upstream.paths.Rust: no module lists the value",
+    ],
+  ])("%s is refused by name", (_case, text, problem) => {
+    expect(problemsOf(text)).toContain(problem);
+  });
+
+  test.each([
+    [
+      "a repository that is not owner/name",
+      { repository: "gitignore" },
+      "files.0.upstream.repository: not an owner/name repository",
+    ],
+    [
+      "a short sha",
+      { sha: SHA.slice(0, 12) },
+      "files.0.upstream.sha: not a full lowercase commit sha",
+    ],
+    [
+      "a missing sha",
+      { sha: "null" },
+      "files.0.upstream.sha: Invalid input: expected string, received null",
+    ],
+    [
+      "a dotted value as a paths key",
+      { paths: "{Node.old: Node.gitignore}" },
+      "files.0.upstream.paths.Node.old: Invalid key in record",
+    ],
+  ])("%s is refused by the schema", (_case, fields, problem) => {
+    const u = {
+      repository: "github/gitignore",
+      sha: SHA,
+      paths: "{Node: Node.gitignore}",
+      ...fields,
+    };
+    const entry = `{ path: .gitignore, class: split, region: hash, blocks: g, upstream: {repository: ${u.repository}, sha: ${u.sha}, paths: ${u.paths}} }`;
+    expect(problemsOf(doc(BUN, entry))).toEqual([problem]);
   });
 });

@@ -21,11 +21,24 @@ interface EntryBase {
   when: When | null;
 }
 
+/** The repository an entry's shared blocks are fetched from, at one pinned commit the refresh workflow moves. */
+export interface UpstreamBlocks {
+  /** owner/name on github.com. */
+  repository: string;
+  /** 40 lowercase hex characters. */
+  sha: string;
+  /** Values every repository takes, before the selected modules' blocks. */
+  always: string[];
+  /** Block value to its path in the repository. */
+  paths: Record<string, string>;
+}
+
 interface SourcedEntry extends EntryBase {
   /** The source file, relative to the files/ tree. */
   source: string;
-  /** The module-data key whose values name the per-module block files. */
+  /** The module-data key whose values name the blocks. */
   blocks?: string;
+  upstream?: UpstreamBlocks;
 }
 
 export interface ManagedEntry extends SourcedEntry {
@@ -96,6 +109,19 @@ const whenSchema = z
 
 const LIST_KEYS = ["modules", "any", "without"] as const;
 
+/** A block value sits between a file's stem and its extension, so it is one
+ *  word without dots. */
+export const BLOCK_VALUE_RE = /^[A-Za-z0-9_-]+$/;
+
+const upstreamSchema = z.strictObject({
+  repository: z
+    .string()
+    .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "not an owner/name repository"),
+  sha: z.string().regex(/^[0-9a-f]{40}$/, "not a full lowercase commit sha"),
+  always: z.array(z.string().min(1)).default([]),
+  paths: z.record(z.string().regex(BLOCK_VALUE_RE, "not a block name"), z.string().min(1)),
+});
+
 const fileSchema = z.strictObject({
   path: z.string().min(1),
   class: z.enum(["managed", "split", "starter"]),
@@ -103,6 +129,7 @@ const fileSchema = z.strictObject({
   when: whenSchema.optional(),
   region: z.enum(["hash", "html"]).optional(),
   blocks: z.string().min(1).optional(),
+  upstream: upstreamSchema.optional(),
   render: z.enum(["settings"]).optional(),
   overlay: z.string().min(1).optional(),
 });
@@ -132,8 +159,8 @@ const moduleDataShape = z.looseObject({
 });
 
 /** Every key outside the shape is a many-of key (a block list a file entry's `blocks` names), so one spelled as a word is refused
- *  here and a reader (scripts/generate/build_gitignore.ts, the writer's blockCandidates) indexes it as a list. Refined rather than
- *  a catchall: zod folds a catchall into an index signature the typed keys contradict. */
+ *  here and blockLists below indexes it as a list. Refined rather than a catchall: zod folds a catchall into an index signature
+ *  the typed keys contradict. */
 const moduleDataSchema = moduleDataShape.superRefine((data, ctx) => {
   for (const [key, value] of Object.entries(data)) {
     if (Object.hasOwn(moduleDataShape.shape, key)) continue;
@@ -175,25 +202,58 @@ export function selectEntries(
 
 export const SOURCE_PREFIX = "files/";
 
-/** A block value sits between a file's stem and its extension, so it is one
- *  word without dots. */
-export const BLOCK_VALUE_RE = /^[A-Za-z0-9_-]+$/;
+export type BlockSource =
+  | { kind: "tree"; source: string }
+  | { kind: "upstream"; value: string; path: string };
 
-/** The block file `value` names beside an entry's path: the value goes
- *  between the stem and the extension so every tool keys on the real one
- *  (`.github/dependabot.block.bun.yml`); an extension-only dotfile keeps
- *  its suffix (`.block.Node.gitignore`). */
-export function blockSourcePath(entryPath: string, value: string): string {
-  const { dir, stem, ext } = splitEntryPath(entryPath);
-  return `${dir}${stem}.block.${value}${ext}`;
+/** A value the entry's upstream names is fetched at the pin; any other is the module's own file beside its copy of the
+ *  path, the value between the stem and the extension so every tool parses it by its real extension.
+ *    upstream  .gitignore, Node                   -> {value: Node, path: Node.gitignore}
+ *    tree      bun, .github/dependabot.yml, bun   -> bun/.github/dependabot.block.bun.yml */
+export function blockSource(
+  entry: Pick<SourcedEntry, "path" | "upstream">,
+  module: string,
+  value: string,
+): BlockSource {
+  // Own keys only: a value spelled `constructor` is a local block, not Object's.
+  const paths = entry.upstream?.paths;
+  if (paths !== undefined && Object.hasOwn(paths, value)) {
+    return { kind: "upstream", value, path: paths[value] };
+  }
+  const { dir, stem, ext } = splitEntryPath(entry.path);
+  return { kind: "tree", source: `${module}/${dir}${stem}.block.${value}${ext}` };
 }
 
-export function blockValueOf(entryPath: string, name: string): string | null {
-  const { stem, ext } = splitEntryPath(entryPath);
-  const prefix = `${stem}.block.`;
-  if (!name.startsWith(prefix) || !name.endsWith(ext)) return null;
-  const value = name.slice(prefix.length, name.length - ext.length);
-  return BLOCK_VALUE_RE.test(value) ? value : null;
+/** The values each module lists under a key, in files.yml order; checkFilesConfig refused any list that is not block names. */
+export function blockLists(modules: Record<string, ModuleData>, key: string): [string, string[]][] {
+  return Object.entries(modules).flatMap(([module, data]): [string, string[]][] =>
+    data[key] === undefined ? [] : [[module, data[key] as string[]]],
+  );
+}
+
+/** The upstream `always` values, then each selected module's list in files.yml order; a source named twice lands once, so a
+ *  shared upstream block two toolchains list is one block while each toolchain's own file under one value name is its own. */
+export function blockSources(
+  config: Pick<FilesConfig, "modules">,
+  entry: FileEntry,
+  modules: string[],
+): BlockSource[] {
+  if ("render" in entry || entry.blocks === undefined) return [];
+  const sources = new Map<string, BlockSource>();
+  const add = (source: BlockSource) => {
+    const key = source.kind === "tree" ? source.source : `upstream ${source.path}`;
+    if (!sources.has(key)) sources.set(key, source);
+  };
+  const upstream = entry.upstream;
+  if (upstream !== undefined) {
+    for (const value of upstream.always)
+      add({ kind: "upstream", value, path: upstream.paths[value] });
+  }
+  for (const [module, values] of blockLists(config.modules, entry.blocks)) {
+    if (!modules.includes(module)) continue;
+    for (const value of values) add(blockSource(entry, module, value));
+  }
+  return [...sources.values()];
 }
 
 function splitEntryPath(entryPath: string): { dir: string; stem: string; ext: string } {
@@ -310,6 +370,19 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     }
     return when;
   };
+  // Once per key: three starters share toolchain_steps, and a bad list is one problem.
+  const blockKeys = new Set(data.files.flatMap((entry) => entry.blocks ?? []));
+  for (const key of blockKeys) {
+    for (const [module, values] of Object.entries(data.modules)) {
+      const list = values[key];
+      if (list === undefined) continue;
+      if (!Array.isArray(list) || list.some((value) => !BLOCK_VALUE_RE.test(String(value)))) {
+        problems.push(
+          `modules.${module}.${key} must be a list of block names (letters, digits, _ -)`,
+        );
+      }
+    }
+  }
   const files: FileEntry[] = data.files.map((entry) => {
     const where = `files: ${entry.path}`;
     const problem = pathProblem(entry.path);
@@ -323,6 +396,36 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     }
     if (entry.render === undefined && entry.overlay !== undefined) {
       problems.push(`${where}: overlay applies to rendered entries only`);
+    }
+    if (entry.upstream !== undefined) {
+      if (entry.blocks === undefined) {
+        problems.push(`${where}: upstream applies to entries with blocks only`);
+      }
+      const { always, paths } = entry.upstream;
+      for (const [value, path] of Object.entries(paths)) {
+        const problem = pathProblem(path);
+        if (problem !== null)
+          problems.push(`${where}: upstream.paths.${value} is ${path}, which ${problem}`);
+      }
+      for (const value of always) {
+        if (!Object.hasOwn(paths, value)) {
+          problems.push(
+            `${where}: upstream.always names '${value}', which upstream.paths does not`,
+          );
+        }
+      }
+      // A registered path nothing lists is dead configuration the writer would fetch for no block.
+      const listed = new Set([
+        ...always,
+        ...(entry.blocks === undefined
+          ? []
+          : blockLists(data.modules, entry.blocks).flatMap(([, values]) => values)),
+      ]);
+      for (const value of Object.keys(paths)) {
+        if (!listed.has(value)) {
+          problems.push(`${where}: upstream.paths.${value}: no module lists the value`);
+        }
+      }
     }
     if (entry.render !== undefined) {
       if (entry.source !== undefined || entry.blocks !== undefined) {
@@ -352,6 +455,7 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       source: source.slice(SOURCE_PREFIX.length),
       when,
       ...(entry.blocks === undefined ? {} : { blocks: entry.blocks }),
+      ...(entry.upstream === undefined ? {} : { upstream: entry.upstream }),
     };
     if (entry.class === "managed") return { ...base, class: "managed" };
     if (entry.class === "starter") return { ...base, class: "starter" };

@@ -24,7 +24,6 @@ import {
   SYNC_BOT,
   SYNC_PR_TITLE_PREFIX,
 } from "../../actions/shared/platform.ts";
-import { CI_WORKSPACE_SECTION, PLATFORM_SECTIONS } from "../../scripts/generate/build_gitignore.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn.ts";
 import { tempDirs } from "../shared/temp_dir.ts";
 
@@ -48,8 +47,6 @@ describe("the platform slug and every string the fleet observes derived from it"
       generatedNotice: GENERATED_NOTICE,
       renderedSettingsHeader: RENDERED_HEADER,
       manifestComment: renderManifest({}).split("\n")[1],
-      gitignoreCiSection: CI_WORKSPACE_SECTION,
-      gitignoreFuzzerSection: PLATFORM_SECTIONS.fuzzer,
       syncBot: SYNC_BOT,
       syncIdentity: SYNC_IDENTITY,
       automationBranch: AUTOMATION_BRANCH,
@@ -80,9 +77,6 @@ describe("the platform slug and every string the fleet observes derived from it"
         "repo-owned from then on), mirror (a byte copy of a written file, or with kind symlink a " +
         "relative symbolic link to it whose hash is sha256 of the link target, declared in files.yml or " +
         '.repo-platform.yml).",',
-      gitignoreCiSection: "## CI workspace paths (repo-platform)\n/results.sarif\n",
-      gitignoreFuzzerSection:
-        "## Fuzzer workspace paths (repo-platform fuzzer)\n/.fuzz-failures/\n",
       syncBot: "repo-platform-sync",
       syncIdentity: {
         name: "repo-platform-sync",

@@ -44,6 +44,7 @@ import { keepReason, type RetireRow, release, retire } from "./retire.ts";
 import { selectModules } from "./select.ts";
 import { renderSettings } from "./settings_entry.ts";
 import { type Found, occupant, probe, removeFile, writeFile } from "./target_files.ts";
+import { fetchUpstreamBodies, RAW_HOST, type UpstreamBodies } from "./upstream_blocks.ts";
 import { type WriteOutcome, writeManaged } from "./write_managed.ts";
 import { writeSplit } from "./write_split.ts";
 import { writeStarter } from "./write_starter.ts";
@@ -55,6 +56,8 @@ export interface SyncOptions {
   build: string;
   repository: string;
   private: boolean;
+  /** The raw-content host the upstream blocks are fetched from. */
+  upstream: string;
 }
 
 interface Rendered {
@@ -68,6 +71,7 @@ interface Facts {
   registration: Registration;
   slug: RepositorySlug;
   values: PlaceholderValues;
+  upstream: UpstreamBodies;
 }
 
 function render(
@@ -104,7 +108,7 @@ function render(
       write: (recorded) => writeManaged(target, entry.path, rendered.content, recorded),
     };
   }
-  const text = () => renderSourced(config, options.tree, entry, modules, values);
+  const text = () => renderSourced(config, options.tree, entry, modules, values, facts.upstream);
   if (entry.class === "starter") {
     return {
       content: "",
@@ -192,17 +196,18 @@ function writeEntry(
   return { outcome, record: rendered.record, content: rendered.content };
 }
 
-export function runSync(options: SyncOptions): SyncReport {
+export async function runSync(options: SyncOptions): Promise<SyncReport> {
   const config = loadFilesConfig(options.files, options.tree);
   const slug = parseRepositorySlug(options.repository);
   const notes: string[] = [];
   const registration = readRegistration(options.target);
+  const selected = selectModules(config, registration.modules);
   const facts: Facts = {
     registration,
     slug,
     values: placeholderValues(registration, slug, options.private, config.defaults),
+    upstream: await fetchUpstreamBodies(config.files, options.upstream),
   };
-  const selected = selectModules(config, registration.modules);
   const { records, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
 
@@ -382,11 +387,11 @@ export function runSync(options: SyncOptions): SyncReport {
   });
 }
 
-function main(argv: string[]): number {
+async function main(argv: string[]): Promise<number> {
   const flags = parseFlags(
     argv,
     ["--files", "--tree", "--target", "--build", "--repository", "--private"] as const,
-    ["--summary"] as const,
+    ["--summary", "--upstream"] as const,
   );
   if (flags["--private"] !== "true" && flags["--private"] !== "false") {
     fail("--private must be true or false");
@@ -400,13 +405,14 @@ function main(argv: string[]): number {
   }
   let report: SyncReport;
   try {
-    report = runSync({
+    report = await runSync({
       files: flags["--files"],
       tree: flags["--tree"],
       target: flags["--target"],
       build: flags["--build"],
       repository: flags["--repository"],
       private: flags["--private"] === "true",
+      upstream: flags["--upstream"] ?? RAW_HOST,
     });
   } catch (error) {
     if (error instanceof MirrorFailure) fail(error.lines);
@@ -419,4 +425,4 @@ function main(argv: string[]): number {
   return 0;
 }
 
-if (import.meta.main) process.exit(main(process.argv.slice(2)));
+if (import.meta.main) process.exit(await main(process.argv.slice(2)));

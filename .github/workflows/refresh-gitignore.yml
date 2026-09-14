@@ -1,5 +1,5 @@
-# The only place that fetches github/gitignore: nothing pins upstream and no CI job verifies the outputs,
-# so the PR's diff IS the upstream change.
+# Moves the github/gitignore pin in files.yml to upstream HEAD; the PR body carries each registered block's diff between
+# the two commits, which is what the next sync renders into every repository's .gitignore region.
 
 name: Refresh gitignore
 
@@ -40,12 +40,15 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/fleet/require_fleet_token.ts
 
-      - name: Regenerate from upstream HEAD
-        run: bun scripts/generate/build_gitignore.ts
+      - name: Move the pin to upstream HEAD
+        id: refresh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun .github/scripts/refresh-gitignore/refresh_gitignore.ts
 
-      # Nothing generated records the upstream SHA, so the commit subject and PR body are fixed text: what moved is the diff itself.
-      # A no-change run with a refresh PR still open means main already has these outputs (upstream moved back, or another PR
-      # landed them): the action closes that PR and deletes its branch, so it runs unconditionally.
+      # A later run moves the pin further on the same branch, so the open PR's title and body are refreshed with it. A run that
+      # moved nothing with a refresh PR still open means main already carries HEAD (the script aborts on an unreachable upstream,
+      # so "nothing moved" is not that view): the action closes that PR and deletes its branch, so it runs unconditionally.
       # The push rides the fleet PAT: a default-token push would leave the PR's CI waiting for approval.
       - name: Commit, push, and open PR
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
@@ -55,10 +58,6 @@ jobs:
           delete-branch: true
           committer: repo-platform-sync <repo-platform-sync@users.noreply.github.com>
           author: repo-platform-sync <repo-platform-sync@users.noreply.github.com>
-          commit-message: "chore: refresh gitignore outputs from github/gitignore"
-          title: "chore: refresh gitignore outputs from github/gitignore"
-          body: >-
-            Automated regeneration of the gitignore outputs (`files/base/.gitignore` and the per-module
-            block files) from [github/gitignore](https://github.com/github/gitignore)'s current HEAD. The diff
-            is the upstream change to the sections we consume. Merging this moves the stable tag once green; the next
-            sync pushes it to the fleet, this repository included.
+          commit-message: "fix(gitignore): bump ${{ steps.refresh.outputs.bumps }}"
+          title: "fix(gitignore): bump ${{ steps.refresh.outputs.bumps }}"
+          body: ${{ steps.refresh.outputs.body }}
