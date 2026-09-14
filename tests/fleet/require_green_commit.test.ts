@@ -128,40 +128,73 @@ describe("calledRefusal", () => {
   // Past the bound the poll fails CLOSED on every non-green shape. A red conclusion waits the bound out too (the
   // predicate polls for a fresh success because a re-judged sha's verdict can trail a stale one), so the refusal names
   // the conclusion at the bound, not on the first read.
-  test.each<{ reason: string; answer: RunResult; refusal: unknown }>([
-    { reason: "the run's own green commit passes on ONE probe", answer: GREEN, refusal: null },
+  test.each<{
+    reason: string;
+    answers: RunResult[];
+    deadlineMs: number;
+    refusal: unknown;
+    calls: number;
+    sleeps: number[];
+  }>([
+    {
+      reason: "the run's own green commit passes on ONE probe, no sleep",
+      answers: [GREEN],
+      deadlineMs: 0,
+      refusal: null,
+      calls: 1,
+      sleeps: [],
+    },
+    {
+      // The Checks API can report the gate job's just-completed check as in progress for a moment after that job
+      // released this leg: the read polls through it instead of refusing a green commit.
+      reason: "a check in progress on the first read and green on the second passes",
+      answers: [PENDING, GREEN],
+      deadlineMs: 1_000,
+      refusal: null,
+      calls: 2,
+      sleeps: [5],
+    },
     {
       reason: "a red verdict refuses at the bound",
-      answer: RED,
+      answers: [RED],
+      deadlineMs: 0,
+      calls: 1,
+      sleeps: [],
       refusal: expect.stringContaining("is not green - its all-green verdict concluded 'failure'"),
     },
     {
       reason: "a verdict still in progress past the bound refuses",
-      answer: PENDING,
+      answers: [PENDING],
+      deadlineMs: 0,
+      calls: 1,
+      sleeps: [],
       refusal: expect.stringContaining(
         "is not green - its all-green verdict is still 'in_progress' after 0s",
       ),
     },
     {
       reason: "no verdict at all past the bound refuses (the call arrived from somewhere else)",
-      answer: NONE,
+      answers: [NONE],
+      deadlineMs: 0,
+      calls: 1,
+      sleeps: [],
       refusal: expect.stringContaining(
         "is not green - no all-green verdict check exists there (waited 0s)",
       ),
     },
-  ])("$reason, no sleep", ({ answer, refusal }) => {
-    const gh = ghReplaying([answer]);
-    const sleeps: number[] = [];
+  ])("$reason", ({ answers, deadlineMs, refusal, calls, sleeps }) => {
+    const gh = ghReplaying(answers);
+    const slept: number[] = [];
     const outcome = calledRefusal("o/r", SHA, SHA, {
       gh: gh.gh,
-      wait: { deadlineMs: 0, sleepMs: 5, sleep: (ms) => sleeps.push(ms) },
+      wait: { deadlineMs, sleepMs: 5, sleep: (ms) => slept.push(ms) },
     });
     const got: { refusal: unknown; calls: number; sleeps: number[] } = {
       refusal: outcome,
       calls: gh.calls(),
-      sleeps,
+      sleeps: slept,
     };
-    expect(got).toEqual({ refusal, calls: 1, sleeps: [] });
+    expect(got).toEqual({ refusal, calls, sleeps });
   });
 
   // The trust boundary: a called run applies the judged commit of the CI run that called it. Without the equality any
@@ -194,7 +227,6 @@ describe("the CLI", () => {
     { mode: 0o755 },
   );
 
-  /** A main run judging a green tip unless `overrides` says otherwise; an undefined value unsets the variable. */
   function runCli(overrides: Record<string, string | undefined>) {
     const work = dirs.dir("require-green-cli-run-");
     const calls = join(work, "gh-calls");

@@ -21,7 +21,7 @@ const temp = tempDirs();
 // End-to-end harness for the sync fan-out selector against stub gh and curl on PATH (the bounds rationale is
 // select_settings_repos.test.ts's). The personas carry the facts the stubs cannot show:
 //   private ones                  -> never reach the public log: skips counted, the rows file alone carries their slugs
-//   locked (403), ungranted (404) -> the push advertisement's two "no grant" answers: a notice each, never a retry or a failure
+//   locked (403), ungranted (404) -> the push advertisement's "no grant" answers (401 has no persona): a notice each, never a retry or a failure
 //   deadprobe (500)               -> a transport answer fails the plan, so it is admitted only in the row expecting that
 //   badlist, hidden-nomods        -> unreadable modules lists, filter runs only: anywhere else they would select and shift each exact row list
 describe("select_sync_repos.ts", () => {
@@ -301,7 +301,7 @@ describe("select_sync_repos.ts", () => {
 
   // A refused plan echoes no entry: an entry may be a private slug and this log is public. A push probe answering neither
   // 200 nor a permission code is refused too: probed for adoption instead, the repository would be selected and the
-  // writer's push would fail per row, late; that refusal names its repository, which the probe already judged public.
+  // writer's push would fail per row, late; that refusal names its repository, which discovery listed as public.
   test.each<{
     reason: string;
     scope: string;

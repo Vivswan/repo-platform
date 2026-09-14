@@ -524,6 +524,18 @@ describe("select_settings_repos.ts", () => {
       summary: summaryOf(...ALL_WARNINGS, NOMODS_WARNING),
     },
     {
+      reason: "a visibility token intersects: only public candidates are probed",
+      repo: "public,modules:release-please",
+      repos: ["Vivswan/nomodule"],
+      stdout: lines(
+        ...PUBLIC_PROBES_HEAD,
+        ...PUBLIC_PROBES_TAIL_HEAD,
+        LEFT_OUT(4),
+        "settings targets: Vivswan/nomodule",
+      ),
+      summary: summaryOf(...PUBLIC_WARNINGS),
+    },
+    {
       reason: "a slug unions in as typed, its selection unread",
       repo: "Vivswan/steady,modules:bun",
       repos: ["Vivswan/repo-platform", "Vivswan/steady"],
