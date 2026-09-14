@@ -17,6 +17,7 @@ import {
   MANAGED_HEADER_PATTERN,
   MANIFEST_NAME,
   REGISTRATION_PATH,
+  SYNC_LABEL,
   SYNC_PR_TITLE_PREFIX,
 } from "../../actions/shared/platform.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn.ts";
@@ -42,6 +43,7 @@ describe("the platform slug and every string the fleet observes derived from it"
       failureIssueTitle: FAILURE_ISSUE_TITLE,
       syncPrTitlePrefix: SYNC_PR_TITLE_PREFIX,
       syncPrTitle: prTitle("0123456789abcdef0123456789abcdef01234567"),
+      syncLabel: SYNC_LABEL,
       deliveryRef: DELIVERY_REF,
     }).toEqual({
       registration: ".repo-platform.yml",
@@ -70,6 +72,7 @@ describe("the platform slug and every string the fleet observes derived from it"
       failureIssueTitle: "[repo-platform] sync failed",
       syncPrTitlePrefix: "chore: sync repo-platform build",
       syncPrTitle: "chore: sync repo-platform build 0123456789ab",
+      syncLabel: "repo-platform:sync",
       deliveryRef: "stable",
     });
   });
