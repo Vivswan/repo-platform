@@ -191,7 +191,7 @@ A stale rendered file behind a held sync PR is exactly what the second and third
 
 | When | Labels |
 |---|---|
-| always | `dependencies` and `github_actions` (dependabot recreates its labels when missing, so an undeclared one would loop delete/recreate nightly); the triage trio `bug`, `enhancement`, `fix-lint`; the owner's approval label `merge-when-green`; the fleet-wide `security-nightly` stream label |
+| always | `dependencies` and `github_actions` (dependabot recreates its labels when missing, so an undeclared one would loop delete/recreate nightly); the triage trio `bug`, `enhancement`, `fix-lint`; the owner's approval label `merge-when-green`; the fleet-wide `security-nightly` stream label; `repo-platform:sync`, which a human adds to a PR for the branch sync ([sync.md](sync.md#syncing-a-branch-by-label)) |
 | per selected toolchain | the dependabot ecosystem labels: `javascript` for bun, `deno` for deno, `python:uv` for uv, `rust` for cargo ([tests/files/label_names.test.ts](../tests/files/label_names.test.ts) holds the layers to dependabot's names) |
 | with release-please | the `autorelease: *` pair and release-health's gate labels, `release-blocker` and `release-override`: stripping one un-blocks or un-overrides a release mid-flight |
 | with the fuzzer, nightly, or site module | the tracking labels (the registration's `labels.fuzzer` / `labels.nightly` / `labels.site`, each defaulting to its module's `tracking_label` in [files.yml](../files.yml), which also carries the color and description) |

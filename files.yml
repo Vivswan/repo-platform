@@ -124,6 +124,7 @@ files:
   - {path: .gitleaks.toml, class: starter}
   - {path: .yamllint, class: managed}
   - {path: .github/workflows/auto-assign.yml, class: managed}
+  - {path: .github/workflows/sync-branch.yml, class: managed}
   - {path: .github/workflows/auto-format.yml, class: starter, when: {any: {declaring: toolchain_steps}}, blocks: toolchain_steps}
   - {path: .typography-allow, class: managed, when: {without: [release-please]}}
   - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
