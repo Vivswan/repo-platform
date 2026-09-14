@@ -27,7 +27,7 @@ Settings stop being applied too: the central run only manages enrolled repos car
    git rm .repo-platform.yml .github/repo-platform-manifest.json
    ```
 
-2. Rewrite `.github/workflows/ci.yml`. The managed file is a thin caller of repo-platform's `fleet-ci.yml` reusable, and that call is all-or-nothing: its `validate-managed-files` step goes red once `.repo-platform.yml` is gone, and no input turns it off. Replace the `ci` job:
+2. Rewrite `.github/workflows/ci.yml`. The managed file is a thin caller of repo-platform's `fleet-ci.yml` reusable, and that call is all-or-nothing: its `plan` step goes red once `.repo-platform.yml` is gone (the registration it reads), and no input turns it off. Replace the `ci` job:
    - copy the jobs you want out of `fleet-ci.yml` into ci.yml (the composite actions they call stay public), or write your own
    - drop the copied `plan`, `validate`, and `managed-files` steps, which read the registration you deleted: remove `steps.plan.outcome == 'success' &&` from every copied step's condition, remove `standard-checks` from every copied job's `needs` list, and replace each `steps.plan.outputs.*` and `needs.standard-checks.outputs.*` condition and value with your repo's literals (actionlint reports a read of the deleted step)
    - the `release` and `site` legs need `ci` and read `needs.ci.outputs.*` in their conditions and inputs (`modules`, `tracking-labels`): delete the legs you do not keep and replace every such read in the rest with your repo's literals
