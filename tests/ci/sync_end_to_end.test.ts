@@ -1189,6 +1189,32 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
     expect(existsSync(join(target, MANIFEST))).toBe(false);
     expect(readlinkSync(join(target, "skills/a/LICENSE.md"))).toBe("../../LICENSE.md");
   });
+
+  test.each([
+    ["LICENSE.md/copy.md", "the target sits under 'LICENSE.md', a path the registration excepts"],
+    ["LICENSE.md", "the target is a path the registration excepts"],
+  ])(
+    "a target at or under an excepted path (%s) fails the run, and the excepted file is not touched",
+    (declared, problem) => {
+      const target = seed(
+        [
+          "modules: [bun]",
+          "project: {name: Demo, slug: demo, description: A demo}",
+          "except: [LICENSE.md]",
+          "mirrors:",
+          `  - {source: AGENTS.md, targets: [${declared}]}`,
+          "",
+        ].join("\n"),
+      );
+      const own = "my own license\n";
+      writeFileSync(join(target, "LICENSE.md"), own);
+      const result = spawnSync(target, join(temp.dir("sync-e2e-mirror-summary-"), "summary.json"));
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe(`${error("AGENTS.md", declared, problem)}\n`);
+      expect(readFileSync(join(target, "LICENSE.md"), "utf-8")).toBe(own);
+      expect(existsSync(join(target, MANIFEST))).toBe(false);
+    },
+  );
 });
 
 describe("sync.ts over retired paths whose records the writer cannot read", () => {

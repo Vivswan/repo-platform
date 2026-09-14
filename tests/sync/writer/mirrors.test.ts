@@ -52,6 +52,7 @@ function owned(
     writes: new Set([...sources, ...writes, ".github/repo-platform-manifest.json"]),
     retires: new Set(retires),
     stale: new Set(stale),
+    excepted: new Set(),
   };
 }
 

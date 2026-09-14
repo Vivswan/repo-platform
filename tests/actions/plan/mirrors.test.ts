@@ -29,6 +29,7 @@ const OWNED: OwnedPaths = {
   ]),
   retires: new Set(["SECURITY.md", "old/SECURITY.md"]),
   stale: new Set(["docs/GONE.md"]),
+  excepted: new Set(["docs/OWN.md", "own/KEEP.md"]),
 };
 
 describe("ownedPaths", () => {
@@ -47,17 +48,19 @@ retired:
   - { path: SECURITY.md, moved_to: .github/SECURITY.md }
   - { path: OLD.md }
 `);
-    expect(ownedPaths(config, { modules: ["bun"], private: false })).toEqual({
+    expect(
+      ownedPaths(config, { modules: ["bun"], private: false, except: ["checks.yml"] }),
+    ).toEqual({
       sources: new Set(["LICENSE.md", "AGENTS.md"]),
       writes: new Set([
         "LICENSE.md",
         "AGENTS.md",
         "CLAUDE.md",
-        "checks.yml",
         ".github/repo-platform-manifest.json",
       ]),
       retires: new Set(["SECURITY.md", "OLD.md"]),
       stale: new Set(),
+      excepted: new Set(["checks.yml"]),
     });
     expect(ownedPaths(config, { modules: ["pages"], private: true }).sources).toEqual(
       new Set(["LICENSE.md", "AGENTS.md", "docs/NOTES.md", "private.yml"]),
@@ -83,6 +86,9 @@ describe("mirrorPathProblem", () => {
     ["old", "is a path prefix of 'old/SECURITY.md', a path files.yml retires"],
     ["docs/GONE.md", "is a path a stale manifest record retires"],
     ["docs/GONE.md/x", "sits under 'docs/GONE.md', a path a stale manifest record retires"],
+    ["docs/OWN.md", "is a path the registration excepts"],
+    ["docs/OWN.md/copy.md", "sits under 'docs/OWN.md', a path the registration excepts"],
+    ["own", "is a path prefix of 'own/KEEP.md', a path the registration excepts"],
   ])("%s -> %p", (path, problem) => {
     expect(mirrorPathProblem(path, OWNED)).toBe(problem);
   });
@@ -449,7 +455,7 @@ describe("mirrorDeclarationProblems", () => {
     },
   );
 
-  test("a pattern that matches the registration, a written or retired path, or a literal target", () => {
+  test("a pattern that matches the registration, a written, retired, or excepted path, or a literal target", () => {
     const problems = mirrorDeclarationProblems(
       [
         L("copy", "*.md", "skills/a/LICENSE.md", "skills/*/AGENTS.md"),
@@ -470,6 +476,7 @@ describe("mirrorDeclarationProblems", () => {
       Ap("*/README.md", "the pattern matches 'docs/README.md', a path files.yml writes"),
       Ap("docs/*", "the pattern matches 'docs/README.md', a path files.yml writes"),
       Ap("docs/*", "the pattern matches 'docs/GONE.md', a path a stale manifest record retires"),
+      Ap("docs/*", "the pattern matches 'docs/OWN.md', a path the registration excepts"),
       Ap(
         ".github/*",
         "the pattern matches '.github/repo-platform-manifest.json', a path files.yml writes",
