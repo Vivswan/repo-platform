@@ -16,7 +16,7 @@
     "file-size": "bun actions/check-file-size/check-file-size.ts .",
     "wrap:check": "bun scripts/check/check_markdown_wrap.ts",
     "lint:yaml": "uvx --with-requirements actions/yamllint/requirements.txt yamllint -s .",
-    "validate": "bun actions/validate-managed-files/validator/validate_managed_files.ts --self --private false .",
+    "validate": "bun scripts/validate_self.ts",
     "test": "bun scripts/run_tests.ts",
     "postinstall": "for pkg in actions/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done",
     "prepare": "husky"

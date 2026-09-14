@@ -161,7 +161,8 @@ jobs:
           bun scripts/bootstrap.ts
           bun run typecheck
 
-  # The offline invariants are package.json's `invariants` script, so CI and `bun run check` run one list.
+  # The invariants are package.json's `invariants` script, so CI and `bun run check` run one list; `validate` installs
+  # the recorded commit's extract and runs its writer, so this job is networked.
   invariants:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -174,7 +175,7 @@ jobs:
         run: |
           bun install --frozen-lockfile --silent
           bun install --frozen-lockfile --silent --cwd actions/validate-managed-files
-      - name: Check the offline invariants
+      - name: Check the invariants
         run: bun run invariants
       # The plan every fleet repository runs on its PRs: the registration against files.yml, failing closed.
       - uses: ./actions/plan

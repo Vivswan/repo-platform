@@ -1,7 +1,7 @@
 {
   "name": "validate-managed-files",
   "private": true,
-  "description": "Dependency manifest for the validate-managed-files action: yaml is the validator's runtime dependency (it parses the registration and every YAML file it scans; files.yml it reads through the plan action's loader, installed from actions/plan); the report scripts under src/ carry none.",
+  "description": "Dependency manifest for the validate-managed-files action: yaml is the hygiene validator's runtime dependency (it parses every YAML file it scans); the step scripts under src/ carry none, and check.ts runs from the platform checkout with that checkout's dependencies.",
   "dependencies": {
     "yaml": "^2.9.0"
   },

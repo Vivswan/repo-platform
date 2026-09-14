@@ -45,10 +45,10 @@ Four files matter later:
 
 | File | Role |
 |---|---|
-| `.repo-platform.yml` | The module selection's home: edit its `modules:` list in a PR; the sync PR carrying the module's files follows the merge ([changing the module selection](#changing-the-module-selection)). Its presence is what marks the repo as managed. Repo-owned: the sync reads it and never rewrites it. |
+| `.repo-platform.yml` | The module selection's home: edit its `modules:` list in a PR, and the branch sync writes the module's files onto that PR ([changing the module selection](#changing-the-module-selection)). Its presence is what marks the repo as managed. Repo-owned: the sync reads it and never rewrites it. |
 | `.github/settings.local.yml` | Your settings overlay: identity keys, your own labels and rulesets. A starter, written once; the sync renders the managed `.github/settings.yml` from it and the fleet layers on every sync, and repo-platform's central run applies the rendered file ([settings](#5-settings-management)). Edit the overlay, never the rendered file. |
 | `.gitignore` | Split: the managed region carries the OS sections, the selected modules' sections (the toolchains' github/gitignore templates, the fuzzer's `/.fuzz-failures/`), agent local state, and the CI workspace paths repo-platform's workflow steps create inside every checked-out workspace (`/results.sarif`), so a stray local file of the same name can never be committed and later collide with the CI step that creates it. Repository-owned patterns go above the BEGIN marker or below the END marker ([split files](fleet-guidelines.md#split-files-the-managed-region)). |
-| `.github/repo-platform-manifest.json` | The ownership manifest: each platform-written path's class (`managed`, `split`, `starter`, or `mirror`) plus sha256 hashes of the managed content (a symlink mirror's hash covers its link target string), written by every sync. The `validate-managed-files` check blocks on drift against it ([the managed files check](#the-managed-files-check)): managed content changed outside a sync, or a recorded managed file missing from the repo. |
+| `.github/repo-platform-manifest.json` | The ownership manifest: each platform-written path's class (`managed`, `split`, `starter`, or `mirror`) plus sha256 hashes of the managed content (a symlink mirror's hash covers its link target string), written by every sync. The `validate-managed-files` check blocks on any byte that differs from what the recorded commit's sync writes ([the managed files check](#the-managed-files-check)). |
 
 ### What the sync writes
 
@@ -106,7 +106,7 @@ Two different pattern texts are nested as written, never by what they can match,
 | a symbolic link above a target (never followed), a source held this run, a pattern matching nothing or reading through a link, a glob landing on a nested or contested path | fails the sync: no PR, and the `[repo-platform] sync failed` issue names each declaration and its reason |
 | clean copies (`written`, `current`) | listed in the PR body but auto-merge-eligible: the declaration is repo-owned consent, and holding every LICENSE bump for review would defeat the auto-heal |
 
-**The manifest records every target** as class `mirror` with the copy's hash (a `symlink` target with `kind: symlink` and the hash of its link target string), so the next sync can tell its own previous write from a local edit. `validate-managed-files` reads each target through its recorded kind: a regular file where a link is recorded, a link where a copy is, or a link pointing elsewhere is a finding.
+**The manifest records every target** as class `mirror` with the copy's hash (a `symlink` target with `kind: symlink` and the hash of its link target string), so the next sync can tell its own previous write from a local edit. `validate-managed-files` judges each target as the writer does: a regular file where a link is declared, a link where a copy is, or a link pointing elsewhere is a finding.
 
 The implementation: [sync/writer/mirrors.ts](../.github/scripts/sync/writer/mirrors.ts) and, for the rules both readers share, [actions/plan/mirrors.ts](../actions/plan/mirrors.ts); [sync.md](sync.md#mirrors) has the outcome table.
 
@@ -133,25 +133,26 @@ The managed `all-green` job in the same ci.yml needs both callers and its own ch
 
 ### The managed files check
 
-The `validate-managed-files` step judges the repository against the platform's current shape, in one sticky PR comment plus the step summary, run by the [validate-managed-files](../actions/validate-managed-files/action.yml) action.
+The `validate-managed-files` step judges the repository against what repo-platform writes at the commit its manifest records ([sync.md](sync.md#judged-at-the-synced-commit)), in one sticky PR comment plus the step summary, run by the [validate-managed-files](../actions/validate-managed-files/action.yml) action.
 
-- **Its vocabulary** is the delivery commit's `files.yml`, read through the plan's loader ([files_config.ts](../actions/plan/files_config.ts)) so a `when` it judges live is one the plan accepted.
+- **Its vocabulary** is the recorded commit's `files.yml`, read by that commit's own writer, so a platform change reddens nothing until the repository syncs.
 - **The repository's side of every `when`** is the plan step's resolved visibility.
 
 | Check | Blocks on |
 |---|---|
-| Registration | a missing or unreadable `.repo-platform.yml`, a `modules` list that is not a list, a module name `files.yml` does not know |
+| The recorded commit | a manifest whose own entry records no `commit`, or one that is not a full sha or that repo-platform does not hold (the checkout fails): not judged, the reason naming the remedy (merge the pending sync PR, or dispatch a sync). A commit repo-platform holds off `stable`'s history is judged, with a freshness warning |
+| The sync's bytes | any byte that differs from what the recorded commit's writer writes over a copy of the repository (an edited managed file, a deleted or unmarked region, a replaced mirror, a registration change the sync has not carried yet), each path with a unified diff whose `+` lines are the sync's; and every reason the writer would hold the sync PR for, or its refusal |
 | Release-please config | a `release-as` key in `release-please-config.json` ([the release pipeline](#the-release-pipeline-release-please)) |
 | YAML | a YAML file anywhere in the repository that does not parse, carries a duplicate mapping key, or is a multi-document stream |
 | Conflict markers | a line opening with `<<<<<<< ` or `>>>>>>> `, or reading `=======`, in a source, config, or markdown file (the validator's text suffixes); a fenced example of the markers counts |
-| Manifest shape | a missing, unparsable, or malformed `.github/repo-platform-manifest.json`, an entry carrying a field the vocabulary lacks, or an entry keyed by a path the sync never writes (`./x`, `a//b`, `..`, a trailing slash, a backslash: none is a path the grammar allows, and the first two also alias a declared path the parity check would not recognise) |
-| Manifest parity | an entry recorded under a class other than the one `files.yml` writes its path under for this repository's modules and visibility (a relabel to `starter` would switch parity off; a path no selected entry writes, a mirror target say, is judged as recorded), managed content whose hash differs from its record (an edit outside a sync), or a recorded managed file missing from the repo |
 
 - **Every finding blocks.** The verdict is ONE per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 
 - **The report step always runs,** reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
 
-- **What it judges:** what the last sync recorded against the classes the edited selection makes live, so a module edit alone changes nothing here unless it flips a recorded path's class (the exception in the table below); the sync that follows, onto the PR's branch or as the sync PR after the merge, brings the files and the manifest together ([changing the module selection](#changing-the-module-selection)).
+- **Freshness informs:** the job summary says whether `stable` has moved past the recorded commit; nothing fails for that, and a sync moves the commit once the delivered surface differs.
+
+- **What it judges:** the tree against the commit its LAST sync recorded, so a platform change reddens nothing until the repository syncs, and a registration change on a PR is red until the sync writes the module's files onto the branch ([changing the module selection](#changing-the-module-selection)).
 
 ### Changing the module selection
 
@@ -159,34 +160,34 @@ A module change is one PR when the branch sync carries the files onto it: edit t
 
 The `repo-platform:sync` label on the PR does the same when the sync's whole diff touches no workflow file ([sync.md](sync.md#syncing-a-branch-by-label)); the repository token cannot push one, and the label's comment names the paths when it refuses.
 
-Without that dispatch it is two PRs: the registration edit, then the sync PR carrying the module's files and the manifest stamp that records them. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` step reads the new list on the next run, validating the registration on the first PR.
+The branch sync is the way through: the registration edit alone is red (below), and the label or the dispatch brings the module's files and the manifest stamp onto the PR as one commit. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` step reads the new list on the next run, validating the registration on the PR.
 
-- **Green on the first PR by design:** the managed-files check judges the stamped manifest against the classes the new selection makes live, so nothing is bypassed; the one exception is an edit that flips a recorded path's class (see the table below).
+- **Red on the first PR until the sync writes onto it:** the managed-files check runs the recorded commit's writer over a copy of the tree with the edited registration, so the module's missing files are findings naming each path with its bytes; the branch sync (the label or the dispatch) brings them and the check turns green.
 
-- **The one red to expect:** a module whose fleet-ci jobs read a file the sync has not written yet (a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the sync PR lands unless the first PR adds that file, or the branch sync writes it onto the PR.
+- **A module the recorded commit does not know yet** (added to the platform after this repository's last sync) is the writer's refusal instead, `unknown module(s)`, with the same way out: the sync runs at `stable`, knows the module, and moves the judge.
 
-- **The sync writes the module's DATA files** (its workflows, starters, and toolchain pins), onto the PR's branch or in the second PR once the first has merged:
+- **The other red to expect:** a module whose fleet-ci jobs read a file the sync has not written yet (a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the branch sync writes that file onto the PR.
+
+- **The sync writes the module's DATA files** (its workflows, starters, and toolchain pins) onto the PR's branch:
 
 ```text
 PR edits modules: in .repo-platform.yml
   -> plan reads the registration and checks it against the module data at the `stable` commit's root (an unknown module or a malformed file fails the job)
-  -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet (unless the edit flips a recorded path's class: see the table)
-  -> either: gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f branch=<pr-branch>
-             (or the repo-platform:sync label on the PR, when the sync's whole diff touches no workflow file)
-             one commit on the PR branch carries the files and the new manifest stamp; review and merge the one PR
-  -> or: merge the registration edit, then
-             gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f manual=true
-     the sync opens a PR carrying the files and the new manifest stamp (the writer replaces platform files whole), held for review
-  -> review and merge the sync PR
+  -> validate-managed-files is red: it names each file the sync would write for the new selection, with the bytes
+  -> gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f branch=<pr-branch>
+     (or the repo-platform:sync label on the PR, when the sync's whole diff touches no workflow file)
+     one commit on the PR branch carries the files and the new manifest stamp
+  -> with the label: approve the pushed head's run from the merge box (GitHub holds a repository-token push's run), or push a commit; the check is green
+  -> review and merge the one PR
 ```
 
 **What the PR check judges:** the `plan` step runs on every event and reads `.repo-platform.yml`, checking it against the module data at the delivery commit's root beside the plan action: every module name must exist and the file must parse.
 
 It fails closed, so an unknown module or a malformed registration never merges through a PR; a registration the sync does meet with an unknown name fails that sync in the same words, with no PR and a `[repo-platform] sync failed` issue on the repository.
 
-**What the PR check does not judge:** `validate-managed-files` reads the edited registration for its module names and for the class each recorded path now falls under, but its parity check walks the manifest the LAST sync recorded, so the new module's missing files are not findings. Nothing on the PR compares the tree against the new selection; the sync brings the files, and the manifest with them.
+**What the PR check judges beyond the plan:** `validate-managed-files` runs the recorded commit's writer over a copy of the tree with the edited registration, so the new module's missing files are findings with their bytes; the sync brings the files, and the manifest with them, and the check is green once it has.
 
-**The one edit that does fail the PR:** a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say); the writer refuses the declaration that now conflicts, so no sync, the branch sync included, restamps the record until it is gone. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules.
+**The one edit no sync can carry:** a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say); the writer refuses the declaration that now conflicts, so no sync, the branch sync included, restamps the record until it is gone. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules.
 
 **Enforced by:** [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` step. The sync side is a dispatch of sync-repos.yml onto the PR's branch or the `repo-platform:sync` label ([sync.md](sync.md#syncing-a-branch-by-label)), or a dispatch after the merge ([the manual run](#the-manual-run)).
 
@@ -296,6 +297,6 @@ Repository settings are applied from repo-platform for every managed repository 
 
 - **Everything fleet-shaped stays out of the overlay,** so the labels dependabot auto-creates can never fall out of sync with the roster: `dependencies` and `github_actions` always, plus one label per toolchain the repo's dependabot.yml covers: `javascript` for bun, `deno` for deno, `python:uv` for uv, `rust` for cargo (the tuples are the [settings layers'](settings.md#what-the-baseline-contains)).
 
-- **An overlay edit is two PRs:** yours, then the sync PR that re-renders `.github/settings.yml` ([the manual run](#the-manual-run) brings it at once). Never edit the rendered file: the next sync replaces it and holds its PR, and the [managed files check](#the-managed-files-check) reds the PR that edits it.
+- **An overlay edit is one PR with the branch sync:** the [managed files check](#the-managed-files-check) reds it while the rendered `.github/settings.yml` is stale, and the `repo-platform:sync` label or the branch dispatch re-renders the file onto the PR ([settings.md](settings.md#editing-your-settings)). Never edit the rendered file: the next sync replaces it and holds its PR.
 
-- **Nothing in the repository applies its settings:** repo-platform's central run applies the rendered file after every green main merge there and nightly, once the sync PR carrying it has merged ([settings.md](settings.md#how-the-apply-works)).
+- **Nothing in the repository applies its settings:** repo-platform's central run applies the rendered file after every green main merge there and nightly, once the PR carrying it has merged ([settings.md](settings.md#how-the-apply-works)).

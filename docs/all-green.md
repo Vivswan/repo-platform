@@ -271,7 +271,7 @@ One label on the PR, before it merges.
 
 ## Residuals, stated
 
-- **A PR can still gut a called workflow's content** (checks.yml is repo-owned) or hand-condition the managed `ci` caller away; validate-managed-files' parity check blocks any edit to the managed ci.yml, the caller's condition included, and review owns the rest - the same same-repo residual every check has.
+- **A PR can still gut a called workflow's content** (checks.yml is repo-owned) or hand-condition the managed `ci` caller away; validate-managed-files blocks any edit to the managed ci.yml, the caller's condition included, and review owns the rest - the same same-repo residual every check has.
 
 - **Any workflow in this repository could mint a look-alike `all-green` check run** (the Actions app pin does not distinguish jobs). The repo is its own sole workflow author; review owns that surface.
 

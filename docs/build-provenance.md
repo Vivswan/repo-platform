@@ -92,6 +92,8 @@ The sync also requires `files.yml` at the commit's root, since a commit without 
 
 **The manifest's own entry** records the commit the repository is judged against: the build when the delivered surface changed since the recorded commit, else the recorded commit, so it moves only when the delivered surface moved ([sync.md](sync.md#the-manifest)).
 
+**Every fleet repository is judged at that recorded commit:** the validate-managed-files action checks out repo-platform at it and runs that commit's `check.ts`, so a `stable` move reddens nothing until the repository syncs ([sync.md](sync.md#judged-at-the-synced-commit)).
+
 Old delivery commits stay reachable forever: they are main history.
 
 ## A new action input and its workflow land together

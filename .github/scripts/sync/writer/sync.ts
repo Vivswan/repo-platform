@@ -283,9 +283,8 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
     throw new Error(
       `${unreadable} manifest ${unreadable === 1 ? "record is" : "records are"} not a shape the writer ` +
         "records (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a " +
-        "mirror kind other than symlink, a split without its grammar or markers); the repository's " +
-        "validate-managed-files check names each - fix the manifest (git history has the stamped original), " +
-        "then dispatch the sync again",
+        "mirror kind other than symlink, a split without its grammar or markers); fix the manifest (git history " +
+        "has the stamped original; the class table is actions/shared/manifest.ts), then dispatch the sync again",
     );
   }
   const owned = ownedPaths(config, selection, stale);

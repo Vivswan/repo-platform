@@ -1,14 +1,16 @@
 name: Validate Managed Files
 description: >-
-  The fleet's validate-managed-files step body: runs the validator (the
-  validator/ script directory nested in this action) over the caller's
-  checkout, judging the platform's files against the ownership manifest the
-  sync writer stamped, then posts the findings as one sticky PR comment plus
-  the step summary and exports the one verdict as the `integrity` output.
-  The action never fails on its own - the report step ALWAYS runs - so the
-  comment is already posted when the caller fails LAST on `integrity`. The
-  calling job needs pull-requests: write for the comment (and nothing else
-  beyond contents: read).
+  The fleet's validate-managed-files step body: judges the caller's checkout
+  as repo-platform writes it at the commit the repository was last synced
+  with (that commit's own check.ts, run from a checkout of repo-platform the
+  action makes inside the tree at .repo-platform-judge and removes), then the
+  repository's YAML,
+  conflict-marker, and release-as hygiene, and posts the findings as one
+  sticky PR comment plus the step summary, exporting the one verdict as the
+  `integrity` output. The action never fails on its own - the report step
+  ALWAYS runs - so the comment is already posted when the caller fails LAST
+  on `integrity`. The calling job needs pull-requests: write for the comment
+  (and nothing else beyond contents: read).
 
 inputs:
   private:
@@ -38,8 +40,8 @@ runs:
         pin: ${{ github.action_path }}/../../files/bun/.bun-version
         required: "false"
 
-    # Every predictable scratch path, cleared by ONE fixed /bin/rm before
-    # anything reads it; any failed removal fails the step.
+    # Every predictable scratch path, cleared by ONE fixed /bin/rm before anything reads it; any failed removal fails
+    # the step.
     - name: Clear the scratch root
       id: clear
       continue-on-error: true
@@ -53,25 +55,62 @@ runs:
         "${{ runner.temp }}/validate-managed-files-verdict.json"
         "${{ runner.temp }}/validate-managed-files-report.md"
 
-    # The tarball ships no node_modules, so the dependencies are installed here: the action's own and the plan's,
-    # whose loader the validator reads files.yml through.
-    # FILES_CONFIG is the files.yml at the delivery commit's root, two levels above this action.
-    - name: Validate the checkout
-      id: validate
+    # The tarball ships no node_modules. Installed BEFORE the platform checkout exists, so a failed install leaves nothing
+    # of repo-platform's in the workspace for the caller's later checks to read; the report step turns it into the verdict.
+    - name: Install the action's dependencies
+      id: install
       if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'
       continue-on-error: true
       shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "${{ github.action_path }}"'
+
+    # The platform checkout sits in the workspace because actions/checkout places a repository nowhere else; a repository
+    # path already there is refused here, so the checkout never replaces the repository's own content.
+    - name: Read the commit the repository was synced with
+      id: read-commit
+      if: steps.install.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        PLATFORM_DIR: ${{ github.workspace }}/.repo-platform-judge
+      run: '"$ACTION_BUN" "${{ github.action_path }}/src/read_commit.ts"'
+
+    # The caller's token reads a public repository from a private caller too. A failed checkout (a recorded commit
+    # repo-platform's history lacks) reaches run.ts as this step's outcome and is reported, never ends the action here.
+    - name: Check out repo-platform at that commit
+      id: platform
+      if: steps.read-commit.outputs.commit != ''
+      continue-on-error: true
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: Vivswan/repo-platform
+        ref: ${{ steps.read-commit.outputs.commit }}
+        path: .repo-platform-judge
+        fetch-depth: 0
+        persist-credentials: false
+
+    # run.ts installs the platform checkout's dependencies at its root, so that commit's writer renders with its own
+    # versions, and removes the checkout on every path of its own.
+    - name: Validate the checkout
+      id: validate
+      if: steps.read-commit.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         ACTION_PATH: ${{ github.action_path }}
-        FILES_CONFIG: ${{ github.action_path }}/../../files.yml
+        COMMIT: ${{ steps.read-commit.outputs.commit }}
+        COMMIT_PROBLEM: ${{ steps.read-commit.outputs.problem }}
+        PLATFORM_DIR: ${{ github.workspace }}/.repo-platform-judge
+        PLATFORM_OUTCOME: ${{ steps.platform.outcome }}
+        REPOSITORY: ${{ github.repository }}
         REPOSITORY_PRIVATE: ${{ inputs.private }}
         SCRATCH_DIR: ${{ runner.temp }}/validate-managed-files
         VERDICT_FILE: ${{ runner.temp }}/validate-managed-files-verdict.json
-      run: |
-        "$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"
-        "$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH/../plan"
-        "$ACTION_BUN" "$ACTION_PATH/src/run.ts"
+      run: '"$ACTION_BUN" "$ACTION_PATH/src/run.ts"'
 
     # The ONE place the verdict is read and `integrity` is set, whatever
     # happened above. Bash so that the no-bun path can still export the

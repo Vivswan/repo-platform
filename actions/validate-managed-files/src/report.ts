@@ -4,7 +4,7 @@
 
 import { appendFileSync, writeFileSync } from "node:fs";
 import { env, requireEnv } from "../../shared/action_runtime.ts";
-import { SYNC_LABEL } from "../../shared/platform.ts";
+import { PLATFORM_NAME } from "../../shared/platform.ts";
 import { type Integrity, readVerdict } from "./verdict.ts";
 
 // Unless the clear step succeeded, the validator never ran: any verdict on
@@ -24,24 +24,18 @@ const runUrl = requireEnv("RUN_URL");
 const summaryFile = requireEnv("GITHUB_STEP_SUMMARY");
 const commentFile = requireEnv("COMMENT_FILE");
 
-/** The kind-change hold is write_managed.ts's and write_split.ts's rule (LINK_IN_THE_WAY). */
-const REMEDY = [
-  "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed",
-  "files whole but holds a path whose kind changed (a link in a file's place) for this repository to restore.",
-  `On a pull request, the \`${SYNC_LABEL}\` label runs the sync on its branch and reports what it would replace.`,
-  "This FAILS the check.",
-].join(" ");
+const FAILS = "This FAILS the check.";
 
 let integrity: string;
 switch (verdict.kind) {
   case "clean":
-    integrity = "Passed - this repository matches the state its last sync recorded.";
+    integrity = `Passed - this repository is what ${PLATFORM_NAME} writes at the commit it was synced with.`;
     break;
   case "findings":
-    integrity = `${verdict.findings}\n${REMEDY}`;
+    integrity = `${verdict.findings}\n\n${FAILS}`;
     break;
   case "not-judged":
-    integrity = `Not judged: ${verdict.reason}. See the [run log](${runUrl}). This FAILS the check.`;
+    integrity = `Not judged: ${verdict.reason}. See the [run log](${runUrl}). ${FAILS}`;
     break;
 }
 const blocking = verdict.kind !== "clean";
