@@ -23,9 +23,13 @@ How the `stable` tag gets moved, how a sync verifies the commit it names before 
 | `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | every managed workflow's `uses:` |
 | `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` |
 
-Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. Two constraints follow for every path on `main`: a `uses:` ref downloads the whole repository tarball at the tag, so no path may carry a name extraction cannot write (conditional landing is `files.yml`'s `when` clauses, never a filename), and a composite action must resolve from that tarball alone: its own directory plus the root files it reads by relative path (`files.yml`, `files/bun/.bun-version`), since nothing installs the repository's root dependencies on the caller's runner.
+Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. Two constraints follow for every path on `main`:
 
-Every self pin resolves: [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout, so a renamed or deleted action, or a pin off the delivery ref, fails CI here instead of the next fleet run.
+- **No unextractable name:** a `uses:` ref downloads the whole repository tarball at the tag, so no path may carry a name extraction cannot write (conditional landing is `files.yml`'s `when` clauses, never a filename).
+
+- **Self-contained actions:** a composite action must resolve from that tarball alone: its own directory plus the root files it reads by relative path (`files.yml`, `files/bun/.bun-version`), since nothing installs the repository's root dependencies on the caller's runner.
+
+**Every self pin resolves:** [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout. A renamed or deleted action, or a pin off the delivery ref, fails CI here instead of the next fleet run.
 
 ## Who can write `refs/tags/stable`?
 
@@ -48,18 +52,30 @@ A change merges to main as commit S. What happens, in order:
 | 3. Move | post-green.yml's move-stable job | [move_stable.ts](../.github/scripts/post-green/move_stable.ts) verifies S is main history with a green check, reads where the tag sits, and moves it to S with a lease push. |
 | 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml: calls reusable-site.yml with `github.sha` after the mover, so a green move's theme is what `@stable` serves the build ([all-green.md](all-green.md#after-the-gate)). Gated on the all-green result alone under `!cancelled()`: a red or skipped post-green never holds the site back (the site then deploys from the tag as it stands), and its own failure shows as its own red job. |
 
-The commit moved to is always SOURCE_SHA - the judged run's own commit on the call, the operator's sha input on a dispatch - never a read of origin/main, which can already be a newer, even red, commit (move_stable.ts's header owns this discipline).
+**The commit moved to is always SOURCE_SHA:** the judged run's own commit on the call, the operator's sha input on a dispatch. Never a read of origin/main, which can already be a newer, even red, commit (move_stable.ts's header owns this discipline).
 
-A missing move (a failed or evicted post-green run after a green gate) heals two ways: the next push to main moves the tag to the newer commit, or an operator dispatches post-green.yml with the green commit's sha. Until the heal, a sync copies from the commit the tag names as it stands (the residuals table; a sync PR, when one opens, records that commit). Anything without a green `all-green` check is not deliverable - re-run that commit's CI first (the gate job posts the check), then dispatch.
+**A missing move** (a failed or evicted post-green run after a green gate) heals two ways:
+
+- the next push to main moves the tag to the newer commit, or
+- an operator dispatches post-green.yml with the green commit's sha.
+
+Until the heal, a sync copies from the commit the tag names as it stands (the residuals table; a sync PR, when one opens, records that commit). Anything without a green `all-green` check is not deliverable - re-run that commit's CI first (the gate job posts the check), then dispatch.
 
 ## Newest-green wins, one mover at a time
 
 - **One lane.** Every workflow mover serializes in the repo-scoped concurrency lane `stable-tag-move`, held by post-green.yml's move-stable job as a literal string: a called run and a dispatched run are runs of DIFFERENT workflows, and a group derived from `github.workflow` would silently split the lane between them (post-green.yml's header).
+
 - **Ancestry skip.** A mover whose sha the tag already names, or has moved past (the tag's commit descends from the sha), moves nothing and exits green: a re-run of an older commit's legs after a newer main commit moved the tag never rolls the fleet back.
+
 - **The lease.** The push is `--force-with-lease` naming the value just read (the tag object for an annotated tag, an empty lease when the tag is absent), so two movers racing leaves the loser red and the tag untouched.
+
 - **The output.** `previous`, the commit the tag named before a move (empty when nothing moved), is the `read-directives` leg's base ahead of the push's `before`. On a call that leg reads on every mover result: a newer run's range starts after its own base, which can be this very commit, so only this commit's run is sure to read it ([all-green.md](all-green.md#after-the-gate)).
+
 - **The credential.** The push uses the run's `GITHUB_TOKEN` with `contents: write` (ci.yml's post-green job grants that ceiling), the way GitHub's own actions/publish-action moves an action's major tag with the default token.
-- **The open question, settled by the first live move.** The docs list the ref-update endpoints as possibly needing the `workflows` permission too, with no stated condition, and no official page says whether a ref update to a commit already on the server can trip the workflow-file refusal. If GitHub refuses the push, the fallback is the `REPO_PLATFORM_TOKEN` of the `fleet-operator` environment, read by a mover job declaring that environment and passed as its checkout's `token`, with no new secret.
+
+- **The open question, settled by the first live move.** The docs list the ref-update endpoints as possibly needing the `workflows` permission too, with no stated condition, and no official page says whether a ref update to a commit already on the server can trip the workflow-file refusal.
+
+- **The fallback if GitHub refuses the push** is the `REPO_PLATFORM_TOKEN` of the `fleet-operator` environment, read by a mover job declaring that environment and passed as its checkout's `token`, with no new secret.
 
 ## Provenance is the commit itself
 
@@ -72,13 +88,15 @@ The tag names a main commit whose own CI run passed, so there is no generated tr
 
 The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
-The delivery is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run). The writer records it as given: in full in the PR body, by its first 12 characters in the sync commit's subject. The tree itself carries no build stamp, so an unchanged tree opens no PR ([sync.md](sync.md#the-manifest)).
+**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run). The writer records it as given: in full in the PR body, by its first 12 characters in the sync commit's subject. The tree itself carries no build stamp, so an unchanged tree opens no PR ([sync.md](sync.md#the-manifest)).
 
 Old delivery commits stay reachable forever: they are main history.
 
 ## A new action input and its workflow land together
 
-A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([sync.md](sync.md#this-repository-as-a-target)), so a workflow never runs ahead of the actions it calls: the sync PR that carries a new workflow line lands only once the delivery ref names a commit carrying the action input it feeds. One PR may add the input and the line together; no check here runs the workflow before the move.
+A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([sync.md](sync.md#this-repository-as-a-target)).
+
+So a workflow never runs ahead of the actions it calls: the sync PR that carries a new workflow line lands only once the delivery ref names a commit carrying the action input it feeds. One PR may add the input and the line together; no check here runs the workflow before the move.
 
 ## Residuals
 

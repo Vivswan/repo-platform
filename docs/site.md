@@ -16,9 +16,18 @@ repo-platform dogfoods the docs half: this guide and the rest of `docs/` are the
 
 ## The leg and its triggers
 
-The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and `publish-release`, and runs on every run of ci.yml on main whose gate passed: a push, the nightly schedule (the rebuild), and a manual dispatch (the manual deploy). There is no workflow of its own and no tag trigger: a tag created without a push lands on the nightly rebuild, or right away via dispatch. The job calls reusable-site.yml`@stable` with `github.sha` (the judged commit, so a red main never reaches the site), and holds the `pages` concurrency lane.
+The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and `publish-release`, and runs on every run of ci.yml on main whose gate passed:
 
-The release legs sit before it as an ORDER, not a gate: the condition leads with `!cancelled()`, so the deploy waits for the release chain and then runs whatever its result, and a release commit's own deploy serves its new tag. Without the release-please module the release legs skip and the deploy follows the repo-owned post-green hook directly ([all-green.md](all-green.md#after-the-gate)).
+| Trigger | The deploy it is |
+|---|---|
+| a push | the ordinary deploy |
+| the nightly schedule | the rebuild |
+| a manual dispatch | the manual deploy |
+
+- **No workflow of its own and no tag trigger:** a tag created without a push lands on the nightly rebuild, or right away via dispatch.
+- **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
+
+**The release legs sit before it as an ORDER, not a gate:** the condition leads with `!cancelled()`, so the deploy waits for the release chain and then runs whatever its result, and a release commit's own deploy serves its new tag. Without the release-please module the release legs skip and the deploy follows the repo-owned post-green hook directly ([all-green.md](all-green.md#after-the-gate)).
 
 The called workflow is one job, in this order:
 
@@ -35,7 +44,9 @@ A repository with neither a hook output nor a `docs/` directory ends green with 
 
 ## The hook: `.github/actions/site-build/action.yml`
 
-The hook is a universal starter: the sync seeds it once in every repository, module or not, as a no-op, and never rewrites it. It is a composite action, so the fleet can run it from the caller's checkout inside the deploy job and hand its output directory to the same job with no artifact hop; a repository that has not filled it in publishes `docs/` alone.
+The hook is a universal starter: the sync seeds it once in every repository, module or not, as a no-op, and never rewrites it.
+
+It is a composite action, so the fleet can run it from the caller's checkout inside the deploy job and hand its output directory to the same job with no artifact hop. A repository that has not filled it in publishes `docs/` alone.
 
 | Contract | Value |
 |---|---|
@@ -98,20 +109,35 @@ The website is one build of the judged commit: version navigation belongs to the
 | `vX.Y.Z/` | that tag's docs, one directory per served tag |
 | `versions.json` | the version index the theme's dropdown reads |
 
-Versions are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../actions/pages-site/build.ts)). Every deploy rebuilds every tier, so a theme or pipeline change restyles the whole site on the next run. A tag whose tree has no `docs/`, or a `docs/` with no landing page (`README.md` or `index.md`), is skipped with a notice, and dead links inside old tags never fail the deploy: history cannot be fixed.
+- **Versions** are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../actions/pages-site/build.ts)).
+
+- **Every deploy rebuilds every tier,** so a theme or pipeline change restyles the whole site on the next run.
+
+- **Skipped tags:** a tag whose tree has no `docs/`, or a `docs/` with no landing page (`README.md` or `index.md`), is skipped with a notice, and dead links inside old tags never fail the deploy: history cannot be fixed.
 
 ## Docs conventions
 
-- Plain `.md` only: no MDX, no Vue components, no repo-local `.vitepress/` (the build REFUSES one; the theme is central). Rich widgets arrive as theme-provided markdown containers for every repository at once.
-- Double curly braces are Vue interpolation, compiled even inside an inline code span (fenced blocks are exempt): the build fails on them instead of shipping a blank page, so wrap literal ones in `<span v-pre>` or a `::: v-pre` container.
-- `docs/README.md` is the landing page and must exist; each directory's `README.md` is its index. The sidebar and nav derive from the file tree and each page's frontmatter: `title` (else the h1, else the file name), `order` (a number, ascending), `group` (a heading placed where the group's first member falls). A directory reads as its folder name with each word capitalized.
-- A table in `docs/README.md` whose one column is bare links to pages becomes the search launcher's curated rows (label from the first other cell, note from the rest); without one the launcher lists every page and heading. A landing page titled exactly like the site reads Overview in the sidebar.
-- Links are written as they read on GitHub: a link inside `docs/` (or into another staged root, below) becomes the page's route, a link to any other repository file becomes that file on GitHub at the version being read, and absolute URLs pass through. Heading anchors are GitHub's. Dead internal links fail the build; that failure is the point ([the PR check](#the-docs-pr-check)).
-- A ```` ```mermaid ```` fence renders as a diagram in the site's colors in both appearance modes; the source stays as the fallback without JavaScript and beside a parse error.
-- A top-level table wider than the doc column scrolls horizontally inside the column.
-- Translations go in `docs/<lang>/` (`zh-cn/`, `ja/`) mirroring the root tree: detected directories become locales with the language switcher, the root tree is the default locale, and a tagged version serves its own translations.
-- Every page gets local full-text search, an "Edit this page" link on default-branch tiers, `llms.txt` and `llms-full.txt` per tier, the version dropdown, the project facts card on the landing page (read from the repository at build time: the identity keys of `.github/settings.yml`, the toolchain pins, `LICENSE.md`), and a provenance line naming the ref, commit, and source file.
-- One file name cannot be linked from markdown: a `%` followed by two hex digits (`100%23b.md`); VitePress collapses the escape. Rename the file.
+- **Plain `.md` only:** no MDX, no Vue components, no repo-local `.vitepress/` (the build REFUSES one; the theme is central). Rich widgets arrive as theme-provided markdown containers for every repository at once.
+
+- **Double curly braces** are Vue interpolation, compiled even inside an inline code span (fenced blocks are exempt): the build fails on them instead of shipping a blank page, so wrap literal ones in `<span v-pre>` or a `::: v-pre` container.
+
+- **The landing page:** `docs/README.md` is the landing page and must exist; each directory's `README.md` is its index.
+
+- **Sidebar and nav** derive from the file tree and each page's frontmatter: `title` (else the h1, else the file name), `order` (a number, ascending), `group` (a heading placed where the group's first member falls). A directory reads as its folder name with each word capitalized.
+
+- **The search launcher:** a table in `docs/README.md` whose one column is bare links to pages becomes the search launcher's curated rows (label from the first other cell, note from the rest); without one the launcher lists every page and heading. A landing page titled exactly like the site reads Overview in the sidebar.
+
+- **Links** are written as they read on GitHub: a link inside `docs/` (or into another staged root, below) becomes the page's route, a link to any other repository file becomes that file on GitHub at the version being read, and absolute URLs pass through. Heading anchors are GitHub's. Dead internal links fail the build; that failure is the point ([the PR check](#the-docs-pr-check)).
+
+- **Diagrams:** a ```` ```mermaid ```` fence renders as a diagram in the site's colors in both appearance modes; the source stays as the fallback without JavaScript and beside a parse error.
+
+- **Wide tables:** a top-level table wider than the doc column scrolls horizontally inside the column.
+
+- **Translations** go in `docs/<lang>/` (`zh-cn/`, `ja/`) mirroring the root tree: detected directories become locales with the language switcher, the root tree is the default locale, and a tagged version serves its own translations.
+
+- **Every page gets** local full-text search, an "Edit this page" link on default-branch tiers, `llms.txt` and `llms-full.txt` per tier, the version dropdown, the project facts card on the landing page (read from the repository at build time: the identity keys of `.github/settings.yml`, the toolchain pins, `LICENSE.md`), and a provenance line naming the ref, commit, and source file.
+
+- **One file name cannot be linked from markdown:** a `%` followed by two hex digits (`100%23b.md`); VitePress collapses the escape. Rename the file.
 
 ## Other roots on the site (`site.include`)
 
@@ -129,11 +155,17 @@ site:
 | `mount` | the URL directory under the docs mount | `.../skills/` (or `.../<site.path>/skills/` beside a website) |
 | `page` | the file that serves as each child directory's page | `skills/repo-platform-sync-pr/SKILL.md` renders at `/skills/repo-platform-sync-pr/` |
 
-- A `README.md` at the include's root is the section's landing page; the other markdown files in a child directory render at their own paths.
-- Every version tier stages the root from its own ref; a tag without the directory skips it with a notice, and the default branch must carry every configured root.
-- `mount` is one or more lowercase URL segments joined by slashes (`skills`, `skills/agents`), `page` a plain markdown file name other than `index.md` or a dot-prefixed one, and no two roots share a `path` or a `mount`. Refused mounts: a locale-shaped name (`de`), a segment the site never walks (`node_modules`), `public/`. The plan refuses the same registration on every PR (one rule, [conventions.ts](../actions/pages-site/.vitepress/conventions.ts), read by both), so a root the deploy would misplace never reaches it. A child directory the site walks (neither dot-prefixed nor `node_modules`) carrying both the page and an `index.md` fails the build.
-- A `SKILL.md`-style page with neither a `title` nor an h1 is titled by its `name` frontmatter key, its `description` becomes the meta description, and its "Edit this page" link names the real source path.
-- Links resolve from the page's own repository path: `../repo-platform-sync-pr/SKILL.md` on a skill page is that skill's directory URL; `.codex-plugin/plugin.json` is the file on GitHub at the tier's ref.
+- **The section's landing page** is a `README.md` at the include's root; the other markdown files in a child directory render at their own paths.
+
+- **Per tier:** every version tier stages the root from its own ref; a tag without the directory skips it with a notice, and the default branch must carry every configured root.
+
+- **Key grammar:** `mount` is one or more lowercase URL segments joined by slashes (`skills`, `skills/agents`), `page` a plain markdown file name other than `index.md` or a dot-prefixed one, and no two roots share a `path` or a `mount`. Refused mounts: a locale-shaped name (`de`), a segment the site never walks (`node_modules`), `public/`.
+
+- **One rule, two readers:** the plan refuses the same registration on every PR (one rule, [conventions.ts](../actions/pages-site/.vitepress/conventions.ts), read by both), so a root the deploy would misplace never reaches it. A child directory the site walks (neither dot-prefixed nor `node_modules`) carrying both the page and an `index.md` fails the build.
+
+- **A `SKILL.md`-style page** with neither a `title` nor an h1 is titled by its `name` frontmatter key, its `description` becomes the meta description, and its "Edit this page" link names the real source path.
+
+- **Links resolve from the page's own repository path:** `../repo-platform-sync-pr/SKILL.md` on a skill page is that skill's directory URL; `.codex-plugin/plugin.json` is the file on GitHub at the tier's ref.
 
 ## Turning the docs half off (`site.path: null`)
 
@@ -155,9 +187,17 @@ The registration is read on every run, so the flip needs no sync. Use it when th
 
 ## The docs PR check
 
-fleet-ci.yml's `docs-check` job builds `docs/` strictly on every pull request of a repository selecting `site` that carries a `docs/` directory (and has not turned the docs half off), with the same include roots the deploy reads from the registration, so a dead link fails the PR instead of the deploy. It is one of the gating jobs behind `all-green`: the deploy would go red on the same link after the merge, and a job inside the `ci` call can never hang as an expected check the way a paths-filtered workflow could. A PR that changes no docs still runs it, quickly, over the unchanged tree. A `docs/` without `docs/README.md` fails it, naming the missing landing page.
+fleet-ci.yml's `docs-check` job builds `docs/` strictly on every pull request of a repository selecting `site` that carries a `docs/` directory (and has not turned the docs half off), with the same include roots the deploy reads from the registration, so a dead link fails the PR instead of the deploy.
 
-Internal links are checked across the whole assembled site, served the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`. Every same-site link on a page built from the default branch must resolve, wherever the target lives (a website page into the docs, a docs page to a staged skill, a `#fragment` naming a heading, an emitted asset, a link spelled with the site's own URL). A broken one fails with a `page -> link (reason)` list:
+- **A gating job:** it is one of the gating jobs behind `all-green`. The deploy would go red on the same link after the merge, and a job inside the `ci` call can never hang as an expected check the way a paths-filtered workflow could.
+
+- **Every PR runs it:** a PR that changes no docs still runs it, quickly, over the unchanged tree.
+
+- **The landing page:** a `docs/` without `docs/README.md` fails it, naming the missing landing page.
+
+**Internal links** are checked across the whole assembled site, served the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`.
+
+Every same-site link on a page built from the default branch must resolve, wherever the target lives (a website page into the docs, a docs page to a staged skill, a `#fragment` naming a heading, an emitted asset, a link spelled with the site's own URL). A broken one fails with a `page -> link (reason)` list:
 
 ```text
 broken internal links (page -> link):
@@ -169,9 +209,9 @@ broken internal links (page -> link):
 
 The nightly run checks the deployed site's EXTERNAL links after publishing with [lychee](https://github.com/lycheeverse/lychee) (internal ones are fatal at build time). The check runs on the schedule alone, so a fixed link closes the issue on the next clean night, never on a push.
 
-Findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the label of the `labels.site` registration key (its default is the site module's `tracking_label` in `files.yml`), closed automatically on the first clean night. While it is open it holds releases on repositories with the release-please module; `release-override` is the escape hatch.
+**The issue:** findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the label of the `labels.site` registration key (its default is the site module's `tracking_label` in `files.yml`), closed automatically on the first clean night. While it is open it holds releases on repositories with the release-please module; `release-override` is the escape hatch.
 
-The issue body is lychee's report: a count table, then every failing URL with its status and the page and position linking it, grouped by page. A report past GitHub's issue body limit is cut at whole lines, naming how many are missing. A timed-out or rate-limited (429) request is retried three times before it counts, and one that keeps failing is reported under its own status.
+**The body** is lychee's report: a count table, then every failing URL with its status and the page and position linking it, grouped by page. A report past GitHub's issue body limit is cut at whole lines, naming how many are missing. A timed-out or rate-limited (429) request is retried three times before it counts, and one that keeps failing is reported under its own status.
 
 | Skipped | Why |
 |---|---|
@@ -181,7 +221,9 @@ The issue body is lychee's report: a count table, then every failing URL with it
 | same-site links and assets, relative or spelled with the site's own URL | judged against the artifact at build time, not over the network |
 | URLs matching the repository's root `.lycheeignore` | the repository's own list of what an anonymous crawl cannot judge: hosts behind a bot wall (403) or a login redirect |
 
-`.lycheeignore` is [lychee's own format](https://lychee.cli.rs/recipes/excluding-links/): one regular expression per line, `#` starting a comment. lychee reads it from its working directory alone, so the deploy copies the repository's copy into the assembled site after the Pages upload; the served site never carries it. Keep it to hosts that are alive in a browser and reject automated clients, each with the reason: a broken link excluded there is never reported again.
+**`.lycheeignore`** is [lychee's own format](https://lychee.cli.rs/recipes/excluding-links/): one regular expression per line, `#` starting a comment. lychee reads it from its working directory alone, so the deploy copies the repository's copy into the assembled site after the Pages upload; the served site never carries it.
+
+Keep it to hosts that are alive in a browser and reject automated clients, each with the reason: a broken link excluded there is never reported again.
 
 ## Module parameters (registration keys)
 
@@ -191,18 +233,26 @@ The issue body is lychee's report: a count table, then every failing URL with it
 | `site.include` | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude)) | none |
 | `labels.site` | the link-rot tracking issue's label | the site module's `tracking_label` default in [files.yml](../files.yml) |
 
-The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label` with its `link_rot_color` and `link_rot_description`); a caller without a registration passes the same document by hand, and its `site_title` must be non-empty like the registration's `project.name`.
+**The `config` output:** the plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label` with its `link_rot_color` and `link_rot_description`). A caller without a registration passes the same document by hand, and its `site_title` must be non-empty like the registration's `project.name`.
 
 ## Pages enablement
 
-Nothing to do: the module's settings layer enables Pages with Actions-workflow builds on the next fleet settings apply ([settings.md](settings.md)). Only a deploy that must run before that apply needs the manual toggle: Settings -> Pages -> Source: GitHub Actions. The `github-pages` environment needs no protection rule: deploys never run on tag refs, and a required-reviewers rule there parks every deploy "waiting for review" with the later runs queued behind it on the `pages` lane. The settings apply does not manage environments, so remove such a rule by hand (Settings -> Environments -> github-pages).
+Nothing to do: the module's settings layer enables Pages with Actions-workflow builds on the next fleet settings apply ([settings.md](settings.md)). Only a deploy that must run before that apply needs the manual toggle: Settings -> Pages -> Source: GitHub Actions.
+
+**The `github-pages` environment needs no protection rule:** deploys never run on tag refs, and a required-reviewers rule there parks every deploy "waiting for review" with the later runs queued behind it on the `pages` lane. The settings apply does not manage environments, so remove such a rule by hand (Settings -> Environments -> github-pages).
 
 ## Caveats
 
-- The repository's website is one unversioned build of the judged commit; the `vX.Y.Z/` tiers exist only under the docs mount. A repository that wants versioned website builds puts them in its own hook output.
-- The hook runs under the deploy job's token (`pages: write`, `id-token: write`, `issues: write`, the same exposure the release hooks have), so it runs only code from the judged commit.
-- A repository that already had its own `.github/actions/site-build/action.yml` keeps it (`unchanged` in the sync report); the fleet passes it `base-path` and `origin`, which an unrelated action may not declare: check that it takes those two inputs and sets the `dist` output (the table above).
-- A repository with a `docs/` directory but no `docs/README.md` is red on every PR (`docs-check`) until the landing page exists, unless the docs half is off.
-- Serving Pages from a private repository requires a paid GitHub plan, and the served site is PUBLIC on non-Enterprise plans: selecting the module is the opt-in to that, per repository.
-- Prerelease-shaped tags (`v1.0.0-rc.1`) are not versions; only plain `vX.Y.Z` tags enter the version set.
-- The theme is one for the whole fleet (dark by default with a light variant, one accent hue per repository derived from its name), owned by [actions/pages-site/.vitepress/theme/](../actions/pages-site/.vitepress/theme/README.md), which says which file controls what. Nothing is configured per repository, and the docs build strips the theme's remote font imports, so the docs never load a font from a third party (the hook's website is copied as built).
+- **One unversioned website:** the repository's website is one unversioned build of the judged commit; the `vX.Y.Z/` tiers exist only under the docs mount. A repository that wants versioned website builds puts them in its own hook output.
+
+- **The hook's token:** the hook runs under the deploy job's token (`pages: write`, `id-token: write`, `issues: write`, the same exposure the release hooks have), so it runs only code from the judged commit.
+
+- **A pre-existing hook:** a repository that already had its own `.github/actions/site-build/action.yml` keeps it (`unchanged` in the sync report); the fleet passes it `base-path` and `origin`, which an unrelated action may not declare. Check that it takes those two inputs and sets the `dist` output (the table above).
+
+- **No landing page:** a repository with a `docs/` directory but no `docs/README.md` is red on every PR (`docs-check`) until the landing page exists, unless the docs half is off.
+
+- **Private repositories:** serving Pages from a private repository requires a paid GitHub plan, and the served site is PUBLIC on non-Enterprise plans: selecting the module is the opt-in to that, per repository.
+
+- **Prerelease tags:** prerelease-shaped tags (`v1.0.0-rc.1`) are not versions; only plain `vX.Y.Z` tags enter the version set.
+
+- **One theme:** the theme is one for the whole fleet (dark by default with a light variant, one accent hue per repository derived from its name), owned by [actions/pages-site/.vitepress/theme/](../actions/pages-site/.vitepress/theme/README.md), which says which file controls what. Nothing is configured per repository, and the docs build strips the theme's remote font imports, so the docs never load a font from a third party (the hook's website is copied as built).
