@@ -22,7 +22,6 @@ on:
 
 concurrency:
   group: nightly-fuzz
-  cancel-in-progress: false
 
 permissions:
   contents: read

@@ -16,7 +16,6 @@ permissions:
 # never cancel one mid-push.
 concurrency:
   group: refresh-gitignore
-  cancel-in-progress: false
 
 jobs:
   refresh:

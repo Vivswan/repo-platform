@@ -44,7 +44,6 @@ permissions:
 # and a called workflow must never wait on the lane its caller holds.
 concurrency:
   group: ${{ inputs.repos != '' && format('sync-repos-called-{0}', github.run_id) || 'sync-repos' }}
-  cancel-in-progress: false
 
 jobs:
   plan:
