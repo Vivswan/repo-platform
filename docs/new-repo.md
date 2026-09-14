@@ -155,7 +155,7 @@ The `validate-managed-files` step judges the repository against the platform's c
 
 ### Changing the module selection
 
-A module change is one PR when the branch sync carries the files onto it: edit the registration on a branch, then dispatch `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>` (or add the `repo-platform:sync` label to the PR, when the module writes no workflow file: the repository token cannot push one), and the module's files and the manifest stamp land on the same branch as one commit ([sync.md](sync.md#syncing-a-branch-by-label)).
+A module change is one PR when the branch sync carries the files onto it: edit the registration on a branch, then dispatch `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>` (or add the `repo-platform:sync` label to the PR, when the sync's whole diff touches no workflow file: the repository token cannot push one, and the label's comment names the paths when it refuses), and the module's files and the manifest stamp land on the same branch as one commit ([sync.md](sync.md#syncing-a-branch-by-label)).
 
 Without that dispatch it is two PRs: the registration edit, then the sync PR carrying the module's files and the manifest stamp that records them. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` step reads the new list on the next run, validating the registration on the first PR.
 
@@ -170,7 +170,7 @@ PR edits modules: in .repo-platform.yml
   -> plan reads the registration and checks it against the module data at the `stable` commit's root (an unknown module or a malformed file fails the job)
   -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet (unless the edit flips a recorded path's class: see the table)
   -> either: gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f branch=<pr-branch>
-             (or the repo-platform:sync label on the PR, when the module writes no workflow file)
+             (or the repo-platform:sync label on the PR, when the sync's whole diff touches no workflow file)
              one commit on the PR branch carries the files and the new manifest stamp; review and merge the one PR
   -> or: merge the registration edit, then
              gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f manual=true

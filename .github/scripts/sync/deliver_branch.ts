@@ -35,7 +35,7 @@ type Outcome =
   | { kind: "failed"; what: "a migration rung" | "the writer"; log: string }
   | { kind: "held"; report: string }
   | { kind: "workflow files"; paths: string[]; report: string }
-  | { kind: "unchanged" }
+  | { kind: "unchanged"; tipIsOurs: boolean }
   | { kind: "push rejected"; log: string }
   | { kind: "pushed"; commit: string; report: string };
 
@@ -71,7 +71,10 @@ function commentBody(
           ...report(outcome.report),
         ];
       case "unchanged":
-        return [`${build}: ${branch} already matches it, nothing pushed ${run}.`];
+        return [
+          `${build}: ${branch} already matches it, nothing pushed ${run}.`,
+          ...(outcome.tipIsOurs ? [APPROVAL_LINE] : []),
+        ];
       case "push rejected":
         return [
           `${build} NOT pushed: the push onto ${branch} was refused ${run}. A commit that reached the branch meanwhile is the usual cause; add the \`${SYNC_LABEL}\` label again once the branch is where you want it.`,
@@ -219,7 +222,12 @@ class BranchDelivery {
       );
     }
     if (changed.length === 0) {
-      this.comment({ kind: "unchanged" });
+      // A relabel queued behind the run that pushed lands here on that run's commit: its approval instruction stays.
+      const author = this.must(
+        this.git("log", "-1", "--format=%an"),
+        "reading the tip's author failed",
+      ).trim();
+      this.comment({ kind: "unchanged", tipIsOurs: author === SYNC_IDENTITY.name });
       console.log(`the branch already matches build ${this.build}; nothing to push`);
       return;
     }
