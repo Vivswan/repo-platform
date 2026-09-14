@@ -155,7 +155,9 @@ The `validate-managed-files` step judges the repository against the platform's c
 
 ### Changing the module selection
 
-A module change is one PR when the branch sync carries the files onto it: edit the registration on a branch, then dispatch `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>` (or add the `repo-platform:sync` label to the PR, when the sync's whole diff touches no workflow file: the repository token cannot push one, and the label's comment names the paths when it refuses), and the module's files and the manifest stamp land on the same branch as one commit ([sync.md](sync.md#syncing-a-branch-by-label)).
+A module change is one PR when the branch sync carries the files onto it: edit the registration on a branch, dispatch `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>`, and the module's files and the manifest stamp land on the same branch as one commit ([sync.md](sync.md#syncing-a-branch)).
+
+The `repo-platform:sync` label on the PR does the same when the sync's whole diff touches no workflow file ([sync.md](sync.md#syncing-a-branch-by-label)); the repository token cannot push one, and the label's comment names the paths when it refuses.
 
 Without that dispatch it is two PRs: the registration edit, then the sync PR carrying the module's files and the manifest stamp that records them. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` step reads the new list on the next run, validating the registration on the first PR.
 

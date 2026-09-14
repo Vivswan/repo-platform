@@ -42,6 +42,9 @@ type Outcome =
 /** GitHub holds the pull_request run a repository-token push creates for approval; the auto-format starter's notice says the same. */
 const APPROVAL_LINE =
   "GitHub holds the new head's pull_request run for approval, so its checks stay unreported until you approve the run from the merge box or push a commit of your own.";
+/** The unchanged tip may be the operator's branch dispatch's commit, whose fleet-token push created an ordinary run. */
+const RELABEL_APPROVAL_LINE =
+  "If a label run pushed this tip, GitHub holds its pull_request run for approval; approve it from the merge box or push a commit of your own.";
 
 function commentBody(
   outcome: Outcome,
@@ -73,7 +76,7 @@ function commentBody(
       case "unchanged":
         return [
           `${build}: ${branch} already matches it, nothing pushed ${run}.`,
-          ...(outcome.tipIsOurs ? [APPROVAL_LINE] : []),
+          ...(outcome.tipIsOurs ? [RELABEL_APPROVAL_LINE] : []),
         ];
       case "push rejected":
         return [
