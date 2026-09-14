@@ -49,7 +49,9 @@ describe("write_fleet_lint_tree.ts", () => {
       ).modules;
     expect(registered("all")).toEqual(Object.keys(FILES.modules));
     expect(registered("none")).toEqual([]);
+    // The all tree lands the module workflows over the base ones; two equal trees lint one selection twice.
     expect(landed.none.filter((file) => !landed.all.includes(file))).toEqual([]);
+    expect(landed.all.length).toBeGreaterThan(landed.none.length);
     for (const name of ["all", "none"]) {
       expect(existsSync(join(dest, name, ".git"))).toBe(true);
       expect(existsSync(join(dest, name, ".github/actionlint.yaml"))).toBe(true);
