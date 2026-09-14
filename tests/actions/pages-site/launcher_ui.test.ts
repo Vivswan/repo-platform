@@ -6,11 +6,13 @@ import type {
   PageIndexEntry,
 } from "../../../actions/pages-site/.vitepress/theme/launcher-model.ts";
 import {
+  clampHighlight,
   decodeEntities,
   flatRows,
   foldLabel,
   type HotkeyIntent,
   hotkeyIntent,
+  initialHighlight,
   type KeyIntent,
   type KeyState,
   keyIntent,
@@ -140,7 +142,42 @@ describe("foldLabel", () => {
   });
 });
 
-describe("moveHighlight", () => {
+describe("the highlight", () => {
+  // A typed query lands on its first row so Enter opens it; a highlight past the surviving rows clamps to the last one.
+  // Either drifting (start at -1, or keep a stale index) leaves Enter a no-op with the list still rendered.
+  test("starts at the first row of a nonblank query and clamps to the rows that survive a filter", () => {
+    expect(
+      [
+        ["release", 4],
+        ["   ", 4],
+        ["", 4],
+        ["release", 0],
+      ].map(([query, count]) => [query, count, initialHighlight(String(query), Number(count))]),
+    ).toEqual([
+      ["release", 4, 0],
+      ["   ", 4, -1],
+      ["", 4, -1],
+      ["release", 0, -1],
+    ]);
+    expect(
+      [
+        [10, 1],
+        [3, 3],
+        [1, 3],
+        [-1, 3],
+        [0, 0],
+        [-1, 0],
+      ].map(([current, count]) => [current, count, clampHighlight(current, count)]),
+    ).toEqual([
+      [10, 1, 0],
+      [3, 3, 2],
+      [1, 3, 1],
+      [-1, 3, -1],
+      [0, 0, -1],
+      [-1, 0, -1],
+    ]);
+  });
+
   // The listbox contract: wrap both ways, and -1 (nothing highlighted) over an empty list.
   test.each<[number, 1 | -1, number, number]>([
     [-1, 1, 3, 0],

@@ -20,6 +20,7 @@ import {
 } from "../../../actions/plan/plan.ts";
 import { parseRegistration, type Registration } from "../../../actions/plan/registration.ts";
 import { declaredLabelTuple, reservedLabelNames } from "../../../actions/plan/reserved_labels.ts";
+import { loadAction } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
@@ -439,11 +440,13 @@ describe("plan.ts as a child", () => {
     `config={"site_title":"${title}","docs_path":"docs","include":${include},"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}\n`;
 
   // The row names are fleet-ci's `needs.plan.outputs` contract: a renamed or missing row leaves its jobs unselected, green.
+  // fleet-ci passes no `mode`, so the default-mode row runs under the manifest's declared default.
+  const MODE_DEFAULT = String(loadAction("actions/plan/action.yml").inputs?.mode.default);
   test.each<{ reason: string; registration: string; env: Record<string, string>; output: string }>([
     {
-      reason: "default mode",
+      reason: "default mode, the mode fleet-ci gets by omitting the input",
       registration: `modules: [bun, fuzzer, release-please]\n${PROJECT}`,
-      env: { PRIVATE: "false" },
+      env: { PRIVATE: "false", MODE: MODE_DEFAULT },
       output: [
         'modules=["bun","release-please","fuzzer"]',
         "private=false",
