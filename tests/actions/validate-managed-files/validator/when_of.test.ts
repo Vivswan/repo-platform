@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { When } from "../../../../actions/shared/selection.ts";
 import { whenOf } from "../../../../actions/validate-managed-files/validator/when_of.ts";
 
-const MODULES = { a: { codeql_language: "python" }, b: { pin: {} }, c: { codeql_language: "go" } };
+const MODULES = {
+  a: { codeql_languages: ["python"] },
+  b: { pin: ["x"] },
+  c: { codeql_languages: ["go"] },
+};
 
 describe("whenOf", () => {
   test.each<{ reason: string; value: unknown; when: When | null | undefined }>([
@@ -18,7 +22,7 @@ describe("whenOf", () => {
     { reason: "a string where a list goes", value: { any: "a" }, when: undefined },
     {
       reason: "a list declared by module data expands to the modules declaring the key",
-      value: { any: { declaring: "codeql_language" }, without: { declaring: "pin" } },
+      value: { any: { declaring: "codeql_languages" }, without: { declaring: "pin" } },
       when: { any: ["a", "c"], without: ["b"] },
     },
     { reason: "a derived list naming no key", value: { any: { declaring: 1 } }, when: undefined },

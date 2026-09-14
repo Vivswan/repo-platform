@@ -43,7 +43,7 @@ bun .github/scripts/sync/writer/sync.ts \
 ```yaml
 placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, private, fuzzer_label, fuzzer_label_color, fuzzer_label_description]
 modules:
-  bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun]}
+  bun: {codeql_languages: [javascript-typescript], gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
   release-please: {}
 settings:
@@ -113,7 +113,7 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `when` form | Used by |
 | --- | --- |
 | `modules: [x]` | every module-owned file |
-| `any: {declaring: <key>}` | the CodeQL settings layer (`codeql_language`), `auto-format.yml` (`toolchain_steps`), the Toolchain variant of `AGENTS.md` (`agents_toolchain`) |
+| `any: {declaring: <key>}` | the CodeQL settings layer (`codeql_languages`), `auto-format.yml` (`toolchain_steps`), the Toolchain variant of `AGENTS.md` (`agents_toolchain`) |
 | `without: [...]` | `LICENSE.md` (not `custom-license`), the plain variant of `.typography-allow` |
 | `without: {declaring: <key>}` | the plain variant of `AGENTS.md` (`agents_toolchain`) |
 | `private: true` / `false` | the public, private, and CodeQL settings layers |
@@ -130,13 +130,15 @@ The three links carry no `when`: every repository gets them.
 | Module data key | Meaning | Reader |
 | --- | --- | --- |
 | `description` | the module's one-line description | docs and the PR body |
-| `codeql_language` | the CodeQL language the toolchain contributes | the fleet plan |
+| `codeql_languages` | the CodeQL languages the toolchain contributes; the plan folds the selected modules' lists into one deduplicated matrix | the fleet plan |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
 | `gitignore_sources` | the github/gitignore templates and platform-authored sections the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
 | `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
+
+Every many-of key is a list, `codeql_languages` and the block lists alike: a key outside `description`, `path`, and `tracking_label` must hold a non-empty list of names, and one spelled as a single word is a loader error naming the module and key.
 
 Placeholders in use beyond the project block: `fuzzer_label`, `fuzzer_label_color`, and `fuzzer_label_description` in `nightly-fuzz.yml`; `nightly_label`, `nightly_label_color`, and `nightly_label_description` in `nightly.yml`. No committed source names `site_label`: the site leg does not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
 
@@ -172,7 +174,7 @@ A module with no files still appears under `modules` (`custom-license`) so a reg
 | `without: [a]` | none of the listed modules is selected |
 | `private: true` | the repository's visibility matches |
 
-A list position may name a module-data key instead of the modules: `any: {declaring: codeql_language}` is the list of every module whose data carries `codeql_language`, in `modules` order. The loader expands it, so a list spelled this way follows the modules block and a new module joins it by declaring the key; a key no module declares is a loader error.
+A list position may name a module-data key instead of the modules: `any: {declaring: codeql_languages}` is the list of every module whose data carries `codeql_languages`, in `modules` order. The loader expands it, so a list spelled this way follows the modules block and a new module joins it by declaring the key; a key no module declares is a loader error.
 
 - The selected modules are the registration's `modules` in `files.yml` order. A name `files.yml` does not offer fails the sync in the plan's words (the refusal the `plan` job gives the PR that introduces it); nothing is dropped.
 - Two entries for one path must be provably exclusive: a module one requires and the other forbids, an `any` list the other forbids entirely, or opposite `private` values. Anything subtler is a loader error.
