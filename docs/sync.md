@@ -369,7 +369,7 @@ Rows appear only for files present, save a `released` row, which reports a recor
 
 - **A rung ships with the PR that changes the shape** and rides the same fleet-sync round (`fleet-sync:all`), with one test seen red on the old shape and a no-op control.
 
-- **A rung's edit is committed because the rung reported it:** the delivery stages the runner's list beside the writer's paths and nothing else, so an edit at a path the rung did not print stays out of the commit.
+- **A rung's edit is committed because the rung reported it:** the delivery stages the runner's list, the writer's paths, and the manifest, nothing else, so an edit at a path neither the rung printed nor the writer's report or the manifest names stays out of the commit.
 
 | Rung | Transition |
 | --- | --- |
