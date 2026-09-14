@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   classify,
+  isExempt,
   isMarkdown,
   type LineKind,
   scanMarkdown,
@@ -8,7 +9,7 @@ import {
 
 describe("classify", () => {
   // The scanner tracks continuation lines by kind, so a misread kind hides a wrapped paragraph or flags a
-  // structural line; each row pins the kind of one line shape, blockquote markers stripped first.
+  // structural line.
   test.each<[string, LineKind]>([
     ["Plain sentence.", "prose"],
     ["", "blank"],
@@ -230,11 +231,12 @@ describe("scanMarkdown", () => {
 });
 
 describe("scan scope", () => {
-  // A scanner that takes no file passes the gate silently; one row of each polarity.
+  // A scanner that takes no file passes the gate silently.
   test.each([
     ["files/deno/AGENTS.block.toolchain.md", true],
+    ["docs/settings.md", true],
     ["files/fuzzer/.block.fuzzer.gitignore", false],
-  ])("isMarkdown(%s) is %s", (path, taken) => {
-    expect(isMarkdown(path)).toBe(taken);
+  ])("%s is scanned: %s", (path, scanned) => {
+    expect(isMarkdown(path) && !isExempt(path)).toBe(scanned);
   });
 });
