@@ -51,7 +51,8 @@ export async function fetchText(
   } catch {
     throw new Error(`GET ${url} failed before a response (network, TLS, or timeout)`);
   }
-  if (!response.ok) throw new Error(`GET ${url} failed: HTTP ${response.status}`);
+  // 200 alone: a 204 or 206 is "ok" to fetch and would render an empty or partial block.
+  if (response.status !== 200) throw new Error(`GET ${url} failed: HTTP ${response.status}`);
   try {
     return await response.text();
   } catch {

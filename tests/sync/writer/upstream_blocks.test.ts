@@ -87,6 +87,23 @@ describe("fetchUpstreamBodies", () => {
     );
   });
 
+  test("a 2xx that is not 200 rejects too: an empty 204 body would render a heading over nothing", async () => {
+    const noContent = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => new Response(null, { status: 204 }),
+    });
+    try {
+      await expect(
+        fetchUpstreamBodies([gitignore], `http://127.0.0.1:${noContent.port}`),
+      ).rejects.toThrow(
+        `GET http://127.0.0.1:${noContent.port}/github/gitignore/${SHA}/Global/Windows.gitignore failed: HTTP 204`,
+      );
+    } finally {
+      noContent.stop(true);
+    }
+  });
+
   test("a body that breaks off after the headers rejects with the fixed body line", async () => {
     // A raw socket, since an HTTP server cannot promise more bytes than it sends: 100 announced, 6 delivered, then closed.
     const truncating = Bun.listen({
