@@ -214,51 +214,6 @@ export function declaredPrivate(overlay: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
-export interface IdentityIssue {
-  key: string;
-  expected: string;
-  got: string;
-}
-
-/** The apply never touches an undeclared key, so drift in a missing identity key is never healed; the starter seeds all four. */
-export function identityKeyIssues(repository: Record<string, unknown>): IdentityIssue[] {
-  const issues: IdentityIssue[] = [];
-  const got = (value: unknown) => (value === undefined ? "missing" : JSON.stringify(value));
-  if (typeof repository.description !== "string" || repository.description === "") {
-    issues.push({
-      key: "description",
-      expected: "a non-empty description string",
-      got: got(repository.description),
-    });
-  }
-  if (typeof repository.homepage !== "string") {
-    issues.push({
-      key: "homepage",
-      expected: 'a homepage string ("" declares-and-clears)',
-      got: got(repository.homepage),
-    });
-  }
-  const topics = repository.topics;
-  if (
-    typeof topics !== "string" &&
-    !(Array.isArray(topics) && topics.every((t) => typeof t === "string"))
-  ) {
-    issues.push({
-      key: "topics",
-      expected: "a declared topics value (string or string list)",
-      got: got(topics),
-    });
-  }
-  if (typeof repository.private !== "boolean") {
-    issues.push({
-      key: "private",
-      expected: "an explicit boolean, so the apply manages visibility",
-      got: got(repository.private),
-    });
-  }
-  return issues;
-}
-
 /** GitHub Actions' app id; every required-check entry pins it so only a workflow run can satisfy the context. */
 export const GITHUB_ACTIONS_APP_ID = 15368;
 

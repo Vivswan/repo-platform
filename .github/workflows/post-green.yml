@@ -145,7 +145,6 @@ jobs:
     if: github.event_name != 'workflow_dispatch' && !cancelled()
     concurrency:
       group: settings-repos
-      cancel-in-progress: false
     permissions:
       contents: read
       checks: read

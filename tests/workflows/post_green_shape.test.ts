@@ -9,7 +9,7 @@ const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 interface Job {
   needs?: string[];
   if?: string;
-  concurrency?: { group: string; "cancel-in-progress": boolean };
+  concurrency?: { group: string; "cancel-in-progress"?: boolean };
   uses?: string;
   with?: Record<string, string>;
   outputs?: Record<string, string>;
@@ -314,10 +314,9 @@ describe("post-green wiring", () => {
     const settingsFleet = jobs["settings-fleet"];
     expect(settingsFleet.needs).toEqual(["sync-fleet"]);
     expect(settingsFleet.if).toBe("github.event_name != 'workflow_dispatch' && !cancelled()");
-    expect(settingsFleet.concurrency).toEqual({
-      group: "settings-repos",
-      "cancel-in-progress": false,
-    });
+    // No cancel-in-progress: GitHub's default (false) is the one value the
+    // arrival-ordered lane admits (settings-repos.yml).
+    expect(settingsFleet.concurrency).toEqual({ group: "settings-repos" });
     expect(settingsFleet.uses).toBe("./.github/workflows/settings-repos.yml");
     expect(settingsFleet.with).toEqual({
       repos: "all",
@@ -335,14 +334,13 @@ describe("post-green wiring", () => {
     const settingsRepos = read(".github/workflows/settings-repos.yml");
     const doc = parseYaml(settingsRepos) as {
       on: Record<string, { inputs?: Record<string, unknown> }>;
-      concurrency: { group: string; "cancel-in-progress": boolean };
+      concurrency: { group: string; "cancel-in-progress"?: boolean };
     };
     expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
     expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos", "sha"]);
     expect(doc.concurrency).toEqual({
       group:
         "${{ inputs.sha != '' && format('settings-repos-called-{0}', github.run_id) || 'settings-repos' }}",
-      "cancel-in-progress": false,
     });
     expect(settingsRepos).not.toContain("paths:");
     expect(settingsRepos).toContain("ONLY_REPO: ${{ inputs.repos }}");
