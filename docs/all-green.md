@@ -5,13 +5,25 @@ group: Start here
 
 # All-green convention
 
-Every repository in the fleet - repo-platform included - gates merges on a required status check named `all-green`: the check run of an ordinary CI job. The job needs every gating job, runs on `if: always()`, and judges the results through [re-actors/alls-green](https://github.com/re-actors/alls-green), a third-party action pinned by sha like every other ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)). The managed skeleton's job is in [files/base/.github/workflows/ci.yml](../files/base/.github/workflows/ci.yml); repo-platform's own is in its [ci.yml](../.github/workflows/ci.yml).
+Every repository in the fleet - repo-platform included - gates merges on a required status check named `all-green`: the check run of an ordinary CI job.
 
-The judgment, whole: every needed result must be `success`, or `skipped` for a job named in `allowed-skips`. Anything else (`failure`, `cancelled`, a skip the list does not name) fails the gate, and the step summary lists every job with its result. The managed skeleton names `checks` alone, so a schedule night passes on `ci` and an all-skipped run cannot pass; repo-platform's own ci.yml names nothing, since none of its gating jobs may skip.
+- **The job** needs every gating job, runs on `if: always()`, and judges the results through [re-actors/alls-green](https://github.com/re-actors/alls-green), a third-party action pinned by sha like every other ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)).
+- **Where it lives:** the managed skeleton's job is in [files/base/.github/workflows/ci.yml](../files/base/.github/workflows/ci.yml); repo-platform's own is in its [ci.yml](../.github/workflows/ci.yml).
 
-The judgment's own scenario tests are alls-green's. The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
+**The judgment, whole:** every needed result must be `success`, or `skipped` for a job named in `allowed-skips`. Anything else (`failure`, `cancelled`, a skip the list does not name) fails the gate, and the step summary lists every job with its result.
 
-repo-platform's own main also requires the pull request branch to be up to date before merging: the `main-up-to-date` ruleset in its [overlay](../.github/settings.local.yml), with no bypass, so a stale merge fails at GitHub for admins too (`gh pr update-branch` first) and a direct push to main is refused unless the commit already carries a passing `all-green` run. The fleet does not, because sync and Dependabot pull requests would stall behind every merge.
+| ci.yml | `allowed-skips` | Why |
+| --- | --- | --- |
+| the managed skeleton | `checks` alone | so a schedule night passes on `ci` and an all-skipped run cannot pass |
+| repo-platform's own | nothing | since none of its gating jobs may skip |
+
+**The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
+
+**repo-platform's own main also requires the pull request branch to be up to date before merging:** the `main-up-to-date` ruleset in its [overlay](../.github/settings.local.yml), with no bypass.
+
+- A stale merge fails at GitHub for admins too (`gh pr update-branch` first).
+- A direct push to main is refused unless the commit already carries a passing `all-green` run.
+- The fleet does not, because sync and Dependabot pull requests would stall behind every merge.
 
 ## Quick triage: why is my PR red or waiting?
 
@@ -25,9 +37,28 @@ repo-platform's own main also requires the pull request branch to be up to date 
 
 ## What gates what
 
-- A managed repository's ci.yml is one byte-identical file for the whole fleet. It carries three gating jobs: `checks` (calls the repo-owned checks.yml; skipped on the nightly schedule run, which the two fleet callers share: in the `ci` caller CodeQL reruns on the plan's `weekly` day and the other checks stand down, and the `nightly` caller runs the Trivy scan and files its tracking issue), `ci` (calls [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@stable` with no inputs: the `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels), and `all-green` needing both - plus the gate-downstream `post-green` caller and the static legs ([after the gate](#after-the-gate)), and the schedule-only `nightly` caller of [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml)`@stable` (the nightly [security scan](security-scans.md), behind its own caller because it runs on the schedule alone and files the tracking issue; public repositories only, since a private repository pays for every job that runs and a skipped job bills nothing), all of which gate nothing. The membership rule: what gates a managed repository is being a job in fleet-ci.yml or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
-- Inside fleet-ci.yml, a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green.
-- The checks every repository runs are the steps of one `standard-checks` job, because GitHub bills a job a rounded-up minute. Each check step runs under `!cancelled()` once the plan resolved (one failure never hides another; a cancelled run stops them; a failed plan runs none), and the judge step last fails the job naming every failed check in the log and step summary; a step that stood down is never a failure.
+A managed repository's ci.yml is one byte-identical file for the whole fleet. It carries three gating jobs:
+
+| Gating job | What it does |
+| --- | --- |
+| `checks` | calls the repo-owned checks.yml; skipped on the nightly schedule run, which the two fleet callers share: in the `ci` caller CodeQL reruns on the plan's `weekly` day and the other checks stand down, and the `nightly` caller runs the Trivy scan and files its tracking issue |
+| `ci` | calls [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@stable` with no inputs: the `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels |
+| `all-green` | needs both |
+
+The jobs beside them gate nothing:
+
+| Non-gating job | What it is |
+| --- | --- |
+| the `post-green` caller and the static legs | gate-downstream ([after the gate](#after-the-gate)) |
+| the schedule-only `nightly` caller of [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml)`@stable` | the nightly [security scan](security-scans.md), behind its own caller because it runs on the schedule alone and files the tracking issue; public repositories only, since a private repository pays for every job that runs and a skipped job bills nothing |
+
+**The membership rule:** what gates a managed repository is being a job in fleet-ci.yml or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
+
+- **Inside fleet-ci.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green.
+
+- **The checks every repository runs** are the steps of one `standard-checks` job, because GitHub bills a job a rounded-up minute.
+
+- **Each check step** runs under `!cancelled()` once the plan resolved (one failure never hides another; a cancelled run stops them; a failed plan runs none), and the judge step last fails the job naming every failed check in the log and step summary; a step that stood down is never a failure.
 
 | Step | Runs on | Notes |
 | --- | --- | --- |
@@ -38,46 +69,141 @@ repo-platform's own main also requires the pull request branch to be up to date 
 | `trivy` | every push and pull request | the blocking half of the [security scans](security-scans.md) |
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
 
-- Beside it, one job each: `semgrep` and `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts. Each check's per-finding bypass is the table in [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check).
-- Repo-platform's own ci.yml has no callers to hide behind: its gating jobs are the needs list itself. Two of them, `validate-skills` (structure, offline) and `skills-discovery` (the real `npx skills` listing, so its own job), run [Vivswan/skills' validate-skills action](https://github.com/Vivswan/skills/tree/main/.github/actions/validate-skills) on this repository's own skills catalog, pinned by sha like every other third-party action ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)).
-- A repo-owned advisory check opts out with `continue-on-error: true` on its job in checks.yml.
+- **Beside it, one job each:** `semgrep` and `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts. Each check's per-finding bypass is the table in [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check).
+
+- **Repo-platform's own ci.yml** has no callers to hide behind: its gating jobs are the needs list itself. Two of them, `validate-skills` (structure, offline) and `skills-discovery` (the real `npx skills` listing, so its own job), run [Vivswan/skills' validate-skills action](https://github.com/Vivswan/skills/tree/main/.github/actions/validate-skills) on this repository's own skills catalog, pinned by sha like every other third-party action ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)).
+
+- **A repo-owned advisory check** opts out with `continue-on-error: true` on its job in checks.yml.
 
 ## Consuming the gate
 
-Anything that asks "is this commit green" reads the CHECK RUN, never the CI run's conclusion (a run whose gating job was skipped still concludes success). [shared/all_green.ts](../.github/scripts/shared/all_green.ts) is the one implementation, shared by the [stable tag mover](build-provenance.md), the sync's delivery-commit gate, and the [settings green-commit gate](settings.md#when-it-runs):
+Anything that asks "is this commit green" reads the CHECK RUN, never the CI run's conclusion (a run whose gating job was skipped still concludes success).
 
-- Consumers that wake on their own (a dispatched tag move, the sync) can race a fresh check, so the read polls briefly before failing closed. The unwedge for a missing check is re-running the sha's CI run - the gate job posts the check.
+- **One implementation:** [shared/all_green.ts](../.github/scripts/shared/all_green.ts), shared by the [stable tag mover](build-provenance.md), the sync's delivery-commit gate, and the [settings green-commit gate](settings.md#when-it-runs).
+- **The poll:** consumers that wake on their own (a dispatched tag move, the sync) can race a fresh check, so the read polls briefly before failing closed. The unwedge for a missing check is re-running the sha's CI run - the gate job posts the check.
 
 ## After the gate
 
-Post-gate work rides downstream in the same run, `needs: [all-green]` on a push to main, so `github.sha` IS the judged commit:
+Post-gate work rides downstream in the same run, `needs: [all-green]` on a push to main, so `github.sha` IS the judged commit.
 
-- Repo-platform's `post-green` job calls [post-green.yml](../.github/workflows/post-green.yml), whose `move-stable` leg moves the `stable` tag, the fleet's delivery ref, to the judged commit in that run - re-verifying main history and the check at the commit before the push ([build-provenance.md](build-provenance.md)). post-green.yml's only other way in is a `workflow_dispatch` with a green main commit's `sha`, which runs the mover alone: the self-heal for a tag move that failed or was evicted after its gate passed (the next push heals it too; a sync meanwhile renders the commit the tag still names). The file's header has the coalescing contract every leg there must satisfy.
-- The mover ([post-green/move_stable.ts](../.github/scripts/post-green/move_stable.ts)) re-verifies main history and the check at the sha, reads where the tag sits, and moves it with a lease push, the compare-and-swap that makes a racing mover lose loudly. It moves nothing when the tag already names the sha or a newer green commit's run already moved it past the sha (newest-green wins). The tag's ruleset ([.github/settings.local.yml](../.github/settings.local.yml)) blocks deletion only: git treats any move of an existing tag as a forced update, so a force-push or update rule would block the mover itself.
-- Repo-platform's own docs site is the skeleton's `site` leg, carried by hand in its ci.yml (this repository's ci.yml is its own, not the managed skeleton): a `site` job ordered behind `post-green`, so the deploy runs after this run's mover and a green move's theme is what `@stable` serves it (a red or skipped post-green does not hold it back: it deploys from the tag as it stands). It calls reusable-site.yml by local path; the reusable plans the site configuration from this repository's registration, as it does for every fleet repository.
-- Its `read-directives` leg reads the fleet-sync label of every pull request merged since the commit the `stable` tag named (the range two bullets down), and when a PR in that range opted in, `sync-fleet` calls sync-repos.yml in the same run, needs-ordered behind the mover, holding the `sync-repos` lane the weekly cron also holds. The leg is ordered behind `move-stable` for its base and never stands down on the mover's word: a newer commit's run reads from its own base, exclusive, which can be this very commit, so only this commit's run is sure to read it. A mover that moved nothing (a replay at the tag's own commit, a commit the tag already passed) and a red mover leave the read on the push's own `before`. After a failed sync, re-run the FAILED jobs: the mover's `previous` output survives, so the whole range syncs; a re-run of every job finds the tag already moved and reads the judged commit alone, so an older commit's opt-in in that range waits for the weekly cron or a hand dispatch. The labels are below.
-- Its `settings-fleet` leg calls settings-repos.yml for every target on every called run, with no diff deciding it: the apply is idempotent and reads each target's rendered `.github/settings.yml` beside its live state, so a run that changed no settings input is an early nightly heal: it fixes whatever out-of-band drift its targets carry and nothing else. It is needs-ordered behind `sync-fleet` whatever that leg's result (skipped, green or red), so a repo whose sync PR merged is applied from its new render, and it holds the `settings-repos` lane the nightly cron also holds. The called run gates on the judged commit through the mover's bounded all-green poll ([settings.md](settings.md#the-green-commit-gate)).
-- The directives leg reads from the commit the `stable` tag named before this run moved it (the mover's `previous` output), up to the judged commit ([post-green/judged_range.ts](../.github/scripts/post-green/judged_range.ts)); not the judged commit alone. Every push gets its own run, but the runs of neighbouring commits overlap and their mover legs queue on the `stable-tag-move` lane, where GitHub keeps one pending job and replaces it with the newest, so a commit whose mover was replaced there never syncs from its own run, and its successor's own `before..sha` would miss it. The tag's previous commit is a durable base: the range from it covers every commit since the last move, replaced movers included.
-- When the mover reports no previous commit (the tag did not move: it already named the sha or a newer commit, or it did not exist yet, or the mover went red), the base is the push payload's `before`. The base must be in the checkout and a strict ancestor of the judged commit, or the leg fails naming it (a force-push, a foreign payload, or a tag moved out of band); an all-zeros `before` (a branch-creating push) reads the whole history from the empty tree.
-- A red mover skips the sync (the commit the tag names is stale), nothing else: the settings apply reads no delivery ref (each target's rendered `.github/settings.yml` sits in the target), so it still runs, exactly as it does on a call with no label. A mover that stands down because a newer commit already moved the tag exits green, and the sync then renders from that newer commit.
-- Both fleet writers reach the fleet this way and never from a `push`: their triggers are the schedule, a dispatch, and the post-green call, and the self-woken paths gate in-script (the sync writes only what the `stable` tag names, the settings apply refuses an ungreen commit). The fleet PAT is a secret of the `fleet-operator` environment ([.github/settings.local.yml](../.github/settings.local.yml)), whose branch policy admits main alone: only a job declaring `environment: fleet-operator` in a main run can read `REPO_PLATFORM_TOKEN`, and GitHub holds that rule, not a check here. A caller job cannot declare an environment, so the writers' jobs declare it themselves. Each caller on the chain says `secrets: inherit`: a job reached through two calls reads the environment secret only when every caller on the chain inherits ([actions/runner#4453](https://github.com/actions/runner/issues/4453)). GitHub hands a job that cannot see the secret the empty string, so every declaring job's first read of it is the `Require the fleet token` step ([fleet/require_fleet_token.ts](../.github/scripts/fleet/require_fleet_token.ts)): an empty read fails the job with the setup recipe, and no fleet write ever runs on `github.token`.
-- Every managed ci.yml carries a `post-green` job calling the repo-owned starter `post-green.yml` (workflow_call only, seeded once, never resynced) with the judged sha: the repository's own green-gated work goes there - applying settings, refreshing generated artifacts. The caller passes every repository secret through and holds no concurrency lane of its own: the repo's jobs take theirs, and a caller holding a lane a called job needs deadlocks the call against itself. A lane on any job the `release` job needs (the repo's post-green hook included) must be keyed per commit: a shared lane keeps one pending job and replaces it with the newest, so a burst of merges can evict the release commit's pending job and strand its tag until a re-run.
-- The caller grants `GITHUB_TOKEN` two scopes, the ceiling for every hook job (a called job cannot raise above its caller), and no knob narrows them per repository:
-  - `contents: write` - a hook may publish a fast-forward branch such as a packaged `latest`.
-  - `id-token: write` - a hook may mint the run's OIDC token for trusted publishing (npm, PyPI). GitHub artifact attestations need `attestations: write` too, which this ceiling does not grant.
-- The starter ships one no-op job (a workflow_call cannot ship empty), and that job costs a runner allocation on every green push to main until the repository REPLACES it. Replace the no-op, do not append beside it.
-- Every push to main gets its own complete run: ci.yml's group is keyed by the commit on a push and by the ref on a pull request (where a newer push cancels the stale run), so no merge timing cancels or coalesces another commit's run. Keyed by the ref, GitHub kept one pending run per group and replaced it with the newest, which left a burst's middle commits unjudged. The runs of neighbouring commits therefore overlap, and the legs that mutate shared state serialize on their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`, `pages`), where GitHub keeps one running plus one pending job and replaces the pending one with the newest, in arrival order rather than commit order. Every hook job must therefore be state-based and idempotent: act on the repository's current state, never on "what this commit changed".
-- Never key a concurrency group in the hook on `github.workflow`: inside a called workflow it resolves to the caller's name, so `<workflow>-<ref>` is the lane the calling run already holds, and a job waiting on it deadlocks the run. A failing hook job blocks the release, never the merge.
-- The legs after the hook are STATIC: every managed ci.yml carries the same `release`, `update-release`, `publish-release`, `update-release-pr`, and `site` jobs, and each gates itself on fleet-ci's `modules` output (`contains(needs.ci.outputs.modules, '"release-please"')`: a substring test on the compact JSON array, hence the quoted name). A job reads outputs only from its direct dependencies, so `ci` sits in each leg's needs list. Adding a module to a repository is one line in its `.repo-platform.yml`, picked up on the next run with no change to ci.yml.
-- The `release` leg needs the gate AND the hook, so the repo's post-green work lands before the tag is minted, then calls [fleet-release.yml](../.github/workflows/fleet-release.yml)`@stable` with the judged sha and fleet-ci's `tracking-labels` output. The called job takes two paths off release-health's `release-cut` output:
-  - On a release-PR merge it cuts: release-please tags that merge commit (never the branch head) and drafts the release, whatever main does afterwards. The job lane is keyed by the judged sha, so no other run shares it and nothing can cancel a pending cut; a re-run of the same commit waits, then finds the release already cut.
-  - On every other push it proposes or refreshes the release PR, and only while main's head is still the judged commit: a run whose commit is no longer the head skips instead of racing the newer run's refresh.
-  - The leg itself holds no lane: a shared lane keeps one pending call and cancels the older one, so a release commit's call could be cancelled before it cuts.
-  - A release merge whose own run went red stays pending until that run is re-run, and the stale-label guard names it on the next push.
-  - Known limit: two release PRs merged before either is cut are both tagged by the first cut run, since release-please builds every pending release PR.
-  - Known limit: when a release merge and an ordinary push land within one run's span, the ordinary run's release-PR refresh can abort green while the merged release PR still wears `autorelease: pending`; the first push after the cut has relabelled it tagged refreshes the PR again.
-  - Its outputs drive the release hooks: `update-release` (the repo-owned update-release.yml with the tag), `publish-release` (fleet-release-publish.yml@stable: attests the assets and flips the draft live), and `update-release-pr` (the repo-owned twin when a release PR was created or refreshed). The two hooks are universal starters, seeded in every repository whatever its modules, because GitHub resolves a called `./` workflow at run creation whether or not the job's condition holds ([new-repo.md](new-repo.md#the-release-pipeline-release-please)).
-- The `site` leg calls [reusable-site.yml](../.github/workflows/reusable-site.yml)`@stable` with the judged sha, holding the `pages` lane ([site.md](site.md)); the called workflow runs the repo-owned `.github/actions/site-build` hook from the checkout and reads the docs configuration from the repository's registration. The leg has no push clause: it runs on every main run whose gate passed, so the nightly schedule is the rebuild and a dispatch is the manual deploy, and no site workflow of its own exists. It is ordered behind `publish-release` as an ORDER and not a gate: its condition leads with `!cancelled()`, so it waits for the release legs and then deploys whatever their result (a red hook skips the release; the deploy still runs), and a release commit's own deploy serves its new tag.
+### Repo-platform's own post-green run
+
+**The `post-green` job** calls [post-green.yml](../.github/workflows/post-green.yml), whose `move-stable` leg moves the `stable` tag, the fleet's delivery ref, to the judged commit in that run - re-verifying main history and the check at the commit before the push ([build-provenance.md](build-provenance.md)).
+
+- post-green.yml's only other way in is a `workflow_dispatch` with a green main commit's `sha`, which runs the mover alone: the self-heal for a tag move that failed or was evicted after its gate passed (the next push heals it too; a sync meanwhile renders the commit the tag still names).
+- The file's header has the coalescing contract every leg there must satisfy.
+
+**The mover** ([post-green/move_stable.ts](../.github/scripts/post-green/move_stable.ts)) re-verifies main history and the check at the sha, reads where the tag sits, and moves it with a lease push, the compare-and-swap that makes a racing mover lose loudly.
+
+- It moves nothing when the tag already names the sha or a newer green commit's run already moved it past the sha (newest-green wins).
+- The tag's ruleset ([.github/settings.local.yml](../.github/settings.local.yml)) blocks deletion only: git treats any move of an existing tag as a forced update, so a force-push or update rule would block the mover itself.
+
+**Repo-platform's own docs site** is the skeleton's `site` leg, carried by hand in its ci.yml (this repository's ci.yml is its own, not the managed skeleton): a `site` job ordered behind `post-green`, so the deploy runs after this run's mover and a green move's theme is what `@stable` serves it (a red or skipped post-green does not hold it back: it deploys from the tag as it stands).
+
+It calls reusable-site.yml by local path; the reusable plans the site configuration from this repository's registration, as it does for every fleet repository.
+
+**The `read-directives` leg** reads the fleet-sync label of every pull request merged since the commit the `stable` tag named (the range below), and when a PR in that range opted in, `sync-fleet` calls sync-repos.yml in the same run, needs-ordered behind the mover, holding the `sync-repos` lane the weekly cron also holds.
+
+- The leg is ordered behind `move-stable` for its base and never stands down on the mover's word: a newer commit's run reads from its own base, exclusive, which can be this very commit, so only this commit's run is sure to read it.
+
+- A mover that moved nothing (a replay at the tag's own commit, a commit the tag already passed) and a red mover leave the read on the push's own `before`.
+
+- After a failed sync, re-run the FAILED jobs: the mover's `previous` output survives, so the whole range syncs; a re-run of every job finds the tag already moved and reads the judged commit alone, so an older commit's opt-in in that range waits for the weekly cron or a hand dispatch.
+
+- The labels are below.
+
+**The `settings-fleet` leg** calls settings-repos.yml for every target on every called run, with no diff deciding it: the apply is idempotent and reads each target's rendered `.github/settings.yml` beside its live state, so a run that changed no settings input is an early nightly heal: it fixes whatever out-of-band drift its targets carry and nothing else.
+
+- It is needs-ordered behind `sync-fleet` whatever that leg's result (skipped, green or red), so a repo whose sync PR merged is applied from its new render, and it holds the `settings-repos` lane the nightly cron also holds.
+- The called run gates on the judged commit through the mover's bounded all-green poll ([settings.md](settings.md#the-green-commit-gate)).
+
+**The directives leg's range** runs from the commit the `stable` tag named before this run moved it (the mover's `previous` output), up to the judged commit ([post-green/judged_range.ts](../.github/scripts/post-green/judged_range.ts)); not the judged commit alone.
+
+- Every push gets its own run, but the runs of neighbouring commits overlap and their mover legs queue on the `stable-tag-move` lane, where GitHub keeps one pending job and replaces it with the newest, so a commit whose mover was replaced there never syncs from its own run, and its successor's own `before..sha` would miss it.
+
+- The tag's previous commit is a durable base: the range from it covers every commit since the last move, replaced movers included.
+
+**When the mover reports no previous commit** (the tag did not move: it already named the sha or a newer commit, or it did not exist yet, or the mover went red), the base is the push payload's `before`.
+
+- The base must be in the checkout and a strict ancestor of the judged commit, or the leg fails naming it (a force-push, a foreign payload, or a tag moved out of band).
+- An all-zeros `before` (a branch-creating push) reads the whole history from the empty tree.
+
+**A red mover skips the sync** (the commit the tag names is stale), nothing else: the settings apply reads no delivery ref (each target's rendered `.github/settings.yml` sits in the target), so it still runs, exactly as it does on a call with no label. A mover that stands down because a newer commit already moved the tag exits green, and the sync then renders from that newer commit.
+
+**Both fleet writers reach the fleet this way and never from a `push`:** their triggers are the schedule, a dispatch, and the post-green call, and the self-woken paths gate in-script (the sync writes only what the `stable` tag names, the settings apply refuses an ungreen commit).
+
+**The fleet PAT** is a secret of the `fleet-operator` environment ([.github/settings.local.yml](../.github/settings.local.yml)), whose branch policy admits main alone: only a job declaring `environment: fleet-operator` in a main run can read `REPO_PLATFORM_TOKEN`, and GitHub holds that rule, not a check here.
+
+- A caller job cannot declare an environment, so the writers' jobs declare it themselves.
+
+- Each caller on the chain says `secrets: inherit`: a job reached through two calls reads the environment secret only when every caller on the chain inherits ([actions/runner#4453](https://github.com/actions/runner/issues/4453)).
+
+- GitHub hands a job that cannot see the secret the empty string, so every declaring job's first read of it is the `Require the fleet token` step ([fleet/require_fleet_token.ts](../.github/scripts/fleet/require_fleet_token.ts)): an empty read fails the job with the setup recipe, and no fleet write ever runs on `github.token`.
+
+### Every managed repository's post-green hook
+
+**Every managed ci.yml carries a `post-green` job** calling the repo-owned starter `post-green.yml` (workflow_call only, seeded once, never resynced) with the judged sha: the repository's own green-gated work goes there - applying settings, refreshing generated artifacts.
+
+- The caller passes every repository secret through and holds no concurrency lane of its own: the repo's jobs take theirs, and a caller holding a lane a called job needs deadlocks the call against itself.
+
+- A lane on any job the `release` job needs (the repo's post-green hook included) must be keyed per commit: a shared lane keeps one pending job and replaces it with the newest, so a burst of merges can evict the release commit's pending job and strand its tag until a re-run.
+
+**The caller grants `GITHUB_TOKEN` two scopes,** the ceiling for every hook job (a called job cannot raise above its caller), and no knob narrows them per repository:
+
+| Scope | Why |
+| --- | --- |
+| `contents: write` | a hook may publish a fast-forward branch such as a packaged `latest` |
+| `id-token: write` | a hook may mint the run's OIDC token for trusted publishing (npm, PyPI). GitHub artifact attestations need `attestations: write` too, which this ceiling does not grant |
+
+**The starter ships one no-op job** (a workflow_call cannot ship empty), and that job costs a runner allocation on every green push to main until the repository REPLACES it. Replace the no-op, do not append beside it.
+
+**Every push to main gets its own complete run:** ci.yml's group is keyed by the commit on a push and by the ref on a pull request (where a newer push cancels the stale run), so no merge timing cancels or coalesces another commit's run.
+
+- Keyed by the ref, GitHub kept one pending run per group and replaced it with the newest, which left a burst's middle commits unjudged.
+
+- The runs of neighbouring commits therefore overlap, and the legs that mutate shared state serialize on their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`, `pages`), where GitHub keeps one running plus one pending job and replaces the pending one with the newest, in arrival order rather than commit order.
+
+- Every hook job must therefore be state-based and idempotent: act on the repository's current state, never on "what this commit changed".
+
+**Never key a concurrency group in the hook on `github.workflow`:** inside a called workflow it resolves to the caller's name, so `<workflow>-<ref>` is the lane the calling run already holds, and a job waiting on it deadlocks the run. A failing hook job blocks the release, never the merge.
+
+### The static legs
+
+**The legs after the hook are STATIC:** every managed ci.yml carries the same `release`, `update-release`, `publish-release`, `update-release-pr`, and `site` jobs, and each gates itself on fleet-ci's `modules` output (`contains(needs.ci.outputs.modules, '"release-please"')`: a substring test on the compact JSON array, hence the quoted name).
+
+- A job reads outputs only from its direct dependencies, so `ci` sits in each leg's needs list.
+- Adding a module to a repository is one line in its `.repo-platform.yml`, picked up on the next run with no change to ci.yml.
+
+**The `release` leg** needs the gate AND the hook, so the repo's post-green work lands before the tag is minted, then calls [fleet-release.yml](../.github/workflows/fleet-release.yml)`@stable` with the judged sha and fleet-ci's `tracking-labels` output. The called job takes two paths off release-health's `release-cut` output:
+
+| Push | Path |
+| --- | --- |
+| a release-PR merge | it cuts: release-please tags that merge commit (never the branch head) and drafts the release, whatever main does afterwards. The job lane is keyed by the judged sha, so no other run shares it and nothing can cancel a pending cut; a re-run of the same commit waits, then finds the release already cut |
+| every other push | it proposes or refreshes the release PR, and only while main's head is still the judged commit: a run whose commit is no longer the head skips instead of racing the newer run's refresh |
+
+- **The leg itself holds no lane:** a shared lane keeps one pending call and cancels the older one, so a release commit's call could be cancelled before it cuts.
+
+- **A release merge whose own run went red** stays pending until that run is re-run, and the stale-label guard names it on the next push.
+
+- **Known limit:** two release PRs merged before either is cut are both tagged by the first cut run, since release-please builds every pending release PR.
+
+- **Known limit:** when a release merge and an ordinary push land within one run's span, the ordinary run's release-PR refresh can abort green while the merged release PR still wears `autorelease: pending`; the first push after the cut has relabelled it tagged refreshes the PR again.
+
+**Its outputs drive the release hooks:**
+
+| Hook job | Calls |
+| --- | --- |
+| `update-release` | the repo-owned update-release.yml with the tag |
+| `publish-release` | fleet-release-publish.yml@stable: attests the assets and flips the draft live |
+| `update-release-pr` | the repo-owned twin when a release PR was created or refreshed |
+
+The two hooks are universal starters, seeded in every repository whatever its modules, because GitHub resolves a called `./` workflow at run creation whether or not the job's condition holds ([new-repo.md](new-repo.md#the-release-pipeline-release-please)).
+
+**The `site` leg** calls [reusable-site.yml](../.github/workflows/reusable-site.yml)`@stable` with the judged sha, holding the `pages` lane ([site.md](site.md)); the called workflow runs the repo-owned `.github/actions/site-build` hook from the checkout and reads the docs configuration from the repository's registration.
+
+- The leg has no push clause: it runs on every main run whose gate passed, so the nightly schedule is the rebuild and a dispatch is the manual deploy, and no site workflow of its own exists.
+
+- It is ordered behind `publish-release` as an ORDER and not a gate: its condition leads with `!cancelled()`, so it waits for the release legs and then deploys whatever their result (a red hook skips the release; the deploy still runs), and a release commit's own deploy serves its new tag.
 
 ```text
 checks + ci -> all-green -> post-green (repo-owned hook) -> release -> update-release (hook) -> publish-release -> site
@@ -88,34 +214,67 @@ Every leg after `post-green` is present in every run and skips where its module 
 
 ### Opting a PR into an immediate fleet sync
 
-One label on the PR, before it merges. The squash commit carries the PR title alone (the fleet override sets `squash_merge_commit_message: BLANK`), so `read-directives` looks up each commit's merged pull request through the API (`GITHUB_TOKEN`, read) and reads its labels ([post-green/fleet_sync_marker.ts](../.github/scripts/post-green/fleet_sync_marker.ts)). A commit no pull request produced (a direct push) carries no label and never syncs from its own merge.
+One label on the PR, before it merges.
+
+- **How the leg finds it:** the squash commit carries the PR title alone (the fleet override sets `squash_merge_commit_message: BLANK`), so `read-directives` looks up each commit's merged pull request through the API (`GITHUB_TOKEN`, read) and reads its labels ([post-green/fleet_sync_marker.ts](../.github/scripts/post-green/fleet_sync_marker.ts)).
+- **A direct push:** a commit no pull request produced carries no label and never syncs from its own merge.
 
 | Label | Syncs now | Notes |
 | --- | --- | --- |
 | `fleet-sync:public` | every public managed repo | the default choice |
 | `fleet-sync:all` | the whole fleet, the same run the weekly cron performs | private repos burn paid Actions minutes, so the weekly sync normally carries them |
 
-- The labels are declared in this repository's own settings overlay ([.github/settings.local.yml](../.github/settings.local.yml)); only this repository's PRs carry them, so the fleet's baseline does not. The leg reads that list at run time, the suffix naming the scope.
-- Label names fold case, as GitHub keeps them unique. Two fleet-sync labels on one PR, or a `fleet-sync:` label the platform does not declare, turn `read-directives` red on the judged commit and nothing syncs: a mistyped opt-in fails loudly instead of waiting for Tuesday. Fix the merged PR's labels for the next run that covers the commit (every run reads the whole range since the tag's previous commit), dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`), or let the next merge carry a correct label.
-- `private`, repository slugs, and the `modules:<a>+<b>` filter (the README's `repo=` table) are dispatch-only. The leg unions the labels of every commit in its range, and an intersecting token would misread there: a `public, modules:site` beside a `private` would read as every repo selecting site and drop the private repos the second asked for. [fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts) owns that grammar for the dispatch input and both writers' plans, which expand the visibility tokens (`public`, `private`) against discovery.
-- The leg reads every commit since the tag's previous commit, so an opt-in survives its own mover being replaced at the lane. Three PRs merged within one minute, `fleet-sync:public` on the first only, and only the third's mover lands:
+- **Where the labels are declared:** this repository's own settings overlay ([.github/settings.local.yml](../.github/settings.local.yml)); only this repository's PRs carry them, so the fleet's baseline does not. The leg reads that list at run time, the suffix naming the scope.
+
+- **Label names fold case,** as GitHub keeps them unique.
+
+- **A refused label:** two fleet-sync labels on one PR, or a `fleet-sync:` label the platform does not declare, turn `read-directives` red on the judged commit and nothing syncs: a mistyped opt-in fails loudly instead of waiting for Tuesday.
+
+- **The fix for a refused label:** fix the merged PR's labels for the next run that covers the commit (every run reads the whole range since the tag's previous commit), dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`), or let the next merge carry a correct label.
+
+- **Dispatch-only scopes:** `private`, repository slugs, and the `modules:<a>+<b>` filter (the README's `repo=` table). The leg unions the labels of every commit in its range, and an intersecting token would misread there: a `public, modules:site` beside a `private` would read as every repo selecting site and drop the private repos the second asked for.
+
+- **The scope grammar:** [fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts) owns it for the dispatch input and both writers' plans, which expand the visibility tokens (`public`, `private`) against discovery.
+
+- **The range:** the leg reads every commit since the tag's previous commit, so an opt-in survives its own mover being replaced at the lane. Three PRs merged within one minute, `fleet-sync:public` on the first only, and only the third's mover lands:
 
 ```text
 ::notice::fleet-sync label on <first merge>: public
 ::notice::<the tag's previous commit>..<third merge> opted in: syncing public now
 ```
 
-- Several opt-ins in the range union: any `all` wins, otherwise `public`. The judged commit's refused labels turn the leg red; an older commit's (its own run was red, or its mover was replaced at the lane) are a warning naming the commit and contribute nothing, and the next merge's correct label still syncs.
-- A merge never loses its own run (push runs are keyed by the commit), but its mover leg is replaced when a third mover queues on the `stable-tag-move` lane while one runs and one waits (GitHub keeps one pending job per lane and replaces it with the newest; a running mover is never cancelled), and the surviving run's range still reads its label. The `sync-repos` lane replaces a pending sync the same way, and when the tag had already moved past that merge, no later range covers its label: the next fleet-wide sync-repos.yml run (its cron, or a dispatch) heals it. A pull request lookup that fails (the API down, a token without read access), or two pull requests claiming the commit as their merge, turns the leg red for the whole range, never a quiet `armed=false`. The opt-in waits for the weekly sync cron (or a hand dispatch) when no later green run reaches post-green before it, when a run whose tag did not move (a re-run of every job after a failed sync included) reads from the push's own `before` alone, or when the leg went red on the commit's own run and a later mover moved the tag past it. The settings apply never depends on the label, since every green run applies every target.
-- The public sync by default, never a gate: [fleet-sync-default.yml](../.github/workflows/fleet-sync-default.yml) adds `fleet-sync:public` to a pull request of this repository that changes what a sync delivers and wears no fleet-sync label, and keeps one sticky comment saying so ([its script](../.github/scripts/fleet/fleet_sync_default.ts)).
+- **Several opt-ins in the range union:** any `all` wins, otherwise `public`.
+
+- **Refused labels by commit:** the judged commit's refused labels turn the leg red; an older commit's (its own run was red, or its mover was replaced at the lane) are a warning naming the commit and contribute nothing, and the next merge's correct label still syncs.
+
+- **A merge never loses its own run** (push runs are keyed by the commit), but its mover leg is replaced when a third mover queues on the `stable-tag-move` lane while one runs and one waits (GitHub keeps one pending job per lane and replaces it with the newest; a running mover is never cancelled), and the surviving run's range still reads its label.
+
+- **The `sync-repos` lane** replaces a pending sync the same way, and when the tag had already moved past that merge, no later range covers its label: the next fleet-wide sync-repos.yml run (its cron, or a dispatch) heals it.
+
+- **A failed lookup:** a pull request lookup that fails (the API down, a token without read access), or two pull requests claiming the commit as their merge, turns the leg red for the whole range, never a quiet `armed=false`.
+
+- **When the opt-in waits** for the weekly sync cron (or a hand dispatch): when no later green run reaches post-green before it; when a run whose tag did not move (a re-run of every job after a failed sync included) reads from the push's own `before` alone; or when the leg went red on the commit's own run and a later mover moved the tag past it.
+
+- **The settings apply never depends on the label,** since every green run applies every target.
+
+- **The public sync by default, never a gate:** [fleet-sync-default.yml](../.github/workflows/fleet-sync-default.yml) adds `fleet-sync:public` to a pull request of this repository that changes what a sync delivers and wears no fleet-sync label, and keeps one sticky comment saying so ([its script](../.github/scripts/fleet/fleet_sync_default.ts)).
+
   - Watches `files.yml`, `files/`, `migrations/`, `.github/scripts/sync/writer/`, and `actions/validate-managed-files/`. Any other workflow or action change is live at `stable` on merge and gets no label.
-  - Not forced: a human removing the label is final for that pull request (the comment then reads `removed by <login>; not re-adding it`), and a human's own fleet-sync label is never touched. `fleet-sync:all` only when necessary and approved by the repository owner: it bills private Actions minutes. The bot withdraws its own label when the paths leave the diff, the PR targets a branch other than the default, or a human picks another fleet-sync label; a label the merge would refuse is named in the comment.
+
+  - Not forced: a human removing the label is final for that pull request (the comment then reads `removed by <login>; not re-adding it`), and a human's own fleet-sync label is never touched. `fleet-sync:all` only when necessary and approved by the repository owner: it bills private Actions minutes.
+
+  - The bot withdraws its own label when the paths leave the diff, the PR targets a branch other than the default, or a human picks another fleet-sync label; a label the merge would refuse is named in the comment.
+
   - Runs on opened, synchronize, reopened, edited (a retarget arrives as edited), labeled, and unlabeled; a closed PR is left as it is. GitHub runs no pull_request workflow on a conflicting PR, so the label catches up at the next push.
+
   - Outside `all-green`'s needs, and exit 0 on every path with a warning annotation: a fork's read-only token, a file listing GitHub capped at 3,000.
 
 ## Residuals, stated
 
-- A PR can still gut a called workflow's content (checks.yml is repo-owned) or hand-condition the managed `ci` caller away; validate-managed-files' parity check blocks any edit to the managed ci.yml, the caller's condition included, and review owns the rest - the same same-repo residual every check has.
-- Any workflow in this repository could mint a look-alike `all-green` check run (the Actions app pin does not distinguish jobs). The repo is its own sole workflow author; review owns that surface.
-- A job-created `all-green` check from a pull_request run judged the merge tree, not the sha, and would vouch for a sha that is also a main commit. Reachable only when a PR head becomes a main commit itself; squash-only merges make that contrived.
-- Copilot code review is advisory: the `copilot_code_review` rule requests a review on every public-repo PR, but nothing blocks on it ([settings.md](settings.md#copilot-code-review)).
+- **A PR can still gut a called workflow's content** (checks.yml is repo-owned) or hand-condition the managed `ci` caller away; validate-managed-files' parity check blocks any edit to the managed ci.yml, the caller's condition included, and review owns the rest - the same same-repo residual every check has.
+
+- **Any workflow in this repository could mint a look-alike `all-green` check run** (the Actions app pin does not distinguish jobs). The repo is its own sole workflow author; review owns that surface.
+
+- **A job-created `all-green` check from a pull_request run** judged the merge tree, not the sha, and would vouch for a sha that is also a main commit. Reachable only when a PR head becomes a main commit itself; squash-only merges make that contrived.
+
+- **Copilot code review is advisory:** the `copilot_code_review` rule requests a review on every public-repo PR, but nothing blocks on it ([settings.md](settings.md#copilot-code-review)).
