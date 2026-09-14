@@ -116,9 +116,9 @@ function dispatchInputs(): { repo: string; branch: string } {
   return { repo: event.inputs?.repo ?? "", branch: event.inputs?.branch ?? "" };
 }
 
-/** The branch a dispatch syncs onto (docs/sync.md, "Syncing a branch"); empty on every other run. Verbatim: a padded or
- * case-changed value names a branch the repository has not got, and the resolve probe refuses it; trimmed, it would land
- * on the branch it resembles. */
+/** The branch a dispatch syncs onto (docs/sync.md, "Syncing a branch"); empty on every other run. Verbatim: git forbids
+ * ASCII whitespace in a refname, so a padded value is a typo the resolve probe refuses, and a name ending in a no-break
+ * space is its own branch, which trimming would send to the one it resembles. */
 export function readDispatchBranch(): string {
   return dispatchInputs().branch;
 }
