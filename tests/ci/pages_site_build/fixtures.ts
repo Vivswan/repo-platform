@@ -5,7 +5,9 @@
 // node_modules when the build copies it there - a laptop layout with the
 // repo near the dependencies cannot see that class, this topology can.
 
+import { expect } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -97,6 +99,25 @@ export function buildSite(
  *  names its cause instead of only its exit code. */
 export function describeRun(result: BuildResult): string {
   return `exit ${result.exitCode}\n--- stdout\n${result.stdout}\n--- stderr\n${result.stderr}`;
+}
+
+/** The step outputs the build set, read from the lines GITHUB_OUTPUT="" makes it print. */
+export function outputs(stdout: string): Record<string, string> {
+  return Object.fromEntries(
+    [...stdout.matchAll(/^\(output\) ([a-z-]+)=(.*)$/gm)].map((match) => [match[1], match[2]]),
+  );
+}
+
+/** A refusal lands before any build and any output, so no half-built site is handed on. */
+export function expectRefusedBeforeBuild(result: BuildResult, message: string): void {
+  expect(result.exitCode, describeRun(result)).toBe(1);
+  expect(result.stderr).toContain(`::error::${message}`);
+  expect(result.stdout).not.toMatch(/vitepress|building docs tier/);
+  expect(outputs(result.stdout)).toEqual({});
+}
+
+export function present(site: string, rels: string[]): string[] {
+  return rels.filter((rel) => existsSync(join(site, rel)));
 }
 
 export function commitAll(repo: string, message: string): void {
