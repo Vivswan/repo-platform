@@ -8,6 +8,7 @@ import { join } from "node:path";
 import {
   AUTOMATION_BRANCH,
   FAILURE_ISSUE_TITLE,
+  MANIFEST_NAME,
   PLATFORM_NAME,
   SYNC_PR_TITLE_PREFIX,
 } from "../../../actions/shared/platform.ts";
@@ -16,8 +17,9 @@ import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, redactText } from "../shared/proc.ts";
 import { tokenUrl } from "../shared/token_url.ts";
+import { NO_MIGRATED_LIST, readMigrated } from "./migrate.ts";
 import { type DeliveryVerdict, VERDICT_FILE } from "./verdict.ts";
-import { REPLACED_HEADING, REVIEW_HEADING } from "./writer/report.ts";
+import { REPLACED_HEADING, REVIEW_HEADING, type SyncReport } from "./writer/report.ts";
 
 export const CHECKOUT_LOG = "checkout.log";
 export const SYNC_LOG = "sync.log";
@@ -190,6 +192,38 @@ export function branchSummary(input: {
     boundedReport(input.report).replace(/\n$/, ""),
     "",
   ].join("\n");
+}
+
+/** By name and forced: a path the target's own .gitignore covers must reach the commit whose manifest names it
+ *  (`git add --all` skipped it and shipped the manifest entry without the file). Literal, so a path spelling `[`, `*`
+ *  or `?` stages itself alone. Renames off, so a retired path is listed as its own deletion. */
+export function stageWritten(
+  summary: SyncReport,
+  migrated: string[],
+  git: (...args: string[]) => string[],
+  must: (argv: string[], reason: string) => string,
+): string[] {
+  const changed = [
+    MANIFEST_NAME,
+    ...migrated,
+    ...summary.written
+      .filter((row) => row.change !== "unchanged" && row.change !== "held")
+      .map((row) => row.path),
+    ...summary.retired
+      .filter((row) => row.outcome === "deleted" || row.outcome === "region removed")
+      .map((row) => row.path),
+    ...summary.mirrors.filter((row) => row.outcome !== "current").map((row) => row.target),
+  ];
+  must(
+    git("add", "-f", "--", ...changed.map((path) => `:(literal)${path}`)),
+    "staging the written paths failed in the checkout",
+  );
+  return must(
+    git("diff", "--cached", "--name-only", "-z", "--no-renames"),
+    "reading the staged paths failed in the checkout",
+  )
+    .split("\0")
+    .filter((path) => path !== "");
 }
 
 /** `git <subcommand>` or `<program> <word>`: the log names the command, never its arguments. */
@@ -445,23 +479,26 @@ class Delivery {
   deliver(): void {
     if (env("CHECKOUT_OUTCOME") !== "success") this.fileFailure("the target checkout failed");
     if (env("WRITER_OUTCOME") !== "success") this.fileFailure("the writer exited with an error");
-    const summary = JSON.parse(readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8")) as {
-      hold: boolean;
-    };
+    const summary = JSON.parse(
+      readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8"),
+    ) as SyncReport;
     const report = readFileSync(join(this.runnerTemp, SYNC_LOG), "utf-8");
 
     for (const argv of [
       this.git("config", "user.name", SYNC_IDENTITY.name),
       this.git("config", "user.email", SYNC_IDENTITY.email),
-      this.git("add", "--all"),
     ]) {
       this.must(argv, `${commandLabel(argv)} failed in the target`);
     }
-    const status = this.must(
-      this.git("status", "--porcelain"),
-      "reading the working tree status failed",
+    const migrated = readMigrated(this.runnerTemp);
+    if (migrated === null) this.fileFailure(NO_MIGRATED_LIST);
+    const staged = stageWritten(
+      summary,
+      migrated,
+      (...args) => this.git(...args),
+      (argv, reason) => this.must(argv, reason),
     );
-    if (status.trim() === "") {
+    if (staged.length === 0) {
       this.log("the tree already matches the build; nothing to deliver");
       if (this.branch === "") {
         this.closeObsoletePr();
