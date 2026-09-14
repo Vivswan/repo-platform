@@ -122,7 +122,6 @@ describe("reusable-site.yml", () => {
     expect(upload).toBeLessThan(stage);
     expect(stage).toBeLessThan(links);
     expect(steps[stage].if).toBe(`${steps[links].if} && hashFiles('.lycheeignore') != ''`);
-    // The copy lands in the directory lychee runs in, whatever that directory is called.
     expect({ env: steps[stage].env, run: steps[stage].run }).toEqual({
       env: { SITE_DIR: String(steps[links].with?.workingDirectory) },
       run: 'cp .lycheeignore "$SITE_DIR/"',
@@ -157,8 +156,8 @@ describe("reusable-site.yml", () => {
     );
   });
 
-  // The verdict step's bash EXECUTED as the runner runs it: lychee's exit codes are its own (0 clean, 2 broken links), and an
-  // empty EXIT_CODE is distinct from an unset one in bash.
+  // The verdict step's bash EXECUTED as the runner runs it: lychee's exit codes are its own (0 clean, 2 broken links). The
+  // script treats an unset and an empty EXIT_CODE alike (no verdict); both rows pin that.
   const readVerdict = (exitCode: string | undefined) => {
     const run = step("rot")?.run ?? "";
     const output = join(temp.dir("reusable-site-rot-"), "output");
