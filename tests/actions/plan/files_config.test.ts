@@ -218,6 +218,16 @@ describe("parseFilesConfig", () => {
       "modules.uv.gitignore_sources: Invalid input: expected array, received string",
     ],
     [
+      "a many-of module-data key nothing reads: the retired codeql_language spelled as a list",
+      "files: []\nmodules:\n  bun: { codeql_language: [python] }\nplaceholders: []",
+      "modules.bun.codeql_language: no file entry or settings layer reads it",
+    ],
+    [
+      "a many-of module-data key nothing reads: a typo'd block list",
+      "files:\n  - { path: .gitignore, class: split, region: hash, blocks: gitignore_sources }\nmodules:\n  uv: { gitignore_source: [Python] }\nplaceholders: []",
+      "modules.uv.gitignore_source: no file entry or settings layer reads it",
+    ],
+    [
       "a many-of module-data key spelled as one word: a key the object prototype also carries",
       "files: []\nmodules:\n  uv: { constructor: Python }\nplaceholders: []",
       "modules.uv.constructor: Invalid input: expected array, received string",
@@ -580,6 +590,27 @@ describe("a module list declared by module data", () => {
     ).toEqual([
       "files: auto-assign.yml: when declaring 'tracking_label' names no module",
       "settings: layers[0]: when declaring 'tracking_label' names no module",
+    ]);
+  });
+  test("an untyped key read only through declaring is read, on a file entry and on a settings layer alike", () => {
+    const untyped = [
+      "placeholders: []",
+      "modules:",
+      "  bun: { steps: [toolchain] }",
+      "  deno: { scans: [deno] }",
+      "settings:",
+      "  baseline: files/settings/baseline.yml",
+      "  layers:",
+      "    - { source: files/settings/scans.yml, when: { any: { declaring: scans } } }",
+      "  override: files/settings/override.yml",
+      "files:",
+      "  - { path: .github/settings.local.yml, class: starter }",
+      "  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml }",
+      "  - { path: auto-format.yml, class: starter, when: { any: { declaring: steps } } }",
+    ].join("\n");
+    expect(problemsOf(untyped)).toEqual([]);
+    expect(problemsOf(untyped.replace("declaring: scans", "declaring: steps"))).toEqual([
+      "modules.deno.scans: no file entry or settings layer reads it",
     ]);
   });
 });
