@@ -23,15 +23,17 @@ export function moduleList(list: ModuleList, modules: Readonly<Record<string, un
   });
 }
 
-/** One repository's side of every `when` clause. */
+/** One repository's side of selection: the facts every `when` clause reads, and the paths it keeps as its own. */
 export interface Selection {
   /** Selected modules. */
   modules: readonly string[];
   private: boolean;
+  /** The registration's `except`: no entry at one of these paths is selected. Absent means none. */
+  except?: readonly string[];
 }
 
-/** The ONE "this entry applies to this repository" rule (docs/sync.md, Selection): the writer, the fleet plan, and
- *  the validator select by it, so a clause the validator judges live is the clause the writer wrote. Absent clauses hold. */
+/** Whether one `when` clause holds for the repository: a files.yml entry's (through `selects`) or a settings layer's.
+ *  Absent clauses hold. */
 export function applies(when: When | null, selection: Selection): boolean {
   if (when === null) return true;
   const selected = (name: string) => selection.modules.includes(name);
@@ -41,4 +43,11 @@ export function applies(when: When | null, selection: Selection): boolean {
     !(when.without ?? []).some(selected) &&
     (when.private === undefined || when.private === selection.private)
   );
+}
+
+/** The ONE "this entry applies to this repository" rule (docs/sync.md, Selection): its `when` holds and its path is not
+ *  excepted. The writer, the fleet plan, and the validator select by it, so a clause the validator judges live is the
+ *  clause the writer wrote. */
+export function selects(entry: { path: string; when: When | null }, selection: Selection): boolean {
+  return applies(entry.when, selection) && !(selection.except ?? []).includes(entry.path);
 }

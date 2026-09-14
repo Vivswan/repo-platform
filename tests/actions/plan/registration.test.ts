@@ -36,6 +36,7 @@ describe("parseRegistration", () => {
       "labels:",
       "  fuzzer: fuzz-nightly",
       "  site: rot",
+      "except: [.github/workflows/ci.yml, .yamllint]",
       "mirrors:",
       "  - source: AGENTS.md",
       "    targets: [CLAUDE.md]",
@@ -60,6 +61,7 @@ describe("parseRegistration", () => {
           ],
         },
         labels: { fuzzer: "fuzz-nightly", site: "rot" },
+        except: [".github/workflows/ci.yml", ".yamllint"],
         mirrors: [
           { source: "AGENTS.md", targets: ["CLAUDE.md"], kind: "copy" },
           { source: "LICENSE.md", targets: ["skills/*/LICENSE.md"], kind: "symlink" },
@@ -80,6 +82,11 @@ describe("parseRegistration", () => {
       reason: "an unknown nested key",
       text: `modules: []\n${PROJECT}site:\n  serve: true\n`,
       error: `${FILE}: site: Unrecognized key: "serve"`,
+    },
+    {
+      reason: "an except path that leaves the repository",
+      text: `modules: []\n${PROJECT}except: [../ci.yml]\n`,
+      error: `${FILE}: except.0: carries an empty, '.', or '..' segment`,
     },
     {
       reason: "a wrong type",

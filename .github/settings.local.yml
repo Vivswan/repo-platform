@@ -1,5 +1,5 @@
 ---
-# Edit here, never the rendered .github/settings.yml: the sync never targets this repository, so `bun run settings` renders it.
+# Edit here, never the rendered .github/settings.yml: the next sync re-renders it from this file and the fleet layers.
 # The override layer merges ABOVE this file: main and non-bypassable are not redeclared.
 
 repository:

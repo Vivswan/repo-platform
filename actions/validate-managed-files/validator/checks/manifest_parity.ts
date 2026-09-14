@@ -20,7 +20,7 @@ function sha256(data: Buffer): string {
 }
 
 export function checkManifestParity(ctx: Context): Finding[] {
-  if (ctx.mode === "self" || ctx.manifest.state !== "parsed") return [];
+  if (ctx.manifest.state !== "parsed") return [];
   const findings: Finding[] = [];
   for (const [rel, entry] of Object.entries(ctx.manifest.records)) {
     const where = `${MANIFEST_NAME}: entry '${rel}'`;

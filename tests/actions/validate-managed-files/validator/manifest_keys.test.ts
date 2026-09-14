@@ -53,7 +53,7 @@ describe("manifest keys are the repository paths the sync writes", () => {
       }
       const dataFile = join(temp.dir("validate-managed-keys-data-"), "files.yml");
       writeFileSync(dataFile, FILES_YML);
-      const ctx = loadContext(root, dataFile, { mode: "render", private: false });
+      const ctx = loadContext(root, dataFile, { self: false, private: false });
       expect(ctx.manifest).toEqual({
         state: "parsed",
         records: Object.fromEntries(

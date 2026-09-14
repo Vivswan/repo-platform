@@ -1,5 +1,3 @@
-// scripts/check/ssot/twin_copies.ts renders through this too, so the copy it holds a root file to is the writer's own, not a second reading.
-
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type {

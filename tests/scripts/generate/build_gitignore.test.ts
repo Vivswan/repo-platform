@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { capture } from "../../../.github/scripts/shared/proc.ts";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
@@ -18,7 +18,6 @@ import {
   sourceId,
   strayBlockFiles,
   topologyProblems,
-  writeOwnGitignore,
 } from "../../../scripts/generate/build_gitignore";
 import { tempDirs } from "../../shared/temp_dir";
 
@@ -116,56 +115,6 @@ describe("the outputs", () => {
       fuzzer: SECTIONS.fuzzer,
       "Node.gitignore": SECTIONS["Node.gitignore"],
     });
-  });
-});
-
-describe("the operator's own .gitignore", () => {
-  /** The registration selects bun and fuzzer, not uv: the region carries their sources in files.yml order and no Python. */
-  const REGISTRATION =
-    "modules: [pages, fuzzer, bun]\nproject: {name: Demo, slug: demo, description: d}\n";
-  const REGION =
-    `# BEGIN REPO-PLATFORM MANAGED\n${buildFilesBase(SECTIONS)}` +
-    `${buildBlock(SECTIONS["Node.gitignore"])}${buildBlock(SECTIONS["bun.gitignore"])}${buildBlock(SECTIONS.fuzzer)}` +
-    "# END REPO-PLATFORM MANAGED\n";
-  const STALE = "# BEGIN REPO-PLATFORM MANAGED\nstale\n# END REPO-PLATFORM MANAGED\n";
-
-  function own(existing: string | null): { change: string; file: string } {
-    const { root, filesDir } = generated();
-    writeFileSync(join(root, "files.yml"), FILES_YML);
-    writeFileSync(join(root, ".repo-platform.yml"), REGISTRATION);
-    if (existing !== null) writeFileSync(join(root, ".gitignore"), existing);
-    const outcome = writeOwnGitignore(root, join(root, "files.yml"), filesDir);
-    return { change: outcome.change, file: readFileSync(join(root, ".gitignore"), "utf-8") };
-  }
-
-  test.each<{ reason: string; existing: string | null; change: string; file: string }>([
-    {
-      reason: "a stale region is replaced between the repository's own sides",
-      existing: `# mine\n\n${STALE}\n# after\n`,
-      change: "replaced local edits",
-      file: `# mine\n\n${REGION}\n# after\n`,
-    },
-    { reason: "no file becomes the region alone", existing: null, change: "created", file: REGION },
-    {
-      reason: "a marker-free file gets the region above its content",
-      existing: "# own\n",
-      change: "region added",
-      file: `${REGION}# own\n`,
-    },
-    {
-      reason: "the exact render is left alone",
-      existing: REGION,
-      change: "unchanged",
-      file: REGION,
-    },
-  ])("$reason", ({ existing, change, file }) => {
-    expect(own(existing)).toEqual({ change, file });
-  });
-
-  test("a malformed region is refused the way the writer refuses it", () => {
-    expect(() => own(`${STALE}${STALE}`)).toThrow(
-      ".gitignore: the managed-region marker text is duplicated, out of order, or buried mid-line",
-    );
   });
 });
 

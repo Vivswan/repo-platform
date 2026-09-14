@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type ManifestEntryShape, parseManifestFiles } from "../../shared/manifest.ts";
 import { MANIFEST_NAME, REGISTRATION_PATH } from "../../shared/platform.ts";
 import { pathProblem } from "../../shared/repo_path.ts";
-import { applies, type Selection, type When } from "../../shared/selection.ts";
+import { type Selection, selects, type When } from "../../shared/selection.ts";
 import { hasConflictMarker, isRecord, isRegularFile, shapeOfYaml } from "./readers.ts";
 import { whenOf } from "./when_of.ts";
 
@@ -58,19 +58,20 @@ export type Vocabulary =
   | { modules: ReadonlySet<string>; files: readonly Declaration[] }
   | { problem: string };
 
-export type Target = { mode: "self" } | { mode: "render"; private: boolean };
+/** `self` is the operator's own checkout, whose walk skips gitignored paths and the writer's sources; it is judged
+ *  like every other target otherwise. */
+export type Target = { self: boolean; private: boolean };
 
-/** Every cross-check dependency (a missing modules list, a conflicted manifest, self mode) is a field here, never an
- *  ordering between checks. */
+/** Every cross-check dependency (a missing modules list, a conflicted manifest) is a field here, never an ordering
+ *  between checks. */
 export interface Context {
-  mode: "self" | "render";
   root: string;
   /** Every regular file below root, sorted, relative paths. */
   files: readonly string[];
-  /** The registration's top-level `modules` value as written (undefined
-   *  when the key is missing, null when the document is not a mapping);
-   *  the record is null when the file is absent. */
-  registration: { modules: unknown } | null;
+  /** The registration's top-level `modules` and `except` values as written
+   *  (undefined when the key is missing, null when the document is not a
+   *  mapping); the record is null when the file is absent. */
+  registration: { modules: unknown; except: unknown } | null;
   vocabulary: Vocabulary;
   /** The class files.yml writes each path under for THIS repository, by the
    *  one selection rule: a path whose declarations are all deselected
@@ -81,7 +82,7 @@ export interface Context {
   manifest: Manifest;
 }
 
-function loadRegistration(root: string): { modules: unknown } | null {
+function loadRegistration(root: string): { modules: unknown; except: unknown } | null {
   const path = join(root, REGISTRATION_PATH);
   if (!isRegularFile(path)) return null;
   let data: unknown = {};
@@ -90,7 +91,9 @@ function loadRegistration(root: string): { modules: unknown } | null {
   } catch {
     data = {};
   }
-  return { modules: isRecord(data) ? data.modules : null };
+  return isRecord(data)
+    ? { modules: data.modules, except: data.except }
+    : { modules: null, except: null };
 }
 
 function loadVocabulary(filesConfig: string): Vocabulary {
@@ -133,19 +136,20 @@ function loadVocabulary(filesConfig: string): Vocabulary {
  *  path is live because the loader refuses two that can both hold (docs/sync.md, Selection). */
 function liveClasses(
   vocabulary: Vocabulary,
-  registration: { modules: unknown } | null,
+  registration: { modules: unknown; except: unknown } | null,
   privateRepo: boolean,
 ): ReadonlyMap<string, string> | null {
   if ("problem" in vocabulary || !Array.isArray(registration?.modules)) return null;
+  const strings = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
   const selection: Selection = {
-    modules: registration.modules.filter(
-      (name): name is string => typeof name === "string" && vocabulary.modules.has(name),
-    ),
+    modules: strings(registration.modules).filter((name) => vocabulary.modules.has(name)),
     private: privateRepo,
+    except: strings(registration.except),
   };
   const classes = new Map<string, string>();
   for (const entry of vocabulary.files) {
-    if (applies(entry.when, selection)) classes.set(entry.path, entry.class);
+    if (selects(entry, selection)) classes.set(entry.path, entry.class);
   }
   return classes;
 }
@@ -218,15 +222,13 @@ export function loadContext(root: string, filesConfig: string, target: Target): 
   const registration = loadRegistration(root);
   const vocabulary = loadVocabulary(filesConfig);
   return {
-    mode: target.mode,
     root,
-    files:
-      target.mode === "self"
-        ? walk(root, gitIgnored(root)).filter((rel) => !rel.startsWith(WRITER_SOURCES))
-        : walk(root, null),
+    files: target.self
+      ? walk(root, gitIgnored(root)).filter((rel) => !rel.startsWith(WRITER_SOURCES))
+      : walk(root, null),
     registration,
     vocabulary,
-    classes: target.mode === "self" ? null : liveClasses(vocabulary, registration, target.private),
+    classes: liveClasses(vocabulary, registration, target.private),
     manifest: loadManifest(root),
   };
 }

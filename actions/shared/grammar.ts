@@ -61,7 +61,7 @@ export function knownGrammar(value: unknown): GrammarId | null {
 // --- split-file line semantics ------------------------------------------------
 
 /** trim on purpose: a marker line with a stray trailing space must split the same way at every splitter
- *  (the writer's split and retire carries, the validator's parity check, the gitignore regenerator). */
+ *  (the writer's split and retire carries, the validator's parity check). */
 export function isMarkerLine(line: string, marker: string): boolean {
   return line.trim() === marker;
 }
@@ -119,8 +119,8 @@ export function splitManagedRegion(content: string, markers: RegionMarkers): Reg
 }
 
 /** Once as a substring too, not only as a line: the validator counts substrings, so marker text buried mid-line is a
- *  duplicate. The sync carries and the gitignore self-output regenerator all slice through here, so they never split
- *  the same malformed file differently. */
+ *  duplicate. The sync's split write and retire carries and the validator's parity check all slice through here, so
+ *  they never split the same malformed file differently. */
 export function cleanManagedRegion(content: string, markers: RegionMarkers): RegionSlice | null {
   const clean = [markers.begin, markers.end].every(
     (marker) => markerLineCount(content, marker) === 1 && substringCount(content, marker) === 1,

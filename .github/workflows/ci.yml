@@ -176,6 +176,10 @@ jobs:
           bun install --frozen-lockfile --silent --cwd actions/validate-managed-files
       - name: Check the offline invariants
         run: bun run invariants
+      # The plan every fleet repository runs on its PRs: the registration against files.yml, failing closed.
+      - uses: ./actions/plan
+        with:
+          private: ${{ github.event.repository.private }}
 
   script-tests:
     runs-on: ubuntu-latest

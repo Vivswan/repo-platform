@@ -148,13 +148,16 @@ describe("the manifest's shape", () => {
     expect(stderr).toContain("binds a key more than once");
   });
 
-  test("self mode inverts: a present manifest is the error", () => {
-    const present = runValidator({ [MANIFEST]: manifestOf(SELF_ENTRY) }, ["--self"]);
-    expect(present.exitCode).toBe(1);
-    expect(present.stderr).toContain(`${MANIFEST}: exists in the operator repository`);
-    const absent = runValidator({}, ["--self"]);
-    expect(absent.stderr).toBe("");
-    expect(absent.exitCode).toBe(0);
+  test("the operator's own checkout (--self) carries the manifest and is judged like any target", () => {
+    const present = runValidator({}, ["--self"]);
+    expect(present.stderr).toBe("");
+    expect(present.exitCode).toBe(0);
+    const absent = runValidator({}, ["--self"], { noManifest: true });
+    expect(absent.exitCode).toBe(1);
+    expect(absent.stderr).toContain(`${MANIFEST} is missing`);
+    const drifted = runValidator({ ".github/workflows/ci.yml": "name: edited\n" }, ["--self"]);
+    expect(drifted.exitCode).toBe(1);
+    expect(drifted.stderr).toContain(".github/workflows/ci.yml: content does not match the sha256");
   });
 });
 
@@ -387,6 +390,16 @@ describe("the recorded class against files.yml", () => {
     });
     expect(undeclared.stderr).toBe("");
     expect(undeclared.exitCode).toBe(0);
+  });
+
+  test("an excepted path is dispatched as recorded: the registration keeps it as the repository's own", () => {
+    const { exitCode, stderr } = runValidator({
+      ".repo-platform.yml": `modules: [uv]\nexcept: [${CI}]\n`,
+      [CI]: "name: my own ci\n",
+      [MANIFEST]: manifestOf({ ...stampedBaseline(), [CI]: '{"class": "starter"}' }),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 
   test("an unknown class at a declared path is the unknown-class error alone", () => {
@@ -656,7 +669,7 @@ describe("parity messages name what the record and the tree show, never who made
     writeFileSync(join(root, "files.yml"), "modules: {}\nfiles: []\n");
     writeFileSync(join(root, MANIFEST_NAME), manifestOf({ ...SELF_ENTRY, [entry[0]]: entry[1] }));
     const findings = checkManifestParity(
-      loadContext(root, join(root, "files.yml"), { mode: "render", private: false }),
+      loadContext(root, join(root, "files.yml"), { self: false, private: false }),
     );
     expect(findings).toEqual([{ message }]);
   });
@@ -737,7 +750,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
     };
     writeFileSync(join(root, MANIFEST_NAME), manifestOf(entries));
     const findings = checkManifestParity(
-      loadContext(root, join(root, "files.yml"), { mode: "render", private: false }),
+      loadContext(root, join(root, "files.yml"), { self: false, private: false }),
     );
     const messages = findings.map((finding) => finding.message.split(" - ")[0].split(";")[0]);
     expect(messages).toEqual([

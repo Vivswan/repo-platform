@@ -51,16 +51,11 @@ function main(): number {
     if (!selfMode) usageError("--files <files.yml> is required outside --self");
     filesConfig = resolve(root, "files.yml");
   }
-  const target: Target = selfMode
-    ? { mode: "self" }
-    : {
-        mode: "render",
-        private:
-          privateRepo ??
-          usageError(
-            "--private <true|false> (the repository's visibility) is required outside --self",
-          ),
-      };
+  const target: Target = {
+    self: selfMode,
+    private:
+      privateRepo ?? usageError("--private <true|false> (the repository's visibility) is required"),
+  };
   const ctx = loadContext(root, resolve(filesConfig), target);
   const findings = CHECKS.flatMap((check) => check(ctx));
   writeReport(findings, process.env);

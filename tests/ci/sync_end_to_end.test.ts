@@ -1189,6 +1189,32 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
     expect(existsSync(join(target, MANIFEST))).toBe(false);
     expect(readlinkSync(join(target, "skills/a/LICENSE.md"))).toBe("../../LICENSE.md");
   });
+
+  test.each([
+    ["LICENSE.md/copy.md", "the target sits under 'LICENSE.md', a path the registration excepts"],
+    ["LICENSE.md", "the target is a path the registration excepts"],
+  ])(
+    "a target at or under an excepted path (%s) fails the run, and the excepted file is not touched",
+    (declared, problem) => {
+      const target = seed(
+        [
+          "modules: [bun]",
+          "project: {name: Demo, slug: demo, description: A demo}",
+          "except: [LICENSE.md]",
+          "mirrors:",
+          `  - {source: AGENTS.md, targets: [${declared}]}`,
+          "",
+        ].join("\n"),
+      );
+      const own = "my own license\n";
+      writeFileSync(join(target, "LICENSE.md"), own);
+      const result = spawnSync(target, join(temp.dir("sync-e2e-mirror-summary-"), "summary.json"));
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe(`${error("AGENTS.md", declared, problem)}\n`);
+      expect(readFileSync(join(target, "LICENSE.md"), "utf-8")).toBe(own);
+      expect(existsSync(join(target, MANIFEST))).toBe(false);
+    },
+  );
 });
 
 describe("sync.ts over retired paths whose records the writer cannot read", () => {
@@ -1263,5 +1289,70 @@ describe("sync.ts over a starter record it cannot read under a linked directory"
     };
     expect(manifest.files["docs/old.md"]).toBeUndefined();
     expect(readlinkSync(join(target, "docs"))).toBe("elsewhere");
+  });
+});
+
+describe("sync.ts over a registration with except", () => {
+  test("an excepted path is neither written nor recorded; one no entry writes is a note that holds", () => {
+    const target = temp.dir("sync-e2e-except-target-");
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n" +
+        "except: [.github/workflows/ci.yml, docs/nothing.md]\n",
+    );
+    mkdirSync(join(target, ".github/workflows"), { recursive: true });
+    writeFileSync(join(target, ".github/workflows/ci.yml"), LOCAL_CI);
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const { summary } = runSync(target, join(temp.dir("sync-e2e-except-summary-"), "summary.json"));
+    const paths = summary.written.map((row) => row.path);
+    expect(paths).not.toContain(".github/workflows/ci.yml");
+    expect(paths).toContain("LICENSE.md");
+    expect(readFileSync(join(target, ".github/workflows/ci.yml"), "utf-8")).toBe(LOCAL_CI);
+    const note = "`except` names `docs/nothing.md`, a path no files.yml entry writes";
+    expect(summary.notes).toEqual([note]);
+    expect(summary.hold).toBe(true);
+    expect(summary.holdReasons).toContain(`registration: ${note}`);
+    const manifest = JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as {
+      files: Record<string, unknown>;
+    };
+    expect(manifest.files[".github/workflows/ci.yml"]).toBeUndefined();
+  });
+});
+
+describe("sync.ts over a target that excepts a path an earlier sync recorded", () => {
+  test("each record is released: the file stays byte for byte, the record leaves, one Retired row, no hold", () => {
+    const target = temp.dir("sync-e2e-release-target-");
+    const registration = "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n";
+    writeFileSync(join(target, ".repo-platform.yml"), registration);
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const first = runSync(target, join(temp.dir("sync-e2e-release-summary1-"), "summary.json"));
+    expect(first.summary.written).toContainEqual({
+      path: ".github/workflows/ci.yml",
+      class: "managed",
+      change: "created",
+      detail: "",
+    });
+    const excepted = [".github/workflows/checks.yml", ".github/workflows/ci.yml"];
+    const before = excepted.map((path) => readFileSync(join(target, path), "utf-8"));
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      `${registration}except: [${excepted.join(", ")}]\n`,
+    );
+    const second = runSync(target, join(temp.dir("sync-e2e-release-summary2-"), "summary.json"));
+    expect(excepted.map((path) => readFileSync(join(target, path), "utf-8"))).toEqual(before);
+    expect(second.summary.retired).toEqual(
+      excepted.map((path) => ({
+        path,
+        outcome: "released",
+        detail:
+          "excepted by the registration; the record leaves and the file stays as it is, the repository's own",
+      })),
+    );
+    expect(second.summary.notes).toEqual([]);
+    expect(second.summary.hold).toBe(false);
+    const manifest = JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as {
+      files: Record<string, unknown>;
+    };
+    for (const path of excepted) expect(manifest.files[path]).toBeUndefined();
   });
 });

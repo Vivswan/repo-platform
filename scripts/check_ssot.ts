@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 
 // Facts this repo states in more than one INDEPENDENTLY-authored place are compared here so drift fails CI instead of rotting silently.
-// The one copy held to its source is the operator's own root copy of a shipped file (root-twin-parity, twin_copies.ts): the fleet's copies are the writer's, proven by the end-to-end sync test.
 //
 // Every rule's extraction fails loudly when its anchor disappears, never vacuously:
 //   grep-shaped text    -> mustMatch() (scripts/check/ssot/comparison.ts)
@@ -13,9 +12,8 @@
 import type { Mismatch } from "./check/ssot/comparison.ts";
 import { RULE_ROSTER, type Rule, ruleRosterMismatches } from "./check/ssot/rule_roster.ts";
 import { settingsWorkflowRules } from "./check/ssot/settings_workflow.ts";
-import { twinCopyRules } from "./check/ssot/twin_copies.ts";
 
-const rules: Rule[] = [...settingsWorkflowRules, ...twinCopyRules];
+const rules: Rule[] = [...settingsWorkflowRules];
 
 function main(): number {
   const args = process.argv.slice(2);

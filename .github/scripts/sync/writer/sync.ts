@@ -8,6 +8,7 @@ import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirr
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import { pathProblem } from "../../../../actions/shared/repo_path.ts";
+import type { Selection } from "../../../../actions/shared/selection.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
 import { loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
@@ -40,7 +41,7 @@ import {
   unifiedDiff,
   type WrittenRow,
 } from "./report.ts";
-import { keepReason, retire } from "./retire.ts";
+import { keepReason, type RetireRow, release, retire } from "./retire.ts";
 import { resolveModules } from "./select.ts";
 import { renderSettings } from "./settings_entry.ts";
 import { type Found, occupant, probe, removeFile, writeFile } from "./target_files.ts";
@@ -225,14 +226,26 @@ export function runSync(options: SyncOptions): SyncReport {
   const { records, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
 
-  const entries = selectEntries(config, { modules: selected, private: options.private });
+  const selection: Selection = {
+    modules: selected,
+    private: options.private,
+    except: registration.except,
+  };
+  const entries = selectEntries(config, selection);
   const entryPaths = new Set(entries.map((entry) => entry.path));
-  const owned = ownedPaths(config, { modules: selected, private: options.private });
-  // A stale record at no declared and no retired path is one files.yml cannot account for (a hand edit, or an entry deleted with no `retired` row), so its retirement is noted, which holds the PR.
+  const owned = ownedPaths(config, selection);
   const declared = new Set(config.files.map((entry) => entry.path));
+  notes.push(
+    ...(registration.except ?? [])
+      .filter((path) => !declared.has(path))
+      .map((path) => `\`except\` names \`${path}\`, a path no files.yml entry writes`),
+  );
+  // A stale record at no declared and no retired path is one files.yml cannot account for (a hand edit, or an entry deleted with no `retired` row), so its retirement is noted, which holds the PR.
   // Manifest keys are target-repo content: a stale record is retired only
   // when its path is one the writer could have written.
+  const excepted = new Set(registration.except ?? []);
   const stale: string[] = [];
+  const released: RetireRow[] = [];
   for (const [path, entry] of Object.entries(records)) {
     if (path === MANIFEST_NAME) continue;
     const record = readRecord(entry);
@@ -242,8 +255,13 @@ export function runSync(options: SyncOptions): SyncReport {
       );
       continue;
     }
-    if (entryPaths.has(path) || owned.retires.has(path)) continue;
-    if (record.class !== "managed" && record.class !== "split" && record.class !== "link") continue;
+    // A mirror record is mirrors.ts's to carry or drop: `except` speaks of files.yml entries.
+    if (record.class === "mirror") continue;
+    if (excepted.has(path)) {
+      released.push(release(path, records));
+      continue;
+    }
+    if (entryPaths.has(path) || owned.retires.has(path) || record.class === "starter") continue;
     const problem = pathProblem(path);
     if (problem !== null) {
       notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
@@ -257,7 +275,16 @@ export function runSync(options: SyncOptions): SyncReport {
       );
     }
   }
-  const retired = retire(options.target, config.retired, stale, entryPaths, records);
+  const retired = [
+    ...retire(
+      options.target,
+      config.retired.filter((entry) => !excepted.has(entry.path)),
+      stale,
+      entryPaths,
+      records,
+    ),
+    ...released,
+  ];
 
   // A Map, so a path named like an inherited property (constructor) is
   // looked up like any other.

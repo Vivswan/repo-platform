@@ -25,6 +25,8 @@ export interface OwnedPaths {
   /** Every recorded path the run retires as no longer selected: the
    *  writer's alone (it reads the manifest), empty at the plan. */
   stale: ReadonlySet<string>;
+  /** The registration's `except`: the repository's own, so no mirror lands at, under, or above one. */
+  excepted: ReadonlySet<string>;
 }
 
 export function ownedPaths(
@@ -41,6 +43,7 @@ export function ownedPaths(
     writes: new Set([...entries.map((entry) => entry.path), MANIFEST_NAME]),
     retires: new Set(config.retired.map((entry) => entry.path)),
     stale: new Set(),
+    excepted: new Set(selection.except ?? []),
   };
 }
 
@@ -49,6 +52,7 @@ function reserved(owned: OwnedPaths): [ReadonlySet<string>, string][] {
     [owned.writes, "a path files.yml writes"],
     [owned.retires, "a path files.yml retires"],
     [owned.stale, "a path a stale manifest record retires"],
+    [owned.excepted, "a path the registration excepts"],
   ];
 }
 

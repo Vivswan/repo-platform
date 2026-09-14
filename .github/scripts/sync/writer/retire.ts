@@ -6,7 +6,7 @@ import { capture } from "../../shared/proc.ts";
 import { mirrorKind, type Records, readRecord, sha256 } from "./manifest.ts";
 import { insideTarget, probe, removeFile, writeFile } from "./target_files.ts";
 
-export type RetireOutcome = "deleted" | "region removed" | "moved" | "held" | "kept";
+export type RetireOutcome = "deleted" | "region removed" | "moved" | "held" | "kept" | "released";
 
 export interface RetireRow {
   path: string;
@@ -91,6 +91,18 @@ export function keepReason(target: string, path: string, records: Records): stri
     return "the file carries repository-owned content outside the managed region";
   }
   return judgement.reason;
+}
+
+/** The registration's `except` names the path the repository's own, so the record leaves and nothing at the path is
+ *  probed or judged, whatever sits there. */
+export function release(path: string, records: Records): RetireRow {
+  delete records[path];
+  return {
+    path,
+    outcome: "released",
+    detail:
+      "excepted by the registration; the record leaves and the file stays as it is, the repository's own",
+  };
 }
 
 /** `git mv`, so the rename lands in the sync commit as one. */

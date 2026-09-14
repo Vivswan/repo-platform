@@ -74,15 +74,9 @@ The sync also requires `files.yml` at the commit's root, since a commit without 
 
 The recorded delivery is the full 40-hex sha of that main commit: the writer takes it from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run) and writes it into the manifest's own entry ([sync.md](sync.md#the-manifest)), so every repository names the exact commit its files came from. Old delivery commits stay reachable forever: they are main history.
 
-## A new action input lands as a stack
+## A new action input and its workflow land together
 
-A managed workflow (`files/<module>/.github/workflows/<name>.yml` and this repository's root twin of it) calls platform actions at the delivery ref, and the root twin is this repository's own check of that workflow. A workflow PR that feeds an action an input not yet at the delivery ref reds itself, whether the PR adds the input or is stacked on the PR that does: its check runs the action's copy at the delivery ref.
-
-1. Land the action change alone: its own PR against main, so the post-green run carries the new input to the delivery ref.
-2. Stack the workflow PR on the action branch while both are open. Once the action PR merges, rebase the workflow branch onto main with `--onto main <old action tip>` and retarget the PR: the squash made a new commit, so a plain retarget keeps the action commits in the workflow PR's diff.
-3. Wait for the action merge's post-green run to move the delivery ref, then re-run the workflow PR's check and merge: a push before the move runs the old copy again, and the move itself starts no PR run.
-
-Example: the pr-title workflow PR feeding validate-commit-names a new `title` input, stacked on the action PR before that PR merged; its own `pr-title` check ran the delivery-ref copy, which ignored the input and judged a commit range in a checkout-less job (`fatal: not a git repository`).
+A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([sync.md](sync.md#this-repository-as-a-target)), so a workflow never runs ahead of the actions it calls: the sync PR that carries a new workflow line lands only once the delivery ref names a commit carrying the action input it feeds. One PR may add the input and the line together; no check here runs the workflow before the move.
 
 ## Residuals
 
