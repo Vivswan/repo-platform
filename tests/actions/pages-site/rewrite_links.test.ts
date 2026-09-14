@@ -38,8 +38,9 @@ const SCOPE = {
 const rewriteHref = (href: string, page: string) => rewriteLink(href, page, SCOPE).href;
 
 describe("rewriteLink", () => {
-  // The output is what VitePress's own link rule then reads: an `index.md`
-  // becomes the directory URL there, a `.md` its `.html`.
+  // GitHub's file route 404s on a directory (tree, not blob), VitePress decodes an href once more (so `%` must
+  // leave as `%25`), and a link written in repository space lands on the staged route: external facts, one list.
+  // The output is what VitePress's own link rule then reads: an `index.md` becomes the directory URL, a `.md` its `.html`.
   test.each<[string, string, string]>([
     ["guide/README.md", "index.md", "guide/index.md"],
     ["./skills/alpha/SKILL.md#install", "index.md", "skills/alpha/index.md#install"],
@@ -47,6 +48,9 @@ describe("rewriteLink", () => {
     ["SKILL.md?x=1#top", "skills/alpha/reference.md", "index.md?x=1#top"],
     ["../alpha/SKILL.md", "skills/beta/index.md", "../alpha/index.md"],
     ["/skills/README.md", "guide/x.md", "/skills/index.md"],
+    ["../README.md", "ja/index.md", "../index.md"],
+    ["./", "guide/x.md", "./"],
+    [".", "guide/x.md", "./"],
     // Percent escapes name the file for the lookup and go back out encoded,
     // from any page, VitePress decoding the href once more.
     ["100%25/README.md", "index.md", "100%25/index.md"],
@@ -128,16 +132,8 @@ describe("rewriteLink", () => {
     expect(rewriteHref(href, page)).toBe(expected);
   });
 
-  test("a public/ link alone is verbatim: final, and VitePress's to leave alone", () => {
-    expect(rewriteLink("public/LICENSE", "index.md", SCOPE)).toEqual({
-      href: "/site/LICENSE",
-      verbatim: true,
-    });
-    for (const href of ["guide/README.md", "setup", "../.github/x.yml", "https://x.test/"]) {
-      expect(rewriteLink(href, "index.md", SCOPE).verbatim).toBe(false);
-    }
-  });
-
+  // The dead-link contract: a target VitePress reads as a page stays a site path whether or not it exists, so its
+  // own dead-link check is what reports a missing one; above the repository root nothing resolves.
   test.each<[string, string]>([
     ["other.md", "index.md"],
     ["setup.md#a", "guide/index.md"],
@@ -147,9 +143,6 @@ describe("rewriteLink", () => {
     ["100%25.md", "index.md"],
     ["a%23b.md", "index.md"],
     ["what%3F.md", "guide/index.md"],
-    // A target VitePress reads as a page (markdown, extensionless, a
-    // directory) stays a site path whether or not it exists: its own
-    // dead-link check is what reports a missing one.
     ["missing.md", "index.md"],
     ["gone/nothing.md#x", "guide/index.md"],
     ["setup", "index.md"],
@@ -158,7 +151,9 @@ describe("rewriteLink", () => {
     ["missing.dir/", "index.md"],
     ["setup/", "index.md"],
     ["../nowhere/sub", "guide/x.md"],
+    // A scheme, an authority (the protocol-relative form included), a bare fragment or query: never a path.
     ["https://example.test/README.md", "index.md"],
+    ["//cdn.example.test/README.md", "index.md"],
     ["mailto:x@example.test", "index.md"],
     ["#readme", "index.md"],
     ["?q=1", "index.md"],
@@ -170,21 +165,17 @@ describe("rewriteLink", () => {
   ])("leaves %s on %s alone", (href, page) => {
     expect(rewriteHref(href, page)).toBe(href);
   });
-
-  test("a docs README link from a locale page, and the page's own directory", () => {
-    expect(rewriteHref("../README.md", "ja/index.md")).toBe("../index.md");
-    expect(rewriteHref("./", "guide/x.md")).toBe("./");
-    expect(rewriteHref(".", "guide/x.md")).toBe("./");
-  });
 });
 
 describe("rewriteLinksRule through VitePress's renderer", () => {
-  test("a README link renders as its directory URL with the fragment, a repository file as its GitHub URL", async () => {
+  // The rule runs ahead of VitePress's link rule (core ruler order), and `target="_self"` is the one attribute that
+  // makes that rule skip the token and the router full-load it: a public/ asset gets it, no page or GitHub link does.
+  test("a README link renders as its directory URL with the fragment, a repository file as its GitHub URL, a public/ asset verbatim with the target", async () => {
     const md = await vitepressRenderer();
     expect(LINK_SCOPE.rewrites["ja/README.md"]).toBe("ja/index.md");
     const html = md.render(
-      "[ja](ja/README.md#intro), [a page](other.md), [pct](100%25.md), [ja dir](ja), " +
-        "[plugin](.codex-plugin/plugin.json), and [the workflow](../.github/workflows/ci.yml)",
+      "[ja](ja/README.md#intro), [a page](other.md), [pct](100%25.md), [ja dir](ja), [bare](other), " +
+        "[plugin](.codex-plugin/plugin.json), [out](https://x.test/), and [the workflow](../.github/workflows/ci.yml)",
       { path: "/x/index.md", relativePath: "index.md" },
     );
     expect(html).toContain('href="./ja/#intro"');
@@ -194,8 +185,10 @@ describe("rewriteLinksRule through VitePress's renderer", () => {
     expect(html).toContain(
       'href="https://github.com/fixture-owner/fixture-repo/blob/main/docs/.codex-plugin/plugin.json"',
     );
-    // public/ links reach the browser as written, base included, with the
-    // target that keeps VitePress's rule and router off them.
+    expect(html).toContain(
+      'href="https://github.com/fixture-owner/fixture-repo/blob/main/.github/workflows/ci.yml"',
+    );
+    expect(html).not.toContain("_self");
     const assets = md.render(
       "[license](public/LICENSE), [manual](public/manual/), [logo](public/logo.svg#x)",
       { path: "/x/index.md", relativePath: "index.md" },
@@ -203,11 +196,9 @@ describe("rewriteLinksRule through VitePress's renderer", () => {
     expect(assets).toContain('<a href="/repo/LICENSE" target="_self">');
     expect(assets).toContain('<a href="/repo/manual/" target="_self">');
     expect(assets).toContain('<a href="/repo/logo.svg#x" target="_self">');
-    expect(html).toContain(
-      'href="https://github.com/fixture-owner/fixture-repo/blob/main/.github/workflows/ci.yml"',
-    );
   });
 
+  // env.links is VitePress's dead-link input: a rule that sent a missing page to GitHub would pass the check silently.
   test("a missing markdown target stays on the site, where VitePress's dead-link check records it", async () => {
     const md = await vitepressRenderer();
     const env: { path: string; relativePath: string; links?: string[] } = {

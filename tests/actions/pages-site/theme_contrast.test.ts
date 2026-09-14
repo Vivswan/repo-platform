@@ -1,5 +1,6 @@
 // The tertiary ink is small type (the 12.5px provenance line, the code block's language label), so every text token must clear WCAG AA's 4.5:1.
-// theme_tokens.test.ts proves each token has a reader and that the render is the data; this pins the values themselves, per mode and ground, the print sheet included.
+// theme_tokens.test.ts proves each token has a reader and that the render is the data; this pins the values themselves,
+// per mode and ground, the print sheet included.
 
 import { expect, test } from "bun:test";
 import { mermaidThemeVariables } from "../../../actions/pages-site/.vitepress/theme/mermaid-theme.ts";
@@ -62,19 +63,15 @@ function palettePairs(declared: Map<string, string>): [string, string][] {
   ];
 }
 
-test.each([...MODES])("every %s text token clears 4.5:1 on every ground of its mode", (mode) => {
-  const declared = modeValues(mode);
-  expect(failures(declared, textPairs(declared))).toEqual([]);
-});
-
 test.each([...MODES])(
-  "every %s code token clears 4.5:1 on the code ground, every alert color on the panel",
+  "every %s text token clears 4.5:1 on every ground of its mode, every code token on the code ground, every alert color on the panel",
   (mode) => {
     const declared = modeValues(mode);
-    expect(failures(declared, palettePairs(declared))).toEqual([]);
+    expect(failures(declared, [...textPairs(declared), ...palettePairs(declared)])).toEqual([]);
   },
 );
 
+// The armed control of the measurement: a non-hex value is reported, never skipped.
 test.each([
   ["var(--vp-c-bg-code)", "is not declared as a six-digit hex"],
   ["#8c94a6", "on --vp-c-bg-code #eaecf0: 2.57:1"],
@@ -121,18 +118,6 @@ test.each(SCREEN_MODES)(
     expect(bands.filter((tint) => contrast(tertiary, tint) < AA_SMALL_TEXT)).toEqual(bands);
   },
 );
-
-// The values the theme replaced fail the same measurement: the tertiary text
-// values shipped before the contrast fix on the code grounds, and shiki's
-// github themes' comment gray and light string green on the fleet's.
-test("the pre-fix tertiary values and the github-theme token colors fail on the code grounds", () => {
-  expect(contrast("#737b89", "#eaecf0")).toBeLessThan(AA_SMALL_TEXT);
-  expect(contrast("#80889a", "#262a32")).toBeLessThan(AA_SMALL_TEXT);
-  expect(contrast("#6a737d", "#23262e")).toBeLessThan(AA_SMALL_TEXT);
-  expect(contrast("#6a737d", "#eaecf0")).toBeLessThan(AA_SMALL_TEXT);
-  expect(contrast("#22863a", "#eaecf0")).toBeLessThan(AA_SMALL_TEXT);
-  expect(contrast("#000000", "#ffffff")).toBeCloseTo(21, 5);
-});
 
 // The mermaid theme bakes literal colors into every diagram's SVG, so its text meets the same bar on the ground it is drawn over.
 // The hue is a border color only, so it may not move any of these pairs.

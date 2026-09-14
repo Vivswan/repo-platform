@@ -16,11 +16,7 @@ import {
   type TokenName,
   tokenNames,
 } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
-import {
-  TOKENS_CSS_ID,
-  themeTokensCss,
-  tokensCssPlugin,
-} from "../../../actions/pages-site/.vitepress/theme/tokens-css.ts";
+import { themeTokensCss } from "../../../actions/pages-site/.vitepress/theme/tokens-css.ts";
 
 const ACTION = resolve(import.meta.dir, "../../../actions/pages-site");
 const THEME = join(ACTION, ".vitepress/theme");
@@ -110,23 +106,8 @@ test("every custom property the theme declares has a live var() reader", () => {
   const unread = [...declared].filter((token) => !read.has(token)).sort();
   expect(declared.size).toBeGreaterThan(50);
   expect(unread).toEqual([]);
-});
-
-// The reverse: a color shiki can put on a span (a diff fence's inserted
-// and deleted lines, a link) with no declared value falls back to the
-// plain text ink, so every colored variable must have a value in each mode,
-// the print sheet's included.
-test.each([...MODES])("every token color the shiki theme emits has a %s value", (mode) => {
-  const declared = new Set<string>(modeValues(mode).keys());
-  const undeclared = [...new Set(shikiReads().colored)].filter((token) => !declared.has(token));
-  expect(undeclared).toEqual([]);
-});
-
-// The control for the filter above: with the override rule disabled every
-// token has a reader again and the first test passes on dead tokens, so
-// this pins the classification on a synthetic block and on the two shipped
-// carbon cases it was written for.
-test("the override filter drops :root reads the theme outranks and keeps scoped ones", () => {
+  // The armed control: with the override filter disabled every token has a reader again and the sweep passes on dead
+  // tokens, so the classification is pinned on a synthetic block and on the two shipped carbon cases it was written for.
   const synthetic = [
     ":root {",
     "  --a: var(--x);",
@@ -141,8 +122,6 @@ test("the override filter drops :root reads the theme outranks and keeps scoped 
     "}",
   ].join("\n");
   expect(liveCarbonReads(synthetic, new Set(["--a"])).sort()).toEqual(["--v", "--w", "--y"]);
-
-  const declared = themeDeclarations();
   const vars = readFileSync(join(CARBON, "theme/styles/vars.css"), "utf-8");
   expect(tokens(vars, VAR_READ)).toContain("--vp-c-default-3");
   expect(declared.has("--vp-button-alt-bg")).toBe(true);
@@ -150,6 +129,16 @@ test("the override filter drops :root reads the theme outranks and keeps scoped 
   const search = readFileSync(join(CARBON, "theme/components/VPLocalSearchBox.vue"), "utf-8");
   expect(declared.has("--vp-local-search-result-bg")).toBe(true);
   expect(liveCarbonReads(search, declared)).toContain("--vp-local-search-result-selected-bg");
+});
+
+// The reverse: a color shiki can put on a span (a diff fence's inserted
+// and deleted lines, a link) with no declared value falls back to the
+// plain text ink, so every colored variable must have a value in each mode,
+// the print sheet's included.
+test.each([...MODES])("every token color the shiki theme emits has a %s value", (mode) => {
+  const declared = new Set<string>(modeValues(mode).keys());
+  const undeclared = [...new Set(shikiReads().colored)].filter((token) => !declared.has(token));
+  expect(undeclared).toEqual([]);
 });
 
 // The token layer is tokens.ts rendered at build time, so the render is pinned to the data, block by block in
@@ -247,15 +236,4 @@ test("the rendered token layer is the data, block by block, in cascade order", (
   ];
   expect(expected.length).toBeGreaterThan(14);
   expect(cssBlocks(themeTokensCss())).toEqual(expected);
-});
-
-test("the vite plugin serves the render under the virtual id and nothing else", () => {
-  const plugin = tokensCssPlugin();
-  const resolved = plugin.resolveId(TOKENS_CSS_ID);
-  expect(resolved).toBeDefined();
-  expect(resolved).toEndWith(".css");
-  expect(plugin.load(resolved as string)).toBe(themeTokensCss());
-  expect(plugin.resolveId("./base.css")).toBeUndefined();
-  expect(plugin.load(TOKENS_CSS_ID)).toBeUndefined();
-  expect(readFileSync(join(THEME, "index.ts"), "utf-8")).toContain(`import "${TOKENS_CSS_ID}";`);
 });

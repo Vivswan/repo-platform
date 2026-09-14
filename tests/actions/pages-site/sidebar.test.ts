@@ -34,13 +34,18 @@ function source(
 const plain = (title: string): [string, null, null] => [title, null, null];
 
 describe("deriveSidebar", () => {
-  test("a tree saying nothing keeps today's shape: landing first, pages in file order, one collapsible group per directory titled from its folder", () => {
+  // The launcher's page index (pages.data.ts) copies this order through sidebarOrder, so the two must agree or the
+  // launcher and the sidebar list pages differently, green; the root tree and each locale are walked in that order.
+  test("a tree saying nothing keeps today's shape: landing first, pages in file order, one collapsible group per directory titled from its folder; each locale is its own tree", () => {
     const files = [
       "README.md",
       "api-reference/errors.md",
       "guide/README.md",
       "guide/deep-dive.md",
+      "release_notes/changes.md",
       "setup.md",
+      "ja/README.md",
+      "ja/z.md",
     ];
     const pages = source({
       "README.md": plain("Home"),
@@ -48,7 +53,25 @@ describe("deriveSidebar", () => {
       "guide/README.md": plain("Guide"),
       "guide/deep-dive.md": plain("deep dive"),
       "api-reference/errors.md": plain("error codes"),
+      "release_notes/changes.md": plain("changes"),
+      "ja/README.md": plain("JA"),
+      "ja/z.md": plain("Z"),
     });
+    const trees = sidebarTrees(files);
+    expect(trees).toEqual([
+      {
+        prefix: "",
+        files: [
+          "README.md",
+          "api-reference/errors.md",
+          "guide/README.md",
+          "guide/deep-dive.md",
+          "release_notes/changes.md",
+          "setup.md",
+        ],
+      },
+      { prefix: "ja/", files: ["ja/README.md", "ja/z.md"] },
+    ]);
     const expected: SidebarItem[] = [
       { text: "Home", link: "/" },
       { text: "Getting started", link: "/setup" },
@@ -65,14 +88,22 @@ describe("deriveSidebar", () => {
           { text: "deep dive", link: "/guide/deep-dive" },
         ],
       },
+      {
+        text: "Release Notes",
+        collapsed: false,
+        items: [{ text: "changes", link: "/release_notes/changes" }],
+      },
     ];
-    expect(deriveSidebar(files, pages, ROOT_SITE)).toEqual(expected);
+    expect(deriveSidebar(trees[0].files, pages, ROOT_SITE)).toEqual(expected);
     expect(sidebarOrder(files, pages, ROOT_SITE)).toEqual([
       "README.md",
       "setup.md",
       "api-reference/errors.md",
       "guide/README.md",
       "guide/deep-dive.md",
+      "release_notes/changes.md",
+      "ja/README.md",
+      "ja/z.md",
     ]);
   });
 
@@ -113,6 +144,8 @@ describe("deriveSidebar", () => {
     },
   );
 
+  // A precedence read the other way round, or a dropped title tie-break, reorders the sidebar of every page tree with
+  // nothing red: VitePress renders whatever order it is handed.
   test("order wins over the landing table, the landing table wins over file order, and the rest keep file order", () => {
     expect(deriveSidebar(RANKED_TREE, ranked, ROOT_SITE).map((item) => item.text)).toEqual([
       "Home",
@@ -180,14 +213,28 @@ describe("deriveSidebar", () => {
     ]);
   });
 
-  test("a landing row titled like the site reads Overview, at any level; any other title stays", () => {
-    const files = ["README.md", "guide/README.md", "guide/index.md", "other.md"];
-    const pages = source({
-      "README.md": plain("my-repo"),
-      "guide/README.md": plain("my-repo"),
-      "guide/index.md": plain("Guide"),
-      "other.md": plain("my-repo"),
-    });
+  // Without the landing test every page titled like the site would read Overview. When README.md and index.md both
+  // exist, index.md serves the directory route, so its table (not the README's) places the level.
+  test("a landing row titled like the site reads Overview, at any level; any other title stays; index.md's table places the level over a README's", () => {
+    const files = [
+      "README.md",
+      "guide/README.md",
+      "guide/index.md",
+      "guide/a.md",
+      "guide/b.md",
+      "other.md",
+    ];
+    const pages = source(
+      {
+        "README.md": plain("my-repo"),
+        "guide/README.md": plain("my-repo"),
+        "guide/index.md": plain("Guide"),
+        "guide/a.md": plain("A"),
+        "guide/b.md": plain("B"),
+        "other.md": plain("my-repo"),
+      },
+      { "guide/README.md": ["./a.html"], "guide/index.md": ["./b.html"] },
+    );
     expect(deriveSidebar(files, pages, ROOT_SITE, { siteTitle: "my-repo" })).toEqual([
       { text: "Overview", link: "/" },
       { text: "my-repo", link: "/other" },
@@ -197,6 +244,8 @@ describe("deriveSidebar", () => {
         items: [
           { text: "Overview", link: "/guide/README" },
           { text: "Guide", link: "/guide/" },
+          { text: "B", link: "/guide/b" },
+          { text: "A", link: "/guide/a" },
         ],
       },
     ]);
@@ -267,33 +316,6 @@ describe("deriveSidebar", () => {
           { text: "Both", link: "/q%3Fdir/e%23f" },
         ],
       },
-    ]);
-  });
-
-  test("sidebarTrees splits the root from each locale, and sidebarOrder walks them in that order", () => {
-    const files = ["README.md", "b.md", "a.md", "ja/README.md", "ja/z.md", "guide/x.md"];
-    const pages = source(
-      {
-        "README.md": plain("Home"),
-        "a.md": plain("A"),
-        "b.md": plain("B"),
-        "ja/README.md": plain("JA"),
-        "ja/z.md": plain("Z"),
-        "guide/x.md": plain("X"),
-      },
-      { "README.md": ["./b.html"] },
-    );
-    expect(sidebarTrees(files)).toEqual([
-      { prefix: "", files: ["README.md", "b.md", "a.md", "guide/x.md"] },
-      { prefix: "ja/", files: ["ja/README.md", "ja/z.md"] },
-    ]);
-    expect(sidebarOrder(files, pages, ROOT_SITE)).toEqual([
-      "README.md",
-      "b.md",
-      "a.md",
-      "guide/x.md",
-      "ja/README.md",
-      "ja/z.md",
     ]);
   });
 

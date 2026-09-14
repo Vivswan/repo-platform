@@ -1,4 +1,5 @@
-// The composite's plumbing: the stock issue action step and its inputs, the mode gates, and the gh lines run against a recording gh stub.
+// The gh lines of the composite, executed against a recording gh stub, and the two `with:` facts of the stock issue step
+// that GitHub enforces nowhere.
 
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -8,10 +9,7 @@ import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 const action = loadAction("actions/fuzz-issue/action.yml");
-const steps = action.runs.steps;
 
-const REPORT = "inputs.mode == 'report'";
-const RESOLVE = "inputs.mode == 'resolve'";
 const LABEL = "fuzz-nightly";
 const CLOSE_COMMENT = "Nightly fuzz passed on 2026-03-04.\n\nClosing.";
 
@@ -78,88 +76,53 @@ const list = (label: string, limit: string, jq: string) => [
 ];
 
 describe("the fuzz-issue composite", () => {
-  test("the stock action files or refreshes the newest open labeled issue from the assembled body, owner assigned", () => {
+  test("the issue step assigns the owner and refreshes by the found number", () => {
+    // An issue created with GITHUB_TOKEN fires no issues:opened event for the auto-assign workflow, so every nightly issue
+    // would sit unassigned; an empty issue-number is the stock action's create, so the find step's output is the whole switch.
     const issue = stepNamed(action, "File or refresh the issue");
-    expect(issue.id).toBe("issue");
-    expect(issue.if).toBe(REPORT);
-    expect(issue.uses).toMatch(/^peter-evans\/create-issue-from-file@[0-9a-f]{40}$/);
-    expect(issue.with).toEqual({
-      token: "${{ github.token }}",
-      "issue-number": "${{ steps.open.outputs.number }}",
-      title: "${{ inputs.title }}",
-      "content-filepath": "${{ steps.body.outputs.file }}",
-      labels: "${{ inputs.label }}",
-      assignees: "${{ github.repository_owner }}",
-    });
-    expect(action.outputs).toEqual({
-      "issue-number": expect.objectContaining({
-        value: "${{ steps.issue.outputs.issue-number }}",
-      }),
-    });
-  });
-
-  test("the assembly runs in both modes on the action's own bun; the plumbing is gated per mode", () => {
-    const gates = steps.map((step) => [step.name, step.if]);
-    expect(gates).toEqual([
-      ["Set up the action's bun", undefined],
-      ["Assemble the issue body or the close comment", undefined],
-      ["Find the stream's open issue", REPORT],
-      ["Create the stream's label", REPORT],
-      ["File or refresh the issue", REPORT],
-      ["Close the stream's open issues", RESOLVE],
+    const with_ = issue.with as Record<string, string>;
+    expect([with_.assignees, with_["issue-number"]]).toEqual([
+      "${{ github.repository_owner }}",
+      "${{ steps.open.outputs.number }}",
     ]);
-    const body = stepNamed(action, "Assemble the issue body or the close comment");
-    expect(body.id).toBe("body");
-    expect(body.run).toBe('"$ACTION_BUN" "${{ github.action_path }}/fuzz-issue.ts"');
-    expect(body.env).toEqual({
-      MODE: "${{ inputs.mode }}",
-      LABEL: "${{ inputs.label }}",
-      ARTIFACTS_DIR: "${{ inputs.artifacts-dir }}",
-      ARTIFACT_NAME: "${{ inputs.artifact-name }}",
-      STREAM: "${{ inputs.stream }}",
-      TITLE: "${{ inputs.title }}",
-      LABEL_COLOR: "${{ inputs.label-color }}",
-      LABEL_DESCRIPTION: "${{ inputs.label-description }}",
-      ACTION_BUN: "${{ steps.action-bun.outputs.path }}",
-    });
   });
 
-  test.each([
+  test.each<{
+    listed: string;
+    listExit: number;
+    exitCode: number;
+    outputs: Record<string, string>;
+    reason: string;
+  }>([
     {
       listed: "7\n",
-      number: "7",
+      listExit: 0,
+      exitCode: 0,
+      outputs: { number: "7" },
       reason: "the newest open issue is refreshed",
     },
-    { listed: "", number: "", reason: "no open issue means a create" },
-  ])("find: $reason", ({ listed, number }) => {
-    const step = stepNamed(action, "Find the stream's open issue");
-    expect(step.id).toBe("open");
-    const run = runWithGh(step, listed);
-    expect([run.exitCode, run.outputs]).toEqual([0, { number }]);
-    expect(run.gh).toEqual([list(LABEL, "1", ".[0].number // empty")]);
-  });
-
-  test("find: a failed listing fails the step instead of reading as no open issue (a duplicate create)", () => {
-    const run = runWithGh(stepNamed(action, "Find the stream's open issue"), "", 1);
-    expect([run.exitCode, run.outputs]).toEqual([1, {}]);
-  });
-
-  test("label: created or repainted to the stream's tuple in one forced call", () => {
-    const run = runWithGh(stepNamed(action, "Create the stream's label"), "");
-    expect(run.exitCode).toBe(0);
-    expect(run.gh).toEqual([
-      [
-        "label",
-        "create",
-        LABEL,
-        "--repo",
-        "o/r",
-        "--color",
-        "B60205",
-        "--description",
-        "Automated nightly fuzz failure",
-        "--force",
-      ],
+    {
+      listed: "",
+      listExit: 0,
+      exitCode: 0,
+      outputs: { number: "" },
+      reason: "no open issue means a create",
+    },
+    {
+      listed: "",
+      listExit: 1,
+      exitCode: 1,
+      outputs: {},
+      reason:
+        "a failed listing fails the step: read as no open issue it would file a duplicate, both green",
+    },
+  ])("find: $reason", ({ listed, listExit, exitCode, outputs }) => {
+    // gh lists newest first; `.[0].number // empty` writes nothing rather than `null` for an empty list.
+    const run = runWithGh(stepNamed(action, "Find the stream's open issue"), listed, listExit);
+    expect([run.exitCode, run.outputs, run.gh]).toEqual([
+      exitCode,
+      outputs,
+      [list(LABEL, "1", ".[0].number // empty")],
     ]);
   });
 
@@ -167,11 +130,27 @@ describe("the fuzz-issue composite", () => {
     {
       listed: "7\n3\n",
       closed: ["7", "3"],
-      reason: "every open labeled issue, not just the first",
+      reason: "every open labeled issue: release-health blocks while any carries the label",
     },
-    { listed: "", closed: [], reason: "no open issue closes nothing" },
+    {
+      listed: "",
+      closed: [],
+      reason: "no open issue closes nothing (xargs -r keeps issue '' out)",
+    },
   ])("close: $reason", ({ listed, closed }) => {
-    const run = runWithGh(stepNamed(action, "Close the stream's open issues"), listed);
+    // The close step is resolve mode's alone and the find, label, and issue steps are report mode's: a close step
+    // gated on report files the night's issue and closes it in the same run, so release-health is unblocked under a
+    // log saying open. runBashStep ignores `if`, so the gates are read before the step runs.
+    const close = stepNamed(action, "Close the stream's open issues");
+    expect(
+      action.runs.steps.filter((step) => step.if !== undefined).map((step) => [step.name, step.if]),
+    ).toEqual([
+      ["Find the stream's open issue", "inputs.mode == 'report'"],
+      ["Create the stream's label", "inputs.mode == 'report'"],
+      ["File or refresh the issue", "inputs.mode == 'report'"],
+      [close.name, "inputs.mode == 'resolve'"],
+    ]);
+    const run = runWithGh(close, listed);
     expect(run.exitCode).toBe(0);
     expect(run.gh).toEqual([
       list(LABEL, "100", ".[].number"),

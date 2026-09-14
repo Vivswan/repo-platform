@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { HUES } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 import {
   collectFacts,
   type FactsReader,
@@ -11,18 +12,20 @@ const treeOf =
   (path) =>
     files[path] ?? null;
 
+// An enterprise server, so a link built from a github.com literal is red; an owner whose hash differs
+// from the bare name's, so a hue hashed from owner/name is red (the accent is the repository's alone).
 const HEAD_INPUT = {
-  repository: "fixture-owner/fixture-repo",
+  repository: "fixture-org/fixture-repo",
   docsDir: "docs",
   defaultBranch: "main",
   ref: "HEAD",
   sha: "0123456789abcdef0123456789abcdef01234567",
-  serverUrl: "https://github.com",
+  serverUrl: "https://ghe.example.test",
 };
 
 const EMPTY_FACTS: ProjectFacts = {
-  repository: "fixture-owner/fixture-repo",
-  repoUrl: "https://github.com/fixture-owner/fixture-repo",
+  repository: "fixture-org/fixture-repo",
+  repoUrl: "https://ghe.example.test/fixture-org/fixture-repo",
   description: null,
   homepage: null,
   topics: [],
@@ -32,7 +35,7 @@ const EMPTY_FACTS: ProjectFacts = {
   provenance: {
     label: "main",
     sha: HEAD_INPUT.sha,
-    url: `https://github.com/fixture-owner/fixture-repo/commit/${HEAD_INPUT.sha}`,
+    url: `https://ghe.example.test/fixture-org/fixture-repo/commit/${HEAD_INPUT.sha}`,
   },
   hue: 3,
 };
@@ -76,6 +79,7 @@ const FULL_TREE: Record<string, string> = {
 };
 
 describe("collectFacts", () => {
+  // The toolchain file roster is a fleet convention no file declares, and the `v` prefix is dropped in one place.
   test("reads every fact from a fully populated tree", () => {
     expect(collectFacts(treeOf(FULL_TREE), HEAD_INPUT)).toEqual({
       ...EMPTY_FACTS,
@@ -93,22 +97,9 @@ describe("collectFacts", () => {
     });
   });
 
-  test("the settings file is the description's only source: a registration alone adds none", () => {
-    const tree = treeOf({ ".repo-platform.yml": REGISTRATION, ".bun-version": "1.4.0" });
-    expect(collectFacts(tree, HEAD_INPUT)).toEqual({
-      ...EMPTY_FACTS,
-      toolchains: [{ name: "Bun", version: "1.4.0" }],
-    });
-  });
-
-  test("degrades missing files and a non-mapping settings.yml to null or empty", () => {
-    expect(collectFacts(treeOf({}), HEAD_INPUT)).toEqual(EMPTY_FACTS);
-    expect(
-      collectFacts(treeOf({ ".github/settings.yml": "- just\n- a list\n" }), HEAD_INPUT),
-    ).toEqual(EMPTY_FACTS);
-  });
-
-  test.each<[string, string, Partial<ProjectFacts>]>([
+  // The shapes the settings apply accepts (topics as one string or a YAML list, an empty string as unset)
+  // live in github-settings-as-code; this is the only pin that the facts reader reads them the same way.
+  test.each<[string, string | null, Partial<ProjectFacts>]>([
     [
       "every identity key declared",
       SETTINGS,
@@ -133,29 +124,20 @@ describe("collectFacts", () => {
       "repository:\n  topics: [bun, ' docs ', '', 7]\n",
       { topics: ["bun", "docs"] },
     ],
+    ["a whitespace-only topics value", "repository:\n  topics: '   '\n", { topics: [] }],
     ["a malformed settings.yml", "repository: [", {}],
     ["a settings.yml without a repository block", "labels:\n  - name: docs\n", {}],
+    ["a settings.yml that is a list", "- just\n- a list\n", {}],
+    ["no settings.yml", null, {}],
   ])("reads identity with %s", (_case, settings, identity) => {
-    const tree = treeOf({ ".github/settings.yml": settings, ".repo-platform.yml": REGISTRATION });
+    const tree = treeOf({
+      ...(settings === null ? {} : { ".github/settings.yml": settings }),
+      ".repo-platform.yml": REGISTRATION,
+    });
     expect(collectFacts(tree, HEAD_INPUT)).toEqual({ ...EMPTY_FACTS, ...identity });
   });
 
-  test.each<[string, string, string]>([
-    ["the default server", "https://github.com", "https://github.com"],
-    ["an enterprise server", "https://ghe.example.test", "https://ghe.example.test"],
-  ])("builds every link from %s", (_case, serverUrl, base) => {
-    const facts = collectFacts(treeOf({}), { ...HEAD_INPUT, serverUrl });
-    expect([facts.repoUrl, facts.provenance.url]).toEqual([
-      `${base}/fixture-owner/fixture-repo`,
-      `${base}/fixture-owner/fixture-repo/commit/${HEAD_INPUT.sha}`,
-    ]);
-  });
-
-  test("carries the docs directory verbatim so the theme can prefix page paths", () => {
-    const nested = collectFacts(treeOf({}), { ...HEAD_INPUT, docsDir: "site/manual" });
-    expect(nested).toEqual({ ...EMPTY_FACTS, docsDir: "site/manual" });
-  });
-
+  // build.ts passes ref "HEAD" for the default-branch tier; the label must read the branch then, not the literal.
   test("labels provenance by the default branch for HEAD and by the tag otherwise", () => {
     const tagged = {
       ...HEAD_INPUT,
@@ -165,26 +147,14 @@ describe("collectFacts", () => {
     expect(collectFacts(treeOf({}), tagged).provenance).toEqual({
       label: "v1.2.0",
       sha: tagged.sha,
-      url: `https://github.com/fixture-owner/fixture-repo/commit/${tagged.sha}`,
+      url: `https://ghe.example.test/fixture-org/fixture-repo/commit/${tagged.sha}`,
     });
     expect(
       collectFacts(treeOf({}), { ...HEAD_INPUT, defaultBranch: "trunk" }).provenance.label,
     ).toBe("trunk");
   });
 
-  test.each<[string, string[]]>([
-    ["", []],
-    ["   ", []],
-    ["bun", ["bun"]],
-    [" bun , docs,,tooling ", ["bun", "docs", "tooling"]],
-  ])("splits the topics value %j into %j", (raw, topics) => {
-    const settings = `repository:\n  topics: ${JSON.stringify(raw)}\n`;
-    expect(collectFacts(treeOf({ ".github/settings.yml": settings }), HEAD_INPUT)).toEqual({
-      ...EMPTY_FACTS,
-      topics,
-    });
-  });
-
+  // GitHub's homepage field has no validator; these are the forms owners type.
   test.each<[string, string, string | null]>([
     ["a full URL", "https://example.test/docs/", "https://example.test/docs/"],
     ["an http URL", "http://example.test", "http://example.test"],
@@ -216,6 +186,7 @@ describe("collectFacts", () => {
     });
   });
 
+  // rustup's accepted TOML shapes (dotted key, inline table) are external; the degrade rows are the never-fail-a-build contract.
   test.each<[string, string, ProjectFacts["toolchains"]]>([
     [
       "a stable channel",
@@ -241,6 +212,8 @@ describe("collectFacts", () => {
     );
   });
 
+  // GitHub's license template texts (Apache's centered header, GPL's header, CC0 under a publisher banner)
+  // are external file shapes; a known name past the head or only in the body is not the license.
   test.each<[string, string, string]>([
     [
       "a heading over a custom license",
@@ -334,15 +307,16 @@ describe("hueOf", () => {
     expect(hueOf(name)).toBe(hueOf(name));
   });
 
-  test("covers every hue and stays within 0..5", () => {
+  // mermaid-render reads `HUES[slot] ?? HUES[0]`, so a slot past the table silently falls to slot 0.
+  test("covers every hue slot of the theme's table and none past it", () => {
     const seen = new Set<number>();
     for (let i = 0; i < 200; i++) {
       const hue = hueOf(`repo-${i}`);
       expect(hue).toBeGreaterThanOrEqual(0);
-      expect(hue).toBeLessThanOrEqual(5);
+      expect(hue).toBeLessThan(HUES.length);
       expect(Number.isInteger(hue)).toBe(true);
       seen.add(hue);
     }
-    expect(seen.size).toBe(6);
+    expect(seen.size).toBe(HUES.length);
   });
 });

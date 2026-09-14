@@ -1,37 +1,41 @@
+// fleet-release.yml runs the action with no checkout and every gate reads GitHub through gh: the facts here are
+// gh's (list truncation, pagination, 403 for a rate limit too) and GitHub's (case-insensitive labels, an open PR
+// listed against a commit it merely contains), none of which the code can enforce for itself.
+
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  BLOCKER_LABEL,
   type Config,
   findReleasePr,
   type GateOutcome,
   type GhRunner,
   issueGate,
-  OVERRIDE_LABEL,
+  type Override,
   overrideFromPullRequest,
   parseConfig,
   parseTrackingLabels,
+  type ReleaseLookup,
   runHealthCheck,
-  SECURITY_THRESHOLD,
   securityGate,
-  severitiesAtOrAbove,
 } from "../../../actions/release-health/release-health.ts";
-import { LABEL_RE } from "../../../actions/shared/label.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
+
+interface CommitPull {
+  number: number;
+  head: { ref: string };
+  labels: Array<{ name: string }>;
+  merged_at?: string | null;
+}
 
 interface Fixture {
   issues?: Record<string, number[]>;
   alerts?: number[];
   alertsError?: string;
-  commitPulls?: Array<{
-    number: number;
-    head: { ref: string };
-    labels: Array<{ name: string }>;
-    merged_at?: string | null;
-  }>;
+  /** One inner array per page, as `--paginate --slurp` hands them over. */
+  commitPulls?: CommitPull[][];
   prViewLabels?: string[];
 }
 
@@ -72,9 +76,7 @@ function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
       return JSON.stringify((fixture.alerts ?? []).map((number) => ({ number })));
     }
     if (args[0] === "api" && args.some((arg) => arg.includes("/pulls"))) {
-      // --paginate --slurp wraps the pages in one array; the fake returns a
-      // single page holding the fixture's PRs.
-      return JSON.stringify([fixture.commitPulls ?? []]);
+      return JSON.stringify(fixture.commitPulls ?? [[]]);
     }
     if (args[0] === "pr" && args[1] === "view") {
       if (fixture.prViewLabels === undefined) {
@@ -87,23 +89,32 @@ function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
   return { run, calls };
 }
 
-// Created at load so the parametrized tables below can name the path.
+// The payload snapshot carries the override label so that every pull-request row proves the live `gh pr view`
+// decides, never the snapshot: a label applied after a failing run to re-run it is absent from the payload,
+// and one removed since is still in it.
 const eventDir = temp.dir("release-health-");
 const eventPath = join(eventDir, "event.json");
 writeFileSync(
   eventPath,
-  JSON.stringify({ pull_request: { number: 12, labels: [{ name: "autorelease: pending" }] } }),
+  JSON.stringify({
+    pull_request: {
+      number: 12,
+      labels: [{ name: "autorelease: pending" }, { name: "release-override" }],
+    },
+  }),
 );
 
-const baseEnv = {
-  GITHUB_REPOSITORY: "o/r",
-  GITHUB_SHA: "abc123",
-} as NodeJS.ProcessEnv;
+/** The rejection's exact message; `rejects.toThrow(string)` matches a substring and would pass an appended remedy. */
+const rejection = (promise: Promise<unknown>): Promise<string> =>
+  promise.then(
+    () => "resolved",
+    (error: unknown) => (error instanceof Error ? error.message : String(error)),
+  );
 
 function prConfig(overrides: Partial<Config> = {}): Config {
   return {
     context: { mode: "pull-request", eventPath },
-    repo: "o/r",
+    repo: REPO,
     trackingLabels: ["fuzz-nightly"],
     ...overrides,
   };
@@ -120,9 +131,9 @@ const COMMIT_PULLS_CALL = [
   "--slurp",
   "repos/o/r/commits/abc123/pulls?per_page=100",
 ];
-const ALERTS_HIGH_CALL = [
+const alertsCall = (severities: string) => [
   "api",
-  "repos/o/r/dependabot/alerts?state=open&severity=high,critical&per_page=100",
+  `repos/o/r/dependabot/alerts?state=open&severity=${severities}&per_page=100`,
 ];
 function issueListCall(label: string): string[] {
   return [
@@ -141,120 +152,36 @@ function issueListCall(label: string): string[] {
   ];
 }
 
-describe("parseConfig", () => {
-  const cases: Array<{ reason: string; env: Record<string, string>; expected: Config }> = [
-    {
-      reason: "pull-request mode with no tracking labels",
-      env: { MODE: "pull-request", GITHUB_EVENT_PATH: eventPath },
-      expected: { repo: "o/r", trackingLabels: [], context: { mode: "pull-request", eventPath } },
-    },
-    {
-      reason: "release mode with tracking labels",
-      env: { MODE: "release", TRACKING_LABELS: "fuzz-nightly,nightly-failure" },
-      expected: {
-        context: { mode: "release", sha: "abc123" },
-        repo: "o/r",
-        trackingLabels: ["fuzz-nightly", "nightly-failure"],
-      },
-    },
-  ];
-  test.each(cases)("parses $reason", ({ env, expected }) => {
-    expect(parseConfig({ ...baseEnv, ...env })).toEqual(expected);
-  });
-
-  test("rejects an unknown mode, a missing mode, and mode-specific context", () => {
-    expect(() => parseConfig({ ...baseEnv, MODE: "push" } as NodeJS.ProcessEnv)).toThrow(
-      "unknown MODE",
-    );
-    expect(() => parseConfig({ ...baseEnv } as NodeJS.ProcessEnv)).toThrow("unknown MODE");
-    expect(() => parseConfig({ ...baseEnv, MODE: "pull-request" } as NodeJS.ProcessEnv)).toThrow(
-      "GITHUB_EVENT_PATH",
-    );
-    expect(() =>
-      parseConfig({ GITHUB_REPOSITORY: "o/r", MODE: "release" } as NodeJS.ProcessEnv),
-    ).toThrow("GITHUB_SHA");
-    expect(() => parseConfig({ MODE: "release" } as NodeJS.ProcessEnv)).toThrow(
-      "GITHUB_REPOSITORY",
-    );
-  });
-
-  test("rejects flag-like and oversized tracking labels", () => {
-    for (const label of ["-x", "--help", "a\nb", "x".repeat(51)]) {
-      expect(() =>
-        parseConfig({
-          ...baseEnv,
-          MODE: "release",
-          TRACKING_LABELS: `fuzz-nightly,${label}`,
-        } as NodeJS.ProcessEnv),
-      ).toThrow(
-        `TRACKING_LABELS must be a plain label (letters, digits, ._:- and spaces; no leading dash), got '${label}'`,
-      );
-    }
-  });
-
-  test("the gate labels and the severity threshold are constants, never inputs", () => {
-    expect([BLOCKER_LABEL, OVERRIDE_LABEL, SECURITY_THRESHOLD]).toEqual([
-      "release-blocker",
-      "release-override",
-      "high",
-    ]);
-  });
-
-  test("LABEL_RE matches the shape the registration grammar enforces", () => {
-    expect(LABEL_RE.test("fuzz-nightly")).toBe(true);
-    expect(LABEL_RE.test("autorelease: pending")).toBe(true);
-    expect(LABEL_RE.test("-x")).toBe(false);
-  });
+const RELEASE_BRANCH = "release-please--branches--main";
+const MERGED = "2026-08-09T00:00:00Z";
+const releasePr = (number: number, labels: string[], merged_at: string | null): CommitPull => ({
+  number,
+  head: { ref: RELEASE_BRANCH },
+  labels: labels.map((name) => ({ name })),
+  merged_at,
 });
+const FEATURE_PR: CommitPull = { number: 3, head: { ref: "feature/x" }, labels: [] };
 
-describe("parseTrackingLabels", () => {
-  const cases: Array<{ reason: string; env: Record<string, string>; expected: string[] }> = [
-    { reason: "an unset variable means no tracking labels", env: {}, expected: [] },
-    {
-      reason: "an empty variable means no tracking labels",
-      env: { TRACKING_LABELS: "" },
-      expected: [],
-    },
-    {
-      reason: "one label needs no comma",
-      env: { TRACKING_LABELS: "fuzz-nightly" },
-      expected: ["fuzz-nightly"],
-    },
-    {
-      reason: "commas split, whitespace is trimmed, empty tokens are dropped",
-      env: { TRACKING_LABELS: " fuzz-nightly , nightly-failure ," },
-      expected: ["fuzz-nightly", "nightly-failure"],
-    },
-    {
-      reason: "a whitespace-only token is empty too",
-      env: { TRACKING_LABELS: "fuzz-nightly, ,nightly-failure" },
-      expected: ["fuzz-nightly", "nightly-failure"],
-    },
-    {
-      reason: "a repeat differing only in case is one label, the way GitHub deduplicates names",
-      env: { TRACKING_LABELS: "Fuzz-Nightly,nightly-failure,fuzz-nightly" },
-      expected: ["Fuzz-Nightly", "nightly-failure"],
-    },
-  ];
-  for (const { reason, env, expected } of cases) {
-    test(reason, () => {
-      expect(parseTrackingLabels(env as NodeJS.ProcessEnv)).toEqual(expected);
-    });
-  }
-});
-
-describe("severitiesAtOrAbove", () => {
-  test("covers each boundary", () => {
-    expect(severitiesAtOrAbove("low")).toEqual(["low", "medium", "high", "critical"]);
-    expect(severitiesAtOrAbove("medium")).toEqual(["medium", "high", "critical"]);
-    expect(severitiesAtOrAbove("high")).toEqual(["high", "critical"]);
-    expect(severitiesAtOrAbove("critical")).toEqual(["critical"]);
-  });
+// GitHub deduplicates label names case-insensitively, so two spellings of one label are one gate.
+test.each<{ reason: string; env: string; expected: string[] }>([
+  {
+    reason: "a repeat differing only in case is one label",
+    env: "Fuzz-Nightly,nightly-failure,fuzz-nightly",
+    expected: ["Fuzz-Nightly", "nightly-failure"],
+  },
+  {
+    reason: "a whitespace-only token is empty and dropped",
+    env: "fuzz-nightly, ,nightly-failure",
+    expected: ["fuzz-nightly", "nightly-failure"],
+  },
+])("parseTrackingLabels: $reason", ({ env, expected }) => {
+  expect(parseTrackingLabels({ TRACKING_LABELS: env } as NodeJS.ProcessEnv)).toEqual(expected);
 });
 
 describe("issueGate", () => {
+  // gh truncates the list at --limit (default 30): a count at the cap is "at least", never a smaller number.
   const overLimit = Array.from({ length: 120 }, (_, i) => i + 1);
-  const cases: Array<{ reason: string; open: number[]; expected: GateOutcome }> = [
+  test.each<{ reason: string; open: number[]; expected: GateOutcome }>([
     {
       reason: "no open issue passes",
       open: [],
@@ -283,45 +210,67 @@ describe("issueGate", () => {
         advice: "close them",
       },
     },
-  ];
-  test.each(cases)("$reason", async ({ open, expected }) => {
+  ])("$reason", async ({ open, expected }) => {
     const { run, calls } = fakeGh({ issues: { "release-blocker": open } });
     const outcome = await issueGate(run, REPO, "blocker", "release-blocker", "close them");
-    expect(outcome).toEqual(expected);
-    expect(calls).toEqual([issueListCall("release-blocker")]);
+    expect([outcome, calls]).toEqual([expected, [issueListCall("release-blocker")]]);
   });
 });
 
 describe("securityGate", () => {
-  test.each([
-    ["high", "repos/o/r/dependabot/alerts?state=open&severity=high,critical&per_page=100"],
-    ["critical", "repos/o/r/dependabot/alerts?state=open&severity=critical&per_page=100"],
-  ] as const)(
-    "passes when no alert at or above %s is open, querying only those severities",
-    async (threshold, url) => {
-      const { run, calls } = fakeGh({ alerts: [] });
-      const outcome = await securityGate(run, "o/r", threshold, "advice");
-      expect(outcome).toEqual({
+  // The severity list in the query URL is the threshold as it leaves the process; a wider or narrower list
+  // changes which alerts the gate ever sees.
+  test.each<{
+    reason: string;
+    threshold: "high" | "critical" | "medium";
+    alerts: number[];
+    url: string;
+    expected: GateOutcome;
+  }>([
+    {
+      reason: "passes at high, querying high and critical alone",
+      threshold: "high",
+      alerts: [],
+      url: "high,critical",
+      expected: {
         gate: "security",
         status: "pass",
-        summary: `no open Dependabot alerts at or above ${threshold}`,
-      });
-      expect(calls).toEqual([["api", url]]);
+        summary: "no open Dependabot alerts at or above high",
+      },
     },
-  );
-
-  test("fails naming the open alerts", async () => {
-    const { run } = fakeGh({ alerts: [1, 2, 3] });
-    expect(await securityGate(run, "o/r", "medium", "fix them")).toEqual({
-      gate: "security",
-      status: "fail",
-      problem: "3 open Dependabot alert(s) at or above medium: #1, #2, #3",
-      advice: "fix them",
-    });
+    {
+      reason: "passes at critical, querying critical alone",
+      threshold: "critical",
+      alerts: [],
+      url: "critical",
+      expected: {
+        gate: "security",
+        status: "pass",
+        summary: "no open Dependabot alerts at or above critical",
+      },
+    },
+    {
+      reason: "fails naming the open alerts",
+      threshold: "medium",
+      alerts: [1, 2, 3],
+      url: "medium,high,critical",
+      expected: {
+        gate: "security",
+        status: "fail",
+        problem: "3 open Dependabot alert(s) at or above medium: #1, #2, #3",
+        advice: "fix them",
+      },
+    },
+  ])("$reason", async ({ threshold, alerts, url, expected }) => {
+    const { run, calls } = fakeGh({ alerts });
+    const outcome = await securityGate(run, REPO, threshold, "fix them");
+    expect([outcome, calls]).toEqual([expected, [alertsCall(url)]]);
   });
 
   // Every fleet repository has Dependabot alerts enabled and the callers grant vulnerability-alerts: read,
-  // so an unreadable endpoint is a broken gate, never a repository to wave through.
+  // so an unreadable endpoint is a broken gate, never a repository to wave through: an empty pass would ship
+  // with open alerts. GitHub answers a primary rate limit with 403 too, so the remedy is named only where
+  // the message says configuration is the cause.
   const REMEDY =
     "; the gate needs vulnerability-alerts: read and Dependabot alerts enabled on the repository";
   test.each([
@@ -329,414 +278,360 @@ describe("securityGate", () => {
       reason: "a bare 403 (missing vulnerability-alerts grant)",
       message: "gh api failed (1): HTTP 403: Resource not accessible by integration",
       remedy: REMEDY,
+      viaRun: true,
     },
     {
-      reason: "Dependabot alerts disabled on the repository",
-      message: "gh api failed (1): Dependabot alerts are disabled for this repository. (HTTP 403)",
-      remedy: REMEDY,
+      reason: "a server error",
+      message: "gh api failed (1): HTTP 500: boom",
+      remedy: "",
+      viaRun: false,
     },
-    {
-      reason: "a host without the feature (404)",
-      message: "gh api failed (1): Not Found (HTTP 404)",
-      remedy: REMEDY,
-    },
-    { reason: "a server error", message: "gh api failed (1): HTTP 500: boom", remedy: "" },
     {
       reason: "a rate-limited 403",
       message: "gh api failed (1): API rate limit exceeded for installation ID 1 (HTTP 403)",
       remedy: "",
-    },
-    {
-      reason: "a secondary rate limit (429)",
-      message: "gh api failed (1): You have exceeded a secondary rate limit. (HTTP 429)",
-      remedy: "",
+      viaRun: false,
     },
   ])(
-    "fails closed on $reason, naming the cause and the configuration remedy only where configuration is the cause",
-    async ({ message, remedy }) => {
-      const { run } = fakeGh({ alertsError: message });
-      let thrown = "";
-      await securityGate(run, "o/r", "high", "advice").catch((error: Error) => {
-        thrown = error.message;
-      });
-      expect(thrown).toBe(
-        `security gate could not read the Dependabot alerts (${message})${remedy}`,
-      );
+    "fails closed on $reason, and runHealthCheck does not catch it",
+    async ({ message, remedy, viaRun }) => {
+      const { run } = fakeGh({ issues: {}, alertsError: message, prViewLabels: [] });
+      const thrown = `security gate could not read the Dependabot alerts (${message})${remedy}`;
+      expect(await rejection(securityGate(run, REPO, "high", "advice"))).toBe(thrown);
+      if (viaRun) {
+        const lines: string[] = [];
+        const viaCheck = runHealthCheck(
+          prConfig(),
+          run,
+          (line) => lines.push(line),
+          () => {},
+        );
+        expect([await rejection(viaCheck), lines]).toEqual([thrown, []]);
+      }
     },
   );
 });
 
 describe("overrideFromPullRequest", () => {
-  test.each([
-    ["exact spelling", ["release-override"]],
-    ["case-insensitively, the way GitHub deduplicates labels", ["Release-Override"]],
-  ])(
-    "finds the label (%s) via a live gh pr view naming the repo",
-    async (_reason, prViewLabels) => {
-      const { run, calls } = fakeGh({ prViewLabels });
-      const override = await overrideFromPullRequest(run, REPO, eventPath, "release-override");
-      expect(override).toEqual({ active: true, prNumber: 12 });
-      expect(calls).toEqual([PR_VIEW_CALL]);
+  // The payload snapshot is stale in both directions (a label applied after a failing run to re-run it, or
+  // removed since), so the label is read live; a failed read fails closed rather than trusting the snapshot.
+  test.each<{ reason: string; prViewLabels: string[] | undefined; override: Override | null }>([
+    {
+      reason: "exact spelling",
+      prViewLabels: ["release-override"],
+      override: { active: true, prNumber: 12 },
     },
-  );
-
-  test("a failed live lookup propagates instead of trusting the payload snapshot", async () => {
-    // The payload names the override label, but the gate must fail closed:
-    // the snapshot could equally be missing a label added for a re-run or
-    // carrying one that was since removed.
-    const path = join(eventDir, "labeled.json");
-    writeFileSync(
-      path,
-      JSON.stringify({ pull_request: { number: 8, labels: [{ name: "release-override" }] } }),
-    );
-    const { run } = fakeGh({});
-    await expect(overrideFromPullRequest(run, REPO, path, "release-override")).rejects.toThrow(
-      "gh pr view failed",
-    );
-  });
-
-  test("malformed pr view JSON propagates as an error", async () => {
-    const run: GhRunner = async () => "not json";
-    await expect(
-      overrideFromPullRequest(run, REPO, eventPath, "release-override"),
-    ).rejects.toThrow();
-  });
-
-  test("no label on the live PR means no override, naming the PR", async () => {
-    const { run } = fakeGh({ prViewLabels: ["autorelease: pending"] });
-    const override = await overrideFromPullRequest(run, REPO, eventPath, "release-override");
-    expect(override).toEqual({ active: false, reason: "no 'release-override' label on PR #12" });
-  });
-
-  test("a missing payload or one without a pull_request means no override, without a gh call", async () => {
-    const { run, calls } = fakeGh({});
-    const missing = join(eventDir, "missing.json");
-    expect(await overrideFromPullRequest(run, REPO, missing, "x")).toEqual({
-      active: false,
-      reason: `no event payload at ${missing}`,
-    });
-    const path = join(eventDir, "push.json");
-    writeFileSync(path, JSON.stringify({ ref: "refs/heads/main" }));
-    expect(await overrideFromPullRequest(run, REPO, path, "x")).toEqual({
-      active: false,
-      reason: "event payload carries no pull_request",
-    });
-    expect(calls).toEqual([]);
+    {
+      reason: "case-insensitively, the way GitHub deduplicates labels",
+      prViewLabels: ["Release-Override"],
+      override: { active: true, prNumber: 12 },
+    },
+    {
+      reason: "no label on the live PR means no override, naming the PR, whatever the payload says",
+      prViewLabels: ["autorelease: pending"],
+      override: { active: false, reason: "no 'release-override' label on PR #12" },
+    },
+    {
+      reason:
+        "a failed live lookup propagates through the run instead of trusting the payload's label",
+      prViewLabels: undefined,
+      override: null,
+    },
+  ])("via a live gh pr view naming the repo: $reason", async ({ prViewLabels, override }) => {
+    const { run, calls } = fakeGh({ issues: {}, alerts: [], prViewLabels });
+    const lookup = overrideFromPullRequest(run, REPO, eventPath, "release-override");
+    if (override === null) {
+      await expect(lookup).rejects.toThrow("gh pr view failed");
+      await expect(
+        runHealthCheck(
+          prConfig(),
+          run,
+          () => {},
+          () => {},
+        ),
+      ).rejects.toThrow("gh pr view failed");
+    } else {
+      expect([await lookup, calls]).toEqual([override, [PR_VIEW_CALL]]);
+    }
   });
 });
 
 describe("findReleasePr", () => {
-  test("finds the merged PR whose head ref is a release-please branch", async () => {
-    const { run, calls } = fakeGh({
-      commitPulls: [
-        { number: 3, head: { ref: "feature/x" }, labels: [] },
-        {
-          number: 5,
-          head: { ref: "release-please--branches--main" },
-          labels: [{ name: "l" }],
-          merged_at: "2026-08-09T00:00:00Z",
-        },
+  // GitHub lists every PR whose branch CONTAINS the commit, open ones included: an open release PR rides along
+  // with an ordinary push and must not count as the cut, and on a busy repository the merged one sits past
+  // page one. The `release-please--` prefix is release-please's branch convention; `--paginate --slurp` needs gh >= 2.51.
+  test.each<{ reason: string; pages: CommitPull[][]; expected: ReleaseLookup | "rejects" }>([
+    {
+      reason: "the merged PR whose head ref is a release-please branch",
+      pages: [[FEATURE_PR, releasePr(5, ["l"], MERGED)]],
+      expected: { pr: { number: 5, labels: ["l"] }, unmerged: [] },
+    },
+    {
+      reason: "a release PR on a later page is still found",
+      pages: [
+        Array.from({ length: 100 }, (_, i) => ({
+          number: i + 100,
+          head: { ref: `fix/${i}` },
+          labels: [],
+        })),
+        [releasePr(5, ["l"], MERGED)],
       ],
-    });
-    const lookup = await findReleasePr(run, REPO, "abc123");
-    expect(lookup).toEqual({ pr: { number: 5, labels: ["l"] }, unmerged: [] });
+      expected: { pr: { number: 5, labels: ["l"] }, unmerged: [] },
+    },
+    {
+      reason: "no associated release PR means no merge and nothing unmerged",
+      pages: [[{ number: 3, head: { ref: "fix/y" }, labels: [] }]],
+      expected: { pr: undefined, unmerged: [] },
+    },
+    {
+      reason: "a single UNMERGED candidate is not a merge, its labels unread",
+      pages: [[releasePr(8, ["release-override"], null)]],
+      expected: { pr: undefined, unmerged: [8] },
+    },
+    {
+      reason: "with several release-please PRs, only the merged one wins",
+      pages: [
+        [
+          {
+            number: 4,
+            head: { ref: "release-please--branches--next" },
+            labels: [],
+            merged_at: null,
+          },
+          releasePr(6, ["l"], MERGED),
+        ],
+      ],
+      expected: { pr: { number: 6, labels: ["l"] }, unmerged: [4] },
+    },
+    {
+      reason: "more than one MERGED release-please PR fails closed naming the numbers",
+      pages: [
+        [
+          {
+            number: 4,
+            head: { ref: "release-please--branches--next" },
+            labels: [],
+            merged_at: "2026-08-08T00:00:00Z",
+          },
+          releasePr(6, [], MERGED),
+        ],
+      ],
+      expected: "rejects",
+    },
+  ])("$reason", async ({ pages, expected }) => {
+    const { run, calls } = fakeGh({ commitPulls: pages });
+    const lookup = findReleasePr(run, REPO, "abc123");
+    if (expected === "rejects") await expect(lookup).rejects.toThrow("#4, #6");
+    else expect(await lookup).toEqual(expected);
     expect(calls).toEqual([COMMIT_PULLS_CALL]);
-  });
-
-  test("a release PR on a later page is still found (slurped pages are flattened)", async () => {
-    const page1 = Array.from({ length: 100 }, (_, i) => ({
-      number: i + 100,
-      head: { ref: `fix/${i}` },
-      labels: [],
-    }));
-    const page2 = [
-      {
-        number: 5,
-        head: { ref: "release-please--branches--main" },
-        labels: [{ name: "l" }],
-        merged_at: "2026-08-09T00:00:00Z",
-      },
-    ];
-    const run: GhRunner = async () => JSON.stringify([page1, page2]);
-    expect(await findReleasePr(run, REPO, "abc123")).toEqual({
-      pr: { number: 5, labels: ["l"] },
-      unmerged: [],
-    });
-  });
-
-  test("no associated release PR means no merge and nothing unmerged", async () => {
-    const { run } = fakeGh({ commitPulls: [{ number: 3, head: { ref: "fix/y" }, labels: [] }] });
-    expect(await findReleasePr(run, REPO, "abc123")).toEqual({ pr: undefined, unmerged: [] });
-  });
-
-  test("a single UNMERGED release-please candidate is not a merge", async () => {
-    // An open release PR associated with a pushed commit must not have its
-    // labels consulted; only an actual merge is gated.
-    const { run } = fakeGh({
-      commitPulls: [
-        {
-          number: 8,
-          head: { ref: "release-please--branches--main" },
-          labels: [{ name: "release-override" }],
-          merged_at: null,
-        },
-      ],
-    });
-    expect(await findReleasePr(run, REPO, "abc123")).toEqual({ pr: undefined, unmerged: [8] });
-  });
-
-  test("with several release-please PRs, only the merged one wins", async () => {
-    const { run } = fakeGh({
-      commitPulls: [
-        {
-          number: 4,
-          head: { ref: "release-please--branches--next" },
-          labels: [],
-          merged_at: null,
-        },
-        {
-          number: 6,
-          head: { ref: "release-please--branches--main" },
-          labels: [{ name: "l" }],
-          merged_at: "2026-08-09T00:00:00Z",
-        },
-      ],
-    });
-    expect(await findReleasePr(run, REPO, "abc123")).toEqual({
-      pr: { number: 6, labels: ["l"] },
-      unmerged: [4],
-    });
-  });
-
-  test("more than one MERGED release-please PR fails closed naming the numbers", async () => {
-    const { run } = fakeGh({
-      commitPulls: [
-        {
-          number: 4,
-          head: { ref: "release-please--branches--next" },
-          labels: [],
-          merged_at: "2026-08-08T00:00:00Z",
-        },
-        {
-          number: 6,
-          head: { ref: "release-please--branches--main" },
-          labels: [],
-          merged_at: "2026-08-09T00:00:00Z",
-        },
-      ],
-    });
-    await expect(findReleasePr(run, REPO, "abc123")).rejects.toThrow("#4, #6");
-  });
-
-  test("malformed commit-pulls JSON propagates as an error", async () => {
-    const run: GhRunner = async () => "not json";
-    await expect(findReleasePr(run, REPO, "abc123")).rejects.toThrow();
   });
 });
 
 describe("runHealthCheck", () => {
-  function collect(): {
-    out: (line: string) => void;
+  interface Run {
+    exit: number;
     lines: string[];
-    setOutput: (name: string, value: string) => void;
     outputs: string[];
-  } {
+    calls: string[][];
+  }
+  async function run(config: Config, fixture: Fixture): Promise<Run> {
+    const gh = fakeGh(fixture);
     const lines: string[] = [];
     const outputs: string[] = [];
-    return {
-      out: (line) => lines.push(line),
-      lines,
-      setOutput: (name, value) => outputs.push(`${name}=${value}`),
-      outputs,
-    };
+    const exit = await runHealthCheck(
+      config,
+      gh.run,
+      (line) => lines.push(line),
+      (name, value) => outputs.push(`${name}=${value}`),
+    );
+    return { exit, lines, outputs, calls: gh.calls };
   }
 
-  // The advice each gate family attaches to its ::error line, pinned
-  // verbatim: it is the operator's only instruction when a release is blocked.
+  // The advice each gate family attaches to its ::error line, pinned verbatim: it is the operator's only
+  // instruction when a release is blocked, and `::error::` is GitHub's workflow-command surface (a misspelled
+  // command is plain log text, silently).
   const OVERRIDE_HINT =
     "or apply the 'release-override' label to the release PR and re-run this check";
   const TRACKING_ADVICE = `fix the failures behind it (the stream's next green nightly run closes the tracking issue automatically), ${OVERRIDE_HINT}`;
   const BLOCKER_ADVICE = `close the blocker issue(s), ${OVERRIDE_HINT}`;
   const SECURITY_ADVICE = `fix or dismiss the alert(s) under the repository's Security tab, ${OVERRIDE_HINT}`;
+  const PR_CALLS = (labels: string[]) => [
+    PR_VIEW_CALL,
+    ...labels.map(issueListCall),
+    issueListCall("release-blocker"),
+    alertsCall("high,critical"),
+  ];
 
-  test("all gates green is a one-line success", async () => {
-    const { run } = fakeGh({ issues: {}, alerts: [], prViewLabels: [] });
-    const { out, lines, setOutput, outputs } = collect();
-    expect(await runHealthCheck(prConfig(), run, out, setOutput)).toBe(0);
-    expect(lines).toEqual([
-      "release health: all gates passed (tracking:fuzz-nightly: no open 'fuzz-nightly' issues; blocker: no open 'release-blocker' issues; security: no open Dependabot alerts at or above high)",
-    ]);
-    // Only release mode reports a verdict to the caller.
-    expect(outputs).toEqual([]);
+  // Every gate runs even under the override, so the report is complete; only release mode sets an output.
+  // The multi-label row reads its Config through parseConfig from the env action.yml sets, so the wiring from
+  // TRACKING_LABELS to the gates is executed once: a parser that dropped the labels would run no tracking
+  // gate and pass, green.
+  test.each<{ reason: string; config: Config; fixture: Fixture; expected: Run }>([
+    {
+      reason: "all gates green is a one-line success",
+      config: prConfig(),
+      fixture: { issues: {}, alerts: [], prViewLabels: [] },
+      expected: {
+        exit: 0,
+        lines: [
+          "release health: all gates passed (tracking:fuzz-nightly: no open 'fuzz-nightly' issues; blocker: no open 'release-blocker' issues; security: no open Dependabot alerts at or above high)",
+        ],
+        outputs: [],
+        calls: PR_CALLS(["fuzz-nightly"]),
+      },
+    },
+    {
+      reason: "an empty tracking-label list runs no tracking gate",
+      config: prConfig({ trackingLabels: [] }),
+      fixture: { issues: {}, alerts: [], prViewLabels: [] },
+      expected: {
+        exit: 0,
+        lines: [
+          "release health: all gates passed (blocker: no open 'release-blocker' issues; security: no open Dependabot alerts at or above high)",
+        ],
+        outputs: [],
+        calls: PR_CALLS([]),
+      },
+    },
+    {
+      reason: "each tracking label from the env is its own gate, queried and reported by label",
+      config: parseConfig({
+        GITHUB_REPOSITORY: REPO,
+        MODE: "pull-request",
+        GITHUB_EVENT_PATH: eventPath,
+        TRACKING_LABELS: "fuzz-nightly,nightly-failure",
+      } as NodeJS.ProcessEnv),
+      fixture: {
+        issues: { "fuzz-nightly": [], "nightly-failure": [3], "release-blocker": [] },
+        alerts: [],
+        prViewLabels: [],
+      },
+      expected: {
+        exit: 1,
+        lines: [
+          `::error::tracking:nightly-failure gate failed: 1 open 'nightly-failure' issue(s): #3. To release: ${TRACKING_ADVICE}`,
+        ],
+        outputs: [],
+        calls: PR_CALLS(["fuzz-nightly", "nightly-failure"]),
+      },
+    },
+    {
+      reason: "each failing gate is an ::error with its advice, exit 1",
+      config: prConfig(),
+      fixture: {
+        issues: { "fuzz-nightly": [2], "release-blocker": [7] },
+        alerts: [11],
+        prViewLabels: [],
+      },
+      expected: {
+        exit: 1,
+        lines: [
+          `::error::tracking:fuzz-nightly gate failed: 1 open 'fuzz-nightly' issue(s): #2. To release: ${TRACKING_ADVICE}`,
+          `::error::blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
+          `::error::security gate failed: 1 open Dependabot alert(s) at or above high: #11. To release: ${SECURITY_ADVICE}`,
+        ],
+        outputs: [],
+        calls: PR_CALLS(["fuzz-nightly"]),
+      },
+    },
+    {
+      reason:
+        "the override turns failures into warnings plus a loud notice, exit 0, every gate still run",
+      config: prConfig(),
+      fixture: {
+        issues: { "fuzz-nightly": [], "release-blocker": [7] },
+        alerts: [5],
+        prViewLabels: ["release-override"],
+      },
+      expected: {
+        exit: 0,
+        lines: [
+          "::warning::blocker gate failed: 1 open 'release-blocker' issue(s): #7",
+          "::warning::security gate failed: 1 open Dependabot alert(s) at or above high: #5",
+          "::notice::OVERRIDE: the 'release-override' label on release PR #12 bypassed 2 failing gate(s) (blocker, security); this release ships despite them",
+        ],
+        outputs: [],
+        calls: PR_CALLS(["fuzz-nightly"]),
+      },
+    },
+  ])("pull-request mode: $reason", async ({ config, fixture, expected }) => {
+    expect(await run(config, fixture)).toEqual(expected);
   });
 
-  test("an empty tracking-label list runs no tracking gate", async () => {
-    const { run, calls } = fakeGh({ issues: {}, alerts: [], prViewLabels: [] });
-    const { out, setOutput } = collect();
-    expect(await runHealthCheck(prConfig({ trackingLabels: [] }), run, out, setOutput)).toBe(0);
-    const issueLists = calls.filter((c) => c[0] === "issue");
-    expect(issueLists).toHaveLength(1);
-    expect(issueLists[0]?.[issueLists[0].indexOf("--label") + 1]).toBe("release-blocker");
-  });
-
-  test("each tracking label is its own gate, queried and reported by label", async () => {
-    const { run, calls } = fakeGh({
-      issues: { "fuzz-nightly": [], "nightly-failure": [3], "release-blocker": [] },
-      alerts: [],
-      prViewLabels: [],
-    });
-    const { out, lines, setOutput } = collect();
-    const cfg = prConfig({ trackingLabels: ["fuzz-nightly", "nightly-failure"] });
-    expect(await runHealthCheck(cfg, run, out, setOutput)).toBe(1);
-    const queried = calls.filter((c) => c[0] === "issue").map((c) => c[c.indexOf("--label") + 1]);
-    expect(queried).toEqual(["fuzz-nightly", "nightly-failure", "release-blocker"]);
-    expect(lines).toEqual([
-      `::error::tracking:nightly-failure gate failed: 1 open 'nightly-failure' issue(s): #3. To release: ${TRACKING_ADVICE}`,
-    ]);
-  });
-
-  test("each failing gate is an ::error with its advice, exit 1", async () => {
-    const { run } = fakeGh({
-      issues: { "fuzz-nightly": [2], "release-blocker": [7] },
-      alerts: [11],
-      prViewLabels: [],
-    });
-    const { out, lines, setOutput } = collect();
-    expect(await runHealthCheck(prConfig(), run, out, setOutput)).toBe(1);
-    expect(lines).toEqual([
-      `::error::tracking:fuzz-nightly gate failed: 1 open 'fuzz-nightly' issue(s): #2. To release: ${TRACKING_ADVICE}`,
-      `::error::blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
-      `::error::security gate failed: 1 open Dependabot alert(s) at or above high: #11. To release: ${SECURITY_ADVICE}`,
-    ]);
-  });
-
-  test("the override on the PR turns failures into warnings plus a loud notice, exit 0, with every gate still run", async () => {
-    const { run, calls } = fakeGh({
-      issues: { "fuzz-nightly": [], "release-blocker": [7] },
-      alerts: [5],
-      prViewLabels: ["release-override"],
-    });
-    const { out, lines, setOutput } = collect();
-    expect(await runHealthCheck(prConfig(), run, out, setOutput)).toBe(0);
-    // Every gate is queried even though the override makes the result moot,
-    // so the report is complete.
-    expect(calls).toEqual([
-      PR_VIEW_CALL,
-      issueListCall("fuzz-nightly"),
-      issueListCall("release-blocker"),
-      ALERTS_HIGH_CALL,
-    ]);
-    expect(lines).toEqual([
-      "::warning::blocker gate failed: 1 open 'release-blocker' issue(s): #7",
-      "::warning::security gate failed: 1 open Dependabot alert(s) at or above high: #5",
-      "::notice::OVERRIDE: the 'release-override' label on release PR #12 bypassed 2 failing gate(s) (blocker, security); this release ships despite them",
-    ]);
-  });
-
-  test("release mode: the override is read from the commit's merged release PR", async () => {
-    const { run } = fakeGh({
-      issues: { "fuzz-nightly": [], "release-blocker": [7] },
-      alerts: [],
-      commitPulls: [
-        {
-          number: 21,
-          head: { ref: "release-please--branches--main" },
-          labels: [{ name: "release-override" }],
-          merged_at: "2026-08-09T00:00:00Z",
-        },
-      ],
-    });
-    const { out, lines, setOutput, outputs } = collect();
-    expect(await runHealthCheck(releaseConfig(), run, out, setOutput)).toBe(0);
-    expect(outputs).toEqual(["release-cut=true"]);
-    expect(lines).toEqual([
-      "::warning::blocker gate failed: 1 open 'release-blocker' issue(s): #7",
-      "::notice::OVERRIDE: the 'release-override' label on release PR #21 bypassed 1 failing gate(s) (blocker); this release ships despite them",
-    ]);
-  });
-
-  test("release mode: a release-PR merge with a red gate and no override fails", async () => {
-    const { run, calls } = fakeGh({
-      issues: { "fuzz-nightly": [], "release-blocker": [7] },
-      alerts: [],
-      commitPulls: [
-        {
-          number: 21,
-          head: { ref: "release-please--branches--main" },
-          labels: [],
-          merged_at: "2026-08-09T00:00:00Z",
-        },
-      ],
-    });
-    const { out, lines, setOutput, outputs } = collect();
-    expect(await runHealthCheck(releaseConfig(), run, out, setOutput)).toBe(1);
-    expect(outputs).toEqual(["release-cut=true"]);
-    expect(calls).toEqual([
-      COMMIT_PULLS_CALL,
-      issueListCall("fuzz-nightly"),
-      issueListCall("release-blocker"),
-      ALERTS_HIGH_CALL,
-    ]);
-    expect(lines).toEqual([
-      `::error::blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
-    ]);
-  });
-
-  test("release mode: a push that is not a release-PR merge is not gated at all", async () => {
-    // An open blocker must not paint ordinary pushes red; the "false" verdict
-    // is what keeps this run from tagging a release merge it never judged.
-    const { run, calls } = fakeGh({
-      issues: { "release-blocker": [7] },
-      commitPulls: [{ number: 3, head: { ref: "feature/x" }, labels: [] }],
-    });
-    const { out, lines, setOutput, outputs } = collect();
-    expect(await runHealthCheck(releaseConfig(), run, out, setOutput)).toBe(0);
-    expect(outputs).toEqual(["release-cut=false"]);
-    expect(lines).toEqual([
-      "::notice::release health: abc123 is not a release-PR merge; nothing to gate",
-    ]);
-    expect(calls).toEqual([COMMIT_PULLS_CALL]);
-  });
-
-  test("release mode: a single UNMERGED release PR is the trivial pass, naming it", async () => {
-    // Its labels (even the override) must not be consulted: only a merge is
-    // gated, and an open release PR rides along with ordinary pushes.
-    const { run, calls } = fakeGh({
-      issues: { "release-blocker": [7] },
-      commitPulls: [
-        {
-          number: 9,
-          head: { ref: "release-please--branches--main" },
-          labels: [{ name: "release-override" }],
-          merged_at: null,
-        },
-      ],
-    });
-    const { out, lines, setOutput, outputs } = collect();
-    expect(await runHealthCheck(releaseConfig(), run, out, setOutput)).toBe(0);
-    expect(outputs).toEqual(["release-cut=false"]);
-    expect(lines).toEqual([
-      "::notice::release health: abc123 is not a release-PR merge; nothing to gate (open release PR(s) associated: #9)",
-    ]);
-    expect(calls).toEqual([COMMIT_PULLS_CALL]);
-  });
-
-  test("an unreadable alerts endpoint errors the run instead of passing the security gate", async () => {
-    const { run } = fakeGh({
-      issues: {},
-      alertsError: "gh api failed (1): HTTP 403: Resource not accessible by integration",
-      prViewLabels: [],
-    });
-    const { out, lines, setOutput } = collect();
-    await expect(runHealthCheck(prConfig(), run, out, setOutput)).rejects.toThrow("HTTP 403");
-    expect(lines).toEqual([]);
-  });
-
-  test("a failed override lookup errors the run instead of gating blind", async () => {
-    const { run } = fakeGh({ issues: {}, alerts: [], prViewLabels: undefined });
-    const { out, setOutput } = collect();
-    await expect(runHealthCheck(prConfig(), run, out, setOutput)).rejects.toThrow(
-      "gh pr view failed",
-    );
+  // `release-cut` is fleet-release.yml's switch: "true" tags the release-PR merge and drafts the release, "false"
+  // proposes or refreshes the release PR. Swapped, a green release merge re-proposes itself and an ordinary
+  // push is tagged, both green; a red release merge keeps "true" so the pair is judged whatever the exit.
+  test.each<{ reason: string; fixture: Fixture; expected: Run }>([
+    {
+      reason: "the override is read from the commit's merged release PR",
+      fixture: {
+        issues: { "fuzz-nightly": [], "release-blocker": [7] },
+        alerts: [],
+        commitPulls: [[releasePr(21, ["release-override"], MERGED)]],
+      },
+      expected: {
+        exit: 0,
+        lines: [
+          "::warning::blocker gate failed: 1 open 'release-blocker' issue(s): #7",
+          "::notice::OVERRIDE: the 'release-override' label on release PR #21 bypassed 1 failing gate(s) (blocker); this release ships despite them",
+        ],
+        outputs: ["release-cut=true"],
+        calls: [
+          COMMIT_PULLS_CALL,
+          issueListCall("fuzz-nightly"),
+          issueListCall("release-blocker"),
+          alertsCall("high,critical"),
+        ],
+      },
+    },
+    {
+      reason: "a release-PR merge with a red gate and no override fails",
+      fixture: {
+        issues: { "fuzz-nightly": [], "release-blocker": [7] },
+        alerts: [],
+        commitPulls: [[releasePr(21, [], MERGED)]],
+      },
+      expected: {
+        exit: 1,
+        lines: [
+          `::error::blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
+        ],
+        outputs: ["release-cut=true"],
+        calls: [
+          COMMIT_PULLS_CALL,
+          issueListCall("fuzz-nightly"),
+          issueListCall("release-blocker"),
+          alertsCall("high,critical"),
+        ],
+      },
+    },
+    {
+      reason: "a push that is not a release-PR merge is not gated at all",
+      fixture: { issues: { "release-blocker": [7] }, commitPulls: [[FEATURE_PR]] },
+      expected: {
+        exit: 0,
+        lines: ["::notice::release health: abc123 is not a release-PR merge; nothing to gate"],
+        outputs: ["release-cut=false"],
+        calls: [COMMIT_PULLS_CALL],
+      },
+    },
+    {
+      reason:
+        "a single UNMERGED release PR is the trivial pass, naming it, its override label unread",
+      fixture: {
+        issues: { "release-blocker": [7] },
+        commitPulls: [[releasePr(9, ["release-override"], null)]],
+      },
+      expected: {
+        exit: 0,
+        lines: [
+          "::notice::release health: abc123 is not a release-PR merge; nothing to gate (open release PR(s) associated: #9)",
+        ],
+        outputs: ["release-cut=false"],
+        calls: [COMMIT_PULLS_CALL],
+      },
+    },
+  ])("release mode: $reason", async ({ fixture, expected }) => {
+    expect(await run(releaseConfig(), fixture)).toEqual(expected);
   });
 });

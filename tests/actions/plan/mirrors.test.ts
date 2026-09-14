@@ -11,12 +11,11 @@ import {
   type MirrorProblem,
   mirrorDeclarationProblems,
   mirrorPathProblem,
-  nestedWith,
   type OwnedPaths,
   ownedPaths,
   patternMatches,
 } from "../../../actions/plan/mirrors.ts";
-import { expandPattern, literalPrefix } from "../../../actions/shared/mirror_pattern.ts";
+import { expandPattern } from "../../../actions/shared/mirror_pattern.ts";
 
 const WRITES = "a path files.yml writes";
 const STALE = "a path a stale manifest record retires";
@@ -37,6 +36,8 @@ const OWNED: OwnedPaths = {
 };
 
 describe("ownedPaths", () => {
+  // A starter counted as a source would let a registration mirror a file the repository owns and edits; a later claim
+  // outranking an earlier one would let a stale record hide a written path.
   test("the selected entries by class; the writes, the manifest, the stale records, and the excepts reserved by why", () => {
     const config = parseFilesConfig(`
 placeholders: []
@@ -67,6 +68,8 @@ files:
 });
 
 describe("declaredMirrors", () => {
+  // The plan and the writer both walk this list, the fleet's first; an excepted fleet target left in it would be refused
+  // as excepted, so the repository could never take a fleet mirror's path for its own.
   const fleet: Mirror[] = [
     { source: "AGENTS.md", kind: "symlink", targets: ["CLAUDE.md", ".github/agents.md"] },
     { source: "LICENSE.md", kind: "copy", targets: ["template/LICENSE.md"] },
@@ -82,23 +85,11 @@ describe("declaredMirrors", () => {
       own: [],
     });
   });
-
-  test("a failure line names the registration when it declares the pair, files.yml otherwise", () => {
-    const problem = {
-      source: "AGENTS.md",
-      target: "CLAUDE.md",
-      problem: "the target is claimed by more than one source",
-    };
-    expect(describeMirrorProblem(problem, own)).toBe(
-      "files.yml: mirrors: source 'AGENTS.md', target 'CLAUDE.md': the target is claimed by more than one source",
-    );
-    expect(describeMirrorProblem(problem, fleet)).toBe(
-      ".repo-platform.yml: mirrors: source 'AGENTS.md', target 'CLAUDE.md': the target is claimed by more than one source",
-    );
-  });
 });
 
 describe("mirrorPathProblem", () => {
+  // Each row is a reason a copy is impossible at sync time; the `.GitHub/Workflows` row is GitHub's case-fold of the
+  // workflows directory, which a case-sensitive check lets through.
   test.each([
     ["skills/a/LICENSE.md", null],
     [".repo-platform.yml", "is the registration itself"],
@@ -121,78 +112,7 @@ describe("mirrorPathProblem", () => {
   });
 });
 
-describe("patternMatches", () => {
-  test.each([
-    ["*.md", "LICENSE.md", true],
-    ["*.md", "docs/README.md", false],
-    ["*/README.md", "docs/README.md", true],
-    ["docs/*", "docs/README.md", true],
-    ["skills/*/LICENSE.md", "skills/a/LICENSE.md", true],
-    ["skills/*/LICENSE.md", "skills/LICENSE.md", false],
-    ["*", ".repo-platform.yml", true],
-    ["a*b*", "ab", true],
-    ["*.md", "xmd", false],
-    ["a.b", "aXb", false],
-  ])("%s against %s -> %p", (pattern, path, matches) => {
-    expect(patternMatches(pattern, path)).toBe(matches);
-  });
-});
-
-describe("nestedWith and literalPrefix", () => {
-  test("a path nests with the one above or below it, never with itself", () => {
-    const others = new Set(["a/b", "x/y/z", "a/b/c/d"]);
-    expect(nestedWith("a/b/c", others)).toEqual({ under: "a/b" });
-    expect(nestedWith("x", others)).toEqual({ above: "x/y/z" });
-    expect(nestedWith("a/b", new Set(["a/b"]))).toBeNull();
-    expect(nestedWith("a/bc", others)).toBeNull();
-    expect(literalPrefix("skills/*/LICENSE.md")).toBe("skills");
-    expect(literalPrefix("a/b/c*/d")).toBe("a/b");
-    expect(literalPrefix("*/x")).toBe("");
-    expect(literalPrefix("plain/path")).toBe("plain/path");
-  });
-});
-
 describe("mirrorDeclarationProblems", () => {
-  test("a target the grammar refuses is judged by that alone: an absolute path ends the nesting walk", () => {
-    expect(
-      mirrorDeclarationProblems(
-        [
-          {
-            source: "LICENSE.md",
-            kind: "copy",
-            targets: ["/tmp/LICENSE.md", "/tmp/*/LICENSE.md", "copies/a"],
-          },
-        ],
-        OWNED,
-      ),
-    ).toEqual([
-      { source: "LICENSE.md", target: "/tmp/LICENSE.md", problem: "the target is absolute" },
-      { source: "LICENSE.md", target: "/tmp/*/LICENSE.md", problem: "the pattern is absolute" },
-    ]);
-    expect(nestedWith("/tmp/x", new Set(["/tmp"]))).toEqual({ under: "/tmp" });
-    expect(nestedWith("/x", new Set(["a"]))).toBeNull();
-  });
-
-  test("a sound declaration has none", () => {
-    expect(
-      mirrorDeclarationProblems(
-        [
-          {
-            source: "LICENSE.md",
-            kind: "copy",
-            targets: ["skills/*/LICENSE.md", "skills/a/LICENSE.md"],
-          },
-          {
-            source: "AGENTS.md",
-            kind: "copy",
-            targets: ["template/AGENTS.md", "skills/*/AGENTS.md", "*/x"],
-          },
-        ],
-        OWNED,
-      ),
-    ).toEqual([]);
-  });
-
   const L = (kind: MirrorKind, ...targets: string[]) => ({ source: "LICENSE.md", kind, targets });
   const A = (kind: MirrorKind, ...targets: string[]) => ({ source: "AGENTS.md", kind, targets });
   const at = (source: string, target: string, verdict: string): MirrorProblem => ({
@@ -213,32 +133,35 @@ describe("mirrorDeclarationProblems", () => {
   const BOTH_KINDS = "is claimed as a copy and as a symbolic link";
   const TWO_SOURCES = "is claimed by more than one source";
 
-  test.each<{ literal: MirrorKind; pattern: MirrorKind }>([
-    { literal: "copy", pattern: "symlink" },
-    { literal: "symlink", pattern: "copy" },
-  ])(
-    "one source claiming a path as a $literal by a literal and as a $pattern by a pattern fails both",
-    ({ literal, pattern }) => {
-      expect(
-        mirrorDeclarationProblems(
-          [
-            { source: "LICENSE.md", kind: literal, targets: ["copies/LICENSE.md"] },
-            { source: "LICENSE.md", kind: pattern, targets: ["copies/*.md"] },
-          ],
-          OWNED,
-        ),
-      ).toEqual([
-        at("LICENSE.md", "copies/LICENSE.md", BOTH_KINDS),
-        expands("LICENSE.md", "copies/*.md", "copies/LICENSE.md", BOTH_KINDS),
-      ]);
-    },
-  );
-
   const DEEP = Array.from({ length: 4 }, (_, i) => String(i).repeat(250));
   const LONG_DIRS = DEEP.join("/");
   const OVER_LONG = `*/*/*/*/${"e".repeat(30)}/*/x`;
 
+  // Each row is a conflict the writer would meet at sync time, refused on the PR with both sides named, so declaration
+  // order never picks the winner.
   test.each<{ reason: string; mirrors: Mirror[]; problems: MirrorProblem[] }>([
+    {
+      reason:
+        "a target the grammar refuses is judged by that alone: an absolute path ends the nesting walk",
+      mirrors: [L("copy", "/tmp/LICENSE.md", "/tmp/*/LICENSE.md", "copies/a")],
+      problems: [
+        { source: "LICENSE.md", target: "/tmp/LICENSE.md", problem: "the target is absolute" },
+        { source: "LICENSE.md", target: "/tmp/*/LICENSE.md", problem: "the pattern is absolute" },
+      ],
+    },
+    ...(
+      [
+        { literal: "copy", pattern: "symlink" },
+        { literal: "symlink", pattern: "copy" },
+      ] as { literal: MirrorKind; pattern: MirrorKind }[]
+    ).map(({ literal, pattern }) => ({
+      reason: `one source claiming a path as a ${literal} by a literal and as a ${pattern} by a pattern fails both`,
+      mirrors: [L(literal, "copies/LICENSE.md"), L(pattern, "copies/*.md")],
+      problems: [
+        at("LICENSE.md", "copies/LICENSE.md", BOTH_KINDS),
+        expands("LICENSE.md", "copies/*.md", "copies/LICENSE.md", BOTH_KINDS),
+      ],
+    })),
     {
       reason: "a `*` walking a directory a literal target created reaches a path above that target",
       mirrors: [L("copy", "tests/shared/stub.ts", "te*/shared")],
@@ -441,6 +364,9 @@ describe("mirrorDeclarationProblems", () => {
     expect(mirrorDeclarationProblems(mirrors, OWNED)).toEqual(problems);
   });
 
+  // One expandPattern serves the plan and the writer: a plan expanding a pattern differently from the writer reserves
+  // paths the writer never writes, or misses ones it does, and the mismatch surfaces as a stale or missing target on
+  // the next sync with nothing red on the PR. Each row is a walk rule the writer's tree makes visible.
   test.each<{ pattern: string; paths: string[] }>([
     // A `*` before the end walks a directory a literal target created; the segments after the last `*` ride along.
     { pattern: "te*/shared", paths: ["tests/shared"] },
@@ -470,7 +396,7 @@ describe("mirrorDeclarationProblems", () => {
     { pattern: "test/*/review.md", paths: [] },
     { pattern: "docs/*.md", paths: ["docs/own.md"] },
   ])(
-    "the writer's walk over the literal targets expands $pattern to $paths",
+    "expandPattern, the one walk the plan and the writer share, reaches $paths for $pattern",
     ({ pattern, paths }) => {
       const literals = new Map<string, MirrorKind>([
         ["tests/shared/stub.ts", "copy"],
@@ -482,24 +408,24 @@ describe("mirrorDeclarationProblems", () => {
     },
   );
 
-  test("the registration outranks its own listing in except", () => {
-    const owned: OwnedPaths = {
+  // Plan-time matching against the reserved paths: a pattern is judged segment for segment at its own depth, so `*`
+  // claims the root's files and never `docs/README.md` below it; a `.` in a segment is literal, a `*` may match nothing.
+  test("a pattern that matches the registration, a written, retired, or excepted path, or a literal target; the registration outranks its own listing in except", () => {
+    expect([patternMatches("a.b", "aXb"), patternMatches("a*b*", "ab")]).toEqual([false, true]);
+    const excepted: OwnedPaths = {
       sources: OWNED.sources,
       reserved: new Map([[".repo-platform.yml", EXCEPTED]]),
     };
-    expect(mirrorDeclarationProblems([A("copy", "*.yml")], owned)).toEqual([
+    expect(mirrorDeclarationProblems([A("copy", "*.yml")], excepted)).toEqual([
       {
         source: "AGENTS.md",
         target: "*.yml",
         problem: "the pattern matches '.repo-platform.yml', the registration",
       },
     ]);
-  });
-
-  test("a pattern that matches the registration, a written, retired, or excepted path, or a literal target", () => {
     const problems = mirrorDeclarationProblems(
       [
-        L("copy", "*.md", "skills/a/LICENSE.md", "skills/*/AGENTS.md"),
+        L("copy", "*.md", "*", "skills/a/LICENSE.md", "skills/*/AGENTS.md"),
         A("copy", "*.yml", "*/README.md", "docs/*", "skills/*/LICENSE.md", "*/x"),
         A("copy", "skills/*/AGENTS.md", ".github/*"),
       ],
@@ -511,6 +437,11 @@ describe("mirrorDeclarationProblems", () => {
       Lp("*.md", "the pattern matches 'AGENTS.md', a path files.yml writes"),
       Lp("*.md", "the pattern matches 'CLAUDE.md', a path files.yml writes"),
       Lp("*.md", "the pattern matches 'LICENSE.md', a path files.yml writes"),
+      Lp("*", "the pattern matches '.repo-platform.yml', the registration"),
+      Lp("*", "the pattern matches 'AGENTS.md', a path files.yml writes"),
+      Lp("*", "the pattern matches 'CLAUDE.md', a path files.yml writes"),
+      Lp("*", "the pattern matches 'LICENSE.md', a path files.yml writes"),
+      Lp("*", "the pattern matches 'nightly.yml', a path files.yml writes"),
       Ap("*.yml", "the pattern matches '.repo-platform.yml', the registration"),
       Ap("*.yml", "the pattern matches 'nightly.yml', a path files.yml writes"),
       Ap("*/README.md", "the pattern matches 'docs/README.md', a path files.yml writes"),

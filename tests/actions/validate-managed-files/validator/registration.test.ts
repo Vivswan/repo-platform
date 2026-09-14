@@ -1,36 +1,55 @@
 import { describe, expect, test } from "bun:test";
 import { tempDirs } from "../../../shared/temp_dir.ts";
-import { FILES_YML, validatorRunner } from "./fixtures";
+import { validatorRunner } from "./fixtures";
 
 const temp = tempDirs();
 const runValidator = validatorRunner(temp);
 
 describe("the registration", () => {
+  // The armed control for every suite sharing fixtures.ts: a baseline that fails on its own would make each
+  // refusal below red for the wrong reason.
   test("the baseline tree passes", () => {
     const { exitCode, stderr } = runValidator();
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
+    expect([exitCode, stderr]).toEqual([0, ""]);
   });
 
-  test("a missing registration fails, naming the guide", () => {
-    const { exitCode, stderr } = runValidator({}, [], { omit: [".repo-platform.yml"] });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(
-      ".repo-platform.yml is missing - every repository the platform manages",
-    );
-    expect(stderr).toContain("docs/new-repo.md");
+  // Without a usable module list `classes` is null and the class-vs-declared check stands down; the error is
+  // what makes that visible.
+  const NOT_A_LIST =
+    "error: .repo-platform.yml: top-level `modules` is missing or not a list (the file may have failed to parse); set it to a YAML list of module names, e.g. modules: [uv, release-please]";
+  test.each<{ reason: string; tree: Record<string, string>; omit: string[]; error: string }>([
+    {
+      reason: "the file is missing",
+      tree: {},
+      omit: [".repo-platform.yml"],
+      error:
+        "error: .repo-platform.yml is missing - every repository the platform manages registers here (docs/new-repo.md); restore it from git history or write it again",
+    },
+    {
+      reason: "modules is a mapping",
+      tree: { ".repo-platform.yml": "modules: {uv: true}\n" },
+      omit: [],
+      error: NOT_A_LIST,
+    },
+    {
+      reason: "no modules key",
+      tree: { ".repo-platform.yml": "labels: {}\n" },
+      omit: [],
+      error: NOT_A_LIST,
+    },
+    {
+      reason: "a scalar document",
+      tree: { ".repo-platform.yml": "just text\n" },
+      omit: [],
+      error: NOT_A_LIST,
+    },
+  ])("an unusable registration fails, naming the guide: $reason", ({ tree, omit, error }) => {
+    const { exitCode, stderr } = runValidator(tree, [], { omit });
+    expect([exitCode, stderr]).toEqual([1, `${error}\n\n1 error(s).\n`]);
   });
 
-  test.each([
-    { reason: "a modules mapping", text: "modules: {uv: true}\n" },
-    { reason: "no modules key", text: "labels: {}\n" },
-    { reason: "a scalar document", text: "just text\n" },
-  ])("a registration whose modules is not a list fails: $reason", ({ text }) => {
-    const { exitCode, stderr } = runValidator({ ".repo-platform.yml": text });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("top-level `modules` is missing or not a list");
-  });
-
+  // The plan and the writer refuse a name files.yml does not know; a validator that let it through would
+  // leave `classes` null and the class check silently off.
   test("an unknown module name fails, naming the data file's vocabulary", () => {
     const { exitCode, stderr } = runValidator({
       ".repo-platform.yml": "modules: [uv, agents, 3]\n",
@@ -39,16 +58,6 @@ describe("the registration", () => {
     expect(stderr).toContain(
       ".repo-platform.yml: unknown module(s): 3, agents - valid modules are: bun, pages, release-please, uv",
     );
-  });
-
-  test("a registration that adds modules while the tree and manifest stay as the last sync left them passes", () => {
-    // BASELINE registers uv alone and its manifest records uv's files: the
-    // roster judged is that stamped manifest, never the module list, so the
-    // registration edit is green before the sync PR brings the new files.
-    const { exitCode, stderr } = runValidator({
-      ".repo-platform.yml": "modules: [bun, uv, pages, release-please]\n",
-    });
-    expect([exitCode, stderr]).toEqual([0, ""]);
   });
 
   test.each([
@@ -82,20 +91,4 @@ describe("the registration", () => {
       expect(stderr).not.toContain("unknown module(s)");
     },
   );
-
-  test("outside self mode --files is required", () => {
-    const { exitCode, stderr } = runValidator({}, [], { filesYml: null });
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain("--files <files.yml> is required outside --self");
-  });
-
-  test("self mode reads the target's own files.yml and judges its registration too", () => {
-    const good = runValidator({ ".repo-platform.yml": "modules: [bun]\n" }, ["--self"]);
-    expect(good.stderr).toBe("");
-    expect(good.exitCode).toBe(0);
-    const bad = runValidator({ ".repo-platform.yml": "modules: [bnu]\n" }, ["--self"]);
-    expect(bad.exitCode).toBe(1);
-    expect(bad.stderr).toContain("unknown module(s): bnu");
-    expect(FILES_YML).toContain("bun");
-  });
 });

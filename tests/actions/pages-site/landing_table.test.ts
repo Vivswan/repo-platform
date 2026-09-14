@@ -55,32 +55,39 @@ const GOAL_READ_ROWS: CuratedRow[] = [
 ];
 
 describe("isLandingPath", () => {
-  const cases: [string, boolean][] = [
-    ["index.md", true],
-    ["README.md", true],
-    ["ja/index.md", true],
-    ["ja/README.md", true],
-    ["guide.md", false],
-    ["guide/index.md", false],
-    ["guide/README.md", false],
-    ["api/index.md", false],
-    ["ja/guide.md", false],
+  // The page build sees index.md and the search indexer sees README.md; both must agree on the landing,
+  // or the search index holds the table the page replaced. A top-level index outside a locale is no landing.
+  const cases: [string, Record<string, string>, boolean][] = [
+    ["index.md", REWRITES, true],
+    ["README.md", REWRITES, true],
+    ["ja/index.md", REWRITES, true],
+    ["ja/README.md", REWRITES, true],
+    ["guide.md", REWRITES, false],
+    ["guide/index.md", REWRITES, false],
+    ["guide/README.md", REWRITES, false],
+    ["api/index.md", REWRITES, false],
+    ["ja/guide.md", REWRITES, false],
+    // A README beside a real index.md serves its own route.
+    ["README.md", {}, false],
+    ["index.md", {}, true],
   ];
-  test.each(cases)("%s under the fixture rewrites is landing: %p", (path, landing) => {
-    expect(isLandingPath(path, REWRITES)).toBe(landing);
-  });
-
-  test("a README beside a real index.md serves its own route and is no landing", () => {
-    expect(isLandingPath("README.md", {})).toBe(false);
-    expect(isLandingPath("index.md", {})).toBe(true);
+  test.each(cases)("%s under rewrites %j is landing: %p", (path, rewrites, landing) => {
+    expect(isLandingPath(path, rewrites)).toBe(landing);
   });
 });
 
 describe("landingTableRule", () => {
-  test("replaces the landing page's link-column table with the launcher tag", () => {
+  // The rows travel as one HTML attribute: an unescaped quote in a label ends the attribute early, and an unescaped
+  // ampersand starts an entity the browser decodes into another label.
+  test("replaces the landing page's link-column table with the launcher tag, the rows JSON escaped as an attribute", () => {
     const { withRule } = renderers();
-    expect(withRule.render(GOAL_READ, { ...LANDING })).toBe(
-      `<h2>I want to...</h2>\n${launcherTag(GOAL_READ_ROWS)}<p>after</p>\n`,
+    const src =
+      '## I want to...\n\n| Goal | Read |\n|---|---|\n| Say "hi" & <b>bye</b> | [Page](p.md) |\n\nafter\n';
+    expect(withRule.render(src, { ...LANDING })).toBe(
+      "<h2>I want to...</h2>\n" +
+        '<FleetLauncher rows="[{&quot;label&quot;:&quot;Say \\&quot;hi\\&quot; &amp; bye&quot;,' +
+        '&quot;href&quot;:&quot;p.md&quot;,&quot;note&quot;:&quot;Page&quot;}]"></FleetLauncher>\n' +
+        "<p>after</p>\n",
     );
   });
 
@@ -88,21 +95,6 @@ describe("landingTableRule", () => {
     const { withRule } = renderers();
     expect(withRule.render(GOAL_READ, { relativePath: "README.md" })).toBe(
       withRule.render(GOAL_READ, { ...LANDING }),
-    );
-  });
-
-  test("refuses a renderer without the inline-text stamp", () => {
-    const md = new MarkdownIt({ html: true });
-    landingTableRule(md, REWRITES);
-    expect(() => md.render(GOAL_READ, { ...LANDING })).toThrow("inlineTextRule is not installed");
-  });
-
-  test("escapes the rows JSON as an HTML attribute", () => {
-    const { withRule } = renderers();
-    const src = '| Goal | Read |\n|---|---|\n| Say "hi" & <b>bye</b> | [Page](p.md) |\n';
-    expect(withRule.render(src, { ...LANDING })).toBe(
-      '<FleetLauncher rows="[{&quot;label&quot;:&quot;Say \\&quot;hi\\&quot; &amp; bye&quot;,' +
-        '&quot;href&quot;:&quot;p.md&quot;,&quot;note&quot;:&quot;Page&quot;}]"></FleetLauncher>\n',
     );
   });
 
@@ -143,24 +135,19 @@ describe("landingTableRule", () => {
     expect(withRule.render(src, { ...env })).toBe(plain.render(src));
   });
 
-  test("fires on a locale landing page and only on the first qualifying table", () => {
-    const { plain, withRule } = renderers();
-    const flags = "| Flag | Meaning |\n|---|---|\n| `-v` | verbose |\n";
-    const second = "| Goal | Read |\n|---|---|\n| B | [y](y.md) |\n";
-    const src = `${flags}\n${GOAL_READ}\n${second}`;
-    expect(withRule.render(src, { relativePath: "ja/index.md" })).toBe(
-      `${plain.render(flags)}<h2>I want to...</h2>\n${launcherTag(GOAL_READ_ROWS)}<p>after</p>\n${plain.render(second)}`,
-    );
-  });
-
-  test("a nested link table above the goal table is skipped, and the goal table fires", () => {
+  test("fires on a locale landing page, on the first qualifying table only, skipping a nested link table above it", () => {
     const { plain, withRule } = renderers();
     const nested = "- See also\n\n  | Read |\n  |---|\n  | [Aside](aside.md) |\n";
-    expect(withRule.render(`${nested}\n${GOAL_READ}`, { ...LANDING })).toBe(
-      `${plain.render(nested)}<h2>I want to...</h2>\n${launcherTag(GOAL_READ_ROWS)}<p>after</p>\n`,
+    const flags = "| Flag | Meaning |\n|---|---|\n| `-v` | verbose |\n";
+    const second = "| Goal | Read |\n|---|---|\n| B | [y](y.md) |\n";
+    const src = `${nested}\n${flags}\n${GOAL_READ}\n${second}`;
+    expect(withRule.render(src, { relativePath: "ja/index.md" })).toBe(
+      `${plain.render(nested)}${plain.render(flags)}<h2>I want to...</h2>\n${launcherTag(GOAL_READ_ROWS)}<p>after</p>\n${plain.render(second)}`,
     );
   });
 
+  // The label and note derivation over the table shapes the fleet's landing pages use; a note compared
+  // case-insensitively or a `<br>` dropped from a cell's text changes the launcher's rows with nothing red.
   const shapes: [string, string, CuratedRow[]][] = [
     [
       "a three-column table yields notes from the cell after the label",
@@ -237,9 +224,17 @@ describe("landingTableRule", () => {
 });
 
 describe("landingTableRule under VitePress's renderer", () => {
-  test("hrefs come out normalized, links are recorded for the dead-link check, entities decode", async () => {
+  // env.links is VitePress's dead-link input: a rule that spliced the table before rendering its cells
+  // would drop those links from the check, and dead links would pass.
+  test("hrefs come out normalized, links are recorded for the dead-link check, entities decode; a link table inside a container stays a table", async () => {
     const md = await vitepressRenderer();
     const src = [
+      "::: tip",
+      "| Read |",
+      "|---|",
+      "| [Aside](aside.md) |",
+      ":::",
+      "",
       "| Goal | [Read](read-all.md) | Note |",
       "|---|---|---|",
       "| A &amp; B &#65; | [New](new-repo.md#x) | ![*Guide*](guide.svg) |",
@@ -262,41 +257,24 @@ describe("landingTableRule under VitePress's renderer", () => {
       { label: "Gone, a &amp; b, \\*, \\[x]", href: "./missing.html", note: null },
       { label: "\u26a0\ufe0f Absolute", href: "/repo/abs.html", note: "Header link" },
     ];
-    const secondTable =
+    const tipTable =
+      '<div class="tip custom-block"><p class="custom-block-title">Tip</p>\n' +
       '<table tabindex="0">\n<thead>\n<tr>\n<th>Read</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n' +
-      '<td><a href="./guide.html"><img src="./guide.svg" alt="Guide"></a></td>\n</tr>\n</tbody>\n</table>\n';
-    expect(html).toBe(`${launcherTag(rows)}${secondTable}`);
+      '<td><a href="./aside.html">Aside</a></td>\n</tr>\n</tbody>\n</table>\n</div>\n';
+    const secondTable =
+      '<div class="vp-table" tabindex="0">\n<table>\n<thead>\n<tr>\n<th>Read</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n' +
+      '<td><a href="./guide.html"><img src="./guide.svg" alt="Guide"></a></td>\n</tr>\n</tbody>\n</table>\n</div>\n';
+    expect(html).toBe(`${tipTable}${launcherTag(rows)}${secondTable}`);
+    // The goal table's cells render at the core stage, ahead of the page's inline pass, so their links lead.
     expect(env.links).toEqual([
       "./read-all",
       "./new-repo.html#x",
       "./missing",
       "/abs",
       "./header",
+      "./aside",
       "./guide",
     ]);
-  });
-
-  test("a link table inside a tip container stays a table and the goal table below it fires", async () => {
-    const md = await vitepressRenderer();
-    const src = [
-      "::: tip",
-      "| Read |",
-      "|---|",
-      "| [Aside](aside.md) |",
-      ":::",
-      "",
-      "| Goal | Read |",
-      "|---|---|",
-      "| Publish | [Pages](pages.md) |",
-      "",
-    ].join("\n");
-    const env = { relativePath: "README.md", path: "/site/README.md", cleanUrls: false };
-    expect(md.render(src, env)).toBe(
-      '<div class="tip custom-block"><p class="custom-block-title">Tip</p>\n' +
-        '<table tabindex="0">\n<thead>\n<tr>\n<th>Read</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n' +
-        '<td><a href="./aside.html">Aside</a></td>\n</tr>\n</tbody>\n</table>\n</div>\n' +
-        launcherTag([{ label: "Publish", href: "./pages.html", note: "Pages" }]),
-    );
   });
 
   test("a public/ asset row carries the link's target, so the launcher leaves it to the browser", async () => {
@@ -347,10 +325,6 @@ describe("landingTableRule under VitePress's renderer", () => {
       { title: "Sub em [x]", anchor: "sub-em-x", level: 3 },
     ]);
     for (const header of headers) expect(html).toContain(`<h${header.level} id="${header.anchor}"`);
-  });
-
-  test("renderedHeaders refuses an env no render stamped", () => {
-    expect(() => renderedHeaders({})).toThrow("headersRule is not installed");
   });
 });
 

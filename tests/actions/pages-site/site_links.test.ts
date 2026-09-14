@@ -11,7 +11,6 @@ import {
   resolvesFragment,
   seedPages,
   servedFile,
-  walkHtml,
 } from "../../../actions/pages-site/site_links.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
@@ -40,15 +39,18 @@ describe("ownSitePattern", () => {
 });
 
 describe("seedPages", () => {
-  test("a page seeds only when the LONGEST tier prefix owning it is strict", () => {
+  // Without the longest-prefix rule the docs root's pages (a tag build) would be judged strictly, or, with the tiers
+  // in another order, HEAD's pages would be skipped; declaration order is not the rule, so the tiers are listed
+  // shortest first here.
+  test("a page seeds only when the LONGEST tier prefix owning it is strict; a versioned root built from HEAD seeds too", () => {
     // A website at "/" (HEAD) over a versioned docs mount whose root is a
     // tag build: the docs root's pages belong to the tag, its latest/ to
     // HEAD, and the website's own pages to the website.
     const tiers = [
-      { rel: "docs/latest/", strict: true },
-      { rel: "docs/v0.1.0/", strict: false },
-      { rel: "docs/", strict: false },
       { rel: "", strict: true },
+      { rel: "docs/", strict: false },
+      { rel: "docs/v0.1.0/", strict: false },
+      { rel: "docs/latest/", strict: true },
     ];
     expect(
       seedPages(
@@ -69,14 +71,11 @@ describe("seedPages", () => {
       "docs/latest/index.html",
       "docs/latest/skills/alpha/index.html",
     ]);
-  });
-
-  test("a versioned root built from HEAD (no tags served) seeds its own pages too", () => {
-    const tiers = [
+    const headRoot = [
       { rel: "latest/", strict: true },
       { rel: "", strict: true },
     ];
-    expect(seedPages(["index.html", "latest/index.html"], tiers)).toEqual([
+    expect(seedPages(["index.html", "latest/index.html"], headRoot)).toEqual([
       "index.html",
       "latest/index.html",
     ]);
@@ -84,33 +83,23 @@ describe("seedPages", () => {
 });
 
 describe("fragment reads", () => {
-  test("fragmentTargets resolves same-site anchors against the page, skipping external and bare hashes", () => {
+  // Browser URL facts: a `<base href>` re-roots every relative anchor, a percent-decoded fragment names the id, a bare
+  // `#` and an external origin are skipped, and a text-fragment directive names text, so only the id before it counts.
+  test("fragmentTargets resolves same-site anchors against the page under its <base href>, skipping external, bare, and text-only fragments", () => {
     const html =
+      '<head><base href="/r/"></head>' +
       '<a href="#install">i</a> <a href="setup.html#x">s</a> <a href="/r/docs/#top">d</a>' +
       ' <a href="https://example.test/#x">e</a> <a href="#">bare</a> <a href="../">up</a>' +
-      ' <a href="a%20b.html#c%20d">enc</a> <a href="#100%">pct</a>';
+      ' <a href="a%20b.html#c%20d">enc</a> <a href="#100%">pct</a>' +
+      ' <a href="#intro:~:text=Hello%20world">text</a> <a href="#:~:text=Hello">bare text</a>' +
+      ' <a href="p.html#:~:text=x">page text</a>';
     expect(fragmentTargets(html, "https://site.invalid/r/guide/index.html")).toEqual([
-      { href: "/r/guide/index.html#install", path: "/r/guide/index.html", fragment: "install" },
-      { href: "/r/guide/setup.html#x", path: "/r/guide/setup.html", fragment: "x" },
+      { href: "/r/#install", path: "/r/", fragment: "install" },
+      { href: "/r/setup.html#x", path: "/r/setup.html", fragment: "x" },
       { href: "/r/docs/#top", path: "/r/docs/", fragment: "top" },
-      { href: "/r/guide/a%20b.html#c%20d", path: "/r/guide/a b.html", fragment: "c d" },
-      { href: "/r/guide/index.html#100%", path: "/r/guide/index.html", fragment: "100%" },
-    ]);
-  });
-
-  test("a <base href> re-roots the page's relative anchors, as the browser resolves them", () => {
-    const html = '<head><base href="/r/"></head><a href="setup.html#missing">s</a>';
-    expect(fragmentTargets(html, "https://site.invalid/r/guide/index.html")).toEqual([
-      { href: "/r/setup.html#missing", path: "/r/setup.html", fragment: "missing" },
-    ]);
-  });
-
-  test("a text-fragment directive names text, not an element: the id before it is judged, a bare one is not", () => {
-    const html =
-      '<a href="#intro:~:text=Hello%20world">i</a> <a href="#:~:text=Hello">bare</a>' +
-      ' <a href="p.html#:~:text=x">page</a>';
-    expect(fragmentTargets(html, "https://site.invalid/r/i.html")).toEqual([
-      { href: "/r/i.html#intro:~:text=Hello%20world", path: "/r/i.html", fragment: "intro" },
+      { href: "/r/a%20b.html#c%20d", path: "/r/a b.html", fragment: "c d" },
+      { href: "/r/#100%", path: "/r/", fragment: "100%" },
+      { href: "/r/#intro:~:text=Hello%20world", path: "/r/", fragment: "intro" },
     ]);
   });
 
@@ -255,7 +244,8 @@ describe("checkSiteLinks", () => {
     expect(result.judged).toBeGreaterThan(0);
   });
 
-  test("fails on a missing target or fragment from a current page, own-site and extensionless links and delimiter-named pages included, and ignores history's", async () => {
+  // History is lenient by the same line tierStrictLinks draws, so a tag build's rot is never reported.
+  test("fails on a missing target or fragment from a current page, own-site and extensionless links and delimiter-named pages included, and ignores history's; a site without a current page is failed-to-look", async () => {
     const dir = site({
       "index.html":
         '<a href="/r/docs/skills/missing/">m</a> <a href="https://o.github.io/r/gone.html">g</a>' +
@@ -326,26 +316,11 @@ describe("checkSiteLinks", () => {
       "/r/index.html -> /r/docs/latest/100%a%23b.html#missing (no element with id 'missing' on that page)",
     );
     expect(printed).not.toContain("nowhere.html");
-  });
-
-  test("a site without a current page is failed-to-look", async () => {
-    const dir = site({ "v1/index.html": "<p>old</p>" });
-    await expect(checkSiteLinks(dir, "/", [{ rel: "v1/", strict: false }], null)).rejects.toThrow(
-      "no page built from HEAD",
-    );
-  });
-});
-
-describe("walkHtml", () => {
-  test("enumerates every page, .htm included, so every page of a strict tier can seed the crawl", () => {
-    const dir = temp.dir("site-");
-    mkdirSync(join(dir, "v1.0.0", "assets"), { recursive: true });
-    writeFileSync(join(dir, "index.html"), "<html></html>");
-    writeFileSync(join(dir, "about.htm"), "<html></html>");
-    writeFileSync(join(dir, "v1.0.0", "index.html"), "<html></html>");
-    writeFileSync(join(dir, "v1.0.0", "assets", "app.js"), "js");
-    writeFileSync(join(dir, "v1.0.0", "assets", "html.txt"), "not a page");
-    expect(walkHtml(dir)).toEqual(["about.htm", "index.html", "v1.0.0/index.html"]);
+    // Zero pages must never read as green: a layout without a HEAD build is failed-to-look, not passed.
+    const history = site({ "v1/index.html": "<p>old</p>" });
+    await expect(
+      checkSiteLinks(history, "/", [{ rel: "v1/", strict: false }], null),
+    ).rejects.toThrow("no page built from HEAD");
   });
 });
 

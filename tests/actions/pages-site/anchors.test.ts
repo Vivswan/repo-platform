@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { githubSlug, headingText } from "../../../actions/pages-site/.vitepress/anchors.ts";
 import { vitepressRenderer } from "./vitepress_renderer.ts";
 
+// GitHub's slug rule as github-slugger spells it. VitePress's own slugify differs on punctuation and
+// emoji, so a README fragment written on GitHub 404s on the site while the dead-link check, which
+// ignores fragments, passes it.
 describe("githubSlug", () => {
   test.each<[string, string]>([
     ["3. Add checks to checks.yml", "3-add-checks-to-checksyml"],
@@ -28,7 +31,9 @@ describe("githubSlug", () => {
 describe("headingText", () => {
   const token = (type: string, content: string) => ({ type, content }) as never;
 
-  test("decodes entities in text, keeps code spans literal, drops every other token", () => {
+  // VitePress's text_join re-joins an entity as markup, so the text GitHub slugs is the once-decoded
+  // form: a second decode turns `&amp;amp;` into `&`, a missed one leaves `&amp;`.
+  test("decodes entities exactly once, keeps code spans literal, drops every other token", () => {
     expect(
       headingText([
         token("text", "Use "),
@@ -40,37 +45,39 @@ describe("headingText", () => {
     expect(githubSlug(headingText([token("text", "Caf&eacute; a &amp; b")]))).toBe(
       "caf\u00e9-a--b",
     );
-  });
-
-  test("decodes once: a doubly encoded entity is the once-decoded text GitHub slugs", () => {
     expect(headingText([token("text", "Use &amp;amp;")])).toBe("Use &amp;");
     expect(githubSlug(headingText([token("text", "Use &amp;amp;")]))).toBe("use-amp");
   });
 });
 
 describe("heading ids through VitePress's renderer", () => {
-  test("headings carry GitHub's ids, code spans included, repeats numbered like GitHub", async () => {
+  // Both anchor hooks (slugify and getTokensText) must be wired in the real pipeline; markdown-it-anchor's
+  // `-1` numbering of repeats is what GitHub does too.
+  test("headings carry GitHub's ids, entities decoded once, code spans included, repeats numbered like GitHub", async () => {
     const md = await vitepressRenderer();
     const html = md.render(
-      "## 3. Add checks to checks.yml\n\n## Who can write `refs/tags/stable`?\n\n## A &amp; B\n\n## Use `&amp;`\n\n## Same\n\n## Same\n",
+      [
+        "## 3. Add checks to checks.yml",
+        "## Who can write `refs/tags/stable`?",
+        "## A &amp; B",
+        "## Use `&amp;`",
+        "## Same",
+        "## Same",
+        "## Use &amp;amp;",
+        "## A \\& B",
+        "## Caf&eacute; &#38; bar",
+        "",
+      ].join("\n\n"),
       { path: "/x/index.md", relativePath: "index.md" },
     );
     expect(html).toContain('<h2 id="3-add-checks-to-checksyml"');
     expect(html).toContain('<h2 id="who-can-write-refstagsstable"');
     expect(html).toContain('<h2 id="a--b"');
     expect(html).toContain('<h2 id="use-amp"');
+    expect(html).toContain('<h2 id="use-amp-1"');
     expect(html).toContain('<h2 id="same"');
     expect(html).toContain('<h2 id="same-1"');
-  });
-
-  test("an entity is decoded exactly once: VitePress joins it back as written, so `&amp;amp;` reads as `&amp;` and `\\&` as `&`, both as on GitHub", async () => {
-    const md = await vitepressRenderer();
-    const html = md.render("## Use &amp;amp;\n\n## A \\& B\n\n## Caf&eacute; &#38; bar\n", {
-      path: "/x/index.md",
-      relativePath: "index.md",
-    });
-    expect(html).toContain('<h2 id="use-amp"');
-    expect(html).toContain('<h2 id="a--b"');
+    expect(html).toContain('<h2 id="a--b-1"');
     expect(html).toContain('<h2 id="caf\u00e9--bar"');
     expect(html).not.toContain('id="use-"');
     expect(html).not.toContain('id="use-ampamp"');

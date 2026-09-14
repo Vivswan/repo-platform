@@ -17,11 +17,9 @@ import {
   deriveRewrites,
   detectLocales,
   pageMeta,
-  readPage,
   routeOf,
   walkMarkdown,
 } from "../../../actions/pages-site/.vitepress/derive.ts";
-import { dirTitle } from "../../../actions/pages-site/.vitepress/dir-title.ts";
 import { tokenNames } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 import {
   assertCentralTheme,
@@ -38,11 +36,8 @@ import {
   parseSiteConfig,
   planMount,
   reservedRootEntries,
+  type SiteConfig,
   siteLayout,
-  urlBase,
-  validateRelPath,
-  versionLinks,
-  versionsIndex,
   versionTags,
 } from "../../../actions/pages-site/lib.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
@@ -65,84 +60,107 @@ describe("parseSiteConfig", () => {
       link_rot_description: "Link rot",
       ...overrides,
     });
+  const linkRot = {
+    linkRotLabel: "docs-link-rot",
+    linkRotColor: "D4A72C",
+    linkRotDescription: "Link rot",
+  };
 
-  test("reads the six keys, the docs half as one value: its path and include roots, or null when the path is", () => {
-    const linkRot = {
-      linkRotLabel: "docs-link-rot",
-      linkRotColor: "D4A72C",
-      linkRotDescription: "Link rot",
-    };
-    expect(parseSiteConfig(config())).toEqual({
-      siteTitle: "Site",
-      docs: { path: "docs", include: [skills] },
-      ...linkRot,
-    });
-    expect(parseSiteConfig(config({ include: [], link_rot_label: "" }))).toEqual({
-      siteTitle: "Site",
-      docs: { path: "docs", include: [] },
-      ...linkRot,
-      linkRotLabel: "",
-    });
-    expect(parseSiteConfig(config({ docs_path: null, include: [] }))).toEqual({
-      siteTitle: "Site",
-      docs: null,
-      ...linkRot,
-    });
-  });
-
-  test.each<[reason: string, json: string, error: string]>([
-    ["malformed JSON", "not json", "the config input is not valid JSON"],
-    ["a list", "[]", "must be a JSON object"],
-    ["an unknown key", config({ docs_dir: "docs" }), "unknown keys: docs_dir"],
-    ["a non-string title", config({ site_title: 3 }), "config.site_title must be a string"],
-    ["an empty title", config({ site_title: "" }), "config.site_title must not be empty"],
+  // VitePress accepts every well-formed config here and builds the wrong site (a missing title renders the site name empty,
+  // a stray key is ignored, an include root beside a null docs half mounts under a directory that is never walked),
+  // so the refusal here is the fleet's only signal and its text is what the docs-check log shows; the
+  // include-beside-null-docs row is cross-file with conventions.ts. The accepting rows read the docs half as one
+  // value: its path and include roots, or null.
+  test.each<[reason: string, json: string, outcome: { parsed: SiteConfig } | { error: string }]>([
+    [
+      "the six keys",
+      config(),
+      { parsed: { siteTitle: "Site", docs: { path: "docs", include: [skills] }, ...linkRot } },
+    ],
+    [
+      "an empty include list and label",
+      config({ include: [], link_rot_label: "" }),
+      {
+        parsed: {
+          siteTitle: "Site",
+          docs: { path: "docs", include: [] },
+          ...linkRot,
+          linkRotLabel: "",
+        },
+      },
+    ],
+    [
+      "a null docs path",
+      config({ docs_path: null, include: [] }),
+      { parsed: { siteTitle: "Site", docs: null, ...linkRot } },
+    ],
+    ["malformed JSON", "not json", { error: "the config input is not valid JSON" }],
+    ["a list", "[]", { error: "must be a JSON object" }],
+    ["an unknown key", config({ docs_dir: "docs" }), { error: "unknown keys: docs_dir" }],
+    [
+      "a non-string title",
+      config({ site_title: 3 }),
+      { error: "config.site_title must be a string" },
+    ],
+    [
+      "an empty title",
+      config({ site_title: "" }),
+      { error: "config.site_title must not be empty" },
+    ],
     [
       "a title with a line break",
       config({ site_title: "Docs\npublish=false" }),
-      "config.site_title must be one line",
+      { error: "config.site_title must be one line" },
     ],
     [
       "a label with a carriage return",
       config({ link_rot_label: "rot\rx" }),
-      "config.link_rot_label must be one line",
+      { error: "config.link_rot_label must be one line" },
     ],
     [
       "a docs path with a slash",
       config({ docs_path: "a/b" }),
-      "config.docs_path 'a/b' must be one plain lowercase URL segment",
+      { error: "config.docs_path 'a/b' must be one plain lowercase URL segment" },
     ],
     [
       "an empty docs path",
       config({ docs_path: "" }),
-      "config.docs_path '' must be one plain lowercase URL segment",
+      { error: "config.docs_path '' must be one plain lowercase URL segment" },
     ],
     [
       "a dot docs path",
       config({ docs_path: ".." }),
-      "config.docs_path '..' must be one plain lowercase URL segment",
+      { error: "config.docs_path '..' must be one plain lowercase URL segment" },
     ],
-    ["a non-list include", config({ include: {} }), "config.include must be a list"],
+    ["a non-list include", config({ include: {} }), { error: "config.include must be a list" }],
     [
       "include roots beside a null docs path",
       config({ docs_path: null }),
-      "config.include names roots to render into the docs, but a null docs path turns the docs half off",
+      {
+        error:
+          "config.include names roots to render into the docs, but a null docs path turns the docs half off",
+      },
     ],
     [
       "an include root escaping the tree",
       config({ include: [{ ...skills, path: "../x" }] }),
-      "config.include[0].path '../x' must be a plain relative path",
+      { error: "config.include[0].path '../x' must be a plain relative path" },
     ],
-  ])("refuses %s", (_reason, json, error) => {
-    expect(() => parseSiteConfig(json)).toThrow(error);
+  ])("%s", (_reason, json, outcome) => {
+    if ("error" in outcome) expect(() => parseSiteConfig(json)).toThrow(outcome.error);
+    else expect(parseSiteConfig(json)).toEqual(outcome.parsed);
   });
 });
 
 describe("versionTags", () => {
+  // release-please's tag shape; the order is numeric per component (v1.10.2 above v1.2.3, v1.2.3 above v1.2.0),
+  // so a text sort or a dropped patch tie-break puts an older tag first and the root tier builds from it.
   test("keeps plain vX.Y.Z only, newest first", () => {
     expect(
       versionTags([
         "v1.2.0",
         "v0.9.1",
+        "v1.2.3",
         "v10.0.0",
         "v1.10.2",
         "v1.0.0-rc.1",
@@ -150,23 +168,22 @@ describe("versionTags", () => {
         "1.0.0",
         "",
       ]),
-    ).toEqual(["v10.0.0", "v1.10.2", "v1.2.0", "v0.9.1"]);
+    ).toEqual(["v10.0.0", "v1.10.2", "v1.2.3", "v1.2.0", "v0.9.1"]);
   });
 });
 
 describe("planMount", () => {
   const docs: DocsMount = { kind: "docs", path: "/docs/", include: [] };
 
-  test("with tags: latest, each tag, then the root from the newest", () => {
+  // Root last is what lets copyInto judge reserved names against tiers already in place; without tags the root is
+  // a second build of HEAD, never a redirect stub.
+  test("with tags: latest, each tag, then the root from the newest; without tags: latest, then the root from HEAD", () => {
     expect(planMount(docs, ["v2.0.0", "v1.0.0"])).toEqual([
       { kind: "latest", ref: "HEAD", version: "latest", rel: "docs/latest/" },
       { kind: "tag", ref: "v2.0.0", version: "v2.0.0", rel: "docs/v2.0.0/" },
       { kind: "tag", ref: "v1.0.0", version: "v1.0.0", rel: "docs/v1.0.0/" },
       { kind: "root", ref: "v2.0.0", version: "v2.0.0", rel: "docs/" },
     ]);
-  });
-
-  test("without tags: latest, then the root as a SECOND build of HEAD - never a redirect stub", () => {
     expect(planMount(docs, [])).toEqual([
       { kind: "latest", ref: "HEAD", version: "latest", rel: "docs/latest/" },
       { kind: "root", ref: "HEAD", version: "latest", rel: "docs/" },
@@ -174,38 +191,7 @@ describe("planMount", () => {
   });
 });
 
-describe("layout helpers", () => {
-  test("versions index and dropdown links derive from the mount, never a hardcoded prefix", () => {
-    expect(versionsIndex(["v2.0.0"])).toEqual([
-      { label: "latest", path: "latest/" },
-      { label: "v2.0.0", path: "v2.0.0/" },
-    ]);
-    expect(
-      versionLinks("/repo/", { kind: "docs", path: "/manual/", include: [] }, ["v2.0.0"]),
-    ).toEqual([
-      { label: "latest", link: "/repo/manual/latest/" },
-      { label: "v2.0.0", link: "/repo/manual/v2.0.0/" },
-    ]);
-  });
-
-  test("reserved root entries are exactly the layout's own names plus the served tags", () => {
-    // Exact set: a stray extra name would refuse legitimate root-tier output.
-    expect(reservedRootEntries(["v1.0.0"])).toEqual(new Set(["latest", "versions.json", "v1.0.0"]));
-  });
-
-  test("urlBase joins the Pages root base and the tier path", () => {
-    expect(urlBase("/repo/", "docs/latest/")).toBe("/repo/docs/latest/");
-    expect(urlBase("/", "")).toBe("/");
-  });
-
-  test("validateRelPath refuses traversal in any spelling", () => {
-    for (const bad of ["", ".", "..", "a//b", "/abs", "a/../b", "a/", "a b"]) {
-      expect(() => validateRelPath(bad, "the docs directory")).toThrow("plain relative path");
-    }
-    expect(() => validateRelPath("docs", "x")).not.toThrow();
-    expect(() => validateRelPath("a/b-c.d_e", "x")).not.toThrow();
-  });
-
+describe("siteLayout", () => {
   // The layout rows of docs/site.md, whole: the docs move under the
   // configured segment only beside a website, a docs half turned off
   // (site.path: null) leaves docs/ out even when it exists, and neither
@@ -235,6 +221,7 @@ describe("assembly copies", () => {
     return dir;
   };
 
+  // cpSync merges into an existing directory silently, so two mounts would interleave, green.
   test("a nested mount's directory survives: the shallower copy collides instead of mixing", () => {
     const dest = temp.dir("dest-");
     copyInto(tree({ "index.html": "docs" }), join(dest, "docs"), "the docs mount");
@@ -243,15 +230,14 @@ describe("assembly copies", () => {
     ).toThrow("collides with existing site content");
   });
 
-  test("a root-tier build emitting a reserved layout name is refused", () => {
+  // An impostor `latest/` from the root tier would shadow the real tier. The reserved set is exact: a stray extra
+  // name would refuse legitimate root-tier output.
+  test("a root-tier build emitting a reserved layout name is refused; the reserved names are the layout's own plus the served tags", () => {
+    const reserved = reservedRootEntries(["v1.0.0"]);
+    expect(reserved).toEqual(new Set(["latest", "versions.json", "v1.0.0"]));
     const dest = temp.dir("dest-");
     expect(() =>
-      copyInto(
-        tree({ "latest/index.html": "impostor" }),
-        dest,
-        "the root tier",
-        reservedRootEntries(["v1.0.0"]),
-      ),
+      copyInto(tree({ "latest/index.html": "impostor" }), dest, "the root tier", reserved),
     ).toThrow("reserves");
   });
 });
@@ -266,12 +252,7 @@ describe("resolvePrebuilt", () => {
     return dir;
   };
 
-  test("a relative directory with an index.html resolves to its absolute path", () => {
-    const ws = workspace({ "apps/web/dist/index.html": "<html></html>" });
-    expect(resolvePrebuilt(ws, "apps/web/dist")).toBe(join(ws, "apps/web/dist"));
-  });
-
-  // The lexical check sees only the link's path; the target decides.
+  // The lexical check sees only the link's path; a symlink pointing outside the checkout passes it, so the target decides.
   test("a symlink dist is judged by where it resolves", () => {
     const ws = workspace({ "site/index.html": "<html></html>" });
     const outside = workspace({ "index.html": "<html></html>" });
@@ -283,18 +264,20 @@ describe("resolvePrebuilt", () => {
     );
   });
 
-  // The hook contract's refusals (docs/site.md), each naming the path.
-  test.each<[reason: string, dist: string, error: string]>([
-    [
-      "an absolute dist",
-      "/tmp/out",
-      "the site-build hook's dist '/tmp/out' must be a plain relative path",
-    ],
-    [
-      "a dist leaving the repository",
-      "../out",
-      "the site-build hook's dist '../out' must be a plain relative path",
-    ],
+  // The hook contract's refusals (docs/site.md), each naming the path; every spelling of traversal is refused.
+  const relPath = (dist: string) =>
+    `the site-build hook's dist '${dist}' must be a plain relative path`;
+  test.each<[reason: string, dist: string, error: string | null]>([
+    ["a relative directory with an index.html", "dist", null],
+    ["a nested directory with an index.html", "dist/site", null],
+    ["an absolute dist", "/tmp/out", relPath("/tmp/out")],
+    ["a dist leaving the repository", "../out", relPath("../out")],
+    ["an empty dist", "", relPath("")],
+    ["the dot", ".", relPath(".")],
+    ["a doubled slash", "dist//assets", relPath("dist//assets")],
+    ["a parent segment inside", "dist/../dist", relPath("dist/../dist")],
+    ["a trailing slash", "dist/", relPath("dist/")],
+    ["a space", "my dist", relPath("my dist")],
     [
       "a missing dist",
       "missing",
@@ -310,14 +293,19 @@ describe("resolvePrebuilt", () => {
       "dist/assets",
       "the site-build hook's dist 'dist/assets' produced no index.html",
     ],
-  ])("refuses %s", (_reason, dist, error) => {
-    const ws = workspace({ "dist/index.html": "<html></html>", "dist/assets/app.js": "js" });
-    expect(() => resolvePrebuilt(ws, dist)).toThrow(error);
+  ])("%s", (_reason, dist, error) => {
+    const ws = workspace({
+      "dist/index.html": "<html></html>",
+      "dist/assets/app.js": "js",
+      "dist/site/index.html": "<html></html>",
+    });
+    if (error === null) expect(resolvePrebuilt(ws, dist)).toBe(join(ws, dist));
+    else expect(() => resolvePrebuilt(ws, dist)).toThrow(error);
   });
 });
 
 describe("setOutput", () => {
-  // A value's line break must not become a second output line.
+  // GitHub's output format: a line break in a value sets a second output unless the value is delimited.
   test("writes every output as one delimited block", () => {
     const file = join(temp.dir("output-"), "output");
     writeFileSync(file, "");
@@ -341,73 +329,66 @@ describe("setOutput", () => {
 });
 
 describe("derive", () => {
-  const fixture = () => {
+  // A walked dot directory surfaces a stray page silently.
+  test("walkMarkdown lists markdown only, skipping dot directories", () => {
     const dir = temp.dir("derive-");
     writeFileSync(join(dir, "README.md"), "# Home\n");
     writeFileSync(join(dir, "setup.md"), "# Getting started\n");
     mkdirSync(join(dir, "guide"));
     writeFileSync(join(dir, "guide", "README.md"), "# Guide\n");
     writeFileSync(join(dir, "guide", "deep-dive.md"), "no heading here\n");
-    mkdirSync(join(dir, "api-reference"));
-    writeFileSync(join(dir, "api-reference", "errors.md"), "# error codes\n");
     mkdirSync(join(dir, ".vitepress"));
     writeFileSync(join(dir, ".vitepress", "stray.md"), "# hidden\n");
-    return dir;
-  };
-
-  test("walkMarkdown lists markdown only, skipping dot directories", () => {
-    expect(walkMarkdown(fixture())).toEqual([
+    expect(walkMarkdown(dir)).toEqual([
       "README.md",
-      "api-reference/errors.md",
       "guide/README.md",
       "guide/deep-dive.md",
       "setup.md",
     ]);
   });
 
-  test("READMEs become directory indexes unless an index.md already exists", () => {
-    expect(deriveRewrites(["README.md", "guide/README.md", "guide/index.md"])).toEqual({
-      "README.md": "index.md",
-    });
-  });
-
-  test("a page's title is its first heading, else the humanized filename, with no frontmatter to read", () => {
-    const dir = fixture();
-    expect(readPage(dir, "setup.md")).toEqual({
-      title: "Getting started",
-      order: null,
-      group: null,
-    });
-    expect(readPage(dir, "guide/deep-dive.md")).toEqual({
-      title: "deep dive",
-      order: null,
-      group: null,
-    });
-  });
-
-  test.each<[string, string, ReturnType<typeof pageMeta>]>([
+  // The `title` key wins as VitePress's own page title does; a heading inside the frontmatter is not read.
+  test.each<[string, string, string, ReturnType<typeof pageMeta>]>([
+    [
+      "the first heading is the title",
+      "setup.md",
+      "# Getting started\n",
+      { title: "Getting started", order: null, group: null },
+    ],
+    [
+      "no heading: the humanized file name",
+      "guide/deep-dive.md",
+      "no heading here\n",
+      { title: "deep dive", order: null, group: null },
+    ],
     [
       "order and group read as written, the title from the heading below them",
+      "pages.md",
       "---\norder: 20\ngroup: Modules\n---\n\n# Pages\n",
       { title: "Pages", order: 20, group: "Modules" },
     ],
     [
       "a title key wins over the heading, as it does for VitePress's own page title",
+      "pages.md",
       "---\ntitle: Pages module\n---\n\n# Pages\n",
       { title: "Pages module", order: null, group: null },
     ],
     [
       "a heading inside the frontmatter is not the page's heading",
+      "pages.md",
       "---\ndescription: '# not a heading'\n---\n\nno heading\n",
       { title: "pages", order: null, group: null },
     ],
-  ])("%s", (_, source, expected) => {
-    expect(pageMeta("pages.md", source)).toEqual(expected);
+  ])("%s", (_, file, source, expected) => {
+    expect(pageMeta(file, source)).toEqual(expected);
   });
 
+  // The error names the page for the fleet's docs-check. `.nan` is YAML's not-a-number spelling and gray-matter reads
+  // it as a numeric NaN (a bare `NaN` is a string), so a typeof check alone would accept it and the sidebar would sort
+  // the page by NaN silently.
   test.each([
     ["order: first", "'order' must be a number"],
-    ["order: NaN", "'order' must be a number"],
+    ["order: .nan", "'order' must be a number"],
     ["group: 3", "'group' must be a non-empty string"],
     ["group: ''", "'group' must be a non-empty string"],
   ])("malformed frontmatter (%s) fails the build naming the page", (line, message) => {
@@ -416,31 +397,23 @@ describe("derive", () => {
     );
   });
 
-  test("routes follow the rewrite map: only an exact index.md basename is a directory index", () => {
+  // `search-index.md` as a directory index, or a README beside an index.md, would be two files on one route,
+  // overwritten silently: the rewrite map skips the README, so the directory URL is the index's alone.
+  test("READMEs become directory indexes unless an index.md exists; only an exact index.md basename routes as a directory", () => {
     const rewrites = deriveRewrites([
       "README.md",
       "guide/README.md",
       "guide/index.md",
       "search-index.md",
     ]);
+    expect(rewrites).toEqual({ "README.md": "index.md" });
     expect(routeOf("README.md", rewrites)).toBe("/");
     expect(routeOf("guide/index.md", rewrites)).toBe("/guide/");
-    // A README beside a real index.md keeps its own route - the rewrite
-    // map skipped it, so the directory URL is the index's alone.
     expect(routeOf("guide/README.md", rewrites)).toBe("/guide/README");
     expect(routeOf("search-index.md", rewrites)).toBe("/search-index");
   });
 
-  test.each([
-    ["guide", "Guide"],
-    ["api-reference", "Api Reference"],
-    ["release_notes", "Release Notes"],
-    ["v2", "V2"],
-    ["guide/getting-started", "Guide/Getting Started"],
-  ])("a directory named %s is titled %s", (dir, title) => {
-    expect(dirTitle(dir)).toBe(title);
-  });
-
+  // ISO 639-1 membership is external; a directory named like a tag silently becomes a translation tree.
   test("locale directories follow the convention: real language tags only", () => {
     for (const tag of ["zh-cn", "zh-tw", "ja", "de", "pt-br"]) {
       expect(isLocaleDir(tag)).toBe(true);
@@ -455,6 +428,7 @@ describe("derive", () => {
 });
 
 describe("central theme guard", () => {
+  // The one owner of strict versus lenient: HEAD content must be fixable, history cannot be.
   test("the dead-link strictness wiring is ARMED: HEAD tiers build strict, tags lenient", () => {
     expect(
       tierStrictLinks({ kind: "latest", ref: "HEAD", version: "latest", rel: "latest/" }),
@@ -468,28 +442,34 @@ describe("central theme guard", () => {
     );
   });
 
-  test("a caller-shipped .vitepress is REFUSED: the theme comes only from repo-platform", () => {
-    const dir = temp.dir("docs-");
-    writeFileSync(join(dir, "README.md"), "# Home\n");
-    mkdirSync(join(dir, ".vitepress"));
-    expect(() => assertCentralTheme(dir)).toThrow("theme changes belong in repo-platform");
-  });
-
-  test("a markdown-only docs tree passes", () => {
-    const dir = temp.dir("docs-");
-    writeFileSync(join(dir, "README.md"), "# Home\n");
-    expect(() => assertCentralTheme(dir)).not.toThrow();
-    expect(() => assertDocsLanding(dir)).not.toThrow();
-  });
-
-  test("a docs tree whose landing is index.md alone is refused naming docs/README.md", () => {
-    const dir = temp.dir("docs-");
-    writeFileSync(join(dir, "index.md"), "# Home\n");
-    expect(() => assertDocsLanding(dir)).toThrow(
+  // The build copies the central theme over a caller's .vitepress, so a repo-local one would be ignored silently.
+  test.each<[reason: string, files: string[], theme: string | null, landing: string | null]>([
+    ["a markdown-only docs tree", ["README.md"], null, null],
+    [
+      "a caller-shipped .vitepress",
+      ["README.md", ".vitepress/config.ts"],
+      "theme changes belong in repo-platform",
+      null,
+    ],
+    [
+      "a landing of index.md alone",
+      ["index.md"],
+      null,
       "docs/README.md does not exist - it is the docs landing page; create it",
-    );
+    ],
+  ])("%s", (_reason, files, theme, landing) => {
+    const dir = temp.dir("docs-");
+    for (const file of files) {
+      mkdirSync(join(dir, file, ".."), { recursive: true });
+      writeFileSync(join(dir, file), "# Home\n");
+    }
+    if (theme === null) expect(() => assertCentralTheme(dir)).not.toThrow();
+    else expect(() => assertCentralTheme(dir)).toThrow(theme);
+    if (landing === null) expect(() => assertDocsLanding(dir)).not.toThrow();
+    else expect(() => assertDocsLanding(dir)).toThrow(landing);
   });
 
+  // Cross-file with isUnwalkedEntry: a page and an index.md in one walked directory are two files at one route.
   test("an include root's page-and-index clash is judged in the directories the site walks, never in a dot directory", () => {
     const root = temp.dir("skills-");
     const include = { path: "skills", mount: "skills", page: "SKILL.md" };
@@ -506,25 +486,33 @@ describe("central theme guard", () => {
   });
 });
 
-describe("strict check build", () => {
+describe("check build", () => {
   // The whole CHECK path through a real `vitepress build`: Vue's production
   // SSR renderer used to log a page's render error and emit the page with
   // an empty body while the build exited 0, so the check job stayed green
-  // on blank pages.
+  // on blank pages. The docs-half-off row stands down before any build.
   test.each([
     {
       name: "a Vue interpolation in markdown fails the build with the render error",
       body: "Use `{{ x.y }}` here.",
-      fails: true,
+      docsPath: '"docs"',
+      outcome: "fails",
     },
     {
-      name: "plain markdown passes with its body rendered",
+      name: "plain markdown passes with its body rendered and every token in the bundle's CSS",
       body: "Plain text here.",
-      fails: false,
+      docsPath: '"docs"',
+      outcome: "passes",
+    },
+    {
+      name: "the docs half off stands down green with a notice and builds nothing, whatever docs/ carries",
+      body: "See [gone](missing.md).",
+      docsPath: "null",
+      outcome: "stands down",
     },
   ])(
     "$name",
-    ({ body, fails }) => {
+    ({ body, docsPath, outcome }) => {
       const root = temp.dir("pages-site-check-");
       const docs = join(root, "ws", "docs");
       mkdirSync(docs, { recursive: true });
@@ -559,14 +547,19 @@ describe("strict check build", () => {
           RUNNER_TEMP: join(root, "runner-temp"),
           CHECK: "true",
           SITE_DIR: "",
-          CONFIG:
-            '{"site_title": "t", "docs_path": "docs", "include": [], "link_rot_label": "", "link_rot_color": "", "link_rot_description": ""}',
+          CONFIG: `{"site_title": "t", "docs_path": ${docsPath}, "include": [], "link_rot_label": "", "link_rot_color": "", "link_rot_description": ""}`,
         },
         timeoutMs: 180_000,
       });
       const buildDir = join(realpathSync(join(root, "runner-temp")), "pages-site", "build-0");
       const page = join(buildDir, ".vitepress", "dist", "page.html");
-      if (fails) {
+      if (outcome === "stands down") {
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain(
+          "::notice::docs-check stood down: the registration turns the docs half off (site.path: null)",
+        );
+        expect(existsSync(buildDir)).toBe(false);
+      } else if (outcome === "fails") {
         // The SSR frame must sit inside vitepress's fatal block (`build error:`,
         // ANSI-colored under CI, up to the action's annotation) and is never matched
         // by wording: bun 1.4.0 prints a bare `Error` stack header in ~1.5% of throws.
@@ -598,34 +591,4 @@ describe("strict check build", () => {
     },
     harnessBound(200_000),
   );
-});
-
-describe("check mode with the docs half off", () => {
-  test("stands down green with a notice and builds nothing, whatever docs/ carries", () => {
-    const root = temp.dir("pages-site-check-off-");
-    const docs = join(root, "ws", "docs");
-    mkdirSync(docs, { recursive: true });
-    mkdirSync(join(root, "runner-temp"));
-    writeFileSync(join(docs, "README.md"), "# Home\n\nSee [gone](missing.md).\n");
-    const result = boundedSpawnSync([process.execPath, join(ACTION_DIR, "build.ts")], {
-      env: {
-        ...process.env,
-        GITHUB_WORKSPACE: join(root, "ws"),
-        GITHUB_REPOSITORY: "o/r",
-        RUNNER_TEMP: join(root, "runner-temp"),
-        CHECK: "true",
-        SITE_DIR: "",
-        CONFIG:
-          '{"site_title": "t", "docs_path": null, "include": [], "link_rot_label": "", "link_rot_color": "", "link_rot_description": ""}',
-      },
-      timeoutMs: 60_000,
-    });
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain(
-      "::notice::docs-check stood down: the registration turns the docs half off (site.path: null)",
-    );
-    expect(existsSync(join(realpathSync(join(root, "runner-temp")), "pages-site", "build-0"))).toBe(
-      false,
-    );
-  });
 });

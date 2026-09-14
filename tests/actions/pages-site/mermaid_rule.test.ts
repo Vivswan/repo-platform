@@ -3,8 +3,7 @@ import { resolve } from "node:path";
 import { mermaidRule } from "../../../actions/pages-site/.vitepress/mermaid.ts";
 import { vitepressRenderer } from "./vitepress_renderer.ts";
 
-// markdown-it is the action's dependency, not the root's: resolve it from
-// the action's own tree, the way the table-wrap test does.
+// markdown-it is the action's dependency, not the root's.
 type Md = Parameters<typeof mermaidRule>[0];
 const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 const { default: MarkdownIt } = (await import(Bun.resolveSync("markdown-it", ACTION_DIR))) as {
@@ -29,26 +28,21 @@ function render(markdown: string): string {
   return md.render(markdown);
 }
 
+// `mermaid {1}` and `mermaid:line-numbers` are VitePress's own info forms; `mermaidjs` is another language.
 test.each([
-  ["mermaid", MOUNT],
-  ["mermaid {1}", MOUNT],
-  ["mermaid:line-numbers", MOUNT],
-  ["mermaidjs", "<HIGHLIGHTED mermaidjs>\n"],
-  ["ts", "<HIGHLIGHTED ts>\n"],
-  ["", "<HIGHLIGHTED >\n"],
-])("a fence with info %j renders as", (info, expected) => {
-  expect(render(`\`\`\`${info}\n${SOURCE}\n\`\`\`\n`)).toBe(expected);
-});
-
-test("a page keeps its prose and its other fences around the mount, tilde fences included", () => {
-  const html = render(
-    `# Title\n\n~~~mermaid\n${SOURCE}\n~~~\n\nProse.\n\n\`\`\`ts\nconst x = 1;\n\`\`\`\n`,
-  );
-  expect(html).toBe(`<h1>Title</h1>\n${MOUNT}<p>Prose.</p>\n<HIGHLIGHTED ts>\n`);
+  ["```", "mermaid", MOUNT],
+  ["~~~", "mermaid", MOUNT],
+  ["```", "mermaid {1}", MOUNT],
+  ["```", "mermaid:line-numbers", MOUNT],
+  ["```", "mermaidjs", "<HIGHLIGHTED mermaidjs>\n"],
+  ["```", "ts", "<HIGHLIGHTED ts>\n"],
+  ["```", "", "<HIGHLIGHTED >\n"],
+])("a %s fence with info %j renders as", (fence, info, expected) => {
+  expect(render(`${fence}${info}\n${SOURCE}\n${fence}\n`)).toBe(expected);
 });
 
 // VitePress's code-group container marks its first fence active and its tabs show the block carrying `.active`.
-// `vp-block` is the class it gives a group's non-code block.
+// `vp-block` is the class it gives a group's non-code block; both are undocumented internals.
 test("a mermaid fence in a code group is a vp-block the tabs can switch, active when first", async () => {
   const md = await vitepressRenderer();
   const group = (first: string, second: string) =>

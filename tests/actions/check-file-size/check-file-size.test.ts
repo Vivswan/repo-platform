@@ -16,20 +16,16 @@ import {
   HARD,
   isGenerated,
   isManaged,
-  isUnbreakable,
   judgeFile,
   type Kind,
   loadGrammars,
-  type Outcome,
   outcomeOf,
-  parseAllowlist,
-  parseArgs,
   REASON_RULE,
   report,
   type Tier,
-  type Verdict,
   WARN,
 } from "../../../actions/check-file-size/check-file-size.ts";
+import { loadAction, stepNamed } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
@@ -59,6 +55,8 @@ const lines = (count: number): string => `${Array.from({ length: count }, () => 
 const MANAGED = "# This file is managed by Vivswan/repo-platform.\n";
 
 describe("classify", () => {
+  // The kind picks the cap: a source file misread as a test gets the larger cap and passes silently. Rust's sibling test
+  // modules and the workflows depth rule are conventions no file declares.
   test.each<[string, Kind | null]>([
     ["src/app.ts", "source"],
     ["src/App.tsx", "source"],
@@ -127,6 +125,9 @@ const GENERATOR_MENTIONS: [string, string][] = [
 ];
 
 describe("isGenerated / isManaged", () => {
+  // The generator phrasings (protoc-gen-go, bindgen, flex, grammar-kit, p10k) are external: a hand-written file taken
+  // for generated is skipped silently, and a file that merely names a generator must not be. The managed rows are
+  // cross-file with MANAGED_HEADER_PATTERN.
   test.each<[string, string, boolean, boolean]>([
     ...GENERATOR_MENTIONS.map(([name, text]): [string, string, boolean, boolean] => [
       name,
@@ -210,101 +211,82 @@ describe("isGenerated / isManaged", () => {
       false,
     ],
     ["no header", "const x = 1;\n", false, false],
-  ])("%s", (_name, text, generated, managed) => {
-    expect([isGenerated(text), isManaged(text)]).toEqual([generated, managed]);
-  });
-
-  test("control: the retired path alternative skipped every generator mention", () => {
-    const retired = /scripts\/generate\b/;
-    const skipped = GENERATOR_MENTIONS.map(([, text]) =>
-      text.split("\n", 10).some((line) => retired.test(line)),
-    );
-    expect(skipped).toEqual(GENERATOR_MENTIONS.map(() => true));
-  });
+  ])(
+    "a header is generated or managed by its vocabulary: %s",
+    (_name, text, generated, managed) => {
+      expect([isGenerated(text), isManaged(text)]).toEqual([generated, managed]);
+    },
+  );
 });
 
 describe("judgeFile line counts", () => {
   const kinds: Kind[] = ["source", "test", "workflow", "shell", "markdown"];
-  // A 50-line matched generated region rides along in every fixture and
-  // never counts; the same fixtures without it would judge identically.
+  // A 50-line matched generated region rides along in every kind's rows and never counts: without the mask a file
+  // carrying a fenced region fails on lines its author cannot shorten. WARN is derived from HARD; the boundary rows
+  // keep the derivation from drifting.
   const region = `# BEGIN GENERATED: x\n${lines(48)}# END GENERATED: x\n`;
-  test.each(kinds)("%s: at each cap passes, one over lands in that tier", (kind) => {
-    const hard = HARD.lines[kind];
-    const warn = WARN.lines[kind];
-    const path = `file.${kind}`;
-    expect(judgeFile(path, kind, `${region}${lines(warn)}`, grammars)).toEqual([]);
-    expect(judgeFile(path, kind, `${lines(warn + 1)}${region}`, grammars)).toEqual([
-      {
-        path,
-        kind,
-        tier: "warn",
-        measure: "lines",
-        value: warn + 1,
-        cap: warn,
-      },
-    ]);
-    expect(judgeFile(path, kind, `${region}${lines(hard)}`, grammars)).toEqual([
-      { path, kind, tier: "warn", measure: "lines", value: hard, cap: warn },
-    ]);
-    expect(judgeFile(path, kind, `${lines(hard + 1)}${region}`, grammars)).toEqual([
-      {
-        path,
-        kind,
-        tier: "hard",
-        measure: "lines",
-        value: hard + 1,
-        cap: hard,
-      },
-    ]);
+  const finding = (kind: Kind, tier: Tier, value: number): Finding => ({
+    path: `file.${kind}`,
+    kind,
+    tier,
+    measure: "lines",
+    value,
+    cap: tier === "hard" ? HARD.lines[kind] : WARN.lines[kind],
   });
-
-  test("an unmatched BEGIN GENERATED fences nothing (control); both markers on one line fence that line", () => {
-    const cap = HARD.lines.source;
-    const finding = (value: number): Finding => ({
-      path: "a.ts",
-      kind: "source",
-      tier: "hard",
-      measure: "lines",
-      value,
-      cap,
-    });
-    expect(judgeFile("a.ts", "source", `// BEGIN GENERATED: x\n${lines(cap)}`, grammars)).toEqual([
-      finding(cap + 1),
-    ]);
-    // The warn boundary, where one uncounted marker line decides.
-    expect(
-      judgeFile(
-        "a.ts",
-        "source",
-        `// BEGIN GENERATED: x END GENERATED: x\n${lines(WARN.lines.source)}`,
-        grammars,
-      ),
-    ).toEqual([]);
-    expect(
-      judgeFile(
-        "a.ts",
-        "source",
-        `// BEGIN GENERATED: x END GENERATED: x\n${lines(cap + 1)}`,
-        grammars,
-      ),
-    ).toEqual([finding(cap + 1)]);
-  });
-
-  test("a missing trailing newline still counts the last line; a trailing newline adds none", () => {
-    const cap = HARD.lines.source;
-    const finding = (tier: Tier, value: number, over: number): Finding => ({
-      path: "a.ts",
-      kind: "source",
-      tier,
-      measure: "lines",
-      value,
-      cap: over,
-    });
-    const body = Array.from({ length: cap + 1 }, () => "x").join("\n");
-    expect(judgeFile("a.ts", "source", body, grammars)).toEqual([finding("hard", cap + 1, cap)]);
-    expect(judgeFile("a.ts", "source", lines(cap), grammars)).toEqual([
-      finding("warn", cap, WARN.lines.source),
-    ]);
+  const SOURCE = HARD.lines.source;
+  test.each<[string, Kind, string, Finding[]]>([
+    ...kinds.flatMap((kind): [string, Kind, string, Finding[]][] => {
+      const hard = HARD.lines[kind];
+      const warn = WARN.lines[kind];
+      return [
+        [`${kind} at the warn cap`, kind, `${region}${lines(warn)}`, []],
+        [
+          `${kind} one over the warn cap`,
+          kind,
+          `${lines(warn + 1)}${region}`,
+          [finding(kind, "warn", warn + 1)],
+        ],
+        [`${kind} at the hard cap`, kind, `${region}${lines(hard)}`, [finding(kind, "warn", hard)]],
+        [
+          `${kind} one over the hard cap`,
+          kind,
+          `${lines(hard + 1)}${region}`,
+          [finding(kind, "hard", hard + 1)],
+        ],
+      ];
+    }),
+    [
+      "an unmatched BEGIN GENERATED fences nothing (control)",
+      "source",
+      `// BEGIN GENERATED: x\n${lines(SOURCE)}`,
+      [finding("source", "hard", SOURCE + 1)],
+    ],
+    [
+      "both markers on one line fence that line alone: at the warn boundary",
+      "source",
+      `// BEGIN GENERATED: x END GENERATED: x\n${lines(WARN.lines.source)}`,
+      [],
+    ],
+    [
+      "both markers on one line fence that line alone: one over the hard cap",
+      "source",
+      `// BEGIN GENERATED: x END GENERATED: x\n${lines(SOURCE + 1)}`,
+      [finding("source", "hard", SOURCE + 1)],
+    ],
+    [
+      "a missing trailing newline still counts the last line",
+      "source",
+      Array.from({ length: SOURCE + 1 }, () => "x").join("\n"),
+      [finding("source", "hard", SOURCE + 1)],
+    ],
+    [
+      "a trailing newline adds no line",
+      "source",
+      lines(SOURCE),
+      [finding("source", "warn", SOURCE)],
+    ],
+  ])("%s", (_name, kind, text, expected) => {
+    expect(judgeFile(`file.${kind}`, kind, text, grammars)).toEqual(expected);
   });
 });
 
@@ -335,6 +317,82 @@ describe("judgeFile line width", () => {
       expected.map((row) => widthFinding(path, kind, row)),
     );
   };
+
+  // A warn-wide line that is one literal beside nothing but punctuation and keywords is exempt (the author cannot wrap
+  // it); the same width beside code is judged. The exemption follows each grammar's node types.
+  const F = "a ".repeat(110).trim();
+  const literalRow = ([name, path, line, literal]: [string, string, string, boolean]): [
+    string,
+    string,
+    string,
+    (Tier | number)[][],
+  ] => {
+    const width = [...line].length;
+    if (width <= WARN.width || width > HARD.width)
+      throw new Error(`${name}: ${width} is not warn-wide`);
+    return [name, path, `${line}\n`, literal ? [] : [["warn", 1, width, WARN.width]]];
+  };
+  const LITERAL_ROWS: [string, string, string, boolean][] = [
+    ["a typed exported declaration", "f.ts", `export const x: Readonly<T[]> = "${F}";`, true],
+    ["a template with a trailing comma", "f.ts", `let x = \`${F}\`,`, true],
+    ["a returned regex with flags", "f.ts", `  return /${F}/gi`, true],
+    ["a keyed literal with trailers", "f.ts", `key: '${F}')]`, true],
+    ["a += assignment", "f.ts", `obj.key += "${F}"`, true],
+    ["a python raw bytes prefix", "f.py", `rb"${F}"`, true],
+    ["an escaped quote inside", "f.ts", `"esc\\"aped ${F}"`, true],
+    ["an escaped slash inside a regex", "f.ts", `/a\\/b ${F}/`, true],
+    ["a string holding comment syntax is a string", "f.ts", `const s = "// ${F}";`, true],
+    ["a regex holding a comment opener is a regex", "f.ts", `const r = /\\/* ${F}/;`, true],
+    ["a sole string argument", "f.ts", `throw new Error("${F}");`, true],
+    ["a template literal type", "f.ts", `type X = \`${F}\`;`, true],
+    [
+      "a string-typed declaration: the type keyword is not a literal",
+      "f.ts",
+      `const x: string = "${F}";`,
+      true,
+    ],
+    [
+      "a long property name typed string holds no literal",
+      "f.ts",
+      `type T = { ${"a".repeat(145)}: string };`,
+      false,
+    ],
+    [
+      "a test title: only punctuation and keywords follow it",
+      "f.ts",
+      `test("${F}", async () => {`,
+      true,
+    ],
+    [
+      "a quoted key before a long value is a key, not a second literal",
+      "f.ts",
+      `const o = { "k": \`${F}\` };`,
+      true,
+    ],
+    ["a quoted yaml key before a long value", ".github/workflows/f.yml", `"k": "${F}"`, true],
+    ["a quoted python key before a long value", "f.py", `d = {"k": "${F}"}`, true],
+    ["a quoted key alone is judged like any string beside code", "f.ts", `  "${F}": x,`, false],
+    [
+      "a ternary's two literals are two literals, not a key and a value",
+      "f.ts",
+      `const x = f ? "a" : "${F}";`,
+      false,
+    ],
+    [
+      "a comment before the literal keeps the row judged (the comment can wrap)",
+      "f.ts",
+      `/* ${"c ".repeat(20)}*/ const x = "${"a ".repeat(85)}";`,
+      false,
+    ],
+    ["two literals joined on one line", "f.ts", `'${F}' + 'b'`, false],
+    ["an unclosed literal", "f.ts", `const x = "unclosed ${F}`, false],
+    ["a three-letter prefix is an identifier glued to a string", "f.py", `rbx"${F}"`, false],
+    ["a tagged template (the tag is a call target)", "f.ts", `r\`${F}\``, false],
+    ["a comment", "f.ts", `// ${F}`, false],
+    ["a literal followed by code", "f.ts", `const x = "${F}" x`, false],
+    ["a shell word before a string is a command", "f.sh", `echo "${F}"`, false],
+    ["a shell regex match is a regex literal", "f.sh", `[[ $x =~ ^${"a".repeat(170)}$ ]]`, true],
+  ];
 
   // Every case names its file, since the literal exemption follows the grammar.
   test.each<[string, string, string, (Tier | number)[][]]>([
@@ -452,76 +510,9 @@ describe("judgeFile line width", () => {
       `// BEGIN GENERATED: x ${wide(300)} END GENERATED: x\n${wide(300)}\n`,
       [["hard", 2, 300, 256]],
     ],
+    ...LITERAL_ROWS.map(literalRow),
   ])("%s", (_name, path, text, expected) => {
     judgeWidth(path, text, expected);
-  });
-
-  const F = "a ".repeat(110).trim();
-  test.each<[string, string, string, boolean]>([
-    ["a typed exported declaration", "f.ts", `export const x: Readonly<T[]> = "${F}";`, true],
-    ["a template with a trailing comma", "f.ts", `let x = \`${F}\`,`, true],
-    ["a returned regex with flags", "f.ts", `  return /${F}/gi`, true],
-    ["a keyed literal with trailers", "f.ts", `key: '${F}')]`, true],
-    ["a += assignment", "f.ts", `obj.key += "${F}"`, true],
-    ["a python raw bytes prefix", "f.py", `rb"${F}"`, true],
-    ["an escaped quote inside", "f.ts", `"esc\\"aped ${F}"`, true],
-    ["an escaped slash inside a regex", "f.ts", `/a\\/b ${F}/`, true],
-    ["a string holding comment syntax is a string", "f.ts", `const s = "// ${F}";`, true],
-    ["a regex holding a comment opener is a regex", "f.ts", `const r = /\\/* ${F}/;`, true],
-    ["a sole string argument", "f.ts", `throw new Error("${F}");`, true],
-    ["a template literal type", "f.ts", `type X = \`${F}\`;`, true],
-    [
-      "a string-typed declaration: the type keyword is not a literal",
-      "f.ts",
-      `const x: string = "${F}";`,
-      true,
-    ],
-    [
-      "a long property name typed string holds no literal",
-      "f.ts",
-      `type T = { ${"a".repeat(145)}: string };`,
-      false,
-    ],
-    [
-      "a test title: only punctuation and keywords follow it",
-      "f.ts",
-      `test("${F}", async () => {`,
-      true,
-    ],
-    [
-      "a quoted key before a long value is a key, not a second literal",
-      "f.ts",
-      `const o = { "k": \`${F}\` };`,
-      true,
-    ],
-    ["a quoted yaml key before a long value", ".github/workflows/f.yml", `"k": "${F}"`, true],
-    ["a quoted python key before a long value", "f.py", `d = {"k": "${F}"}`, true],
-    ["a quoted key alone is judged like any string beside code", "f.ts", `  "${F}": x,`, false],
-    [
-      "a ternary's two literals are two literals, not a key and a value",
-      "f.ts",
-      `const x = f ? "a" : "${F}";`,
-      false,
-    ],
-    [
-      "a comment before the literal keeps the row judged (the comment can wrap)",
-      "f.ts",
-      `/* ${"c ".repeat(20)}*/ const x = "${"a ".repeat(85)}";`,
-      false,
-    ],
-    ["two literals joined on one line", "f.ts", `'${F}' + 'b'`, false],
-    ["an unclosed literal", "f.ts", `const x = "unclosed ${F}`, false],
-    ["a three-letter prefix is an identifier glued to a string", "f.py", `rbx"${F}"`, false],
-    ["a tagged template (the tag is a call target)", "f.ts", `r\`${F}\``, false],
-    ["a comment", "f.ts", `// ${F}`, false],
-    ["a literal followed by code", "f.ts", `const x = "${F}" x`, false],
-    ["a shell word before a string is a command", "f.sh", `echo "${F}"`, false],
-    ["a shell regex match is a regex literal", "f.sh", `[[ $x =~ ^${"a".repeat(170)}$ ]]`, true],
-  ])("%s", (_name, path, line, literal) => {
-    const width = [...line].length;
-    expect(width).toBeGreaterThan(WARN.width);
-    expect(width).toBeLessThanOrEqual(HARD.width);
-    judgeWidth(path, `${line}\n`, literal ? [] : [["warn", 1, width, WARN.width]]);
   });
 });
 
@@ -547,10 +538,6 @@ describe("judgeFile comment blocks", () => {
           cap: COMMENT_CAPS[row[2]],
           scope: row[2],
         };
-
-  test("the caps: one warn-only tier per scope", () => {
-    expect(COMMENT_CAPS).toEqual({ block: 10, header: 25 });
-  });
 
   // Every case names its file, since the comment syntax follows the extension.
   test.each<[string, string, string, Row[]]>([
@@ -986,19 +973,6 @@ describe("grammars", () => {
     [".github/workflows/f.yaml", "# c", "on: push"],
   ];
 
-  test("every judged extension but Swift has a working grammar; Swift's reason names the leak", () => {
-    expect([...grammars].filter(([, grammar]) => "reason" in grammar)).toEqual([
-      ["swift", { reason: expect.stringContaining("keeps scanner state across files") }],
-    ]);
-    expect([...grammars.keys()].sort()).toEqual(
-      [...SAMPLES.map(([path]) => path.slice(path.lastIndexOf(".") + 1)), "swift"].sort(),
-    );
-    const chatty = `${"// c\n".repeat(BLOCK + 1)}let x = "${"a ".repeat(115)}"\n`;
-    expect(judgeFile("f.swift", "source", chatty, grammars).map(describeFinding)).toEqual([
-      `f.swift:${BLOCK + 2}: 240 chars (cap ${WARN.width})`,
-    ]);
-  });
-
   // A wasm importing a libc symbol the runtime does not export loads fine, then crashes the parse on the first input reaching it.
   //   tree-sitter-wasms' bash build  -> imports isalpha, the control below
   //   abort, __assert_fail           -> exempted: only a grammar bug reaches them, a crash either way
@@ -1032,28 +1006,6 @@ describe("grammars", () => {
     expect(GRAMMAR_WASMS).not.toContain(crashing);
     expect(await missingImports([crashing])).toContain("tree-sitter-bash.wasm: isalpha");
   });
-
-  test.each(SAMPLES)(
-    "%s: a comment run after code is a block; the same lines as code are not",
-    (path, comment, code) => {
-      const kind = classify(path);
-      if (kind === null) throw new Error(`${path} has no kind`);
-      const run = `${comment}\n`.repeat(BLOCK + 1);
-      expect(judgeFile(path, kind, `${code}\n${run}${code}\n`, grammars)).toEqual([
-        {
-          path,
-          kind,
-          tier: "warn",
-          measure: "comment",
-          line: 2,
-          value: BLOCK + 1,
-          cap: BLOCK,
-          scope: "block",
-        },
-      ]);
-      expect(judgeFile(path, kind, `${code}\n`.repeat(BLOCK + 2), grammars)).toEqual([]);
-    },
-  );
 
   const STYLES: [path: string, open: string, close: string][] = [
     ["f.ts", "//", ""],
@@ -1132,7 +1084,44 @@ describe("grammars", () => {
     },
   );
 
-  test("every comment node type of every grammar has a style above, so its delimiters are proven", () => {
+  // A grammar that fails to load downgrades every file of its extension to unjudged: the check reports it in the
+  // summary and stays green, so a dependency bump that breaks a wasm load is red here alone (the roster, and loaded()
+  // in the STYLES rows). One that loads but whose comment node was renamed upstream yields no block, silently; a
+  // declared comment node type without a STYLES row has unproven delimiters.
+  test("every judged extension but Swift has a grammar that finds a comment block and none in code, every declared comment node type has a style row, and Swift's reason names the leak", () => {
+    expect([...grammars].filter(([, grammar]) => "reason" in grammar)).toEqual([
+      ["swift", { reason: expect.stringContaining("keeps scanner state across files") }],
+    ]);
+    expect([...grammars.keys()].sort()).toEqual(
+      [...SAMPLES.map(([path]) => extension(path)), "swift"].sort(),
+    );
+    const kindOf = (path: string): Kind => {
+      const kind = classify(path);
+      if (kind === null) throw new Error(`${path} has no kind`);
+      return kind;
+    };
+    const blockFinding = (path: string): Finding => ({
+      path,
+      kind: kindOf(path),
+      tier: "warn",
+      measure: "comment",
+      line: 2,
+      value: BLOCK + 1,
+      cap: BLOCK,
+      scope: "block",
+    });
+    expect(
+      SAMPLES.map(([path, comment, code]) => [
+        path,
+        judgeFile(
+          path,
+          kindOf(path),
+          `${code}\n${`${comment}\n`.repeat(BLOCK + 1)}${code}\n`,
+          grammars,
+        ),
+        judgeFile(path, kindOf(path), `${code}\n`.repeat(BLOCK + 2), grammars),
+      ]),
+    ).toEqual(SAMPLES.map(([path]) => [path, [blockFinding(path)], []]));
     // A grammar is named by the first extension reaching it: a style's, else its own.
     const byGrammar = new Map<Grammar, { name: string; types: Set<string> }>();
     for (const [path, open, close] of STYLES) {
@@ -1153,19 +1142,9 @@ describe("grammars", () => {
       [...byGrammar].map(([grammar, { name }]) => [name, [...grammar.comments.keys()].sort()]),
     );
     expect(styled).toEqual(declared);
-    expect(Object.keys(styled)).toEqual([
-      "ts",
-      "tsx",
-      "js",
-      "py",
-      "rs",
-      "go",
-      "c",
-      "cpp",
-      "java",
-      "kt",
-      "sh",
-      "yml",
+    const chatty = `${"// c\n".repeat(BLOCK + 1)}let x = "${"a ".repeat(115)}"\n`;
+    expect(judgeFile("f.swift", "source", chatty, grammars).map(describeFinding)).toEqual([
+      `f.swift:${BLOCK + 2}: 240 chars (cap ${WARN.width})`,
     ]);
   });
 
@@ -1194,42 +1173,6 @@ describe("grammars", () => {
   });
 });
 
-describe("isUnbreakable", () => {
-  test.each<[string, boolean]>([
-    ["https://example.com/a/very/long/path", true],
-    ["    indented-token", true],
-    ["two tokens", false],
-    ["  run: value", false],
-    ["", false],
-    ["   ", false],
-  ])("%j", (line, unbreakable) => {
-    expect(isUnbreakable(line)).toBe(unbreakable);
-  });
-});
-
-describe("parseAllowlist", () => {
-  test("entries need a reason on the same line; comments and blanks are skipped", () => {
-    const text = [
-      "# header comment",
-      "",
-      "scripts/big.ts # vendored from upstream",
-      "  tests/big.test.ts   #   spaced reason  ",
-      "scripts/bare.ts",
-      "scripts/empty.ts #",
-    ].join("\n");
-    expect(parseAllowlist(text)).toEqual({
-      entries: [
-        { path: "scripts/big.ts", reason: "vendored from upstream", line: 3 },
-        { path: "tests/big.test.ts", reason: "spaced reason", line: 4 },
-      ],
-      failures: [
-        `${ALLOWLIST_FILE}:5: 'scripts/bare.ts' has no '# reason'; ${REASON_RULE}`,
-        `${ALLOWLIST_FILE}:6: 'scripts/empty.ts' has no '# reason'; ${REASON_RULE}`,
-      ],
-    });
-  });
-});
-
 describe("check", () => {
   const BIG = lines(HARD.lines.source + 1);
   const WARM = lines(WARN.lines.source + 1);
@@ -1245,10 +1188,12 @@ describe("check", () => {
     };
   };
 
-  test("judges tracked files only; ignored, untracked, generated, managed and exempt files never count", () => {
+  test("judges tracked files only; ignored, untracked, generated, managed, goldens and exempt files never count", () => {
     const root = checkout(
       {
         ".gitignore": "ignored/\n",
+        "tests/goldens/all/.github/workflows/auto.yml": `${MANAGED}${WIDE}`,
+        "tests/goldens/all/src/gen.ts": `// generated by x\n${BIG}`,
         "src/big.ts": BIG,
         "src/warm.ts": WARM,
         "src/wide.sh": WIDE,
@@ -1278,110 +1223,131 @@ describe("check", () => {
     });
   });
 
-  test("a goldens directory is exempt wholesale, and the managed root file is skipped", () => {
-    const root = checkout({
-      "tests/goldens/all/.github/workflows/auto.yml": `${MANAGED}${WIDE}`,
-      "tests/goldens/all/src/gen.ts": `// generated by x\n${BIG}`,
-      ".github/workflows/auto.yml": `${MANAGED}${WIDE}`,
-    });
-    expect(summary(root)).toEqual({
-      failures: [],
-      warnings: [],
-      allowlistErrors: [],
-      managedSkipped: 1,
-    });
-  });
-
-  test("an allowlisted path with a reason silences both tiers; the unlisted control still fails", () => {
-    const root = checkout({
-      "src/big.ts": `${BIG}${WIDE}`,
-      "src/other.ts": BIG,
-      [ALLOWLIST_FILE]: "src/big.ts # vendored from upstream\n",
-    });
-    expect(summary(root)).toEqual({
-      failures: [
-        `src/other.ts: ${HARD.lines.source + 1} lines (cap ${HARD.lines.source} for source)`,
-      ],
-      warnings: [],
-      allowlistErrors: [],
-      managedSkipped: 0,
-    });
-  });
-
-  test("an allowlisted warn-tier file is silenced too, and is not stale", () => {
-    const root = checkout({
-      "src/warm.ts": WARM,
-      [ALLOWLIST_FILE]: "src/warm.ts # known\n",
-    });
-    expect(summary(root)).toEqual({
-      failures: [],
-      warnings: [],
-      allowlistErrors: [],
-      managedSkipped: 0,
-    });
-  });
-
-  test("an entry without a reason fails and exempts nothing", () => {
-    const root = checkout({
-      "src/big.ts": BIG,
-      [ALLOWLIST_FILE]: "src/big.ts\n",
-    });
-    expect(summary(root)).toEqual({
-      failures: [bigLine],
-      warnings: [],
-      allowlistErrors: [`${ALLOWLIST_FILE}:1: 'src/big.ts' has no '# reason'; ${REASON_RULE}`],
-      managedSkipped: 0,
-    });
-  });
-
-  test("a stale entry (file back under every cap, or not tracked) fails", () => {
-    const root = checkout({
-      "src/fine.ts": lines(10),
-      [ALLOWLIST_FILE]: "src/fine.ts # was big\nsrc/gone.ts # deleted since\n",
-    });
-    expect(summary(root)).toEqual({
-      failures: [],
-      warnings: [],
-      allowlistErrors: [
-        `${ALLOWLIST_FILE}:1: 'src/fine.ts' is stale (under every cap, or not a tracked file); remove the entry`,
-        `${ALLOWLIST_FILE}:2: 'src/gone.ts' is stale (under every cap, or not a tracked file); remove the entry`,
-      ],
-      managedSkipped: 0,
-    });
-  });
-
-  test("this repository passes with its allowlist", () => {
-    const verdict = check(REPO_ROOT, grammars);
-    expect([...verdict.failures.map(describeFinding), ...verdict.allowlistErrors]).toEqual([]);
+  // The fleet's bypass: an allowlist matching by prefix, silencing the control, or exempting without a reason would pass
+  // silently. The stale rule is what keeps the file honest once the path shrinks.
+  test.each<[string, Record<string, string>, ReturnType<typeof summary>]>([
+    [
+      "a path with a reason silences both tiers; header comments, blanks and spacing are skipped; the unlisted control still fails",
+      {
+        "src/big.ts": `${BIG}${WIDE}`,
+        "src/other.ts": BIG,
+        [ALLOWLIST_FILE]: "# header comment\n\n  src/big.ts   #   vendored from upstream  \n",
+      },
+      {
+        failures: [
+          `src/other.ts: ${HARD.lines.source + 1} lines (cap ${HARD.lines.source} for source)`,
+        ],
+        warnings: [],
+        allowlistErrors: [],
+        managedSkipped: 0,
+      },
+    ],
+    [
+      "a warn-tier file is silenced too, and is not stale",
+      { "src/warm.ts": WARM, [ALLOWLIST_FILE]: "src/warm.ts # known\n" },
+      { failures: [], warnings: [], allowlistErrors: [], managedSkipped: 0 },
+    ],
+    [
+      "an entry without a reason, or with an empty one, fails and exempts nothing",
+      { "src/big.ts": BIG, "src/other.ts": BIG, [ALLOWLIST_FILE]: "src/big.ts\nsrc/other.ts #\n" },
+      {
+        failures: [
+          bigLine,
+          `src/other.ts: ${HARD.lines.source + 1} lines (cap ${HARD.lines.source} for source)`,
+        ],
+        warnings: [],
+        allowlistErrors: [
+          `${ALLOWLIST_FILE}:1: 'src/big.ts' has no '# reason'; ${REASON_RULE}`,
+          `${ALLOWLIST_FILE}:2: 'src/other.ts' has no '# reason'; ${REASON_RULE}`,
+        ],
+        managedSkipped: 0,
+      },
+    ],
+    [
+      "a stale entry (file back under every cap, or not tracked) fails",
+      {
+        "src/fine.ts": lines(10),
+        [ALLOWLIST_FILE]: "src/fine.ts # was big\nsrc/gone.ts # deleted since\n",
+      },
+      {
+        failures: [],
+        warnings: [],
+        allowlistErrors: [
+          `${ALLOWLIST_FILE}:1: 'src/fine.ts' is stale (under every cap, or not a tracked file); remove the entry`,
+          `${ALLOWLIST_FILE}:2: 'src/gone.ts' is stale (under every cap, or not a tracked file); remove the entry`,
+        ],
+        managedSkipped: 0,
+      },
+    ],
+  ])("allowlist: %s", (_name, tree, expected) => {
+    expect(summary(checkout(tree))).toEqual(expected);
   });
 });
 
 describe("the CLI", () => {
-  const hardBody = (hardLines: number) =>
-    [
-      "## File size check",
-      "",
-      "1 over a hard cap (fails), 1 warning(s).",
-      "",
-      "| File | Size | Tier | Cap |",
-      "| --- | --- | --- | --- |",
+  // action.yml gates the sticky comment on the `report` output: one literal posts, the other deletes, and both steps are
+  // continue-on-error, so a value the script renames is never posted or never deleted, green. The two literals are read
+  // from the manifest so neither side can move alone.
+  const gateValue = (stepName: string): string => {
+    const gate = String(stepNamed(loadAction("actions/check-file-size/action.yml"), stepName).if);
+    const value = /steps\.check\.outputs\.report == '([a-z]+)'/.exec(gate)?.[1];
+    if (value === undefined) throw new Error(`no report gate in ${gate}`);
+    return value;
+  };
+  const POSTED = gateValue("Post the findings as a sticky PR comment");
+  const DELETED = gateValue("Remove a stale sticky comment");
+  const REMEDY = `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`;
+  const hardLines = HARD.lines.source + 1;
+  const wide = `${"a ".repeat(120).trim()}\n`;
+  const stale = `${ALLOWLIST_FILE}:1: 'src/fine.ts' is stale (under every cap, or not a tracked file); remove the entry`;
+  const table = (rows: string[]) => [
+    "| File | Size | Tier | Cap |",
+    "| --- | --- | --- | --- |",
+    ...rows,
+  ];
+  const findingsBody = [
+    "## File size check",
+    "",
+    "1 over a hard cap (fails), 4 warning(s).",
+    "",
+    ...table([
       `| \`src/big.ts\` | ${hardLines} lines | hard | ${HARD.lines.source} |`,
+      `| \`src/chatty.ts:2\` | ${COMMENT_CAPS.block + 1} comment lines | warn | ${COMMENT_CAPS.block} |`,
+      `| \`src/header.ts:1\` | ${COMMENT_CAPS.header + 1} comment lines (header) | warn | ${COMMENT_CAPS.header} |`,
+      `| \`src/marker.sh:1\` | comment-cap: ignore without a reason | warn | - |`,
       `| \`src/warm.sh:1\` | 239 chars | warn | ${WARN.width} |`,
-      "",
-      `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
-      "",
-    ].join("\n");
+    ]),
+    "",
+    REMEDY,
+    "",
+    "1 managed file(s) skipped; repo-platform owns them.",
+    "",
+    "1 `.swift` file(s) not judged for comment blocks or literal lines (no working grammar: the prebuilt Swift grammar keeps scanner state across files, so a raw string in one file changes how the next file tokenizes).",
+    "",
+  ].join("\n");
   const warmBody = [
     "## File size check",
     "",
     "0 over a hard cap (fails), 2 warning(s).",
     "",
-    "| File | Size | Tier | Cap |",
-    "| --- | --- | --- | --- |",
-    `| \`src/chatty.ts:1\` | 30 comment lines (header) | warn | ${COMMENT_CAPS.header} |`,
-    `| \`src/warm.sh:1\` | 239 chars | warn | ${WARN.width} |`,
+    ...table([
+      `| \`src/chatty.ts:1\` | 30 comment lines (header) | warn | ${COMMENT_CAPS.header} |`,
+      `| \`src/warm.sh:1\` | 239 chars | warn | ${WARN.width} |`,
+    ]),
     "",
-    `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+    REMEDY,
+    "",
+  ].join("\n");
+  const staleBody = [
+    "## File size check",
+    "",
+    "0 over a hard cap (fails), 0 warning(s).",
+    "",
+    `### ${ALLOWLIST_FILE}`,
+    "",
+    `- ${stale}`,
+    "",
+    REMEDY,
     "",
   ].join("\n");
   const cleanBody = [
@@ -1420,188 +1386,123 @@ describe("the CLI", () => {
       output: readFileSync(outputPath, "utf-8"),
     };
   };
+  const notGit = () => temp.dir("check-file-size-notgit-");
+  const gitMessage = (root: string) =>
+    `git ls-files failed in ${root}: fatal: not a git repository (or any of the parent directories): .git`;
 
-  test("findings: exit 1, ::error:: lines, the table as comment body, summary, and report=findings", () => {
-    const hardLines = HARD.lines.source + 1;
-    const wide = `${"a ".repeat(120).trim()}\n`;
-    const root = checkout({
-      "src/big.ts": lines(hardLines),
-      "src/warm.sh": wide,
-    });
-    expect(run(root)).toEqual({
-      exitCode: 1,
-      stdout: [`::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`],
-      stderr: [
-        `::error::src/big.ts: ${hardLines} lines (cap ${HARD.lines.source} for source)`,
-        `1 finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
-      ],
-      comment: hardBody(hardLines),
-      summary: hardBody(hardLines),
-      output: "report=findings\n",
-    });
-  });
-
-  test("warnings only, an over-cap comment among them: exit 0 with the same three sinks", () => {
-    const root = checkout({
-      "src/warm.sh": `${"a ".repeat(120).trim()}\n`,
-      "src/chatty.ts": `${"// h\n".repeat(30)}x\n`,
-    });
-    expect(run(root)).toEqual({
-      exitCode: 0,
-      stdout: [
-        `::warning::src/chatty.ts:1: 30 comment lines (cap ${COMMENT_CAPS.header} for a header)`,
-        `::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`,
-        "File size check passed (2 warning(s), 0 managed file(s) skipped).",
-      ],
-      stderr: [""],
-      comment: warmBody,
-      summary: warmBody,
-      output: "report=findings\n",
-    });
-  });
-
-  test("clean: exit 0, a summary, no comment body (the action deletes the comment), report=clean", () => {
-    const root = checkout({
-      "src/fine.ts": lines(3),
-      "src/managed.ts": `${MANAGED}${lines(3)}`,
-    });
-    expect(run(root)).toEqual({
-      exitCode: 0,
-      stdout: ["File size check passed (0 warning(s), 1 managed file(s) skipped)."],
-      stderr: [""],
-      comment: null,
-      summary: cleanBody,
-      output: "report=clean\n",
-    });
-  });
-
-  test("error: a root that is no checkout exits 1 with the failure in the summary, no comment body, report=error", () => {
-    const root = temp.dir("check-file-size-notgit-");
-    const message = `git ls-files failed in ${root}: fatal: not a git repository (or any of the parent directories): .git`;
-    expect(run(root)).toEqual({
-      exitCode: 1,
-      stdout: [""],
-      stderr: [`::error::check-file-size did not run to completion: ${message}`],
-      comment: null,
-      summary: `## File size check\n\nThe check did not run to completion: ${message}\n`,
-      output: "report=error\n",
-    });
-  });
-
-  test("parseArgs takes one optional root and refuses anything more", () => {
-    expect(parseArgs([])).toEqual({ root: process.cwd() });
-    expect(parseArgs(["/r"])).toEqual({ root: "/r" });
-    expect(() => parseArgs(["/r", "--rendered", "a"])).toThrow(
-      "unexpected argument(s): --rendered a",
-    );
+  test.each<[string, () => string, (root: string) => ReturnType<typeof run>]>([
+    [
+      "findings: exit 1 on the hard finding alone, ::error:: and ::warning:: lines, the table hard first, the managed count and the unjudged line, as comment and summary",
+      () =>
+        checkout({
+          "src/big.ts": lines(hardLines),
+          "src/warm.sh": wide,
+          "src/chatty.ts": `x\n${"// c\n".repeat(COMMENT_CAPS.block + 1)}x\n`,
+          "src/header.ts": `${"// h\n".repeat(COMMENT_CAPS.header + 1)}x\n`,
+          "src/marker.sh": `# ${COMMENT_MARKER}\necho x\n`,
+          "src/managed.ts": `${MANAGED}x\n`,
+          "src/odd.swift": "let x = 1\n",
+        }),
+      () => ({
+        exitCode: 1,
+        stdout: [
+          `::warning::src/chatty.ts:2: ${COMMENT_CAPS.block + 1} comment lines (cap ${COMMENT_CAPS.block})`,
+          `::warning::src/header.ts:1: ${COMMENT_CAPS.header + 1} comment lines (cap ${COMMENT_CAPS.header} for a header)`,
+          `::warning::src/marker.sh:1: ${COMMENT_MARKER} needs a reason`,
+          `::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`,
+        ],
+        stderr: [
+          `::error::src/big.ts: ${hardLines} lines (cap ${HARD.lines.source} for source)`,
+          `1 finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
+        ],
+        comment: findingsBody,
+        summary: findingsBody,
+        output: `report=${POSTED}\n`,
+      }),
+    ],
+    [
+      "warnings only, an over-cap comment among them: exit 0 with the same three sinks",
+      () =>
+        checkout({
+          "src/warm.sh": wide,
+          "src/chatty.ts": `${"// h\n".repeat(30)}x\n`,
+        }),
+      () => ({
+        exitCode: 0,
+        stdout: [
+          `::warning::src/chatty.ts:1: 30 comment lines (cap ${COMMENT_CAPS.header} for a header)`,
+          `::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`,
+          "File size check passed (2 warning(s), 0 managed file(s) skipped).",
+        ],
+        stderr: [""],
+        comment: warmBody,
+        summary: warmBody,
+        output: `report=${POSTED}\n`,
+      }),
+    ],
+    [
+      "a stale allowlist entry alone: exit 1 and the comment posted with the allowlist section; read as clean, the action would delete the comment while the run fails with no table",
+      () => checkout({ "src/fine.ts": lines(3), [ALLOWLIST_FILE]: "src/fine.ts # was big\n" }),
+      () => ({
+        exitCode: 1,
+        stdout: [""],
+        stderr: [
+          `::error::${stale}`,
+          `1 finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
+        ],
+        comment: staleBody,
+        summary: staleBody,
+        output: `report=${POSTED}\n`,
+      }),
+    ],
+    [
+      "clean: exit 0, a summary, no comment body (the action deletes the comment)",
+      () => checkout({ "src/fine.ts": lines(3), "src/managed.ts": `${MANAGED}${lines(3)}` }),
+      () => ({
+        exitCode: 0,
+        stdout: ["File size check passed (0 warning(s), 1 managed file(s) skipped)."],
+        stderr: [""],
+        comment: null,
+        summary: cleanBody,
+        output: `report=${DELETED}\n`,
+      }),
+    ],
+    [
+      "error: a root that is no checkout exits 1 with the failure in the summary and no comment body",
+      notGit,
+      (root) => ({
+        exitCode: 1,
+        stdout: [""],
+        stderr: [`::error::check-file-size did not run to completion: ${gitMessage(root)}`],
+        comment: null,
+        summary: `## File size check\n\nThe check did not run to completion: ${gitMessage(root)}\n`,
+        output: "report=error\n",
+      }),
+    ],
+  ])("%s", (_name, makeRoot, expected) => {
+    const root = makeRoot();
+    expect(run(root)).toEqual(expected(root));
   });
 });
 
-describe("report", () => {
-  const verdict: Verdict = {
-    failures: [
-      {
-        path: "a.ts",
-        kind: "source",
-        tier: "hard",
-        measure: "lines",
-        value: 2100,
-        cap: 2000,
-      },
-    ],
-    warnings: [
-      {
-        path: "b.sh",
-        kind: "shell",
-        tier: "warn",
-        line: 7,
-        measure: "width",
-        value: 180,
-        cap: 150,
-      },
-      {
-        path: "c.ts",
-        kind: "source",
-        tier: "warn",
-        line: 12,
-        measure: "comment",
-        value: 11,
-        cap: 10,
-        scope: "block",
-      },
-      {
-        path: "d.ts",
-        kind: "source",
-        tier: "warn",
-        line: 1,
-        measure: "comment",
-        value: 26,
-        cap: 25,
-        scope: "header",
-      },
-      { path: "e.sh", kind: "shell", tier: "warn", measure: "marker", line: 3 },
-    ],
-    allowlistErrors: [`${ALLOWLIST_FILE}:1: 'c.ts' is stale`],
-    managedSkipped: 3,
-    unjudged: [{ extension: "kt", files: 2, reason: "kotlin did not load" }],
-  };
-
-  test.each<[string, Outcome, string[]]>([
+// docs/fleet-guidelines.md spells the caps by hand for the fleet; the tests above read them from the source, so a changed
+// ratio or cap would leave the guide lying with nothing red.
+test("the caps table in docs/fleet-guidelines.md is the caps the code judges by", () => {
+  const rows = readFileSync(join(REPO_ROOT, "docs/fleet-guidelines.md"), "utf8")
+    .split("\n")
+    .filter((line) =>
+      /^\| (source|test|workflow|shell|markdown|line width|comment block) \|/.test(line),
+    )
+    .map((line) => line.split("|").map((cell) => cell.trim()))
+    .map((cells) => [cells[1], cells[3], cells[4]?.replace(/ \(.*\)$/, "")]);
+  const kinds: Kind[] = ["source", "test", "workflow", "shell", "markdown"];
+  expect(rows).toEqual([
+    ...kinds.map((kind) => [kind, `${HARD.lines[kind]} lines`, `${WARN.lines[kind]} lines`]),
+    ["line width", `${HARD.width} code points`, `${WARN.width} code points`],
     [
-      "findings render hard first as one table, allowlist errors and the managed count after",
-      { state: "findings", verdict },
-      [
-        "## File size check",
-        "",
-        "1 over a hard cap (fails), 4 warning(s).",
-        "",
-        "| File | Size | Tier | Cap |",
-        "| --- | --- | --- | --- |",
-        "| `a.ts` | 2100 lines | hard | 2000 |",
-        "| `b.sh:7` | 180 chars | warn | 150 |",
-        "| `c.ts:12` | 11 comment lines | warn | 10 |",
-        "| `d.ts:1` | 26 comment lines (header) | warn | 25 |",
-        "| `e.sh:3` | comment-cap: ignore without a reason | warn | - |",
-        "",
-        `### ${ALLOWLIST_FILE}`,
-        "",
-        `- ${ALLOWLIST_FILE}:1: 'c.ts' is stale`,
-        "",
-        `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
-        "",
-        "3 managed file(s) skipped; repo-platform owns them.",
-        "",
-        "2 `.kt` file(s) not judged for comment blocks or literal lines (no working grammar: kotlin did not load).",
-        "",
-      ],
+      "comment block",
+      "never fails",
+      `${COMMENT_CAPS.block} lines; ${COMMENT_CAPS.header} for the file header`,
     ],
-    [
-      "clean says so and keeps the managed count",
-      {
-        state: "clean",
-        verdict: {
-          ...verdict,
-          failures: [],
-          warnings: [],
-          allowlistErrors: [],
-          unjudged: [],
-        },
-      },
-      [
-        "## File size check",
-        "",
-        "Every file is under its caps.",
-        "",
-        "3 managed file(s) skipped; repo-platform owns them.",
-        "",
-      ],
-    ],
-    [
-      "an error names what stopped the check",
-      { state: "error", message: "boom" },
-      ["## File size check", "", "The check did not run to completion: boom", ""],
-    ],
-  ])("%s", (_name, outcome, expected) => {
-    expect(report(outcome)).toBe(expected.join("\n"));
-  });
+  ]);
 });

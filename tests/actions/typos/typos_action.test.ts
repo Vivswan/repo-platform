@@ -1,89 +1,39 @@
-// typos layers --config over the _typos.toml it discovers at the checkout root, so a repository's own file extends the fleet allowlist.
-// The end-to-end runs need a typos binary on PATH.
+// typos layers --config over the _typos.toml it discovers at the checkout root (external): the action's description
+// promises the extension, and a typos release that replaced instead of layering would drop every repository's words at
+// once. The end-to-end rows need a typos binary on PATH.
 //   locally            -> skipped without one
 //   TYPOS_REQUIRED=1   -> mandatory; ci.yml's script-tests job installs the pinned release and sets it
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadAction, REPO_ROOT } from "../../shared/action_step";
+import { loadAction, REPO_ROOT, stepNamed } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
-const action = loadAction("actions/typos/action.yml");
-const FLEET_CONFIG = join(REPO_ROOT, "actions/typos/_typos.toml");
+// The config the action names, so a `with.config` the action drops or moves is a config these rows stop finding.
+const configInput = String(
+  (
+    stepNamed(loadAction("actions/typos/action.yml"), "Check spelling").with as Record<
+      string,
+      string
+    >
+  ).config,
+);
+const FLEET_CONFIG = configInput.replace(
+  "${{ github.action_path }}",
+  join(REPO_ROOT, "actions/typos"),
+);
 const typosBinary = Bun.which("typos");
 const typosRequired = process.env.TYPOS_REQUIRED === "1";
 const endToEnd = typosBinary === null && !typosRequired ? test.skip : test;
 
 describe("actions/typos", () => {
-  test("a composite of exactly the pinned typos step with the fleet config, no inputs to loosen it", () => {
-    expect(action.runs.using).toBe("composite");
-    expect(action.inputs).toBeUndefined();
-    expect(action.runs.steps).toHaveLength(1);
-    const [step] = action.runs.steps;
-    expect(step.uses).toMatch(/^crate-ci\/typos@[0-9a-f]{40}$/);
-    expect(step.with).toEqual({ config: "${{ github.action_path }}/_typos.toml" });
-    // The version comment beside the sha, for dependabot and the reader.
-    const pinLine = readFileSync(join(REPO_ROOT, "actions/typos/action.yml"), "utf8")
-      .split("\n")
-      .find((line) => line.includes("uses: crate-ci/typos@"));
-    expect(pinLine).toMatch(/ # v\d+\.\d+\.\d+$/);
-  });
-
-  test("the fleet allowlist: generated-file excludes and two ignore patterns, no accepted words", () => {
-    const config = Bun.TOML.parse(readFileSync(FLEET_CONFIG, "utf8")) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(Object.keys(config).sort()).toEqual(["default", "files"]);
-    expect(Object.keys(config.files)).toEqual(["extend-exclude"]);
-    const excludes = config.files["extend-exclude"] as string[];
-    expect(excludes).toContain("*.lock");
-    // Never a source glob: a root lib/ is source in a Node repository, and one that generates it excludes it itself.
-    expect(excludes).toEqual([
-      "*.lock",
-      "*.lockb",
-      "package-lock.json",
-      "*.min.js",
-      "*.min.css",
-      "*.svg",
-      "/dist/",
-      "node_modules/",
-    ]);
-    expect(Object.keys(config.default)).toEqual(["extend-ignore-re"]);
-    // typos' leading inline flags become JS flags; R, its CRLF flag, has no JS counterpart and is dropped.
-    const patterns = config.default["extend-ignore-re"] as string[];
-    expect(patterns).toHaveLength(2);
-    const [hex, marker] = patterns.map((pattern) => {
-      const flags = /^\(\?([a-zA-Z]+)\)/.exec(pattern);
-      return new RegExp(
-        flags ? pattern.slice(flags[0].length) : pattern,
-        flags ? flags[1].replace("R", "") : "",
-      );
-    });
-    expect(hex.test("598b829d7f507749e4e05469a31ddcfc9a7404c7")).toBe(true);
-    expect(hex.test("teh quick fox")).toBe(false);
-    expect(marker.test("const teh = 1; # typos: ignore")).toBe(true);
-    expect(marker.test("const teh = 1; // typos: ignore")).toBe(true);
-    expect(marker.test("const teh = 1;")).toBe(false);
-    expect(marker.test("const teh = 1; // typos are ignored elsewhere")).toBe(false);
-  });
-
-  test("this repository's own _typos.toml only adds words and excludes this suite's fixtures", () => {
-    const own = Bun.TOML.parse(readFileSync(join(REPO_ROOT, "_typos.toml"), "utf8")) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(Object.keys(own).sort()).toEqual(["default", "files"]);
-    expect(Object.keys(own.default)).toEqual(["extend-words"]);
-    expect(own.files["extend-exclude"]).toEqual(["tests/actions/typos/typos_action.test.ts"]);
-  });
-
   test.skipIf(!typosRequired)(
     "TYPOS_REQUIRED: the binary on PATH is the release the action pins",
     () => {
+      // The end-to-end rows run whatever typos is on PATH; without this they prove another release's behaviour.
       expect(typosBinary).not.toBeNull();
       const pinned = /uses: crate-ci\/typos@[0-9a-f]{40} # v(\d+\.\d+\.\d+)$/m.exec(
         readFileSync(join(REPO_ROOT, "actions/typos/action.yml"), "utf8"),
@@ -93,64 +43,70 @@ describe("actions/typos", () => {
     },
   );
 
-  // End to end with the installed binary (brew install typos-cli): typos
-  // exits 2 on findings, 0 when clean.
-  const typos = (repo: string) =>
-    boundedSpawnSync([typosBinary ?? "typos", "--config", FLEET_CONFIG, "--format", "brief", "."], {
-      cwd: repo,
-    });
-
-  endToEnd(
-    "end to end: an ordinary typo and the hyphenated mis- prefix both fail under the fleet config",
-    () => {
-      const repo = temp.dir("typos-e2e-");
-      writeFileSync(join(repo, "a.md"), "teh quick fox mis-parses.\n");
-      const run = typos(repo);
-      expect([run.exitCode, run.stdout.includes("`teh`"), run.stdout.includes("`mis`")]).toEqual([
-        2,
-        true,
-        true,
-      ]);
+  // typos exits 2 on findings, 0 when clean; a fixture tree is the axis. The findings are asserted whole, as
+  // `path:line word`, so a rule that widened or narrowed shows the line it changed; every misspelling is unique to
+  // its line so no other line can stand in for it.
+  endToEnd.each<{
+    reason: string;
+    files: Record<string, string>;
+    found: string[];
+  }>([
+    {
+      reason: "an ordinary typo and the hyphenated mis- prefix both fail under the fleet config",
+      files: { "a.md": "teh quick fox mis-parses.\n" },
+      found: ["./a.md:1 mis", "./a.md:1 teh"],
     },
-  );
-
-  endToEnd(
-    "end to end: the repository's _typos.toml extends the fleet allowlist (words and fixture paths); a sha is ignored, unparseable is not",
-    () => {
-      const repo = temp.dir("typos-e2e-own-");
-      mkdirSync(join(repo, "src"));
-      mkdirSync(join(repo, "test/fixtures"), { recursive: true });
-      writeFileSync(
-        join(repo, "_typos.toml"),
-        '[default.extend-words]\nteh = "teh"\n\n[files]\nextend-exclude = ["test/fixtures/"]\n',
-      );
-      writeFileSync(
-        join(repo, "src/a.md"),
-        "teh quick fox at 598b829d7f507749e4e05469a31ddcfc9a7404c7, unparseable and recieve\n",
-      );
-      writeFileSync(join(repo, "test/fixtures/negative.txt"), "permision DELET entires\n");
-      const run = typos(repo);
-      expect(run.exitCode).toBe(2);
-      expect(run.stdout).toContain("`recieve`");
-      expect(run.stdout).not.toContain("`teh`");
-      expect(run.stdout).toContain("`unparseable`");
-      expect(run.stdout).not.toContain("`permision`");
+    {
+      // The two fleet ignore patterns run in typos' own regex dialect (its `R` flag has no JS counterpart): a sha and
+      // a `# typos: ignore` or `// typos: ignore` line are exempt, prose mentioning typos is not.
+      reason:
+        "the repository's _typos.toml extends the fleet allowlist (words and fixture paths); a sha and a marked line are ignored, unparseable is not",
+      files: {
+        "_typos.toml":
+          '[default.extend-words]\nteh = "teh"\n\n[files]\nextend-exclude = ["test/fixtures/"]\n',
+        "src/a.md":
+          "teh quick fox at 598b829d7f507749e4e05469a31ddcfc9a7404c7, unparseable and recieve\n",
+        "src/b.ts": "const seperate = 1; // typos: ignore\nconst permision = 2; # typos: ignore\n",
+        "src/c.md": "adress: typos are ignored elsewhere\n",
+        "src/d.ts": "const definately = 3; // typos are a word here, not the marker\n",
+        "test/fixtures/negative.txt": "occured DELET entires\n",
+      },
+      found: [
+        "./src/a.md:1 recieve",
+        "./src/a.md:1 unparseable",
+        "./src/c.md:1 adress",
+        "./src/d.ts:1 definately",
+      ],
     },
-  );
-
-  endToEnd(
-    "end to end: a root dist/ is committed build output and skipped; a root lib/ and a nested one are source and scanned",
-    () => {
-      const repo = temp.dir("typos-e2e-built-");
-      for (const dir of ["dist", "lib", "src/lib"]) mkdirSync(join(repo, dir), { recursive: true });
-      writeFileSync(join(repo, "dist/index.js"), "recieve\n");
-      writeFileSync(join(repo, "lib/index.js"), "permision\n");
-      writeFileSync(join(repo, "src/lib/a.ts"), "// teh\n");
-      const run = typos(repo);
-      expect(run.exitCode).toBe(2);
-      expect(run.stdout).toContain("`teh`");
-      expect(run.stdout).toContain("`permision`");
-      expect(run.stdout).not.toContain("`recieve`");
+    {
+      // Never a source glob: a root lib/ is source in a Node repository, and one that generates it excludes it itself.
+      reason:
+        "a root dist/ is committed build output and skipped; a root lib/ and a nested one are source and scanned",
+      files: {
+        "dist/index.js": "recieve\n",
+        "lib/index.js": "permision\n",
+        "src/lib/a.ts": "// teh\n",
+      },
+      found: ["./lib/index.js:1 permision", "./src/lib/a.ts:1 teh"],
     },
-  );
+  ])("end to end: $reason", ({ files, found }) => {
+    const repo = temp.dir("typos-e2e-");
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(join(repo, rel, ".."), { recursive: true });
+      writeFileSync(join(repo, rel), text);
+    }
+    const run = boundedSpawnSync(
+      [typosBinary ?? "typos", "--config", FLEET_CONFIG, "--format", "brief", "."],
+      { cwd: repo },
+    );
+    // `--format brief` prints `path:line:col: error: \`word\` should be ...`; the column and the suggestion are the
+    // dictionary's, not the rule's.
+    const reported = run.stdout
+      .trimEnd()
+      .split("\n")
+      .map((line) => /^(\S+:\d+):\d+: error: `([^`]+)`/.exec(line))
+      .map((match) => (match === null ? "unparsed line" : `${match[1]} ${match[2]}`))
+      .sort();
+    expect([run.exitCode, reported]).toEqual([2, found]);
+  });
 });

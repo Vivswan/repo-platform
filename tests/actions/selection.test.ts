@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { applies, type Selection, selects, type When } from "../../actions/shared/selection.ts";
 
-// Every selection two modules can form, crossed with both visibilities; a
-// row pins the whole set a clause admits, so a clause that drifts on any
-// selection names the row.
+// The ONE selection rule the writer, the plan, and the validator share: a clause read differently by any of them
+// writes, plans, or judges a different file set with no error. Every selection two modules can form, crossed with
+// both visibilities; a row pins the whole set a clause admits, so a clause that drifts on any selection names the row.
 const SELECTIONS: Record<string, Selection> = {
   "-/public": { modules: [], private: false },
   "-/private": { modules: [], private: true },

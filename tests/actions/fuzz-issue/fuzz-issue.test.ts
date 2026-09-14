@@ -11,7 +11,6 @@ import {
   closeComment,
   failureDirs,
   head,
-  runUrl,
   type Stream,
 } from "../../../actions/fuzz-issue/fuzz-issue.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
@@ -24,6 +23,7 @@ const env = {
   GITHUB_REPOSITORY: "o/r",
   GITHUB_RUN_ID: "42",
 } as NodeJS.ProcessEnv;
+const RUN = "Run: https://github.com/o/r/actions/runs/42";
 
 /**
  * Every body under test stamps the UTC day at call time, so the clock is
@@ -34,123 +34,88 @@ const date = "2026-03-04";
 beforeAll(() => setSystemTime(new Date(`${date}T12:00:00Z`)));
 afterAll(() => setSystemTime());
 
-describe("head", () => {
+const reportDir = (root: string, name: string, report?: string): void => {
+  mkdirSync(join(root, name), { recursive: true });
+  if (report !== undefined) writeFileSync(join(root, name, "report.md"), report);
+};
+
+describe("the cuts", () => {
+  // A head that split a line would lose a URL silently; the marker is reserved at the largest count it can name, so
+  // adding it never overflows the character cap, and a first line wider than the cap is kept whole for capChars.
   const five = ["1", "2", "3", "4", "5"].join("\n");
-  const cases: {
-    text: string;
-    lines: number;
-    chars: number;
-    expected: string;
-    reason: string;
-  }[] = [
+  test.each<{ cut: () => string; expected: string; reason: string }>([
+    { cut: () => head("a\nb\nc", 5, 100), expected: "a\nb\nc", reason: "within both limits" },
     {
-      text: "a\nb\nc",
-      lines: 5,
-      chars: 100,
-      expected: "a\nb\nc",
-      reason: "within both limits",
-    },
-    {
-      text: `${["1", "2", "3"].join("\n")}\n`,
-      lines: 3,
-      chars: 100,
+      cut: () => head("1\n2\n3\n", 3, 100),
       expected: "1\n2\n3",
       reason: "a single trailing newline is not a line",
     },
+    { cut: () => head(five, 2, 100), expected: "1\n2\n... (3 more lines)", reason: "the line cap" },
     {
-      text: five,
-      lines: 2,
-      chars: 100,
-      expected: "1\n2\n... (3 more lines)",
-      reason: "the line cap",
-    },
-    {
-      text: five,
-      lines: 10,
-      chars: 9,
+      cut: () => head(five, 10, 9),
       expected: five,
       reason: "text that exactly fills the character cap needs no marker",
     },
     {
-      text: Array(5).fill("abcdefghij").join("\n"),
-      lines: 10,
       // Two lines (21 chars) plus the reserved "\n... (5 more lines)" marker (19) fit; a third would not.
-      chars: 45,
+      cut: () => head(Array(5).fill("abcdefghij").join("\n"), 10, 45),
       expected: "abcdefghij\nabcdefghij\n... (3 more lines)",
       reason: "the character cap keeps whole lines and counts the cut ones",
     },
     {
-      text: `${"x".repeat(50)}\nshort`,
-      lines: 10,
-      chars: 20,
+      cut: () => head(`${"x".repeat(50)}\nshort`, 10, 20),
       expected: `${"x".repeat(50)}\n... (1 more lines)`,
-      reason: "a first line over the cap is kept for capChars to cut",
+      reason: "a first line over the cap is kept whole for capChars",
     },
-  ];
-
-  test.each(cases)(
-    "keeps the head within $lines lines and $chars chars ($reason)",
-    ({ text, lines, chars, expected }) => {
-      expect(head(text, lines, chars)).toBe(expected);
+    { cut: () => capChars("short", 100), expected: "short", reason: "capChars within the cap" },
+    {
+      // 50 - 16 (the marker) = 34 kept characters; the return is exactly 50.
+      cut: () => capChars("abcdefghij".repeat(100), 50),
+      expected: `${"abcdefghij".repeat(3)}abcd\n... (truncated)`,
+      reason: "capChars counts the marker inside max",
     },
-  );
-});
-
-describe("capChars", () => {
-  test("returns the text unchanged when within the cap", () => {
-    expect(capChars("short", 100)).toBe("short");
-  });
-
-  test("keeps the head and counts the marker inside `max`", () => {
-    // 50 - 16 (the marker) = 34 kept characters; the return is exactly 50.
-    expect(capChars("abcdefghij".repeat(100), 50)).toBe(
-      `${"abcdefghij".repeat(3)}abcd\n... (truncated)`,
-    );
+  ])("$reason", ({ cut, expected }) => {
+    expect(cut()).toBe(expected);
   });
 });
 
-describe("runUrl", () => {
-  test("builds the Actions run URL from the standard env vars", () => {
-    expect(runUrl(env)).toBe("https://github.com/o/r/actions/runs/42");
-  });
-
-  test("returns empty when any component is missing", () => {
-    expect(runUrl({ GITHUB_SERVER_URL: "https://github.com" } as NodeJS.ProcessEnv)).toBe("");
-  });
-});
-
-describe("failureDirs", () => {
-  test("returns empty for a missing root", () => {
-    expect(failureDirs("/nonexistent/nowhere")).toEqual([]);
-  });
-
-  test("ignores top-level files and non-contract names", () => {
-    const root = temp.dir("dirs-");
-    mkdirSync(join(root, "good_target-1.x"));
-    mkdirSync(join(root, "bad name with spaces"));
-    writeFileSync(join(root, "stray-file"), "not a dir");
-    const dirs = failureDirs(root).map((d) => d.split("/").pop());
-    expect(dirs).toEqual(["good_target-1.x"]);
-  });
+test("failureDirs: a directory named outside the docs/fuzzer.md contract is dropped without a word, as is a missing root", () => {
+  const root = temp.dir("dirs-");
+  mkdirSync(join(root, "good_target-1.x"));
+  mkdirSync(join(root, "bad name with spaces"));
+  writeFileSync(join(root, "stray-file"), "not a dir");
+  expect([
+    failureDirs(root).map((d) => d.split("/").pop()),
+    failureDirs("/nonexistent/nowhere"),
+  ]).toEqual([["good_target-1.x"], []]);
 });
 
 describe("blockTitle", () => {
+  // The title is the issue's only index into a night's failures: the fallbacks decide whether a present report reads
+  // "(no report.md)" and whether a blank first line hides the heading below it, and nothing else reads the report's head.
   test.each([
-    { report: "# fuzz: target crashed\n\nbody", reason: "an h1 first line" },
+    {
+      report: "# fuzz: target crashed\n\nbody",
+      title: "fuzz: target crashed",
+      reason: "an h1 first line",
+    },
     {
       report: "## fuzz: target crashed\n",
+      title: "fuzz: target crashed",
       reason: "every leading marker is stripped, not one",
     },
-  ])("uses the report's first heading ($reason)", ({ report }) => {
-    expect(blockTitle("/x/target", report)).toBe("fuzz: target crashed");
-  });
-
-  test("falls back to the directory name when the report is absent", () => {
-    expect(blockTitle("/x/nm_frame", "")).toBe("nm_frame (no report.md)");
-  });
-
-  test("a report with a blank first line is not called missing", () => {
-    expect(blockTitle("/x/nm_frame", "\nsome body")).toBe("nm_frame");
+    {
+      report: "",
+      title: "target (no report.md)",
+      reason: "an absent report names the directory and says so",
+    },
+    {
+      report: "\nsome body",
+      title: "target",
+      reason: "a blank first line is not a missing report",
+    },
+  ])("$reason", ({ report, title }) => {
+    expect(blockTitle("/x/target", report)).toBe(title);
   });
 });
 
@@ -159,10 +124,9 @@ describe("buildBody", () => {
 
   beforeAll(() => {
     root = temp.dir("failures-");
-    const crash = join(root, "nm_frame");
-    mkdirSync(crash, { recursive: true });
-    writeFileSync(
-      join(crash, "report.md"),
+    reportDir(
+      root,
+      "nm_frame",
       [
         "# fuzz: nm_frame crashed",
         "",
@@ -175,58 +139,98 @@ describe("buildBody", () => {
       ].join("\n"),
     );
     // A failure dir the producer could not write a report for.
-    const orphan = join(root, "mcp_jsonrpc");
-    mkdirSync(orphan, { recursive: true });
+    reportDir(root, "mcp_jsonrpc");
     // failureDirs orders by mtime; two mkdirs can tie, so pin nm_frame older.
-    utimesSync(crash, new Date(1_000_000), new Date(1_000_000));
-    utimesSync(orphan, new Date(2_000_000), new Date(2_000_000));
+    utimesSync(join(root, "nm_frame"), new Date(1_000_000), new Date(1_000_000));
+    utimesSync(join(root, "mcp_jsonrpc"), new Date(2_000_000), new Date(2_000_000));
   });
 
-  const trailers: {
-    artifactName: string;
-    reason: string;
-    trailer: string[];
-  }[] = [
-    {
-      artifactName: "fuzz-failures-1",
-      reason: "names the uploaded artifact",
-      trailer: [
-        "The full failure artifacts (crashing inputs, logs) are attached to the run as `fuzz-failures-1`.",
-      ],
-    },
-    {
-      artifactName: "",
-      reason: "no artifact, no sentence pointing at one",
-      trailer: [],
-    },
+  const blocks = [
+    "## fuzz: nm_frame crashed",
+    "",
+    "Reproduce:",
+    "",
+    "```bash",
+    "cargo +nightly fuzz run nm_frame fuzz/artifacts/nm_frame/crash-abc",
+    "```",
+    "",
+    "## mcp_jsonrpc (no report.md)",
+    "",
+  ];
+  const noReport = (stream: Stream) => [
+    "Nothing wrote a report: the failure may sit outside the " +
+      (stream === "fuzz" ? "fuzz" : "reporting") +
+      " step",
+    `(setup, cache, artifact upload), or the ${stream === "fuzz" ? "fuzzer" : "producer"} died before it could`,
+    "write one. See the run log.",
+    "",
+    RUN,
   ];
 
-  test.each(trailers)(
-    "one block per failure, oldest first, then the artifacts note and run ($reason)",
-    ({ artifactName, trailer }) => {
-      expect(buildBody(failureDirs(root), env, artifactName, "fuzz")).toBe(
-        [
-          `Nightly fuzz run on ${date} produced 2 failure report(s).`,
-          "",
-          "## fuzz: nm_frame crashed",
-          "",
-          "Reproduce:",
-          "",
-          "```bash",
-          "cargo +nightly fuzz run nm_frame fuzz/artifacts/nm_frame/crash-abc",
-          "```",
-          "",
-          "## mcp_jsonrpc (no report.md)",
-          "",
-          ...trailer,
-          "Run: https://github.com/o/r/actions/runs/42",
-        ].join("\n"),
-      );
+  // Oldest first is the reading order of a night's failures; the artifact sentence exists only when an artifact does.
+  test.each<{
+    dirs: boolean;
+    stream: Stream;
+    artifactName: string;
+    body: string[];
+    reason: string;
+  }>([
+    {
+      dirs: true,
+      stream: "fuzz",
+      artifactName: "fuzz-failures-1",
+      body: [
+        `Nightly fuzz run on ${date} produced 2 failure report(s).`,
+        "",
+        ...blocks,
+        "The full failure artifacts (crashing inputs, logs) are attached to the run as `fuzz-failures-1`.",
+        RUN,
+      ],
+      reason: "oldest first, then the artifact sentence and the run",
     },
-  );
+    {
+      dirs: true,
+      stream: "fuzz",
+      artifactName: "",
+      body: [`Nightly fuzz run on ${date} produced 2 failure report(s).`, "", ...blocks, RUN],
+      reason: "no artifact, no sentence pointing at one",
+    },
+    {
+      dirs: true,
+      stream: "generic",
+      artifactName: "trivy-findings-1",
+      body: [
+        `Nightly run on ${date} produced 2 report(s).`,
+        "",
+        ...blocks,
+        "The full reports are attached to the run as `trivy-findings-1`.",
+        RUN,
+      ],
+      reason: "the generic stream words the same body without fuzz notions",
+    },
+    {
+      dirs: false,
+      stream: "fuzz",
+      artifactName: "a",
+      body: [`Nightly fuzz run on ${date} failed with no failure report.`, "", ...noReport("fuzz")],
+      reason: "no failure dirs is a bare notice",
+    },
+    {
+      dirs: false,
+      stream: "generic",
+      artifactName: "a",
+      body: [`Nightly run on ${date} failed with no report.`, "", ...noReport("generic")],
+      reason: "the generic bare notice",
+    },
+  ])("$reason", ({ dirs, stream, artifactName, body }) => {
+    expect(buildBody(dirs ? failureDirs(root) : [], env, artifactName, stream)).toBe(
+      body.join("\n"),
+    );
+  });
 
-  // The link-rot shape: one report listing every broken URL with its
-  // referring page, 83 lines for 40 URLs, more than the 60-line summary head.
+  // The link-rot shape: one report listing every broken URL with its referring page, 83 lines for 40 URLs, more than the
+  // 60-line summary head. reusable-site.yml calls this action with no artifact, so the issue is the only record: a head
+  // cut there would drop 23 report lines silently.
   const linkRotReport = (urls: number) => [
     `# ${urls} broken external links`,
     "",
@@ -241,39 +245,28 @@ describe("buildBody", () => {
   ];
   const linkRotRoot = (urls: number) => {
     const root = temp.dir("link-rot-");
-    mkdirSync(join(root, "external-links"));
-    writeFileSync(join(root, "external-links", "report.md"), linkRotReport(urls).join("\n"));
+    reportDir(root, "external-links", linkRotReport(urls).join("\n"));
     return root;
   };
 
-  const linkRotBodies: {
-    artifactName: string;
-    reason: string;
-    body: (report: string[]) => string[];
-  }[] = [
+  test.each<{ artifactName: string; reason: string; body: (report: string[]) => string[] }>([
     {
       artifactName: "",
       reason: "no artifact: the body is the only record and carries all 40",
-      body: (report: string[]) => [
-        ...report.slice(1, -1),
-        "",
-        "Run: https://github.com/o/r/actions/runs/42",
-      ],
+      body: (report) => [...report.slice(1, -1), "", RUN],
     },
     {
       artifactName: "link-rot-1",
       reason: "an artifact: the 60-line head, the count, and the artifact sentence",
-      body: (report: string[]) => [
+      body: (report) => [
         ...report.slice(1, 62),
         "... (23 more lines)",
         "",
         "The full reports are attached to the run as `link-rot-1`.",
-        "Run: https://github.com/o/r/actions/runs/42",
+        RUN,
       ],
     },
-  ];
-
-  test.each(linkRotBodies)("a 40-URL link-rot report ($reason)", ({ artifactName, body }) => {
+  ])("a 40-URL link-rot report ($reason)", ({ artifactName, body }) => {
     const report = linkRotReport(40);
     expect(buildBody(failureDirs(linkRotRoot(40)), env, artifactName, "generic")).toBe(
       [
@@ -285,118 +278,137 @@ describe("buildBody", () => {
     );
   });
 
-  test("without an artifact a report past the body limit is cut at whole lines with an honest count and no artifact sentence", () => {
-    const urls = 1500;
-    const body = buildBody(failureDirs(linkRotRoot(urls)), env, "", "generic");
-    // The whole 60,000-char budget is used, less than one report line spare:
-    // the 8,000-char summary cap would leave a body a seventh this size.
-    expect(body.length).toBeGreaterThan(59_800);
-    expect(body.length).toBeLessThan(60_000);
-    expect(body).not.toContain("artifact");
-    expect(body).not.toContain("omitted");
-    const cut = /\n\.\.\. \((\d+) more lines\)\n\nRun: /.exec(body);
-    const kept = body.split("\n").filter((line) => line.startsWith("- https://")).length;
-    // Every URL is either in the body or counted; the parent lines are the rest of the count.
-    expect(kept).toBeGreaterThan(0);
-    expect(kept).toBeLessThan(urls);
-    const shown = body
-      .split("\n")
-      .filter((line) => line.startsWith("- ") || line.startsWith("  - ")).length;
-    expect(shown + Number(cut?.[1])).toBe(2 * urls);
+  // The honesty invariant under GitHub's 65,536-character body limit: nothing vanishes uncounted, and the filing itself
+  // never fails on size. Each row is a report shape the budget meets differently; the outcome is the same shape.
+  interface Budget {
+    lengthWithin: [number, number];
+    omittedNotice: boolean;
+    truncatedMarker: boolean;
+    moreLinesMarker: boolean;
+    artifactSentence: boolean;
+  }
+  const budgetOf = (body: string, lengthWithin: [number, number]): Budget => ({
+    lengthWithin,
+    omittedNotice: body.includes("omitted to stay under the GitHub body limit"),
+    truncatedMarker: body.includes("... (truncated)"),
+    moreLinesMarker: body.includes("more lines"),
+    artifactSentence: body.includes("artifact"),
   });
-
-  test("caps the body under the GitHub limit and says how many were omitted", () => {
-    const bigRoot = temp.dir("big-");
-    const filler = "x".repeat(5000);
-    for (let i = 0; i < 40; i++) {
-      const dir = join(bigRoot, `target-${i}`);
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "report.md"), `# target-${i} crashed\n\n${filler}\n${filler}\n`);
-    }
-    const body = buildBody(failureDirs(bigRoot), env, "a", "fuzz");
-    expect(body.length).toBeLessThan(65_536);
-    expect(body).toContain("omitted to stay under the GitHub body limit");
-  });
-
-  test("without an artifact many reports keep their content whole and the rest are counted as omitted", () => {
-    // 100 reports of ~700 chars: a bare share of the budget (~600 chars each)
-    // would cut every one, so the share floors at the summary cap and the
-    // budget runs out on whole blocks instead.
-    const manyRoot = temp.dir("many-");
-    const line = "x".repeat(68);
-    for (let i = 0; i < 100; i++) {
-      const dir = join(manyRoot, `r${String(i).padStart(3, "0")}`);
-      mkdirSync(dir);
-      writeFileSync(
-        join(dir, "report.md"),
-        `# report ${i}\n\n${Array(10).fill(line).join("\n")}\n`,
-      );
-    }
-    const body = buildBody(failureDirs(manyRoot), env, "", "generic");
-    const shown = (body.match(/^## report \d+$/gm) ?? []).length;
-    expect(body.length).toBeGreaterThan(59_000);
-    expect(body.length).toBeLessThan(60_000);
-    expect(body).not.toContain("more lines");
-    expect(body).not.toContain("truncated");
-    expect(shown).toBeGreaterThan(0);
-    expect(shown).toBeLessThan(100);
-    expect(body.split("\n").filter((candidate) => candidate === line)).toHaveLength(shown * 10);
-    expect(body).toEndWith(
-      `\n${100 - shown} more report(s) omitted to stay under the GitHub body limit.\nRun: https://github.com/o/r/actions/runs/42`,
-    );
-  });
-
-  test.each(["a", ""])(
-    "a single giant single-line report still produces a body under the limit (artifact %j)",
-    (artifactName) => {
-      // One report that is a single 70,000-char line, which line truncation
-      // cannot shorten. The character cap must keep the whole body under
-      // GitHub's 65,536 limit so the filing itself does not fail.
-      const giantRoot = temp.dir("giant-");
-      const dir = join(giantRoot, "handshake");
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "report.md"), `# handshake crashed\n${"x".repeat(70_000)}`);
-      const body = buildBody(failureDirs(giantRoot), env, artifactName, "fuzz");
-      expect(body.length).toBeLessThan(65_536);
-      expect(body).toContain("## handshake crashed");
-      expect(body).toContain("... (truncated)");
+  const fill = (
+    count: number,
+    report: (i: number) => string,
+    name = (i: number) => `target-${i}`,
+  ) => {
+    const root = temp.dir("budget-");
+    for (let i = 0; i < count; i++) reportDir(root, name(i), report(i));
+    return root;
+  };
+  const line = "x".repeat(68);
+  interface BudgetRow {
+    reason: string;
+    root: () => string;
+    artifactName: string;
+    stream: Stream;
+    budget: Budget;
+    also?: (body: string) => void;
+  }
+  test.each<BudgetRow>([
+    {
+      reason: "one report past the limit, no artifact: cut at whole lines with an honest count",
+      root: () => linkRotRoot(1500),
+      artifactName: "",
+      stream: "generic",
+      // The whole 60,000-char budget is used, less than one report line spare: the 8,000-char summary cap would leave a
+      // body a seventh this size.
+      budget: {
+        lengthWithin: [59_800, 60_000],
+        omittedNotice: false,
+        truncatedMarker: false,
+        moreLinesMarker: true,
+        artifactSentence: false,
+      },
+      also: (body) => {
+        const cut = /\n\.\.\. \((\d+) more lines\)\n\nRun: /.exec(body);
+        const kept = body.split("\n").filter((l) => l.startsWith("- https://")).length;
+        const shown = body
+          .split("\n")
+          .filter((l) => l.startsWith("- ") || l.startsWith("  - ")).length;
+        // Every URL is either in the body or counted; the parent lines are the rest of the count.
+        expect([kept > 0, kept < 1500, shown + Number(cut?.[1])]).toEqual([true, true, 3000]);
+      },
     },
-  );
-
-  test("files a bare notice when there are no failure dirs", () => {
-    expect(buildBody([], env, "a", "fuzz")).toBe(
-      [
-        `Nightly fuzz run on ${date} failed with no failure report.`,
-        "",
-        "Nothing wrote a report: the failure may sit outside the fuzz step",
-        "(setup, cache, artifact upload), or the fuzzer died before it could",
-        "write one. See the run log.",
-        "",
-        "Run: https://github.com/o/r/actions/runs/42",
-      ].join("\n"),
+    {
+      reason:
+        "40 large reports with an artifact: the body stays under the limit and says how many were omitted",
+      root: () =>
+        fill(40, (i) => `# target-${i} crashed\n\n${"x".repeat(5000)}\n${"x".repeat(5000)}\n`),
+      artifactName: "a",
+      stream: "fuzz",
+      budget: {
+        lengthWithin: [0, 65_535],
+        omittedNotice: true,
+        truncatedMarker: false,
+        moreLinesMarker: true,
+        artifactSentence: true,
+      },
+    },
+    {
+      // 100 reports of ~700 chars: a bare share of the budget (~600 chars each) would cut every one, so the share floors
+      // at the summary cap and the budget runs out on whole blocks instead.
+      reason:
+        "many small reports, no artifact: whole blocks until the budget ends, the rest counted",
+      root: () =>
+        fill(
+          100,
+          (i) => `# report ${i}\n\n${Array(10).fill(line).join("\n")}\n`,
+          (i) => `r${String(i).padStart(3, "0")}`,
+        ),
+      artifactName: "",
+      stream: "generic",
+      budget: {
+        lengthWithin: [59_000, 60_000],
+        omittedNotice: true,
+        truncatedMarker: false,
+        moreLinesMarker: false,
+        artifactSentence: false,
+      },
+      also: (body) => {
+        const shown = (body.match(/^## report \d+$/gm) ?? []).length;
+        expect([shown > 0, shown < 100]).toEqual([true, true]);
+        expect(body.split("\n").filter((candidate) => candidate === line)).toHaveLength(shown * 10);
+        expect(body).toEndWith(
+          `\n${100 - shown} more report(s) omitted to stay under the GitHub body limit.\n${RUN}`,
+        );
+      },
+    },
+    ...(["a", ""] as const).map(
+      (artifactName): BudgetRow => ({
+        reason: `a single 70,000-char line, which line cuts cannot shorten (artifact ${JSON.stringify(artifactName)})`,
+        root: () =>
+          fill(
+            1,
+            () => `# handshake crashed\n${"x".repeat(70_000)}`,
+            () => "handshake",
+          ),
+        artifactName,
+        stream: "fuzz",
+        budget: {
+          lengthWithin: [0, 65_535],
+          omittedNotice: false,
+          truncatedMarker: true,
+          moreLinesMarker: false,
+          artifactSentence: artifactName !== "",
+        },
+        also: (body) => expect(body).toContain("## handshake crashed"),
+      }),
+    ),
+  ])("$reason", ({ root, artifactName, stream, budget, also }) => {
+    const body = buildBody(failureDirs(root()), env, artifactName, stream);
+    const [min, max] = budget.lengthWithin;
+    expect(budgetOf(body, [Math.min(min, body.length), Math.max(max, body.length)])).toEqual(
+      budget,
     );
-  });
-
-  test("the generic stream words the same body without fuzz notions", () => {
-    const body = buildBody(failureDirs(root), env, "trivy-findings-1", "generic");
-    expect(body).toStartWith(`Nightly run on ${date} produced 2 report(s).\n`);
-    expect(body).toContain("## fuzz: nm_frame crashed");
-    expect(body).toContain(
-      "\nThe full reports are attached to the run as `trivy-findings-1`.\nRun: ",
-    );
-    expect(body).not.toContain("crashing inputs");
-    expect(body).not.toContain("failure report");
-    expect(buildBody([], env, "a", "generic")).toBe(
-      [
-        `Nightly run on ${date} failed with no report.`,
-        "",
-        "Nothing wrote a report: the failure may sit outside the reporting step",
-        "(setup, cache, artifact upload), or the producer died before it could",
-        "write one. See the run log.",
-        "",
-        "Run: https://github.com/o/r/actions/runs/42",
-      ].join("\n"),
-    );
+    also?.(body);
   });
 });
 
@@ -412,7 +424,7 @@ describe("buildGenericBody", () => {
         "step(s). Repeat failures update this issue until a green night closes it.",
         "",
         "Commit: abc1234def",
-        "Run: https://github.com/o/r/actions/runs/42",
+        RUN,
       ],
     },
     {
@@ -431,12 +443,13 @@ describe("buildGenericBody", () => {
 });
 
 describe("closeComment", () => {
-  test.each([
+  test.each<{ reason: string; stream: Stream; commentEnv: NodeJS.ProcessEnv; comment: string[] }>([
     {
       reason: "the fuzz stream hedges on unpinned regression seeds",
-      stream: "fuzz" as Stream,
+      stream: "fuzz",
+      commentEnv: env,
       comment: [
-        `Nightly fuzz passed on ${date}. Run: https://github.com/o/r/actions/runs/42`,
+        `Nightly fuzz passed on ${date}. ${RUN}`,
         "",
         "Closing. If the crashing inputs reported here were pinned as regression",
         "seeds, this pass replayed them; for anything not pinned, a green night is",
@@ -445,21 +458,27 @@ describe("closeComment", () => {
     },
     {
       reason: "the generic stream names the run and carries no fuzz notions",
-      stream: "generic" as Stream,
+      stream: "generic",
+      commentEnv: env,
       comment: [
-        `Nightly run passed on ${date}. Run: https://github.com/o/r/actions/runs/42`,
+        `Nightly run passed on ${date}. ${RUN}`,
         "",
         "Closing; the next failing night opens a fresh issue.",
       ],
     },
-  ])("$reason", ({ stream, comment }) => {
-    expect(closeComment(env, stream)).toBe(comment.join("\n"));
-  });
-
-  test("without a run URL the first line carries no link", () => {
-    expect(closeComment({} as NodeJS.ProcessEnv, "generic")).toStartWith(
-      `Nightly run passed on ${date}.\n`,
-    );
+    {
+      // runUrl needs all three of server, repository and run id; guarding on fewer prints "undefined" into the link.
+      reason: "a partial env (the server alone) is no run URL: the first line carries no link",
+      stream: "generic",
+      commentEnv: { GITHUB_SERVER_URL: "https://github.com" } as NodeJS.ProcessEnv,
+      comment: [
+        `Nightly run passed on ${date}.`,
+        "",
+        "Closing; the next failing night opens a fresh issue.",
+      ],
+    },
+  ])("$reason", ({ stream, commentEnv, comment }) => {
+    expect(closeComment(commentEnv, stream)).toBe(comment.join("\n"));
   });
 });
 
@@ -500,54 +519,69 @@ describe("the script", () => {
     LABEL_DESCRIPTION: "Automated nightly fuzz failure",
   };
 
-  test("report mode with an artifacts dir writes the failure-report body under RUNNER_TEMP and outputs its path", () => {
-    const failures = temp.dir("fuzz-issue-script-failures-");
-    mkdirSync(join(failures, "nm_frame"));
-    writeFileSync(
-      join(failures, "nm_frame", "report.md"),
+  const failures = () => {
+    const dir = temp.dir("fuzz-issue-script-failures-");
+    reportDir(
+      dir,
+      "nm_frame",
       "# fuzz: nm_frame crashed\n\n```bash\ncargo fuzz run nm_frame crash-abc\n```\n",
     );
-    const result = run({
-      ...REPORT_TUPLE,
-      STREAM: "fuzz",
-      ARTIFACTS_DIR: failures,
-      ARTIFACT_NAME: "fuzz-failures-1",
-    });
-    expect([result.exitCode, result.stderr]).toEqual([0, ""]);
+    return dir;
+  };
+
+  // The `file` output is what action.yml's issue and close steps read; the body lands under RUNNER_TEMP.
+  const dated = (text: string | undefined) => text?.replace(new RegExp(DAY), date);
+  test.each<{ reason: string; vars: () => Record<string, string>; body: string[] }>([
+    {
+      reason: "report mode with an artifacts dir writes the failure-report body",
+      vars: () => ({
+        ...REPORT_TUPLE,
+        STREAM: "fuzz",
+        ARTIFACTS_DIR: failures(),
+        ARTIFACT_NAME: "fuzz-failures-1",
+      }),
+      body: [
+        `Nightly fuzz run on ${date} produced 1 failure report(s).`,
+        "",
+        "## fuzz: nm_frame crashed",
+        "",
+        "```bash",
+        "cargo fuzz run nm_frame crash-abc",
+        "```",
+        "",
+        "The full failure artifacts (crashing inputs, logs) are attached to the run as `fuzz-failures-1`.",
+        RUN,
+      ],
+    },
+    {
+      reason: "report mode without an artifacts dir writes the generic body",
+      vars: () => ({ ...REPORT_TUPLE, STREAM: "generic", GITHUB_WORKFLOW: "Nightly" }),
+      body: [
+        `\`Nightly\` failed on ${date}.`,
+        "",
+        "This stream writes no failure reports; the run log names the failing",
+        "step(s). Repeat failures update this issue until a green night closes it.",
+        "",
+        RUN,
+      ],
+    },
+    {
+      reason: "resolve mode writes the stream's close comment",
+      vars: () => ({ MODE: "resolve", STREAM: "generic" }),
+      body: [
+        `Nightly run passed on ${date}. ${RUN}`,
+        "",
+        "Closing; the next failing night opens a fresh issue.",
+      ],
+    },
+  ])("$reason", ({ vars, body }) => {
+    const result = run(vars());
+    expect([result.exitCode, result.stderr, dated(result.text)]).toEqual([0, "", body.join("\n")]);
     expect(result.file).toStartWith(join(result.root, "fuzz-issue-"));
-    expect(result.text).toMatch(
-      new RegExp(`^Nightly fuzz run on ${DAY} produced 1 failure report\\(s\\)\\.\n`),
-    );
-    expect(result.text).toContain(
-      "## fuzz: nm_frame crashed\n\n```bash\ncargo fuzz run nm_frame crash-abc\n```",
-    );
-    expect(result.text).toEndWith(
-      "\nThe full failure artifacts (crashing inputs, logs) are attached to the run as `fuzz-failures-1`.\nRun: https://github.com/o/r/actions/runs/42",
-    );
   });
 
-  test("report mode without an artifacts dir writes the generic body", () => {
-    const result = run({
-      ...REPORT_TUPLE,
-      STREAM: "generic",
-      GITHUB_WORKFLOW: "Nightly",
-    });
-    expect(result.exitCode).toBe(0);
-    expect(result.text).toMatch(new RegExp(`^\`Nightly\` failed on ${DAY}\\.\n`));
-    expect(result.text).toEndWith("\n\nRun: https://github.com/o/r/actions/runs/42");
-  });
-
-  test("resolve mode writes the stream's close comment", () => {
-    const result = run({ MODE: "resolve", STREAM: "generic" });
-    expect(result.exitCode).toBe(0);
-    expect(result.text).toMatch(
-      new RegExp(
-        `^Nightly run passed on ${DAY}\\. Run: https://github.com/o/r/actions/runs/42\n\nClosing; the next failing night opens a fresh issue\\.$`,
-      ),
-    );
-  });
-
-  // A composite's `required: true` only documents, so an omitted input reaches the script as an empty string.
+  // A composite's `required: true` only documents, so an omitted input reaches the script as an empty string; without
+  // the check resolve mode lists every open issue under an empty label and closes them all.
   test.each([
     { vars: {}, error: "the mode input is required" },
     { vars: { MODE: "" }, error: "the mode input is required" },

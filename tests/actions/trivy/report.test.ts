@@ -1,5 +1,10 @@
+// The Trivy JSON field names are external, and a matched secret in an issue body is the one silent security failure
+// here. The report shape is a contract with fuzz-issue: only the first 60 lines survive into the issue when an artifact
+// exists (docs/fuzzer.md), so a replay block below the rows would vanish, and a directory named outside fuzz-issue's
+// DIR_NAME is dropped without a word.
+
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   collectFindings,
@@ -8,9 +13,6 @@ import {
   MAX_ROWS,
   RESULTS_NAME,
   reportBody,
-  severitySummary,
-  shellWord,
-  writeReports,
 } from "../../../actions/trivy/report";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { tempDirs } from "../../shared/temp_dir";
@@ -113,17 +115,16 @@ describe("collectFindings", () => {
       { severity: "CRITICAL", line: "aws-access-key-id line 3: AWS Access Key ID" },
     ]);
     expect(JSON.stringify(reports)).not.toContain("AKIA");
-  });
-
-  test("no Results, or an empty document, is no findings", () => {
-    expect(collectFindings({})).toEqual([]);
-    expect(collectFindings(null)).toEqual([]);
-    expect(collectFindings({ Results: [{ Target: "bun.lock" }] })).toEqual([]);
+    expect([{}, null, { Results: [{ Target: "bun.lock" }] }].map(collectFindings)).toEqual([
+      [],
+      [],
+      [],
+    ]);
   });
 });
 
 describe("reportBody", () => {
-  test("a contract-v1 report: the heading names the target, the replay block comes first, then one row per finding", () => {
+  test("a contract-v1 report: the heading names the target, the replay block comes first, then one row per finding; a spaced target is one shell word", () => {
     const body = reportBody(collectFindings(RESULTS)[1]);
     expect(body.split("\n")).toEqual([
       "# Dockerfile: 2 findings",
@@ -138,6 +139,12 @@ describe("reportBody", () => {
       "- LOW DS-0026 line 1: No HEALTHCHECK defined. Add HEALTHCHECK instruction in your Dockerfile https://avd.aquasec.com/misconfig/ds-0026",
       "",
     ]);
+    // A wrong quoting is a replay command that fails on the operator's machine.
+    expect(
+      reportBody({ target: "it's/my app/bun.lock", findings: [{ severity: "LOW", line: "x" }] }),
+    ).toContain(
+      "\ntrivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml 'it'\\''s/my app/bun.lock'\n",
+    );
   });
 
   test("rows past the cap fold into one line so the issue keeps the whole report", () => {
@@ -152,16 +159,10 @@ describe("reportBody", () => {
     // The fuzz-issue action keeps the heading plus 60 lines.
     expect(lines.length).toBeLessThanOrEqual(62);
   });
-
-  test("severitySummary lists the non-zero levels, worst first", () => {
-    expect(severitySummary(collectFindings(RESULTS).flatMap((r) => r.findings))).toBe(
-      "2 CRITICAL, 1 HIGH, 1 MEDIUM, 1 LOW, 1 UNKNOWN",
-    );
-  });
 });
 
 describe("directoryName", () => {
-  test("a target path becomes a contract-conforming name, unique within the run", () => {
+  test("a target path becomes a contract-conforming name, unique within the run; past the name limit its head plus a hash of the whole", () => {
     const taken = new Set<string>();
     const names = [
       "actions/pages-site/bun.lock",
@@ -178,9 +179,6 @@ describe("directoryName", () => {
       "target",
     ]);
     for (const name of names) expect(name).toMatch(/^[A-Za-z0-9._-]+$/);
-  });
-
-  test("a flattened path past the filesystem's name limit keeps its head plus a hash of the whole", () => {
     const deep = `${"a".repeat(100)}/${"b".repeat(100)}/${"c".repeat(100)}/package-lock.json`;
     const name = directoryName(deep, new Set());
     expect(name).toHaveLength(MAX_NAME);
@@ -189,44 +187,8 @@ describe("directoryName", () => {
   });
 });
 
-describe("writeReports", () => {
-  test("a target named like the full-results file gets the allocator's suffix instead of colliding", () => {
-    const dir = join(temp.dir("trivy-write-"), "report");
-    const results = join(temp.dir("trivy-results-"), "scan.json");
-    writeFileSync(results, "{}");
-    const reports = collectFindings({
-      Results: [
-        {
-          Target: RESULTS_NAME,
-          Class: "secret",
-          Secrets: [
-            { RuleID: "github-pat", Severity: "CRITICAL", Title: "GitHub PAT", StartLine: 1 },
-          ],
-        },
-      ],
-    });
-    writeReports(reports, dir, results);
-    expect(readdirSync(dir).sort()).toEqual([RESULTS_NAME, `${RESULTS_NAME}-2`]);
-    expect(readFileSync(join(dir, RESULTS_NAME), "utf-8")).toBe("{}");
-    expect(existsSync(join(dir, `${RESULTS_NAME}-2`, "report.md"))).toBe(true);
-  });
-});
-
-describe("shellWord", () => {
-  test("a plain path stays bare; spaces and quotes get single-quoted so the replay is one argument", () => {
-    expect(shellWord("actions/pages-site/bun.lock")).toBe("actions/pages-site/bun.lock");
-    expect(shellWord("examples/my app/package-lock.json")).toBe(
-      "'examples/my app/package-lock.json'",
-    );
-    expect(shellWord("it's/Dockerfile")).toBe("'it'\\''s/Dockerfile'");
-    expect(
-      reportBody({ target: "my app/bun.lock", findings: [{ severity: "LOW", line: "x" }] }),
-    ).toContain(
-      "\ntrivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml 'my app/bun.lock'\n",
-    );
-  });
-});
-
+// The executed entry point: the output keys are action.yml's outputs map; `found=true` is the literal fleet-nightly's
+// upload and file-issue gates read, `found=false` the one its close-issue gate reads.
 describe("the report step", () => {
   const run = (results: unknown) => {
     const dir = temp.dir("trivy-report-");
@@ -248,35 +210,85 @@ describe("the report step", () => {
     return { ...result, reportDir, output: readFileSync(output, "utf-8") };
   };
 
-  test("findings: one report.md per target, the counts logged, findings and report-dir published", () => {
-    const result = run(RESULTS);
-    expect(result.exitCode).toBe(0);
-    expect(readdirSync(result.reportDir).sort()).toEqual([
-      "Dockerfile",
-      "actions_pages-site_bun.lock",
-      "tests_fixtures_keys.env",
-      "trivy.json",
+  test.each<{
+    reason: string;
+    results: unknown;
+    listing: string[];
+    outputs: string;
+    says: string[];
+  }>([
+    {
+      reason:
+        "findings: one report.md per target, the counts logged, findings and report-dir published",
+      results: RESULTS,
+      listing: [
+        "Dockerfile",
+        "actions_pages-site_bun.lock",
+        "tests_fixtures_keys.env",
+        "trivy.json",
+      ],
+      outputs: "findings=6\nfound=true\n",
+      says: [
+        "trivy found 6 finding(s) in 3 target(s): 2 CRITICAL, 1 HIGH, 1 MEDIUM, 1 LOW, 1 UNKNOWN",
+        "  Dockerfile: 1 HIGH, 1 LOW",
+      ],
+    },
+    {
+      reason: "a clean scan: an empty report directory and findings=0",
+      results: { Results: [{ Target: "bun.lock", Class: "lang-pkgs", Type: "bun" }] },
+      listing: [],
+      outputs: "findings=0\nfound=false\n",
+      says: ["trivy found nothing"],
+    },
+    {
+      reason:
+        "a target named like the full-results file gets the allocator's suffix instead of colliding",
+      results: {
+        Results: [
+          {
+            Target: RESULTS_NAME,
+            Class: "secret",
+            Secrets: [
+              { RuleID: "github-pat", Severity: "CRITICAL", Title: "GitHub PAT", StartLine: 1 },
+            ],
+          },
+        ],
+      },
+      listing: [RESULTS_NAME, `${RESULTS_NAME}-2`],
+      outputs: "findings=1\nfound=true\n",
+      says: ["trivy found 1 finding(s) in 1 target(s): 1 CRITICAL"],
+    },
+  ])("$reason", ({ results, listing, outputs, says }) => {
+    const result = run(results);
+    expect([result.exitCode, readdirSync(result.reportDir).sort(), result.output]).toEqual([
+      0,
+      listing,
+      `${outputs}report-dir=${result.reportDir}\n`,
     ]);
-    // The full results ride the artifact: rows past the report cap are not lost.
-    expect(JSON.parse(readFileSync(join(result.reportDir, "trivy.json"), "utf-8"))).toEqual(
-      RESULTS,
-    );
-    expect(readFileSync(join(result.reportDir, "Dockerfile", "report.md"), "utf-8")).toStartWith(
-      "# Dockerfile: 2 findings\n",
-    );
-    expect(result.output).toBe(`findings=6\nfound=true\nreport-dir=${result.reportDir}\n`);
-    expect(result.stdout).toContain(
-      "trivy found 6 finding(s) in 3 target(s): 2 CRITICAL, 1 HIGH, 1 MEDIUM, 1 LOW, 1 UNKNOWN",
-    );
-    expect(result.stdout).toContain("  Dockerfile: 1 HIGH, 1 LOW");
-  });
-
-  test("a clean scan: an empty report directory and findings=0", () => {
-    const result = run({ Results: [{ Target: "bun.lock", Class: "lang-pkgs", Type: "bun" }] });
-    expect(result.exitCode).toBe(0);
-    expect(existsSync(result.reportDir)).toBe(true);
-    expect(readdirSync(result.reportDir)).toEqual([]);
-    expect(result.output).toBe(`findings=0\nfound=false\nreport-dir=${result.reportDir}\n`);
-    expect(result.stdout).toContain("trivy found nothing");
+    expect(says.filter((line) => result.stdout.includes(line))).toEqual(says);
+    if (listing.length > 0) {
+      // The full results ride the artifact: rows past the report cap are not lost.
+      expect(JSON.parse(readFileSync(join(result.reportDir, RESULTS_NAME), "utf-8"))).toEqual(
+        results,
+      );
+      // Each report.md is the body the issue shows; an empty or wrong body ships a listing with no findings text.
+      const taken = new Set([RESULTS_NAME]);
+      const bodies = Object.fromEntries(
+        collectFindings(results).map((report) => [
+          directoryName(report.target, taken),
+          reportBody(report),
+        ]),
+      );
+      expect(
+        Object.fromEntries(
+          listing
+            .filter((entry) => entry !== RESULTS_NAME)
+            .map((name) => [
+              name,
+              readFileSync(join(result.reportDir, name, "report.md"), "utf-8"),
+            ]),
+        ),
+      ).toEqual(bodies);
+    }
   });
 });

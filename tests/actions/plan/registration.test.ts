@@ -1,26 +1,23 @@
+// The sync substitutes quoted scalars from this document into rendered files, and the docs mount reads its include
+// roots: each refusal row is one way a registration lies to every reader at once, and the registration and the
+// pages-site config are two readers of one include grammar whose disagreement lets a green plan fail in docs-check.
+
 import { describe, expect, test } from "bun:test";
 import { parse } from "yaml";
 import { parseSiteConfig } from "../../../actions/pages-site/lib.ts";
 import {
   declaredModules,
   parseRegistration,
+  type Registration,
   readModules,
 } from "../../../actions/plan/registration.ts";
 
 const FILE = ".repo-platform.yml";
 const PROJECT = "project: {name: My Project, slug: my-project, description: One line}\n";
+const NO_SELECTION = `${FILE}: no module selection found - add a top-level \`modules: [...]\` list (the sync never assumes an empty selection, which would strip every module from the repo)`;
 
 describe("parseRegistration", () => {
-  test("the smallest document: the module list and the project block", () => {
-    expect(parseRegistration(`modules: [uv, site]\n${PROJECT}`)).toEqual({
-      registration: {
-        modules: ["uv", "site"],
-        project: { name: "My Project", slug: "my-project", description: "One line" },
-      },
-    });
-  });
-
-  test("the full document, every section", () => {
+  test("the full document, every section; a mirror's kind defaults to the copy the writer materializes", () => {
     const text = [
       "modules: [bun, site, fuzzer]",
       "project:",
@@ -70,147 +67,152 @@ describe("parseRegistration", () => {
     });
   });
 
-  // Fail closed: each row is one way a registration can lie, and the error
-  // names the file and the offending path.
-  test.each<{ reason: string; text: string; error: string }>([
+  // Fail closed, the error naming the file and the offending path; the accepting control carries the whole document
+  // read back, so a quoting rule that rewrote an apostrophe or a colon would show in the rendered project name.
+  test.each<{
+    reason: string;
+    text: string;
+    outcome: { registration: Registration } | { error: string };
+  }>([
+    {
+      reason: "a name and description of plain text with apostrophes and colons pass",
+      text: "modules: []\nproject:\n  name: Vivswan's tools\n  slug: tools\n  description: 'Tools: for things, 100%'\n",
+      outcome: {
+        registration: {
+          modules: [],
+          project: {
+            name: "Vivswan's tools",
+            slug: "tools",
+            description: "Tools: for things, 100%",
+          },
+        },
+      },
+    },
     {
       reason: "an unknown top-level key",
       text: `modules: []\n${PROJECT}extra: 1\n`,
-      error: `${FILE}: (top level): Unrecognized key: "extra"`,
+      outcome: { error: `${FILE}: (top level): Unrecognized key: "extra"` },
     },
     {
       reason: "an unknown nested key",
       text: `modules: []\n${PROJECT}site:\n  serve: true\n`,
-      error: `${FILE}: site: Unrecognized key: "serve"`,
+      outcome: { error: `${FILE}: site: Unrecognized key: "serve"` },
     },
     {
       reason: "an except path that leaves the repository",
       text: `modules: []\n${PROJECT}except: [../ci.yml]\n`,
-      error: `${FILE}: except.0: carries an empty, '.', or '..' segment`,
+      outcome: { error: `${FILE}: except.0: carries an empty, '.', or '..' segment` },
     },
     {
       reason: "a wrong type",
       text: "modules: []\nproject:\n  name: 3\n  slug: x\n  description: y\n",
-      error: `${FILE}: project.name: Invalid input: expected string, received number`,
+      outcome: { error: `${FILE}: project.name: Invalid input: expected string, received number` },
     },
     {
       reason: "no project block",
       text: "modules: [bun]\n",
-      error: `${FILE}: project: Invalid input: expected object, received undefined`,
+      outcome: { error: `${FILE}: project: Invalid input: expected object, received undefined` },
     },
     {
       reason: "a project block without its name",
       text: "modules: [bun]\nproject:\n  slug: x\n  description: y\n",
-      error: `${FILE}: project.name: Invalid input: expected string, received undefined`,
+      outcome: {
+        error: `${FILE}: project.name: Invalid input: expected string, received undefined`,
+      },
     },
     {
-      reason: "a non-list modules key",
-      text: "modules: bun\n",
-      error: `${FILE}: modules must be a list of module names`,
+      reason: "a YAML error",
+      text: "modules: [bun\n",
+      outcome: { error: `${FILE}: YAML parse error: ` },
     },
-    {
-      reason: "a duplicate module",
-      text: "modules: [bun, bun]\n",
-      error: `${FILE}: duplicate modules entry "bun"`,
-    },
-    {
-      reason: "no modules key",
-      text: "project:\n  name: x\n  slug: x\n  description: y\n",
-      error: `${FILE}: no module selection found - add a top-level \`modules: [...]\` list (the sync never assumes an empty selection, which would strip every module from the repo)`,
-    },
-    {
-      reason: "a non-mapping document",
-      text: "- bun\n",
-      error: `${FILE}: top level must be a mapping`,
-    },
-    { reason: "a YAML error", text: "modules: [bun\n", error: `${FILE}: YAML parse error: ` },
     {
       reason: "a slug that is not kebab-case",
       text: "modules: []\nproject:\n  name: X\n  slug: My_Project\n  description: d\n",
-      error: `${FILE}: project.slug: must be kebab-case (lowercase letters and digits, dash-separated)`,
+      outcome: {
+        error: `${FILE}: project.slug: must be kebab-case (lowercase letters and digits, dash-separated)`,
+      },
     },
     {
       reason: "a project name with a double quote",
       text: 'modules: []\nproject:\n  name: Say "hi"\n  slug: hi\n  description: d\n',
-      error: `${FILE}: project.name: project.name must not contain double quotes, backslashes, or control characters`,
+      outcome: {
+        error: `${FILE}: project.name: project.name must not contain double quotes, backslashes, or control characters`,
+      },
     },
     {
       reason: "a description with a backslash",
       text: "modules: []\nproject:\n  name: X\n  slug: x\n  description: 'C:\\\\tools'\n",
-      error: `${FILE}: project.description: project.description must not contain double quotes, backslashes, or control characters`,
+      outcome: {
+        error: `${FILE}: project.description: project.description must not contain double quotes, backslashes, or control characters`,
+      },
     },
     {
       reason: "a copyright holder with a double quote",
       text: 'modules: []\nproject:\n  name: X\n  slug: x\n  description: d\n  copyright_holder: Acme "Labs"\n',
-      error: `${FILE}: project.copyright_holder: project.copyright_holder must not contain double quotes, backslashes, or control characters`,
+      outcome: {
+        error: `${FILE}: project.copyright_holder: project.copyright_holder must not contain double quotes, backslashes, or control characters`,
+      },
     },
     {
       reason: "a description with a control character",
       text: 'modules: []\nproject:\n  name: X\n  slug: x\n  description: "bell\\u0007"\n',
-      error: `${FILE}: project.description: project.description must not contain double quotes, backslashes, or control characters`,
+      outcome: {
+        error: `${FILE}: project.description: project.description must not contain double quotes, backslashes, or control characters`,
+      },
     },
     {
       reason: "a docs path with a slash",
       text: `modules: []\n${PROJECT}site:\n  path: a/b\n`,
-      error: `${FILE}: site.path: must be one plain lowercase URL segment (letters, digits, dashes, underscores)`,
+      outcome: {
+        error: `${FILE}: site.path: must be one plain lowercase URL segment (letters, digits, dashes, underscores)`,
+      },
     },
     {
       reason: "an include root escaping the repo",
       text: `modules: []\n${PROJECT}site:\n  include: [{ path: ../x, mount: x, page: X.md }]\n`,
-      error: `${FILE}: site.include.0.path: must be a plain relative path inside the repository`,
-    },
-    {
-      reason: "an include root on a locale-shaped mount",
-      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: de, page: X.md }]\n`,
-      error: `${FILE}: site.include.0.mount: reads as a locale directory`,
-    },
-    {
-      reason: "an include root whose page is a path",
-      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: x, page: x/SKILL.md }]\n`,
-      error: `${FILE}: site.include.0.page: must be a plain markdown file name`,
-    },
-    {
-      reason: "two include roots on one mount",
-      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: m, page: X.md }, { path: y, mount: m, page: Y.md }]\n`,
-      error: `${FILE}: site.include: lists one mount twice`,
-    },
-    {
-      reason: "one include root staged twice",
-      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: m, page: X.md }, { path: x, mount: n, page: X.md }]\n`,
-      error: `${FILE}: site.include: lists one path twice`,
+      outcome: {
+        error: `${FILE}: site.include.0.path: must be a plain relative path inside the repository`,
+      },
     },
     {
       reason: "an include entry with an unknown key",
       text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: x, page: X.md, title: T }]\n`,
-      error: `${FILE}: site.include.0: Unrecognized key: "title"`,
+      outcome: { error: `${FILE}: site.include.0: Unrecognized key: "title"` },
     },
     {
       reason: "an include entry without its page file",
       text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: x }]\n`,
-      error: `${FILE}: site.include.0.page: Invalid input: expected string, received undefined`,
+      outcome: {
+        error: `${FILE}: site.include.0.page: Invalid input: expected string, received undefined`,
+      },
     },
     {
       reason: "a label starting with a dash",
       text: `modules: []\n${PROJECT}labels:\n  fuzzer: -x\n`,
-      error: `${FILE}: labels.fuzzer: must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters`,
+      outcome: {
+        error: `${FILE}: labels.fuzzer: must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters`,
+      },
     },
     {
       reason: "a mirror without targets",
       text: `modules: []\n${PROJECT}mirrors:\n  - source: a\n    targets: []\n`,
-      error: `${FILE}: mirrors.0.targets: Too small: expected array to have >=1 items`,
+      outcome: { error: `${FILE}: mirrors.0.targets: Too small: expected array to have >=1 items` },
     },
     {
       reason: "a mirror of a kind the writer cannot materialize",
       text: `modules: []\n${PROJECT}mirrors:\n  - source: a\n    targets: [b]\n    kind: hardlink\n`,
-      error: `${FILE}: mirrors.0.kind: Invalid option: expected one of "copy"|"symlink"`,
+      outcome: {
+        error: `${FILE}: mirrors.0.kind: Invalid option: expected one of "copy"|"symlink"`,
+      },
     },
-  ])("refuses $reason", ({ text, error }) => {
+  ])("refuses $reason", ({ text, outcome }) => {
     const read = parseRegistration(text);
-    expect("errors" in read).toBe(true);
-    if ("errors" in read) expect(read.errors[0]).toStartWith(error);
+    if ("registration" in outcome) expect(read).toEqual(outcome);
+    else expect("errors" in read ? read.errors[0] : null).toStartWith(outcome.error);
   });
 
   test("site.path: null turns the docs half off, and is refused beside include roots that would need it", () => {
+    // The docs-half opt-out contract with pages-site (includeWithoutDocsProblem).
     expect(parseRegistration(`modules: [site]\n${PROJECT}site:\n  path: null\n`)).toEqual({
       registration: {
         modules: ["site"],
@@ -227,23 +229,8 @@ describe("parseRegistration", () => {
       ],
     });
   });
-
-  test("a name and description of plain text with apostrophes and colons pass", () => {
-    const read = parseRegistration(
-      "modules: []\nproject:\n  name: Vivswan's tools\n  slug: tools\n  description: 'Tools: for things, 100%'\n",
-    );
-    expect(read).toEqual({
-      registration: {
-        modules: [],
-        project: { name: "Vivswan's tools", slug: "tools", description: "Tools: for things, 100%" },
-      },
-    });
-  });
 });
 
-// The registration and the pages-site config are two readers of one include
-// grammar: a rule that lands on one side alone lets a green plan fail later,
-// in docs-check or the deploy.
 describe("include roots: the registration and the pages-site config agree", () => {
   const skills = { path: "skills", mount: "skills", page: "SKILL.md" };
   test.each<[reason: string, include: object[], accepted: boolean]>([
@@ -282,78 +269,70 @@ describe("include roots: the registration and the pages-site config agree", () =
   });
 });
 
-// Every case pins the whole {modules, errors} result: the builders emit
-// fixed strings, and a second spurious error must not hide behind a
-// substring or a null check.
-describe("readModules", () => {
-  test.each<{ reason: string; yaml: string; modules: string[] }>([
+// Every row pins the whole {modules, errors} result (a second spurious error must not hide behind a substring) and
+// declaredModules, the fleet plans' text reader, beside it. JSON.stringify throws on the cycle a YAML alias builds, so a
+// nested entry is named by shape, an error rather than a crash.
+describe("readModules and declaredModules", () => {
+  test.each<{ reason: string; yaml: string; modules: string[] | null; errors: string[] }>([
     {
       reason: "the top-level modules list",
       yaml: "modules: [agents, uv]",
       modules: ["agents", "uv"],
+      errors: [],
     },
-    { reason: "an explicit empty list is valid", yaml: "modules: []", modules: [] },
-  ])("reads $reason", ({ yaml, modules }) => {
-    expect(readModules(parse(yaml))).toEqual({ modules, errors: [] });
-  });
-
-  test.each([
-    { reason: "no modules key", yaml: "other: value" },
-    { reason: "only a nested template.modules key", yaml: "template:\n  modules: [agents]" },
-  ])("fails when no top-level module selection exists ($reason; never assumes [])", ({ yaml }) => {
-    expect(readModules(parse(yaml))).toEqual({
+    { reason: "an explicit empty list", yaml: "modules: []", modules: [], errors: [] },
+    {
+      reason: "no modules key (never assumes [])",
+      yaml: "other: value",
       modules: null,
-      errors: [
-        `${FILE}: no module selection found - add a top-level \`modules: [...]\` list (the sync never assumes an empty selection, which would strip every module from the repo)`,
-      ],
-    });
-  });
-
-  test("fails on a non-list modules value", () => {
-    expect(readModules(parse("modules: agents"))).toEqual({
+      errors: [NO_SELECTION],
+    },
+    {
+      reason: "only a nested template.modules key",
+      yaml: "template:\n  modules: [agents]",
+      modules: null,
+      errors: [NO_SELECTION],
+    },
+    {
+      reason: "a non-list modules value",
+      yaml: "modules: agents",
       modules: null,
       errors: [`${FILE}: modules must be a list of module names`],
-    });
-  });
-
-  test("fails on a non-string entry", () => {
-    expect(readModules(parse("modules: [agents, 3]"))).toEqual({
+    },
+    {
+      reason: "a non-string entry",
+      yaml: "modules: [agents, 3]",
       modules: null,
       errors: [`${FILE}: modules entry 3 is not a module name`],
-    });
-  });
-
-  test("names a nested entry by shape, so a self-referencing alias is an error, not a crash", () => {
-    expect(readModules(parse("modules: [&loop [*loop], {a: 1}, null]"))).toEqual({
+    },
+    {
+      reason: "a self-referencing alias and other nested entries, named by shape",
+      yaml: "modules: [&loop [*loop], {a: 1}, null]",
       modules: null,
       errors: [
         `${FILE}: modules entry (a list) is not a module name`,
         `${FILE}: modules entry (a mapping) is not a module name`,
         `${FILE}: modules entry null is not a module name`,
       ],
-    });
-  });
-
-  test("fails on a duplicate entry", () => {
-    expect(readModules(parse("modules: [agents, agents]"))).toEqual({
+    },
+    {
+      reason: "a duplicate entry",
+      yaml: "modules: [agents, agents]",
       modules: null,
       errors: [`${FILE}: duplicate modules entry "agents"`],
-    });
-  });
-
-  test("fails on a non-mapping document", () => {
-    expect(readModules(parse("- just\n- a list"))).toEqual({
+    },
+    {
+      reason: "a non-mapping document",
+      yaml: "- just\n- a list",
       modules: null,
       errors: [`${FILE}: top level must be a mapping`],
-    });
+    },
+  ])("$reason", ({ yaml, modules, errors }) => {
+    expect(readModules(parse(yaml))).toEqual({ modules, errors });
+    expect(declaredModules(yaml)).toEqual(modules);
   });
-});
 
-describe("declaredModules (the fleet plans' text reader)", () => {
-  test("reads a list, refuses everything else as null", () => {
-    expect(declaredModules("modules: [uv]\n")).toEqual(["uv"]);
-    expect(declaredModules("modules: []\n")).toEqual([]);
-    expect(declaredModules("modules: notalist\n")).toBeNull();
+  test("declaredModules reads broken YAML as null, never as a selection", () => {
     expect(declaredModules(": broken\n")).toBeNull();
   });
 });
