@@ -65,8 +65,8 @@ describe(`the ${SECRET} readers`, () => {
     expect(undeclared.map(({ site }) => site)).toEqual([]);
   });
 
-  // actions/runner#4453: an environment secret reaches a called job only when every caller on the chain inherits
-  // (a called workflow inherits down only what it received). A mapped copy is the caller's empty read.
+  // actions/runner#4453: a job reached through two calls reads the environment secret only when every caller on
+  // the chain inherits (a called workflow inherits down only what it received). A mapped copy is the caller's empty read.
   test("a caller inherits exactly when its call reaches a job declaring the environment; none maps the secret", () => {
     const declaring = workflows
       .filter(({ doc }) =>
