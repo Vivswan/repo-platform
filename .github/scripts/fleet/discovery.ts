@@ -116,9 +116,11 @@ function dispatchInputs(): { repo: string; branch: string } {
   return { repo: event.inputs?.repo ?? "", branch: event.inputs?.branch ?? "" };
 }
 
-/** The branch a dispatch syncs onto (docs/sync.md, "Syncing a branch"); empty on every other run. Case kept: branch names are case-sensitive. */
+/** The branch a dispatch syncs onto (docs/sync.md, "Syncing a branch"); empty on every other run. Verbatim: a padded or
+ * case-changed value names a branch the repository has not got, and the resolve probe refuses it; trimmed, it would land
+ * on the branch it resembles. */
 export function readDispatchBranch(): string {
-  return dispatchInputs().branch.trim();
+  return dispatchInputs().branch;
 }
 
 /** Lowercased because GitHub identity is case-insensitive. A non-empty ONLY_REPO wins over the

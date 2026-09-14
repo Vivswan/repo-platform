@@ -207,7 +207,7 @@ class Delivery {
   readonly targetDir = env("TARGET_DIR", "target");
   readonly build = requireEnv("BUILD");
   readonly runUrl = requireEnv("RUN_URL");
-  /** Set on a branch dispatch: the row cloned this branch and the delivery commits onto it (docs/sync.md, "Syncing a branch"). */
+  /** docs/sync.md, "Syncing a branch". */
   readonly branch = readDispatchBranch();
   readonly logFile = join(this.runnerTemp, DELIVER_LOG);
 
@@ -575,7 +575,7 @@ class Delivery {
     this.verdict(outcome);
   }
 
-  /** The checkout kept no credentials; the push alone authenticates. */
+  /** The clone kept no credentials: the lease read and the push authenticate with this URL alone. */
   authUrl(): string {
     return tokenUrl(this.target, requireEnv("PAT"));
   }

@@ -63,7 +63,6 @@ const GH_LINES = [
 interface Options {
   hold?: boolean;
   manual?: boolean;
-  /** The dispatched branch: the row cloned it and the delivery commits onto it. */
   branch?: string;
   public?: boolean;
   writer?: "success" | "failure" | "skipped";

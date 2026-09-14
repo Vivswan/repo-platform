@@ -296,12 +296,18 @@ describe("readDispatchRepo", () => {
     });
   });
 
-  // The branch rides the payload as the repo does (never step env), trimmed and never case-folded: a branch name is case-sensitive.
+  // The branch rides the payload as the repo does (never step env) and verbatim: a padded or case-changed value must
+  // reach the resolve probe as typed, never as the branch it resembles.
   test.each([
     {
-      reason: "the branch input beside the repo, trimmed",
+      reason: "the branch input beside the repo, whitespace and case kept",
       eventBody: JSON.stringify({ inputs: { repo: "Vivswan/A", branch: " Feat/Add-Site " } }),
-      expected: "Feat/Add-Site",
+      expected: " Feat/Add-Site ",
+    },
+    {
+      reason: "a no-break space is kept too",
+      eventBody: JSON.stringify({ inputs: { branch: "feat/add-site\u00a0" } }),
+      expected: "feat/add-site\u00a0",
     },
     {
       reason: "a payload without a branch input reads as empty",
