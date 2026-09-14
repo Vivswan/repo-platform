@@ -63,8 +63,8 @@ interface Options {
   writer?: "success" | "failure" | "skipped";
   hold?: boolean;
   stub?: Record<string, string>;
-  /** Builds a real checkout under the target and answers the writer's summary over it; git then runs for real. */
-  written?: (target: string) => SyncReport;
+  /** Builds a real checkout under root/target and answers the writer's summary over it; git then runs for real. */
+  written?: (root: string) => SyncReport;
 }
 
 interface Run {
@@ -91,7 +91,8 @@ function run(options: Options = {}): Run {
   const target = join(root, "target");
   mkdirSync(target);
   mkdirSync(join(root, "build"));
-  const summary = options.written?.(target) ?? {
+  writeFileSync(join(runnerTemp, "migrated.txt"), "");
+  const summary = options.written?.(root) ?? {
     hold: options.hold ?? false,
     holdReasons: options.hold === true ? ["replaced local edits in .editorconfig"] : [],
     written: [],
@@ -277,10 +278,11 @@ describe("the branch delivery's outcomes", () => {
     });
   });
 
-  // The same tree the operator's delivery test drives: a path the branch's own .gitignore covers reaches the commit
-  // the manifest names it in, and a summary row git cannot find fails the run before any comment.
-  test("over a real checkout, the ignored file is in the pushed commit beside the manifest that names it", () => {
-    const result = run({ written: (target) => writtenTree(target, BUILD) });
+  // The same tree the operator's delivery test drives: a path the branch's own .gitignore covers, a bracketed path
+  // (itself, not the sibling its glob form matches), and a rung's reported edit reach the pushed commit; a summary
+  // row git cannot find fails the run before any comment.
+  test("over a real checkout, the ignored file, the bracketed file, and the rung's edit are in the pushed commit", () => {
+    const result = run({ written: (root) => writtenTree(root, BUILD) });
     const commit = fixtureGit(result.target, ["rev-parse", "HEAD"]);
     expect({
       exitCode: result.exitCode,
@@ -299,8 +301,8 @@ describe("the branch delivery's outcomes", () => {
 
   test("over a real checkout, a written row git cannot find fails red with git's line naming the path, nothing committed", () => {
     const result = run({
-      written: (target) => {
-        const summary = writtenTree(target, BUILD);
+      written: (root) => {
+        const summary = writtenTree(root, BUILD);
         summary.written.push({
           path: MISSING_PATH,
           class: "managed",

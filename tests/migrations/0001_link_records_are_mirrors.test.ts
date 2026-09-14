@@ -46,10 +46,11 @@ describe("0001-link-records-are-mirrors", () => {
     // Control: the writer refuses the record as seeded, so the restamp below is what makes it readable.
     const seeded = (JSON.parse(manifestOf(linked)) as { files: Record<string, never> }).files;
     expect(readRecord(seeded["CLAUDE.md"])).toBeNull();
+    // stdout is the runner's contract: the one path written, nothing else.
     expect(run(root)).toEqual({
       exitCode: 0,
-      stdout: `0001-link-records-are-mirrors: restamped 3 link record(s) in ${MANIFEST_NAME}\n`,
-      stderr: "",
+      stdout: `${MANIFEST_NAME}\n`,
+      stderr: `0001-link-records-are-mirrors: restamped 3 link record(s) in ${MANIFEST_NAME}\n`,
     });
     const text = readFileSync(join(root, MANIFEST_NAME), "utf-8");
     expect(text).toBe(manifestOf(restamped));

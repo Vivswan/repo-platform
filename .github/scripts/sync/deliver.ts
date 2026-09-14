@@ -17,6 +17,7 @@ import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, redactText } from "../shared/proc.ts";
 import { tokenUrl } from "../shared/token_url.ts";
+import { NO_MIGRATED_LIST, readMigrated } from "./migrate.ts";
 import { type DeliveryVerdict, VERDICT_FILE } from "./verdict.ts";
 import { REPLACED_HEADING, REVIEW_HEADING, type SyncReport } from "./writer/report.ts";
 
@@ -194,15 +195,17 @@ export function branchSummary(input: {
 }
 
 /** By name and forced: a path the target's own .gitignore covers must reach the commit whose manifest names it
- *  (`git add --all` skipped it and shipped the manifest entry without the file). Renames off, so a retired path is
- *  listed as its own deletion. */
+ *  (`git add --all` skipped it and shipped the manifest entry without the file). Literal, so a path spelling `[`, `*`
+ *  or `?` stages itself alone. Renames off, so a retired path is listed as its own deletion. */
 export function stageWritten(
   summary: SyncReport,
+  migrated: string[],
   git: (...args: string[]) => string[],
   must: (argv: string[], reason: string) => string,
 ): string[] {
   const changed = [
     MANIFEST_NAME,
+    ...migrated,
     ...summary.written
       .filter((row) => row.change !== "unchanged" && row.change !== "held")
       .map((row) => row.path),
@@ -211,7 +214,10 @@ export function stageWritten(
       .map((row) => row.path),
     ...summary.mirrors.filter((row) => row.outcome !== "current").map((row) => row.target),
   ];
-  must(git("add", "-f", "--", ...changed), "staging the written paths failed in the checkout");
+  must(
+    git("add", "-f", "--", ...changed.map((path) => `:(literal)${path}`)),
+    "staging the written paths failed in the checkout",
+  );
   return must(
     git("diff", "--cached", "--name-only", "-z", "--no-renames"),
     "reading the staged paths failed in the checkout",
@@ -484,8 +490,11 @@ class Delivery {
     ]) {
       this.must(argv, `${commandLabel(argv)} failed in the target`);
     }
+    const migrated = readMigrated(this.runnerTemp);
+    if (migrated === null) this.fileFailure(NO_MIGRATED_LIST);
     const staged = stageWritten(
       summary,
+      migrated,
       (...args) => this.git(...args),
       (argv, reason) => this.must(argv, reason),
     );

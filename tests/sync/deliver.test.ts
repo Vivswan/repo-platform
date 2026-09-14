@@ -83,8 +83,10 @@ interface Options {
   /** The clone log checkout_target.ts left behind, when any. */
   checkoutLog?: string;
   stub?: Record<string, string>;
-  /** Builds a real checkout under the target and answers the writer's summary over it; git then runs for real. */
-  written?: (target: string) => SyncReport;
+  /** Builds a real checkout under root/target and answers the writer's summary over it; git then runs for real. */
+  written?: (root: string) => SyncReport;
+  /** False leaves no migrated list, as a build whose runner predates it does. */
+  migrated?: boolean;
 }
 
 interface Run {
@@ -108,7 +110,8 @@ function run(options: Options = {}): Run {
   mkdirSync(runnerTemp);
   const target = join(root, "target");
   mkdirSync(target);
-  const summary = options.written?.(target) ?? {
+  if (options.migrated !== false) writeFileSync(join(runnerTemp, "migrated.txt"), "");
+  const summary = options.written?.(root) ?? {
     hold: options.hold ?? false,
     written: [],
     retired: [],
@@ -405,25 +408,27 @@ describe("deliver.ts", () => {
   // A target whose own .gitignore covers a managed path (an excepted, ignored .bun-version whose exception the PR
   // removes): `git add --all` skipped it, the run went green with the manifest naming a file the commit lacked, and
   // the validator went red on the target's next PR. The commit changes exactly the rows the summary says changed on
-  // disk (a released record's absent file is not asked of git), and a row naming a path git cannot find fails the run.
+  // disk plus what the rungs reported: a bracketed path stages itself and not the sibling its glob form matches, a
+  // released record's absent file is not asked of git, and a row naming a path git cannot find fails the run.
   test.each<{
     reason: string;
-    written: (target: string) => SyncReport;
+    written: (root: string) => SyncReport;
     verdict: string;
     diff: string[] | null;
     issue: string[];
   }>([
     {
-      reason: "the ignored file is in the commit beside the manifest that names it",
-      written: (target) => writtenTree(target, BUILD),
+      reason:
+        "the ignored file, the bracketed file, and the rung's edit are in the commit beside the manifest",
+      written: (root) => writtenTree(root, BUILD),
       verdict: "opened",
       diff: WRITTEN_DIFF,
       issue: [],
     },
     {
       reason: "a written row git cannot find fails the delivery with git's line naming the path",
-      written: (target) => {
-        const summary = writtenTree(target, BUILD);
+      written: (root) => {
+        const summary = writtenTree(root, BUILD);
         summary.written.push({
           path: MISSING_PATH,
           class: "managed",
@@ -486,6 +491,8 @@ describe("deliver.ts", () => {
 
   // A failed step still ends the row with a verdict and an issue carrying that step's own log (the writer's report,
   // the checkout's clone log); nothing is committed or pushed, and a failed clone's directory is not asked anything.
+  // A build whose migration runner left no list (this delivery runs from main, the runner from the build, and a cron
+  // or dispatch can copy the build before the tag moves) is such a failure, named, not an unread crash.
   test.each<{
     reason: string;
     options: Options;
@@ -507,6 +514,14 @@ describe("deliver.ts", () => {
       },
       says: ["the target checkout failed", "## Checkout log", "fatal: could not read from remote"],
       gitAsked: false,
+    },
+    {
+      reason: "a build whose migration runner left no migrated list",
+      options: { migrated: false },
+      says: [
+        "the build's migration runner left no migrated list: the build is older than this delivery",
+      ],
+      gitAsked: true,
     },
   ])(
     "$reason files the issue with its log and records the failed verdict, touching no tree",
