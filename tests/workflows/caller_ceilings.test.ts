@@ -16,6 +16,7 @@ interface Concurrency {
 }
 interface Job {
   uses?: string;
+  with?: Record<string, unknown>;
   permissions?: Permissions;
   concurrency?: Concurrency;
 }
@@ -42,9 +43,9 @@ const RANK: Record<string, number> = { none: 0, read: 1, write: 2 };
 const CALLER_ROOTS = [".github/workflows", "files/base/.github/workflows"];
 const LOCAL_CALL = /^\.\/\.github\/workflows\/(.+)$/;
 const PLATFORM_CALL = new RegExp(`^${PLATFORM_SLUG}/(\\.github/workflows/.+)@`);
-// A called run keyed per run_id, falling back to the cron's lane: the literal is what the caller job holds.
+// A called run keyed per run_id, falling back to the cron's lane: the caller passes the input the branch reads and holds the literal.
 const FALLBACK_LANE =
-  /^\$\{\{ inputs\.[\w-]+ != '' && format\('[\w-]+-called-\{0\}', github\.run_id\) \|\| '([\w-]+)' \}\}$/;
+  /^\$\{\{ inputs\.([\w-]+) != '' && format\('[\w-]+-called-\{0\}', github\.run_id\) \|\| '([\w-]+)' \}\}$/;
 
 /** The writer's two placeholders become YAML before parsing: the owner slug, and the `{{blocks}}` line a starter opens with. */
 function load(rel: string): Workflow {
@@ -160,12 +161,18 @@ test("no called lane is one its caller chain holds or reads github.workflow; a f
   const fallbackSites: string[] = [];
   for (const { site, job, called, heldByChain } of CALLS) {
     for (const [where, group] of lanesOf(called)) {
-      const fallback = FALLBACK_LANE.exec(group)?.[1];
-      if (fallback !== undefined) {
+      const fallback = FALLBACK_LANE.exec(group);
+      if (fallback !== null) {
+        const [, input, lane] = fallback;
         fallbackSites.push(site);
-        if (job.concurrency?.group.toLowerCase() !== fallback.toLowerCase()) {
+        if (!(input in (job.with ?? {}))) {
           findings.push(
-            `${site} ${where}: falls back to '${fallback}', the caller job holds ${job.concurrency?.group}`,
+            `${site} ${where}: keys the called run on inputs.${input}, which the caller does not pass`,
+          );
+        }
+        if (job.concurrency?.group.toLowerCase() !== lane.toLowerCase()) {
+          findings.push(
+            `${site} ${where}: falls back to '${lane}', the caller job holds ${job.concurrency?.group}`,
           );
         }
       } else if (heldByChain.has(group.toLowerCase())) {

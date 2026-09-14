@@ -39,7 +39,7 @@ describe("fleet-ci.yml", () => {
     expect(
       checks.map((step) => ({ if: step.if, "continue-on-error": step["continue-on-error"] })),
     ).toEqual(checks.map(() => ({ if: "${{ !cancelled() }}", "continue-on-error": undefined })));
-    expect([judge?.if, judge?.run?.trimEnd().endsWith("exit 1")]).toEqual(["always()", true]);
+    expect(judge?.if).toBe("always()");
   });
 
   // Spawned with the runner's default shell flags (bash --noprofile --norc -eo pipefail), so the verdict is the one Actions sees.

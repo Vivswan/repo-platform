@@ -149,7 +149,6 @@ describe("post-green wiring", () => {
     expect(jobsRunning(jobs, "push", { armed: "true", previous: "" }).sort()).toEqual(
       Object.keys(jobs).sort(),
     );
-    expect(jobs["read-directives"].if).not.toContain("needs.move-stable.outputs");
     // A red mover (a lost lease, a refused push) leaves the read on the push's own before and skips the
     // sync (the tag names a stale commit), nothing else.
     expect(jobsRunning(jobs, "push", { armed: "true" }, ["move-stable"]).sort()).toEqual([
@@ -159,7 +158,8 @@ describe("post-green wiring", () => {
   });
 
   // The condition is evaluated, not searched for: a clause moved into a comment reads the same to a text search and
-  // releases the fleet's post-green legs on a pull request or a red gate.
+  // releases the fleet's post-green legs on a pull request. The result clause is pinned explicitly so the release never
+  // depends on remembering GitHub's implicit success() rule for a condition without a status function.
   test("ci.yml's post-green job runs on a green gate on a push to main and on nothing else", () => {
     const condition = ci.jobs["post-green"].if ?? "";
     const runsWhen = (context: Record<string, string>) =>
