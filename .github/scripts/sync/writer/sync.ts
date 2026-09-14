@@ -407,8 +407,8 @@ function main(argv: string[]): number {
   if (flags["--private"] !== "true" && flags["--private"] !== "false") {
     fail("--private must be true or false");
   }
-  // The build reaches the target only through the sync commit's subject and the PR body, which must name one exact
-  // main commit.
+  // The build is recorded as given (in full in the PR body, its first 12 characters in the sync commit's subject), so
+  // only the canonical full sha is accepted.
   if (!/^[0-9a-f]{40}$/.test(flags["--build"])) {
     fail(
       `--build must be the build commit's full sha (40 lowercase hex characters), got ${JSON.stringify(flags["--build"])}`,

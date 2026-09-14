@@ -72,7 +72,9 @@ The tag names a main commit whose own CI run passed, so there is no generated tr
 
 The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
-The delivery is the full 40-hex sha of that main commit: the writer takes it from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run) and names it in the sync commit's subject and the PR body, so every repository's history names the exact commit its files came from; the tree itself carries no build stamp, so an unchanged tree opens no PR ([sync.md](sync.md#the-manifest)). Old delivery commits stay reachable forever: they are main history.
+The delivery is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run). The writer records it as given: in full in the PR body, by its first 12 characters in the sync commit's subject. The tree itself carries no build stamp, so an unchanged tree opens no PR ([sync.md](sync.md#the-manifest)).
+
+Old delivery commits stay reachable forever: they are main history.
 
 ## A new action input and its workflow land together
 
