@@ -146,10 +146,10 @@ jobs:
           # line lychee's `# Summary` heading.
           output: ${{ runner.temp }}/link-rot/external-links/report.md
 
-      # A verdict the gates below can test positively (check_ssot's
-      # step-output-gates rule): anything but lychee's two verdicts fails
-      # here rather than reading as a clean night, and neither the report
-      # nor the close runs.
+      # A verdict the gates below can test positively (an absent step output
+      # reads as 0, tests/workflows/step_output_gates.test.ts): anything but
+      # lychee's two verdicts fails here rather than reading as a clean
+      # night, and neither the report nor the close runs.
       - name: Read the link-rot verdict
         id: rot
         if: steps.links.outcome == 'success'

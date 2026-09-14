@@ -4,7 +4,7 @@
   "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies, which the root postinstall installs so one root bun install covers every action package.",
   "scripts": {
     "check": "bun scripts/bootstrap.ts --if-missing && bun run docs:check && bun run lint && bun run lint:actions && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run lint:yaml && bun run invariants && bun run test",
-    "invariants": "bun run wrap:check && bun run validate && bun run ssot:check && bun run gitignore:topology",
+    "invariants": "bun run wrap:check && bun run validate && bun run gitignore:topology",
     "bootstrap": "bun scripts/bootstrap.ts",
     "docs:check": "bun scripts/docs_check.ts",
     "check:fix": "bun x biome check --write .",
@@ -17,7 +17,6 @@
     "wrap:check": "bun scripts/check/check_markdown_wrap.ts",
     "lint:yaml": "uvx --with-requirements actions/yamllint/requirements.txt yamllint -s .",
     "validate": "bun actions/validate-managed-files/validator/validate_managed_files.ts --self --private false .",
-    "ssot:check": "bun scripts/check_ssot.ts",
     "gitignore": "bun scripts/generate/build_gitignore.ts",
     "gitignore:topology": "bun scripts/generate/build_gitignore.ts --topology",
     "test": "bun scripts/run_tests.ts",
@@ -29,7 +28,6 @@
     "@types/bun": "1.4.0",
     "husky": "^9.1.7",
     "knip": "6.35.1",
-    "ts-morph": "^28.0.0",
     "typescript": "^7.0.2"
   },
   "dependencies": {

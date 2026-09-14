@@ -52,12 +52,11 @@ permissions:
 
 # A CALLED run takes a per-run group: its caller (post-green.yml's settings-fleet job) already holds
 # settings-repos, and a called workflow waiting on its caller's lane deadlocks.
-# cancel-in-progress stays false on both: the lane orders by arrival, so cancelling would let an older
-# commit's late run cancel the newer apply in flight. The selector stands that run down instead
-# (fleet/newest_main.ts; the settings-lane-newest-wins ssot rule pins the pair).
+# Neither lane cancels in progress (GitHub's default): the lane orders by arrival, so cancelling would let
+# an older commit's late run cancel the newer apply in flight. The selector stands that run down instead
+# (fleet/newest_main.ts).
 concurrency:
   group: ${{ inputs.sha != '' && format('settings-repos-called-{0}', github.run_id) || 'settings-repos' }}
-  cancel-in-progress: false
 
 jobs:
   plan:
