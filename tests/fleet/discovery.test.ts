@@ -346,7 +346,7 @@ describe("the dispatch inputs", () => {
       value: "hiddenserver",
     },
   ])(
-    "$reason fails loudly, naming the path but never the value",
+    "$reason fails loudly, never echoing the value",
     ({ reason, payload, diagnostic, path, value }) => {
       const eventFile = join(root, `event-${Bun.hash(reason).toString(16)}.json`);
       writeFileSync(eventFile, payload);

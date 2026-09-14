@@ -364,7 +364,7 @@ describe("select_sync_repos.ts", () => {
       named: "Vivswan/deadprobe",
     },
   ])(
-    "$reason: refused before any row is written, the entries withheld",
+    "$reason: refused before any row is written",
     ({ reason, scope, transport, branch, manual, discoveredList = discovered, error, named }) => {
       const name = `refused-${Bun.hash(reason).toString(16)}`;
       const env: Record<string, string> =
