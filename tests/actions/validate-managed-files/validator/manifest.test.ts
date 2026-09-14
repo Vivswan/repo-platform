@@ -9,7 +9,6 @@ import { tempDirs } from "../../../shared/temp_dir.ts";
 import {
   B,
   BASELINE,
-  COMMIT,
   E,
   gitFreeEnv,
   HB,
@@ -70,10 +69,10 @@ describe("the manifest's shape", () => {
     expect(stderr).toContain("does not list itself");
   });
 
-  test("the self entry carries class, hash, and commit alone", () => {
+  test("the self entry carries class and hash alone", () => {
     const entries = {
       ...stampedBaseline(),
-      [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${COMMIT}", "kind": "symlink"}`,
+      [MANIFEST]: '{"class": "managed", "hash": null, "kind": "symlink"}',
     };
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(exitCode).toBe(1);
@@ -82,27 +81,17 @@ describe("the manifest's shape", () => {
     ]);
   });
 
-  test.each([
-    { reason: "a null commit (before the first sync stamps it)", commit: "null", ok: true },
-    { reason: "the build's full sha", commit: `"${COMMIT}"`, ok: true },
-    { reason: "a short sha", commit: '"abc1234"', ok: false },
-    { reason: "a number", commit: "42", ok: false },
-    { reason: "uppercase hex", commit: `"${COMMIT.toUpperCase()}"`, ok: false },
-  ])("the self entry's commit is null or a full sha: $reason", ({ commit, ok }) => {
+  test("a self entry still carrying the build commit earlier syncs stamped is outside the vocabulary", () => {
     const entries = {
       ...stampedBaseline(),
-      [MANIFEST]: `{"class": "managed", "hash": null, "commit": ${commit}}`,
+      [MANIFEST]:
+        '{"class": "managed", "hash": null, "commit": "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01"}',
     };
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    if (ok) {
-      expect(stderr).toBe("");
-      expect(exitCode).toBe(0);
-    } else {
-      expect(exitCode).toBe(1);
-      expect(stderr).toContain(
-        "its self entry's commit must be null or the delivery commit's full 40-hex sha",
-      );
-    }
+    expect(exitCode).toBe(1);
+    expect(stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
+      `error: ${MANIFEST}: entry '${MANIFEST}' carries field(s) "commit" outside the manifest's vocabulary - no sync writes them; revert the edit (git history has the stamped original) or ${RESYNC}`,
+    ]);
   });
 
   test("an entry field outside the vocabulary is an error naming the entry and the keys", () => {
@@ -130,7 +119,7 @@ describe("the manifest's shape", () => {
     const self = runValidator({
       [MANIFEST]: manifestOf({
         ...stampedBaseline(),
-        [MANIFEST]: '{"class": "managed", "hash": null, "commit": null, "withheld": true}',
+        [MANIFEST]: '{"class": "managed", "hash": null, "withheld": true}',
       }),
     });
     expect(self.stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
@@ -706,8 +695,6 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/file-as-mirror-link.md": "../intact.md",
       "docs/kind-on-managed.md": "managed content\n",
       "docs/grammar-on-managed.md": "managed content\n",
-      "docs/commit-on-managed.md": "managed content\n",
-      "docs/commit-on-mirror.md": "managed content\n",
     };
     for (const [rel, content] of Object.entries(files)) {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
@@ -730,7 +717,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
     const split = (hash: string, grammar = "managed-region") =>
       `{"class": "split", "grammar": ${JSON.stringify(grammar)}, "begin": ${JSON.stringify(B)}, "end": ${JSON.stringify(E)}, "hash": "${hash}"}`;
     const entries: Record<string, string> = {
-      [MANIFEST_NAME]: `{"class": "managed", "hash": null, "commit": "${COMMIT}"}`,
+      [MANIFEST_NAME]: '{"class": "managed", "hash": null}',
       "docs/intact.md": `{"class": "managed", "hash": "${sha("managed content\n")}"}`,
       "docs/drifted.md": `{"class": "managed", "hash": "${sha("original content\n")}"}`,
       "docs/notes.md": split(sha(region)),
@@ -757,8 +744,6 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/mirror-odd-kind.md": `{"class": "mirror", "kind": "hardlink", "hash": "${sha("intact.md")}"}`,
       "docs/kind-on-managed.md": `{"class": "managed", "kind": "symlink", "hash": "${sha("managed content\n")}"}`,
       "docs/grammar-on-managed.md": `{"class": "managed", "grammar": "managed-region", "hash": "${sha("managed content\n")}"}`,
-      "docs/commit-on-managed.md": `{"class": "managed", "commit": "${COMMIT}", "hash": "${sha("managed content\n")}"}`,
-      "docs/commit-on-mirror.md": `{"class": "mirror", "commit": "${COMMIT}", "hash": "${sha("managed content\n")}"}`,
     };
     writeFileSync(join(root, MANIFEST_NAME), manifestOf(entries));
     const findings = checkManifestParity(
@@ -787,8 +772,6 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       `${MANIFEST_NAME}: entry 'docs/mirror-odd-kind.md' carries kind "hardlink"`,
       `${MANIFEST_NAME}: entry 'docs/kind-on-managed.md' carries "kind", which the sync never records on a managed entry`,
       `${MANIFEST_NAME}: entry 'docs/grammar-on-managed.md' carries "grammar", which the sync never records on a managed entry`,
-      `${MANIFEST_NAME}: entry 'docs/commit-on-managed.md' carries "commit", which the sync never records on a managed entry`,
-      `${MANIFEST_NAME}: entry 'docs/commit-on-mirror.md' carries "commit", which the sync never records on a mirror entry`,
     ]);
     for (const finding of findings) expect(finding.message).not.toContain("template");
   });

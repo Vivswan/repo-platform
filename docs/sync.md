@@ -33,7 +33,7 @@ bun .github/scripts/sync/writer/sync.ts \
 ```
 
 - `--tree` is the `files/` directory itself; every `source` in `files.yml` starts with `files/` and resolves under it.
-- `--build` is the delivery commit's full sha, 40 lowercase hex characters (`git fetch origin +refs/tags/stable:refs/tags/stable` then `git rev-parse stable^{commit}`, the forced refspec so a local tag left by an earlier fetch is refreshed), stamped into the manifest's `commit` field, which the fleet validator reads as a full sha; a short or uppercase one is refused before anything is written.
+- `--build` is the delivery commit's full sha, 40 lowercase hex characters (`git fetch origin +refs/tags/stable:refs/tags/stable` then `git rev-parse stable^{commit}`, the forced refspec so a local tag left by an earlier fetch is refreshed), named in the sync commit's subject and the PR body; a short or uppercase one is refused before anything is written.
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the default `copyright_holder`.
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
 - Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a `--build` that is not a full sha, a bad `files.yml`, an unreadable registration, a registration naming a module `files.yml` does not offer, a manifest record the writer cannot read ([Retirement](#retirement)), a symlinked ancestor at a path the writer touches, a directory or a symlink at the manifest or registration path, a directory at a stale record's path, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
@@ -249,7 +249,7 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 
 ## The manifest
 
-`.github/repo-platform-manifest.json`, the layout `actions/shared/manifest.ts` already parses: one entry per line, sorted by path. The manifest's own entry carries the delivery commit in `commit` (`null` before the first sync, else the full sha of the main commit the `stable` tag named when the sync ran) and no hash. That entry is the one record of that commit: `validate-managed-files` judges its shape in place ([manifest_shape.ts](../actions/validate-managed-files/validator/checks/manifest_shape.ts)), and nothing fetches the tag to learn it. Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror` (with `kind: symlink` for a link, hash of the target string), `link` (hash of the target string). The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
+`.github/repo-platform-manifest.json`, the layout `actions/shared/manifest.ts` already parses: one entry per line, sorted by path. The manifest's own entry is `managed` with `hash: null` and nothing else, so a tree the build did not change renders byte-identical under a new `stable` and no sync PR opens for it; the delivery commit is named by the sync commit's subject and the PR body alone. Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror` (with `kind: symlink` for a link, hash of the target string), `link` (hash of the target string). The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
 
 ## The report
 

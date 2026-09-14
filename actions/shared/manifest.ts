@@ -48,7 +48,6 @@ export type ManifestEntryShape = {
   class: string;
   hash?: unknown;
   grammar?: unknown;
-  commit?: unknown;
   /** A mirror's materialization: "symlink" when the path is a link to the source; absent for a copy. */
   kind?: unknown;
 } & { [F in SplitDeclarationField]?: unknown };
@@ -60,7 +59,6 @@ export const ENTRY_FIELDS = [
   "class",
   "hash",
   "grammar",
-  "commit",
   "kind",
   ...MANAGED_REGION_WIRE_FIELDS,
 ] as const satisfies readonly (keyof ManifestEntryShape)[];
@@ -72,7 +70,7 @@ const ENTRY_FIELD_SET: ReadonlySet<string> = new Set(ENTRY_FIELDS);
 
 /** The fields a record of each class carries. The sync writer reads a previous record and the validator's parity check
  *  judges a target's manifest through this one table, so a field on the wrong class is a hand edit to both. The manifest's own
- *  entry (managed, hash null, the build in `commit`) is no record of a written file: neither reader judges it here. */
+ *  entry (managed, hash null) is no record of a written file: neither reader judges it here. */
 export const RECORD_FIELDS = {
   managed: ["class", "hash"],
   split: ["class", "hash", "grammar", ...MANAGED_REGION_WIRE_FIELDS],
@@ -81,11 +79,10 @@ export const RECORD_FIELDS = {
   link: ["class", "hash"],
 } as const satisfies Record<RecordedClass, readonly (typeof ENTRY_FIELDS)[number][]>;
 
-/** The manifest's own entry: managed, hash null, the build in `commit`. */
+/** The manifest's own entry: managed, hash null. */
 export const SELF_ENTRY_FIELDS = [
   "class",
   "hash",
-  "commit",
 ] as const satisfies readonly (typeof ENTRY_FIELDS)[number][];
 
 export function strayFields(fields: readonly string[], entry: ManifestEntryShape): string[] {

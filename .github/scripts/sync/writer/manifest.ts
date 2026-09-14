@@ -109,15 +109,15 @@ const COMMENT =
   "hash covers the region from the BEGIN line through the END line), starter (written once, " +
   "repo-owned from then on), mirror (a byte copy of a written file, or with kind symlink a " +
   "relative symbolic link to it whose hash is sha256 of the link target, declared in " +
-  `${REGISTRATION_PATH}), link (a relative symbolic link; hash is sha256 of its target). This ` +
-  "file's own entry records the build commit that wrote the tree.";
+  `${REGISTRATION_PATH}), link (a relative symbolic link; hash is sha256 of its target).`;
 
-/** The manifest's own entry carries the build sha and no hash: a self-hash would be circular. */
-export function renderManifest(records: Record<string, ManifestRecord>, build: string): string {
+/** The manifest's own entry carries no hash: a self-hash would be circular. The build that wrote the tree is named by
+ *  the sync commit and its PR alone, so an unchanged tree renders byte-identical under a new build. */
+export function renderManifest(records: Record<string, ManifestRecord>): string {
   const lines = Object.entries(records)
     .filter(([path]) => path !== MANIFEST_NAME)
     .map(([path, record]) => [path, entryBody(record as Record<string, JsonValue>)] as const);
-  lines.push([MANIFEST_NAME, entryBody({ class: "managed", hash: null, commit: build })]);
+  lines.push([MANIFEST_NAME, entryBody({ class: "managed", hash: null })]);
   lines.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return [
     "{",
@@ -130,10 +130,6 @@ export function renderManifest(records: Record<string, ManifestRecord>, build: s
   ].join("\n");
 }
 
-export function writeManifest(
-  target: string,
-  records: Record<string, ManifestRecord>,
-  build: string,
-): void {
-  writeFile(target, MANIFEST_NAME, Buffer.from(renderManifest(records, build)));
+export function writeManifest(target: string, records: Record<string, ManifestRecord>): void {
+  writeFile(target, MANIFEST_NAME, Buffer.from(renderManifest(records)));
 }

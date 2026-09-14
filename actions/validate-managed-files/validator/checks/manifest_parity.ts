@@ -25,9 +25,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
   for (const [rel, entry] of Object.entries(ctx.manifest.records)) {
     const where = `${MANIFEST_NAME}: entry '${rel}'`;
     // The self entry's invariant comes before any class dispatch: a
-    // corrupted class (say, starter) must not slip past it. Its commit slot
-    // holds the provenance stamp (null or a string; manifest_shape judges
-    // the value).
+    // corrupted class (say, starter) must not slip past it.
     if (rel === MANIFEST_NAME) {
       const stray = strayFields(SELF_ENTRY_FIELDS, entry).filter(isEntryField);
       if (stray.length > 0) {
@@ -40,16 +38,11 @@ export function checkManifestParity(ctx: Context): Finding[] {
         );
         continue;
       }
-      if (
-        entry.class !== "managed" ||
-        entry.hash !== null ||
-        ("commit" in entry && entry.commit !== null && typeof entry.commit !== "string")
-      ) {
+      if (entry.class !== "managed" || entry.hash !== null) {
         findings.push(
           error(
             `${where} must be managed with hash null (its content includes ` +
-              "every other hash, so a self-hash would be circular) and a " +
-              "null-or-string provenance commit; re-run the sync to " +
+              "every other hash, so a self-hash would be circular); re-run the sync to " +
               "regenerate it",
           ),
         );
