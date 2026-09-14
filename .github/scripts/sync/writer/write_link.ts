@@ -1,4 +1,4 @@
-import { sha256 } from "./manifest.ts";
+import { sha256 } from "../../../../actions/shared/values.ts";
 import { writeLink as placeLink, probe } from "./target_files.ts";
 import type { WriteOutcome } from "./write_managed.ts";
 

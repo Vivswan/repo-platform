@@ -1,5 +1,4 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -13,6 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { sha256 } from "../../actions/shared/values.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
@@ -25,7 +25,6 @@ const BUILD = "abcdef0123456789abcdef0123456789abcdef01";
 const MANIFEST = ".github/repo-platform-manifest.json";
 const YEAR = String(new Date().getUTCFullYear());
 
-const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const droppedMirrorNote = (path: string) =>
   `manifest record for \`${path}\` dropped: no mirror in .repo-platform.yml reaches it now, so ` +
   "the file is the repository's own (a mirror declared again adopts it while it still holds the " +

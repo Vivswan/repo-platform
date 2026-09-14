@@ -12,6 +12,7 @@ import {
 import { LABEL_RE } from "../shared/label.ts";
 import { REGISTRATION_PATH } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
+import { isMapping } from "../shared/values.ts";
 
 /** The one refusal of a module files.yml does not offer: the plan on every PR and the sync writer speak it alike, so no reader drops a name quietly. */
 export function unknownModuleProblems(
@@ -26,10 +27,6 @@ export function unknownModuleProblems(
     );
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 // A nested list or mapping is named by shape: JSON.stringify throws on the
 // cycle a YAML alias can build, which would turn a bad entry into a crash.
 function describeEntry(entry: unknown): string {
@@ -42,7 +39,7 @@ export function readModules(
   data: unknown,
   label = REGISTRATION_PATH,
 ): { modules: string[] | null; errors: string[] } {
-  if (!isPlainObject(data)) {
+  if (!isMapping(data)) {
     return { modules: null, errors: [`${label}: top level must be a mapping`] };
   }
   const raw: unknown = data.modules;

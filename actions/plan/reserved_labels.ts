@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { isMapping } from "../shared/values.ts";
 import { type FilesConfig, SOURCE_PREFIX } from "./files_config.ts";
 
 export type LayerSources = Pick<FilesConfig, "modules" | "settings">;
@@ -11,10 +12,6 @@ export function declaredLayers(config: LayerSources): string[] {
   const { settings } = config;
   if (settings === null) return [];
   return [settings.baseline, ...settings.layers.map((layer) => layer.source), settings.override];
-}
-
-function isMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export interface LabelTuple {

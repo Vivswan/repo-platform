@@ -1,6 +1,6 @@
 // A local edit is replaced anyway and returned as text, so the report shows the diff and holds the PR. A link at the path is held: the writer never reads through one and has no record of writing it as a file.
 
-import { sha256 } from "./manifest.ts";
+import { sha256 } from "../../../../actions/shared/values.ts";
 import { probe, writeFile } from "./target_files.ts";
 
 export type WriteOutcome =

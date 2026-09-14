@@ -8,12 +8,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import { writeLink } from "../../../.github/scripts/sync/writer/write_link.ts";
 import { writeManaged } from "../../../.github/scripts/sync/writer/write_managed.ts";
 import { renderRegion, writeSplit } from "../../../.github/scripts/sync/writer/write_split.ts";
 import { writeStarter } from "../../../.github/scripts/sync/writer/write_starter.ts";
 import { HASH_REGION_MARKERS } from "../../../actions/shared/grammar.ts";
+import { sha256 } from "../../../actions/shared/values.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();

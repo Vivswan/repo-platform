@@ -1,5 +1,6 @@
 import { cleanManagedRegion } from "../../../../actions/shared/grammar.ts";
-import { mirrorKind, type Records, readRecord, sha256 } from "./manifest.ts";
+import { sha256 } from "../../../../actions/shared/values.ts";
+import { mirrorKind, type Records, readRecord } from "./manifest.ts";
 import { probe, removeFile, writeFile } from "./target_files.ts";
 
 export type RetireOutcome = "deleted" | "region removed" | "held" | "released";

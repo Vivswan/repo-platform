@@ -12,7 +12,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import {
   applyMirrors,
   blockedAncestor,
@@ -29,6 +28,7 @@ import {
   patternMatches,
 } from "../../../actions/plan/mirrors.ts";
 import { expandPattern } from "../../../actions/shared/mirror_pattern.ts";
+import { sha256 } from "../../../actions/shared/values.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();

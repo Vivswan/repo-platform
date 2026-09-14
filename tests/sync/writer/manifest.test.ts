@@ -7,10 +7,10 @@ import {
   readRecord,
   readRecords,
   renderManifest,
-  sha256,
   writeManifest,
 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import { type ManifestEntryShape, parseManifestFiles } from "../../../actions/shared/manifest.ts";
+import { sha256 } from "../../../actions/shared/values.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();

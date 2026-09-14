@@ -3,6 +3,7 @@
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { error, requireEnv, warning } from "../shared/action_runtime.ts";
+import { isMapping } from "../shared/values.ts";
 
 export const IGNORE_FILE = ".trivyignore.yaml";
 export const PLAIN_IGNORE_FILE = ".trivyignore";
@@ -15,10 +16,6 @@ export interface IgnoreCheck {
   problems: string[];
   /** Entries whose expiry has passed: Trivy no longer honors them. */
   expired: string[];
-}
-
-function isMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function parseDate(value: unknown): Date | null {
