@@ -10,7 +10,7 @@ npx skills add https://github.com/Vivswan/repo-platform/tree/main/skills/repo-pl
 
 ## What It Does
 
-- Walks the add flow: edit `.repo-platform.yml` on a branch, merge (the plan job validates it), dispatch the sync with `manual=true`, check that the module diff explains every row of the sync PR's report, merge
+- Walks the add flow: edit `.repo-platform.yml` on a branch, merge (fleet CI's plan step validates it), dispatch the sync with `manual=true`, check that the module diff explains every row of the sync PR's report, merge
 - Lists what each module writes (path and class, from `files.yml`) and that `ci.yml` never changes with the selection
 - Documents the module keys (`site.*`, `labels.*`) and the ripple a tracking-label change has on the repo-owned starters
 - Carries the per-module companion checklist and what removal retires vs leaves behind

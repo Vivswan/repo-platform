@@ -20,7 +20,7 @@ Each stream is identified by a label, set as a registration key (`labels.fuzzer`
 - The report and resolve steps: both dedup and auto-close by the label.
 - The repository's settings labels: settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The rendered `.github/settings.yml` declares the label automatically - the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](settings.md)). A repository whose overlay opts out of label management (`labels: null`) owns its tracking labels instead.
 
-The registration grammar and fleet-ci's `plan` job enforce:
+The registration grammar and fleet-ci's `plan` step enforce:
 
 - No label name the fleet layers already manage (the settings baseline, the release labels, the dependabot labels; GitHub label names are case-insensitive). Reusing one would let a green night close unrelated issues carrying it and make every settings apply fight over the label's color and description.
 - Every pair of selected stream labels must differ (`labels.nightly` vs `labels.fuzzer` vs `labels.site`): all streams dedup AND auto-close by label, so a shared label would let one stream's green night close another's active failure issue.
@@ -35,7 +35,7 @@ The registration grammar and fleet-ci's `plan` job enforce:
 
 ## Release gating
 
-With the release-please module also selected, an open tracking issue blocks releases twice over: the release PR's `release-pr` CI job fails early and visibly, and the release pipeline's authoritative pre-flight blocks the cut itself. fleet-ci's `plan` job outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open. The release PR's job blocks that PR on every refresh; the pipeline's pre-flight self-scopes to release-cut pushes, so ordinary main runs are never blocked.
+With the release-please module also selected, an open tracking issue blocks releases twice over: the release PR's `release-pr` CI job fails early and visibly, and the release pipeline's authoritative pre-flight blocks the cut itself. fleet-ci's `plan` step outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open. The release PR's job blocks that PR on every refresh; the pipeline's pre-flight self-scopes to release-cut pushes, so ordinary main runs are never blocked.
 
 To unblock:
 

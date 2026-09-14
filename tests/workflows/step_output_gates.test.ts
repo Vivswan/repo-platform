@@ -18,8 +18,8 @@ interface Step {
   "continue-on-error"?: boolean | string;
 }
 
-/** Only `== '<non-zero literal>'` and `!= ''` cannot be satisfied by an absent output. Terms without a
- *  step output (`env.*`, `needs.*`) are not this hazard. The offending term, or null. */
+/** Only `== '<non-zero literal>'`, `!= ''`, and `contains(<output>, '<non-empty literal>')` cannot be satisfied by an
+ *  absent output. Terms without a step output (`env.*`, `needs.*`) are not this hazard. The offending term, or null. */
 function unsafeStepCondition(raw: string): string | null {
   // One spelling per term: the `${{ }}` delimiters GitHub accepts around an `if:` go, spaces around a
   // dot go, and a literal bracket index (`steps['probe'].outputs['changed']`) reads as the dotted path
@@ -36,10 +36,13 @@ function unsafeStepCondition(raw: string): string | null {
   // A negated GROUP inverts terms this check reads term by term, so it cannot be proven safe here.
   // `!cancelled()` and friends do not match: the parenthesis has to follow the `!` directly.
   if (/!\s*\(/.test(condition)) return `a negated group: ${condition.trim()}`;
+  // A parenthesis becomes a space, never nothing: glued to the function name, `contains(steps...` would read as no
+  // step output at all.
   for (const raw of condition.split(/&&|\|\|/)) {
-    const term = raw.replaceAll(/[()]/g, "").trim();
+    const term = raw.replaceAll(/[()]/g, " ").replaceAll(/\s+/g, " ").trim();
     if (!OUTPUT.test(term)) continue;
-    const match = /^steps\.[\w-]+\.outputs\.[\w-]+\s*(==|!=)\s*'([^']*)'$/i.exec(term);
+    if (/^contains steps\.[\w-]+\.outputs\.[\w-]+, '[^']+'$/i.test(term)) continue;
+    const match = /^steps\.[\w-]+\.outputs\.[\w-]+ ?(==|!=) ?'([^']*)'$/i.exec(term);
     if (match === null) return term;
     const [, operator, literal] = match;
     if (operator === "==" ? Number(literal) === 0 : literal !== "") return term;
@@ -112,6 +115,13 @@ describe("unsafeStepCondition", () => {
     ["steps.merge.outputs.skipped == false", "steps.merge.outputs.skipped == false"],
     ["steps.a.outputs.b == 'false' && steps.c.outputs.d != 'true'", "steps.c.outputs.d != 'true'"],
     ["steps.a.outputs.b == 'false' || !steps.c.outputs.d", "!steps.c.outputs.d"],
+    // contains('', '') is true, so an empty needle is satisfied by an absent output; a needle with no
+    // step output inside is the hazard read the other way round.
+    ["contains(steps.plan.outputs.modules, '')", "contains steps.plan.outputs.modules, ''"],
+    [
+      "contains('\"bun\"', steps.plan.outputs.modules)",
+      "contains '\"bun\"', steps.plan.outputs.modules",
+    ],
     // Bracket indexes name the same output GitHub reads; the term is named in its dotted spelling.
     ["steps.probe.outputs['changed'] != 'true'", "steps.probe.outputs.changed != 'true'"],
     ["steps['probe'].outputs.changed != 'true'", "steps.probe.outputs.changed != 'true'"],
@@ -147,6 +157,9 @@ describe("unsafeStepCondition", () => {
     "success() && env.TARGET != ''",
     // An absent output compares equal to '', so this inequality fails on it.
     "steps.refresh.outputs.bumps != ''",
+    // An absent output contains nothing but ''.
+    "contains(steps.plan.outputs.modules, '\"bun\"')",
+    "!cancelled() && steps.plan.outcome == 'success' && contains(steps.plan.outputs.modules, '\"bun\"')",
     // The delimiters GitHub accepts around an `if:` change nothing.
     "${{ steps.probe.outputs.changed == 'true' }}",
     "STEPS . probe . outputs . changed == 'true'",

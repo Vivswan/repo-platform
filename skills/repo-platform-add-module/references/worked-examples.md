@@ -19,7 +19,7 @@ git checkout -b add-nightly
 #     nightly: slow-suite-failure
 git commit -am "chore: add the nightly module"
 gh pr create
-# the plan job validates the file; merge when green, then:
+# fleet CI's plan step validates the file; merge when green, then:
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
 ```
 

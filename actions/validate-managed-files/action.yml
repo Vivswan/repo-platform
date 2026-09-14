@@ -1,6 +1,6 @@
 name: Validate Managed Files
 description: >-
-  The fleet's validate-managed-files job body: runs the validator (the
+  The fleet's validate-managed-files step body: runs the validator (the
   validator/ script directory nested in this action) over the caller's
   checkout, judging the platform's files against the ownership manifest the
   sync writer stamped, then posts the findings as one sticky PR comment plus

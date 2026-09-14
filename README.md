@@ -22,7 +22,7 @@ The measure of the design is the cost of a simple change, not the number of chec
 
 | Principle | What it means here |
 |---|---|
-| Behavior never lives in a written file | ci.yml is byte-identical in every repo; fleet-ci's `plan` job reads the registration at run time and every leg keys on its outputs. Adding a leg is one static job in the skeleton plus its platform workflow. |
+| Behavior never lives in a written file | ci.yml is byte-identical in every repo; fleet-ci's `plan` step reads the registration at run time and every leg keys on its outputs. Adding a leg is one static job in the skeleton plus its platform workflow. |
 | Fewer derived artifacts beats a better generator | What the fleet receives is written once under `files/` and copied whole; the one rendered file is each repo's `.github/settings.yml`, folded by the sync from the settings layers and the repo's overlay. The generators that remain (gitignore blocks, toolchain pin dotfiles, the theme CSS, this repo's own settings document) each have one offline drift check. |
 | One run, one order | Everything after the gate is a job in the same run, ordered by `needs`: move the `stable` tag, sync the fleet, deploy the docs. No dispatch tokens between workflows. |
 | Sync is copy, not merge | Managed files are replaced whole, split files have their managed region replaced around the repository's own sides, starters are written once, and a file no entry writes any more is deleted when it still holds the platform's own content. |
