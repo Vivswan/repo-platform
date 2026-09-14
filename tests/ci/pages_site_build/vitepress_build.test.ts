@@ -156,9 +156,14 @@ describe("the versioned vitepress deploy", () => {
     expect(latestAssets).toContain("onBeforeRouteChange=");
   });
 
-  test("renders every custom-block kind with its class and sentence-case title", () => {
+  test("renders every custom-block kind with its class and sentence-case title, and wraps each table as the one tab stop", () => {
     // vitepress's alert and container markup is what the theme's CSS targets (the title as the
     // block's first paragraph); a vitepress bump that moves it restyles every alert silently.
+    // The table wrapper is the theme's renderer rule registered in config.mts; table_wrap.test
+    // installs the rule itself, so only the built page shows the registration reached vitepress.
+    const setup = readSite(site, "latest/setup.html");
+    expect(setup).toContain('<div class="vp-table" tabindex="0"><table>');
+    expect(setup).not.toContain("<table tabindex");
     const alerts = readSite(site, "latest/alerts.html");
     const kinds = ["note", "tip", "important", "warning", "caution"];
     const titles = kinds.map((kind) =>
