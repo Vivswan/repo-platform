@@ -60,7 +60,6 @@ export interface FilesData {
  *  no repository plans. The module declaring `path` is the docs module: planSite deploys it under any name. */
 export const REQUIRED_DEFAULTS = { docsPath: "path" } as const;
 
-/** The `when` grammar's `{declaring: key}` list, over these modules. */
 function declaring(modules: Module[], key: string): Module[] {
   const names = moduleList({ declaring: key }, Object.fromEntries(modules.map((m) => [m.name, m])));
   return modules.filter((module) => names.includes(module.name));

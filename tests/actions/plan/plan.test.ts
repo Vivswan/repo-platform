@@ -389,14 +389,14 @@ describe("planSite", () => {
       "{ path: guide, tracking_label: { key: manual, default: rot, color: ABCDEF, description: Manual link rot } }",
     );
     const plan = planSite({
-      ...input("modules: [manual]"),
+      ...input("modules: [manual]\nlabels: { manual: custom-rot }"),
       modules: manual.modules,
       defaults: manual.defaults,
     });
     expect(plan).toEqual({
       siteTitle: "Demo Project",
       docs: { path: "guide", include: [] },
-      linkRot: { name: "rot", color: "ABCDEF", description: "Manual link rot" },
+      linkRot: { name: "custom-rot", color: "ABCDEF", description: "Manual link rot" },
     });
     const bare = declared("{ path: guide, tracking_label: { key: manual, default: rot } }");
     expect(() =>
