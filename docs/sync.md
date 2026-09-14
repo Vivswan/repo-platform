@@ -76,7 +76,7 @@ bun .github/scripts/sync/writer/sync.ts \
 placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, private, fuzzer_label, fuzzer_label_color, fuzzer_label_description]
 modules:
   bun: {codeql_languages: [javascript-typescript], gitignore_sources: [Node, bun], dependabot_ecosystems: [bun]}
-  fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
+  fuzzer: {gitignore_sources: [fuzzer], tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
   release-please: {}
 settings:
   baseline: files/settings/baseline.yml
@@ -91,12 +91,15 @@ files:
     region: hash
     blocks: gitignore_sources
     replace: {"[\r]": "?"}
-    upstream:
-      repository: github/gitignore
-      sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4
-      always: [Windows, macOS, Linux]
-      paths: {Windows: Global/Windows.gitignore, macOS: Global/macOS.gitignore, Linux: Global/Linux.gitignore, Node: Node.gitignore, bun: bun.gitignore}
-  - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
+    always: [Windows, macOS, Linux]
+    sources:
+      Windows: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Windows.gitignore}
+      macOS: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/macOS.gitignore}
+      Linux: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Linux.gitignore}
+      Node: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Node.gitignore}
+      bun: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: bun.gitignore}
+      fuzzer: files/fuzzer/fuzzer.gitignore
+  - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems, sources: {bun: files/bun/.github/dependabot.bun.yml}}
   - {path: .github/settings.local.yml, class: starter}
   - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}
   - {path: AGENTS.md, class: split, region: html}
@@ -117,8 +120,9 @@ mirrors:
 | `files[].source` | The source file, under `files/`, or an upstream ref `{repository, sha, path}` fetched at sync time ([Upstream refs](#upstream-refs)). Default: `files/<first when.modules entry, or base>/<path>`. |
 | `files[].when` | The selection condition (below). Absent or empty means always. |
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
-| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names one block (below); a block named twice lands once. |
-| `files[].upstream` | Managed, split, and starter entries: `{repository, sha, always, paths}`, the pin spelled once for every block value in `paths`; each value is the upstream ref `{repository, sha, <its path>}` ([Upstream refs](#upstream-refs)). A fetched block is headed in the entry's region comment, `## <value> (<repository> <path>)` under `hash`, `<!-- <value> (<repository> <path>) -->` under `html`, bare on an entry without a region, and ends with a blank line. The `always` values land on every repository, before the modules' blocks. Any other value is the module's own file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`, `.block.fuzzer.gitignore`), so every tool parses a block file by its real extension and each toolchain's `AGENTS.md` bullets stay its own under one value name. |
+| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names one block (below); a value listed twice lands once. |
+| `files[].always` | Managed, split, and starter entries: block values every repository takes, before the modules' blocks; each needs a source in `sources`. |
+| `files[].sources` | Managed, split, and starter entries: block value to its source, in the grammar of `files[].source`: a tree file under `files/`, spliced as it reads, or an upstream ref ([Upstream refs](#upstream-refs)). Every value `always` or a module lists has one, and every source is listed by one of them. |
 | `files[].replace` | Entries fetching an upstream source or blocks: literal rewrites `{<from>: <to>}` applied to every fetched body of the entry, in order (`{"[\r]": "?"}` turns the macOS template's class holding a bare CR byte, which check-typography refuses, into a one-character glob). A tree file is edited instead. |
 | `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
@@ -140,7 +144,7 @@ The loader refuses, all problems at once:
 
 - a `split` without `region`; `region` on a non-split entry
 
-- a `source` outside `files/`, or one missing from the tree (a module's own block files included)
+- a `source` or `sources` tree path outside `files/`, or one missing from the tree
 
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
 
@@ -148,11 +152,11 @@ The loader refuses, all problems at once:
 
 - a `pin` whose `file` is not a clean path under `files/`, whose `repository` is not `owner/name`, or whose `tag` does not spell `{version}` exactly once
 
-- `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source`, `blocks`, `upstream`, or `replace`, or without `overlay`
+- `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source`, `blocks`, `always`, `sources`, or `replace`, or without `overlay`
 
-- a block list that is not a list of names (letters, digits, `_`, `-`)
+- a block list that is not a list of names (letters, digits, `_`, `-`); a block value or `sources` key spelled `__proto__`, which the schema would drop
 
-- an upstream ref (a `source` object, or `upstream`) whose `repository` is not `owner/name`, whose `sha` is not 40 lowercase hex characters, or whose path is not a clean path of letters, digits, `. _ - /`; an `upstream` naming no path; an `always` value `paths` does not name; a `paths` value no module lists; `replace` on an entry fetching nothing
+- an upstream ref (a `source` object, or a `sources` value) whose `repository` is not `owner/name`, whose `sha` is not 40 lowercase hex characters, or whose path is not a clean path of letters, digits, `. _ - /`; a value `always` or a module lists that `sources` does not name; a `sources` value neither `always` nor a module lists; `replace` on an entry fetching nothing
 
 - an `overlay` path that is not clean, is the entry's own path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter; a conditional one a starter with the same `when`)
 
@@ -166,11 +170,13 @@ The loader refuses, all problems at once:
 
 ## Upstream refs
 
-An upstream ref is `{repository, sha, path}`: a file of a github.com repository at one pinned commit. It may stand where a tree source stands (`files[].source`) or name a block value (`files[].upstream.paths`), and both read through one fetcher.
+An upstream ref is `{repository, sha, path}`: a file of a github.com repository at one pinned commit. It may stand where a tree source stands, as `files[].source` or a `files[].sources` value, and both read through one fetcher.
 
 - Fetched from `https://raw.githubusercontent.com/<repository>/<sha>/<path>` (`--upstream` swaps the host), every ref once per sync and before any file is written. A fetch that fails or answers anything but 200 fails the sync with one `::error::` line, nothing written.
 
-- The body is normalized (CRLF to LF, trailing spaces and tabs stripped, surrounding blank lines dropped), then rewritten by the entry's `replace`. As a source it is the entry's text; as a block it is headed by the entry's region (`files[].upstream` above).
+- The body is normalized (CRLF to LF, trailing spaces and tabs stripped, surrounding blank lines dropped), then rewritten by the entry's `replace`. As a source it is the entry's text.
+
+- As a block it is headed in the entry's region comment, `## <value> (<repository> <path>)` under `hash`, `<!-- <value> (<repository> <path>) -->` under `html`, bare on an entry without a region, and ends with a blank line.
 
 - Two syncs render the same bytes until [refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) moves the pin: weekly, its `commit` leg moves every distinct `{repository, sha}` the data file spells to that repository's HEAD by one PR on `automation/refresh-commit-pins`, its body each fetched file's diff between the two commits; the next sync renders the change wherever the file lands. The workflow's other leg moves the modules' release pins ([toolchains.md](toolchains.md#keeping-the-pins-fresh)) on a branch of their own.
 
@@ -199,12 +205,12 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 
 A fleet mirror carries no `when`: every repository gets its targets, save one its `except` names.
 
-| `blocks` key | Entry | Block files |
+| `blocks` key | Entry | Block sources |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` (split, `upstream: github/gitignore` at a pinned sha) | the github/gitignore templates the entry's `upstream.paths` register, fetched at the pin by every sync (`Global/Windows.gitignore`, `Global/macOS.gitignore`, `Global/Linux.gitignore` on every repository through `always`; the Node template both JavaScript toolchains list lands once); the fuzzer's `files/fuzzer/.block.fuzzer.gitignore`, its failure directory, is the module's own |
-| `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.block.<ecosystem>.yml`, appended at the anchor line that ends the source |
-| `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.block.toolchain.md`, the module's Toolchain bullets, appended after the region body |
-| `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.block.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
+| `gitignore_sources` | `.gitignore` (split) | github/gitignore templates at one pinned sha, fetched by every sync (`Global/Windows.gitignore`, `Global/macOS.gitignore`, `Global/Linux.gitignore` on every repository through `always`; the Node template both JavaScript toolchains list lands once); the fuzzer's failure directory from `files/fuzzer/fuzzer.gitignore` |
+| `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.<ecosystem>.yml`, appended at the anchor line that ends the source |
+| `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.toolchain.md`, the module's Toolchain bullets, appended after the region body |
+| `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
 
 | Module data key | Meaning | Reader |
 | --- | --- | --- |
@@ -212,8 +218,8 @@ A fleet mirror carries no `when`: every repository gets its targets, save one it
 | `codeql_languages` | the CodeQL languages the toolchain contributes; the plan folds the selected modules' lists into one deduplicated matrix | the fleet plan |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
 | `gitignore_sources` | the github/gitignore templates and platform-authored blocks the module adds (its `blocks` list) | the writer |
-| `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
-| `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
+| `agents_toolchain` | the AGENTS.md block list, the module's own name | the writer |
+| `toolchain_steps` | the block list, the module's own name, of the three starter workflows that carry per-toolchain steps | the writer |
 | `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
 | `pin` | `{file, repository, tag}`: the module's version dotfile under `files/`, the github.com repository whose latest release it follows, and that repository's release tag with `{version}` where the version stands ([toolchains.md](toolchains.md#keeping-the-pins-fresh)) | the refresh workflow |

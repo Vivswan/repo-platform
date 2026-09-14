@@ -26,8 +26,8 @@ modules:
     codeql_languages: [javascript-typescript]
     dependabot_ecosystems: [bun]
     gitignore_sources: [Node, bun]
-    agents_toolchain: [toolchain]
-    toolchain_steps: [toolchain]
+    agents_toolchain: [bun]
+    toolchain_steps: [bun]
   deno:
     description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
     pin:
@@ -37,20 +37,20 @@ modules:
     codeql_languages: [javascript-typescript]
     dependabot_ecosystems: [deno]
     gitignore_sources: [Deno, Node]
-    agents_toolchain: [toolchain]
-    toolchain_steps: [toolchain]
+    agents_toolchain: [deno]
+    toolchain_steps: [deno]
   uv:
     description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
     codeql_languages: [python]
     dependabot_ecosystems: [uv]
     gitignore_sources: [Python]
-    agents_toolchain: [toolchain]
-    toolchain_steps: [toolchain]
+    agents_toolchain: [uv]
+    toolchain_steps: [uv]
   rust:
     description: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
     dependabot_ecosystems: [cargo]
     gitignore_sources: [Rust]
-    agents_toolchain: [toolchain]
+    agents_toolchain: [rust]
   site:
     description: one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme)
     path: docs
@@ -102,21 +102,26 @@ files:
     region: hash
     blocks: gitignore_sources
     replace: {"[\r]": "?"}
-    upstream:
-      repository: github/gitignore
-      sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4
-      always: [Windows, macOS, Linux]
-      paths:
-        Windows: Global/Windows.gitignore
-        macOS: Global/macOS.gitignore
-        Linux: Global/Linux.gitignore
-        Node: Node.gitignore
-        bun: bun.gitignore
-        Deno: Deno.gitignore
-        Python: Python.gitignore
-        Rust: Rust.gitignore
+    always: [Windows, macOS, Linux]
+    sources:
+      Windows: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Windows.gitignore}
+      macOS: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/macOS.gitignore}
+      Linux: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Linux.gitignore}
+      Node: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Node.gitignore}
+      bun: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: bun.gitignore}
+      Deno: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Deno.gitignore}
+      Python: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Python.gitignore}
+      Rust: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Rust.gitignore}
+      fuzzer: files/fuzzer/fuzzer.gitignore
   - {path: .github/CODEOWNERS, class: split, region: hash}
-  - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
+  - path: .github/dependabot.yml
+    class: managed
+    blocks: dependabot_ecosystems
+    sources:
+      bun: files/bun/.github/dependabot.bun.yml
+      deno: files/deno/.github/dependabot.deno.yml
+      uv: files/uv/.github/dependabot.uv.yml
+      cargo: files/rust/.github/dependabot.cargo.yml
   - {path: .github/actionlint.yaml, class: starter}
   - {path: .github/instructions/review.instructions.md, class: managed}
   # The overlay starter precedes the rendered document, which reads the
@@ -124,21 +129,50 @@ files:
   - {path: .github/settings.local.yml, class: starter}
   - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}
   - {path: .github/workflows/ci.yml, class: managed}
-  - {path: .github/workflows/checks.yml, class: starter, blocks: toolchain_steps}
+  - path: .github/workflows/checks.yml
+    class: starter
+    blocks: toolchain_steps
+    sources:
+      bun: files/bun/.github/workflows/checks.toolchain.yml
+      deno: files/deno/.github/workflows/checks.toolchain.yml
+      uv: files/uv/.github/workflows/checks.toolchain.yml
   - {path: .github/workflows/post-green.yml, class: starter}
   - {path: .github/workflows/update-release.yml, class: starter}
   - {path: .github/workflows/update-release-pr.yml, class: starter}
   - {path: .github/actions/site-build/action.yml, class: starter}
-  - {path: .github/workflows/copilot-setup-steps.yml, class: starter, blocks: toolchain_steps}
+  - path: .github/workflows/copilot-setup-steps.yml
+    class: starter
+    blocks: toolchain_steps
+    sources:
+      bun: files/bun/.github/workflows/copilot-setup-steps.toolchain.yml
+      deno: files/deno/.github/workflows/copilot-setup-steps.toolchain.yml
+      uv: files/uv/.github/workflows/copilot-setup-steps.toolchain.yml
   - {path: .gitleaks.toml, class: starter}
   - {path: .yamllint, class: managed}
   - {path: .github/workflows/auto-assign.yml, class: managed}
   - {path: .github/workflows/sync-branch.yml, class: managed}
-  - {path: .github/workflows/auto-format.yml, class: starter, when: {any: {declaring: toolchain_steps}}, blocks: toolchain_steps}
+  - path: .github/workflows/auto-format.yml
+    class: starter
+    when: {any: {declaring: toolchain_steps}}
+    blocks: toolchain_steps
+    sources:
+      bun: files/bun/.github/workflows/auto-format.toolchain.yml
+      deno: files/deno/.github/workflows/auto-format.toolchain.yml
+      uv: files/uv/.github/workflows/auto-format.toolchain.yml
   - {path: .typography-allow, class: managed, when: {without: [release-please]}}
   - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
   - {path: AGENTS.md, class: split, region: html, when: {without: {declaring: agents_toolchain}}}
-  - {path: AGENTS.md, class: split, region: html, when: {any: {declaring: agents_toolchain}}, source: files/base/AGENTS.toolchain.md, blocks: agents_toolchain}
+  - path: AGENTS.md
+    class: split
+    region: html
+    when: {any: {declaring: agents_toolchain}}
+    source: files/base/AGENTS.toolchain.md
+    blocks: agents_toolchain
+    sources:
+      bun: files/bun/AGENTS.toolchain.md
+      deno: files/deno/AGENTS.toolchain.md
+      uv: files/uv/AGENTS.toolchain.md
+      rust: files/rust/AGENTS.toolchain.md
   - {path: LICENSE.md, class: split, region: html, when: {without: [custom-license]}}
   # --- modules
   - {path: .bun-version, class: managed, when: {modules: [bun]}}

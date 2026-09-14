@@ -22,7 +22,7 @@ modules:
   fuzzer: {}
 files:
   - { path: .github/workflows/ci.yml, class: managed }
-  - { path: .gitignore, class: split, region: hash, blocks: gitignore_sources }
+  - { path: .gitignore, class: split, region: hash, blocks: gitignore_sources, sources: {Node: files/bun/Node.gitignore, Bun: files/bun/Bun.gitignore} }
   - path: .github/workflows/docs-site.yml
     class: managed
     when: { modules: [docs-site], without: [pages] }
@@ -113,15 +113,15 @@ describe("verifySources", () => {
   const BLOCKS = [
     "placeholders: []",
     "modules:",
-    "  bun: { eco: [x] }",
-    "  deno: { eco: [x] }",
+    "  bun: { eco: [bun] }",
+    "  deno: { eco: [deno] }",
     "files:",
-    "  - { path: d.yml, class: managed, blocks: eco }",
-    "  - { path: s.yml, class: starter, blocks: eco, when: { modules: [bun] }, source: files/base/s.yml }",
+    "  - { path: d.yml, class: managed, blocks: eco, sources: {bun: files/bun/d.yml, deno: files/deno/d.yml} }",
+    "  - { path: s.yml, class: starter, blocks: eco, when: { modules: [bun] }, source: files/base/s.yml, sources: {bun: files/bun/s.yml, deno: files/deno/s.yml} }",
     "  - { path: plain.yml, class: managed }",
-    "  - { path: shared-a.yml, class: managed, blocks: eco, source: files/base/shared-anchor.yml }",
+    "  - { path: shared-a.yml, class: managed, blocks: eco, source: files/base/shared-anchor.yml, sources: {bun: files/bun/shared-a.yml, deno: files/deno/shared-a.yml} }",
     "  - { path: shared-b.yml, class: managed, source: files/base/shared-anchor.yml }",
-    "  - { path: twice.yml, class: managed, blocks: eco, source: files/base/twice.yml }",
+    "  - { path: twice.yml, class: managed, blocks: eco, source: files/base/twice.yml, sources: {bun: files/bun/twice.yml, deno: files/deno/twice.yml} }",
   ].join("\n");
 
   // The tree walk fails CLOSED: a block file of a module that left, or a layer file dropped from the declaration,
@@ -135,9 +135,9 @@ describe("verifySources", () => {
       tree: {
         "base/.github/workflows/ci.yml": "",
         "base/.gitignore": "",
-        "bun/.block.Node.gitignore": "## Node\n",
-        "bun/.block.Bun.gitignore": "## Bun\n",
-        "bun/.gitignore.block.Node": "## Node\n",
+        "bun/Node.gitignore": "## Node\n",
+        "bun/Bun.gitignore": "## Bun\n",
+        "bun/Old.gitignore": "## Old\n",
         "bun/settings.yml": "labels: []\n",
         "pages/settings.yml": "labels: []\n",
         "docs-site/docs-site.standalone.yml": "",
@@ -145,7 +145,7 @@ describe("verifySources", () => {
         "fuzzer/.github/workflows/nightly-fuzz.yml": "",
       },
       problems: [
-        "files/bun/.gitignore.block.Node is read by no entry, block name, or settings layer",
+        "files/bun/Old.gitignore is read by no entry, block name, or settings layer",
         "files/bun/settings.yml is read by no entry, block name, or settings layer",
         "files/pages/settings.yml is read by no entry, block name, or settings layer",
       ],
@@ -156,14 +156,14 @@ describe("verifySources", () => {
       tree: {
         "base/.github/workflows/ci.yml": "name: {{project_name}} {{owner}}\n",
         "base/.gitignore": "node_modules\n",
-        "bun/.block.Node.gitignore": "*.log\n# END REPO-PLATFORM MANAGED\n",
-        "bun/.block.Bun.gitignore": "bun.lockb\n",
+        "bun/Node.gitignore": "*.log\n# END REPO-PLATFORM MANAGED\n",
+        "bun/Bun.gitignore": "bun.lockb\n",
         "docs-site/docs-site.standalone.yml": "",
         "docs-site/docs-site.with-pages.yml": "",
       },
       problems: [
         "source files/base/.github/workflows/ci.yml uses unlisted placeholder(s) {{owner}}",
-        "source files/bun/.block.Node.gitignore mentions the hash region markers the writer adds itself",
+        "source files/bun/Node.gitignore mentions the hash region markers the writer adds itself",
         "source files/fuzzer/.github/workflows/nightly-fuzz.yml is missing from the tree",
       ],
     },
@@ -177,21 +177,21 @@ describe("verifySources", () => {
         "base/plain.yml": "{{blocks}}\n",
         "base/shared-anchor.yml": "{{blocks}}\n",
         "base/twice.yml": "{{blocks}}\n{{blocks}}\n",
-        "bun/d.block.x.yml": "one\n",
-        "deno/d.block.x.yml": "two\n",
-        "bun/s.block.x.yml": "{{blocks}}\n",
-        "bun/shared-a.block.x.yml": "",
-        "deno/shared-a.block.x.yml": "",
-        "bun/twice.block.x.yml": "",
-        "deno/twice.block.x.yml": "",
+        "bun/d.yml": "one\n",
+        "deno/d.yml": "two\n",
+        "bun/s.yml": "{{blocks}}\n",
+        "bun/shared-a.yml": "",
+        "deno/shared-a.yml": "",
+        "bun/twice.yml": "",
+        "deno/twice.yml": "",
       },
       problems: [
         "source files/base/d.yml mentions {{blocks}} mid-line; it must be a line of its own",
         "source files/base/plain.yml uses unlisted placeholder(s) {{blocks}}",
         "source files/base/shared-anchor.yml uses unlisted placeholder(s) {{blocks}}",
         "source files/base/twice.yml mentions {{blocks}} more than once",
-        "source files/bun/s.block.x.yml uses unlisted placeholder(s) {{blocks}}",
-        "source files/deno/s.block.x.yml is missing from the tree",
+        "source files/bun/s.yml uses unlisted placeholder(s) {{blocks}}",
+        "source files/deno/s.yml is missing from the tree",
       ],
     },
     {

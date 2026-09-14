@@ -142,9 +142,9 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
       if (entry.class === "split") own.regions.add(entry.region);
     }
     // A block file is spliced into the source, so it is read like one but may not carry the anchor itself.
-    for (const block of blockSources(config, entry, allModules)) {
-      if (block.kind !== "tree") continue;
-      const used = use(block.source);
+    for (const { source } of blockSources(config, entry, allModules)) {
+      if (typeof source !== "string") continue;
+      const used = use(source);
       used.entries += 1;
       if (entry.class === "split") used.regions.add(entry.region);
     }

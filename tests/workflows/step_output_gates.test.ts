@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { parseFilesConfig } from "../../actions/plan/files_config.ts";
 
 // GitHub reads an unrun step's ABSENT output as the number 0, so a condition that tests a step output
 // negatively passes when the step never ran, wherever the guarded step is a push, a PR, or an issue
@@ -274,11 +275,21 @@ jobs:
   });
 });
 
-/** A shipped file as a target's workflow parses: placeholders stubbed, and a `.block.` file (a step list
- *  the writer splices at a workflow's `{{blocks}}` line, indented for that spot) wrapped as one job. */
-function asWorkflow(name: string, text: string): string {
+/** The tree files files.yml splices into a workflow: each a step list indented for its `{{blocks}}` line, wherever it sits under files/. */
+const fragments = new Set(
+  parseFilesConfig(readFileSync(join(root, "files.yml"), "utf-8")).files.flatMap((entry) =>
+    "sources" in entry && entry.path.startsWith(".github/workflows/")
+      ? Object.values(entry.sources)
+          .filter((source): source is string => typeof source === "string")
+          .map((source) => join(root, "files", source))
+      : [],
+  ),
+);
+
+/** A shipped file as a target's workflow parses: placeholders stubbed, and a fragment wrapped as one job. */
+function asWorkflow(fragment: boolean, text: string): string {
   const stubbed = text.replaceAll(/^\{\{blocks\}\}$/gm, "").replaceAll(/\{\{[\w-]+\}\}/g, "x");
-  return name.includes(".block.") ? `jobs:\n  spliced:\n    steps:\n${stubbed}` : stubbed;
+  return fragment ? `jobs:\n  spliced:\n    steps:\n${stubbed}` : stubbed;
 }
 
 describe("asWorkflow", () => {
@@ -291,12 +302,10 @@ describe("asWorkflow", () => {
       "        run: bun x format",
       "",
     ].join("\n");
-    expect(negativeGates(asWorkflow("auto-format.block.toolchain.yml", block))).toEqual([
+    expect(negativeGates(asWorkflow(true, block))).toEqual([
       "step \"Format\": steps.probe.outputs.changed != 'true'",
     ]);
-    expect(
-      negativeGates(asWorkflow("checks.block.toolchain.yml", "      # comments only\n")),
-    ).toEqual([]);
+    expect(negativeGates(asWorkflow(true, "      # comments only\n"))).toEqual([]);
   });
 });
 
@@ -311,15 +320,15 @@ describe("every workflow tests step outputs positively", () => {
     .map((entry) => join(root, "files", entry.name, ".github/workflows"))
     .filter((dir) => existsSync(dir))
     .flatMap(workflowsUnder);
-  const files = [...own, ...shipped];
+  const files = [...new Set([...own, ...shipped, ...fragments])];
 
   test("the scan reaches the operator's and the fleet's workflows (ARMED)", () => {
     expect(own.length).toBeGreaterThan(2);
-    expect(shipped.filter((path) => path.includes(".block.")).length).toBeGreaterThan(2);
-    expect(shipped.filter((path) => !path.includes(".block.")).length).toBeGreaterThan(2);
+    expect(fragments.size).toBeGreaterThan(2);
+    expect(shipped.filter((path) => !fragments.has(path)).length).toBeGreaterThan(2);
   });
 
   test.each(files.map((path) => [relative(root, path), path]))("%s", (_rel, path) => {
-    expect(negativeGates(asWorkflow(path, readFileSync(path, "utf8")))).toEqual([]);
+    expect(negativeGates(asWorkflow(fragments.has(path), readFileSync(path, "utf8")))).toEqual([]);
   });
 });

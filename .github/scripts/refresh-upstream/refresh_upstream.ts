@@ -69,7 +69,7 @@ export function pins(refs: UpstreamRef[]): CommitPin[] {
   return [...seen.values()].map((pin) => ({ ...pin, paths: [...pin.paths].sort() }));
 }
 
-/** Every mapping spelling the pin (a source ref, a registry) moves together, by the sha scalar's own text range so the
+/** Every mapping spelling the pin (an entry's source or a block's source) moves together, by the sha scalar's own text range so the
  *  document keeps its bytes outside the sha scalar; a quoted pin comes back bare. The repository is part of the match,
  *  so another repository at the same sha stays put. */
 export function repin(

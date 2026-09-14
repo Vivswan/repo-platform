@@ -54,10 +54,10 @@ export function renderSourced(
   const raw = (rel: string) => readFileSync(join(tree, rel), "utf-8");
   const fetched = (ref: UpstreamRef) => rewritten(upstream.body(ref), entry.replace);
   const region = entry.class === "split" ? entry.region : null;
-  const blocks = blockSources(config, entry, modules).map((block) =>
-    block.kind === "tree"
-      ? raw(block.source)
-      : upstreamBlock(region, block.value, block.ref, fetched(block.ref)),
+  const blocks = blockSources(config, entry, modules).map(({ value, source }) =>
+    typeof source === "string"
+      ? raw(source)
+      : upstreamBlock(region, value, source, fetched(source)),
   );
   const source =
     typeof entry.source === "string" ? raw(entry.source) : `${fetched(entry.source)}\n`;
