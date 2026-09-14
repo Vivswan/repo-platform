@@ -66,7 +66,7 @@ The gate is ordering, not content: the apply reads nothing but the target list f
 
 ### Newest wins
 
-The `settings-repos` lane runs one apply at a time in ARRIVAL order (post-green.yml's `settings-fleet` job holds it on a call, the cron and dispatch runs hold it themselves, `cancel-in-progress: false` on both), and CI durations vary, so an older commit's run can reach the lane after a newer one's. A run therefore asks whether main's tip is still its own commit ([fleet/newest_main.ts](../.github/scripts/fleet/newest_main.ts), one `git ls-remote`): when main moved on, it stands down GREEN with the notice `superseded by <sha>`; the tip's own run or the nightly applies.
+The `settings-repos` lane runs one apply at a time in ARRIVAL order (post-green.yml's `settings-fleet` job holds it on a call, the cron and dispatch runs hold it themselves; neither cancels a run in progress), and CI durations vary, so an older commit's run can reach the lane after a newer one's. A run therefore asks whether main's tip is still its own commit ([fleet/newest_main.ts](../.github/scripts/fleet/newest_main.ts), one `git ls-remote`): when main moved on, it stands down GREEN with the notice `superseded by <sha>`; the tip's own run or the nightly applies.
 
 | Where it asks | Why there |
 | --- | --- |
@@ -162,9 +162,11 @@ The reviews are ADVISORY: each executes as a dynamic Actions workflow and posts 
 ## repo-platform itself is a target
 
 - It carries its own [.repo-platform.yml](../.repo-platform.yml) (modules and project facts) like any managed repository: the sync writes its rendered [.github/settings.yml](../.github/settings.yml) from the same layers, this registration, and its overlay ([sync.md](sync.md#this-repository-as-a-target)), and the selector picks it up like any other target.
-- Its overlay, [.github/settings.local.yml](../.github/settings.local.yml), carries its identity keys plus its one repo-specific ruleset, `stable-tag`, which only blocks deleting the `stable` tag, since every move of an existing tag is a forced update to git and any stricter rule would block the mover ([build-provenance.md](build-provenance.md#who-can-write-refstagsstable)).
+- Its overlay, [.github/settings.local.yml](../.github/settings.local.yml), carries its identity keys plus its two repo-specific rulesets:
+  - `stable-tag` only blocks deleting the `stable` tag, since every move of an existing tag is a forced update to git and any stricter rule would block the mover ([build-provenance.md](build-provenance.md#who-can-write-refstagsstable)).
+  - `main-up-to-date` requires a pull request branch to be up to date before merging, with no bypass actor: admin merges are the stale merges it refuses, and a direct push to main is refused with them unless the commit already carries a passing `all-green` run ([all-green.md](all-green.md)).
 - A stricter mover-only ruleset over the executable ref is not expressible: GitHub rejects an Integration bypass actor on a user-owned repository's ruleset (422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization"). So `stable` consumption keeps its sync-side [re-verification](build-provenance.md#provenance-is-the-commit-itself), the executable `uses: ...@stable` channel has no mover-identity enforcement beyond push access plus the deletion-only rule, and [tests/fleet/repo_settings.test.ts](../tests/fleet/repo_settings.test.ts) pins that no settings layer declares an Integration bypass actor.
-- It does NOT redeclare `main` or `non-bypassable` in its overlay: the override layer supplies them and wins, so a copy there would be silently overridden.
+- It does NOT redeclare `main` or `non-bypassable` in its overlay: an entry named like a fleet ruleset merges into it, the override's rules winning on conflict, so a copy there adds nothing, which is why the up-to-date requirement is a ruleset of its own.
 
 ## The starter and the rendered file
 
