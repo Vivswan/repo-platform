@@ -173,6 +173,7 @@
         "actions/**",
         "!scripts/run_tests.ts",
         "!tests/actions/pages-site/mermaid_labels.test.ts",
+        "!tests/shared/upstream_server.ts",
         "!actions/release-health/release-health.ts"
       ],
       "plugins": ["./biome/spawn_async.grit"]

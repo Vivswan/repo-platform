@@ -48,7 +48,7 @@ Rules that follow:
 
 ## Keeping the pins fresh
 
-The refresh-toolchains workflow (weekly cron plus manual dispatch, mirroring refresh-gitignore) bumps the pins when upstream moved:
+The refresh-toolchains workflow (weekly cron plus manual dispatch, mirroring refresh-upstream) bumps the pins when upstream moved:
 
 1. Fetch the latest upstream versions: bun's latest GitHub release, Deno's latest stable release. An unreachable source, or a "latest" older than the pin (a backport surfacing as latest), aborts the run: such a view cannot tell "nothing moved" from "could not see upstream's newest".
 2. Write the version dotfile under `files/` of each toolchain that moved. A bun bump also pins `@types/bun` to the same version in every package declaring it (`bun add --dev --exact`), which is why `.github/dependabot.yml` ignores that package; the types publish per bun release, so a run before they exist fails at the add and the next run retries.

@@ -63,6 +63,9 @@ describe("the sync row's failure path", () => {
         "false",
         "--summary",
         join(runnerTemp, "summary.json"),
+        // No network in tests: the registration refusal comes first, and a fetch reaching this would fail loudly instead.
+        "--upstream",
+        "http://127.0.0.1:9",
       ],
       { cwd: REPO_ROOT, env: fixtureGitEnv(), timeoutMs: 60_000 },
     );

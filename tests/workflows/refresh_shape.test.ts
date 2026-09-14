@@ -19,7 +19,7 @@ const AUTOMATION_PR_ACTION = "peter-evans/create-pull-request";
 const TOKEN = "${{ secrets.REPO_PLATFORM_TOKEN }}";
 const SIGNATURE = `${SYNC_IDENTITY.name} <${SYNC_IDENTITY.email}>`;
 
-test.each(["refresh-gitignore", "refresh-toolchains"])(
+test.each(["refresh-upstream", "refresh-toolchains"])(
   "%s pushes its PR with the fleet PAT, never github.token, as the sync identity",
   (workflow) => {
     const source = readFileSync(join(ROOT, `.github/workflows/${workflow}.yml`), "utf8");

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -16,8 +16,12 @@ import { sha256 } from "../../actions/shared/values.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
+import { spawnUpstream } from "../shared/upstream_server";
 
 const temp = tempDirs();
+// The fixture's github/gitignore, served over loopback: the writer fetches its registered blocks from here, never the network.
+const upstream = await spawnUpstream(join(import.meta.dir, "sync_end_to_end/fixtures/upstream"));
+afterAll(() => upstream.stop());
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const FIXTURES = join(import.meta.dir, "sync_end_to_end/fixtures");
@@ -33,10 +37,16 @@ const droppedMirrorNote = (path: string) =>
 const HASH_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 const HASH_END = "# END REPO-PLATFORM MANAGED";
 const OLD_REGION = `${HASH_BEGIN}\n# old managed region\nnode_modules/\n${HASH_END}\n`;
-/** The .gitignore region the fixture writes for bun up to the END marker: the base, then the module blocks in files.yml order. */
+/** The .gitignore region the fixture writes for bun up to the END marker: the base, the three OS blocks every repository
+ *  takes, then the module blocks in files.yml order; the upstream bodies arrive normalized (`Icon[\r]`, trailing spaces). */
 const BUN_REGION_PREFIX =
   `${HASH_BEGIN}\n# Generated from github/gitignore - do not edit between the markers.\n` +
-  "node_modules/\n## Node\n*.log\n## Bun\nbun.lockb\n";
+  "node_modules/\n" +
+  "## Windows (github/gitignore Global/Windows.gitignore)\nThumbs.db\n\n" +
+  "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\nIcon?\n\n" +
+  "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n\n" +
+  "## Node (github/gitignore Node.gitignore)\n*.log\n\n" +
+  "## Bun (github/gitignore Bun.gitignore)\nbun.lockb\n\n";
 const REGION_WITHOUT_FUZZER = `${BUN_REGION_PREFIX}${HASH_END}\n`;
 const REGION_WITH_FUZZER = `${BUN_REGION_PREFIX}## Fuzzer\n/.fuzz-failures/\n${HASH_END}\n`;
 const OLD_LICENSE = "MIT License\n\nCopyright (c) 2020 Someone\n";
@@ -249,7 +259,6 @@ function spawnSync(target: string, summaryPath: string, build = BUILD, extra: st
     [
       "bun",
       SYNC,
-      ...extra,
       "--files",
       join(FIXTURES, "files.yml"),
       "--tree",
@@ -264,6 +273,9 @@ function spawnSync(target: string, summaryPath: string, build = BUILD, extra: st
       "false",
       "--summary",
       summaryPath,
+      "--upstream",
+      upstream.host,
+      ...extra,
     ],
     { cwd: REPO_ROOT, env: fixtureGitEnv(), timeoutMs: 60_000 },
   );
@@ -492,7 +504,7 @@ describe("sync.ts end to end", () => {
     expect(read(".github/workflows/docs-site.yml")).toContain("docs site (standalone)");
   });
 
-  test("rewrites the split region between the repo-owned halves with the module blocks, one Node block for two modules, the fuzzer block last", () => {
+  test("rewrites the split region between the repo-owned halves: the OS blocks every repository takes, one upstream Node block for two modules, the fuzzer block last", () => {
     expect(read(".gitignore")).toBe(
       `# my ignores above\n${REGION_WITH_FUZZER}# my ignores below\n.idea/\n`,
     );
@@ -1072,6 +1084,31 @@ describe("sync.ts over a repository that deselected the fuzzer module", () => {
   });
 });
 
+describe("sync.ts over an upstream that does not serve a registered block", () => {
+  test("exits nonzero with the one HTTP line, before anything is written", async () => {
+    const target = temp.dir("sync-e2e-upstream-target-");
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
+    );
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const before = snapshot(target);
+    const empty = await spawnUpstream(temp.dir("sync-e2e-upstream-empty-"));
+    const summary = join(temp.dir("sync-e2e-upstream-summary-"), "summary.json");
+    try {
+      expect(spawnSync(target, summary, BUILD, ["--upstream", empty.host])).toEqual({
+        exitCode: 1,
+        stdout: `::error::GET ${empty.host}/github/gitignore/0123456789abcdef0123456789abcdef01234567/Global/Windows.gitignore failed: HTTP 404\n`,
+        stderr: "",
+      });
+    } finally {
+      empty.stop();
+    }
+    expect(snapshot(target)).toEqual(before);
+    expect(existsSync(summary)).toBe(false);
+  });
+});
+
 describe("sync.ts over a --build that is not the build commit's full sha", () => {
   test.each([
     { reason: "a short sha", build: BUILD.slice(0, 12) },
@@ -1112,7 +1149,7 @@ describe("sync.ts over --previous-files", () => {
     expect(spawnSync(target, summary, BUILD, ["--previous-files", previous])).toEqual({
       exitCode: 1,
       stdout:
-        '::error::unknown or valueless argument "--previous-files" - allowed flags: --files, --tree, --target, --build, --repository, --private, --summary\n',
+        '::error::unknown or valueless argument "--previous-files" - allowed flags: --files, --tree, --target, --build, --repository, --private, --summary, --upstream\n',
       stderr: "",
     });
     expect(snapshot(target)).toEqual(before);

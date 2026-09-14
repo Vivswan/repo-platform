@@ -29,12 +29,13 @@ bun .github/scripts/sync/writer/sync.ts \
   --files files.yml --tree files \
   --target <checkout> --build <full sha> \
   --repository <owner/name> --private <true|false> \
-  [--summary <path for the JSON summary>]
+  [--summary <path for the JSON summary>] [--upstream <raw-content host>]
 ```
 
-- `--tree` is the `files/` directory itself; every `source` in `files.yml` starts with `files/` and resolves under it.
+- `--tree` is the `files/` directory itself; every tree `source` starts with `files/` and resolves under it; a ref source is fetched ([Upstream refs](#upstream-refs)).
 - `--build` is the delivery commit's full sha, 40 lowercase hex characters (`git fetch origin +refs/tags/stable:refs/tags/stable` then `git rev-parse stable^{commit}`, the forced refspec so a local tag left by an earlier fetch is refreshed). It is recorded as given: in full in the PR body, by its first 12 characters in the sync commit's subject. A short or uppercase one is refused before anything is written.
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the default `copyright_holder`.
+- `--upstream` is the host every upstream ref (below) is fetched from, `https://raw.githubusercontent.com` by default; the tests serve their fixture over loopback.
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
 - Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a `--build` that is not a full sha, a bad `files.yml`, an unreadable registration, a registration naming a module `files.yml` does not offer, a manifest record the writer cannot read ([Retirement](#retirement)), a symlinked ancestor at a path the writer touches, a directory or a symlink at the manifest or registration path, a directory at a stale record's path, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
 
@@ -43,7 +44,7 @@ bun .github/scripts/sync/writer/sync.ts \
 ```yaml
 placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, private, fuzzer_label, fuzzer_label_color, fuzzer_label_description]
 modules:
-  bun: {codeql_languages: [javascript-typescript], gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun]}
+  bun: {codeql_languages: [javascript-typescript], gitignore_sources: [Node, bun], dependabot_ecosystems: [bun]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
   release-please: {}
 settings:
@@ -54,7 +55,16 @@ settings:
   override: files/settings/override.yml
 files:
   - {path: .github/workflows/ci.yml, class: managed}
-  - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources}
+  - path: .gitignore
+    class: split
+    region: hash
+    blocks: gitignore_sources
+    replace: {"[\r]": "?"}
+    upstream:
+      repository: github/gitignore
+      sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4
+      always: [Windows, macOS, Linux]
+      paths: {Windows: Global/Windows.gitignore, macOS: Global/macOS.gitignore, Linux: Global/Linux.gitignore, Node: Node.gitignore, bun: bun.gitignore}
   - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
   - {path: .github/settings.local.yml, class: starter}
   - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}
@@ -73,10 +83,12 @@ mirrors:
 | `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. A key is a typed one (`description`, `path`, `tracking_label`, `codeql_languages`) or a list some entry's `blocks` or a `declaring` clause reads; anything else is refused (the rule under the module data table). One key carries a placeholder default: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
 | `files[].class` | `managed`, `split`, or `starter` (below). |
-| `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. |
+| `files[].source` | The source file, under `files/`, or an upstream ref `{repository, sha, path}` fetched at sync time ([Upstream refs](#upstream-refs)). Default: `files/<first when.modules entry, or base>/<path>`. |
 | `files[].when` | The selection condition (below). Absent or empty means always. |
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
-| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source two toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
+| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names one block (below); a block named twice lands once. |
+| `files[].upstream` | Managed, split, and starter entries: `{repository, sha, always, paths}`, the pin spelled once for every block value in `paths`; each value is the upstream ref `{repository, sha, <its path>}` ([Upstream refs](#upstream-refs)). A fetched block is headed in the entry's region comment, `## <value> (<repository> <path>)` under `hash`, `<!-- <value> (<repository> <path>) -->` under `html`, bare on an entry without a region, and ends with a blank line. The `always` values land on every repository, before the modules' blocks. Any other value is the module's own file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`, `.block.fuzzer.gitignore`), so every tool parses a block file by its real extension and each toolchain's `AGENTS.md` bullets stay its own under one value name. |
+| `files[].replace` | Entries fetching an upstream source or blocks: literal rewrites `{<from>: <to>}` applied to every fetched body of the entry, in order (`{"[\r]": "?"}` turns the macOS template's class holding a bare CR byte, which check-typography refuses, into a one-character glob). A tree file is edited instead. |
 | `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
 | `settings.baseline`, `settings.layers`, `settings.override` | The settings layers ([settings.md](settings.md)), clean paths under `files/`, present exactly when a `render: settings` entry exists: the baseline, then each `{source, when}` layer whose `when` holds (absent means always) in declared order, then the override above the repository's overlay. |
@@ -89,15 +101,25 @@ The loader refuses, all problems at once:
 - a placeholder the writer cannot derive, or a source file using a token outside `placeholders`
 - a `when` naming a module absent from `modules`, or declaring a key no module carries
 - a `split` without `region`; `region` on a non-split entry
-- a `source` outside `files/`, or one missing from the tree (block files included)
+- a `source` outside `files/`, or one missing from the tree (a module's own block files included)
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
 - a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
-- `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source` or `blocks`, or without `overlay`
+- `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source`, `blocks`, `upstream`, or `replace`, or without `overlay`
+- a block list that is not a list of names (letters, digits, `_`, `-`)
+- an upstream ref (a `source` object, or `upstream`) whose `repository` is not `owner/name`, whose `sha` is not 40 lowercase hex characters, or whose path is not a clean path of letters, digits, `. _ - /`; an `upstream` naming no path; an `always` value `paths` does not name; a `paths` value no module lists; `replace` on an entry fetching nothing
 - an `overlay` path that is not clean, is the entry's own path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter; a conditional one a starter with the same `when`)
 - a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`; a layer source declared twice; a layer `when` naming a module absent from `modules` or declaring a key no module carries
 - a declared settings layer missing from the tree, not a YAML mapping, or naming one label (case-insensitively) or one ruleset twice
 - two entries for one `path` whose conditions can both hold (below)
 - a `files` entry at `.github/repo-platform-manifest.json`, the manifest the writer itself writes last
+
+## Upstream refs
+
+An upstream ref is `{repository, sha, path}`: a file of a github.com repository at one pinned commit. It may stand where a tree source stands (`files[].source`) or name a block value (`files[].upstream.paths`), and both read through one fetcher.
+
+- Fetched from `https://raw.githubusercontent.com/<repository>/<sha>/<path>` (`--upstream` swaps the host), every ref once per sync and before any file is written. A fetch that fails or answers anything but 200 fails the sync with one `::error::` line, nothing written.
+- The body is normalized (CRLF to LF, trailing spaces and tabs stripped, surrounding blank lines dropped), then rewritten by the entry's `replace`. As a source it is the entry's text; as a block it is headed by the entry's region (`files[].upstream` above).
+- Two syncs render the same bytes until [refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) moves the pin: weekly, every distinct `{repository, sha}` the data file spells moves to that repository's HEAD by one PR here, its body each fetched file's diff between the two commits; the next sync renders the change wherever the file lands.
 
 ## files.yml reference
 
@@ -126,7 +148,7 @@ A fleet mirror carries no `when`: every repository gets its targets, save one it
 
 | `blocks` key | Entry | Block files |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.block.<Source>.gitignore`, one github/gitignore template or platform-authored section (`PLATFORM_SECTIONS` in `scripts/generate/build_gitignore.ts`, the fuzzer's failure directory) each, written by that script together with `files/base/.gitignore`; the Node source two toolchains declare is byte-identical in each, so it lands once |
+| `gitignore_sources` | `.gitignore` (split, `upstream: github/gitignore` at a pinned sha) | the github/gitignore templates the entry's `upstream.paths` register, fetched at the pin by every sync (`Global/Windows.gitignore`, `Global/macOS.gitignore`, `Global/Linux.gitignore` on every repository through `always`; the Node template both JavaScript toolchains list lands once); the fuzzer's `files/fuzzer/.block.fuzzer.gitignore`, its failure directory, is the module's own |
 | `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.block.<ecosystem>.yml`, appended at the anchor line that ends the source |
 | `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.block.toolchain.md`, the module's Toolchain bullets, appended after the region body |
 | `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.block.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
@@ -136,7 +158,7 @@ A fleet mirror carries no `when`: every repository gets its targets, save one it
 | `description` | the module's one-line description | docs and the PR body |
 | `codeql_languages` | the CodeQL languages the toolchain contributes; the plan folds the selected modules' lists into one deduplicated matrix | the fleet plan |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
-| `gitignore_sources` | the github/gitignore templates and platform-authored sections the module adds (its `blocks` list) | the writer |
+| `gitignore_sources` | the github/gitignore templates and platform-authored blocks the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
 | `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |

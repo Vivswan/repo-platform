@@ -1,16 +1,25 @@
 // One overlay starter serves both visibilities: the writer fills `{{private}}` from its own flag.
 
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { parseFilesConfig } from "../../actions/plan/files_config";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
+import { spawnStubUpstream } from "../shared/upstream_server";
 
 const temp = tempDirs();
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const OVERLAY = ".github/settings.local.yml";
+
+// This test reads the overlay alone, so every upstream file is a stub and never the network.
+const upstream = await spawnStubUpstream(
+  parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
+  temp.dir("overlay-starter-upstream-"),
+);
+afterAll(() => upstream.stop());
 
 function writtenOverlay(isPrivate: boolean): string {
   const target = temp.dir(`overlay-starter-${isPrivate ? "private" : "public"}-`);
@@ -34,6 +43,8 @@ function writtenOverlay(isPrivate: boolean): string {
       "owner/demo",
       "--private",
       String(isPrivate),
+      "--upstream",
+      upstream.host,
     ],
     { cwd: REPO_ROOT, timeoutMs: 60_000 },
   );

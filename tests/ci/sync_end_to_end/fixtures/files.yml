@@ -42,6 +42,17 @@ files:
     class: split
     region: hash
     blocks: gitignore_sources
+    replace: {"[\r]": "?"}
+    upstream:
+      repository: github/gitignore
+      sha: 0123456789abcdef0123456789abcdef01234567
+      always: [Windows, macOS, Linux]
+      paths:
+        Windows: Global/Windows.gitignore
+        macOS: Global/macOS.gitignore
+        Linux: Global/Linux.gitignore
+        Node: Node.gitignore
+        Bun: Bun.gitignore
   - path: AGENTS.md
     class: split
     region: html

@@ -85,7 +85,27 @@ files:
   # --- base: every repository
   - {path: .editorconfig, class: split, region: hash}
   - {path: .gitattributes, class: split, region: hash}
-  - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources}
+  # The github/gitignore templates are fetched at the pin by every sync; refresh-upstream.yml moves the pin weekly.
+  # macOS names its Finder icon file "Icon\r", which the template spells as a class holding a bare CR byte; text gates
+  # refuse the byte, so the rendered line matches the file by a one-character glob instead.
+  - path: .gitignore
+    class: split
+    region: hash
+    blocks: gitignore_sources
+    replace: {"[\r]": "?"}
+    upstream:
+      repository: github/gitignore
+      sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4
+      always: [Windows, macOS, Linux]
+      paths:
+        Windows: Global/Windows.gitignore
+        macOS: Global/macOS.gitignore
+        Linux: Global/Linux.gitignore
+        Node: Node.gitignore
+        bun: bun.gitignore
+        Deno: Deno.gitignore
+        Python: Python.gitignore
+        Rust: Rust.gitignore
   - {path: .github/CODEOWNERS, class: split, region: hash}
   - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
   - {path: .github/actionlint.yaml, class: starter}

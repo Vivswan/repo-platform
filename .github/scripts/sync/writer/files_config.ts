@@ -1,10 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  BLOCK_VALUE_RE,
-  blockSourcePath,
+  blockSources,
   checkFilesConfig,
-  type FileEntry,
   type FilesConfig,
   FilesConfigError,
   type ModuleData,
@@ -114,53 +112,6 @@ export function trackingTuples(config: FilesConfig): TrackingTuples {
   return { tuples, problems };
 }
 
-export interface BlockSource {
-  module: string;
-  value: string;
-  source: string;
-}
-
-export function blockCandidates(
-  config: FilesConfig,
-  entry: FileEntry,
-  modules: string[],
-): BlockSource[] {
-  if ("render" in entry || entry.blocks === undefined) return [];
-  const candidates: BlockSource[] = [];
-  for (const module of Object.keys(config.modules)) {
-    if (!modules.includes(module)) continue;
-    const values = config.modules[module][entry.blocks];
-    if (values === undefined) continue;
-    if (!Array.isArray(values) || values.some((value) => !BLOCK_VALUE_RE.test(String(value)))) {
-      throw new Error(
-        `files.yml: modules.${module}.${entry.blocks} must be a list of block names (letters, digits, _ -)`,
-      );
-    }
-    for (const value of values as string[]) {
-      candidates.push({ module, value, source: `${module}/${blockSourcePath(entry.path, value)}` });
-    }
-  }
-  return candidates;
-}
-
-/** Deduplicated by bytes, not by value name: a gitignore block three toolchains declare lands once, while each toolchain's own AGENTS.md bullets under one value name all land. */
-export function blockSources(
-  config: FilesConfig,
-  entry: FileEntry,
-  modules: string[],
-  tree: string,
-): string[] {
-  const seen: Buffer[] = [];
-  const sources: string[] = [];
-  for (const candidate of blockCandidates(config, entry, modules)) {
-    const bytes = readFileSync(join(tree, candidate.source));
-    if (seen.some((earlier) => earlier.equals(bytes))) continue;
-    seen.push(bytes);
-    sources.push(candidate.source);
-  }
-  return sources;
-}
-
 interface SourceUse {
   regions: Set<RegionKind>;
   /** The anchor is allowed only when every entry reading the source splices blocks into it. */
@@ -183,15 +134,19 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
   const allModules = Object.keys(config.modules);
   for (const entry of config.files) {
     if ("render" in entry) continue;
-    const own = use(entry.source);
-    own.entries += 1;
-    if (entry.blocks !== undefined) own.withBlocks += 1;
-    if (entry.class === "split") own.regions.add(entry.region);
+    // A fetched source is not in the tree; renderRegion refuses a body mentioning the markers at render time.
+    if (typeof entry.source === "string") {
+      const own = use(entry.source);
+      own.entries += 1;
+      if (entry.blocks !== undefined) own.withBlocks += 1;
+      if (entry.class === "split") own.regions.add(entry.region);
+    }
     // A block file is spliced into the source, so it is read like one but may not carry the anchor itself.
-    for (const candidate of blockCandidates(config, entry, allModules)) {
-      const block = use(candidate.source);
-      block.entries += 1;
-      if (entry.class === "split") block.regions.add(entry.region);
+    for (const block of blockSources(config, entry, allModules)) {
+      if (block.kind !== "tree") continue;
+      const used = use(block.source);
+      used.entries += 1;
+      if (entry.class === "split") used.regions.add(entry.region);
     }
   }
   for (const [source, { regions, entries, withBlocks }] of [...sources].sort()) {

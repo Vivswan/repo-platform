@@ -1,18 +1,28 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { parseFilesConfig } from "../../actions/plan/files_config";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
+import { spawnStubUpstream } from "../shared/upstream_server";
 
 const temp = tempDirs();
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 const SCRIPT = join(REPO_ROOT, ".github/scripts/ci/write_fleet_lint_tree.ts");
+// The lint reads workflows, so every upstream file is a stub and never the network.
+const upstream = await spawnStubUpstream(
+  parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
+  temp.dir("fleet-lint-upstream-"),
+);
+afterAll(() => upstream.stop());
 
 describe("write_fleet_lint_tree.ts", () => {
   test("lands the all-modules and no-module selections, every workflow parseable and placeholder-free", () => {
     const dest = temp.dir("fleet-lint-");
-    const run = boundedSpawnSync([process.execPath, SCRIPT, dest], { cwd: REPO_ROOT });
+    const run = boundedSpawnSync([process.execPath, SCRIPT, dest, "--upstream", upstream.host], {
+      cwd: REPO_ROOT,
+    });
     expect([run.exitCode, run.stderr.toString()]).toEqual([0, ""]);
     const stdout = run.stdout.toString();
     expect(stdout).toContain("all: ");
@@ -51,8 +61,16 @@ describe("write_fleet_lint_tree.ts", () => {
     }
   });
 
-  test("a missing or extra argument is a usage error", () => {
-    const run = boundedSpawnSync([process.execPath, SCRIPT], { cwd: REPO_ROOT });
-    expect(run.exitCode).toBe(2);
+  test.each([
+    ["no destination", []],
+    ["a flag without its host", ["dest", "--upstream"]],
+    ["an unknown flag", ["dest", "--host", "x"]],
+    ["an extra argument", ["dest", "--upstream", "x", "y"]],
+  ])("%s is a usage error", (_case, argv) => {
+    const run = boundedSpawnSync([process.execPath, SCRIPT, ...argv], { cwd: REPO_ROOT });
+    expect([run.exitCode, run.stderr.toString()]).toEqual([
+      2,
+      "usage: write_fleet_lint_tree.ts <dest> [--upstream <raw-content host>]\n",
+    ]);
   });
 });
