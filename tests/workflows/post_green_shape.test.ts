@@ -9,7 +9,7 @@ const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 interface Job {
   needs?: string[];
   if?: string;
-  concurrency?: { group: string };
+  concurrency?: { group: string; "cancel-in-progress"?: boolean };
   uses?: string;
   with?: Record<string, string>;
   outputs?: Record<string, string>;
@@ -311,6 +311,8 @@ describe("post-green wiring", () => {
     const settingsFleet = jobs["settings-fleet"];
     expect(settingsFleet.needs).toEqual(["sync-fleet"]);
     expect(settingsFleet.if).toBe("github.event_name != 'workflow_dispatch' && !cancelled()");
+    // No cancel-in-progress: GitHub's default (false) is the one value the
+    // arrival-ordered lane admits (settings-repos.yml).
     expect(settingsFleet.concurrency).toEqual({ group: "settings-repos" });
     expect(settingsFleet.uses).toBe("./.github/workflows/settings-repos.yml");
     expect(settingsFleet.with).toEqual({
@@ -329,7 +331,7 @@ describe("post-green wiring", () => {
     const settingsRepos = read(".github/workflows/settings-repos.yml");
     const doc = parseYaml(settingsRepos) as {
       on: Record<string, { inputs?: Record<string, unknown> }>;
-      concurrency: { group: string };
+      concurrency: { group: string; "cancel-in-progress"?: boolean };
     };
     expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
     expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos", "sha"]);
@@ -375,7 +377,7 @@ describe("post-green wiring", () => {
     );
     for (const text of [ciYml, skeleton]) {
       const doc = parseYaml(text) as {
-        concurrency: { group: string; "cancel-in-progress": string };
+        concurrency: { group: string; "cancel-in-progress": string | boolean };
       };
       expect(doc.concurrency).toEqual({
         group:
@@ -397,8 +399,8 @@ describe("post-green wiring", () => {
     for (const group of groupsOf(postGreen)) {
       expect(group).not.toContain("github.workflow");
     }
-    // Delivery legs never cancel a running one: an interrupted move between read and push is exactly the
-    // wedge the lease exists for (concurrency_cancel.test.ts holds the roster of lanes that do cancel).
+    // Delivery legs never cancel a running one: an interrupted move
+    // between read and push is exactly the wedge the lease exists for.
     expect(postGreen).not.toContain("cancel-in-progress: true");
     // A caller must never hold the resource its called workflow requires (the mover lane above
     // all), so ci.yml's post-green job holds no job-level lane. Asserted on the parsed job:
