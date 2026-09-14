@@ -13,7 +13,7 @@ import {
 import { MANIFEST_NAME } from "../../../shared/platform.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
-import { RESYNC } from "./manifest_shape.ts";
+import { REPAIR, RESYNC } from "./manifest_shape.ts";
 
 function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
@@ -56,16 +56,17 @@ export function checkManifestParity(ctx: Context): Finding[] {
       }
       continue;
     }
-    // A key outside the vocabulary is manifest_shape's report; this names a vocabulary field on the wrong class.
+    // A key outside the vocabulary is manifest_shape's report, and the writer refuses the record, so no remedy below
+    // applies to it; this names a vocabulary field on the wrong class.
+    if (Object.keys(entry).some((key) => !isEntryField(key))) continue;
     const stray = isRecordedClass(entry.class)
-      ? strayFields(RECORD_FIELDS[entry.class], entry).filter(isEntryField)
+      ? strayFields(RECORD_FIELDS[entry.class], entry)
       : [];
     if (stray.length > 0) {
       findings.push(
         error(
           `${where} carries ${stray.map((field) => JSON.stringify(field)).join(", ")}, which the ` +
-            `sync never records on a ${entry.class} entry; revert the edit (git history has the ` +
-            `stamped original) or ${RESYNC}`,
+            `sync never records on a ${entry.class} entry; ${REPAIR}`,
         ),
       );
       continue;
@@ -74,7 +75,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
       findings.push(
         error(
           `${where} has unknown class ${JSON.stringify(entry.class)} (expected one of ` +
-            `${RECORDED_CLASSES.join(", ")}); re-run the sync to regenerate the manifest`,
+            `${RECORDED_CLASSES.join(", ")}); ${REPAIR}`,
         ),
       );
       continue;
@@ -83,15 +84,58 @@ export function checkManifestParity(ctx: Context): Finding[] {
       findings.push(
         error(
           `${where} carries kind ${JSON.stringify(entry.kind)} - the sync records only "symlink" ` +
-            `as a mirror's kind; revert the edit (git history has the stamped original) or ${RESYNC}`,
+            `as a mirror's kind; ${REPAIR}`,
         ),
       );
       continue;
     }
+    // Readability first: every remedy below assumes a record the writer reads, and the writer refuses one it cannot.
+    // A starter carries no hash, so null here means "nothing to verify" once the class verdict is in.
+    let hash: string | null = null;
+    let split: { begin: string; end: string } | null = null;
+    if (entry.class !== "starter") {
+      const stamped = "hash" in entry ? entry.hash : undefined;
+      if (typeof stamped !== "string" || !/^[0-9a-f]{64}$/.test(stamped)) {
+        findings.push(error(`${where}: hash must be a lowercase sha256 hex digest; ${REPAIR}`));
+        continue;
+      }
+      hash = stamped;
+      if (entry.class === "split") {
+        // Every sync stamps the grammar field; the marker strings alone
+        // cannot say which grammar the writer uses, so a split entry
+        // without one is a hand edit. Checked BEFORE the marker-string shape
+        // so the grammar diagnosis comes first, not a field-shape complaint.
+        if (!("grammar" in entry)) {
+          findings.push(
+            error(
+              `${where} lacks the split grammar field every sync stamps - a hand edit; ${REPAIR}`,
+            ),
+          );
+          continue;
+        }
+        // A grammar outside GRAMMAR_IDS cannot be read by guess without verifying the wrong region.
+        if (knownGrammar(entry.grammar) === null) {
+          findings.push(
+            error(
+              `${where} declares split grammar ${JSON.stringify(entry.grammar)}, which this ` +
+                `validator does not read (one grammar exists: managed-region); ${REPAIR}`,
+            ),
+          );
+          continue;
+        }
+        if (typeof entry.begin !== "string" || typeof entry.end !== "string") {
+          findings.push(
+            error(`${where} is split but lacks its begin/end marker-line strings; ${REPAIR}`),
+          );
+          continue;
+        }
+        split = { begin: entry.begin, end: entry.end };
+      }
+    }
     // The class decides what parity verifies (a starter: nothing), so it is
     // judged before any dispatch, against the declaration the selection
     // makes live. A path no live declaration writes (a mirror target, a
-    // retired path, a deselected module's file) is dispatched as recorded.
+    // deselected module's file) is dispatched as recorded.
     const declared = ctx.classes?.get(rel);
     if (declared !== undefined && declared !== entry.class) {
       findings.push(
@@ -110,55 +154,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
       );
       continue;
     }
-    if (entry.class === "starter") continue;
-    const hash = "hash" in entry ? entry.hash : undefined;
-    if (hash !== null && !(typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash))) {
-      findings.push(
-        error(
-          `${where}: hash must be null or a lowercase sha256 hex digest; ` +
-            "re-run the sync to regenerate and restamp the manifest",
-        ),
-      );
-      continue;
-    }
-    let split: { begin: string; end: string } | null = null;
-    if (entry.class === "split") {
-      // Every sync stamps the grammar field; the marker strings alone
-      // cannot say which grammar the writer uses, so a split entry
-      // without one is a hand edit. Checked BEFORE the marker-string shape
-      // so the grammar diagnosis comes first, not a field-shape complaint.
-      if (!("grammar" in entry)) {
-        findings.push(
-          error(
-            `${where} lacks the split grammar field every sync stamps - a hand ` +
-              "edit, and the sync records manifest edits instead of healing them; " +
-              `revert the entry (git history has the stamped original) or ${RESYNC}`,
-          ),
-        );
-        continue;
-      }
-      // A grammar outside GRAMMAR_IDS cannot be read by guess without verifying the wrong region.
-      if (knownGrammar(entry.grammar) === null) {
-        findings.push(
-          error(
-            `${where} declares split grammar ${JSON.stringify(entry.grammar)}, which this ` +
-              "validator does not read (one grammar exists: managed-region); re-run " +
-              "the sync to restamp the manifest",
-          ),
-        );
-        continue;
-      }
-      if (typeof entry.begin !== "string" || typeof entry.end !== "string") {
-        findings.push(
-          error(
-            `${where} is split but lacks its begin/end marker-line strings; ` +
-              "re-run the sync to regenerate the manifest",
-          ),
-        );
-        continue;
-      }
-      split = { begin: entry.begin, end: entry.end };
-    }
+    if (hash === null) continue;
     let stat: ReturnType<typeof lstatSync> | null = null;
     try {
       stat = lstatSync(join(ctx.root, rel));
@@ -174,12 +170,10 @@ export function checkManifestParity(ctx: Context): Finding[] {
       );
       continue;
     }
-    // The occupant's kind is judged before its hash: a hash-null record over a link where a file is recorded would
-    // otherwise be offered a resync the class writer holds. A directory is judged before the recorded kind: the mirror
+    // The occupant's kind is judged before its hash. A directory is judged before the recorded kind: the mirror
     // writer treats it alike under both kinds. A mirror remedy never says to remove a reached occupant first (the
     // writer replaces a wrong-kind file or link itself, and removing a pattern's only match fails the run); it says
-    // what the re-run does at every path a record can sit on, since the validator reads no mirror declaration and no
-    // retired list.
+    // what the re-run does at every path a record can sit on, since the validator reads no mirror declaration.
     const linkRecorded =
       entry.class === "link" || (entry.class === "mirror" && entry.kind === "symlink");
     const removeThenResync = `or remove what stands at the path and ${RESYNC}`;
@@ -189,14 +183,10 @@ export function checkManifestParity(ctx: Context): Finding[] {
     const mirrorFails =
       "; a run the writer cannot finish (a declaration it cannot honour, a directory or a symbolic-link ancestor at " +
       "a path it must probe) fails by name instead";
-    const mirrorResync =
-      `${mirrorReached}; a record none reaches is dropped, or at a path files.yml retires is retired as the ` +
-      "Retirement table in docs/sync.md says (a wrong-kind or hash-null occupant is held as it stands unless a " +
-      `moved_to moves it; remove a held occupant, then re-run)${mirrorFails}`;
+    const mirrorResync = `${mirrorReached}; a record none reaches is dropped${mirrorFails}`;
     const mirrorDirectoryResync =
       `${mirrorReached}, except under a * in the pattern's last segment, which matches files and links alone and ` +
-      "passes a directory by (the run fails when it is the pattern's only match); a record none reaches is " +
-      `dropped; a directory at a path files.yml retires fails the run (remove it, then re-run)${mirrorFails}`;
+      `passes a directory by (the run fails when it is the pattern's only match); a record none reaches is dropped${mirrorFails}`;
     const resync = entry.class === "mirror" ? `or ${mirrorResync}` : removeThenResync;
     if (!stat.isFile() && !stat.isSymbolicLink()) {
       findings.push(
@@ -224,21 +214,6 @@ export function checkManifestParity(ctx: Context): Finding[] {
           `${rel}: recorded as ${entry.class} in ${MANIFEST_NAME} but is a symbolic link - the ` +
             "record (a file's content hash) cannot verify a link, which the sync never reads through; " +
             `restore the file from git history, ${resync}`,
-        ),
-      );
-      continue;
-    }
-    if (hash === null) {
-      const remedy =
-        entry.class === "mirror"
-          ? mirrorResync
-          : `the sync carries such a record as it found it: ${RESYNC} and read its report (a selected entry's ` +
-            "write, when it goes through, stamps the hash; a path files.yml retires gets its Retired row; a stale " +
-            "path is held as it stands: delete the file and its manifest entry)";
-      findings.push(
-        error(
-          `${rel}: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
-            `verify the file against - ${remedy}`,
         ),
       );
       continue;

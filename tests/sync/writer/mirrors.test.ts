@@ -41,16 +41,10 @@ function tree(files: Record<string, string>): string {
   return root;
 }
 
-function owned(
-  sources: string[],
-  writes: string[] = [],
-  retires: string[] = [],
-  stale: string[] = [],
-): OwnedPaths {
+function owned(sources: string[], writes: string[] = [], stale: string[] = []): OwnedPaths {
   return {
     sources: new Set(sources),
     writes: new Set([...sources, ...writes, ".github/repo-platform-manifest.json"]),
-    retires: new Set(retires),
     stale: new Set(stale),
     excepted: new Set(),
   };
@@ -237,19 +231,18 @@ describe("applyMirrors", () => {
           {
             source: "LICENSE.md",
             kind: "copy",
-            targets: ["LICENSE.md", "SECURITY.md", "GONE.md", "docs/**/x"],
+            targets: ["LICENSE.md", "GONE.md", "docs/**/x"],
           },
           { source: "LICENSE.md", kind: "copy", targets: [".repo-platform.yml/copy.md"] },
           { source: "README.md", kind: "copy", targets: ["skills/*/README.md"] },
         ],
         bytes({ "LICENSE.md": "L\n" }),
-        owned(["LICENSE.md"], [], ["SECURITY.md"], ["GONE.md"]),
+        owned(["LICENSE.md"], [], ["GONE.md"]),
         {},
       ),
     );
     expect(failures).toEqual([
       failure("LICENSE.md", "LICENSE.md", "the target is a path files.yml writes"),
-      failure("LICENSE.md", "SECURITY.md", "the target is a path files.yml retires"),
       failure("LICENSE.md", "GONE.md", "the target is a path a stale manifest record retires"),
       failure("LICENSE.md", "docs/**/x", "the pattern uses '**'"),
       failure("LICENSE.md", ".repo-platform.yml/copy.md", "the target sits under the registration"),
@@ -470,26 +463,24 @@ describe("applyMirrors", () => {
   // and the plan's matcher see the same names; the paths the checkout leg
   // refuses are exactly the ones the plan reports.
   test.each([
-    ["*.md", ["AGENTS.md", "LICENSE.md", "SECURITY.md"]],
+    ["*.md", ["AGENTS.md", "LICENSE.md"]],
     ["*.yml", [".repo-platform.yml"]],
     ["*/README.md", ["docs/README.md"]],
     ["docs/*", ["docs/README.md"]],
     ["skills/*/*.md", []],
     ["skills/*/README.md", []],
   ])("the writer expands %s to the paths the plan matches: %p", (pattern, refused) => {
-    const claims = owned(["LICENSE.md", "AGENTS.md"], ["docs/README.md"], ["SECURITY.md"]);
+    const claims = owned(["LICENSE.md", "AGENTS.md"], ["docs/README.md"]);
     const root = tree(
       Object.fromEntries(
-        [...claims.writes, ...claims.retires, ".repo-platform.yml", "skills/a/README.md"].map(
-          (path) => [path, ""],
-        ),
+        [...claims.writes, ".repo-platform.yml", "skills/a/README.md"].map((path) => [path, ""]),
       ),
     );
     const expanded = expandPattern(checkoutProbe(root), pattern);
     expect(expanded.filter((path) => mirrorPathProblem(path, claims) !== null)).toEqual(refused);
     expect(expanded.filter((path) => patternMatches(pattern, path))).toEqual(expanded);
     expect(
-      [...claims.writes, ...claims.retires, ".repo-platform.yml"]
+      [...claims.writes, ".repo-platform.yml"]
         .filter((path) => patternMatches(pattern, path))
         .sort(),
     ).toEqual(refused);

@@ -64,7 +64,7 @@ const UNHASHED = "# unhashed notes\n";
 const HANDMADE = "# my own notes, recorded by hand\n";
 const LOCAL_DEPENDABOT = "version: 2\n# my own update schedule\n";
 const noWriterNote = (path: string) =>
-  `manifest record for \`${path}\` had no writer: no files.yml entry declares or retires the path now; ` +
+  `manifest record for \`${path}\` had no writer: no files.yml entry declares the path now; ` +
   "it is retired as a stale record (the Retired row has the outcome)";
 const NEW_LICENSE = `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`;
 // The repository's overlay: identity keys, a ruleset of its own, comment
@@ -98,6 +98,9 @@ function oldManifest(): string {
     ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha256(OLD_CI)}"}`,
     "LICENSE.md": `{"class": "managed", "hash": "${sha256(OLD_LICENSE)}"}`,
     ".gitignore": `{"class": "split", "grammar": "managed-region", "begin": "${HASH_BEGIN}", "end": "${HASH_END}", "hash": "${sha256(OLD_REGION)}"}`,
+    // Records at paths no files.yml entry declares any more, each a state the stale-record retirement judges: the
+    // platform's own last write (deleted), an edit since (held), a split region with repository-owned content around
+    // it (region removed), and one whose file is gone (no row, the record leaves).
     ".github/old-tool.yml": `{"class": "managed", "hash": "${sha256(OLD_TOOL)}"}`,
     ".github/workflows/release.yml": `{"class": "managed", "hash": "${sha256("name: release\n")}"}`,
     "SECURITY.md": `{"class": "managed", "hash": "${sha256(OLD_SECURITY)}"}`,
@@ -105,6 +108,7 @@ function oldManifest(): string {
     "CONTRIBUTING.md": `{"class": "split", "grammar": "managed-region", "begin": "${HTML_BEGIN}", "end": "${HTML_END}", "hash": "${sha256(OLD_CONTRIBUTING_REGION)}"}`,
     ".github/workflows/nightly-fuzz.yml": `{"class": "starter"}`,
     [OVERLAY]: `{"class": "starter"}`,
+    // Starter records of entries nothing selects now: the files are the repository's own, and the records leave.
     ".github/workflows/old-starter.yml": `{"class": "starter"}`,
     ".github/workflows/deselected-starter.yml": `{"class": "starter"}`,
     "skills/gamma/LICENSE.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
@@ -120,27 +124,17 @@ function oldManifest(): string {
     // recorded content, one edited since.
     ".editorconfig": `{"class": "managed", "hash": "${sha256(OLD_EDITORCONFIG)}"}`,
     ".gitattributes": `{"class": "managed", "hash": "${sha256("* text=auto\n")}"}`,
-    // A managed record without a hash: nothing vouches for the content, so
-    // the flip to split treats the file as unrecorded.
-    ".yamllint": `{"class": "managed", "hash": null}`,
+    // A managed record whose hash the file no longer matches: nothing vouches
+    // for the content, so the flip to split treats the file as unrecorded.
+    ".yamllint": `{"class": "managed", "hash": "${sha256("rules: {other: enable}\n")}"}`,
     // A starter record on a managed path is stale, and the file is replaced
     // like any local edit; the path is named like an inherited object
     // property to keep every record lookup honest.
     constructor: `{"class": "starter"}`,
-    // A split record without its markers, carrying the local file's hash:
-    // not a record the writer can read, so it vouches for nothing and the
-    // file is judged unrecorded.
-    ".github/dependabot.yml": `{"class": "split", "hash": "${sha256(LOCAL_DEPENDABOT)}"}`,
-    // A hash-less managed record for a path nothing declares or retires:
-    // held every run, its record carried, never a silent orphan, and noted
-    // every run because no current files.yml entry declares or retires the path.
-    "UNHASHED.md": `{"class": "managed", "hash": null}`,
-    // A class the writer does not record: the record is dropped with a note.
-    "BESPOKE.md": `{"class": "bespoke", "hash": "${sha256("b\n")}"}`,
     "../escape.txt": `{"class": "managed", "hash": "${sha256("x")}"}`,
     // A hand-added record with the file's true hash, at a path no files.yml
     // entry declares: retired as stale, and noted because no current files.yml
-    // entry declares or retires the path.
+    // entry declares the path.
     "HANDMADE.md": `{"class": "managed", "hash": "${sha256(HANDMADE)}"}`,
     // The same with nothing at the path: nothing to review, so no note; the
     // record leaves the manifest like any other stale record of an absent file.
@@ -157,7 +151,8 @@ function seedTarget(): string {
   const target = temp.dir("sync-e2e-target-");
   const files: Record<string, string> = {
     ".repo-platform.yml": [
-      "modules: [bun, deno, docs-site, fuzzer, uv]",
+      // Shuffled on purpose: the selection comes out in files.yml order, never the registration's.
+      "modules: [fuzzer, bun, docs-site, deno]",
       "project: {name: Demo Project, slug: demo, description: A demo repository}",
       "labels: {fuzzer: fuzz-me}",
       "mirrors:",
@@ -198,8 +193,6 @@ function seedTarget(): string {
     ".yamllint": OLD_YAMLLINT,
     constructor: LOCAL_CONSTRUCTOR,
     ".dockerignore": LOCAL_DOCKERIGNORE,
-    "UNHASHED.md": UNHASHED,
-    "BESPOKE.md": "b\n",
     "HANDMADE.md": HANDMADE,
     ".github/dependabot.yml": LOCAL_DEPENDABOT,
     [MANIFEST]: oldManifest(),
@@ -290,19 +283,19 @@ describe("sync.ts end to end", () => {
     ({ stdout, summary } = runSync(target, join(temp.dir("sync-e2e-summary-"), "summary.json")));
   });
 
-  test("selects the known modules; unknown modules and unsafe records become notes", () => {
+  test("selects the modules in files.yml order; stale records with a file present, unsafe paths, and unreached mirrors become notes", () => {
     expect(summary.modules).toEqual(["bun", "deno", "docs-site", "fuzzer"]);
     expect(summary.notes).toEqual([
-      "dropped unknown module `uv` (files.yml does not know it)",
-      "manifest record for `.github/dependabot.yml` dropped: its class or shape is not one the writer records",
-      noWriterNote("UNHASHED.md"),
-      "manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
+      noWriterNote(".github/old-tool.yml"),
+      noWriterNote(".github/workflows/release.yml"),
+      noWriterNote("SECURITY.md"),
+      noWriterNote("OLD_NOTES.md"),
+      noWriterNote("CONTRIBUTING.md"),
       "manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
       noWriterNote("HANDMADE.md"),
       droppedMirrorNote("docs/old-mirror.md"),
       droppedMirrorNote("other/loop/sub/x.md"),
     ]);
-    expect(read("BESPOKE.md")).toBe("b\n");
     expect(read("docs/old-mirror.md")).toBe(OLD_LICENSE);
   });
 
@@ -316,7 +309,7 @@ describe("sync.ts end to end", () => {
     expect(summary.written).toEqual([
       row(".github/workflows/ci.yml", "managed", "replaced local edits"),
       row("LICENSE.md", "managed", "updated"),
-      row(".github/SECURITY.md", "managed", "updated"),
+      row(".github/SECURITY.md", "managed", "created"),
       row(".gitignore", "split", "updated"),
       row("AGENTS.md", "split", "created"),
       row("CLAUDE.md", "link", "unchanged"),
@@ -356,9 +349,9 @@ describe("sync.ts end to end", () => {
     // .editorconfig was exactly its managed record: the region alone now, mode kept.
     expect(read(".editorconfig")).toBe(`${HASH_BEGIN}\nroot = true\n${HASH_END}\n`);
     expect(lstatSync(join(target, ".editorconfig")).mode & 0o111).toBe(0o111);
-    // .gitattributes was edited since its record and .yamllint's record had
-    // no hash: neither is the platform's own write, so each gets the region
-    // above its content like any unrecorded file.
+    // .gitattributes and .yamllint were edited since their records: neither
+    // is the platform's own write, so each gets the region above its content
+    // like any unrecorded file.
     expect(read(".gitattributes")).toBe(
       `${HASH_BEGIN}\n* text=auto\n${HASH_END}\n${OLD_GITATTRIBUTES}`,
     );
@@ -493,50 +486,38 @@ describe("sync.ts end to end", () => {
     );
   });
 
-  test("never touches the existing starters, selected or retired", () => {
+  test("never touches the existing starters, selected or deselected", () => {
     expect(read(".github/workflows/nightly-fuzz.yml")).toBe(STARTER);
     expect(read(".github/workflows/old-starter.yml")).toBe(OLD_STARTER);
   });
 
-  test("retires: deletes the clean file, holds the edited one, moves the relocated one", () => {
+  test("retires every stale record's file: deletes the platform's own write, holds an edited one, hands over a tailed region", () => {
     expect(summary.retired).toEqual([
-      { path: ".github/old-tool.yml", outcome: "deleted", detail: "retired" },
+      { path: ".github/old-tool.yml", outcome: "deleted", detail: "no longer selected" },
       {
         path: ".github/workflows/release.yml",
         outcome: "held",
         detail: "the content differs from the last write",
       },
-      { path: "SECURITY.md", outcome: "moved", detail: "to .github/SECURITY.md" },
-      {
-        path: ".github/workflows/old-starter.yml",
-        outcome: "kept",
-        detail: "a starter is repo-owned",
-      },
-      {
-        path: "OLD_NOTES.md",
-        outcome: "deleted",
-        detail: "retired (its new home docs/NOTES.md is not selected here)",
-      },
+      { path: "SECURITY.md", outcome: "deleted", detail: "no longer selected" },
+      { path: "OLD_NOTES.md", outcome: "deleted", detail: "no longer selected" },
       {
         path: "CONTRIBUTING.md",
         outcome: "region removed",
         detail:
-          "retired; repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it",
+          "no longer selected; repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it",
       },
       {
         path: ".github/copilot-instructions.md",
         outcome: "deleted",
         detail: "no longer selected",
       },
-      { path: "UNHASHED.md", outcome: "held", detail: "the record carries no hash" },
       { path: "HANDMADE.md", outcome: "deleted", detail: "no longer selected" },
     ]);
-    expect(read("UNHASHED.md")).toBe(UNHASHED);
     expect(existsSync(join(target, "HANDMADE.md"))).toBe(false);
     expect(summary.notes).not.toContainEqual(expect.stringContaining("HANDMADE-GONE.md"));
     expect(summary.retired.map((row) => row.path)).not.toContain("CLAUDE.md");
     expect(existsSync(join(target, ".github/old-tool.yml"))).toBe(false);
-    // The destination is gated on an unselected module: nothing moves there.
     expect(existsSync(join(target, "OLD_NOTES.md"))).toBe(false);
     expect(existsSync(join(target, "docs/NOTES.md"))).toBe(false);
     expect(read(".github/workflows/release.yml")).toBe(RELEASE_EDITED);
@@ -590,8 +571,6 @@ describe("sync.ts end to end", () => {
       expect(readlinkSync(join(target, path))).toBe("../LICENSE.md");
       expect(read(path)).toBe(NEW_LICENSE);
     }
-    // The retired path was moved, never rewritten by its mirror.
-    expect(existsSync(join(target, "SECURITY.md"))).toBe(false);
   });
 
   test("records what it wrote in the manifest, the build on the self entry", () => {
@@ -617,7 +596,6 @@ describe("sync.ts end to end", () => {
         ".gitattributes",
         ".yamllint",
         "constructor",
-        "UNHASHED.md",
         ".dockerignore",
         "skills/new/LICENSE.md",
         "skills/alpha/AGENTS.md",
@@ -631,8 +609,6 @@ describe("sync.ts end to end", () => {
         "skills/alpha/README.md/LICENSE.md",
         ".github/workflows/docs-site.yml",
         ".github/workflows/nightly-fuzz.yml",
-        ".github/workflows/old-starter.yml",
-        ".github/workflows/deselected-starter.yml",
         ".github/workflows/release.yml",
         "skills/alpha/LICENSE.md",
         "skills/gamma/LICENSE.md",
@@ -677,7 +653,6 @@ describe("sync.ts end to end", () => {
       class: "managed",
       hash: sha256("platform notes\n"),
     });
-    expect(manifest.files["UNHASHED.md"]).toEqual({ class: "managed", hash: null });
     expect(manifest.files["HANDMADE-GONE.md"]).toBeUndefined();
     expect(manifest.files[".github/dependabot.yml"]).toEqual({
       class: "managed",
@@ -687,12 +662,9 @@ describe("sync.ts end to end", () => {
       class: "split",
       hash: sha256(read(".editorconfig")),
     });
-    // Kept files keep their previous records, so a later sync can still
-    // recognise the platform's last write.
-    expect(manifest.files[".github/workflows/old-starter.yml"]).toEqual({ class: "starter" });
-    expect(manifest.files[".github/workflows/deselected-starter.yml"]).toEqual({
-      class: "starter",
-    });
+    // A starter nothing selects is the repository's own: its record leaves, the file stays.
+    expect(manifest.files[".github/workflows/old-starter.yml"]).toBeUndefined();
+    expect(manifest.files[".github/workflows/deselected-starter.yml"]).toBeUndefined();
     expect(read(".github/workflows/deselected-starter.yml")).toBe(OLD_STARTER);
     expect(manifest.files["docs/NOTES.md"]).toBeUndefined();
     // The handed-over split file's record left with its region.
@@ -720,6 +692,7 @@ describe("sync.ts end to end", () => {
       end: HASH_END,
       hash: sha256(region),
     });
+    // A held retirement keeps its record, so a later sync can still recognise the platform's last write.
     expect(manifest.files[".github/workflows/release.yml"]).toEqual({
       class: "managed",
       hash: sha256("name: release\n"),
@@ -766,13 +739,13 @@ describe("sync.ts end to end", () => {
       "local edits replaced in skills/gamma/LICENSE.md",
       "retirement of .github/workflows/release.yml held: the content differs from the last write",
       "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
-      "retirement of UNHASHED.md held: the record carries no hash",
       "mirror plain replaced: a directory stood at the target",
       "mirror skills/alpha/README.md/LICENSE.md replaced: a file stood at ancestor 'skills/alpha/README.md'",
-      "registration: dropped unknown module `uv` (files.yml does not know it)",
-      "registration: manifest record for `.github/dependabot.yml` dropped: its class or shape is not one the writer records",
-      `registration: ${noWriterNote("UNHASHED.md")}`,
-      "registration: manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
+      `registration: ${noWriterNote(".github/old-tool.yml")}`,
+      `registration: ${noWriterNote(".github/workflows/release.yml")}`,
+      `registration: ${noWriterNote("SECURITY.md")}`,
+      `registration: ${noWriterNote("OLD_NOTES.md")}`,
+      `registration: ${noWriterNote("CONTRIBUTING.md")}`,
       "registration: manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
       `registration: ${noWriterNote("HANDMADE.md")}`,
       `registration: ${droppedMirrorNote("docs/old-mirror.md")}`,
@@ -795,12 +768,6 @@ describe("sync.ts end to end", () => {
         outcome: "held",
         detail: "the content differs from the last write",
       },
-      {
-        path: ".github/workflows/old-starter.yml",
-        outcome: "kept",
-        detail: "a starter is repo-owned",
-      },
-      { path: "UNHASHED.md", outcome: "held", detail: "the record carries no hash" },
     ]);
     for (const path of [".dockerignore", ".gitattributes", ".yamllint"]) {
       expect(again.summary.holdReasons).not.toContainEqual(expect.stringContaining(path));
@@ -814,7 +781,7 @@ describe("sync.ts end to end", () => {
         (r) =>
           !r.startsWith("local edits") &&
           !r.startsWith("mirror ") &&
-          (!r.includes("manifest record") || r.includes("`UNHASHED.md`")) &&
+          (!r.includes("manifest record") || r.includes("`.github/workflows/release.yml`")) &&
           !r.endsWith("the managed region was added above repository-owned content") &&
           !r.startsWith("retirement of CONTRIBUTING.md"),
       ),
@@ -1091,8 +1058,8 @@ describe("sync.ts over a --build that is not the build commit's full sha", () =>
 
 describe("sync.ts over --previous-files", () => {
   // The retirement fact it checked is judged per target instead: a manifest record no files.yml
-  // entry declares or retires now is retired as a stale record and, while a file sits at the
-  // path, noted, which holds the PR.
+  // entry declares now is retired as a stale record and, while a file sits at the path, noted,
+  // which holds the PR.
   test("is refused as an unknown flag, before anything is written", () => {
     const target = temp.dir("sync-e2e-previous-target-");
     writeFileSync(
@@ -1135,7 +1102,7 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
         "mirrors:",
         "  - {source: LICENSE.md, targets: [copies/a, copies/a/b, .github/repo-platform-manifest.json]}",
         "  - {source: README.md, targets: [skills/*/README.md]}",
-        "  - {source: LICENSE.md, targets: [SECURITY.md, docs/GONE.md, docs/**/LICENSE.md]}",
+        "  - {source: LICENSE.md, targets: [docs/GONE.md, docs/**/LICENSE.md]}",
         "",
       ].join("\n"),
     );
@@ -1155,7 +1122,6 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
           "skills/*/README.md",
           "the source is not a managed or split file files.yml writes for this repository",
         ),
-        error("LICENSE.md", "SECURITY.md", "the target is a path files.yml retires"),
         error("LICENSE.md", "docs/GONE.md", "the target is a path a stale manifest record retires"),
         error("LICENSE.md", "docs/**/LICENSE.md", "the pattern uses '**'"),
         error(
@@ -1217,78 +1183,82 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
   );
 });
 
-describe("sync.ts over retired paths whose records the writer cannot read", () => {
-  // Hand edits: a mirror kind the writer never writes, a split record without its markers. Each file matches its hash.
-  const records: Record<string, string> = {
+describe("sync.ts over a registration naming a module files.yml does not offer", () => {
+  test("fails before anything is written, in the plan's words: one refusal for the PR check and the sync alike", () => {
+    const target = temp.dir("sync-e2e-unknown-module-target-");
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      "modules: [bun, uv]\nproject: {name: Demo, slug: demo, description: A demo}\n",
+    );
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const before = snapshot(target);
+    const summary = join(temp.dir("sync-e2e-unknown-module-summary-"), "summary.json");
+    expect(spawnSync(target, summary)).toEqual({
+      exitCode: 1,
+      stdout:
+        '::error::.repo-platform.yml: module "uv" is not a module files.yml offers (known: bun, deno, pages, docs-site, fuzzer)\n',
+      stderr: "",
+    });
+    expect(snapshot(target)).toEqual(before);
+    expect(existsSync(summary)).toBe(false);
+  });
+});
+
+describe("sync.ts over manifest records it cannot read", () => {
+  // Each is a shape no writer of this platform stamps: a mirror kind it never writes, a split record without its
+  // markers, a class it does not record, a hash another tool left null, a starter carrying a field. The count is the
+  // whole message: manifest keys are target content and the writer log reaches a public issue.
+  const UNREADABLE = {
     ".github/old-tool.yml": `{"class": "mirror", "kind": "hardlink", "hash": "${sha256(OLD_TOOL)}"}`,
     "CONTRIBUTING.md": `{"class": "split", "grammar": "managed-region", "hash": "${sha256(OLD_CONTRIBUTING_REGION)}"}`,
+    "BESPOKE.md": `{"class": "bespoke", "hash": "${sha256("b\n")}"}`,
+    "UNHASHED.md": '{"class": "managed", "hash": null}',
+    "docs/old.md": '{"class": "starter", "hash": null}',
   };
-  const dropped = Object.keys(records).map(
-    (path) =>
-      `manifest record for \`${path}\` dropped: its class or shape is not one the writer records`,
-  );
+  const manifestOf = (records: Record<string, string>) =>
+    `{\n  "files": {\n${Object.entries(records)
+      .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
+      .join(",\n")}\n  }\n}\n`;
+  const refusal = (count: number) =>
+    `::error::${count} manifest ${count === 1 ? "record is" : "records are"} not a shape the writer ` +
+    "records (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a " +
+    "mirror kind other than symlink, a split without its grammar or markers); the repository's " +
+    "validate-managed-files check names each - fix the manifest (git history has the stamped original), " +
+    "then dispatch the sync again\n";
 
-  test("the first run drops each record with a note and holds; the second has nothing to say, both files untouched", () => {
+  test.each<{ reason: string; records: Record<string, string> }>([
+    { reason: "every unreadable shape at once", records: UNREADABLE },
+    { reason: "one hash-null record", records: { "UNHASHED.md": UNREADABLE["UNHASHED.md"] } },
+    {
+      reason: "a starter record under a linked directory, which is never probed through the link",
+      records: { "docs/old.md": UNREADABLE["docs/old.md"] },
+    },
+  ])("$reason fails the run with a count, and writes nothing", ({ records }) => {
     const target = temp.dir("sync-e2e-unreadable-target-");
     const files: Record<string, string> = {
       ".repo-platform.yml":
         "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
       ".github/old-tool.yml": OLD_TOOL,
       "CONTRIBUTING.md": OLD_CONTRIBUTING_REGION,
-      [MANIFEST]: `{\n  "files": {\n${Object.entries(records)
-        .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
-        .join(",\n")}\n  }\n}\n`,
+      "BESPOKE.md": "b\n",
+      "UNHASHED.md": UNHASHED,
+      [MANIFEST]: manifestOf(records),
     };
     for (const [rel, content] of Object.entries(files)) {
       mkdirSync(dirname(join(target, rel)), { recursive: true });
       writeFileSync(join(target, rel), content);
     }
-    fixtureGit(target, ["init", "-q", "-b", "main"]);
-    const recorded = () =>
-      Object.keys(
-        (JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as { files: object }).files,
-      );
-    const first = runSync(target, join(temp.dir("sync-e2e-unreadable-summary-"), "summary.json"));
-    expect(first.summary.notes).toEqual(dropped);
-    expect(first.summary.retired).toEqual([]);
-    expect(first.summary.hold).toBe(true);
-    expect(recorded()).not.toContain(".github/old-tool.yml");
-    expect(recorded()).not.toContain("CONTRIBUTING.md");
-    const second = runSync(target, join(temp.dir("sync-e2e-unreadable-summary2-"), "summary.json"));
-    expect(second.summary.notes).toEqual([]);
-    expect(second.summary.retired).toEqual([]);
-    expect(second.summary.hold).toBe(false);
-    expect(readFileSync(join(target, ".github/old-tool.yml"), "utf-8")).toBe(OLD_TOOL);
-    expect(readFileSync(join(target, "CONTRIBUTING.md"), "utf-8")).toBe(OLD_CONTRIBUTING_REGION);
-  });
-});
-
-describe("sync.ts over a starter record it cannot read under a linked directory", () => {
-  test("the record is dropped with a note and never probed, so the run exits 0", () => {
-    const target = temp.dir("sync-e2e-linked-starter-target-");
-    writeFileSync(
-      join(target, ".repo-platform.yml"),
-      "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
-    );
-    mkdirSync(join(target, ".github"));
-    writeFileSync(
-      join(target, MANIFEST),
-      `{\n  "files": {\n    "docs/old.md": {"class": "starter", "hash": null}\n  }\n}\n`,
-    );
     symlinkSync("elsewhere", join(target, "docs"));
     fixtureGit(target, ["init", "-q", "-b", "main"]);
-    const { summary } = runSync(
-      target,
-      join(temp.dir("sync-e2e-linked-starter-summary-"), "summary.json"),
-    );
-    expect(summary.notes).toEqual([
-      "manifest record for `docs/old.md` dropped: its class or shape is not one the writer records",
-    ]);
-    const manifest = JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as {
-      files: Record<string, unknown>;
-    };
-    expect(manifest.files["docs/old.md"]).toBeUndefined();
-    expect(readlinkSync(join(target, "docs"))).toBe("elsewhere");
+    const before = snapshot(target);
+    const summary = join(temp.dir("sync-e2e-unreadable-summary-"), "summary.json");
+    expect(spawnSync(target, summary)).toEqual({
+      exitCode: 1,
+      stdout: refusal(Object.keys(records).length),
+      stderr: "",
+    });
+    expect(snapshot(target)).toEqual(before);
+    expect(existsSync(summary)).toBe(false);
   });
 });
 

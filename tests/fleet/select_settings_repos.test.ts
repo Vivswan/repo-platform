@@ -27,7 +27,6 @@ const PERSONAS: { name: string; private: boolean }[] = [
   { name: "deadapi", private: false },
   { name: "deadprobe", private: false },
   { name: "flaky", private: false },
-  { name: "handwritten", private: false },
   { name: "hidden-deadapi", private: true },
   { name: "hidden-locked", private: true },
   { name: "hidden-nomods", private: true },
@@ -114,8 +113,10 @@ describe("select_settings_repos.ts", () => {
         '    echo "HTTP 404 from stub" >&2',
         "    exit 1",
         "    ;;",
-        "  repos/Vivswan/handwritten/contents/.github/settings.yml)",
-        '    printf "repository:\\n  description: mine\\n"',
+        // A hand-written document (no generator header) under a flag, so the fleet run above stays a control for it.
+        "  repos/Vivswan/steady/contents/.github/settings.yml)",
+        '    if [ -n "$STUB_HANDWRITTEN_STEADY" ]; then printf "repository:\\n  description: mine\\n"; exit 0; fi',
+        `    printf '%s\\n# Rendered by the sync\\nrepository:\\n  description: %s\\n' "${RENDERED_HEADER}" "$2"`,
         "    ;;",
         // The rendered document: the header line, then target-owned
         // content the selector must never print.
@@ -302,7 +303,6 @@ describe("select_settings_repos.ts", () => {
   const PUBLIC_PROBES = [
     ...PUBLIC_PROBES_HEAD,
     "Vivswan/flaky: rendered settings check failed (attempt 1/3: HTTP 502 from stub); retrying...",
-    `::notice::${notRenderedNotice("Vivswan/handwritten")}`,
   ];
   const PUBLIC_PROBES_TAIL_HEAD = [
     `::notice::${pushProbeSkipNotice("Vivswan/locked")}`,
@@ -411,12 +411,37 @@ describe("select_settings_repos.ts", () => {
   );
 
   test(
-    "a bare name scopes the apply, the operator repository's own included",
+    "a bare name is refused as the sync selector refuses it: one scope grammar, owner/name slugs only",
     () => {
-      const r = run("dispatch-self", { ONLY_REPO: "repo-platform" });
-      expect(r.exitCode).toBe(0);
-      expect(r.stdout).toBe(lines("settings targets: Vivswan/repo-platform"));
-      expect(outputsOf(r)).toEqual({ count: "1", repos: ["Vivswan/repo-platform"] });
+      const r = run("dispatch-bare", { ONLY_REPO: "repo-platform" });
+      expect({ ...r, masked: r.masked.length }).toEqual({
+        exitCode: 1,
+        stdout: lines(
+          "::error::1 of 1 scope entries is neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
+        ),
+        masked: 0,
+        stderr: "",
+        output: "",
+        summary: "",
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a hand-written .github/settings.yml fails the plan with a count: applied alone it would delete every fleet label it does not list",
+    () => {
+      const r = run("handwritten", { ONLY_REPO: "Vivswan/steady", STUB_HANDWRITTEN_STEADY: "1" });
+      expect({ ...r, masked: r.masked.length }).toEqual({
+        exitCode: 1,
+        stdout: lines(
+          "::error::1 selected target carries a hand-written .github/settings.yml (names withheld - a target may be private): the apply reads the rendered file alone, so merge the sync PR that renders it, then re-run",
+        ),
+        masked: PRIVATE_SLUGS.flatMap(maskForms).length,
+        stderr: "",
+        output: "",
+        summary: "",
+      });
     },
     TEST_TIMEOUT_MS,
   );
@@ -565,7 +590,7 @@ describe("select_settings_repos.ts", () => {
       repos: ["Vivswan/hidden-server", "Vivswan/nomodule"],
       stdout: lines(
         ...FILTER_PROBES,
-        LEFT_OUT(6),
+        LEFT_OUT(5),
         "settings targets: Vivswan/nomodule and 1 private repository",
       ),
       summary: summaryOf(...ALL_WARNINGS, NOMODS_WARNING),
@@ -577,18 +602,18 @@ describe("select_settings_repos.ts", () => {
       stdout: lines(
         ...PUBLIC_PROBES_HEAD,
         ...PUBLIC_PROBES_TAIL_HEAD,
-        LEFT_OUT(5),
+        LEFT_OUT(4),
         "settings targets: Vivswan/nomodule",
       ),
       summary: summaryOf(...PUBLIC_WARNINGS),
     },
     {
-      reason: "a bare name unions in as typed, its selection unread",
-      repo: "steady,modules:bun",
+      reason: "a slug unions in as typed, its selection unread",
+      repo: "Vivswan/steady,modules:bun",
       repos: ["Vivswan/repo-platform", "Vivswan/steady"],
       stdout: lines(
         ...FILTER_PROBES,
-        LEFT_OUT(6),
+        LEFT_OUT(5),
         "settings targets: Vivswan/repo-platform, Vivswan/steady",
       ),
       summary: summaryOf(...ALL_WARNINGS, NOMODS_WARNING),
@@ -691,14 +716,9 @@ describe("select_settings_repos.ts", () => {
       notice: UNADOPTED_NOTICE,
     },
     {
-      reason: "a repo whose settings the sync has not rendered yet",
+      reason: "a repo with no settings.yml yet (its first sync PR has not merged)",
       scope: "Vivswan/unrendered",
       notice: notRenderedNotice("Vivswan/unrendered"),
-    },
-    {
-      reason: "a repo with a hand-written settings.yml",
-      scope: "Vivswan/handwritten",
-      notice: notRenderedNotice("Vivswan/handwritten"),
     },
   ])(
     "a scope selecting only $reason selects nothing: green, the notice, count 0, an empty matrix",

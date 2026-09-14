@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { resolveModules } from "../../../.github/scripts/sync/writer/select.ts";
 import { parseFilesConfig, selectEntries } from "../../../actions/plan/files_config.ts";
 
 const CONFIG = parseFilesConfig(`
@@ -35,14 +34,5 @@ describe("selectEntries", () => {
     expect(paths([])).toEqual(["ci.yml", "toolchain.yml"]);
     expect(paths(["ci.yml"])).toEqual(["toolchain.yml"]);
     expect(paths(["ci.yml", "toolchain.yml", "nothing.yml"])).toEqual([]);
-  });
-});
-
-describe("resolveModules", () => {
-  test("keeps known names in files.yml order and reports the rest", () => {
-    expect(resolveModules(CONFIG, ["fuzzer", "uv", "bun", "release-please"])).toEqual({
-      selected: ["bun", "fuzzer"],
-      dropped: ["uv", "release-please"],
-    });
   });
 });

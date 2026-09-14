@@ -2,8 +2,11 @@
 // lets a later run adopt the open PR instead of opening a second one, and the unconditional step (no `if:`) is what lets a
 // no-diff run close a stale one. The major is pinned, not the patch: adopting, title and body refresh, and the close on
 // no diff are the behaviors a major may change; Dependabot's minor and patch bumps flow.
+// The fleet PAT is the only token: a github.token push would leave the PR's CI unstarted, so a missing secret fails the
+// run at its first step instead of degrading to it.
 
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -15,6 +18,7 @@ interface Step {
   uses?: string;
   run?: string;
   if?: string;
+  env?: Record<string, string>;
   with?: Record<string, unknown>;
 }
 
@@ -25,7 +29,7 @@ interface Workflow {
 
 const ROOT = join(import.meta.dir, "../..");
 const AUTOMATION_PR_ACTION = "peter-evans/create-pull-request";
-const TOKEN = "${{ secrets.REPO_PLATFORM_TOKEN || github.token }}";
+const TOKEN = "${{ secrets.REPO_PLATFORM_TOKEN }}";
 const SIGNATURE = `${SYNC_IDENTITY.name} <${SYNC_IDENTITY.email}>`;
 
 interface Row {
@@ -61,16 +65,35 @@ const ROWS: Row[] = [
 ];
 
 test.each(ROWS)(
-  "$workflow opens its PR through create-pull-request alone, unconditionally, as the sync identity",
+  "$workflow requires the fleet token first, then opens its PR through create-pull-request alone, unconditionally, as the sync identity",
   ({ workflow, runs, branch, title, body }) => {
     const file = `.github/workflows/${workflow}.yml`;
     const source = readFileSync(join(ROOT, file), "utf8");
     const doc = parseYaml(source) as Workflow;
-    const steps = doc.jobs.refresh.steps;
+    const [guard, checkout, ...steps] = doc.jobs.refresh.steps;
     expect(doc.permissions).toEqual({ contents: "write", "pull-requests": "write" });
+    expect(guard).toMatchObject({ name: "Require the fleet token", env: { PAT: TOKEN } });
+    expect(guard.if).toBeUndefined();
+    // The guard's bash EXECUTED as the runner runs it: a missing token is the one red, a present one passes silently.
+    const guarded = (pat: string) =>
+      spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", String(guard.run)], {
+        encoding: "utf8",
+        env: { PATH: process.env.PATH ?? "", PAT: pat },
+      });
+    const missing = guarded("");
+    expect([missing.status, missing.stderr]).toEqual([1, ""]);
+    expect(missing.stdout).toMatch(
+      /^::error::the refresh cannot run: the REPO_PLATFORM_TOKEN secret is not set\. [^\n]*\n$/,
+    );
+    expect(guarded("ghp_present")).toMatchObject({ status: 0, stdout: "", stderr: "" });
+    expect(checkout).toMatchObject({
+      uses: expect.stringMatching(/^actions\/checkout@/),
+      with: { ref: "${{ github.event.repository.default_branch }}", token: TOKEN },
+    });
     expect(steps.filter((step) => step.run !== undefined).map((step) => step.run?.trim())).toEqual(
       runs,
     );
+    expect(source).not.toContain("github.token");
     expect(steps.filter((step) => step.uses?.startsWith(`${AUTOMATION_PR_ACTION}@`))).toEqual([
       {
         name: "Commit, push, and open PR",

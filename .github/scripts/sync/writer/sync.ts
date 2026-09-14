@@ -42,7 +42,7 @@ import {
   type WrittenRow,
 } from "./report.ts";
 import { keepReason, type RetireRow, release, retire } from "./retire.ts";
-import { resolveModules } from "./select.ts";
+import { selectModules } from "./select.ts";
 import { renderSettings } from "./settings_entry.ts";
 import { type Found, occupant, probe, removeFile, writeFile } from "./target_files.ts";
 import { writeLink } from "./write_link.ts";
@@ -101,7 +101,6 @@ function render(
       config,
       tree: options.tree,
       modules,
-      private: options.private,
       registration: facts.registration,
       overlay: overlay.kind === "file" ? overlay.bytes.toString("utf-8") : null,
       overlayPath,
@@ -219,10 +218,7 @@ export function runSync(options: SyncOptions): SyncReport {
     slug,
     values: placeholderValues(registration, slug, config.defaults),
   };
-  const { selected, dropped } = resolveModules(config, registration.modules);
-  notes.push(
-    ...dropped.map((name) => `dropped unknown module \`${name}\` (files.yml does not know it)`),
-  );
+  const selected = selectModules(config, registration.modules);
   const { records, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
 
@@ -240,19 +236,19 @@ export function runSync(options: SyncOptions): SyncReport {
       .filter((path) => !declared.has(path))
       .map((path) => `\`except\` names \`${path}\`, a path no files.yml entry writes`),
   );
-  // A stale record at no declared and no retired path is one files.yml cannot account for (a hand edit, or an entry deleted with no `retired` row), so its retirement is noted, which holds the PR.
+  // A stale record at a path no files.yml entry declares (a hand edit, or an entry deleted from files.yml) is one the writer cannot account for, so its retirement is noted, which holds the PR.
   // Manifest keys are target-repo content: a stale record is retired only
-  // when its path is one the writer could have written.
+  // when its path is one the writer could have written, and the refusal
+  // below carries a count alone.
   const excepted = new Set(registration.except ?? []);
   const stale: string[] = [];
   const released: RetireRow[] = [];
+  let unreadable = 0;
   for (const [path, entry] of Object.entries(records)) {
     if (path === MANIFEST_NAME) continue;
     const record = readRecord(entry);
     if (record === null) {
-      notes.push(
-        `manifest record for \`${path}\` dropped: its class or shape is not one the writer records`,
-      );
+      unreadable++;
       continue;
     }
     // A mirror record is mirrors.ts's to carry or drop: `except` speaks of files.yml entries.
@@ -261,7 +257,7 @@ export function runSync(options: SyncOptions): SyncReport {
       released.push(release(path, records));
       continue;
     }
-    if (entryPaths.has(path) || owned.retires.has(path) || record.class === "starter") continue;
+    if (entryPaths.has(path) || record.class === "starter") continue;
     const problem = pathProblem(path);
     if (problem !== null) {
       notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
@@ -270,21 +266,21 @@ export function runSync(options: SyncOptions): SyncReport {
     stale.push(path);
     if (!declared.has(path) && occupant(options.target, path) !== null) {
       notes.push(
-        `manifest record for \`${path}\` had no writer: no files.yml entry declares or retires the path now; ` +
+        `manifest record for \`${path}\` had no writer: no files.yml entry declares the path now; ` +
           "it is retired as a stale record (the Retired row has the outcome)",
       );
     }
   }
-  const retired = [
-    ...retire(
-      options.target,
-      config.retired.filter((entry) => !excepted.has(entry.path)),
-      stale,
-      entryPaths,
-      records,
-    ),
-    ...released,
-  ];
+  if (unreadable > 0) {
+    throw new Error(
+      `${unreadable} manifest ${unreadable === 1 ? "record is" : "records are"} not a shape the writer ` +
+        "records (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a " +
+        "mirror kind other than symlink, a split without its grammar or markers); the repository's " +
+        "validate-managed-files check names each - fix the manifest (git history has the stamped original), " +
+        "then dispatch the sync again",
+    );
+  }
+  const retired = [...retire(options.target, stale, records), ...released];
 
   // A Map, so a path named like an inherited property (constructor) is
   // looked up like any other.
@@ -295,19 +291,7 @@ export function runSync(options: SyncOptions): SyncReport {
     if (record !== null && !next.has(path)) next.set(path, record);
   };
   for (const row of retired) {
-    if (row.outcome === "held" || row.outcome === "kept") carry(row.path);
-  }
-  // A starter whose module was deselected stays the repository's own; its
-  // record stays too, so a later retirement still reads it as kept.
-  for (const [path, entry] of Object.entries(records)) {
-    if (
-      readRecord(entry)?.class !== "starter" ||
-      entryPaths.has(path) ||
-      pathProblem(path) !== null
-    ) {
-      continue;
-    }
-    if (occupant(options.target, path) !== null) carry(path);
+    if (row.outcome === "held") carry(row.path);
   }
   const written = new Map<string, Buffer>();
   const rows: WrittenRow[] = [];

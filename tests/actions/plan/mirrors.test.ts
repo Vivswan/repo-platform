@@ -27,13 +27,12 @@ const OWNED: OwnedPaths = {
     "docs/README.md",
     ".github/repo-platform-manifest.json",
   ]),
-  retires: new Set(["SECURITY.md", "old/SECURITY.md"]),
   stale: new Set(["docs/GONE.md"]),
   excepted: new Set(["docs/OWN.md", "own/KEEP.md"]),
 };
 
 describe("ownedPaths", () => {
-  test("the selected entries by class, the manifest among the writes, every retirement", () => {
+  test("the selected entries by class, the manifest among the writes", () => {
     const config = parseFilesConfig(`
 placeholders: []
 modules: { bun: {}, pages: {} }
@@ -44,9 +43,6 @@ files:
   - { path: checks.yml, class: starter }
   - { path: docs/NOTES.md, class: managed, when: { modules: [pages] } }
   - { path: private.yml, class: managed, when: { private: true } }
-retired:
-  - { path: SECURITY.md, moved_to: .github/SECURITY.md }
-  - { path: OLD.md }
 `);
     expect(
       ownedPaths(config, { modules: ["bun"], private: false, except: ["checks.yml"] }),
@@ -58,7 +54,6 @@ retired:
         "CLAUDE.md",
         ".github/repo-platform-manifest.json",
       ]),
-      retires: new Set(["SECURITY.md", "OLD.md"]),
       stale: new Set(),
       excepted: new Set(["checks.yml"]),
     });
@@ -78,12 +73,9 @@ describe("mirrorPathProblem", () => {
     [".GitHub/Workflows/x.yml", "sits under .github/workflows/"],
     ["LICENSE.md", "is a path files.yml writes"],
     ["nightly.yml", "is a path files.yml writes"],
-    ["SECURITY.md", "is a path files.yml retires"],
     ["LICENSE.md/copy.md", "sits under 'LICENSE.md', a path files.yml writes"],
     ["docs", "is a path prefix of 'docs/README.md', a path files.yml writes"],
     ["docs-site/README.md", null],
-    ["SECURITY.md/copy.md", "sits under 'SECURITY.md', a path files.yml retires"],
-    ["old", "is a path prefix of 'old/SECURITY.md', a path files.yml retires"],
     ["docs/GONE.md", "is a path a stale manifest record retires"],
     ["docs/GONE.md/x", "sits under 'docs/GONE.md', a path a stale manifest record retires"],
     ["docs/OWN.md", "is a path the registration excepts"],
@@ -470,7 +462,6 @@ describe("mirrorDeclarationProblems", () => {
       Lp("*.md", "the pattern matches 'AGENTS.md', a path files.yml writes"),
       Lp("*.md", "the pattern matches 'CLAUDE.md', a path files.yml writes"),
       Lp("*.md", "the pattern matches 'LICENSE.md', a path files.yml writes"),
-      Lp("*.md", "the pattern matches 'SECURITY.md', a path files.yml retires"),
       Ap("*.yml", "the pattern matches '.repo-platform.yml', the registration"),
       Ap("*.yml", "the pattern matches 'nightly.yml', a path files.yml writes"),
       Ap("*/README.md", "the pattern matches 'docs/README.md', a path files.yml writes"),
@@ -504,7 +495,6 @@ describe("mirrorDeclarationProblems", () => {
           ".github/workflows/x.yml",
           "LICENSE.md",
           "docs",
-          "SECURITY.md/x",
           "LICENSE.md/*",
           "copies/a",
           "copies/a/b",
@@ -532,7 +522,6 @@ describe("mirrorDeclarationProblems", () => {
       Lp(".github/workflows/x.yml", "the target sits under .github/workflows/"),
       Lp("LICENSE.md", "the target is a path files.yml writes"),
       Lp("docs", "the target is a path prefix of 'docs/README.md', a path files.yml writes"),
-      Lp("SECURITY.md/x", "the target sits under 'SECURITY.md', a path files.yml retires"),
       Lp("LICENSE.md/*", "the pattern sits under 'LICENSE.md', a path files.yml writes"),
       at("LICENSE.md", "copies/a", "is a path prefix of another target 'copies/a/b'"),
       at("LICENSE.md", "copies/a/b", "sits under another target 'copies/a'"),
@@ -544,7 +533,7 @@ describe("mirrorDeclarationProblems", () => {
       Lp("skills/*/LICENSE.md", "the pattern sits under another target 'skills'"),
       Lp("skills/a/*", "the pattern sits under another target 'skills'"),
     ]);
-    expect(describeMirrorProblem(problems[9])).toBe(
+    expect(describeMirrorProblem(problems[8])).toBe(
       ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'copies/a': the target is a path prefix of another target 'copies/a/b'",
     );
   });

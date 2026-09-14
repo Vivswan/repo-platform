@@ -14,6 +14,7 @@ interface Step {
   run?: string;
   if?: string;
   with?: Record<string, unknown>;
+  env?: Record<string, string>;
 }
 interface Job {
   concurrency?: { group: string; "cancel-in-progress": boolean };
@@ -22,6 +23,7 @@ interface Job {
 
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
 const releaseWorkflow = parseYaml(read(".github/workflows/fleet-release.yml")) as {
+  on: { workflow_call: { inputs: Record<string, { required?: boolean; default?: unknown }> } };
   jobs: Record<string, Job>;
 };
 const job = releaseWorkflow.jobs["release-please"];
@@ -61,10 +63,15 @@ describe("fleet-release.yml's release-please job", () => {
     expect(propose.with).toMatchObject({ "skip-github-release": true });
   });
 
-  test("the job holds a lane keyed by the judged commit that never cancels, and the skeleton's caller holds none", () => {
+  test("the judged sha is a required input with no default: the lane and the head check read it alone, never github.sha", () => {
+    expect(releaseWorkflow.on.workflow_call.inputs.sha).toMatchObject({ required: true });
+    expect(releaseWorkflow.on.workflow_call.inputs.sha).not.toHaveProperty("default");
     expect(job.concurrency).toEqual({
-      "group": "release-cut-${{ inputs.sha || github.sha }}",
+      "group": "release-cut-${{ inputs.sha }}",
       "cancel-in-progress": false,
+    });
+    expect(steps.find((step) => step.id === "head")).toMatchObject({
+      env: { GH_TOKEN: "${{ github.token }}", JUDGED: "${{ inputs.sha }}" },
     });
     expect(skeleton.jobs.release.concurrency).toBeUndefined();
   });

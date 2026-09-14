@@ -96,6 +96,7 @@ describe("readRecord", () => {
   const cases: [string, ManifestEntryShape | undefined, ManifestRecord | null][] = [
     ["a managed record", { class: "managed", hash: HASH }, { class: "managed", hash: HASH }],
     ["a record without a hash", { class: "managed" }, null],
+    ["a record another tool left unstamped (hash null)", { class: "managed", hash: null }, null],
     ["a hash that is no digest", { class: "managed", hash: "nothex" }, null],
     [
       "a record carrying a field its class does not",

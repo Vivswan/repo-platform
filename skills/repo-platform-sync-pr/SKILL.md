@@ -47,19 +47,17 @@ Exactly one open sync PR should exist per repo; when none exists, or more than o
 | header | Build sha, the modules the registration selected, the visibility | The module list matches `.repo-platform.yml`; visibility matches the repo |
 | Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) | `created` is explained by a new module or a first sync; `updated` and `unchanged` need no look; `replaced local edits` (a managed file, or a split file's region) has a diff below; `region added` is a split file that had no markers, its whole prior content now below the new region; `held` wrote nothing and its Detail says why (the list below). A starter is only ever `created`, `unchanged`, or `held` |
 | Replaced local edits | one unified diff per replaced file or region (40 lines shown, the rest counted) | Decide per diff: the content moves into a repo-owned hook or upstream, or it was a stray edit and goes |
-| Retired | one row per file the platform no longer writes: `deleted`, `region removed`, `held`, `kept`, `moved`, `released` | `deleted` removed the platform's own content; `region removed` took the managed region and its markers out of a split file and left the repository-owned content as a plain file (the record leaves with it, so the row appears once); `held` left a file no manifest record vouched for, or one whose `moved_to` destination already exists, for your decision; `kept` is a starter (yours); `moved` is a git rename; `released` dropped the record of a path the registration's `except` names and touched nothing (yours) |
-| Registration notes | one line per note: an unknown module dropped, an unreadable manifest, a placeholder with no value, a manifest record dropped or ignored, a stale record no entry declares or retires, or an `except` path no entry writes (the exact forms below) | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A dropped mirror record means that copy is the repository's own now |
+| Retired | one row per file the platform no longer writes here: `deleted`, `region removed`, `held`, `released` | `deleted` removed the platform's own content; `region removed` took the managed region and its markers out of a split file and left the repository-owned content as a plain file (the record leaves with it, so the row appears once); `held` left a file whose content differs from the recorded write, for your decision; `released` dropped the record of a path the registration's `except` names and touched nothing (yours) |
+| Registration notes | one line per note: an unreadable manifest, a placeholder with no value, a manifest record at an unclean path, a stale record no entry declares, a mirror record no declaration reaches, or an `except` path no entry writes (the exact forms below) | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A dropped mirror record means that copy is the repository's own now |
 | Mirrors | one row per declared target: `written`, `current`, `replaced local edits` (its diff below), `replaced` with a detail naming what was removed | `replaced local edits`: decide per diff like a managed file; `replaced`: a directory stood at the target or a file where a directory had to be, and the diff shows what went. A declaration the writer cannot honour never reaches the report: the sync fails instead (the failure path below) |
 | Review | `Hold for review: yes` with one line per reason, or `no` | Every listed reason resolved before merging |
 
 The Registration notes, exactly:
 
-- ``dropped unknown module `<name>` (files.yml does not know it)``: dropped for this sync
 - `.github/repo-platform-manifest.json <problem>; every existing file is judged as unrecorded`: the manifest could not be read, so this sync rewrites it
 - ``placeholder `{{<name>}}` has no value: set <key> in .repo-platform.yml``: every file rendering that placeholder is `held`; an empty value counts as none
-- ``manifest record for `<path>` dropped: its class or shape is not one the writer records``: the record is not exactly a shape the writer writes (an unknown class, a field its class does not carry, a hash that is neither null nor a sha256 digest or is missing where the class carries one, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers). The path is unrecorded from then on: a selected entry or a declared mirror writes it as any unrecorded path, and anywhere else the file is the repository's own
 - ``manifest record for `<path>` ignored: the path <problem>``: an unclean path
-- ``manifest record for `<path>` had no writer: no files.yml entry declares or retires the path now; it is retired as a stale record (the Retired row has the outcome)``: read that Retired row; `deleted` removed a file the record vouched for, `held` left one it did not, for your decision (the Held retirement case below)
+- ``manifest record for `<path>` had no writer: no files.yml entry declares the path now; it is retired as a stale record (the Retired row has the outcome)``: read that Retired row; `deleted` removed a file the record vouched for, `held` left one it did not, for your decision (the Held retirement case below)
 - ``manifest record for `<path>` dropped: no mirror in .repo-platform.yml reaches it now, so the file is the repository's own (a mirror declared again adopts it while it still holds the source's content)``
 - `` `except` names `<path>`, a path no files.yml entry writes ``: the registration excepts a path the platform never writes; remove it from `except`, or spell the path `files.yml` writes
 
@@ -86,7 +84,7 @@ gh pr diff <number> --name-only
 Every changed path must be one of:
 
 - a Written row whose change is not `unchanged`
-- a Retired row reading `deleted`, `region removed`, or `moved`
+- a Retired row reading `deleted` or `region removed`
 - a Mirrors row reading `written`, `replaced local edits`, or `replaced` (a `replaced` row also explains the deleted paths under its target and the ancestor file its detail names)
 - `.github/repo-platform-manifest.json` (rewritten every sync, no row)
 
@@ -102,24 +100,16 @@ git diff origin/main...origin/automation/repo-platform -- <path>
 | Case | What happened | What to do |
 |---|---|---|
 | Replaced local edits | Someone edited a managed file (`ci.yml`, a module workflow, a pin dotfile) or the managed region of a split file | Read the diff; move the need (below). The platform version stays |
-| Held retirement | A retired path holds content no manifest record vouched for, a split file's region differs from the recorded one, or a move's destination already exists | Keep what matters, delete the rest yourself (a blocked move: free the destination or delete the file); the row returns every sync until the file is gone |
-| Removed region | A retired split file carried repository-owned content around its recorded region: the region and its markers went, the rest stayed as a plain file | Read the file that remains; it is yours now, and no row returns for it |
+| Held retirement | A file the platform stopped writing here differs from its recorded write: a managed file edited, a split file's region edited or its markers gone | Keep what matters, delete the rest yourself; the row returns every sync until the file is gone |
+| Removed region | A split file the platform stopped writing here carried repository-owned content around its recorded region: the region and its markers went, the rest stayed as a plain file | Read the file that remains; it is yours now, and no row returns for it |
 | Replaced mirror | A declared target held other content (`replaced local edits`, diff below), or a directory or a blocking file stood in the target's way (`replaced`, the detail names it) | Read the diff; the platform's copy or link, by the declared `kind`, stays. Content worth keeping moves to a path no declaration names |
-| Registration drop | `modules:` names a module the platform does not know | Fix the name; the module's files were not written |
 | Settings | `.github/settings.yml` reads `replaced local edits` (someone edited the rendered file, or the repository carried a hand-written one the sync had not recorded) or `held` (`no overlay at .github/settings.local.yml (its starter is held or missing)`, an overlay naming one label twice, or a tracking label the plan refuses) | `replaced local edits`: move what the diff removed into `.github/settings.local.yml` (the rendered file is never edited by hand); the holds name the registration key or the overlay line to fix |
 
 Something that matches none of the above: do not merge. The branch is rewritten on the next run, so nothing is lost by waiting. Escalate with an issue on Vivswan/repo-platform.
 
-## Repository-owned markdown after a retirement
+## Orphaned comments after a retirement
 
-The platform no longer writes the community health files; GitHub serves the account's defaults from its `<owner>/.github` repository, and a default shows ONLY when the repository has no file of the same name. A sync PR that retires the platform's `CONTRIBUTING.md` or `.github/SECURITY.md` can leave a repository-owned tail in it, and that tail (a `held` retirement, or a file the platform never recorded, which stays in place with no row at all) hides the complete default behind a fragment. Before merging, decide each file:
-
-| File left behind | Either delete it | Or make it complete |
-|---|---|---|
-| `CONTRIBUTING.md` | Move the repo-specific content into `README.md` and delete the file, so the account default shows | It states the Conventional Commit PR-title rule and the CI gate (`all-green` as the required check) |
-| `.github/SECURITY.md` | Move anything repo-specific into `README.md` and delete the file | It lists the supported versions and the private reporting route |
-
-A sync PR that retires a workflow or reshapes the CI legs also orphans the comments that named the old shape, so grep the repository's own markdown and workflow comments for every name under `retired` in `files.yml` and rewrite every hit. A comment that names a workflow the repository no longer has is a false statement about the repository.
+A sync PR that retires a workflow or reshapes the CI legs orphans the comments that named the old shape, so grep the repository's own markdown and workflow comments for every path in the Retired section and rewrite every hit. A comment that names a workflow the repository no longer has is a false statement about the repository.
 
 - The fix is ONE commit pushed onto `automation/repo-platform` BEFORE merging, never a separate PR: the branch is rewritten on the next run, and a follow-up PR leaves the merged tree wrong in between.
 - Repeat the check on every later sync PR that retires or reshapes a file: each retirement can leave a tail, and each reshaped workflow can orphan a comment that named the old shape.
@@ -173,7 +163,7 @@ When a human does the merging, your job ends with the branch resolved, pushed, a
 
 ## The failure path
 
-A sync leg that fails files (or refreshes) one issue in the target repository titled `[repo-platform] sync failed`, with the error. The operator run's job log (`gh run view <id> --log` on Vivswan/repo-platform) shows the row as `row <i>: failed, report filed in the target repository`; the line carries an index from 0, never the repository's name. Fix what the issue names (usually the registration, a mirror declaration the writer cannot honour - each named as `.repo-platform.yml: mirrors: source '<s>', target '<t>': <reason>` in the writer log - or a split file's markers), then dispatch again:
+A sync leg that fails files (or refreshes) one issue in the target repository titled `[repo-platform] sync failed`, with the error. The operator run's job log (`gh run view <id> --log` on Vivswan/repo-platform) shows the row as `row <i>: failed, report filed in the target repository`; the line carries an index from 0, never the repository's name. Fix what the issue names (usually the registration: a module `files.yml` does not offer, named as `.repo-platform.yml: module "<name>" is not a module files.yml offers (known: ...)`, or a mirror declaration the writer cannot honour, named as `.repo-platform.yml: mirrors: source '<s>', target '<t>': <reason>`; a manifest record the writer cannot read, counted in the log and named by the repository's own `validate-managed-files` check; or a split file's markers), then dispatch again:
 
 ```bash
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true

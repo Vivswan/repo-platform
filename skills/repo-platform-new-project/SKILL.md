@@ -111,7 +111,7 @@ The PR body is the report, one section per outcome ([the sync-pr skill](https://
 | Written | `created` for every path that was absent; an adopted repo also sees `unchanged` for a starter it already had, `region added` for a split file that had no markers (the region goes above its content and the PR holds), and `replaced local edits` for a managed file or split region it had written itself |
 | Replaced local edits | a diff per replaced file; move anything you want to keep (step 6) |
 | Retired | a row per file the platform no longer writes; `held` means it needs your decision |
-| Registration notes | a module name `files.yml` does not know, dropped; a placeholder with no value, naming the registration key to set (an empty `project.description` counts as no value: it holds the managed region of `AGENTS.md` on every sync, and the settings starter while it is still absent); an `except` path no `files.yml` entry writes |
+| Registration notes | a placeholder with no value, naming the registration key to set (an empty `project.description` counts as no value: it holds the managed region of `AGENTS.md` on every sync, and the settings starter while it is still absent); an `except` path no `files.yml` entry writes |
 | Mirrors | one row per declared target: `written`, `current`, `replaced local edits`, or `replaced` (the last two hold the PR); a declaration the writer cannot honour fails the sync instead |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
@@ -161,7 +161,7 @@ gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-p
 
 - The sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from the registration's `labels.*` keys (the module's default when a key is unset) into the file; the apply declares them on the repository.
 - Your own labels, rulesets, and identity keys go in `.github/settings.local.yml`; an edit there lands in the rendered file on the next sync PR (`gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project -f manual=true` brings it at once). A hand edit of `.github/settings.yml` is replaced by the next sync and reds the managed files check before that.
-- Until the sync PR carrying the rendered file has merged, the apply skips the repository with a notice.
+- Until the sync PR carrying the rendered file has merged, the apply skips a repository with no `.github/settings.yml` with a notice; one carrying a hand-written file fails the plan.
 
 ## Owner actions (need repository-settings access)
 

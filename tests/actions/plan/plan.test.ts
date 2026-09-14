@@ -58,7 +58,6 @@ function input(text: string, isPrivate = false, modules: Module[] = MODULES): Pl
     modules,
     defaults: FILES_DATA.defaults,
     files: FILES_DATA.files,
-    retired: FILES_DATA.retired,
     reservedLabels: RESERVED,
     securityLabel: SECURITY,
     private: isPrivate,
