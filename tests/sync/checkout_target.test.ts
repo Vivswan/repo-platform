@@ -9,6 +9,7 @@ const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/checkout_target.ts");
 const TARGET = "Vivswan/hidden-server";
 const PAT = "ghp_SENTINEL";
+const URL = `https://x-access-token:${PAT}@github.com/${TARGET}.git`;
 
 function run(branch?: string) {
   const root = temp.dir("checkout-target-");
@@ -41,31 +42,25 @@ function run(branch?: string) {
   };
 }
 
-const URL = `https://x-access-token:${PAT}@github.com/${TARGET}.git`;
-
 describe("checkout_target.ts", () => {
-  test("a plain row clones the default branch at depth 1, then strips the token from the remote", () => {
-    const result = run();
+  // The clone authenticates with the token URL and then strips it from the remote, so only deliver.ts's own lease
+  // read and push carry it later; the captured log is redacted, since git quotes target file text in its diagnostics.
+  // A dispatched branch is the clone's --branch (resolve_row.ts already proved it exists).
+  test.each([
+    { reason: "a plain row clones the default branch", branch: undefined, at: [] },
+    {
+      reason: "a dispatched branch is the clone's --branch",
+      branch: "feat/add-site",
+      at: ["--branch", "feat/add-site"],
+    },
+  ])("$reason at depth 1, then strips the token from the remote", ({ branch, at }) => {
+    const result = run(branch);
     expect(result.exitCode).toBe(0);
     expect(result.git.map((argv) => argv.slice(1))).toEqual([
-      ["clone", "--quiet", "--depth", "1", URL, result.targetDir],
+      ["clone", "--quiet", "--depth", "1", ...at, URL, result.targetDir],
       ["-C", result.targetDir, "remote", "set-url", "origin", `https://github.com/${TARGET}.git`],
     ]);
     expect(result.log).toContain("$ git clone -> exit 0");
     expect(result.log).not.toContain(PAT);
-  });
-
-  test("a dispatched branch is the clone's --branch", () => {
-    const result = run("feat/add-site");
-    expect(result.exitCode).toBe(0);
-    expect(result.git[0].slice(1, 8)).toEqual([
-      "clone",
-      "--quiet",
-      "--depth",
-      "1",
-      "--branch",
-      "feat/add-site",
-      URL,
-    ]);
   });
 });

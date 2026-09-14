@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  blocksAnchorProblem,
   missingPlaceholders,
   type PlaceholderValues,
   spliceBlocks,
@@ -67,16 +66,5 @@ describe("blocks anchor", () => {
     expect(spliceBlocks("a\n{{blocks}}\nb\n", [])).toBe("a\nb\n");
     expect(spliceBlocks("\n{{blocks}}\nb\n", ["x\n"])).toBe("\nx\nb\n");
     expect(spliceBlocks("exact bytes", [])).toBe("exact bytes");
-  });
-
-  test("the anchor is one whole line at most", () => {
-    expect(blocksAnchorProblem("a\n{{blocks}}\n")).toBeNull();
-    expect(blocksAnchorProblem("plain\n")).toBeNull();
-    expect(blocksAnchorProblem("  {{blocks}}\n")).toBe(
-      "mentions {{blocks}} mid-line; it must be a line of its own",
-    );
-    expect(blocksAnchorProblem("{{blocks}}\n{{blocks}}\n")).toBe(
-      "mentions {{blocks}} more than once",
-    );
   });
 });

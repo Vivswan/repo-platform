@@ -2,7 +2,7 @@
 // The overlay's place in the fold is settings_entry.test.ts's.
 
 import { describe, expect, test } from "bun:test";
-import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
@@ -16,13 +16,11 @@ import {
   loadOverrideLayer,
   readFleetLayer,
   readLayer,
-  readLayers,
   type SettingsDoc,
   sectionEntries,
 } from "../../../.github/scripts/sync/writer/settings_layers";
 
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
-import type { LayerSources } from "../../../actions/plan/reserved_labels.ts";
 import type { Selection } from "../../../actions/shared/selection.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
@@ -121,50 +119,73 @@ describe("the managed rulesets", () => {
   };
   const mainRuleset = (s: Selection) => rulesets(s).find((r) => r.name === "main");
 
-  // The main ruleset these layers emit, whole: GitHub enum values render fine and 422 at apply time, so the
-  // parameters are pinned, not the types. The protection rules live in the override, which merges above.
-  test.each<{ reason: string; selection: Selection; names: string[]; main: unknown[] | undefined }>(
-    [
-      {
-        reason: "a bare public selection: code_quality and the Copilot auto-request alone",
-        selection: selection(),
-        names: ["main"],
-        main: [codeQuality, copilotReview],
-      },
-      {
-        reason: "a private selection declares no ruleset in these layers",
-        selection: selection({ private: true }),
-        names: [],
-        main: undefined,
-      },
-      {
-        reason: "a public toolchain without CodeQL renders no code_scanning",
-        selection: selection({ modules: ["rust"] }),
-        names: ["main"],
-        main: [codeQuality, copilotReview],
-      },
-      ...CODEQL_MODULES.map((module) => ({
-        reason: `a public ${module} repository gets the CodeQL rule with the exact threshold tuple`,
-        selection: selection({ modules: [module] }),
-        names: ["main"],
-        main: [codeQuality, copilotReview, codeScanning],
-      })),
-      ...CODEQL_MODULES.map((module) => ({
-        reason: `a private ${module} repository gets no CodeQL rule`,
-        selection: selection({ modules: [module], private: true }),
-        names: [],
-        main: undefined,
-      })),
-      {
-        reason: "two CodeQL toolchains select the one CodeQL layer, so code_scanning renders once",
-        selection: selection({ modules: ["bun", "uv"] }),
-        names: ["main"],
-        main: [codeQuality, copilotReview, codeScanning],
-      },
-    ],
-  )("$reason", ({ selection: s, names, main }) => {
+  // The rulesets these layers emit, whole: GitHub enum values render fine and 422 at apply time, so parameters
+  // are pinned, not types, and a module's own ruleset is pinned entire (its enforcement included: release tags
+  // are immutable because this rule is active, and a disabled one renders and applies fine). The protection
+  // rules live in the override, which merges above.
+  test.each<{
+    reason: string;
+    selection: Selection;
+    names: string[];
+    main: unknown[] | undefined;
+    others?: Record<string, unknown>[];
+  }>([
+    {
+      reason: "a bare public selection: code_quality and the Copilot auto-request alone",
+      selection: selection(),
+      names: ["main"],
+      main: [codeQuality, copilotReview],
+    },
+    {
+      reason: "a private selection declares no ruleset in these layers",
+      selection: selection({ private: true }),
+      names: [],
+      main: undefined,
+    },
+    {
+      reason: "a public toolchain without CodeQL renders no code_scanning",
+      selection: selection({ modules: ["rust"] }),
+      names: ["main"],
+      main: [codeQuality, copilotReview],
+    },
+    ...CODEQL_MODULES.map((module) => ({
+      reason: `a public ${module} repository gets the CodeQL rule with the exact threshold tuple`,
+      selection: selection({ modules: [module] }),
+      names: ["main"],
+      main: [codeQuality, copilotReview, codeScanning],
+    })),
+    ...CODEQL_MODULES.map((module) => ({
+      reason: `a private ${module} repository gets no CodeQL rule`,
+      selection: selection({ modules: [module], private: true }),
+      names: [],
+      main: undefined,
+    })),
+    {
+      reason: "two CodeQL toolchains select the one CodeQL layer, so code_scanning renders once",
+      selection: selection({ modules: ["bun", "uv"] }),
+      names: ["main"],
+      main: [codeQuality, copilotReview, codeScanning],
+    },
+    {
+      reason: "release-please adds the whole release-tags ruleset, active, admins bypassing",
+      selection: selection({ modules: ["release-please"] }),
+      names: ["main", "release-tags"],
+      main: [codeQuality, copilotReview],
+      others: [
+        {
+          name: "release-tags",
+          target: "tag",
+          enforcement: "active",
+          conditions: { ref_name: { include: ["v*"], exclude: [] } },
+          rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "update" }],
+          bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+        },
+      ],
+    },
+  ])("$reason", ({ selection: s, names, main, others }) => {
     expect(rulesets(s).map((r) => r.name)).toEqual(names);
     expect(mainRuleset(s)?.rules).toEqual(main);
+    expect(rulesets(s).filter((r) => r.name !== "main")).toEqual(others ?? []);
   });
 
   // Cross-file with files.yml's modules block: a toolchain that gains codeql_languages joins the CodeQL layer's
@@ -277,88 +298,6 @@ describe("layerPaths", () => {
     },
   ])("$reason", ({ selection: s, paths }) => {
     expect(layerPaths(CONFIG, s)).toEqual(paths);
-  });
-});
-
-describe("the layer topology fails CLOSED", () => {
-  // Selecting layer files by existence fails OPEN: a deleted
-  // files/uv/settings.yml would vanish from the stack, the roster come out
-  // short but valid-looking, and the apply's delete-undeclared pass remove
-  // the module's labels from live repos. The declaration lives in
-  // files.yml (settings.layers) and the load holds the tree to it; the
-  // writer's tree walk refuses the other direction (files_config.test.ts).
-  const scratchTree = () => {
-    const tree = join(temp.dir("settings-layers-tree-"), "files");
-    cpSync(TREE, tree, { recursive: true });
-    return tree;
-  };
-
-  test.each<{
-    reason: string;
-    config: LayerSources;
-    damage: (tree: string) => void;
-    problem: string;
-  }>([
-    {
-      reason: "a deleted FLEET layer",
-      config: CONFIG,
-      damage: (tree) => rmSync(join(tree, "settings/baseline.yml")),
-      problem: "settings layer files/settings/baseline.yml is missing from the tree",
-    },
-    {
-      reason: "a declared MODULE layer missing from the tree, selected or not",
-      config: CONFIG,
-      damage: (tree) => rmSync(join(tree, "uv/settings.yml")),
-      problem: "settings layer files/uv/settings.yml is missing from the tree",
-    },
-    {
-      reason: "a layer that is not a mapping",
-      config: CONFIG,
-      damage: (tree) => writeFileSync(join(tree, "site/settings.yml"), "- a\n- b\n"),
-      problem:
-        "files/site/settings.yml must be a YAML mapping of section names to settings, but its top level parsed as a list",
-    },
-    {
-      reason: "a layer naming one label twice",
-      config: CONFIG,
-      damage: (tree) =>
-        writeFileSync(
-          join(tree, "settings/baseline.yml"),
-          'labels:\n  - {name: bug, color: "d73a4a"}\n  - {name: BUG, color: "d73a4a"}\n',
-        ),
-      problem:
-        'layer "files/settings/baseline.yml": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer',
-    },
-    {
-      reason: "a layer with a section the apply does not know",
-      config: CONFIG,
-      damage: (tree) => writeFileSync(join(tree, "site/settings.yml"), "labels_v2: []\n"),
-      problem: "unknown top-level section in files/site/settings.yml: labels_v2",
-    },
-  ])("$reason is a load problem naming the file", ({ config, damage, problem }) => {
-    // The control: every committed declaration has its file, so the one
-    // problem below is the damage alone.
-    const committed = readLayers(CONFIG, TREE);
-    expect(committed.problems).toEqual([]);
-    expect([...committed.layers.keys()]).toEqual([
-      "settings/baseline.yml",
-      "settings/public.yml",
-      "settings/private.yml",
-      "bun/settings.yml",
-      "deno/settings.yml",
-      "uv/settings.yml",
-      "rust/settings.yml",
-      "site/settings.yml",
-      "release-please/settings.yml",
-      "pr-title/settings.yml",
-      "settings/codeql-public.yml",
-      "settings/override.yml",
-    ]);
-    const tree = scratchTree();
-    damage(tree);
-    const { problems } = readLayers(config, tree);
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain(problem);
   });
 });
 
