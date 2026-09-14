@@ -35,10 +35,10 @@ describe("holdReasons", () => {
       written: [
         ...QUIET.written,
         {
-          path: "CLAUDE.md",
-          class: "link",
+          path: "AGENTS.md",
+          class: "split",
           change: "held",
-          detail: "a regular file sits where a link is declared",
+          detail: "a symbolic link sits where a file is declared",
         },
         { path: ".gitignore", class: "split", change: "region added", detail: "" },
       ],
@@ -66,7 +66,7 @@ describe("holdReasons", () => {
       ],
     };
     expect(holdReasons(loud)).toEqual([
-      "CLAUDE.md held: a regular file sits where a link is declared",
+      "AGENTS.md held: a symbolic link sits where a file is declared",
       ".gitignore: the managed region was added above repository-owned content",
       "local edits replaced in ci.yml",
       "retirement of r.yml held: the content differs from the last write",

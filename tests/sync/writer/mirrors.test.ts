@@ -164,13 +164,16 @@ describe("applyMirrors", () => {
     });
     const { rows, replaced } = applyMirrors(
       root,
-      [{ source: "LICENSE.md", kind: "copy", targets: ["skills/*/LICENSE.md"] }],
+      {
+        fleet: [],
+        own: [{ source: "LICENSE.md", kind: "copy", targets: ["skills/*/LICENSE.md"] }],
+      },
       bytes({ "LICENSE.md": "v2\n" }),
       owned(["LICENSE.md"]),
       {
         "skills/d/LICENSE.md": { class: "mirror", hash: sha256("v1\n") },
-        // A link record's hash covers a target string, so it vouches for no file bytes.
-        "skills/e/LICENSE.md": { class: "link", hash: sha256("AGENTS.md") },
+        // A symlink mirror's hash covers a link target, so it vouches for no file bytes.
+        "skills/e/LICENSE.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
       },
     );
     expect(rows).toEqual([
@@ -201,10 +204,13 @@ describe("applyMirrors", () => {
     symlinkSync("../outside", join(root, "adir/out"));
     const { rows, replaced } = applyMirrors(
       root,
-      [
-        { source: "L.md", kind: "copy", targets: ["adir", "afile.txt/COPY.md"] },
-        { source: "N.md", kind: "copy", targets: ["skills/*/LICENSE.md"] },
-      ],
+      {
+        fleet: [],
+        own: [
+          { source: "L.md", kind: "copy", targets: ["adir", "afile.txt/COPY.md"] },
+          { source: "N.md", kind: "copy", targets: ["skills/*/LICENSE.md"] },
+        ],
+      },
       bytes({ "L.md": "L\n", "N.md": "N\n" }),
       owned(["L.md", "N.md"]),
       {},
@@ -226,20 +232,23 @@ describe("applyMirrors", () => {
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [
-          {
-            source: "LICENSE.md",
-            kind: "copy",
-            targets: ["copies/a", "copies/a/b", "good/COPY.md"],
-          },
-          {
-            source: "LICENSE.md",
-            kind: "copy",
-            targets: ["LICENSE.md", "GONE.md", "docs/**/x"],
-          },
-          { source: "LICENSE.md", kind: "copy", targets: [".repo-platform.yml/copy.md"] },
-          { source: "README.md", kind: "copy", targets: ["skills/*/README.md"] },
-        ],
+        {
+          fleet: [],
+          own: [
+            {
+              source: "LICENSE.md",
+              kind: "copy",
+              targets: ["copies/a", "copies/a/b", "good/COPY.md"],
+            },
+            {
+              source: "LICENSE.md",
+              kind: "copy",
+              targets: ["LICENSE.md", "GONE.md", "docs/**/x"],
+            },
+            { source: "LICENSE.md", kind: "copy", targets: [".repo-platform.yml/copy.md"] },
+            { source: "README.md", kind: "copy", targets: ["skills/*/README.md"] },
+          ],
+        },
         bytes({ "LICENSE.md": "L\n" }),
         owned(["LICENSE.md"], [], ["GONE.md"]),
         {},
@@ -287,7 +296,9 @@ describe("applyMirrors", () => {
       failure("LICENSE.md", "vendor/NOTICE.md", `the target is ${what}`),
       failure("LICENSE.md", "vendor/*", `the pattern matches 'vendor/NOTICE.md', ${what}`),
     ]);
-    expect(failuresOf(() => applyMirrors(root, declared, written, claims, {}))).toEqual(planned);
+    expect(
+      failuresOf(() => applyMirrors(root, { fleet: [], own: declared }, written, claims, {})),
+    ).toEqual(planned);
 
     // The checkout alone shows 'vendor/*/sub' landing above the reserved path: the plan passes it, the writer's expansion
     // refuses it with the verdict the plan's judge gives that path.
@@ -295,9 +306,9 @@ describe("applyMirrors", () => {
     const verdict = `is a path prefix of 'vendor/pkg/sub/NOTICE.md', ${what}`;
     expect(mirrorDeclarationProblems(expanded, claims)).toEqual([]);
     expect(mirrorPathProblem("vendor/pkg/sub", claims)).toBe(verdict);
-    expect(failuresOf(() => applyMirrors(root, expanded, written, claims, {}))).toEqual([
-      expands("LICENSE.md", "vendor/*/sub", "vendor/pkg/sub", verdict),
-    ]);
+    expect(
+      failuresOf(() => applyMirrors(root, { fleet: [], own: expanded }, written, claims, {})),
+    ).toEqual([expands("LICENSE.md", "vendor/*/sub", "vendor/pkg/sub", verdict)]);
   });
 
   test("a literal pass fails whole on a link above a target, a held source, or a directory the glob pass would need, and writes over no link it could have replaced", () => {
@@ -312,14 +323,17 @@ describe("applyMirrors", () => {
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [
-          {
-            source: "LICENSE.md",
-            kind: "copy",
-            targets: ["skills/a/LICENSE.md", "linked/LICENSE.md", "good/COPY.md", "sub/*/L.md"],
-          },
-          { source: "HELD.md", kind: "copy", targets: ["copies/HELD.md", "sub/*/HELD.md"] },
-        ],
+        {
+          fleet: [],
+          own: [
+            {
+              source: "LICENSE.md",
+              kind: "copy",
+              targets: ["skills/a/LICENSE.md", "linked/LICENSE.md", "good/COPY.md", "sub/*/L.md"],
+            },
+            { source: "HELD.md", kind: "copy", targets: ["copies/HELD.md", "sub/*/HELD.md"] },
+          ],
+        },
         bytes({ "LICENSE.md": "v2\n" }),
         owned(["LICENSE.md", "HELD.md"]),
         {},
@@ -367,19 +381,22 @@ describe("applyMirrors", () => {
       failures = failuresOf(() =>
         applyMirrors(
           root,
-          [
-            {
-              source: "A.md",
-              kind: "copy",
-              targets: ["skills/*/LICENSE.md", "skills/*/nope/LICENSE.md"],
-            },
-            {
-              source: "B.md",
-              kind: "copy",
-              targets: ["nowhere/*/x", "skills/link/*.md", "real/a/x/*", "docs/*.md"],
-            },
-            { source: "HELD.md", kind: "copy", targets: ["skills/*/HELD.md"] },
-          ],
+          {
+            fleet: [],
+            own: [
+              {
+                source: "A.md",
+                kind: "copy",
+                targets: ["skills/*/LICENSE.md", "skills/*/nope/LICENSE.md"],
+              },
+              {
+                source: "B.md",
+                kind: "copy",
+                targets: ["nowhere/*/x", "skills/link/*.md", "real/a/x/*", "docs/*.md"],
+              },
+              { source: "HELD.md", kind: "copy", targets: ["skills/*/HELD.md"] },
+            ],
+          },
           bytes({ "A.md": "A\n", "B.md": "B\n" }),
           owned(["A.md", "B.md", "HELD.md"]),
           {},
@@ -434,10 +451,13 @@ describe("applyMirrors", () => {
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [
-          { source: "A.md", kind: "copy", targets: ["*/LICENSE.md"] },
-          { source: "B.md", kind: "copy", targets: ["skills/*/COPY.md"] },
-        ],
+        {
+          fleet: [],
+          own: [
+            { source: "A.md", kind: "copy", targets: ["*/LICENSE.md"] },
+            { source: "B.md", kind: "copy", targets: ["skills/*/COPY.md"] },
+          ],
+        },
         bytes({ "A.md": "A\n", "B.md": "B\n" }),
         owned(["A.md", "B.md"]),
         {},
@@ -472,10 +492,13 @@ describe("applyMirrors", () => {
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [
-          { source: "LICENSE.md", kind: "copy", targets: ["*.md", "skills/a/LICENSE.md"] },
-          { source: "AGENTS.md", kind: "copy", targets: ["*.yml", "skills/*/LICENSE.md"] },
-        ],
+        {
+          fleet: [],
+          own: [
+            { source: "LICENSE.md", kind: "copy", targets: ["*.md", "skills/a/LICENSE.md"] },
+            { source: "AGENTS.md", kind: "copy", targets: ["*.yml", "skills/*/LICENSE.md"] },
+          ],
+        },
         bytes({ "LICENSE.md": "L\n", "AGENTS.md": "A\n" }),
         owned(["LICENSE.md", "AGENTS.md"]),
         {},
@@ -532,7 +555,7 @@ describe("applyMirrors", () => {
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [{ source: "L.md", kind: "copy", targets: ["skills/*/sub/L.md"] }],
+        { fleet: [], own: [{ source: "L.md", kind: "copy", targets: ["skills/*/sub/L.md"] }] },
         bytes({ "L.md": "L\n" }),
         owned(["L.md"]),
         {},
@@ -561,7 +584,10 @@ describe("applyMirrors", () => {
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [{ source: "L.md", kind: "copy", targets: ["tests/*/foo", "tests/a*/*/bar"] }],
+        {
+          fleet: [],
+          own: [{ source: "L.md", kind: "copy", targets: ["tests/*/foo", "tests/a*/*/bar"] }],
+        },
         bytes({ "L.md": "L\n" }),
         owned(["L.md"]),
         {},
@@ -589,10 +615,13 @@ describe("applyMirrors", () => {
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [
-          { source: "A.md", kind: "copy", targets: ["skills/*/L.md"] },
-          { source: "B.md", kind: "copy", targets: ["skills/a/*.md"] },
-        ],
+        {
+          fleet: [],
+          own: [
+            { source: "A.md", kind: "copy", targets: ["skills/*/L.md"] },
+            { source: "B.md", kind: "copy", targets: ["skills/a/*.md"] },
+          ],
+        },
         bytes({ "A.md": "A\n", "B.md": "B\n" }),
         owned(["A.md", "B.md"]),
         {},
@@ -616,7 +645,10 @@ describe("applyMirrors", () => {
       failuresOf(() =>
         applyMirrors(
           root,
-          [{ source: "LICENSE.md", kind: "copy", targets: [long, "skills/*/LICENSE.md"] }],
+          {
+            fleet: [],
+            own: [{ source: "LICENSE.md", kind: "copy", targets: [long, "skills/*/LICENSE.md"] }],
+          },
           bytes({ "LICENSE.md": "L\n" }),
           owned(["LICENSE.md"]),
           {},
@@ -645,13 +677,19 @@ describe("applyMirrors", () => {
         const failures = failuresOf(() =>
           applyMirrors(
             root,
-            [
-              {
-                source: "LICENSE.md",
-                kind: "copy",
-                targets: [`${Array(levels).fill("*").join("/")}/LICENSE.md`, "skills/*/LICENSE.md"],
-              },
-            ],
+            {
+              fleet: [],
+              own: [
+                {
+                  source: "LICENSE.md",
+                  kind: "copy",
+                  targets: [
+                    `${Array(levels).fill("*").join("/")}/LICENSE.md`,
+                    "skills/*/LICENSE.md",
+                  ],
+                },
+              ],
+            },
             bytes({ "LICENSE.md": "L\n" }),
             owned(["LICENSE.md"]),
             {},
@@ -681,10 +719,13 @@ describe("applyMirrors", () => {
     const root = tree({ "skills/old/README.md": "" });
     const { rows } = applyMirrors(
       root,
-      [
-        { source: "AGENTS.md", kind: "copy", targets: ["skills/*/AGENTS.md"] },
-        { source: "LICENSE.md", kind: "copy", targets: ["skills/new/LICENSE.md"] },
-      ],
+      {
+        fleet: [],
+        own: [
+          { source: "AGENTS.md", kind: "copy", targets: ["skills/*/AGENTS.md"] },
+          { source: "LICENSE.md", kind: "copy", targets: ["skills/new/LICENSE.md"] },
+        ],
+      },
       bytes({ "LICENSE.md": "L\n", "AGENTS.md": "A\n" }),
       owned(["LICENSE.md", "AGENTS.md"]),
       {},
@@ -701,14 +742,17 @@ describe("applyMirrors", () => {
     const root = tree({ "skills/a/README.md": "" });
     const { rows } = applyMirrors(
       root,
-      [
-        {
-          source: "LICENSE.md",
-          kind: "copy",
-          targets: ["skills/a/LICENSE.md", "skills/*/LICENSE.md"],
-        },
-        { source: "LICENSE.md", kind: "copy", targets: ["skills/a/*.md"] },
-      ],
+      {
+        fleet: [],
+        own: [
+          {
+            source: "LICENSE.md",
+            kind: "copy",
+            targets: ["skills/a/LICENSE.md", "skills/*/LICENSE.md"],
+          },
+          { source: "LICENSE.md", kind: "copy", targets: ["skills/a/*.md"] },
+        ],
+      },
       bytes({ "LICENSE.md": "L\n" }),
       owned(["LICENSE.md"]),
       {},
@@ -730,6 +774,26 @@ describe("applyMirrors with kind symlink", () => {
   });
   const copy = (source: string, targets: string[]) => ({ source, targets, kind: "copy" as const });
 
+  test("a recorded link re-pointed by its declaration is written whole, with no replaced edit to review", () => {
+    const root = tree({ "LICENSE.md": "v2\n", "OLD.md": "o\n", "top/README.md": "" });
+    symlinkSync("../OLD.md", join(root, "top/L.md"));
+    const { rows, replaced, records } = applyMirrors(
+      root,
+      { fleet: [], own: [link("LICENSE.md", ["top/L.md"])] },
+      bytes({ "LICENSE.md": "v2\n" }),
+      owned(["LICENSE.md"]),
+      { "top/L.md": { class: "mirror", kind: "symlink", hash: sha256("../OLD.md") } },
+    );
+    expect(rows).toEqual([row("LICENSE.md", "top/L.md", "written")]);
+    expect(replaced).toEqual([]);
+    expect(readlinkSync(join(root, "top/L.md"))).toBe("../LICENSE.md");
+    expect(records.get("top/L.md")).toEqual({
+      class: "mirror",
+      kind: "symlink",
+      hash: sha256("../LICENSE.md"),
+    });
+  });
+
   test("places a relative link to the source, reads a link as current, and replaces a file or a link elsewhere with a diff", () => {
     const root = tree({
       "LICENSE.md": "v2\n",
@@ -745,7 +809,7 @@ describe("applyMirrors with kind symlink", () => {
     symlinkSync("../../OTHER.md", join(root, "skills/e/LICENSE.md"));
     const { rows, replaced, records } = applyMirrors(
       root,
-      [link("LICENSE.md", ["skills/*/LICENSE.md", "top/LICENSE.md"])],
+      { fleet: [], own: [link("LICENSE.md", ["skills/*/LICENSE.md", "top/LICENSE.md"])] },
       bytes({ "LICENSE.md": "v2\n" }),
       owned(["LICENSE.md"]),
       // A copy record vouches for the file the flip replaces.
@@ -779,7 +843,7 @@ describe("applyMirrors with kind symlink", () => {
     });
     const again = applyMirrors(
       root,
-      [link("LICENSE.md", ["skills/*/LICENSE.md", "top/LICENSE.md"])],
+      { fleet: [], own: [link("LICENSE.md", ["skills/*/LICENSE.md", "top/LICENSE.md"])] },
       bytes({ "LICENSE.md": "v2\n" }),
       owned(["LICENSE.md"]),
       Object.fromEntries(records),
@@ -795,7 +859,7 @@ describe("applyMirrors with kind symlink", () => {
     symlinkSync("../../OTHER.md", join(root, "skills/b/LICENSE.md"));
     const { rows, replaced, records } = applyMirrors(
       root,
-      [copy("LICENSE.md", ["skills/*/LICENSE.md"])],
+      { fleet: [], own: [copy("LICENSE.md", ["skills/*/LICENSE.md"])] },
       bytes({ "LICENSE.md": "v2\n" }),
       owned(["LICENSE.md"]),
       {
@@ -829,7 +893,7 @@ describe("applyMirrors with kind symlink", () => {
     const root = tree({ "adir/keep.md": "" });
     const { rows, replaced } = applyMirrors(
       root,
-      [link("L.md", ["adir"])],
+      { fleet: [], own: [link("L.md", ["adir"])] },
       bytes({ "L.md": "L\n" }),
       owned(["L.md"]),
       {},
@@ -844,7 +908,10 @@ describe("applyMirrors with kind symlink", () => {
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [copy("LICENSE.md", ["skills/*/README.md"]), link("LICENSE.md", ["skills/a/*.md"])],
+        {
+          fleet: [],
+          own: [copy("LICENSE.md", ["skills/*/README.md"]), link("LICENSE.md", ["skills/a/*.md"])],
+        },
         bytes({ "LICENSE.md": "L\n" }),
         owned(["LICENSE.md"]),
         {},

@@ -45,16 +45,6 @@ files:
   - path: AGENTS.md
     class: split
     region: html
-  - path: CLAUDE.md
-    class: link
-    target: AGENTS.md
-  - path: .github/agents.md
-    class: link
-    target: ../AGENTS.md
-  - path: .github/copilot-instructions.md
-    class: link
-    target: ../AGENTS.md
-    when: {modules: [pages]}
   - path: .github/dependabot.yml
     class: managed
     blocks: dependabot_ecosystems
@@ -101,3 +91,7 @@ files:
   - path: docs/NOTES.md
     class: managed
     when: {modules: [pages]}
+mirrors:
+  - source: AGENTS.md
+    kind: symlink
+    targets: [CLAUDE.md, .github/agents.md, .github/copilot-instructions.md]

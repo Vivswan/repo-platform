@@ -34,7 +34,6 @@ describe("renderManifest", () => {
       "s.yml": { class: "starter" },
       "m/copy.txt": { class: "mirror", hash: HASH },
       "m/link.txt": { class: "mirror", kind: "symlink", hash: sha256("../s.yml") },
-      "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
     });
     const parsed = parseManifestFiles(text);
     expect(parsed.problem).toBeNull();
@@ -48,27 +47,23 @@ describe("renderManifest", () => {
         hash: HASH,
       },
       "b.txt": { class: "managed", hash: HASH },
-      "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
       "m/copy.txt": { class: "mirror", hash: HASH },
       "m/link.txt": { class: "mirror", kind: "symlink", hash: sha256("../s.yml") },
       "s.yml": { class: "starter" },
     });
     expect(Object.keys(parsed.files ?? {})).toEqual([
       MANIFEST_NAME,
-      "CLAUDE.md",
       "a.md",
       "b.txt",
       "m/copy.txt",
       "m/link.txt",
       "s.yml",
     ]);
-    const link = sha256("AGENTS.md");
     expect(text.split("\n")).toEqual([
       "{",
       expect.stringMatching(/^ {2}"\$comment": ".*",$/),
       '  "files": {',
       `    ${JSON.stringify(MANIFEST_NAME)}: {"class": "managed", "hash": null},`,
-      `    "CLAUDE.md": {"class": "link", "hash": "${link}"},`,
       `    "a.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- B -->", "end": "<!-- E -->", "hash": "${HASH}"},`,
       `    "b.txt": {"class": "managed", "hash": "${HASH}"},`,
       `    "m/copy.txt": {"class": "mirror", "hash": "${HASH}"},`,
@@ -105,7 +100,11 @@ describe("readRecord", () => {
     ],
     ["a starter", { class: "starter" }, { class: "starter" }],
     ["a starter carrying a hash", { class: "starter", hash: HASH }, null],
-    ["a link", { class: "link", hash: HASH }, { class: "link", hash: HASH }],
+    [
+      "a link record, the class that left with the fleet symlinks becoming mirrors",
+      { class: "link", hash: HASH },
+      null,
+    ],
     ["a mirror copy", { class: "mirror", hash: HASH }, { class: "mirror", hash: HASH }],
     [
       "a symlink mirror",

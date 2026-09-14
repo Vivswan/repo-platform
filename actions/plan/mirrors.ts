@@ -17,6 +17,27 @@ export type Mirrors = NonNullable<Registration["mirrors"]>;
 export type Mirror = Mirrors[number];
 export type MirrorKind = Mirror["kind"];
 
+/** Both documents' declarations for one repository, judged and written as one list, the fleet's first; `own` alone
+ *  names the failure lines (describeMirrorProblem). */
+export interface DeclaredMirrors {
+  fleet: Mirrors;
+  own: Mirrors;
+}
+
+/** A fleet target the registration excepts is the repository's own, as an entry at that path would be (selects). */
+export function declaredMirrors(
+  config: Pick<FilesConfig, "mirrors">,
+  registration: Pick<Registration, "mirrors" | "except">,
+): DeclaredMirrors {
+  const except = registration.except ?? [];
+  return {
+    fleet: config.mirrors
+      .map((mirror) => ({ ...mirror, targets: mirror.targets.filter((t) => !except.includes(t)) }))
+      .filter((mirror) => mirror.targets.length > 0),
+    own: registration.mirrors ?? [],
+  };
+}
+
 export interface OwnedPaths {
   /** The managed and split entry paths: the only files a mirror may copy. */
   sources: ReadonlySet<string>;
@@ -86,8 +107,15 @@ export interface MirrorProblem {
   problem: string;
 }
 
-export function describeMirrorProblem({ source, target, problem }: MirrorProblem): string {
-  return `${REGISTRATION_PATH}: mirrors: source '${source}', target '${target}': ${problem}`;
+/** Named by the document the repository can edit: the registration when it declares the pair, files.yml otherwise. */
+export function describeMirrorProblem(
+  { source, target, problem }: MirrorProblem,
+  own: readonly Mirror[],
+): string {
+  const declared = own.some((m) => m.source === source && m.targets.includes(target))
+    ? REGISTRATION_PATH
+    : "files.yml";
+  return `${declared}: mirrors: source '${source}', target '${target}': ${problem}`;
 }
 
 /** What the writer would expand the pattern to, if `path` were a file in the checkout. */

@@ -23,9 +23,9 @@ const runUrl = requireEnv("RUN_URL");
 const summaryFile = requireEnv("GITHUB_STEP_SUMMARY");
 const commentFile = requireEnv("COMMENT_FILE");
 
-/** The kind-change hold is write_link.ts's rule. */
+/** The kind-change hold is write_managed.ts's and write_split.ts's rule (LINK_IN_THE_WAY). */
 const REMEDY =
-  "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a file in a link's place) for this repository to restore. This FAILS the check.";
+  "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a link in a file's place) for this repository to restore. This FAILS the check.";
 
 let integrity: string;
 switch (verdict.kind) {

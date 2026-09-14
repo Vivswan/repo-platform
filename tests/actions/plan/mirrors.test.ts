@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import {
+  declaredMirrors,
   describeMirrorProblem,
   knownProbe,
   type Mirror,
@@ -43,7 +44,6 @@ modules: { bun: {}, pages: {} }
 files:
   - { path: LICENSE.md, class: managed }
   - { path: AGENTS.md, class: split, region: html }
-  - { path: CLAUDE.md, class: link, target: AGENTS.md }
   - { path: checks.yml, class: starter }
   - { path: docs/NOTES.md, class: managed, when: { modules: [pages] } }
   - { path: private.yml, class: managed, when: { private: true } }
@@ -55,7 +55,6 @@ files:
       reserved: new Map([
         ["LICENSE.md", WRITES],
         ["AGENTS.md", WRITES],
-        ["CLAUDE.md", WRITES],
         [".github/repo-platform-manifest.json", WRITES],
         ["OLD.md", STALE],
         ["checks.yml", EXCEPTED],
@@ -63,6 +62,38 @@ files:
     });
     expect(ownedPaths(config, { modules: ["pages"], private: true }).sources).toEqual(
       new Set(["LICENSE.md", "AGENTS.md", "docs/NOTES.md", "private.yml"]),
+    );
+  });
+});
+
+describe("declaredMirrors", () => {
+  const fleet: Mirror[] = [
+    { source: "AGENTS.md", kind: "symlink", targets: ["CLAUDE.md", ".github/agents.md"] },
+    { source: "LICENSE.md", kind: "copy", targets: ["template/LICENSE.md"] },
+  ];
+  const own: Mirror[] = [{ source: "LICENSE.md", kind: "copy", targets: ["skills/*/LICENSE.md"] }];
+
+  test("the fleet's list first, the registration's after; an excepted fleet target is the repository's own", () => {
+    expect(declaredMirrors({ mirrors: fleet }, { mirrors: own })).toEqual({ fleet, own });
+    expect(
+      declaredMirrors({ mirrors: fleet }, { except: ["CLAUDE.md", "template/LICENSE.md"] }),
+    ).toEqual({
+      fleet: [{ source: "AGENTS.md", kind: "symlink", targets: [".github/agents.md"] }],
+      own: [],
+    });
+  });
+
+  test("a failure line names the registration when it declares the pair, files.yml otherwise", () => {
+    const problem = {
+      source: "AGENTS.md",
+      target: "CLAUDE.md",
+      problem: "the target is claimed by more than one source",
+    };
+    expect(describeMirrorProblem(problem, own)).toBe(
+      "files.yml: mirrors: source 'AGENTS.md', target 'CLAUDE.md': the target is claimed by more than one source",
+    );
+    expect(describeMirrorProblem(problem, fleet)).toBe(
+      ".repo-platform.yml: mirrors: source 'AGENTS.md', target 'CLAUDE.md': the target is claimed by more than one source",
     );
   });
 });
@@ -502,29 +533,27 @@ describe("mirrorDeclarationProblems", () => {
   });
 
   test("every problem files.yml alone proves: each declaration's own first, then each path's, both sides of a conflict", () => {
-    const problems = mirrorDeclarationProblems(
-      [
-        { source: "README.md", kind: "copy", targets: ["copies/README.md"] },
-        { source: "CLAUDE.md", kind: "copy", targets: ["copies/CLAUDE.md"] },
-        L(
-          "copy",
-          "docs/**/LICENSE.md",
-          "../LICENSE.md",
-          ".github/workflows/x.yml",
-          "LICENSE.md",
-          "docs",
-          "LICENSE.md/*",
-          "copies/a",
-          "copies/a/b",
-          "dup",
-          "skills",
-          "skills/*/LICENSE.md",
-          "skills/a/*",
-        ),
-        A("copy", "dup", "copies/c/d", "copies/c"),
-      ],
-      OWNED,
-    );
+    const declared: Mirror[] = [
+      { source: "README.md", kind: "copy", targets: ["copies/README.md"] },
+      { source: "CLAUDE.md", kind: "copy", targets: ["copies/CLAUDE.md"] },
+      L(
+        "copy",
+        "docs/**/LICENSE.md",
+        "../LICENSE.md",
+        ".github/workflows/x.yml",
+        "LICENSE.md",
+        "docs",
+        "LICENSE.md/*",
+        "copies/a",
+        "copies/a/b",
+        "dup",
+        "skills",
+        "skills/*/LICENSE.md",
+        "skills/a/*",
+      ),
+      A("copy", "dup", "copies/c/d", "copies/c"),
+    ];
+    const problems = mirrorDeclarationProblems(declared, OWNED);
     const Lp = (target: string, text: string): MirrorProblem => ({
       source: "LICENSE.md",
       target,
@@ -551,7 +580,7 @@ describe("mirrorDeclarationProblems", () => {
       Lp("skills/*/LICENSE.md", "the pattern sits under another target 'skills'"),
       Lp("skills/a/*", "the pattern sits under another target 'skills'"),
     ]);
-    expect(describeMirrorProblem(problems[8])).toBe(
+    expect(describeMirrorProblem(problems[8], declared)).toBe(
       ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'copies/a': the target is a path prefix of another target 'copies/a/b'",
     );
   });

@@ -163,8 +163,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
     // writer treats it alike under both kinds. A mirror remedy never says to remove a reached occupant first (the
     // writer replaces a wrong-kind file or link itself, and removing a pattern's only match fails the run); it says
     // what the re-run does at every path a record can sit on, since the validator reads no mirror declaration.
-    const linkRecorded =
-      entry.class === "link" || (entry.class === "mirror" && entry.kind === "symlink");
+    const linkRecorded = entry.class === "mirror" && entry.kind === "symlink";
     const removeThenResync = `or remove what stands at the path and ${RESYNC}`;
     const mirrorReached =
       `${RESYNC} and read its report: a target a declaration reaches is rewritten (unless it already carries the ` +
@@ -190,7 +189,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
     if (linkRecorded && !stat.isSymbolicLink()) {
       findings.push(
         error(
-          `${rel}: recorded as ${entry.class === "link" ? "a link" : "a symlink mirror"} in ` +
+          `${rel}: recorded as a symlink mirror in ` +
             `${MANIFEST_NAME} but is not a symbolic link - the record (a link target's hash) can ` +
             `verify a link alone; restore the link from git history, ${resync}`,
         ),

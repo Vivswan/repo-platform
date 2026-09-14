@@ -270,7 +270,7 @@ describe("byte parity, entry by entry", () => {
     expect(reordered.stderr).toContain(".gitignore: the managed-region marker lines");
   });
 
-  test("a symlink's hash covers the link target under the link class; a managed record on a symlink fails by class", () => {
+  test("a symlink's hash covers the link target under a symlink mirror record; a managed record on a symlink fails by class", () => {
     const build = (claudeEntry: string): string => {
       const root = temp.dir("validate-managed-link-");
       for (const [rel, content] of Object.entries(BASELINE)) {
@@ -287,7 +287,7 @@ describe("byte parity, entry by entry", () => {
     };
     const dataFile = join(temp.dir("validate-managed-link-data-"), "files.yml");
     writeFileSync(dataFile, "placeholders: []\nmodules: {uv: {}}\nfiles: []\n");
-    const linked = build(`{"class": "link", "hash": "${sha("AGENTS.md")}"}`);
+    const linked = build(`{"class": "mirror", "kind": "symlink", "hash": "${sha("AGENTS.md")}"}`);
     const intact = boundedSpawnSync(
       [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", linked],
       { env: gitFreeEnv() },
@@ -303,7 +303,9 @@ describe("byte parity, entry by entry", () => {
     expect(byClass.stderr).toContain(
       `CLAUDE.md: recorded as managed in ${MANIFEST} but is a symbolic link`,
     );
-    const repointed = build(`{"class": "link", "hash": "${sha("docs/AGENTS.md")}"}`);
+    const repointed = build(
+      `{"class": "mirror", "kind": "symlink", "hash": "${sha("docs/AGENTS.md")}"}`,
+    );
     const drifted = boundedSpawnSync(
       [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", repointed],
       { env: gitFreeEnv() },
@@ -312,20 +314,6 @@ describe("byte parity, entry by entry", () => {
     expect(drifted.stderr).toContain(
       `CLAUDE.md: its link target does not match the sha256 recorded in ${MANIFEST} - the link ` +
         "drifted from the last sync; local edits to the link are replaced by the next sync",
-    );
-  });
-
-  test("a link record on a regular file fails parity by class", () => {
-    const { exitCode, stderr } = runValidator({
-      "CLAUDE.md": "AGENTS.md\n",
-      [MANIFEST]: manifestOf({
-        ...stampedBaseline(),
-        "CLAUDE.md": `{"class": "link", "hash": "${sha("AGENTS.md\n")}"}`,
-      }),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(
-      `CLAUDE.md: recorded as a link in ${MANIFEST} but is not a symbolic link`,
     );
   });
 
@@ -358,7 +346,6 @@ describe("the recorded class against files.yml", () => {
       recorded: "split",
       entry: `{"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": "${sha("other\n")}"}`,
     },
-    { recorded: "link", entry: `{"class": "link", "hash": "${sha("other\n")}"}` },
     { recorded: "mirror", entry: `{"class": "mirror", "hash": "${sha("other\n")}"}` },
   ])(
     "a managed path recorded as $recorded is one error, whatever the file holds",
@@ -419,7 +406,7 @@ describe("the recorded class against files.yml", () => {
     });
     expect(exitCode).toBe(1);
     expect(errors(stderr)).toEqual([
-      `error: ${MANIFEST}: entry '${CI}' has unknown class "bespoke" (expected one of managed, split, starter, mirror, link); the sync refuses a record it cannot read, so revert the entry (git history has the stamped original)`,
+      `error: ${MANIFEST}: entry '${CI}' has unknown class "bespoke" (expected one of managed, split, starter, mirror); the sync refuses a record it cannot read, so revert the entry (git history has the stamped original)`,
     ]);
   });
 
@@ -636,21 +623,6 @@ describe("parity messages name what the record and the tree show, never who made
       message: HASH_REFUSED("copies/copy.md"),
     },
     {
-      reason: "a regular file under a link record",
-      files: { "CLAUDE.md": "AGENTS.md" },
-      links: {},
-      entry: ["CLAUDE.md", `{"class": "link", "hash": "${sha("AGENTS.md")}"}`],
-      message: LINK_RECORDED("a link", REMOVE_THEN_RESYNC),
-    },
-    {
-      reason:
-        "a directory under a link record: neither a symbolic link nor a regular file, so the directory message",
-      files: { "CLAUDE.md/keep": "" },
-      links: {},
-      entry: ["CLAUDE.md", `{"class": "link", "hash": "${sha("AGENTS.md")}"}`],
-      message: DIRECTORY("CLAUDE.md", "link", REMOVE_THEN_RESYNC),
-    },
-    {
       reason:
         "a regular file under a symlink-mirror record: the mirror writer replaces it at a literal target and a pattern match alike",
       files: { "CLAUDE.md": "AGENTS.md" },
@@ -690,7 +662,6 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/starter.md": "repo-owned\n",
       "docs/relabeled.md": "repo-owned now\n",
       "docs/odd.md": "content\n",
-      "docs/file-as-link.md": "intact.md",
       "docs/copy-mirror.md": "managed content\n",
       "docs/file-as-mirror-link.md": "../intact.md",
       "docs/kind-on-managed.md": "managed content\n",
@@ -701,8 +672,6 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       writeFileSync(join(root, rel), content);
     }
     symlinkSync("intact.md", join(root, "docs/link.md"));
-    symlinkSync("intact.md", join(root, "docs/linked.md"));
-    symlinkSync("drifted.md", join(root, "docs/repointed.md"));
     symlinkSync("intact.md", join(root, "docs/mirror-link.md"));
     symlinkSync("drifted.md", join(root, "docs/mirror-link-elsewhere.md"));
     symlinkSync("intact.md", join(root, "docs/link-as-copy-mirror.md"));
@@ -732,10 +701,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/link.md": `{"class": "managed", "hash": "${sha("intact.md")}"}`,
       "docs/dir.md": `{"class": "managed", "hash": "${"e".repeat(64)}"}`,
       "docs/deleted.md": `{"class": "managed", "hash": "${"f".repeat(64)}"}`,
-      "docs/linked.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
-      "docs/repointed.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
-      "docs/file-as-link.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
-      "docs/link-gone.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
+      "docs/link-record.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
       "docs/copy-mirror.md": `{"class": "mirror", "hash": "${sha("managed content\n")}"}`,
       "docs/mirror-link.md": `{"class": "mirror", "kind": "symlink", "hash": "${sha("intact.md")}"}`,
       "docs/mirror-link-elsewhere.md": `{"class": "mirror", "kind": "symlink", "hash": "${sha("intact.md")}"}`,
@@ -758,14 +724,12 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       `${MANIFEST_NAME}: entry 'docs/unstamped.md': hash must be a lowercase sha256 hex digest`,
       `${MANIFEST_NAME}: entry 'docs/starter.md' carries "hash", which the sync never records on a starter entry`,
       `${MANIFEST_NAME}: entry 'docs/relabeled.md' is recorded as starter but files.yml declares the path managed`,
-      `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror, link)`,
+      `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror)`,
       `${MANIFEST_NAME}: entry 'docs/short-hash.md': hash must be a lowercase sha256 hex digest`,
       `docs/link.md: recorded as managed in ${MANIFEST_NAME} but is a symbolic link`,
       `docs/dir.md: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink`,
       `docs/deleted.md: listed as managed in ${MANIFEST_NAME} but missing from the repo`,
-      `docs/repointed.md: its link target does not match the sha256 recorded in ${MANIFEST_NAME}`,
-      `docs/file-as-link.md: recorded as a link in ${MANIFEST_NAME} but is not a symbolic link`,
-      `docs/link-gone.md: listed as link in ${MANIFEST_NAME} but missing from the repo`,
+      `${MANIFEST_NAME}: entry 'docs/link-record.md' has unknown class "link" (expected one of managed, split, starter, mirror)`,
       `docs/mirror-link-elsewhere.md: its link target does not match the sha256 recorded in ${MANIFEST_NAME}`,
       `docs/file-as-mirror-link.md: recorded as a symlink mirror in ${MANIFEST_NAME} but is not a symbolic link`,
       `docs/link-as-copy-mirror.md: recorded as mirror in ${MANIFEST_NAME} but is a symbolic link`,

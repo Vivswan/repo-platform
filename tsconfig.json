@@ -13,6 +13,7 @@
     "scripts/**/*.ts",
     ".github/scripts/**/*.ts",
     "actions/shared/**/*.ts",
+    "migrations/**/*.ts",
     "tests/**/*.ts"
   ]
 }
