@@ -416,9 +416,6 @@ describe("sync.ts end to end", () => {
   });
 
   test.each<[string, string | string[]]>([
-    // A block lands at a managed file's anchor line and at a starter's end; a split region is rewritten
-    // between the repo-owned halves with the OS blocks every repository takes, one upstream Node block for two
-    // modules, the fuzzer block last; placeholders are substituted and Actions expressions left alone.
     [
       ".github/dependabot.yml",
       [
@@ -680,8 +677,12 @@ describe("sync.ts end to end", () => {
     });
   });
 
-  test("holds for review, with one reason per hold source in report order", () => {
-    // The run's review agenda across every hold source; report.test builds the sources by hand.
+  test("names the build and the selection in the report header, and holds for review with one reason per hold source in report order", () => {
+    // The header row is the sync's identity in the PR body. report.test builds the report's inputs by hand, so
+    // the build and selection reaching it are pinned here. The hold list is the run's review agenda.
+    expect(stdout).toContain(
+      `| \`${BUILD}\` | \`bun\`, \`deno\`, \`docs-site\`, \`fuzzer\` | public |`,
+    );
     expect(summary.hold).toBe(true);
     expect(summary.holdReasons).toEqual([
       ".gitattributes: the managed region was added above repository-owned content",

@@ -1,6 +1,6 @@
 // The sync row's failure path end to end, chained as sync-repos.yml chains it: the writer's streams become
 // the writer log, deliver.ts files that log into the target's failure issue, verdict.ts prints the row's
-// line. tests/sync/deliver.test.ts pins each script's half against stubs; the hand-off has no other home.
+// line. deliver.test and verdict.test pin each script alone against stubs; the hand-off has no other home.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
