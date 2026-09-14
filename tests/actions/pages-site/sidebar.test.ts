@@ -42,6 +42,7 @@ describe("deriveSidebar", () => {
       "api-reference/errors.md",
       "guide/README.md",
       "guide/deep-dive.md",
+      "release_notes/changes.md",
       "setup.md",
       "ja/README.md",
       "ja/z.md",
@@ -52,6 +53,7 @@ describe("deriveSidebar", () => {
       "guide/README.md": plain("Guide"),
       "guide/deep-dive.md": plain("deep dive"),
       "api-reference/errors.md": plain("error codes"),
+      "release_notes/changes.md": plain("changes"),
       "ja/README.md": plain("JA"),
       "ja/z.md": plain("Z"),
     });
@@ -64,6 +66,7 @@ describe("deriveSidebar", () => {
           "api-reference/errors.md",
           "guide/README.md",
           "guide/deep-dive.md",
+          "release_notes/changes.md",
           "setup.md",
         ],
       },
@@ -85,6 +88,11 @@ describe("deriveSidebar", () => {
           { text: "deep dive", link: "/guide/deep-dive" },
         ],
       },
+      {
+        text: "Release Notes",
+        collapsed: false,
+        items: [{ text: "changes", link: "/release_notes/changes" }],
+      },
     ];
     expect(deriveSidebar(trees[0].files, pages, ROOT_SITE)).toEqual(expected);
     expect(sidebarOrder(files, pages, ROOT_SITE)).toEqual([
@@ -93,6 +101,7 @@ describe("deriveSidebar", () => {
       "api-reference/errors.md",
       "guide/README.md",
       "guide/deep-dive.md",
+      "release_notes/changes.md",
       "ja/README.md",
       "ja/z.md",
     ]);

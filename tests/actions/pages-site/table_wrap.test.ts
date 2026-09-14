@@ -37,9 +37,9 @@ test("wraps each top-level table in a focusable div.vp-table; a nested table sta
   );
 });
 
-// Every VitePress-driven test renders through vitepress_renderer.ts, so a rule config.mts installs and the
-// helper does not is exercised by no test; the two `config(md)` bodies are read as text and must install
-// the same rules in the same order.
+// Every rule-level VitePress render goes through vitepress_renderer.ts (the build tests run build.ts with the real
+// config but read a page or two, not each rule's output), so a rule config.mts installs and the helper does not is
+// exercised by no unit test; the two `config(md)` bodies are read as text and must install the same rules in the same order.
 test("the test renderer installs every markdown rule config.mts installs, in the same order", () => {
   const installedRules = (source: string): string[] => {
     const body = /\bconfig\(md[^)]*\) \{([\s\S]*?)\n {2,6}\},\n/.exec(source)?.[1];

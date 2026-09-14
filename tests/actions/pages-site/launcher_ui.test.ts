@@ -15,6 +15,7 @@ import {
   type KeyState,
   keyIntent,
   type LauncherRow,
+  modifierLabel,
   moveHighlight,
   shownGroups,
   TEXT_MATCHES_CAP,
@@ -253,6 +254,24 @@ describe("hotkeyIntent", () => {
     [key("/"), true, null],
   ])("%j (editing: %p) asks %p", (event, editing, intent) => {
     expect(hotkeyIntent(event, editing)).toBe(intent);
+  });
+
+  test("the field's hint names the modifier that opens the dialog on the visitor's platform", () => {
+    // navigator.platform spells Apple devices several ways; a hint reading Ctrl on a Mac names the wrong convention
+    // (both modifiers open the dialog, the hint is what the visitor reads).
+    expect(
+      ["MacIntel", "iPhone", "iPad", "Win32", "Linux x86_64", ""].map((platform) => [
+        platform,
+        modifierLabel(platform),
+      ]),
+    ).toEqual([
+      ["MacIntel", "Cmd"],
+      ["iPhone", "Cmd"],
+      ["iPad", "Cmd"],
+      ["Win32", "Ctrl"],
+      ["Linux x86_64", "Ctrl"],
+      ["", "Ctrl"],
+    ]);
   });
 });
 

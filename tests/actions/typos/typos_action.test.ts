@@ -68,9 +68,15 @@ describe("actions/typos", () => {
           "teh quick fox at 598b829d7f507749e4e05469a31ddcfc9a7404c7, unparseable and recieve\n",
         "src/b.ts": "const seperate = 1; // typos: ignore\nconst permision = 2; # typos: ignore\n",
         "src/c.md": "adress: typos are ignored elsewhere\n",
+        "src/d.ts": "const definately = 3; // typos are a word here, not the marker\n",
         "test/fixtures/negative.txt": "occured DELET entires\n",
       },
-      found: ["./src/a.md:1 recieve", "./src/a.md:1 unparseable", "./src/c.md:1 adress"],
+      found: [
+        "./src/a.md:1 recieve",
+        "./src/a.md:1 unparseable",
+        "./src/c.md:1 adress",
+        "./src/d.ts:1 definately",
+      ],
     },
     {
       // Never a source glob: a root lib/ is source in a Node repository, and one that generates it excludes it itself.

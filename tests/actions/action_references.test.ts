@@ -67,7 +67,6 @@ function writesKey(text: string, key: string, form: "run" | "script"): boolean {
   );
 }
 
-/** The scripts a run names under the action directory; the run text itself is judged in its own form. */
 function scriptsOf(actionName: string, step: Step): { run: string; scripts: string[] } {
   const actionDir = join(ACTIONS_DIR, actionName);
   const run = String(step.run).replaceAll(ACTION_PATH, actionDir);
@@ -120,8 +119,7 @@ function manifestProblems(name: string, action: Action): string[] {
   return problems;
 }
 
-/** Every mapping carrying a `uses:` of a platform action, wherever it sits: a workflow job's steps, a starter block's
- *  fragment (an indented sequence), a composite's own steps. */
+/** A starter block's fragment is an indented sequence with no `jobs:` above it, so the walk takes every array. */
 function callSites(node: unknown, path: string): [string, Caller][] {
   if (Array.isArray(node)) return node.flatMap((item, i) => callSites(item, `${path}[${i}]`));
   if (node === null || typeof node !== "object") return [];

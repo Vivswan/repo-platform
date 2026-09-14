@@ -138,7 +138,19 @@ describe("the fuzz-issue composite", () => {
       reason: "no open issue closes nothing (xargs -r keeps issue '' out)",
     },
   ])("close: $reason", ({ listed, closed }) => {
-    const run = runWithGh(stepNamed(action, "Close the stream's open issues"), listed);
+    // The close step is resolve mode's alone and the find, label, and issue steps are report mode's: a close step
+    // gated on report files the night's issue and closes it in the same run, so release-health is unblocked under a
+    // log saying open. runBashStep ignores `if`, so the gates are read before the step runs.
+    const close = stepNamed(action, "Close the stream's open issues");
+    expect(
+      action.runs.steps.filter((step) => step.if !== undefined).map((step) => [step.name, step.if]),
+    ).toEqual([
+      ["Find the stream's open issue", "inputs.mode == 'report'"],
+      ["Create the stream's label", "inputs.mode == 'report'"],
+      ["File or refresh the issue", "inputs.mode == 'report'"],
+      [close.name, "inputs.mode == 'resolve'"],
+    ]);
+    const run = runWithGh(close, listed);
     expect(run.exitCode).toBe(0);
     expect(run.gh).toEqual([
       list(LABEL, "100", ".[].number"),

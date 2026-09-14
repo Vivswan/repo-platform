@@ -187,8 +187,8 @@ describe("directoryName", () => {
   });
 });
 
-// The executed entry point: the output keys are action.yml's outputs map, and `found=false` is the literal
-// fleet-nightly's `== 'false'` upload gate reads.
+// The executed entry point: the output keys are action.yml's outputs map; `found=true` is the literal fleet-nightly's
+// upload and file-issue gates read, `found=false` the one its close-issue gate reads.
 describe("the report step", () => {
   const run = (results: unknown) => {
     const dir = temp.dir("trivy-report-");

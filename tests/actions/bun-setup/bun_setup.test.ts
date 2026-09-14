@@ -37,7 +37,6 @@ function fakeBun(root: string, name: string, script: string): string {
   return dir;
 }
 
-/** What `command -v bun` finds first for the row. */
 function pathFor(onPath: "real" | "decoy" | "failing" | "lying" | "none", root: string): string {
   switch (onPath) {
     case "real":

@@ -124,6 +124,7 @@ describe("collectFacts", () => {
       "repository:\n  topics: [bun, ' docs ', '', 7]\n",
       { topics: ["bun", "docs"] },
     ],
+    ["a whitespace-only topics value", "repository:\n  topics: '   '\n", { topics: [] }],
     ["a malformed settings.yml", "repository: [", {}],
     ["a settings.yml without a repository block", "labels:\n  - name: docs\n", {}],
     ["a settings.yml that is a list", "- just\n- a list\n", {}],

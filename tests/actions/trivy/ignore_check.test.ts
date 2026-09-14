@@ -86,6 +86,12 @@ describe("checkIgnoreFile", () => {
       expired: ["vulnerabilities[0] (CVE-1)"],
     },
     {
+      reason: "an expired secrets entry: every Trivy section is walked",
+      text: "secrets:\n  - id: generic-api-key\n    statement: a test fixture\n    expired_at: 2026-09-10\n",
+      problems: [],
+      expired: ["secrets[0] (generic-api-key)"],
+    },
+    {
       reason: "a calendar date that does not exist",
       text: entry("CVE-1", "2026-02-30"),
       problems: [`vulnerabilities[0] (CVE-1): ${EXPIRY_PROBLEM}`],

@@ -125,6 +125,9 @@ const GENERATOR_MENTIONS: [string, string][] = [
 ];
 
 describe("isGenerated / isManaged", () => {
+  // The generator phrasings (protoc-gen-go, bindgen, flex, grammar-kit, p10k) are external: a hand-written file taken
+  // for generated is skipped silently, and a file that merely names a generator must not be. The managed rows are
+  // cross-file with MANAGED_HEADER_PATTERN.
   test.each<[string, string, boolean, boolean]>([
     ...GENERATOR_MENTIONS.map(([name, text]): [string, string, boolean, boolean] => [
       name,
@@ -208,9 +211,12 @@ describe("isGenerated / isManaged", () => {
       false,
     ],
     ["no header", "const x = 1;\n", false, false],
-  ])("%s", (_name, text, generated, managed) => {
-    expect([isGenerated(text), isManaged(text)]).toEqual([generated, managed]);
-  });
+  ])(
+    "a header is generated or managed by its vocabulary: %s",
+    (_name, text, generated, managed) => {
+      expect([isGenerated(text), isManaged(text)]).toEqual([generated, managed]);
+    },
+  );
 });
 
 describe("judgeFile line counts", () => {
@@ -1078,9 +1084,10 @@ describe("grammars", () => {
     },
   );
 
-  // A grammar that fails to load downgrades every file of its extension to unjudged: reported in the summary, never
-  // red, so a dependency bump that breaks a wasm load passes every other test. One that loads but whose comment node was
-  // renamed upstream yields no block, silently; a declared comment node type without a STYLES row has unproven delimiters.
+  // A grammar that fails to load downgrades every file of its extension to unjudged: the check reports it in the
+  // summary and stays green, so a dependency bump that breaks a wasm load is red here alone (the roster, and loaded()
+  // in the STYLES rows). One that loads but whose comment node was renamed upstream yields no block, silently; a
+  // declared comment node type without a STYLES row has unproven delimiters.
   test("every judged extension but Swift has a grammar that finds a comment block and none in code, every declared comment node type has a style row, and Swift's reason names the leak", () => {
     expect([...grammars].filter(([, grammar]) => "reason" in grammar)).toEqual([
       ["swift", { reason: expect.stringContaining("keeps scanner state across files") }],
@@ -1181,8 +1188,6 @@ describe("check", () => {
     };
   };
 
-  // The census of check(): git scope, the managed skip and its count, the exempt directories; a goldens tree is exempt
-  // wholesale, managed files inside it included.
   test("judges tracked files only; ignored, untracked, generated, managed, goldens and exempt files never count", () => {
     const root = checkout(
       {

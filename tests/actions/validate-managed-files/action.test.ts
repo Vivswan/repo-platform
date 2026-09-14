@@ -128,7 +128,8 @@ function play(scenario: Scenario): Outcome {
   };
 }
 
-// The remedy is the operator's whole instruction on a red check; the kind-change hold it names is write_managed.ts's LINK_IN_THE_WAY.
+// The remedy is the operator's whole instruction on a red check; the kind-change hold it names is write_managed.ts's
+// LINK_IN_THE_WAY, which write_split.ts shares.
 const REMEDY =
   "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a link in a file's place) for this repository to restore. This FAILS the check.";
 const notJudged = (text: string) =>

@@ -77,7 +77,8 @@ describe("isLandingPath", () => {
 });
 
 describe("landingTableRule", () => {
-  // The rows travel as one HTML attribute: an unescaped quote or ampersand in a label ends the attribute early.
+  // The rows travel as one HTML attribute: an unescaped quote in a label ends the attribute early, and an unescaped
+  // ampersand starts an entity the browser decodes into another label.
   test("replaces the landing page's link-column table with the launcher tag, the rows JSON escaped as an attribute", () => {
     const { withRule } = renderers();
     const src =

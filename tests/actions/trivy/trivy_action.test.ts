@@ -1,4 +1,6 @@
-// actionlint does not read action.yml, so the step order, the scan wiring, and the outputs map are checked nowhere else.
+// actionlint does not read action.yml. action_references proves every step reference names an earlier step and a
+// written key; that the bypass runs before every scan and unconditionally, and which knobs each scan carries, is
+// checked here alone.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -58,10 +60,14 @@ describe("the trivy action", () => {
   test("the two modes: the blocking scan alone fails and ignores unfixed; the nightly scans what the replay command says and hands one results file to the report and SARIF steps", () => {
     // trivy-action's default exit code is 0, so without `exit-code: "1"` the blocking scan never fails, green. The
     // nightly's scanners and severity are report.ts's constants: the replay command must see what the scan saw. The
-    // outputs map hands the caller the keys report.ts writes; a mistyped mapping reads empty, and fleet-nightly's
-    // `found == 'false'` then uploads nothing and files nothing, green.
+    // outputs map hands the caller the keys report.ts writes; a mistyped mapping reads empty, so fleet-nightly's
+    // `found == 'true'` gates upload and file nothing and its `== 'false'` gate closes nothing: a red night is never
+    // recorded, green.
     const [blocking, nightly] = scans;
-    expect([blocking.if, nightly.if]).toEqual([
+    // fleet-ci calls the action with no `mode`: without the blocking default an empty mode gates both scans false and
+    // the security job passes without scanning.
+    expect([action.inputs.mode.default, blocking.if, nightly.if]).toEqual([
+      "blocking",
       "inputs.mode == 'blocking'",
       "inputs.mode == 'nightly'",
     ]);

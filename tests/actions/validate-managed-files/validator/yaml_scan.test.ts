@@ -14,8 +14,9 @@ const erroring = (stderr: string): string[] =>
     .map((line) => line.slice("error: ".length).split(": ")[0]);
 
 describe("duplicate mapping keys", () => {
-  // The yaml library reports DUPLICATE_KEY as a document error, not an exception, and its default parse
-  // keeps the LAST value: every consumer of the file would read the wrong one with no message.
+  // parseAllDocuments composes a document with a duplicate key and reports DUPLICATE_KEY in doc.errors; the fleet's
+  // readers parse with uniqueKeys off and keep the LAST value, so without this scan every consumer reads the wrong
+  // one with no message.
   test.each([
     {
       reason: "settings.yml",

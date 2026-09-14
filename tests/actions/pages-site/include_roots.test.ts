@@ -140,6 +140,7 @@ describe("include root routes", () => {
     ],
     ["an empty name", "skills/x/SKILL.md", "---\nname: ''\n---\n\nBody.\n", "SKILL"],
     ["a blank name", "skills/x/SKILL.md", "---\nname: '   '\n---\n\nBody.\n", "SKILL"],
+    ["a padded name", "skills/x/SKILL.md", "---\nname: '  beta  '\n---\n\nBody.\n", "beta"],
     ["a non-string name", "skills/x/SKILL.md", "---\nname: 3\n---\n\nBody.\n", "SKILL"],
     [
       "no frontmatter and a delimited file name",

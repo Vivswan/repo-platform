@@ -40,8 +40,8 @@ const reportDir = (root: string, name: string, report?: string): void => {
 };
 
 describe("the cuts", () => {
-  // A head that split a line would lose a URL silently; the marker's own length is inside the budget, so a cut body never
-  // lands over the limit it was cut for.
+  // A head that split a line would lose a URL silently; the marker is reserved at the largest count it can name, so
+  // adding it never overflows the character cap, and a first line wider than the cap is kept whole for capChars.
   const five = ["1", "2", "3", "4", "5"].join("\n");
   test.each<{ cut: () => string; expected: string; reason: string }>([
     { cut: () => head("a\nb\nc", 5, 100), expected: "a\nb\nc", reason: "within both limits" },
@@ -91,8 +91,8 @@ test("failureDirs: a directory named outside the docs/fuzzer.md contract is drop
 });
 
 describe("blockTitle", () => {
-  // The title is the issue's only index into a night's failures: a fallback misfiring names a present report
-  // "(no report.md)" or a blank-first-line report by its directory, and nothing else reads the report's head.
+  // The title is the issue's only index into a night's failures: the fallbacks decide whether a present report reads
+  // "(no report.md)" and whether a blank first line hides the heading below it, and nothing else reads the report's head.
   test.each([
     {
       report: "# fuzz: target crashed\n\nbody",
@@ -230,7 +230,7 @@ describe("buildBody", () => {
 
   // The link-rot shape: one report listing every broken URL with its referring page, 83 lines for 40 URLs, more than the
   // 60-line summary head. reusable-site.yml calls this action with no artifact, so the issue is the only record: a head
-  // cut there would drop 23 broken links silently.
+  // cut there would drop 23 report lines silently.
   const linkRotReport = (urls: number) => [
     `# ${urls} broken external links`,
     "",
@@ -467,9 +467,10 @@ describe("closeComment", () => {
       ],
     },
     {
-      reason: "without a run URL the first line carries no link",
+      // runUrl needs all three of server, repository and run id; guarding on fewer prints "undefined" into the link.
+      reason: "a partial env (the server alone) is no run URL: the first line carries no link",
       stream: "generic",
-      commentEnv: {} as NodeJS.ProcessEnv,
+      commentEnv: { GITHUB_SERVER_URL: "https://github.com" } as NodeJS.ProcessEnv,
       comment: [
         `Nightly run passed on ${date}.`,
         "",

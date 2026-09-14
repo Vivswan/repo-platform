@@ -66,7 +66,7 @@ describe("parseSiteConfig", () => {
     linkRotDescription: "Link rot",
   };
 
-  // VitePress accepts every one of these configs and builds the wrong site (a missing title renders the site name empty,
+  // VitePress accepts every well-formed config here and builds the wrong site (a missing title renders the site name empty,
   // a stray key is ignored, an include root beside a null docs half mounts under a directory that is never walked),
   // so the refusal here is the fleet's only signal and its text is what the docs-check log shows; the
   // include-beside-null-docs row is cross-file with conventions.ts. The accepting rows read the docs half as one
@@ -269,6 +269,7 @@ describe("resolvePrebuilt", () => {
     `the site-build hook's dist '${dist}' must be a plain relative path`;
   test.each<[reason: string, dist: string, error: string | null]>([
     ["a relative directory with an index.html", "dist", null],
+    ["a nested directory with an index.html", "dist/site", null],
     ["an absolute dist", "/tmp/out", relPath("/tmp/out")],
     ["a dist leaving the repository", "../out", relPath("../out")],
     ["an empty dist", "", relPath("")],
@@ -293,7 +294,11 @@ describe("resolvePrebuilt", () => {
       "the site-build hook's dist 'dist/assets' produced no index.html",
     ],
   ])("%s", (_reason, dist, error) => {
-    const ws = workspace({ "dist/index.html": "<html></html>", "dist/assets/app.js": "js" });
+    const ws = workspace({
+      "dist/index.html": "<html></html>",
+      "dist/assets/app.js": "js",
+      "dist/site/index.html": "<html></html>",
+    });
     if (error === null) expect(resolvePrebuilt(ws, dist)).toBe(join(ws, dist));
     else expect(() => resolvePrebuilt(ws, dist)).toThrow(error);
   });
