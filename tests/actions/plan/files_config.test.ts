@@ -816,6 +816,16 @@ describe("the upstream registry grammar", () => {
       "files.0.upstream.repository: not an owner/name repository",
     ],
     [
+      "a repository whose owner or name is a traversal segment the URL would normalize away",
+      { repository: "../gitignore" },
+      "files.0.upstream.repository: not an owner/name repository",
+    ],
+    [
+      "a path with a URL delimiter, which fetch would read as a fragment",
+      { paths: "{Node: 'templates/a#b.gitignore'}" },
+      "files.0.upstream.paths.Node: not a plain path (letters, digits, . _ - /)",
+    ],
+    [
       "a short sha",
       { sha: SHA.slice(0, 12) },
       "files.0.upstream.sha: not a full lowercase commit sha",

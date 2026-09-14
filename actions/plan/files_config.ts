@@ -113,13 +113,22 @@ const LIST_KEYS = ["modules", "any", "without"] as const;
  *  word without dots. */
 export const BLOCK_VALUE_RE = /^[A-Za-z0-9_-]+$/;
 
+/** Both go into the raw-content URL verbatim, so only the characters GitHub itself admits pass. */
 const upstreamSchema = z.strictObject({
   repository: z
     .string()
-    .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "not an owner/name repository"),
+    .regex(/^[A-Za-z0-9-]+\/(?!\.\.?$)[A-Za-z0-9_.-]+$/, "not an owner/name repository"),
   sha: z.string().regex(/^[0-9a-f]{40}$/, "not a full lowercase commit sha"),
   always: z.array(z.string().min(1)).default([]),
-  paths: z.record(z.string().regex(BLOCK_VALUE_RE, "not a block name"), z.string().min(1)),
+  paths: z.record(
+    z.string().regex(BLOCK_VALUE_RE, "not a block name"),
+    z
+      .string()
+      .regex(
+        /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/,
+        "not a plain path (letters, digits, . _ - /)",
+      ),
+  ),
 });
 
 const fileSchema = z.strictObject({
