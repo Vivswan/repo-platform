@@ -14,6 +14,7 @@ import {
 } from "../shared/action_runtime.ts";
 import { LABEL_RE } from "../shared/label.ts";
 import { REGISTRATION_PATH } from "../shared/platform.ts";
+import { moduleList } from "../shared/selection.ts";
 import {
   type FileEntry,
   type FilesConfig,
@@ -55,16 +56,14 @@ export interface FilesData {
   layers: LayerSources;
 }
 
-export interface DefaultSource {
-  module: string;
-  key: string;
-  pick: (data: ModuleData) => string | undefined;
-}
+/** The module-data key each default is read from; exactly one module declares it, or the delivery commit is broken and
+ *  no repository plans. The module declaring `path` is the docs module: planSite deploys it under any name. */
+export const REQUIRED_DEFAULTS = { docsPath: "path" } as const;
 
-/** The module and key must be there, or the delivery commit is broken and no repository plans. */
-export const REQUIRED_DEFAULTS: Readonly<Record<keyof PlanDefaults, DefaultSource>> = {
-  docsPath: { module: "site", key: "path", pick: (d) => d.path },
-};
+function declaring(modules: Module[], key: string): Module[] {
+  const names = moduleList({ declaring: key }, Object.fromEntries(modules.map((m) => [m.name, m])));
+  return modules.filter((module) => names.includes(module.name));
+}
 
 export function loadModuleData(text: string, label = "files.yml"): FilesData {
   let config: FilesConfig;
@@ -74,24 +73,22 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
     if (!(error instanceof FilesConfigError)) throw error;
     throw new PlanError(error.problems.map((problem) => `${label}: ${problem}`));
   }
-  const { modules } = config;
-  const missing: string[] = [];
-  const required = ({ module, key, pick }: DefaultSource): string => {
-    const data = modules[module];
-    const value = data === undefined ? undefined : pick(data);
-    if (value === undefined) {
-      missing.push(
-        `${label}: modules.${module}.${key}: missing - the plan reads it as the default`,
-      );
-    }
-    return value ?? "";
+  const modules = Object.entries(config.modules).map(([name, data]) => ({ ...data, name }));
+  const problems: string[] = [];
+  const required = (key: (typeof REQUIRED_DEFAULTS)[keyof PlanDefaults]): string => {
+    const owners = declaring(modules, key);
+    if (owners.length === 1) return owners[0][key] ?? "";
+    problems.push(
+      owners.length === 0
+        ? `${label}: modules: no module declares ${key} - the plan reads it as the default`
+        : `${label}: modules: ${key} is declared by ${owners.map((m) => m.name).join(", ")} - exactly one module declares it`,
+    );
+    return "";
   };
-  const defaults: PlanDefaults = {
-    docsPath: required(REQUIRED_DEFAULTS.docsPath),
-  };
-  if (missing.length > 0) throw new PlanError(missing);
+  const defaults: PlanDefaults = { docsPath: required(REQUIRED_DEFAULTS.docsPath) };
+  if (problems.length > 0) throw new PlanError(problems);
   return {
-    modules: Object.entries(modules).map(([name, data]) => ({ ...data, name })),
+    modules,
     defaults,
     files: config.files,
     layers: { modules: config.modules, settings: config.settings },
@@ -219,23 +216,24 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
 export interface SitePlan {
   siteTitle: string;
   docs: DocsConfig | null;
-  /** The link-rot stream: the registration's label under the site module's tuple. */
+  /** The link-rot stream: the registration's label under the docs module's tuple. */
   linkRot: LabelTuple;
 }
 
 export function planSite(input: PlanInput): SitePlan {
   const selected = selectModules(input);
-  if (!selected.some((module) => module.name === "site")) {
+  const [docsModule] = declaring(selected, REQUIRED_DEFAULTS.docsPath);
+  if (docsModule === undefined) {
     throw new PlanError([
-      `${REGISTRATION_PATH}: the site module is not selected - there is no site to deploy`,
+      `${REGISTRATION_PATH}: no selected module declares a docs path - there is no site to deploy`,
     ]);
   }
   const labels = trackingLabels(input, selected);
   const streams = selected.flatMap((m) => (m.tracking_label ? [m.name] : []));
-  const tuple = selected.find((m) => m.name === "site")?.tracking_label;
+  const tuple = docsModule.tracking_label;
   if (tuple?.color === undefined || tuple.description === undefined) {
     throw new PlanError([
-      "files.yml: modules.site.tracking_label needs a color and a description - the link-rot issue is filed under them",
+      `files.yml: modules.${docsModule.name}.tracking_label needs a color and a description - the link-rot issue is filed under them`,
     ]);
   }
   const site = input.registration.site;
@@ -246,7 +244,7 @@ export function planSite(input: PlanInput): SitePlan {
         ? null
         : { path: site?.path ?? input.defaults.docsPath, include: site?.include ?? [] },
     linkRot: {
-      name: labels[streams.indexOf("site")],
+      name: labels[streams.indexOf(docsModule.name)],
       color: tuple.color,
       description: tuple.description,
     },
