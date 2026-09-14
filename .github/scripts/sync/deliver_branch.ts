@@ -20,8 +20,10 @@ import {
   prTitle,
   SUMMARY_FILE,
   SYNC_LOG,
+  stageWritten,
   tail,
 } from "./deliver.ts";
+import type { SyncReport } from "./writer/report.ts";
 
 /** The first line of the sticky comment; the finder matches it, so it never changes shape. */
 const COMMENT_MARKER = `<!-- ${PLATFORM_NAME} sync-branch -->`;
@@ -193,10 +195,9 @@ class BranchDelivery {
       this.comment({ kind: "failed", what, log: tail(join(this.runnerTemp, SYNC_LOG)) });
       fail(`${what} failed; its log is in the pull request comment`);
     }
-    const summary = JSON.parse(readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8")) as {
-      hold: boolean;
-      holdReasons: string[];
-    };
+    const summary = JSON.parse(
+      readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8"),
+    ) as SyncReport;
     const report = readFileSync(join(this.runnerTemp, SYNC_LOG), "utf-8");
     if (summary.hold) {
       this.comment({ kind: "held", report });
@@ -206,17 +207,14 @@ class BranchDelivery {
     for (const argv of [
       this.git("config", "user.name", SYNC_IDENTITY.name),
       this.git("config", "user.email", SYNC_IDENTITY.email),
-      this.git("add", "--all"),
     ]) {
       this.must(argv, `${argv.slice(3).join(" ")} failed in the branch checkout`);
     }
-    // NUL-delimited so no path is quoted, renames off so a retired path is listed as its own deletion.
-    const changed = this.must(
-      this.git("diff", "--cached", "--name-only", "-z", "--no-renames"),
-      "reading the staged paths failed",
-    )
-      .split("\0")
-      .filter((path) => path !== "");
+    const changed = stageWritten(
+      summary,
+      (...args) => this.git(...args),
+      (argv, reason) => this.must(argv, reason),
+    );
     const workflows = changed.filter((path) => path.startsWith(WORKFLOWS_DIR));
     if (workflows.length > 0) {
       this.comment({ kind: "workflow files", paths: workflows, report });

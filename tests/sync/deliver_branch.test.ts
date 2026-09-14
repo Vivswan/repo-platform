@@ -8,10 +8,19 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SYNC_IDENTITY } from "../../.github/scripts/shared/git_identity.ts";
 import { prTitle } from "../../.github/scripts/sync/deliver.ts";
+import type { SyncReport } from "../../.github/scripts/sync/writer/report.ts";
 import { SYNC_LABEL } from "../../actions/shared/platform.ts";
 import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { FIXTURE_GITCONFIG, fixtureGit } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
+import {
+  committedDiff,
+  MISSING_PATH,
+  MISSING_PATH_LINE,
+  WRITTEN_DIFF,
+  writtenTree,
+} from "../shared/written_tree";
 
 const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/deliver_branch.ts");
@@ -24,10 +33,13 @@ const RUN_URL = `https://github.com/${REPOSITORY}/actions/runs/9`;
 const REPORT = "## Sync report\n\n### Review\n\nHold for review: no\n";
 const PUSH_REFUSAL =
   "! [remote rejected] HEAD -> feat/take-the-module (protected branch hook declined)";
+const REAL_GIT = Bun.which("git") ?? "git";
 
 // The build checkout answers its commit; the target checkout answers what each row stages (NUL-separated paths),
-// the tip's author, and the commit before and after the sync commit.
+// the tip's author, and the commit before and after the sync commit. With STUB_REAL_GIT set, every target call but
+// the push runs the real git over the fixture checkout.
 const GIT_LINES = [
+  'if [ -n "${STUB_REAL_GIT:-}" ]; then case "$*" in "-C target "*) case " $* " in *" push "*) ;; *) exec "$STUB_REAL_GIT" "$@" ;; esac ;; esac; fi',
   'case "$*" in',
   `  "-C build rev-parse HEAD") echo "${BUILD}" ;;`,
   '  *" diff --cached --name-only -z --no-renames") printf "%b" "${STUB_CHANGED:-}" ;;',
@@ -51,11 +63,15 @@ interface Options {
   writer?: "success" | "failure" | "skipped";
   hold?: boolean;
   stub?: Record<string, string>;
+  /** Builds a real checkout under the target and answers the writer's summary over it; git then runs for real. */
+  written?: (target: string) => SyncReport;
 }
 
 interface Run {
   exitCode: number;
   stdout: string;
+  stderr: string;
+  target: string;
   labelRemoved: boolean;
   comment: string | null;
   /** The comment call that carried the body: POST creates on the issue, PATCH replaces the found comment by its id. */
@@ -72,15 +88,17 @@ function run(options: Options = {}): Run {
   const root = temp.dir("deliver-branch-");
   const runnerTemp = join(root, "temp");
   mkdirSync(runnerTemp);
-  mkdirSync(join(root, "target"));
+  const target = join(root, "target");
+  mkdirSync(target);
   mkdirSync(join(root, "build"));
-  writeFileSync(
-    join(runnerTemp, "summary.json"),
-    JSON.stringify({
-      hold: options.hold ?? false,
-      holdReasons: options.hold === true ? ["replaced local edits in .editorconfig"] : [],
-    }),
-  );
+  const summary = options.written?.(target) ?? {
+    hold: options.hold ?? false,
+    holdReasons: options.hold === true ? ["replaced local edits in .editorconfig"] : [],
+    written: [],
+    retired: [],
+    mirrors: [],
+  };
+  writeFileSync(join(runnerTemp, "summary.json"), JSON.stringify(summary));
   writeFileSync(join(runnerTemp, "sync.log"), REPORT);
   const committed = join(root, "committed");
   const commentOut = join(root, "comment.md");
@@ -101,6 +119,8 @@ function run(options: Options = {}): Run {
       WRITER_OUTCOME: options.writer ?? "success",
       STUB_COMMITTED: committed,
       STUB_COMMENT_OUT: commentOut,
+      GIT_CONFIG_GLOBAL: FIXTURE_GITCONFIG,
+      ...(options.written === undefined ? {} : { STUB_REAL_GIT: REAL_GIT }),
       ...(options.stub ?? {}),
     },
   });
@@ -112,6 +132,8 @@ function run(options: Options = {}): Run {
   return {
     exitCode: result.exitCode,
     stdout: result.stdout,
+    stderr: result.stderr,
+    target,
     labelRemoved: ghCalls.some(
       (call) =>
         call.includes("DELETE") &&
@@ -253,6 +275,48 @@ describe("the branch delivery's outcomes", () => {
       saidNot: [],
       firstLine: "<!-- repo-platform sync-branch -->",
     });
+  });
+
+  // The same tree the operator's delivery test drives: a path the branch's own .gitignore covers reaches the commit
+  // the manifest names it in, and a summary row git cannot find fails the run before any comment.
+  test("over a real checkout, the ignored file is in the pushed commit beside the manifest that names it", () => {
+    const result = run({ written: (target) => writtenTree(target, BUILD) });
+    const commit = fixtureGit(result.target, ["rev-parse", "HEAD"]);
+    expect({
+      exitCode: result.exitCode,
+      diff: committedDiff(result.target),
+      subject: fixtureGit(result.target, ["log", "-1", "--format=%s"]),
+      said: result.comment?.includes(`pushed onto \`${BRANCH}\` as ${commit}`),
+      stdout: result.stdout.trim(),
+    }).toEqual({
+      exitCode: 0,
+      diff: WRITTEN_DIFF,
+      subject: prTitle(BUILD),
+      said: true,
+      stdout: `build ${BUILD} pushed onto ${BRANCH} as ${commit}`,
+    });
+  });
+
+  test("over a real checkout, a written row git cannot find fails red with git's line naming the path, nothing committed", () => {
+    const result = run({
+      written: (target) => {
+        const summary = writtenTree(target, BUILD);
+        summary.written.push({
+          path: MISSING_PATH,
+          class: "managed",
+          change: "created",
+          detail: "",
+        });
+        return summary;
+      },
+    });
+    expect({
+      exitCode: result.exitCode,
+      commits: fixtureGit(result.target, ["log", "--format=%s"]),
+      error: result.stdout.includes("::error::staging the written paths failed in the checkout"),
+      gitLine: result.stderr.includes(MISSING_PATH_LINE),
+      comment: result.comment,
+    }).toEqual({ exitCode: 1, commits: "base", error: true, gitLine: true, comment: null });
   });
 
   test("the push carries a lease on the commit checked out, and the sync commit's subject is the operator's", () => {
