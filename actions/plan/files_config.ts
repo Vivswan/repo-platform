@@ -487,8 +487,8 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     ) {
       problems.push(`${where}: replace applies to entries fetching an upstream source or blocks`);
     }
-    // Fetching keys are refused by name on the two classes that render nothing from a source: silently dropping one would
-    // leave a pin the refresh never moves.
+    // Fetching keys are refused by name on a rendered entry, which reads no source: silently dropping one would leave a
+    // pin the refresh never moves.
     const fetching = (["source", "blocks", "upstream", "replace"] as const).filter(
       (key) => entry[key] !== undefined,
     );
