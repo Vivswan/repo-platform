@@ -135,7 +135,7 @@ const refSchema = z.strictObject({
     }),
 });
 
-/** The pin is spelled once for every path; each value comes out as the ref a source ref is. */
+/** One pin per registry, so a bump is one edit. */
 const upstreamSchema = refSchema
   .omit({ path: true })
   .extend({
@@ -249,7 +249,6 @@ export function refKey(ref: UpstreamRef): string {
   return `${ref.repository}/${ref.sha}/${ref.path}`;
 }
 
-/** Every fetched file the document names, once each, in files.yml order: an entry's source before its blocks. */
 export function upstreamRefs(files: FileEntry[]): UpstreamRef[] {
   const refs = new Map<string, UpstreamRef>();
   for (const entry of files) {

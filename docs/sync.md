@@ -32,7 +32,7 @@ bun .github/scripts/sync/writer/sync.ts \
   [--summary <path for the JSON summary>] [--upstream <raw-content host>]
 ```
 
-- `--tree` is the `files/` directory itself; every `source` in `files.yml` starts with `files/` and resolves under it.
+- `--tree` is the `files/` directory itself; every tree `source` starts with `files/` and resolves under it; a ref source is fetched ([Upstream refs](#upstream-refs)).
 - `--build` is the delivery commit's full sha, 40 lowercase hex characters (`git fetch origin +refs/tags/stable:refs/tags/stable` then `git rev-parse stable^{commit}`, the forced refspec so a local tag left by an earlier fetch is refreshed). It is recorded as given: in full in the PR body, by its first 12 characters in the sync commit's subject. A short or uppercase one is refused before anything is written.
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the default `copyright_holder`.
 - `--upstream` is the host every upstream ref (below) is fetched from, `https://raw.githubusercontent.com` by default; the tests serve their fixture over loopback.

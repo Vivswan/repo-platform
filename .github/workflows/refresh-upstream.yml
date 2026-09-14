@@ -1,5 +1,5 @@
 # Moves every upstream pin in files.yml to its repository's HEAD; the PR body carries each fetched file's diff between
-# the two commits, which is what the next sync renders wherever the file is a source or a block.
+# the two commits, which the next sync renders, after each entry's `replace`, wherever the file lands.
 
 name: Refresh upstream pins
 

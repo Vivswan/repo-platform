@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // The one writer of the upstream pins in files.yml: every sync fetches at them, so moving a pin is the fleet-wide refresh
 // of every source and block that names it. The workflow around this script commits and opens the PR; the body carries
-// each pinned file's diff between the two commits, which is exactly what the next sync renders wherever the file lands.
+// each pinned file's diff between the two commits, which the next sync renders, after each entry's `replace`, wherever
+// the file lands.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -39,7 +40,6 @@ export interface Pin {
   paths: string[];
 }
 
-/** One bump per pin, however many entries and blocks spell it. */
 export function pins(refs: UpstreamRef[]): Pin[] {
   const seen = new Map<string, Pin>();
   for (const { repository, sha, path } of refs) {
@@ -52,7 +52,8 @@ export function pins(refs: UpstreamRef[]): Pin[] {
 }
 
 /** Every mapping spelling the pin (a source ref, a registry) moves together, by the sha scalar's own text range so the
- *  document keeps its bytes; the repository is part of the match, so another repository at the same sha stays put. */
+ *  document keeps its bytes outside the sha scalar; a quoted pin comes back bare. The repository is part of the match,
+ *  so another repository at the same sha stays put. */
 export function repin(text: string, pin: Pick<Pin, "repository" | "sha">, to: string): string {
   const spans: [number, number][] = [];
   visit(parseDocument(text), {

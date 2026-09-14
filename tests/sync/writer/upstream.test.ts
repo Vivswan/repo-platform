@@ -19,8 +19,7 @@ const ref = (path: string) => ({ repository: "github/gitignore", sha: SHA, path 
 const served = serveUpstream(join(FIXTURES, "upstream"));
 afterAll(() => served.stop());
 
-// A test that spawns the writer without --upstream passes while the network is up and fails offline; two such tests were
-// each found by review after the fact, so the roster is pinned here, helpers that spawn the writer for a test included.
+// A test that spawns the writer without --upstream passes online and fails offline, so the roster is pinned.
 test("every test that runs the writer, directly or through a script, passes --upstream, so no test reaches the real host", () => {
   const root = join(import.meta.dir, "../../..");
   const read = (rel: string) => readFileSync(join(root, rel), "utf-8");
