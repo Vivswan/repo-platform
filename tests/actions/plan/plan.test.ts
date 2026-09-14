@@ -93,11 +93,11 @@ describe("loadModuleData", () => {
   test("the minimal modules block loads; a default the plan reads going missing fails, naming the file and key", () => {
     expect(loadModuleData(MINIMAL_FILES).defaults).toEqual(FILES_DATA.defaults);
     const cases: [drop: string, replacement: string, error: string][] = [
-      ["{ path: docs }", "{}", "modules.site.path: missing"],
+      ["{ path: docs }", "{}", "modules: no module declares path"],
       [
         "{ path: docs }",
         "{ tracking_label: { key: site, default: rot } }",
-        "modules.site.path: missing",
+        "modules: no module declares path",
       ],
     ];
     for (const [drop, replacement, error] of cases) {
@@ -117,8 +117,18 @@ describe("loadModuleData", () => {
       }
       return [];
     })();
-    expect(problems.map((problem) => problem.split(":")[1].trim())).toEqual(
-      Object.values(REQUIRED_DEFAULTS).map(({ module, key }) => `modules.${module}.${key}`),
+    expect(problems).toEqual(
+      Object.values(REQUIRED_DEFAULTS).map(
+        (key) => `files.yml: modules: no module declares ${key} - the plan reads it as the default`,
+      ),
+    );
+  });
+
+  test("two modules declaring the docs path fail closed, both named: one module owns the docs", () => {
+    const text = `${MINIMAL_FILES}  manual: { path: guide }\n`;
+    expect(() => loadModuleData(text, "/build/files.yml")).toThrow(PlanError);
+    expect(() => loadModuleData(text, "/build/files.yml")).toThrow(
+      "/build/files.yml: modules: path is declared by site, manual - exactly one module declares it",
     );
   });
 
@@ -365,10 +375,34 @@ describe("planSite", () => {
     });
   });
 
-  test("fails closed when site is not selected: there is no site to deploy", () => {
+  test("fails closed when no selected module declares a docs path: there is no site to deploy", () => {
     expect(() => planSite(input("modules: [bun]"))).toThrow(PlanError);
     expect(() => planSite(input("modules: [bun]"))).toThrow(
-      ".repo-platform.yml: the site module is not selected - there is no site to deploy",
+      ".repo-platform.yml: no selected module declares a docs path - there is no site to deploy",
+    );
+  });
+
+  test("the docs module is whichever module declares path, under any name: its path is the default and its tuple files the link-rot issue", () => {
+    const declared = (data: string) =>
+      loadModuleData(MINIMAL_FILES.replace("  site: { path: docs }", `  manual: ${data}`));
+    const manual = declared(
+      "{ path: guide, tracking_label: { key: manual, default: rot, color: ABCDEF, description: Manual link rot } }",
+    );
+    const plan = planSite({
+      ...input("modules: [manual]"),
+      modules: manual.modules,
+      defaults: manual.defaults,
+    });
+    expect(plan).toEqual({
+      siteTitle: "Demo Project",
+      docs: { path: "guide", include: [] },
+      linkRot: { name: "rot", color: "ABCDEF", description: "Manual link rot" },
+    });
+    const bare = declared("{ path: guide, tracking_label: { key: manual, default: rot } }");
+    expect(() =>
+      planSite({ ...input("modules: [manual]"), modules: bare.modules, defaults: bare.defaults }),
+    ).toThrow(
+      "files.yml: modules.manual.tracking_label needs a color and a description - the link-rot issue is filed under them",
     );
   });
 });
@@ -595,7 +629,9 @@ describe("plan.ts as a child", () => {
       { PRIVATE: "false", FILES_CONFIG: missingPath },
     );
     expect(missing.exitCode).toBe(1);
-    expect(missing.stdout).toContain(`::error::${missingPath}: modules.site.path: missing`);
+    expect(missing.stdout).toContain(
+      `::error::${missingPath}: modules: no module declares path - the plan reads it as the default`,
+    );
     expect(missing.output).toBe("");
   });
 
