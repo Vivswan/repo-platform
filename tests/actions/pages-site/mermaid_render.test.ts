@@ -140,11 +140,10 @@ async function heldRenders(count: number): Promise<void> {
   expect(stub.held).toHaveLength(count);
 }
 
-beforeEach(() => {
-  mounts.length = 0;
-  html.dataset = { fleetHue: "2" };
+/** Between the phases of one test the stubs and the per-phase counters restart, but the render ordinals run on: a
+ *  phase that redrew nothing still shows the previous phase's SVG, so a skipped redraw cannot pass as a fresh one. */
+function nextPhase(): void {
   calls.initialize.length = 0;
-  calls.renders.length = 0;
   calls.fontLoads.length = 0;
   stub.failLoad = false;
   stub.hold = false;
@@ -153,6 +152,12 @@ beforeEach(() => {
   stub.heldFonts.length = 0;
   stub.failFonts = false;
   fakeDocument.fonts = fontsApi;
+}
+beforeEach(() => {
+  mounts.length = 0;
+  html.dataset = { fleetHue: "2" };
+  calls.renders.length = 0;
+  nextPhase();
 });
 
 // First, before any run has loaded the package: a load that fails is not
@@ -186,6 +191,8 @@ test("no mount never loads mermaid or a face; a failed load is every mount's err
   expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
 });
 
+// `securityLevel: strict` keeps HTML out of labels and `suppressErrorRendering` stops mermaid injecting an error SVG into
+// body; a broken diagram is the theme's to show, source kept.
 test("renders each mount in the mode's theme and hue, keeps a broken one's source with the error's first line", async () => {
   const good = mount("graph LR\n  A --> B");
   const bad = mount("graph LR\n  A -->");
@@ -214,6 +221,7 @@ test("renders each mount in the mode's theme and hue, keeps a broken one's sourc
   expect(variables.nodeBorder).toBe(HUES[2].dark.hue);
 });
 
+// mermaid.render with a reused id collides on the temporary element it inserts, so every run mints new ids.
 test("a re-render replaces the diagram or the error in place under new ids, so the mount never stacks two", async () => {
   const good = mount("graph LR\n  A --> B");
   const bad = mount("graph LR\n  A -->");
@@ -241,9 +249,28 @@ test("a re-render replaces the diagram or the error in place under new ids, so t
   expect(good.dataset.state).toBe("error");
 });
 
-test("initializes and draws only once the theme's mono face has loaded for every mount's text, and draws in the fallback when the face fails", async () => {
+// Browser fact: a face is fetched only once laid-out text uses it, so without the wait mermaid measures every label in
+// the fallback face. The failed load, the deadline, and a document without the API are the never-block-the-page half.
+//   settles  -> initialize waits for it, the deadline is disarmed
+//   fails    -> draws in the fallback at once
+//   stalls   -> draws in the fallback when the deadline fires
+//   no API   -> no face request, draws at once
+test("initializes and draws only once the theme's mono face has loaded for every mount's text; a face that fails, stalls past the deadline, or has no API draws in the fallback", async () => {
   const first = mount("graph LR\n  A --> B");
   const second = mount("graph TD");
+  const drawn = () => [shapes(first), shapes(second), first.dataset.state, second.dataset.state];
+  const drawnAs = (a: number, b: number) => [
+    [
+      "pre.fleet-mermaid-source:graph LR\n  A --> B",
+      `div.fleet-mermaid-diagram:<svg data-render="${a}">graph LR\n  A --> B</svg>`,
+    ],
+    [
+      "pre.fleet-mermaid-source:graph TD",
+      `div.fleet-mermaid-diagram:<svg data-render="${b}">graph TD</svg>`,
+    ],
+    "rendered",
+    "rendered",
+  ];
   stub.holdFonts = true;
   const run = renderAll(false);
   for (let i = 0; i < 100 && stub.heldFonts.length < 1; i += 1) await Bun.sleep(1);
@@ -262,24 +289,15 @@ test("initializes and draws only once the theme's mono face has loaded for every
   stub.heldFonts[0].resolve();
   await run;
   expect(calls.initialize).toHaveLength(1);
-  expect(shapes(first)[1]).toBe(
-    'div.fleet-mermaid-diagram:<svg data-render="1">graph LR\n  A --> B</svg>',
-  );
-  expect(shapes(second)[1]).toBe('div.fleet-mermaid-diagram:<svg data-render="2">graph TD</svg>');
-  stub.holdFonts = false;
+  expect(drawn()).toEqual(drawnAs(1, 2));
+
+  nextPhase();
   stub.failFonts = true;
   await renderAll(true);
-  expect(calls.fontLoads).toHaveLength(2);
-  expect(shapes(first)).toEqual([
-    "pre.fleet-mermaid-source:graph LR\n  A --> B",
-    'div.fleet-mermaid-diagram:<svg data-render="3">graph LR\n  A --> B</svg>',
-  ]);
-  expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
-});
+  expect(calls.fontLoads).toHaveLength(1);
+  expect(drawn()).toEqual(drawnAs(3, 4));
 
-test("a face that settles disarms its deadline; one that never settles draws every mount in the fallback when the deadline fires", async () => {
-  const first = mount("graph LR");
-  const second = mount("graph TD");
+  nextPhase();
   stub.holdFonts = true;
   await withFakeTimers(async (armed) => {
     const settled = renderAll(true);
@@ -287,7 +305,7 @@ test("a face that settles disarms its deadline; one that never settles draws eve
     stub.heldFonts[0].resolve();
     await settled;
     expect(armed.size).toBe(0);
-    expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
+    expect(drawn()).toEqual(drawnAs(5, 6));
     const stalled = renderAll(false);
     expect(armed.size).toBe(1);
     for (const [handle, fire] of armed) {
@@ -298,36 +316,19 @@ test("a face that settles disarms its deadline; one that never settles draws eve
   });
   expect(stub.heldFonts).toHaveLength(2);
   expect(darkModes()).toEqual([true, false]);
-  expect(shapes(first)).toEqual([
-    "pre.fleet-mermaid-source:graph LR",
-    'div.fleet-mermaid-diagram:<svg data-render="3">graph LR</svg>',
-  ]);
-  expect(shapes(second)).toEqual([
-    "pre.fleet-mermaid-source:graph TD",
-    'div.fleet-mermaid-diagram:<svg data-render="4">graph TD</svg>',
-  ]);
-  expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
-});
+  expect(drawn()).toEqual(drawnAs(7, 8));
 
-test("a document without the fonts API draws at once: no face request, one initialize, every mount rendered", async () => {
-  const first = mount("graph LR");
-  const second = mount("graph TD");
+  nextPhase();
   fakeDocument.fonts = undefined;
   await renderAll(true);
   expect(calls.fontLoads).toEqual([]);
   expect(calls.initialize).toHaveLength(1);
-  expect(shapes(first)).toEqual([
-    "pre.fleet-mermaid-source:graph LR",
-    'div.fleet-mermaid-diagram:<svg data-render="1">graph LR</svg>',
-  ]);
-  expect(shapes(second)).toEqual([
-    "pre.fleet-mermaid-source:graph TD",
-    'div.fleet-mermaid-diagram:<svg data-render="2">graph TD</svg>',
-  ]);
-  expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
+  expect(drawn()).toEqual(drawnAs(9, 10));
 });
 
-test("a run overtaken before it draws never initializes or renders; the newest mode lands alone", async () => {
+// A pass stops at its next await once a newer one starts (a toggle mid-render, a navigation), so the newest theme
+// lands last; without the check after render, a slow stale draw or its error overwrites the fresh diagram.
+test("a run overtaken before it draws never initializes or renders; one overtaken mid-draw writes neither its late diagram nor its late error over the newer one", async () => {
   const element = mount("graph LR");
   const stale = renderAll(true);
   const fresh = renderAll(false);
@@ -338,24 +339,25 @@ test("a run overtaken before it draws never initializes or renders; the newest m
     "pre.fleet-mermaid-source:graph LR",
     'div.fleet-mermaid-diagram:<svg data-render="1">graph LR</svg>',
   ]);
-});
 
-test("a run overtaken mid-draw writes neither its late diagram nor its late error over the newer one", async () => {
-  const element = mount("graph LR");
+  nextPhase();
   stub.hold = true;
-  const stale = renderAll(true);
+  const staleHeld = renderAll(true);
   await heldRenders(1);
-  const fresh = renderAll(false);
+  const freshHeld = renderAll(false);
   await heldRenders(2);
   stub.held[1].resolve();
-  await fresh;
+  await freshHeld;
   expect(shapes(element)).toEqual([
     "pre.fleet-mermaid-source:graph LR",
-    'div.fleet-mermaid-diagram:<svg data-render="2">graph LR</svg>',
+    'div.fleet-mermaid-diagram:<svg data-render="3">graph LR</svg>',
   ]);
   stub.held[0].resolve();
-  await stale;
-  expect(shapes(element)[1]).toBe('div.fleet-mermaid-diagram:<svg data-render="2">graph LR</svg>');
+  await staleHeld;
+  expect(shapes(element)).toEqual([
+    "pre.fleet-mermaid-source:graph LR",
+    'div.fleet-mermaid-diagram:<svg data-render="3">graph LR</svg>',
+  ]);
   const staleFailing = renderAll(true);
   await heldRenders(3);
   const newest = renderAll(false);
@@ -366,7 +368,7 @@ test("a run overtaken mid-draw writes neither its late diagram nor its late erro
   await staleFailing;
   expect(shapes(element)).toEqual([
     "pre.fleet-mermaid-source:graph LR",
-    'div.fleet-mermaid-diagram:<svg data-render="4">graph LR</svg>',
+    'div.fleet-mermaid-diagram:<svg data-render="5">graph LR</svg>',
   ]);
   expect(element.dataset.state).toBe("rendered");
   expect(darkModes()).toEqual([true, false, true, false]);

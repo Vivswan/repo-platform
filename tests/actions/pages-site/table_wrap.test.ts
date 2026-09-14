@@ -1,26 +1,9 @@
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
-import { tableWrapRule } from "../../../actions/pages-site/.vitepress/table-wrap.ts";
-
-// markdown-it is the action's dependency, not the root's: resolve it from
-// the action's own tree, the way the theme token test reaches carbon.
-type Md = Parameters<typeof tableWrapRule>[0];
-const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
-const { default: MarkdownIt } = (await import(Bun.resolveSync("markdown-it", ACTION_DIR))) as {
-  default: new () => Md;
-};
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { ACTION_DIR, vitepressRenderer } from "./vitepress_renderer.ts";
 
 const TABLE = ["| Key | Value |", "|---|---|", "| a | 1 |"].join("\n");
-
-/** A renderer as VitePress hands it to markdown.config: its own table_open
- *  rule (the tabindex a wrapped table must drop and a nested one keeps)
- *  already installed. */
-function render(markdown: string): string {
-  const md = new MarkdownIt();
-  md.renderer.rules.table_open = () => '<table tabindex="0">\n';
-  tableWrapRule(md);
-  return md.render(markdown);
-}
 
 const TABLE_HTML = [
   "<table>",
@@ -39,9 +22,13 @@ const TABLE_HTML = [
   "</table>",
 ].join("\n");
 
-test("wraps each top-level table in a focusable div.vp-table; a nested table stays bare with its own tab stop", () => {
-  const html = render(
+// VitePress's own table_open renderer puts `tabindex="0"` on every table (undocumented), so a wrapped table must
+// drop it or keyboard users meet two tab stops, one of which scrolls nothing; a nested table keeps its own.
+test("wraps each top-level table in a focusable div.vp-table; a nested table stays bare with its own tab stop", async () => {
+  const md = await vitepressRenderer();
+  const html = md.render(
     `${TABLE}\n\nBetween.\n\n${TABLE}\n\n> quoted\n>\n> ${TABLE.replaceAll("\n", "\n> ")}\n`,
+    { path: "/x/other.md", relativePath: "other.md" },
   );
   const wrapped = `<div class="vp-table" tabindex="0">\n${TABLE_HTML}\n</div>\n`;
   const nested = TABLE_HTML.replace("<table>", '<table tabindex="0">');
@@ -50,7 +37,19 @@ test("wraps each top-level table in a focusable div.vp-table; a nested table sta
   );
 });
 
-test("a document without tables renders unchanged", () => {
-  const bare = new MarkdownIt().render("# Title\n\nProse only.\n");
-  expect(render("# Title\n\nProse only.\n")).toBe(bare);
+// Every VitePress-driven test renders through vitepress_renderer.ts, so a rule config.mts installs and the
+// helper does not is exercised by no test; the two `config(md)` bodies are read as text and must install
+// the same rules in the same order.
+test("the test renderer installs every markdown rule config.mts installs, in the same order", () => {
+  const installedRules = (source: string): string[] => {
+    const body = /\bconfig\(md[^)]*\) \{([\s\S]*?)\n {2,6}\},\n/.exec(source)?.[1];
+    if (body === undefined) throw new Error("no config(md) body found");
+    return [...body.matchAll(/^\s*(\w+Rule)\(md\b/gm)].map((match) => match[1]);
+  };
+  const config = installedRules(readFileSync(join(ACTION_DIR, ".vitepress/config.mts"), "utf8"));
+  const helper = installedRules(
+    readFileSync(join(import.meta.dir, "vitepress_renderer.ts"), "utf8"),
+  );
+  expect(config.length).toBeGreaterThan(4);
+  expect(helper).toEqual(config);
 });

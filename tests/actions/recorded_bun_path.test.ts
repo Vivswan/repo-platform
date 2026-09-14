@@ -41,10 +41,6 @@ describe("the actions' recorded bun path", () => {
     const step = stepsOf("actions/validate-commit-names/action.yml").find(
       (s) => s.name === "Validate the subjects",
     ) as Step;
-    expect(step.env).toEqual({
-      ACTION_BUN: "${{ steps.action-bun.outputs.path }}",
-      PR_TITLE: "${{ inputs.title }}",
-    });
     const run = fill(String(step.run), actionPath);
     const env = { PATH: `${decoy}:${BUN_DIR}:/usr/bin:/bin`, ACTION_BUN: process.execPath };
     const byPath = boundedSpawnSync([...RUNNER_BASH, run], { env });

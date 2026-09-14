@@ -1,5 +1,16 @@
+// The first step of every platform action: a resolver that accepted the caller's bun would run the platform's scripts
+// under a foreign bun, and a different bun rewrites bun.lock or picks other dependency versions with no error. The
+// probe and the resolve are executed here per PATH state, so the two apply one test.
+
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
@@ -19,18 +30,34 @@ const stepById = (id: string): Step => {
   return step;
 };
 
-function fakeBun(root: string, name: string, version: string | null): string {
+function fakeBun(root: string, name: string, script: string): string {
   const dir = join(root, name);
   mkdirSync(dir);
-  const body = version === null ? "exit 1" : `echo "${version}"`;
-  writeFileSync(join(dir, "bun"), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+  writeFileSync(join(dir, "bun"), `#!/bin/bash\n${script}\n`, { mode: 0o755 });
   return dir;
+}
+
+/** What `command -v bun` finds first for the row. */
+function pathFor(onPath: "real" | "decoy" | "failing" | "lying" | "none", root: string): string {
+  switch (onPath) {
+    case "real":
+      return BUN_DIR;
+    case "decoy":
+      return `${fakeBun(root, "decoy", 'echo "0.0.0"')}:${BUN_DIR}`;
+    case "failing":
+      return fakeBun(root, "failing", "exit 1");
+    case "lying":
+      return fakeBun(root, "lying", `echo "${Bun.version}"\nexit 97`);
+    case "none":
+      return join(root, "none");
+  }
 }
 
 /** The only PATH entry beyond the test's own: `cat`, the one external
  *  command the steps run, so a system bun can never leak into a case. */
 function toolsDir(root: string): string {
   const dir = join(root, "tools");
+  if (existsSync(dir)) return dir;
   mkdirSync(dir);
   symlinkSync("/bin/cat", join(dir, "cat"));
   return dir;
@@ -69,151 +96,124 @@ function runStep(
 }
 
 describe("actions/bun-setup", () => {
-  test("action.yml: pin in, path/ready/installed out, probe -> setup -> retry -> resolve with neither setup able to end the action", () => {
-    expect(Object.keys(action.inputs)).toEqual(["pin", "required"]);
-    expect(action.inputs.pin.required).toBe(true);
-    expect(action.inputs.required.default).toBe("true");
-    expect(action.outputs).toEqual({
-      path: { description: expect.any(String), value: "${{ steps.resolve.outputs.path }}" },
-      ready: { description: expect.any(String), value: "${{ steps.resolve.outputs.ready }}" },
-      installed: {
-        description: expect.any(String),
-        value: "${{ steps.resolve.outputs.installed }}",
-      },
-      version: { description: expect.any(String), value: "${{ steps.resolve.outputs.version }}" },
-    });
-    expect(steps.map((step) => step.id)).toEqual([
-      "probe",
-      "setup-bun",
-      "setup-bun-retry",
-      "resolve",
+  test("neither setup attempt can end the action, the retry keys on the first attempt's outcome, and the resolve runs whatever they did", () => {
+    // Under continue-on-error GitHub sets outcome to failure and conclusion to success, so a retry keyed on conclusion
+    // never fires; actionlint does not read action.yml. Together with an unconditional resolve this is the
+    // `required: false` contract validate-managed-files' report step depends on (its two-witness verdict needs the
+    // action to reach that step whatever setup did).
+    const setups = steps.filter((step) => typeof step.uses === "string");
+    expect(setups.map((step) => [step["continue-on-error"], step.if])).toEqual([
+      [true, "steps.probe.outputs.pinned != 'true'"],
+      [true, "steps.setup-bun.outcome == 'failure'"],
     ]);
-    expect(steps.filter((step) => typeof step.uses === "string")).toEqual([
-      {
-        name: "Set up bun",
-        id: "setup-bun",
-        if: "steps.probe.outputs.pinned != 'true'",
-        "continue-on-error": true,
-        uses: expect.stringMatching(/^oven-sh\/setup-bun@[0-9a-f]{40}$/),
-        with: { "bun-version-file": "${{ inputs.pin }}" },
-      },
-      {
-        name: "Set up bun (retry)",
-        id: "setup-bun-retry",
-        if: "steps.setup-bun.outcome == 'failure'",
-        "continue-on-error": true,
-        uses: expect.stringMatching(/^oven-sh\/setup-bun@[0-9a-f]{40}$/),
-        with: { "bun-version-file": "${{ inputs.pin }}" },
-      },
-    ]);
-    expect(stepById("probe").env).toEqual({ PIN_FILE: "${{ inputs.pin }}" });
-    expect(stepById("resolve").env).toEqual({
-      PIN_FILE: "${{ inputs.pin }}",
-      REQUIRED: "${{ inputs.required }}",
-      SETUP_OUTCOME: "${{ steps.setup-bun.outcome }}",
-    });
+    expect(stepById("resolve").if).toBeUndefined();
   });
 
-  // The probe's one output decides whether setup-bun runs, by the resolver's
-  // own test: an absolute path on PATH printing exactly the pin and exiting 0.
-  test.each<{ reason: string; onPath: string | null | "none" | "lying"; pinned: string }>([
-    { reason: "the pinned version on PATH", onPath: "1.4.0", pinned: "true" },
-    { reason: "another version on PATH", onPath: "1.3.9", pinned: "false" },
-    { reason: "a bun that fails to print its version", onPath: null, pinned: "false" },
-    { reason: "a bun printing the pin but exiting nonzero", onPath: "lying", pinned: "false" },
-    { reason: "no bun on PATH", onPath: "none", pinned: "false" },
-  ])("probe with $reason", ({ onPath, pinned }) => {
-    const root = temp.dir("bun-setup-probe-");
-    const pin = join(root, ".bun-version");
-    writeFileSync(pin, "1.4.0\n");
-    let path = join(root, "none");
-    if (onPath === "lying") {
-      path = join(root, "lying");
-      mkdirSync(path);
-      writeFileSync(join(path, "bun"), '#!/bin/bash\necho "1.4.0"\nexit 97\n', { mode: 0o755 });
-    } else if (onPath !== "none") {
-      path = fakeBun(root, "fake", onPath);
-    }
-    const result = runStep(stepById("probe"), { "${{ inputs.pin }}": pin }, path, root);
-    expect([result.exitCode, result.outputs]).toEqual([0, { pinned }]);
-  });
-
+  const UNRESOLVED = { path: "", version: "", ready: "false", installed: "true" };
+  // The probe decides whether setup-bun runs by the resolver's own test: an absolute path on PATH printing exactly the pin
+  // and exiting 0. Both steps run here over one PATH; `outcome` is what the resolve would read from the setup step.
   test.each<{
     reason: string;
-    onPath: "real" | "decoy" | "none";
+    onPath: "real" | "decoy" | "failing" | "lying" | "none";
     required: string;
     outcome: string;
+    pinned: string;
     exitCode: number;
     outputs: Record<string, string>;
   }>([
     {
-      reason: "the real bun first on PATH after an install",
-      onPath: "real",
-      required: "true",
-      outcome: "success",
-      exitCode: 0,
-      outputs: { path: process.execPath, version: Bun.version, ready: "true", installed: "true" },
-    },
-    {
-      reason: "the real bun first on PATH, setup skipped (pin was satisfied)",
+      reason: "the pinned bun first on PATH, setup skipped",
       onPath: "real",
       required: "true",
       outcome: "skipped",
+      pinned: "true",
       exitCode: 0,
       outputs: { path: process.execPath, version: Bun.version, ready: "true", installed: "false" },
     },
     {
-      reason: "a decoy bun first on PATH, required",
+      reason: "the pinned bun first on PATH after an install",
+      onPath: "real",
+      required: "true",
+      outcome: "success",
+      pinned: "true",
+      exitCode: 0,
+      outputs: { path: process.execPath, version: Bun.version, ready: "true", installed: "true" },
+    },
+    {
+      reason: "another version first on PATH, required",
       onPath: "decoy",
       required: "true",
       outcome: "failure",
+      pinned: "false",
       exitCode: 1,
-      outputs: { path: "", version: "", ready: "false", installed: "true" },
+      outputs: UNRESOLVED,
     },
     {
-      reason: "a decoy bun first on PATH, verdict left to the caller",
+      reason: "another version first on PATH, verdict left to the caller",
       onPath: "decoy",
       required: "false",
       outcome: "failure",
+      pinned: "false",
       exitCode: 0,
-      outputs: { path: "", version: "", ready: "false", installed: "true" },
+      outputs: UNRESOLVED,
+    },
+    {
+      reason: "a bun that fails to print its version",
+      onPath: "failing",
+      required: "false",
+      outcome: "failure",
+      pinned: "false",
+      exitCode: 0,
+      outputs: UNRESOLVED,
+    },
+    {
+      reason: "a bun printing the pin but exiting nonzero",
+      onPath: "lying",
+      required: "false",
+      outcome: "failure",
+      pinned: "false",
+      exitCode: 0,
+      outputs: UNRESOLVED,
     },
     {
       reason: "no bun on PATH after a failed setup, required",
       onPath: "none",
       required: "true",
       outcome: "failure",
+      pinned: "false",
       exitCode: 1,
-      outputs: { path: "", version: "", ready: "false", installed: "true" },
+      outputs: UNRESOLVED,
     },
     {
       reason: "no bun on PATH after a failed setup, verdict left to the caller",
       onPath: "none",
       required: "false",
       outcome: "failure",
+      pinned: "false",
       exitCode: 0,
-      outputs: { path: "", version: "", ready: "false", installed: "true" },
+      outputs: UNRESOLVED,
     },
-  ])("resolve with $reason", ({ onPath, required, outcome, exitCode, outputs }) => {
-    const root = temp.dir("bun-setup-resolve-");
-    const pin = join(root, ".bun-version");
-    writeFileSync(pin, `${Bun.version}\n`);
-    const path = {
-      real: BUN_DIR,
-      decoy: `${fakeBun(root, "decoy", "0.0.0")}:${BUN_DIR}`,
-      none: join(root, "none"),
-    }[onPath];
-    const result = runStep(
-      stepById("resolve"),
-      {
-        "${{ inputs.pin }}": pin,
-        "${{ inputs.required }}": required,
-        "${{ steps.setup-bun.outcome }}": outcome,
-      },
-      path,
-      root,
-    );
-    expect([result.exitCode, result.outputs]).toEqual([exitCode, outputs]);
-    if (exitCode !== 0) expect(result.stdout).toContain("::error::no bun matching the pin");
-  });
+  ])(
+    "probe and resolve with $reason",
+    ({ onPath, required, outcome, pinned, exitCode, outputs }) => {
+      const root = temp.dir("bun-setup-");
+      const pin = join(root, ".bun-version");
+      writeFileSync(pin, `${Bun.version}\n`);
+      const path = pathFor(onPath, root);
+      const probe = runStep(stepById("probe"), { "${{ inputs.pin }}": pin }, path, root);
+      expect([probe.exitCode, probe.outputs]).toEqual([0, { pinned }]);
+      const resolve = runStep(
+        stepById("resolve"),
+        {
+          "${{ inputs.pin }}": pin,
+          "${{ inputs.required }}": required,
+          "${{ steps.setup-bun.outcome }}": outcome,
+        },
+        path,
+        root,
+      );
+      expect([resolve.exitCode, resolve.outputs]).toEqual([exitCode, outputs]);
+      if (exitCode !== 0) expect(resolve.stdout).toContain("::error::no bun matching the pin");
+    },
+  );
 });

@@ -10,6 +10,7 @@ import { inlineTextRule } from "../../../actions/pages-site/.vitepress/inline-te
 import { landingTableRule } from "../../../actions/pages-site/.vitepress/landing-table.ts";
 import { mermaidRule } from "../../../actions/pages-site/.vitepress/mermaid.ts";
 import { rewriteLinksRule } from "../../../actions/pages-site/.vitepress/rewrite-links.ts";
+import { tableWrapRule } from "../../../actions/pages-site/.vitepress/table-wrap.ts";
 import { headersRule } from "../../../actions/pages-site/.vitepress/theme/page-index.ts";
 
 export type Md = Parameters<typeof landingTableRule>[0];
@@ -47,6 +48,7 @@ export async function vitepressRenderer(): Promise<Md> {
         inlineTextRule(md);
         rewriteLinksRule(md, LINK_SCOPE);
         landingTableRule(md, REWRITES);
+        tableWrapRule(md);
         headersRule(md);
         alertTitlesRule(md);
         mermaidRule(md);

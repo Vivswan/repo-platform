@@ -9,6 +9,7 @@ import {
   readVerdict,
   writeVerdict,
 } from "../../../actions/validate-managed-files/src/verdict";
+import { loadAction } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { tempDirs } from "../../shared/temp_dir";
 
@@ -16,6 +17,23 @@ const temp = tempDirs();
 
 const ACTION = join(import.meta.dir, "../../../actions/validate-managed-files");
 const RUN_URL = "https://example.invalid/run/1";
+const HEADING = "### Managed files check\n\n";
+
+// The sticky-comment steps gate on `report`'s two values and are continue-on-error, so a value the script
+// spells one way and the manifest another is a comment never posted or never deleted, green. Both literals
+// are read from the manifest's `if` lines, never spelled here.
+function commentGates(): { post: string; remove: string } {
+  const action = loadAction("actions/validate-managed-files/action.yml");
+  const gateOf = (id: string): string => {
+    const step = action.runs.steps.find((s) => s.id === id);
+    const match = /steps\.report\.outputs\.report == '([a-z]+)'/.exec(String(step?.if));
+    if (match === null)
+      throw new Error(`step '${id}' does not gate on steps.report.outputs.report`);
+    return match[1];
+  };
+  return { post: gateOf("post-comment"), remove: gateOf("delete-comment") };
+}
+const REPORT = commentGates();
 
 const fakeValidator = `import { writeFileSync } from "node:fs";
 if (!process.env.FAKE_SKIP_REPORT) {
@@ -45,7 +63,6 @@ interface Outcome {
   outputs: string;
   summary: string;
   comment: string;
-  stdout: string;
 }
 
 function play(scenario: Scenario): Outcome {
@@ -108,62 +125,89 @@ function play(scenario: Scenario): Outcome {
     outputs: read(outputs),
     summary: read(summary),
     comment: read(comment),
-    stdout: report.stdout,
   };
 }
 
+// The remedy is the operator's whole instruction on a red check; the kind-change hold it names is write_link.ts's rule.
+const REMEDY =
+  "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a link in a file's place) for this repository to restore. This FAILS the check.";
+const notJudged = (text: string) =>
+  `${HEADING}Not judged: ${text}. See the [run log](${RUN_URL}). This FAILS the check.\n`;
+const BLOCKED = `integrity=failure\nreport=${REPORT.post}\n`;
+
 describe("the validator's classification reaches the report as one verdict", () => {
-  test("a clean run passes, deletes any stale comment, and posts nothing", () => {
-    const outcome = play({});
-    expect(outcome.runExit).toBe(0);
-    expect(outcome.verdict).toEqual({ kind: "clean" });
-    expect(outcome.outputs).toBe("integrity=success\nreport=clean\n");
-    expect(outcome.summary).toBe(
-      "### Managed files check\n\nPassed - this repository matches the state its last sync recorded.\n",
-    );
-    expect(outcome.comment).toBe(outcome.summary);
-  });
-
-  test("findings block, carry the remedy, and are posted", () => {
-    const findings = "#### Errors (1)\n\n- ci.yml: content does not match";
-    const outcome = play({ env: { FAKE_EXIT: "1", FAKE_FINDINGS: `${findings}\n` } });
-    expect(outcome.runExit).toBe(1);
-    expect(outcome.verdict).toEqual({ kind: "findings", findings });
-    expect(outcome.outputs).toBe("integrity=failure\nreport=findings\n");
-    expect(outcome.comment).toContain(findings);
-    expect(outcome.comment).toContain("Managed content changed outside a sync.");
-    expect(outcome.comment).toContain("This FAILS the check.");
-  });
-
-  test.each<{ reason: string; env: Record<string, string>; text: string }>([
+  // The exit and the findings file are two witnesses: a validator that exits 0 with findings, or nonzero with
+  // none, is a broken run, and reading either witness alone would pass it.
+  const FINDINGS = "#### Errors (1)\n\n- ci.yml: content does not match";
+  test.each<{
+    reason: string;
+    env: Record<string, string>;
+    runExit: number;
+    verdict: Integrity;
+    outputs: string;
+    comment: string;
+  }>([
     {
-      reason: "a validator that exited 0 yet reported findings",
+      reason: "a clean run passes and clears a stale comment",
+      env: {},
+      runExit: 0,
+      verdict: { kind: "clean" },
+      outputs: `integrity=success\nreport=${REPORT.remove}\n`,
+      comment: `${HEADING}Passed - this repository matches the state its last sync recorded.\n`,
+    },
+    {
+      reason: "findings block, carry the remedy, and are posted",
+      env: { FAKE_EXIT: "1", FAKE_FINDINGS: `${FINDINGS}\n` },
+      runExit: 1,
+      verdict: { kind: "findings", findings: FINDINGS },
+      outputs: BLOCKED,
+      comment: `${HEADING}${FINDINGS}\n${REMEDY}\n`,
+    },
+    {
+      reason: "a validator that exited 0 yet reported findings is not judged",
       env: { FAKE_FINDINGS: "- x\n" },
-      text: "the validator exited 0 yet reported findings",
+      runExit: 1,
+      verdict: { kind: "not-judged", reason: "the validator exited 0 yet reported findings" },
+      outputs: BLOCKED,
+      comment: notJudged("the validator exited 0 yet reported findings"),
     },
     {
-      reason: "a validator that exited nonzero without a finding",
+      reason: "a validator that exited nonzero without a finding is not judged",
       env: { FAKE_EXIT: "1" },
-      text: "the validator exited 1 without reporting a finding",
+      runExit: 1,
+      verdict: { kind: "not-judged", reason: "the validator exited 1 without reporting a finding" },
+      outputs: BLOCKED,
+      comment: notJudged("the validator exited 1 without reporting a finding"),
     },
     {
-      reason: "a validator that crashed before reporting",
+      reason: "a validator that crashed before reporting is not judged",
       env: { FAKE_EXIT: "2", FAKE_SKIP_REPORT: "1" },
-      text: "the validator exited 2 before reporting",
+      runExit: 1,
+      verdict: { kind: "not-judged", reason: "the validator exited 2 before reporting" },
+      outputs: BLOCKED,
+      comment: notJudged("the validator exited 2 before reporting"),
     },
     {
-      reason: "a validator killed by a signal",
+      reason: "a validator killed by a signal is not judged",
       env: { FAKE_SIGNAL: "SIGKILL" },
-      text: "the validator died on SIGKILL",
+      runExit: 1,
+      verdict: { kind: "not-judged", reason: "the validator died on SIGKILL" },
+      outputs: BLOCKED,
+      comment: notJudged("the validator died on SIGKILL"),
     },
-  ])("$reason is not-judged and blocks", ({ env, text }) => {
+  ])("$reason", ({ env, runExit, verdict, outputs, comment }) => {
     const outcome = play({ env });
-    expect(outcome.runExit).toBe(1);
-    expect(outcome.verdict).toEqual({ kind: "not-judged", reason: text });
-    expect(outcome.outputs).toBe("integrity=failure\nreport=findings\n");
-    expect(outcome.comment).toContain(`Not judged: ${text}. See the [run log](${RUN_URL}).`);
+    expect(outcome).toEqual({
+      runExit,
+      verdict,
+      outputs,
+      summary: outcome.comment,
+      comment,
+    });
   });
 
+  // A stale or planted verdict must never read as clean: the report trusts only a verdict the aligned validate
+  // step wrote after a successful clear.
   test.each<{ reason: string; scenario: Scenario; text: string }>([
     {
       reason: "no verdict file (the validate step never ran)",
@@ -182,23 +226,22 @@ describe("the validator's classification reaches the report as one verdict", () 
     },
   ])("the report alone fails closed on $reason", ({ scenario, text }) => {
     const outcome = play(scenario);
-    expect(outcome.outputs).toBe("integrity=failure\nreport=findings\n");
-    expect(outcome.summary).toContain(`Not judged: ${text}.`);
+    expect([outcome.outputs, outcome.summary]).toEqual([BLOCKED, notJudged(text)]);
   });
 });
 
 describe("verdict.ts", () => {
-  test("classify reads the exit and the report file as two witnesses", () => {
+  test("a timed-out validator is not judged, with the deadline in the reason", () => {
     const dir = temp.dir("verdict-classify-");
     const findingsFile = join(dir, "f.md");
     writeFileSync(findingsFile, "");
-    expect(classify({ kind: "exited", code: 0 }, 1000, findingsFile)).toEqual({ kind: "clean" });
     expect(classify({ kind: "timed-out" }, 300_000, findingsFile)).toEqual({
       kind: "not-judged",
       reason: "the validator ran past its 300s deadline",
     });
   });
 
+  // JSON.parse would accept a reordered or hand-edited verdict; only writeVerdict's own bytes are one.
   test("readVerdict accepts only writeVerdict's own bytes", () => {
     const dir = temp.dir("verdict-read-");
     const path = join(dir, "verdict.json");

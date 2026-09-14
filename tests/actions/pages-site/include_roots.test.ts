@@ -4,7 +4,6 @@ import {
   includeIndexPages,
   pageMeta,
   routeOf,
-  untitledPageTitle,
 } from "../../../actions/pages-site/.vitepress/derive.ts";
 import { isLandingFile, sourcePathOf } from "../../../actions/pages-site/.vitepress/source-path.ts";
 import { parseSiteConfig } from "../../../actions/pages-site/lib.ts";
@@ -22,16 +21,9 @@ const config = (include: unknown) =>
   });
 
 describe("parseSiteConfig include roots", () => {
-  test.each([[[SKILLS]], [[]]])("the include list %j is carried as written", (include) => {
-    expect(parseSiteConfig(config(include))).toEqual({
-      siteTitle: "Site",
-      docs: { path: "docs", include },
-      linkRotLabel: "",
-      linkRotColor: "",
-      linkRotDescription: "",
-    });
-  });
-
+  // VitePress refuses none of these and builds the wrong site without a word, so the plan-time refusal is the only
+  // signal: public/ is copied as static files, a locale-shaped mount is read as a translation tree, a dot-prefixed
+  // segment is never walked, and index.md is already the directory's page.
   test.each([
     ["not a list", { path: "skills" }, "must be a list of {path, mount, page}"],
     ["an unknown key", [{ ...SKILLS, title: "x" }], "unknown keys: title"],
@@ -74,33 +66,43 @@ describe("include root routes", () => {
     "skills/deep/nested/SKILL.md",
     "other/SKILL.md",
   ];
+  const NESTED = [
+    { path: "manuals", mount: "manuals", page: "README.md" },
+    { path: "tools/agents", mount: "manuals/agents", page: "AGENT.md" },
+  ];
+  const NESTED_TREE = [
+    "manuals/README.md",
+    "manuals/topic/README.md",
+    "manuals/topic/detail.md",
+    "manuals/agents/README.md",
+    "manuals/agents/AGENT.md",
+    "manuals/agents/x/AGENT.md",
+    "manuals/agents/x/README.md",
+  ];
 
-  test("includeIndexPages lists exactly the child directories' page files; a nested root's own files are its, never the parent's child pages", () => {
+  // The longest mount owns a file (owningRoot, shared with the plan): a nested root's own files are never
+  // the parent's child pages, and a page file is never a landing whatever it is named.
+  test("includeIndexPages lists exactly the child directories' page files under the owning root; landings stay README.md and index.md", () => {
     expect(includeIndexPages(files, [SKILLS])).toEqual([
       "skills/alpha/SKILL.md",
       "skills/beta/SKILL.md",
       "skills/gamma/SKILL.md",
     ]);
     expect(includeIndexPages(files, [])).toEqual([]);
-    const nested = [
-      { path: "manuals", mount: "manuals", page: "README.md" },
-      { path: "tools/agents", mount: "manuals/agents", page: "AGENT.md" },
-    ];
-    expect(
-      includeIndexPages(
-        [
-          "manuals/README.md",
-          "manuals/topic/README.md",
-          "manuals/agents/README.md",
-          "manuals/agents/AGENT.md",
-          "manuals/agents/x/AGENT.md",
-          "manuals/agents/x/README.md",
-        ],
-        nested,
-      ),
-    ).toEqual(["manuals/topic/README.md", "manuals/agents/x/AGENT.md"]);
+    const nestedPages = includeIndexPages(NESTED_TREE, NESTED);
+    expect(nestedPages).toEqual(["manuals/topic/README.md", "manuals/agents/x/AGENT.md"]);
+    const tree = ["README.md", "guide/index.md", "search-index.md", ...NESTED_TREE];
+    expect(tree.filter((file) => isLandingFile(file, new Set(nestedPages)))).toEqual([
+      "README.md",
+      "guide/index.md",
+      "manuals/README.md",
+      "manuals/agents/README.md",
+      "manuals/agents/x/README.md",
+    ]);
   });
 
+  // VitePress's rewrites map accepts two files on one route and overwrites one page silently; the
+  // precedence (index.md over the page file, the page file over a README) keeps them apart.
   test("the page serves at the directory URL; a README beside it keeps its own route; an index.md beside it wins", () => {
     const rewrites = deriveRewrites(files, includeIndexPages(files, [SKILLS]));
     expect(rewrites).toEqual({
@@ -114,7 +116,6 @@ describe("include root routes", () => {
     expect(routeOf("skills/beta/README.md", rewrites)).toBe("/skills/beta/README");
     expect(routeOf("skills/gamma/SKILL.md", rewrites)).toBe("/skills/gamma/SKILL");
     expect(routeOf("skills/gamma/index.md", rewrites)).toBe("/skills/gamma/");
-    // Without the include the same tree rewrites READMEs alone.
     expect(deriveRewrites(files)).toEqual({
       "README.md": "index.md",
       "skills/README.md": "skills/index.md",
@@ -122,38 +123,37 @@ describe("include root routes", () => {
     });
   });
 
-  test("a page with neither a title key nor an h1 is titled by its name key", () => {
-    expect(
-      pageMeta("skills/beta/SKILL.md", "---\nname: beta\ndescription: Beta.\n---\n\nBody.\n"),
-    ).toEqual({
-      title: "beta",
-      order: null,
-      group: null,
-    });
-    expect(
-      pageMeta("skills/alpha/SKILL.md", "---\nname: alpha\n---\n\n# Alpha skill\n\nBody.\n"),
-    ).toEqual({ title: "Alpha skill", order: null, group: null });
-    expect(pageMeta("skills/x/SKILL.md", "---\nname: ''\n---\n\nBody.\n")).toEqual({
-      title: "SKILL",
-      order: null,
-      group: null,
-    });
-  });
-
-  test("untitledPageTitle, which the document title shares with the sidebar row: a non-blank name trimmed, else the file name humanized", () => {
-    expect(untitledPageTitle("skills/beta/SKILL.md", "beta")).toBe("beta");
-    expect(untitledPageTitle("skills/beta/SKILL.md", "  beta  ")).toBe("beta");
-    expect(untitledPageTitle("skills/beta/SKILL.md", "")).toBe("SKILL");
-    expect(untitledPageTitle("skills/beta/SKILL.md", "   ")).toBe("SKILL");
-    expect(untitledPageTitle("skills/beta/SKILL.md", undefined)).toBe("SKILL");
-    expect(untitledPageTitle("skills/beta/SKILL.md", 3)).toBe("SKILL");
-    expect(untitledPageTitle("guide/getting_started-now.md", undefined)).toBe(
+  // The sidebar row (pageMeta) and the document title (config.mts transformPageData) share the
+  // fallback; a page file with a `name` key and no heading is titled by the name, blank falling to the file.
+  test.each<[string, string, string, string]>([
+    [
+      "a name key and no heading",
+      "skills/beta/SKILL.md",
+      "---\nname: beta\ndescription: Beta.\n---\n\nBody.\n",
+      "beta",
+    ],
+    [
+      "an h1 over a name key",
+      "skills/alpha/SKILL.md",
+      "---\nname: alpha\n---\n\n# Alpha skill\n\nBody.\n",
+      "Alpha skill",
+    ],
+    ["an empty name", "skills/x/SKILL.md", "---\nname: ''\n---\n\nBody.\n", "SKILL"],
+    ["a blank name", "skills/x/SKILL.md", "---\nname: '   '\n---\n\nBody.\n", "SKILL"],
+    ["a non-string name", "skills/x/SKILL.md", "---\nname: 3\n---\n\nBody.\n", "SKILL"],
+    [
+      "no frontmatter and a delimited file name",
+      "guide/getting_started-now.md",
+      "Body.\n",
       "getting started now",
-    );
+    ],
+  ])("titles a page with %s", (_, file, source, title) => {
+    expect(pageMeta(file, source)).toEqual({ title, order: null, group: null });
   });
 });
 
 describe("source paths", () => {
+  // config.mts routes the edit link and the provenance line through it; a shorter mount winning sends both to the wrong file.
   test("a staged path resolves to its root's repository path, the longest mount winning", () => {
     const includes = [SKILLS, { path: "tools/agents", mount: "skills/agents", page: "AGENT.md" }];
     expect(sourcePathOf("docs", includes, "guide/README.md")).toBe("docs/guide/README.md");
@@ -162,24 +162,5 @@ describe("source paths", () => {
       "tools/agents/x/AGENT.md",
     );
     expect(sourcePathOf("site/manual", [], "skillset.md")).toBe("site/manual/skillset.md");
-  });
-
-  test("landing files are README.md and index.md sources, never an include root's page file, whatever it is named", () => {
-    const tree = [
-      "README.md",
-      "guide/index.md",
-      "search-index.md",
-      "skills/alpha/SKILL.md",
-      "manuals/README.md",
-      "manuals/topic/README.md",
-      "manuals/topic/detail.md",
-    ];
-    const includes = [SKILLS, { path: "manuals", mount: "manuals", page: "README.md" }];
-    const includePages = new Set(includeIndexPages(tree, includes));
-    expect(tree.filter((file) => isLandingFile(file, includePages))).toEqual([
-      "README.md",
-      "guide/index.md",
-      "manuals/README.md",
-    ]);
   });
 });

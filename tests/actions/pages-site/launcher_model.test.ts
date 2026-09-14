@@ -187,10 +187,18 @@ const ROOT_GROUPS: LauncherGroup[] = [
 ];
 
 describe("buildGroups", () => {
-  test("curated rows lead in table order, then root pages, then directory groups; a page row's note is its site path, a heading row's its page", () => {
-    expect(buildGroups(CURATED, PAGES, "root")).toEqual(ROOT_GROUPS);
+  // The dedupe and ordering contract: a page a curated row reaches joins that row's group instead of listing
+  // twice, and a curated row never folds behind the headings.
+  test("curated rows lead in table order, then root pages, then directory groups; a page row's note is its site path, a heading row's its page; only headings fold", () => {
+    const groups = buildGroups(CURATED, PAGES, "root");
+    expect(groups).toEqual(ROOT_GROUPS);
+    expect(splitRows(groups[0].kind, groups[0].items)).toEqual({
+      kept: [ROOT_GROUPS[0].items[0]],
+      foldable: ROOT_GROUPS[0].items.slice(1),
+    });
   });
 
+  // A `#` or `?` in a file name reads as a fragment or query to the router unless it leaves escaped.
   test("a file named with characters a URL reserves is reached by its escaped href and emitted escaped, on every row that links it", () => {
     const pages = [
       page("/repo/", "Docs", "", "root"),
@@ -209,14 +217,6 @@ describe("buildGroups", () => {
         ],
       },
     ]);
-  });
-
-  test("a page group folds its headings behind its curated and page rows; a curated row never hides", () => {
-    const [newRepo] = buildGroups(CURATED, PAGES, "root");
-    expect(splitRows(newRepo.kind, newRepo.items)).toEqual({
-      kept: [ROOT_GROUPS[0].items[0]],
-      foldable: ROOT_GROUPS[0].items.slice(1),
-    });
   });
 
   // The landing table of a real site reaches most pages, so the fold rule
@@ -268,38 +268,7 @@ describe("buildGroups", () => {
     expect(groups.map((group) => [group.title, group.folded])).toEqual(expected);
   });
 
-  test("a directory group with more than eight items starts folded", () => {
-    const groups = buildGroups([], [PAGES[0], ...PAGES.slice(3, 6)], "root");
-    expect(groups).toEqual([
-      {
-        key: "dir:api",
-        title: "Api",
-        kind: "dir",
-        folded: true,
-        items: ["alpha", "beta", "gamma"].flatMap((name) => [
-          {
-            label: `API ${name}`,
-            href: `/repo/api/${name}.html`,
-            note: `api/${name}`,
-            source: "page",
-          },
-          {
-            label: `${name} usage`,
-            href: `/repo/api/${name}.html#usage`,
-            note: `API ${name}`,
-            source: "heading",
-          },
-          {
-            label: `${name} limits`,
-            href: `/repo/api/${name}.html#limits`,
-            note: `API ${name}`,
-            source: "heading",
-          },
-        ]),
-      },
-    ]);
-  });
-
+  // A wrong landing URL resolves every locale row to the root page, green.
   test("a locale sees only its pages and resolves hrefs against its own landing; its page notes keep the locale prefix", () => {
     const curated: CuratedRow[] = [{ label: "新規", href: "new-repo.md#template", note: null }];
     expect(buildGroups(curated, PAGES, "ja")).toEqual([
@@ -321,7 +290,7 @@ describe("buildGroups", () => {
     ]);
   });
 
-  test("a matched href keeps its query and hash; an unmatched internal one becomes absolute", () => {
+  test("a matched href keeps its query and hash; an unmatched internal one becomes absolute; clean URLs match the same markdown hrefs", () => {
     const curated: CuratedRow[] = [
       { label: "Print", href: "new-repo.md?mode=print#x", note: null },
       { label: "Japanese intro", href: "./ja/intro.html", note: null },
@@ -364,15 +333,12 @@ describe("buildGroups", () => {
         ],
       },
     ]);
-  });
-
-  test("clean URLs resolve the same markdown hrefs", () => {
-    const pages = [
+    const clean = [
       page("/repo/", "Docs", "", "root"),
       page("/repo/new-repo", "New repo", "", "root"),
     ];
     expect(
-      buildGroups([{ label: "Start", href: "new-repo.md", note: null }], pages, "root"),
+      buildGroups([{ label: "Start", href: "new-repo.md", note: null }], clean, "root"),
     ).toEqual([
       {
         key: "/repo/new-repo",
@@ -386,6 +352,8 @@ describe("buildGroups", () => {
 });
 
 describe("resolveHref", () => {
+  // URL-standard facts: the identity key percent-decodes while the href keeps the author's escapes, and
+  // a protocol-relative `//host` is external.
   const cases: [string, string, ResolvedHref][] = [
     [
       "new-repo.md#x",
@@ -448,11 +416,12 @@ describe("resolveHref", () => {
 describe("filterGroups", () => {
   const groups = buildGroups(CURATED, PAGES, "root");
 
-  test("an empty query returns the groups as built", () => {
+  // A filter that ORed its tokens, matched labels alone, or kept a folded group folded would show the user the wrong
+  // rows with nothing red: the listbox renders whatever comes back. Tokens AND across label, note, and group title; a
+  // group title match alone keeps the whole group; a match unfolds; an empty query returns the built list itself.
+  test("tokens AND across label, note, and group title; a match unfolds; groups without a match drop out; an empty query is the input", () => {
     expect(filterGroups(groups, "   ")).toBe(groups);
-  });
 
-  test("tokens AND across label, note, and group title, and a match unfolds", () => {
     const folded = buildGroups([], [PAGES[0], ...PAGES.slice(3, 6)], "root");
     expect(folded[0].folded).toBe(true);
     expect(filterGroups(folded, "API gamma lim")).toEqual([
@@ -471,9 +440,7 @@ describe("filterGroups", () => {
         ],
       },
     ]);
-  });
 
-  test("a group title match alone keeps every item of that group", () => {
     const glossary: LauncherGroup = {
       key: "/repo/terms.html",
       title: "Glossary",
@@ -487,9 +454,7 @@ describe("filterGroups", () => {
     expect(filterGroups([...groups, glossary], "glossary")).toEqual([
       { ...glossary, folded: false },
     ]);
-  });
 
-  test("groups without a matching item drop out and matching groups keep only matching items", () => {
     expect(filterGroups(groups, "triage")).toEqual([
       {
         ...ROOT_GROUPS[4],
@@ -500,6 +465,7 @@ describe("filterGroups", () => {
 });
 
 describe("matchRanges", () => {
+  // Lowercasing U+0130 changes the UTF-16 length, so ranges computed on the folded text slice the wrong characters.
   const cases: [string, string[], [number, number][]][] = [
     [
       "The pr-title ruleset",
@@ -533,7 +499,8 @@ describe("buildPageIndex", () => {
     "ja/all-green.md",
   ];
 
-  test("landing pages lead, URLs follow the route rules, dirs are locale-relative", () => {
+  // The post-rewrite relativePath is what VitePress's env needs for isLandingPath to fire during the headers render.
+  test("landing pages lead, URLs follow the route rules, dirs are locale-relative; clean URLs drop .html and a root base adds no prefix", () => {
     const rendered: [string, string][] = [];
     const index = buildPageIndex(
       FILES,
@@ -590,9 +557,6 @@ describe("buildPageIndex", () => {
       ["ja/README.md", "ja/index.md"],
       ["ja/all-green.md", "ja/all-green.md"],
     ]);
-  });
-
-  test("clean URLs drop the .html suffix and a root base adds no prefix", () => {
     const urls = buildPageIndex(
       ["README.md", "all-green.md", "api/overview.md"],
       { base: "/", cleanUrls: true },
@@ -603,6 +567,7 @@ describe("buildPageIndex", () => {
 });
 
 describe("buildGroups row targets", () => {
+  // public/LICENSE beside LICENSE.md is real in the fleet: the asset row must not join the page's group.
   test("a curated row's target is carried onto its item and onto nothing else, and its href is never a page's", () => {
     const groups = buildGroups(CURATED_TARGET, PAGES, "root");
     const items = groups.flatMap((group) => group.items);

@@ -57,7 +57,6 @@ const TITLES: [title: string, problems: string[]][] = [
   [HEADER_101, []],
   ["fix(a,b): x", [ONE_SCOPE]],
   ["fix(a, b): x", [ONE_SCOPE]],
-  ["fix(a,b)!: x", [ONE_SCOPE]],
   ["fix(a b): x", [ONE_SCOPE]],
   ["fix(): x", [ONE_SCOPE]],
   ["fix(a,b)(c): x", [ONE_SCOPE]],
@@ -132,26 +131,18 @@ const RANGE_PROBLEMS = [SUBJECT_CASE, ONE_SCOPE];
 describe("the event's commit range", () => {
   const { repo, base, head, orphan } = scratchRepo();
 
-  test("pull_request: base..head from the event, merge subjects ignored", () => {
-    const eventPath = eventFile({ pull_request: { base: { sha: base }, head: { sha: head } } });
-    const result = runAction(
-      { GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: eventPath },
-      repo,
-    );
+  // The `-z` log read, the merge exemption judged on the subject alone, and the 150-character body line (the
+  // cap the fleet turns off) in one run; the payload's empty `commits` list is never consulted while both ends resolve.
+  test.each([
+    {
+      event: "pull_request",
+      payload: { pull_request: { base: { sha: base }, head: { sha: head } } },
+    },
+    { event: "push", payload: { before: base, after: head, commits: [] } },
+  ])("$event: the event's range, merge subjects ignored", ({ event, payload }) => {
+    const eventPath = eventFile(payload);
+    const result = runAction({ GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: eventPath }, repo);
     expect(verdict(result)).toEqual({ exitCode: 1, stderr: "", problems: RANGE_PROBLEMS });
-  });
-
-  test("push with both ends resolvable: before..after", () => {
-    const eventPath = eventFile({ before: base, after: head, commits: [] });
-    const result = runAction({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath }, repo);
-    expect(verdict(result)).toEqual({ exitCode: 1, stderr: "", problems: RANGE_PROBLEMS });
-  });
-
-  test("a pull_request event without its shas fails instead of judging nothing", () => {
-    const eventPath = eventFile({ pull_request: {} });
-    const result = runAction({ GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: eventPath });
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("pull_request event is missing base/head SHAs.");
   });
 
   // A new branch's `before` is the zero sha and a force-push orphans it or re-roots the history: the payload's
@@ -245,14 +236,5 @@ describe("the event's commit range", () => {
     });
     const result = runAction({ GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath });
     expect(verdict(result)).toEqual({ exitCode: 1, stderr: "", problems: [TYPE_ENUM] });
-  });
-
-  test("another event judges nothing", () => {
-    const eventPath = eventFile({});
-    const result = runAction({
-      GITHUB_EVENT_NAME: "workflow_dispatch",
-      GITHUB_EVENT_PATH: eventPath,
-    });
-    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
   });
 });

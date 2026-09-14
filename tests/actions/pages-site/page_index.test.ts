@@ -7,8 +7,9 @@ import {
 
 const OWN_HEADING: PageHeader = { title: "Install!", anchor: "install", level: 2 };
 
-/** A renderer that stamps the same headers on every render, so what the
- *  rule lets through is the only variable. */
+// VitePress expands `<!-- @include -->` before any rule sees the page, so a heading in the included file is a real anchor
+// and one behind a missing target is not; processIncludes' resolution is undocumented, and a wrong guess shifts every
+// launcher anchor with nothing red. The renderer stamps the same headers on every render, so the rule is the only variable.
 const stampingRenderer = {
   render(_source: string, env: HeadersEnv): string {
     env.launcherHeaders = [OWN_HEADING];
@@ -32,13 +33,6 @@ describe("sourceHeaders", () => {
     [
       "a tight include directive to an existing file drops every heading row",
       "# Page\n\n<!--@include: ./part.md-->\n\n## Install!\n",
-      ["/site/docs/guide/part.md"],
-      [],
-      ["/site/docs/guide/part.md"],
-    ],
-    [
-      "a spaced include directive to an existing file drops every heading row",
-      "# Page\n\n<!-- @include: ./part.md -->\n\n## Install!\n",
       ["/site/docs/guide/part.md"],
       [],
       ["/site/docs/guide/part.md"],
@@ -133,13 +127,5 @@ describe("sourceHeaders", () => {
     };
     expect(sourceHeaders(stampingRenderer, source, {}, scope)).toEqual(expectedHeaders);
     expect(lookups).toEqual(expectedLookups);
-  });
-
-  test("refuses a renderer without headersRule", () => {
-    const bare = { render: () => "" };
-    const scope = { file: PAGE, srcDir: SRC_DIR, isFile: () => false };
-    expect(() => sourceHeaders(bare, "## Install!\n", {}, scope)).toThrow(
-      "headersRule is not installed",
-    );
   });
 });

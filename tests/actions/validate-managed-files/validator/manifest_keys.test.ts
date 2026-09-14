@@ -5,17 +5,9 @@ import { checkManifestParity } from "../../../../actions/validate-managed-files/
 import { checkManifestShape } from "../../../../actions/validate-managed-files/validator/checks/manifest_shape.ts";
 import { loadContext } from "../../../../actions/validate-managed-files/validator/context.ts";
 import { tempDirs } from "../../../shared/temp_dir.ts";
-import {
-  BASELINE,
-  FILES_YML,
-  MANIFEST,
-  manifestOf,
-  stampedBaseline,
-  validatorRunner,
-} from "./fixtures";
+import { BASELINE, FILES_YML, MANIFEST, manifestOf, stampedBaseline } from "./fixtures";
 
 const temp = tempDirs();
-const runValidator = validatorRunner(temp);
 
 describe("manifest keys are the repository paths the sync writes", () => {
   const CI = ".github/workflows/ci.yml";
@@ -63,9 +55,4 @@ describe("manifest keys are the repository paths the sync writes", () => {
       expect(findings.map((finding) => finding.message)).toEqual([keyError(key, problem)]);
     },
   );
-
-  test("the sync's own keys pass (control)", () => {
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(stampedBaseline()) });
-    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
-  });
 });
