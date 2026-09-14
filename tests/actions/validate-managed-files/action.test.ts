@@ -443,7 +443,7 @@ describe("freshness against the stable tag informs and never fails", () => {
           commit,
           line:
             `stable moved 2 commits past the synced commit (${commit.slice(0, 12)} -> ${tip.slice(0, 12)}). ` +
-            "The next sync moves this repository's judge. Nothing here fails for that.",
+            "A sync moves this repository's judge once the delivered surface differs. Nothing here fails for that.",
         };
       },
       env: { CHECK_EXIT: "1", CHECK_STDOUT: DIFF },

@@ -474,7 +474,7 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 
 The fleet's `validate-managed-files` check judges a repository as [check.ts](../actions/validate-managed-files/check.ts) judges it at the commit the manifest records, byte to byte against what that platform tree writes, so a platform change reddens a repository only once it syncs.
 
-- **The action reads the recorded commit first** ([shared/recorded_commit.ts](../actions/shared/recorded_commit.ts)), checks out repo-platform at it beside the tree, installs that checkout's dependencies, runs its `check.ts` over the repository, and removes the checkout before the hygiene checks walk the tree.
+- **The action reads the recorded commit first** ([shared/recorded_commit.ts](../actions/shared/recorded_commit.ts)), checks out repo-platform at it inside the tree at `.repo-platform-judge`, installs that checkout's dependencies, runs its `check.ts` over the repository, and removes the checkout before the hygiene checks walk the tree.
 
 - **`check.ts` copies the repository to scratch** (what git lists when the target is a checkout's own root; every path but `.git` in any other tree), runs the tree's own writer over the copy with `--build` as the commit, and removes the copy.
 
@@ -488,10 +488,11 @@ The fleet's `validate-managed-files` check judges a repository as [check.ts](../
 | a `commit` that is not a full 40-hex sha, or a manifest that does not parse | not judged, the reason naming the manifest |
 | a commit repo-platform's history lacks (the checkout fails) | not judged, the checkout step's outcome in the reason |
 | a repository path at `.repo-platform-judge`, where the check places its checkout | not judged: move it |
-| `check.ts` exit 1 or 2 | findings: its output fenced under `#### repo-platform at <commit>`, with the remedy |
+| `check.ts` exit 1 or 2 with output | findings: its output fenced under `#### repo-platform at <commit>`, with the remedy |
+| `check.ts` exit 1 or 2 with no output, any other exit, a signal, or the deadline | not judged: `ended without a verdict`, with the detail |
 | `check.ts` exit 0 | clean, unless a hygiene check finds something |
 
-- **Freshness informs and never fails:** the action compares the recorded commit with the `stable` tag in the platform checkout (git ancestry alone) and writes one line to the job summary and an annotation: up to date; `stable` moved N commits past it and the next sync moves the judge; or the commit is not on `stable`'s history and a sync re-stamps it once the delivered surface differs.
+- **Freshness informs and never fails:** the action compares the recorded commit with the `stable` tag in the platform checkout (git ancestry alone) and writes one line to the job summary and an annotation: up to date; `stable` moved N commits past it; or the commit is not on `stable`'s history. In both of the last two, a sync moves the judge once the delivered surface differs.
 
 - **The hygiene checks** (YAML, conflict markers, `release-as`) read no platform data and run from the action at `stable` ([new-repo.md](new-repo.md#the-managed-files-check)).
 

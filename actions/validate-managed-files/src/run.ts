@@ -78,7 +78,7 @@ function reportFreshness(commit: string, short: string): void {
     if (count !== null && succeeded(count.exit)) {
       line =
         `${DELIVERY_REF} moved ${count.stdout.trim()} commits past the synced commit (${short} -> ${tip.slice(0, 12)}). ` +
-        "The next sync moves this repository's judge. Nothing here fails for that.";
+        "A sync moves this repository's judge once the delivered surface differs. Nothing here fails for that.";
       notice(line);
     } else if (ancestor.exit.kind === "exited" && ancestor.exit.code === 1) {
       line = `The synced commit (${short}) is not on ${DELIVERY_REF}'s history. A sync re-stamps it once the delivered surface differs.`;

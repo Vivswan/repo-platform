@@ -150,7 +150,7 @@ The `validate-managed-files` step judges the repository against what repo-platfo
 
 - **The report step always runs,** reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
 
-- **Freshness informs:** the job summary says whether `stable` has moved past the recorded commit; nothing fails for that, and the next sync moves the commit.
+- **Freshness informs:** the job summary says whether `stable` has moved past the recorded commit; nothing fails for that, and a sync moves the commit once the delivered surface differs.
 
 - **What it judges:** the tree against the commit its LAST sync recorded, so a platform change reddens nothing until the repository syncs, and a registration change on a PR is red until the sync writes the module's files onto the branch ([changing the module selection](#changing-the-module-selection)).
 
@@ -299,4 +299,4 @@ Repository settings are applied from repo-platform for every managed repository 
 
 - **An overlay edit is one PR with the branch sync:** the [managed files check](#the-managed-files-check) reds it while the rendered `.github/settings.yml` is stale, and the `repo-platform:sync` label or the branch dispatch re-renders the file onto the PR ([settings.md](settings.md#editing-your-settings)). Never edit the rendered file: the next sync replaces it and holds its PR.
 
-- **Nothing in the repository applies its settings:** repo-platform's central run applies the rendered file after every green main merge there and nightly, once the sync PR carrying it has merged ([settings.md](settings.md#how-the-apply-works)).
+- **Nothing in the repository applies its settings:** repo-platform's central run applies the rendered file after every green main merge there and nightly, once the PR carrying it has merged ([settings.md](settings.md#how-the-apply-works)).

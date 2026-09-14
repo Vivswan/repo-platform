@@ -3,7 +3,8 @@ description: >-
   The fleet's validate-managed-files step body: judges the caller's checkout
   as repo-platform writes it at the commit the repository was last synced
   with (that commit's own check.ts, run from a checkout of repo-platform the
-  action makes beside the tree and removes), then the repository's YAML,
+  action makes inside the tree at .repo-platform-judge and removes), then the
+  repository's YAML,
   conflict-marker, and release-as hygiene, and posts the findings as one
   sticky PR comment plus the step summary, exporting the one verdict as the
   `integrity` output. The action never fails on its own - the report step

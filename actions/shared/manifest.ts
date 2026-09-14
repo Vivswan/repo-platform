@@ -12,7 +12,7 @@ import {
 
 /** Every class a recorded entry can carry. The sync writer's record union (sync/writer/manifest.ts) is pinned to
  *  this table, so a class one side learns reaches the other or the build fails. */
-export const RECORDED_CLASSES = ["managed", "split", "starter", "mirror"] as const;
+const RECORDED_CLASSES = ["managed", "split", "starter", "mirror"] as const;
 export type RecordedClass = (typeof RECORDED_CLASSES)[number];
 const RECORDED_CLASS_SET: ReadonlySet<string> = new Set(RECORDED_CLASSES);
 
@@ -56,7 +56,7 @@ export type ManifestEntryShape = {
 /** The closed entry-field vocabulary, the runtime twin of ManifestEntryShape: `satisfies` refuses
  *  a stranger and the AssertNever pin refuses an omission (a new grammar's tuple joins here or the
  *  build fails). */
-export const ENTRY_FIELDS = [
+const ENTRY_FIELDS = [
   "class",
   "hash",
   "grammar",
