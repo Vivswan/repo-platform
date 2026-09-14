@@ -86,11 +86,13 @@ describe("the repo's own stable-tag ruleset", () => {
 describe("the repo's own main-up-to-date ruleset", () => {
   test("the rendered default branch requires an up-to-date branch beside the fleet's main ruleset", () => {
     const rulesets = readRulesets(OWN_RENDER);
-    const admins = [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }];
     const main = rulesets.find((r) => r.name === "main");
     // The fleet's flag stays false: sync and Dependabot pull requests would stall behind every merge.
     expect(requiredChecks(main)?.strict_required_status_checks_policy).toBe(false);
-    expect(main?.bypass_actors).toEqual(admins);
+    // Main's admin bypass stays; the new ruleset has none, or the admin merges it exists for would pass it silently.
+    expect(main?.bypass_actors).toEqual([
+      { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" },
+    ]);
     // The check is listed again: GitHub ignores the flag on a ruleset that requires no check.
     expect(rulesets.find((r) => r.name === "main-up-to-date")).toEqual({
       name: "main-up-to-date",
@@ -109,7 +111,7 @@ describe("the repo's own main-up-to-date ruleset", () => {
           },
         },
       ],
-      bypass_actors: admins,
+      bypass_actors: [],
     });
   });
 });

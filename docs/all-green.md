@@ -22,7 +22,7 @@ The judgment, whole: every needed result must be `success`, or `skipped` for a j
 
 The judgment's own scenario tests are alls-green's. The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
 
-repo-platform's own main also requires the pull request branch to be up to date before merging: the `main-up-to-date` ruleset in its [overlay](../.github/settings.local.yml). The fleet does not, because sync and Dependabot pull requests would stall behind every merge.
+repo-platform's own main also requires the pull request branch to be up to date before merging: the `main-up-to-date` ruleset in its [overlay](../.github/settings.local.yml), with no bypass, so a stale merge fails at GitHub for admins too (`gh pr update-branch` first) and a direct push to main is refused unless the commit already carries a passing `all-green` run. The fleet does not, because sync and Dependabot pull requests would stall behind every merge.
 
 ## Quick triage: why is my PR red or waiting?
 

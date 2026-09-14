@@ -158,10 +158,7 @@ rulesets:
             required_status_checks:
               - context: all-green
                 integration_id: 15368
-      bypass_actors:
-        - actor_id: 5
-          actor_type: RepositoryRole
-          bypass_mode: always
+      bypass_actors: []
     - name: non-bypassable
       target: branch
       enforcement: active
