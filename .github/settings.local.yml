@@ -37,6 +37,32 @@ rulesets:
     # Declared EMPTY on purpose: only the explicit empty list lets the nightly heal clear an out-of-band bypass actor.
     bypass_actors: []
 
+  # Requires the pull request branch to be up to date before merging (docs/all-green.md), on this repository alone.
+  # Its own ruleset, like pr-title: the override's `main` replaces a same-type rule an overlay declares (docs/settings.md).
+  #   two active rulesets on one branch  -> GitHub takes the stricter flag
+  #   a ruleset requiring no check       -> GitHub ignores the flag, so all-green is listed again
+  - name: main-up-to-date
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: required_status_checks
+        parameters:
+          strict_required_status_checks_policy: true
+          do_not_enforce_on_create: true
+          required_status_checks:
+            - context: all-green
+              integration_id: 15368
+    # The main ruleset's own bypass, so direct pushes to main keep working; an admin's merge bypasses this rule as it bypasses all-green.
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
+
 # Holds REPO_PLATFORM_TOKEN once the post-green jobs declare this environment: then only a declaring job in a main run can
 # read the fleet PAT, and GitHub itself holds the rule. No wait timer and no reviewers: GitHub's defaults, left undeclared.
 environments:
