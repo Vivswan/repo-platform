@@ -428,7 +428,6 @@ jobs:
       github.ref == 'refs/heads/main'
     concurrency:
       group: pages
-      cancel-in-progress: false
     permissions:
       contents: read
       pages: write

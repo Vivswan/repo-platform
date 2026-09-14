@@ -13,7 +13,6 @@ permissions:
 # never cancel one mid-push.
 concurrency:
   group: refresh-toolchains
-  cancel-in-progress: false
 
 jobs:
   refresh:

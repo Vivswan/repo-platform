@@ -9,7 +9,7 @@ const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 interface Job {
   needs?: string[];
   if?: string;
-  concurrency?: { group: string; "cancel-in-progress"?: boolean };
+  concurrency?: { group: string };
   uses?: string;
   with?: Record<string, string>;
   outputs?: Record<string, string>;
@@ -300,10 +300,7 @@ describe("post-green wiring", () => {
     );
     // The fleet's single-writer lane is held HERE (the raw group census
     // below cannot tell which job holds it).
-    expect(syncFleet.concurrency).toEqual({
-      group: "sync-repos",
-      "cancel-in-progress": false,
-    });
+    expect(syncFleet.concurrency).toEqual({ group: "sync-repos" });
     expect(syncFleet.uses).toBe("./.github/workflows/sync-repos.yml");
     // No sha rides the call: the sync reads the commit the tag names (resolve_build.ts).
     expect(syncFleet.with).toEqual({
@@ -314,8 +311,6 @@ describe("post-green wiring", () => {
     const settingsFleet = jobs["settings-fleet"];
     expect(settingsFleet.needs).toEqual(["sync-fleet"]);
     expect(settingsFleet.if).toBe("github.event_name != 'workflow_dispatch' && !cancelled()");
-    // No cancel-in-progress: GitHub's default (false) is the one value the
-    // arrival-ordered lane admits (settings-repos.yml).
     expect(settingsFleet.concurrency).toEqual({ group: "settings-repos" });
     expect(settingsFleet.uses).toBe("./.github/workflows/settings-repos.yml");
     expect(settingsFleet.with).toEqual({
@@ -334,7 +329,7 @@ describe("post-green wiring", () => {
     const settingsRepos = read(".github/workflows/settings-repos.yml");
     const doc = parseYaml(settingsRepos) as {
       on: Record<string, { inputs?: Record<string, unknown> }>;
-      concurrency: { group: string; "cancel-in-progress"?: boolean };
+      concurrency: { group: string };
     };
     expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
     expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos", "sha"]);
@@ -356,14 +351,13 @@ describe("post-green wiring", () => {
     const syncRepos = read(".github/workflows/sync-repos.yml");
     const doc = parseYaml(syncRepos) as {
       on: Record<string, { inputs?: Record<string, unknown> }>;
-      concurrency: { group: string; "cancel-in-progress": boolean };
+      concurrency: { group: string };
     };
     expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
     expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos"]);
     expect(doc.concurrency).toEqual({
       group:
         "${{ inputs.repos != '' && format('sync-repos-called-{0}', github.run_id) || 'sync-repos' }}",
-      "cancel-in-progress": false,
     });
     // The scope reaches the selector as ONLY_REPO from the call input
     // only - the dispatch input stays out of step env (private slugs).
@@ -381,7 +375,7 @@ describe("post-green wiring", () => {
     );
     for (const text of [ciYml, skeleton]) {
       const doc = parseYaml(text) as {
-        concurrency: { group: string; "cancel-in-progress": string | boolean };
+        concurrency: { group: string; "cancel-in-progress": string };
       };
       expect(doc.concurrency).toEqual({
         group:
@@ -397,17 +391,14 @@ describe("post-green wiring", () => {
     // name and would split a lane between called and dispatched runs.
     // ci.yml legitimately keys its RUN-level serialization on
     // github.workflow (a trigger workflow, never workflow_call'd).
-    expect(postGreenDoc.jobs["move-stable"].concurrency).toEqual({
-      group: "stable-tag-move",
-      "cancel-in-progress": false,
-    });
+    expect(postGreenDoc.jobs["move-stable"].concurrency).toEqual({ group: "stable-tag-move" });
     const groupsOf = (text: string) => [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
     expect(groupsOf(postGreen)).toEqual(["stable-tag-move", "sync-repos", "settings-repos"]);
     for (const group of groupsOf(postGreen)) {
       expect(group).not.toContain("github.workflow");
     }
-    // Delivery legs never cancel a running one: an interrupted move
-    // between read and push is exactly the wedge the lease exists for.
+    // Delivery legs never cancel a running one: an interrupted move between read and push is exactly the
+    // wedge the lease exists for (concurrency_cancel.test.ts holds the roster of lanes that do cancel).
     expect(postGreen).not.toContain("cancel-in-progress: true");
     // A caller must never hold the resource its called workflow requires (the mover lane above
     // all), so ci.yml's post-green job holds no job-level lane. Asserted on the parsed job:
