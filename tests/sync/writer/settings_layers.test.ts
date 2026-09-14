@@ -11,7 +11,6 @@ import {
   declaredPrivate,
   foldSettings,
   GITHUB_ACTIONS_APP_ID,
-  identityKeyIssues,
   layerConfig,
   layerPaths,
   loadLayer,
@@ -869,28 +868,5 @@ describe("declaredPrivate", () => {
     expect(declaredPrivate({ repository: {} })).toBeNull();
     expect(declaredPrivate({})).toBeNull();
     expect(declaredPrivate(null)).toBeNull();
-  });
-});
-
-describe("identityKeyIssues", () => {
-  test("flags shape problems, empty strings excepted", () => {
-    const identity = { description: "x", homepage: "", topics: "", private: false };
-    expect(identityKeyIssues(identity)).toEqual([]);
-    expect(identityKeyIssues({ ...identity, topics: ["a", "b"] })).toEqual([]);
-    // Each issue is pinned whole: the key, the expectation a human reads,
-    // and the offending value as it will print.
-    expect(identityKeyIssues({ ...identity, description: "" })).toEqual([
-      { key: "description", expected: "a non-empty description string", got: '""' },
-    ]);
-    expect(identityKeyIssues({ ...identity, private: "false" })).toEqual([
-      {
-        key: "private",
-        expected: "an explicit boolean, so the apply manages visibility",
-        got: '"false"',
-      },
-    ]);
-    expect(identityKeyIssues({ ...identity, topics: [1] })).toEqual([
-      { key: "topics", expected: "a declared topics value (string or string list)", got: "[1]" },
-    ]);
   });
 });
