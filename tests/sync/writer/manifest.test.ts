@@ -23,9 +23,9 @@ const PROTO = "__proto__";
 const CTOR = "constructor";
 
 describe("renderManifest", () => {
-  // Cross-file: the validator's parser (actions/shared/manifest.ts) reads what the writer renders, and the self
-  // entry's null hash plus its commit is what manifest_parity and check.ts key on; sorted one-line entries keep the
-  // fleet's diffs readable.
+  // Cross-file: the validator's parser (actions/shared/manifest.ts) reads what the writer renders; the self entry's
+  // null hash is what manifest_parity keys on, and its commit is what recordedCommit reads for sync.ts's
+  // judgedCommit; sorted one-line entries keep the fleet's diffs readable.
   test("one entry per line, sorted, with the self entry carrying the commit and no hash", () => {
     const text = renderManifest(
       {
@@ -140,8 +140,8 @@ describe("readRecord", () => {
 });
 
 describe("readRecords", () => {
-  // The round trip through the file; a missing manifest is a first sync, and an unparsable one is a problem the
-  // writer notes (every file then judged unrecorded) instead of a throw that would fail the row.
+  // A missing manifest is a first sync, and an unparsable one is a problem the writer notes (every file then judged
+  // unrecorded) instead of a throw that would fail the row.
   test("a missing manifest is no records; a written one reads back; an unparsable one is a problem", () => {
     const target = temp.dir("writer-manifest-");
     expect(readRecords(target)).toEqual({ records: {}, problem: null });
@@ -197,8 +197,8 @@ describe("readRecords", () => {
 });
 
 describe("recordedCommit", () => {
-  // The commit check.ts judges a repository against until a sync moves it; a stamp the writer cannot read (a
-  // manifest from before the field, a hand edit) is null, and sync.ts's stamp rule then takes the build.
+  // The commit sync.ts's judgedCommit keeps while the delivered surface is unchanged; a stamp the writer cannot read
+  // (a manifest from before the field, a hand edit) is null, and judgedCommit takes the build.
   test.each([
     ["no manifest", {}, null],
     ["a self entry before the field", { [MANIFEST_NAME]: { class: "managed", hash: null } }, null],

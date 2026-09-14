@@ -36,8 +36,9 @@ const KEPT =
   "repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it";
 
 describe("keepReason", () => {
-  // The judgement table sync.ts's class flip reads: a hand-over must be a keep reason, or a flip would overwrite
-  // repository-owned content around a region; a hash-null record is not one the writer reads, so it vouches for nothing.
+  // The judgement table sync.ts's class flip reads: a keep reason makes the flip report the content as replaced local
+  // edits instead of overwriting it silently as its own last write, so a hand-over must be one; a hash-null record
+  // is not one the writer reads, so it vouches for nothing.
   test("names why each state is not the writer's own last write", () => {
     const target = checkout({
       same: "v1\n",
@@ -116,10 +117,8 @@ describe("keepReason", () => {
 });
 
 describe("retire", () => {
-  // Unreadable records (a hardlink kind, a split without markers) are not the writer's to touch, an absent path makes
-  // no row, and a foreign file is held, never skipped; a symlink mirror is judged by its target string; a split file
-  // is deleted when only blank lines frame its region, held when the region was edited, and handed over when the
-  // repository owns content around it.
+  // Unreadable records (a hardlink kind, a split without markers) are not the writer's to touch, and a foreign file
+  // is held, never skipped, so the report names it.
   test("deletes matches, holds the rest, skips absent paths and records it has none of or cannot read", () => {
     const target = checkout({
       same: "v1\n",
