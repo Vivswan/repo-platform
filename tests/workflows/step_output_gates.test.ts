@@ -21,13 +21,17 @@ interface Step {
 /** Only `== '<non-zero literal>'` and `!= ''` cannot be satisfied by an absent output. Terms without a
  *  step output (`env.*`, `needs.*`) are not this hazard. The offending term, or null. */
 function unsafeStepCondition(raw: string): string | null {
-  // One spelling per term: the `${{ }}` delimiters GitHub accepts around an `if:` go, and a bracket
-  // index (`steps['probe'].outputs['changed']`) reads as the dotted path it names.
+  // One spelling per term: the `${{ }}` delimiters GitHub accepts around an `if:` go, spaces around a
+  // dot go, and a literal bracket index (`steps['probe'].outputs['changed']`) reads as the dotted path
+  // it names. Context names are case-insensitive to GitHub, so they are matched that way.
   const condition = raw
     .trim()
     .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1")
+    .replaceAll(/\s*\.\s*/g, ".")
     .replaceAll(/\[\s*'([\w-]+)'\s*\]/g, ".$1");
-  const OUTPUT = /steps\.[\w-]+\.outputs\./;
+  // A step output is any term reaching `.outputs` from `steps`, a dynamic index (`steps[env.PROBE]`)
+  // included: a term the classifier below cannot read is named, never passed.
+  const OUTPUT = /(?<![.\w])steps\b.*\.outputs\b/i;
   if (!OUTPUT.test(condition)) return null;
   // A negated GROUP inverts terms this check reads term by term, so it cannot be proven safe here.
   // `!cancelled()` and friends do not match: the parenthesis has to follow the `!` directly.
@@ -35,7 +39,7 @@ function unsafeStepCondition(raw: string): string | null {
   for (const raw of condition.split(/&&|\|\|/)) {
     const term = raw.replaceAll(/[()]/g, "").trim();
     if (!OUTPUT.test(term)) continue;
-    const match = /^steps\.[\w-]+\.outputs\.[\w-]+ (==|!=) '([^']*)'$/.exec(term);
+    const match = /^steps\.[\w-]+\.outputs\.[\w-]+\s*(==|!=)\s*'([^']*)'$/i.exec(term);
     if (match === null) return term;
     const [, operator, literal] = match;
     if (operator === "==" ? Number(literal) === 0 : literal !== "") return term;
@@ -43,17 +47,33 @@ function unsafeStepCondition(raw: string): string | null {
   return null;
 }
 
-/** FAIL steps (a bare `exit <non-zero>` last line, no continue-on-error) are exempt: a gate that opens
- *  on an absent output there turns the job red, which is the point. */
+/** A FAIL step's gate opening on an absent output turns the job red, which is the point, so it is
+ *  exempt. Its lines print and nothing else: no chained command, pipe, or substitution rides on an echo. */
+function isFailStep(step: Step): boolean {
+  if (step["continue-on-error"]) return false;
+  const lines = String(step.run ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
+  const last = lines.at(-1);
+  const prints = (line: string) => {
+    if (!/^(echo|printf)\b/.test(line)) return false;
+    // Quoted text prints, read left to right in ONE pass so a quote of one kind inside the other is
+    // text: single quotes hide everything, double quotes hide operators but not a substitution.
+    const shell = line.replaceAll(/'[^']*'|"[^"]*"/g, (quoted) =>
+      quoted.startsWith("'") ? "" : quoted.replaceAll(/[;|&<>`]/g, ""),
+    );
+    return !/[;|&<>`]|\$\(/.test(shell);
+  };
+  return last !== undefined && /^exit [1-9]\d*$/.test(last) && lines.slice(0, -1).every(prints);
+}
+
 function negativeGates(text: string): string[] {
   const doc = parseYaml(text) as { jobs?: Record<string, { steps?: Step[] }> };
   const gates: string[] = [];
   for (const job of Object.values(doc.jobs ?? {})) {
     for (const step of job.steps ?? []) {
-      const failStep =
-        /(^|\n)\s*exit [1-9]\d*$/.test(String(step.run ?? "").trimEnd()) &&
-        !step["continue-on-error"];
-      if (failStep) continue;
+      if (isFailStep(step)) continue;
       const unsafe = unsafeStepCondition(String(step.if ?? ""));
       if (unsafe !== null) gates.push(`step "${step.id ?? step.name ?? step.uses}": ${unsafe}`);
     }
@@ -90,6 +110,21 @@ describe("unsafeStepCondition", () => {
     ["steps.probe.outputs['changed'] != 'true'", "steps.probe.outputs.changed != 'true'"],
     ["steps['probe'].outputs.changed != 'true'", "steps.probe.outputs.changed != 'true'"],
     ["${{ steps.probe.outputs['changed'] != 'true' }}", "steps.probe.outputs.changed != 'true'"],
+    // A dynamic index cannot be read here, so the term is named whatever it compares against.
+    ["steps[env.PROBE].outputs.changed != 'true'", "steps[env.PROBE].outputs.changed != 'true'"],
+    ["steps[env.PROBE].outputs.changed == 'true'", "steps[env.PROBE].outputs.changed == 'true'"],
+    [
+      "steps[env[matrix.key]].outputs.changed != 'true'",
+      "steps[env[matrix.key]].outputs.changed != 'true'",
+    ],
+    // GitHub reads these as the plain spelling; so does the classifier.
+    ["steps . probe . outputs . changed != 'true'", "steps.probe.outputs.changed != 'true'"],
+    ["STEPS.probe.OUTPUTS.changed != 'true'", "STEPS.probe.OUTPUTS.changed != 'true'"],
+    // A job named `steps` is a needs term, not this hazard; the unsafe term beside it is the one named.
+    [
+      "needs.steps.outputs.ready == 'true' && steps.probe.outputs.changed != 'true'",
+      "steps.probe.outputs.changed != 'true'",
+    ],
   ])("rejects %s, naming the offending term", (condition, offending) => {
     expect(unsafeStepCondition(condition)).toBe(offending);
   });
@@ -108,6 +143,10 @@ describe("unsafeStepCondition", () => {
     "steps.refresh.outputs.bumps != ''",
     // The delimiters GitHub accepts around an `if:` change nothing.
     "${{ steps.probe.outputs.changed == 'true' }}",
+    "STEPS . probe . outputs . changed == 'true'",
+    "steps.probe.outputs.changed=='true'",
+    "steps.probe.outputs.bumps!=''",
+    "needs.steps.outputs.ready == 'true'",
     "${{ steps['probe'].outputs.changed == 'true' }}",
     "",
   ])("accepts %s", (condition) => {
@@ -156,6 +195,40 @@ jobs:
     { run: "true || exit 1", red: true, shape: "an exit 1 behind a short-circuit" },
     { run: "echo exit 1", red: true, shape: "an exit 1 that is only text" },
     { run: "bun scripts/publish.ts", red: true, shape: "a step with an effect" },
+    { run: "gh pr merge --squash\nexit 1\n", red: true, shape: "an effect before the exit 1" },
+    { run: "echo failed; gh pr merge\nexit 1", red: true, shape: "an effect chained onto an echo" },
+    {
+      run: 'echo "$(gh pr merge)"\nexit 1',
+      red: true,
+      shape: "an effect substituted into an echo",
+    },
+    { run: "echo failed | tee log\nexit 1", red: true, shape: "an echo piped into a command" },
+    {
+      run: "echo failed & gh pr merge\nexit 1",
+      red: true,
+      shape: "an effect backgrounded off an echo",
+    },
+    {
+      run: 'echo "can\'t"; gh pr merge "won\'t"\nexit 1',
+      red: true,
+      shape: "an effect between two double-quoted apostrophes",
+    },
+    { run: "echo <(gh pr merge)\nexit 1", red: true, shape: "a process substitution in an echo" },
+    {
+      run: 'echo failed > "$GITHUB_OUTPUT"\nexit 1',
+      red: true,
+      shape: "an echo redirected to a file",
+    },
+    {
+      run: 'echo "failed; see $LOG | above"\nexit 1',
+      red: false,
+      shape: "punctuation inside quotes",
+    },
+    {
+      run: "# the re-raise\nprintf '%s\\n' 'integrity failed'\n\nexit 3\n",
+      red: false,
+      shape: "a printf re-raise with a comment and a blank line",
+    },
     {
       run: "exit 1",
       extra: "continue-on-error: true",
