@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   BLOCK_VALUE_RE,
-  blockSourcePath,
+  blockSource,
   checkFilesConfig,
   type FileEntry,
   type FilesConfig,
@@ -114,19 +114,10 @@ export function trackingTuples(config: FilesConfig): TrackingTuples {
   return { tuples, problems };
 }
 
-export interface BlockSource {
-  module: string;
-  value: string;
-  source: string;
-}
-
-export function blockCandidates(
-  config: FilesConfig,
-  entry: FileEntry,
-  modules: string[],
-): BlockSource[] {
+/** Unique by path: a shared block two selected modules name is one file and lands once; each module's own block is its own path even under one value name (every toolchain's `AGENTS.md` bullets). */
+export function blockSources(config: FilesConfig, entry: FileEntry, modules: string[]): string[] {
   if (entry.class === "link" || "render" in entry || entry.blocks === undefined) return [];
-  const candidates: BlockSource[] = [];
+  const sources = new Set<string>();
   for (const module of Object.keys(config.modules)) {
     if (!modules.includes(module)) continue;
     const values = config.modules[module][entry.blocks];
@@ -136,29 +127,9 @@ export function blockCandidates(
         `files.yml: modules.${module}.${entry.blocks} must be a list of block names (letters, digits, _ -)`,
       );
     }
-    for (const value of values as string[]) {
-      candidates.push({ module, value, source: `${module}/${blockSourcePath(entry.path, value)}` });
-    }
+    for (const value of values as string[]) sources.add(blockSource(entry, module, value));
   }
-  return candidates;
-}
-
-/** Deduplicated by bytes, not by value name: a gitignore block three toolchains declare lands once, while each toolchain's own AGENTS.md bullets under one value name all land. */
-export function blockSources(
-  config: FilesConfig,
-  entry: FileEntry,
-  modules: string[],
-  tree: string,
-): string[] {
-  const seen: Buffer[] = [];
-  const sources: string[] = [];
-  for (const candidate of blockCandidates(config, entry, modules)) {
-    const bytes = readFileSync(join(tree, candidate.source));
-    if (seen.some((earlier) => earlier.equals(bytes))) continue;
-    seen.push(bytes);
-    sources.push(candidate.source);
-  }
-  return sources;
+  return [...sources];
 }
 
 interface SourceUse {
@@ -188,8 +159,8 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
     if (entry.blocks !== undefined) own.withBlocks += 1;
     if (entry.class === "split") own.regions.add(entry.region);
     // A block file is spliced into the source, so it is read like one but may not carry the anchor itself.
-    for (const candidate of blockCandidates(config, entry, allModules)) {
-      const block = use(candidate.source);
+    for (const source of blockSources(config, entry, allModules)) {
+      const block = use(source);
       block.entries += 1;
       if (entry.class === "split") block.regions.add(entry.region);
     }

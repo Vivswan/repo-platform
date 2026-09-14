@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // Nothing records the upstream SHA on purpose: the outputs change only when consumed upstream content changes,
 // so the refresh-gitignore PR diff stays worth reading.
-// --topology is the offline gate over the block files: they match files.yml's sources and every copy of a section carries
-// the same bytes. The root .gitignore is the sync's, written from these files like any target's.
+// --topology is the offline gate over the block files: one per files.yml source, each exactly its section.
+// The root .gitignore is the sync's, written from these files like any target's.
 // Content drift inside a block against upstream is ungated until the next refresh regenerates over it.
 //
 // Usage: bun scripts/generate/build_gitignore.ts [--topology]
@@ -10,8 +10,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import {
-  blockSourcePath,
-  blockValueOf,
+  blockSource,
   type FilesConfig,
   parseFilesConfig,
 } from "../../actions/plan/files_config.ts";
@@ -60,47 +59,60 @@ export function blockName(path: string): string {
   return (path.split("/").pop() as string).replace(/\.gitignore$/, "");
 }
 
-export function blockRel(module: string, path: string): string {
-  return `${module}/${blockSourcePath(GITIGNORE, blockName(path))}`;
+export interface GitignoreBlocks {
+  /** The files/-relative directory every block file sits in. */
+  dir: string;
+  /** Source path (github/gitignore path or platform key) to its files/-relative block file, in files.yml order. */
+  files: Map<string, string>;
 }
 
-export function gitignoreSources(config: FilesConfig, label = "files.yml"): [string, string[]][] {
-  return Object.entries(config.modules).flatMap(([module, data]): [string, string[]][] => {
-    const names = data.gitignore_sources;
-    if (names === undefined) return [];
+/** One block file per source however many modules name it, so the entry must share its blocks. */
+export function gitignoreBlocks(config: FilesConfig, label = "files.yml"): GitignoreBlocks {
+  const entry = config.files.find((candidate) => candidate.path === GITIGNORE);
+  if (
+    entry === undefined ||
+    entry.class === "link" ||
+    "render" in entry ||
+    entry.blocks === undefined
+  ) {
+    throw new Error(`${label}: no ${GITIGNORE} entry declares blocks`);
+  }
+  if (entry.blocks_dir === undefined) {
+    throw new Error(`${label}: the ${GITIGNORE} entry needs blocks_dir, one block file per source`);
+  }
+  const files = new Map<string, string>();
+  for (const [module, data] of Object.entries(config.modules)) {
+    const names = data[entry.blocks];
+    if (names === undefined) continue;
     if (!Array.isArray(names) || names.some((name) => typeof name !== "string")) {
-      throw new Error(`${label}: modules.${module}.gitignore_sources must be a list of names`);
+      throw new Error(`${label}: modules.${module}.${entry.blocks} must be a list of names`);
     }
-    return [[module, (names as string[]).map(sourceId)]];
-  });
+    for (const name of names as string[]) {
+      const path = sourceId(name);
+      if (!files.has(path)) files.set(path, blockSource(entry, module, name));
+    }
+  }
+  return { dir: entry.blocks_dir, files };
 }
 
 /** Returned rather than deleted: the missing name may be the typo to fix, not the block. */
-export function strayBlockFiles(entries: [string, string[]][], filesDir: string): string[] {
-  const expected = new Set(
-    entries.flatMap(([module, sources]) => sources.map((path) => blockRel(module, path))),
-  );
-  const strays: string[] = [];
-  for (const module of readdirSync(filesDir).sort()) {
-    const dir = join(filesDir, module);
-    if (!existsSync(dir) || module === "base") continue;
-    for (const name of readdirSync(dir).sort()) {
-      const rel = `${module}/${name}`;
-      if (blockValueOf(GITIGNORE, name) !== null && !expected.has(rel)) strays.push(`files/${rel}`);
-    }
-  }
-  return strays;
+export function strayBlockFiles({ dir, files }: GitignoreBlocks, filesDir: string): string[] {
+  const expected = new Set(files.values());
+  const abs = join(filesDir, dir);
+  if (!existsSync(abs)) return [];
+  return readdirSync(abs)
+    .sort()
+    .map((name) => `${dir}/${name}`)
+    .filter((rel) => !expected.has(rel))
+    .map((rel) => `files/${rel}`);
 }
 
 /** A module newly declaring a source has no block until the generator runs, and the writer fails on the missing source
- *  (.github/scripts/sync/writer/files_config.ts, blockSources). */
-export function missingBlockFiles(entries: [string, string[]][], filesDir: string): string[] {
-  return entries.flatMap(([module, sources]) =>
-    sources
-      .map((path) => blockRel(module, path))
-      .filter((rel) => !existsSync(join(filesDir, rel)))
-      .map((rel) => `files/${rel}`),
-  );
+ *  (.github/scripts/sync/writer/files_config.ts, verifySources). */
+export function missingBlockFiles({ files }: GitignoreBlocks, filesDir: string): string[] {
+  return [...files.values()]
+    .filter((rel) => !existsSync(join(filesDir, rel)))
+    .map((rel) => `files/${rel}`);
 }
 
 export function sectionsIn(text: string): Record<string, string> {
@@ -161,38 +173,26 @@ export function buildBlock(section: string): string {
   return `${section}\n`;
 }
 
-export function topologyProblems(input: {
-  entries: [string, string[]][];
-  filesDir: string;
-}): string[] {
+export function topologyProblems(input: { blocks: GitignoreBlocks; filesDir: string }): string[] {
   const problems: string[] = [];
-  const rerun = "run 'bun scripts/generate/build_gitignore.ts' to regenerate every copy";
-  const blockSections = new Map<string, string>();
-  for (const [module, sources] of input.entries) {
-    for (const path of sources) {
-      const rel = blockRel(module, path);
-      const abs = join(input.filesDir, rel);
-      if (!existsSync(abs)) continue;
-      const text = readFileSync(abs, "utf-8");
-      const encoded = Object.keys(sectionsIn(text));
-      if (encoded.length !== 1 || encoded[0] !== path) {
-        problems.push(
-          `files/${rel} encodes [${encoded.join(", ")}] but its name stands for ${path}; ${rerun}`,
-        );
-        continue;
-      }
-      const sectionText = sectionsIn(text)[path];
-      if (buildBlock(sectionText) !== text) {
-        problems.push(`files/${rel} is not exactly its section plus one blank line; ${rerun}`);
-      }
-      if (Object.hasOwn(PLATFORM_SECTIONS, path) && sectionText !== PLATFORM_SECTIONS[path]) {
-        problems.push(`files/${rel} is not the platform-authored section ${path}; ${rerun}`);
-      }
-      const earlier = blockSections.get(path);
-      if (earlier !== undefined && earlier !== sectionText) {
-        problems.push(`files/${rel} differs from another module's copy of ${path}; ${rerun}`);
-      }
-      blockSections.set(path, sectionText);
+  const rerun = "run 'bun scripts/generate/build_gitignore.ts' to regenerate";
+  for (const [path, rel] of input.blocks.files) {
+    const abs = join(input.filesDir, rel);
+    if (!existsSync(abs)) continue;
+    const text = readFileSync(abs, "utf-8");
+    const encoded = Object.keys(sectionsIn(text));
+    if (encoded.length !== 1 || encoded[0] !== path) {
+      problems.push(
+        `files/${rel} encodes [${encoded.join(", ")}] but its name stands for ${path}; ${rerun}`,
+      );
+      continue;
+    }
+    const sectionText = sectionsIn(text)[path];
+    if (buildBlock(sectionText) !== text) {
+      problems.push(`files/${rel} is not exactly its section plus one blank line; ${rerun}`);
+    }
+    if (Object.hasOwn(PLATFORM_SECTIONS, path) && sectionText !== PLATFORM_SECTIONS[path]) {
+      problems.push(`files/${rel} is not the platform-authored section ${path}; ${rerun}`);
     }
   }
   const baseAbs = join(input.filesDir, BASE_REL);
@@ -236,28 +236,28 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
 async function run(topology: boolean): Promise<number> {
   const config = parseFilesConfig(readFileSync(FILES_CONFIG, "utf-8"));
-  const entries = gitignoreSources(config);
-  const strays = strayBlockFiles(entries, FILES_DIR);
+  const blocks = gitignoreBlocks(config);
+  const strays = strayBlockFiles(blocks, FILES_DIR);
   if (strays.length > 0) {
     throw new Error(
       `stray gitignore block file(s) no files.yml source names: ${strays.join(", ")} - ` +
-        "the writer would keep splicing them; delete them (or restore the source)",
+        "the writer refuses a file no source reads; delete them (or restore the source)",
     );
   }
   if (topology) {
-    const missing = missingBlockFiles(entries, FILES_DIR);
+    const missing = missingBlockFiles(blocks, FILES_DIR);
     if (missing.length > 0) {
       throw new Error(
         `missing gitignore block file(s) for declared source(s): ${missing.join(", ")} - ` +
           "run 'bun scripts/generate/build_gitignore.ts' to generate them (or drop the source)",
       );
     }
-    const problems = topologyProblems({ entries, filesDir: FILES_DIR });
+    const problems = topologyProblems({ blocks, filesDir: FILES_DIR });
     if (problems.length > 0) {
-      throw new Error(`the gitignore copies disagree:\n  - ${problems.join("\n  - ")}`);
+      throw new Error(`the gitignore outputs are stale:\n  - ${problems.join("\n  - ")}`);
     }
     console.log(
-      "gitignore topology OK: the block files match files.yml's sources and every copy of a section agrees.",
+      "gitignore topology OK: one block file per files.yml source, each exactly its section.",
     );
     return 0;
   }
@@ -266,17 +266,14 @@ async function run(topology: boolean): Promise<number> {
   const sha = await upstreamHead();
   console.log(`github/gitignore HEAD is ${sha}`);
   const sections: Record<string, string> = {};
-  const declared = new Set([...ALWAYS, ...entries.flatMap(([, paths]) => paths)]);
-  for (const path of declared) sections[path] = await section(sha, path);
+  for (const path of [...ALWAYS, ...blocks.files.keys()]) sections[path] = await section(sha, path);
 
   const outputs: [string, string][] = [
     [join(FILES_DIR, BASE_REL), buildFilesBase(sections)],
-    ...entries.flatMap(([module, paths]) =>
-      paths.map((path): [string, string] => [
-        join(FILES_DIR, blockRel(module, path)),
-        buildBlock(sections[path]),
-      ]),
-    ),
+    ...[...blocks.files].map(([path, rel]): [string, string] => [
+      join(FILES_DIR, rel),
+      buildBlock(sections[path]),
+    ]),
   ];
   for (const [out, content] of outputs) {
     writeFileSync(out, content);

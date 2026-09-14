@@ -26,7 +26,7 @@ export function renderSourced(
   values: PlaceholderValues,
 ): string | { missing: string[] } {
   const raw = (rel: string) => readFileSync(join(tree, rel), "utf-8");
-  const blocks = blockSources(config, entry, modules, tree).map(raw);
+  const blocks = blockSources(config, entry, modules).map(raw);
   const spliced = spliceBlocks(raw(entry.source), blocks);
   const missing = missingPlaceholders(spliced, values);
   if (missing.length > 0) return { missing };

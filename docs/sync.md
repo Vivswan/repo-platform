@@ -54,7 +54,7 @@ settings:
   override: files/settings/override.yml
 files:
   - {path: .github/workflows/ci.yml, class: managed}
-  - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources}
+  - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources, blocks_dir: files/gitignore}
   - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
   - {path: .github/settings.local.yml, class: starter, when: {private: false}}
   - {path: .github/settings.local.yml, class: starter, when: {private: true}, source: files/base/.github/settings.local.private.yml}
@@ -76,7 +76,8 @@ files:
 | `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. Not for links. |
 | `files[].when` | The selection condition (below). Absent or empty means always. |
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
-| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source two toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
+| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names one block file (below); a block file named twice lands once. |
+| `files[].blocks_dir` | Entries with `blocks` only: a directory under `files/` the modules share. With it, a value names `<blocks_dir>/<value><extension of path>` (`files/gitignore/Node.gitignore`), one file however many modules list the value. Without it, a value names the module's own `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`), so every tool parses a block file by its real extension and each toolchain's `AGENTS.md` bullets stay its own under one value name. |
 | `files[].target` | Link entries only: the symlink target, relative to the link's own directory (`../AGENTS.md` from `.github/`). It must resolve to a clean repository path other than the link itself. |
 | `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
@@ -93,6 +94,7 @@ The loader refuses, all problems at once:
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
 - a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
 - `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source` or `blocks`, or without `overlay`
+- `blocks_dir` on an entry without `blocks`, or outside `files/`
 - an `overlay` path that is not clean, is the entry's own path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
 - a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`; a layer source declared twice; a layer `when` naming a module absent from `modules` or declaring a key no module carries
 - a declared settings layer missing from the tree, not a YAML mapping, or naming one label (case-insensitively) or one ruleset twice
@@ -123,7 +125,7 @@ The three links carry no `when`: every repository gets them.
 
 | `blocks` key | Entry | Block files |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.block.<Source>.gitignore`, one github/gitignore template or platform-authored section (`PLATFORM_SECTIONS` in `scripts/generate/build_gitignore.ts`, the fuzzer's failure directory) each, written by that script together with `files/base/.gitignore`; the Node source two toolchains declare is byte-identical in each, so it lands once |
+| `gitignore_sources` | `.gitignore` (split, `blocks_dir: files/gitignore`) | `files/gitignore/<Source>.gitignore`, one github/gitignore template or platform-authored section (`PLATFORM_SECTIONS` in `scripts/generate/build_gitignore.ts`, the fuzzer's failure directory) each, written by that script together with `files/base/.gitignore`; the Node source both JavaScript toolchains declare is one file, so it lands once |
 | `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.block.<ecosystem>.yml`, appended at the anchor line that ends the source |
 | `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.block.toolchain.md`, the module's Toolchain bullets, appended after the region body |
 | `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.block.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |

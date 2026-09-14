@@ -239,7 +239,7 @@ describe("scan scope", () => {
     expect(isMarkdown("files/deno/AGENTS.block.toolchain.md")).toBe(true);
     expect(isMarkdown("scripts/check/check_markdown_wrap.ts")).toBe(false);
     expect(isMarkdown("files/base/.gitignore")).toBe(false);
-    expect(isMarkdown("files/deno/.block.Deno.gitignore")).toBe(false);
+    expect(isMarkdown("files/gitignore/Deno.gitignore")).toBe(false);
   });
 
   test("vendored/generated texts are exempt, the writer's license source included", () => {

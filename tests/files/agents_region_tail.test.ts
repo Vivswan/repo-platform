@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { blockSourcePath } from "../../actions/plan/files_config";
+import { blockSource } from "../../actions/plan/files_config";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -53,7 +53,7 @@ function writtenAgents(label: string, modules: string[]): string {
 }
 
 const bunBlock = readFileSync(
-  join(FILES_TREE, "bun", blockSourcePath("AGENTS.md", "toolchain")),
+  join(FILES_TREE, blockSource({ path: "AGENTS.md" }, "bun", "toolchain")),
   "utf-8",
 );
 

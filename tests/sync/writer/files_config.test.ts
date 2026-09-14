@@ -108,66 +108,55 @@ describe("blockSources and verifySources", () => {
     BASE.replace(
       "  pages:",
       "  uv: { gitignore_sources: [Node] }\n  deno: { gitignore_sources: [Deno, Node] }\n  pages:",
+    ).replace(
+      "blocks: gitignore_sources }",
+      "blocks: gitignore_sources, blocks_dir: files/gitignore }",
     ),
   );
-  const tree = temp.dir("writer-files-blocks-tree-");
-  writeTree(tree, {
-    "bun/.block.Node.gitignore": "## Node\n*.log\n",
-    "bun/.block.Bun.gitignore": "## Bun\n",
-    "uv/.block.Node.gitignore": "## Node\n*.log\n",
-    "deno/.block.Node.gitignore": "## Node\n*.log\n",
-    "deno/.block.Deno.gitignore": "## Deno\n",
-  });
 
   test("blocks come from the selected modules carrying the key, in files.yml order", () => {
-    expect(blockSources(config, gitignore, ["bun", "pages"], tree)).toEqual([
+    expect(blockSources(config, gitignore, ["bun", "pages"])).toEqual([
       "bun/.block.Node.gitignore",
       "bun/.block.Bun.gitignore",
     ]);
-    expect(blockSources(config, gitignore, ["pages"], tree)).toEqual([]);
+    expect(blockSources(config, gitignore, ["pages"])).toEqual([]);
   });
 
-  test("a block three selected modules declare with the same bytes lands once, from the first", () => {
-    expect(blockSources(three, three.files[1], ["bun", "uv", "deno"], tree)).toEqual([
-      "bun/.block.Node.gitignore",
-      "bun/.block.Bun.gitignore",
-      "deno/.block.Deno.gitignore",
+  test("a shared block three selected modules name is one path, placed where the first names it", () => {
+    expect(blockSources(three, three.files[1], ["bun", "uv", "deno"])).toEqual([
+      "gitignore/Node.gitignore",
+      "gitignore/Bun.gitignore",
+      "gitignore/Deno.gitignore",
     ]);
-    expect(blockSources(three, three.files[1], ["deno", "uv"], tree)).toEqual([
-      "uv/.block.Node.gitignore",
-      "deno/.block.Deno.gitignore",
+    expect(blockSources(three, three.files[1], ["deno", "uv"])).toEqual([
+      "gitignore/Node.gitignore",
+      "gitignore/Deno.gitignore",
     ]);
   });
 
-  test("one value name with different bytes per module is each module's own block", () => {
-    const agents = temp.dir("writer-files-blocks-agents-");
-    writeTree(agents, {
-      "bun/AGENTS.block.toolchain.md": "- bun\n",
-      "deno/AGENTS.block.toolchain.md": "- deno\n",
-    });
+  test("one value name per module is each module's own block", () => {
     const config = parseFilesConfig(
       "placeholders: []\nmodules:\n  bun: { agents_toolchain: [toolchain] }\n  deno: { agents_toolchain: [toolchain] }\nfiles:\n  - { path: AGENTS.md, class: split, region: html, blocks: agents_toolchain }\n",
     );
-    expect(blockSources(config, config.files[0], ["bun", "deno"], agents)).toEqual([
+    expect(blockSources(config, config.files[0], ["bun", "deno"])).toEqual([
       "bun/AGENTS.block.toolchain.md",
       "deno/AGENTS.block.toolchain.md",
     ]);
   });
 
   test("blocks apply to managed and starter entries too, and never to links", () => {
-    const own = temp.dir("writer-files-blocks-classes-");
-    writeTree(own, { "bun/d.block.bun.yml": "d\n", "bun/s.block.bun.yml": "s\n" });
     const config = parseFilesConfig(
-      "placeholders: []\nmodules:\n  bun: { eco: [bun] }\nfiles:\n  - { path: d.yml, class: managed, blocks: eco }\n  - { path: s.yml, class: starter, blocks: eco }\n",
+      "placeholders: []\nmodules:\n  bun: { eco: [bun] }\nfiles:\n  - { path: d.yml, class: managed, blocks: eco }\n  - { path: s.yml, class: starter, blocks: eco }\n  - { path: l.yml, class: link, target: d.yml }\n",
     );
-    expect(blockSources(config, config.files[0], ["bun"], own)).toEqual(["bun/d.block.bun.yml"]);
-    expect(blockSources(config, config.files[1], ["bun"], own)).toEqual(["bun/s.block.bun.yml"]);
+    expect(blockSources(config, config.files[0], ["bun"])).toEqual(["bun/d.block.bun.yml"]);
+    expect(blockSources(config, config.files[1], ["bun"])).toEqual(["bun/s.block.bun.yml"]);
+    expect(blockSources(config, config.files[2], ["bun"])).toEqual([]);
   });
 
   test("a block value that is not one word (a path, a dotted name) is refused", () => {
     for (const value of ["../../outside", "Node.old"]) {
       const bad = parseFilesConfig(BASE.replace("[Node, Bun]", `[${value}]`));
-      expect(() => blockSources(bad, bad.files[1], ["bun"], tree)).toThrow(
+      expect(() => blockSources(bad, bad.files[1], ["bun"])).toThrow(
         "must be a list of block names",
       );
     }

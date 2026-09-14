@@ -23,8 +23,10 @@ interface EntryBase {
 interface SourcedEntry extends EntryBase {
   /** The source file, relative to the files/ tree. */
   source: string;
-  /** The module-data key whose values name the per-module block files. */
+  /** The module-data key whose values name the block files. */
   blocks?: string;
+  /** The files/-relative directory holding the block files every module shares; absent, each module holds its own. */
+  blocks_dir?: string;
 }
 
 export interface ManagedEntry extends SourcedEntry {
@@ -108,6 +110,7 @@ const fileSchema = z.strictObject({
   when: whenSchema.optional(),
   region: z.enum(["hash", "html"]).optional(),
   blocks: z.string().min(1).optional(),
+  blocks_dir: z.string().min(1).optional(),
   target: z.string().min(1).optional(),
   render: z.enum(["settings"]).optional(),
   overlay: z.string().min(1).optional(),
@@ -169,21 +172,19 @@ export const SOURCE_PREFIX = "files/";
  *  word without dots. */
 export const BLOCK_VALUE_RE = /^[A-Za-z0-9_-]+$/;
 
-/** The block file `value` names beside an entry's path: the value goes
- *  between the stem and the extension so every tool keys on the real one
- *  (`.github/dependabot.block.bun.yml`); an extension-only dotfile keeps
- *  its suffix (`.block.Node.gitignore`). */
-export function blockSourcePath(entryPath: string, value: string): string {
-  const { dir, stem, ext } = splitEntryPath(entryPath);
-  return `${dir}${stem}.block.${value}${ext}`;
-}
-
-export function blockValueOf(entryPath: string, name: string): string | null {
-  const { stem, ext } = splitEntryPath(entryPath);
-  const prefix = `${stem}.block.`;
-  if (!name.startsWith(prefix) || !name.endsWith(ext)) return null;
-  const value = name.slice(prefix.length, name.length - ext.length);
-  return BLOCK_VALUE_RE.test(value) ? value : null;
+/** The value sits between the stem and the extension so every tool parses a block by its real extension;
+ *  under blocks_dir the directory already says whose block it is, so the value alone names the file.
+ *    own     bun, .github/dependabot.yml, bun          -> bun/.github/dependabot.block.bun.yml
+ *    shared  blocks_dir gitignore, .gitignore, Node    -> gitignore/Node.gitignore */
+export function blockSource(
+  entry: Pick<SourcedEntry, "path" | "blocks_dir">,
+  module: string,
+  value: string,
+): string {
+  const { dir, stem, ext } = splitEntryPath(entry.path);
+  return entry.blocks_dir === undefined
+    ? `${module}/${dir}${stem}.block.${value}${ext}`
+    : `${entry.blocks_dir}/${value}${ext}`;
 }
 
 function splitEntryPath(entryPath: string): { dir: string; stem: string; ext: string } {
@@ -327,6 +328,9 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     if (entry.render === undefined && entry.overlay !== undefined) {
       problems.push(`${where}: overlay applies to rendered entries only`);
     }
+    if (entry.blocks === undefined && entry.blocks_dir !== undefined) {
+      problems.push(`${where}: blocks_dir applies to entries with blocks only`);
+    }
     if (entry.render !== undefined) {
       if (entry.source !== undefined || entry.blocks !== undefined) {
         problems.push(`${where}: a rendered entry has no source or blocks`);
@@ -365,11 +369,21 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     if (!source.startsWith(SOURCE_PREFIX) || pathProblem(source) !== null) {
       problems.push(`${where}: source '${source}' must be a clean path under ${SOURCE_PREFIX}`);
     }
+    const blocksDir = entry.blocks_dir;
+    if (
+      blocksDir !== undefined &&
+      (!blocksDir.startsWith(SOURCE_PREFIX) || pathProblem(blocksDir) !== null)
+    ) {
+      problems.push(
+        `${where}: blocks_dir '${blocksDir}' must be a clean path under ${SOURCE_PREFIX}`,
+      );
+    }
     const base = {
       path: entry.path,
       source: source.slice(SOURCE_PREFIX.length),
       when,
       ...(entry.blocks === undefined ? {} : { blocks: entry.blocks }),
+      ...(blocksDir === undefined ? {} : { blocks_dir: blocksDir.slice(SOURCE_PREFIX.length) }),
     };
     if (entry.class === "managed") return { ...base, class: "managed" };
     if (entry.class === "starter") return { ...base, class: "starter" };

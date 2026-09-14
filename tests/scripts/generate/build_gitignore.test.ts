@@ -6,11 +6,11 @@ import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import {
   ALWAYS,
   blockName,
-  blockRel,
   buildBlock,
   buildFilesBase,
   CI_WORKSPACE_SECTION,
-  gitignoreSources,
+  type GitignoreBlocks,
+  gitignoreBlocks,
   main,
   missingBlockFiles,
   PLATFORM_SECTIONS,
@@ -30,6 +30,7 @@ const SECTIONS: Record<string, string> = {
   "Node.gitignore": "## Node (github/gitignore Node.gitignore)\nnode_modules/\n",
   "bun.gitignore": "## bun (github/gitignore bun.gitignore)\nbun.lockb\n",
   "Python.gitignore": "## Python (github/gitignore Python.gitignore)\n__pycache__/\n\n*.py[cod]\n",
+  "Deno.gitignore": "## Deno (github/gitignore Deno.gitignore)\n.deno/\n",
   ...PLATFORM_SECTIONS,
 };
 
@@ -45,18 +46,27 @@ const FILES_YML = [
   "  fuzzer:",
   "    description: fuzzer",
   "    gitignore_sources: [fuzzer]",
+  "  deno:",
+  "    description: deno",
+  "    gitignore_sources: [Deno, Node]",
   "  pages:",
   "    description: pages",
   "files:",
-  "  - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources}",
+  "  - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources, blocks_dir: files/gitignore}",
   "",
 ].join("\n");
 
-const ENTRIES: [string, string[]][] = [
-  ["bun", ["Node.gitignore", "bun.gitignore"]],
-  ["uv", ["Python.gitignore"]],
-  ["fuzzer", ["fuzzer"]],
-];
+/** One file per source in first-declared order; Node, named by bun and deno, maps once. */
+const BLOCKS: GitignoreBlocks = {
+  dir: "gitignore",
+  files: new Map([
+    ["Node.gitignore", "gitignore/Node.gitignore"],
+    ["bun.gitignore", "gitignore/bun.gitignore"],
+    ["Python.gitignore", "gitignore/Python.gitignore"],
+    ["fuzzer", "gitignore/fuzzer.gitignore"],
+    ["Deno.gitignore", "gitignore/Deno.gitignore"],
+  ]),
+};
 
 function generated(): { root: string; filesDir: string } {
   const root = temp.dir("build-gitignore-");
@@ -67,30 +77,45 @@ function generated(): { root: string; filesDir: string } {
     writeFileSync(abs, content);
   };
   write("base/.gitignore", buildFilesBase(SECTIONS));
-  for (const [module, sources] of ENTRIES) {
-    for (const path of sources) write(blockRel(module, path), buildBlock(SECTIONS[path]));
-  }
+  for (const [path, rel] of BLOCKS.files) write(rel, buildBlock(SECTIONS[path]));
   return { root, filesDir };
 }
 
 describe("the source grammar", () => {
-  test("a files.yml name is a github/gitignore root stem or a platform section, and the block file carries it", () => {
+  test("a files.yml name is a github/gitignore root stem or a platform section", () => {
     expect(sourceId("Node")).toBe("Node.gitignore");
     expect(sourceId("fuzzer")).toBe("fuzzer");
     expect(blockName("Global/macOS.gitignore")).toBe("macOS");
     expect(blockName("fuzzer")).toBe("fuzzer");
-    expect(blockRel("bun", "Node.gitignore")).toBe("bun/.block.Node.gitignore");
-    expect(blockRel("fuzzer", "fuzzer")).toBe("fuzzer/.block.fuzzer.gitignore");
   });
 
-  test("gitignoreSources reads the declaring modules in files.yml order", () => {
-    expect(gitignoreSources(parseFilesConfig(FILES_YML))).toEqual(ENTRIES);
+  test("gitignoreBlocks maps each source once to its shared block file, in files.yml order", () => {
+    const { dir, files } = gitignoreBlocks(parseFilesConfig(FILES_YML));
+    expect(dir).toBe(BLOCKS.dir);
+    expect([...files]).toEqual([...BLOCKS.files]);
   });
 
-  test("a non-list declaration is refused by name", () => {
-    expect(() =>
-      gitignoreSources(parseFilesConfig(FILES_YML.replace("[Python]", "Python"))),
-    ).toThrow("modules.uv.gitignore_sources must be a list of names");
+  test.each([
+    [
+      "a non-list declaration",
+      "[Python]",
+      "Python",
+      "modules.uv.gitignore_sources must be a list of names",
+    ],
+    [
+      "an entry without blocks_dir",
+      ", blocks_dir: files/gitignore",
+      "",
+      "the .gitignore entry needs blocks_dir",
+    ],
+    [
+      "no .gitignore entry",
+      "path: .gitignore",
+      "path: .dockerignore",
+      "no .gitignore entry declares blocks",
+    ],
+  ])("%s is refused by name", (_reason, from, to, message) => {
+    expect(() => gitignoreBlocks(parseFilesConfig(FILES_YML.replace(from, to)))).toThrow(message);
   });
 });
 
@@ -121,47 +146,32 @@ describe("the outputs", () => {
 describe("the offline topology check", () => {
   test("the generator's own outputs pass", () => {
     const { filesDir } = generated();
-    expect(strayBlockFiles(ENTRIES, filesDir)).toEqual([]);
-    expect(missingBlockFiles(ENTRIES, filesDir)).toEqual([]);
-    expect(topologyProblems({ entries: ENTRIES, filesDir })).toEqual([]);
+    expect(strayBlockFiles(BLOCKS, filesDir)).toEqual([]);
+    expect(missingBlockFiles(BLOCKS, filesDir)).toEqual([]);
+    expect(topologyProblems({ blocks: BLOCKS, filesDir })).toEqual([]);
   });
 
   test("a block no source names is a stray; a declared source without its block is missing", () => {
     const { filesDir } = generated();
-    writeFileSync(join(filesDir, "uv/.block.Old.gitignore"), "x\n");
-    expect(strayBlockFiles(ENTRIES, filesDir)).toEqual(["files/uv/.block.Old.gitignore"]);
-    expect(missingBlockFiles([...ENTRIES, ["rust", ["Rust.gitignore"]]], filesDir)).toEqual([
-      "files/rust/.block.Rust.gitignore",
-    ]);
+    writeFileSync(join(filesDir, "gitignore/Old.gitignore"), "x\n");
+    expect(strayBlockFiles(BLOCKS, filesDir)).toEqual(["files/gitignore/Old.gitignore"]);
+    const withRust: GitignoreBlocks = {
+      dir: BLOCKS.dir,
+      files: new Map([...BLOCKS.files, ["Rust.gitignore", "gitignore/Rust.gitignore"]]),
+    };
+    expect(missingBlockFiles(withRust, filesDir)).toEqual(["files/gitignore/Rust.gitignore"]);
   });
 
-  test("a block whose heading names another source, a hand-edited block, and two modules' copies that differ are named", () => {
+  test("a block whose heading names another source and a hand-edited block are named", () => {
     const { filesDir } = generated();
     writeFileSync(
-      join(filesDir, "bun/.block.bun.gitignore"),
+      join(filesDir, "gitignore/bun.gitignore"),
       buildBlock(SECTIONS["Node.gitignore"]),
     );
-    writeFileSync(join(filesDir, "uv/.block.Python.gitignore"), SECTIONS["Python.gitignore"]);
-    expect(topologyProblems({ entries: ENTRIES, filesDir }).map((p) => p.split(";")[0])).toEqual([
-      "files/bun/.block.bun.gitignore encodes [Node.gitignore] but its name stands for bun.gitignore",
-      "files/uv/.block.Python.gitignore is not exactly its section plus one blank line",
-    ]);
-    const shared: [string, string[]][] = [...ENTRIES, ["deno", ["Node.gitignore"]]];
-    writeFileSync(
-      join(filesDir, "bun/.block.bun.gitignore"),
-      buildBlock(SECTIONS["bun.gitignore"]),
-    );
-    writeFileSync(
-      join(filesDir, "uv/.block.Python.gitignore"),
-      buildBlock(SECTIONS["Python.gitignore"]),
-    );
-    mkdirSync(join(filesDir, "deno"));
-    writeFileSync(
-      join(filesDir, "deno/.block.Node.gitignore"),
-      buildBlock("## Node (github/gitignore Node.gitignore)\nnode_modules/\ndist/\n"),
-    );
-    expect(topologyProblems({ entries: shared, filesDir }).map((p) => p.split(";")[0])).toEqual([
-      "files/deno/.block.Node.gitignore differs from another module's copy of Node.gitignore",
+    writeFileSync(join(filesDir, "gitignore/Python.gitignore"), SECTIONS["Python.gitignore"]);
+    expect(topologyProblems({ blocks: BLOCKS, filesDir }).map((p) => p.split(";")[0])).toEqual([
+      "files/gitignore/bun.gitignore encodes [Node.gitignore] but its name stands for bun.gitignore",
+      "files/gitignore/Python.gitignore is not exactly its section plus one blank line",
     ]);
   });
 
@@ -171,7 +181,7 @@ describe("the offline topology check", () => {
       Object.entries(SECTIONS).filter(([path]) => path !== "Global/Windows.gitignore"),
     );
     writeFileSync(join(filesDir, "base/.gitignore"), buildFilesBase(without));
-    expect(topologyProblems({ entries: ENTRIES, filesDir }).map((p) => p.split(";")[0])).toEqual([
+    expect(topologyProblems({ blocks: BLOCKS, filesDir }).map((p) => p.split(";")[0])).toEqual([
       "files/base/.gitignore lacks the section(s) [Global/Windows.gitignore]",
     ]);
   });
@@ -179,24 +189,24 @@ describe("the offline topology check", () => {
   test("a platform-authored block whose body drifted from the generator is named", () => {
     const { filesDir } = generated();
     const drifted = "## Fuzzer workspace paths (repo-platform fuzzer)\n";
-    writeFileSync(join(filesDir, "fuzzer/.block.fuzzer.gitignore"), buildBlock(drifted));
-    expect(topologyProblems({ entries: ENTRIES, filesDir }).map((p) => p.split(";")[0])).toEqual([
-      "files/fuzzer/.block.fuzzer.gitignore is not the platform-authored section fuzzer",
+    writeFileSync(join(filesDir, "gitignore/fuzzer.gitignore"), buildBlock(drifted));
+    expect(topologyProblems({ blocks: BLOCKS, filesDir }).map((p) => p.split(";")[0])).toEqual([
+      "files/gitignore/fuzzer.gitignore is not the platform-authored section fuzzer",
     ]);
   });
 
   test("a stale base and a missing base are named", () => {
     const { filesDir } = generated();
     writeFileSync(join(filesDir, "base/.gitignore"), `${buildFilesBase(SECTIONS)}extra\n`);
-    expect(topologyProblems({ entries: ENTRIES, filesDir }).map((p) => p.split(";")[0])).toEqual([
+    expect(topologyProblems({ blocks: BLOCKS, filesDir }).map((p) => p.split(";")[0])).toEqual([
       "files/base/.gitignore is not the header, the agent and CI workspace sections, and exactly the OS sections [Global/Windows.gitignore, Global/macOS.gitignore, Global/Linux.gitignore]",
     ]);
-    expect(topologyProblems({ entries: ENTRIES, filesDir: temp.dir("empty-files-") })).toEqual([
-      "files/base/.gitignore is missing; run 'bun scripts/generate/build_gitignore.ts' to regenerate every copy",
+    expect(topologyProblems({ blocks: BLOCKS, filesDir: temp.dir("empty-files-") })).toEqual([
+      "files/base/.gitignore is missing; run 'bun scripts/generate/build_gitignore.ts' to regenerate",
     ]);
   });
 
-  test("the committed copies agree (the live topology gate)", async () => {
+  test("the committed outputs pass (the live topology gate)", async () => {
     const original = console.log;
     console.log = () => {};
     try {

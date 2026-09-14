@@ -41,6 +41,7 @@ files:
     class: split
     region: hash
     blocks: gitignore_sources
+    blocks_dir: files/gitignore
   - path: AGENTS.md
     class: split
     region: html

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  blockSourcePath,
-  blockValueOf,
+  blockSource,
   checkFilesConfig,
   type FileEntry,
   FilesConfigError,
@@ -633,23 +632,47 @@ describe("mutuallyExclusive", () => {
 });
 
 describe("block file names", () => {
-  test("the value sits between the stem and the extension, the directory untouched", () => {
-    expect(blockSourcePath(".github/dependabot.yml", "bun")).toBe(
-      ".github/dependabot.block.bun.yml",
+  test("a module's own block sits beside its copy of the path with the value between the stem and the extension", () => {
+    expect(blockSource({ path: ".github/dependabot.yml" }, "bun", "bun")).toBe(
+      "bun/.github/dependabot.block.bun.yml",
     );
-    expect(blockSourcePath("AGENTS.md", "toolchain")).toBe("AGENTS.block.toolchain.md");
-    expect(blockSourcePath(".gitignore", "Node")).toBe(".block.Node.gitignore");
-    expect(blockSourcePath(".github/CODEOWNERS", "x")).toBe(".github/CODEOWNERS.block.x");
+    expect(blockSource({ path: "AGENTS.md" }, "deno", "toolchain")).toBe(
+      "deno/AGENTS.block.toolchain.md",
+    );
+    expect(blockSource({ path: ".gitignore" }, "bun", "Node")).toBe("bun/.block.Node.gitignore");
+    expect(blockSource({ path: ".github/CODEOWNERS" }, "bun", "x")).toBe(
+      "bun/.github/CODEOWNERS.block.x",
+    );
   });
 
-  test("blockValueOf reads the value back and refuses every other name", () => {
-    expect(blockValueOf(".gitignore", ".block.Node.gitignore")).toBe("Node");
-    expect(blockValueOf("dependabot.yml", "dependabot.block.bun.yml")).toBe("bun");
-    expect(blockValueOf("CODEOWNERS", "CODEOWNERS.block.x")).toBe("x");
-    expect(blockValueOf(".gitignore", ".gitignore.block.Node")).toBeNull();
-    expect(blockValueOf(".gitignore", ".gitignore")).toBeNull();
-    expect(blockValueOf(".gitignore", ".block..gitignore")).toBeNull();
-    expect(blockValueOf(".gitignore", ".block.a.b.gitignore")).toBeNull();
-    expect(blockValueOf("dependabot.yml", "dependabot.block.bun.yaml")).toBeNull();
+  test("a shared block is one path under blocks_dir, whichever module names it", () => {
+    const shared = { path: ".gitignore", blocks_dir: "gitignore" };
+    expect(blockSource(shared, "bun", "Node")).toBe("gitignore/Node.gitignore");
+    expect(blockSource(shared, "deno", "Node")).toBe("gitignore/Node.gitignore");
+    expect(blockSource({ path: ".github/dependabot.yml", blocks_dir: "eco" }, "bun", "bun")).toBe(
+      "eco/bun.yml",
+    );
+  });
+
+  test("blocks_dir is parsed under files/ and refused elsewhere or without blocks", () => {
+    const entry = (line: string) =>
+      checkFilesConfig(`placeholders: []\nmodules:\n  bun: { g: [Node] }\nfiles:\n  - ${line}\n`);
+    const shared = entry(
+      "{ path: .gitignore, class: split, region: hash, blocks: g, blocks_dir: files/gitignore }",
+    );
+    expect(shared.problems).toEqual([]);
+    expect(shared.config.files[0]).toMatchObject({ blocks: "g", blocks_dir: "gitignore" });
+    expect(
+      entry("{ path: .gitignore, class: split, region: hash, blocks_dir: files/gitignore }")
+        .problems,
+    ).toEqual(["files: .gitignore: blocks_dir applies to entries with blocks only"]);
+    expect(
+      entry("{ path: .gitignore, class: split, region: hash, blocks: g, blocks_dir: gitignore }")
+        .problems,
+    ).toEqual(["files: .gitignore: blocks_dir 'gitignore' must be a clean path under files/"]);
+    expect(
+      entry("{ path: .gitignore, class: split, region: hash, blocks: g, blocks_dir: files/../x }")
+        .problems,
+    ).toEqual(["files: .gitignore: blocks_dir 'files/../x' must be a clean path under files/"]);
   });
 });
