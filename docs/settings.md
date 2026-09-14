@@ -165,7 +165,7 @@ The reviews are ADVISORY: each executes as a dynamic Actions workflow and posts 
 
 ## The starter and the rendered file
 
-Every repository receives `.github/settings.local.yml` once (the public or private variant under [files/base/.github/](../files/base/.github/)): the four identity keys (`description` from the registration, `homepage` and `topics` declared empty, `private` by visibility), plus commented examples for local labels and rulesets. It is repo-owned from then on (a starter: written only when absent). The rendered `.github/settings.yml` is written right after it, on every sync.
+Every repository receives `.github/settings.local.yml` once (the one starter under [files/base/.github/](../files/base/.github/)): the four identity keys (`description` from the registration, `homepage` and `topics` declared empty, `private` from the writer's `--private` flag), plus commented examples for local labels and rulesets. It is repo-owned from then on (a starter: written only when absent). The rendered `.github/settings.yml` is written right after it, on every sync.
 
 The rendered file takes the managed rules ([sync.md](sync.md#classes)): it is written on every sync (`updated` when the file was the recorded render, `unchanged` when it already matches the new one), and a file that is neither, hand-written or edited, is replaced with its diff holding the PR (`replaced local edits`); move what it declared into the overlay.
 

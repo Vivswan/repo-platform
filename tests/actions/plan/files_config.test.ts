@@ -243,10 +243,8 @@ describe("render, overlay, and the settings block", () => {
   const RENDERED =
     "  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml }";
   const STARTER = "  - { path: .github/settings.local.yml, class: starter }";
-  const PAIR = [
-    "  - { path: .github/settings.local.yml, class: starter, when: { private: false } }",
-    "  - { path: .github/settings.local.yml, class: starter, when: { private: true }, source: files/base/.github/settings.local.private.yml }",
-  ];
+  const PUBLIC_STARTER =
+    "  - { path: .github/settings.local.yml, class: starter, when: { private: false } }";
 
   test("a rendered entry carries no source, keeps its overlay, and exposes the settings block tree-relative", () => {
     const config = parseFilesConfig(doc([STARTER, RENDERED]));
@@ -266,13 +264,11 @@ describe("render, overlay, and the settings block", () => {
       ],
       override: "settings/override.yml",
     });
-    // The two selection shapes the overlay check accepts: a private pair
-    // under an unconditional rendered entry, and a matching condition.
-    expect(problemsOf(doc([...PAIR, RENDERED]))).toEqual([]);
+    // A conditional rendered entry is covered by a starter with the same when.
     expect(
       problemsOf(
         doc([
-          PAIR[0],
+          PUBLIC_STARTER,
           "  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml, when: { private: false } }",
         ]),
       ),
@@ -340,11 +336,6 @@ describe("render, overlay, and the settings block", () => {
       "files: .github/settings.yml: overlay .github/settings.local.yml, whose starter entries must be listed before it",
     ],
     [
-      "a rendered entry listed between the two starters it renders from",
-      doc([PAIR[0], RENDERED, PAIR[1]]),
-      "files: .github/settings.yml: overlay .github/settings.local.yml, whose starter entries must be listed before it",
-    ],
-    [
       "render with a source",
       doc([
         STARTER,
@@ -408,6 +399,15 @@ describe("render, overlay, and the settings block", () => {
       "an unconditional rendered entry over a modules-gated starter",
       doc([
         "  - { path: .github/settings.local.yml, class: starter, when: { modules: [bun] } }",
+        RENDERED,
+      ]),
+      "whose starters are not selected exactly when this entry is",
+    ],
+    [
+      "an unconditional rendered entry over a public and a private starter",
+      doc([
+        PUBLIC_STARTER,
+        "  - { path: .github/settings.local.yml, class: starter, when: { private: true }, source: files/base/private-overlay.yml }",
         RENDERED,
       ]),
       "whose starters are not selected exactly when this entry is",
@@ -496,7 +496,7 @@ describe("render, overlay, and the settings block", () => {
       "{ modules: [bun], private: false }",
       [
         "files: .github/settings.yml: overlay .github/settings.local.yml, whose starters are not selected exactly when this entry is" +
-          " - an unconditional rendered entry needs one unconditional starter or a private true/false pair, a conditional one a starter with the same when",
+          " - an unconditional rendered entry needs one unconditional starter, a conditional one a starter with the same when",
       ],
     ],
   ])(
@@ -582,10 +582,8 @@ describe("a module list declared by module data", () => {
 describe("starterCoverage", () => {
   test.each([
     [null, [null], true],
-    [null, [{ private: true }, { private: false }], true],
-    [null, [{ private: false }, { private: true }], true],
-    [null, [{ private: true }], false],
-    [null, [{ private: true, modules: ["a"] }, { private: false }], false],
+    [null, [{ private: true }, { private: false }], false],
+    [null, [null, null], false],
     [null, [{ modules: ["a"] }], false],
     [{ private: false }, [{ private: false }, { private: true }], true],
     [{ modules: ["a"] }, [{ modules: ["a"] }], true],

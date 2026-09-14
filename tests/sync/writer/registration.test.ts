@@ -15,18 +15,24 @@ const PROJECT = { name: "My Repo", slug: "myrepo", description: "Does things" };
 const PROJECT_YAML = "project: {name: My Repo, slug: myrepo, description: Does things}\n";
 
 describe("placeholderValues", () => {
-  // The project block names the project and the slug names the owner alone;
-  // the copyright holder is the one project key with a default.
+  // The project block names the project, the slug names the owner alone, and the visibility is the
+  // writer's flag; the copyright holder is the one project key with a default.
   test.each([
-    { reason: "a set copyright holder", copyright_holder: "Owner Inc", expected: "Owner Inc" },
     {
-      reason: "an unset copyright holder is the owner",
+      reason: "a set copyright holder, a public repository",
+      copyright_holder: "Owner Inc",
+      isPrivate: false,
+      expected: "Owner Inc",
+    },
+    {
+      reason: "an unset copyright holder is the owner, a private repository",
       copyright_holder: undefined,
+      isPrivate: true,
       expected: "OwnerOrg",
     },
-  ])("$reason", ({ copyright_holder, expected }) => {
+  ])("$reason", ({ copyright_holder, isPrivate, expected }) => {
     const registration = { modules: [], project: { ...PROJECT, copyright_holder } };
-    expect(placeholderValues(registration, SLUG, {}, NOW)).toEqual({
+    expect(placeholderValues(registration, SLUG, isPrivate, {}, NOW)).toEqual({
       project_name: "My Repo",
       project_slug: "myrepo",
       description: "Does things",
@@ -34,6 +40,7 @@ describe("placeholderValues", () => {
       github_username_lower: "ownerorg",
       copyright_holder: expected,
       year: "2031",
+      private: String(isPrivate),
     });
   });
 });
@@ -48,16 +55,16 @@ describe("placeholderValues: the registration-backed names", () => {
   };
 
   test("absent from both sides, the name has no value; a module default fills it", () => {
-    const bare = placeholderValues({ modules: [], project: PROJECT }, SLUG, {}, NOW);
+    const bare = placeholderValues({ modules: [], project: PROJECT }, SLUG, false, {}, NOW);
     expect(Object.keys(bare)).not.toContain("fuzzer_label");
-    expect(placeholderValues({ modules: [], project: PROJECT }, SLUG, defaults, NOW)).toMatchObject(
-      defaults,
-    );
+    expect(
+      placeholderValues({ modules: [], project: PROJECT }, SLUG, false, defaults, NOW),
+    ).toMatchObject(defaults);
   });
 
   test("the registration's own labels win over the defaults", () => {
     const registration = { modules: [], project: PROJECT, labels: { fuzzer: "fuzz", site: "rot" } };
-    expect(placeholderValues(registration, SLUG, defaults, NOW)).toMatchObject({
+    expect(placeholderValues(registration, SLUG, false, defaults, NOW)).toMatchObject({
       fuzzer_label: "fuzz",
       fuzzer_label_color: "B60205",
       fuzzer_label_description: "Automated nightly fuzz failure",

@@ -47,4 +47,4 @@ The files each module brings are listed in the `repo-platform-add-module` skill 
 
 ## Visibility
 
-Visibility is read from GitHub, not from this file. Public repositories get CodeQL and dependency-review jobs and the public variant of the settings overlay starter; private ones do not. The starter seeds `repository.private` from that reading, and from then on the rendered `.github/settings.yml` follows the value your `.github/settings.local.yml` declares.
+Visibility is read from GitHub, not from this file. Public repositories get CodeQL and dependency-review jobs; private ones do not. The settings overlay starter seeds `repository.private` from that reading, and from then on the rendered `.github/settings.yml` follows the value your `.github/settings.local.yml` declares.

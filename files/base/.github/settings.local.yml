@@ -12,7 +12,7 @@ repository:
   # this keeps it healing out-of-band edits.
   homepage: ""
   topics: ""
-  private: false
+  private: {{private}}
 
 # This repository's own labels (the fleet layers already carry the
 # dependabot, release, and tracking labels its modules need):

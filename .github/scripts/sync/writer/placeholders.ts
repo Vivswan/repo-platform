@@ -8,6 +8,7 @@ export const PLACEHOLDER_NAMES = [
   "github_username_lower",
   "copyright_holder",
   "year",
+  "private",
   "fuzzer_label",
   "fuzzer_label_color",
   "fuzzer_label_description",
