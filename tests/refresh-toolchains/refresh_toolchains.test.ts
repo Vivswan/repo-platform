@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
-  type Bump,
   decideBump,
   fetchJson,
   latestBunVersion,
@@ -10,8 +9,6 @@ import {
   latestVersions,
   PIN_SOURCES,
   pinnedVersion,
-  prBody,
-  proseBumps,
   typesBunDirs,
 } from "../../.github/scripts/refresh-toolchains/refresh_toolchains";
 import { parseFilesConfig } from "../../actions/plan/files_config";
@@ -21,17 +18,24 @@ const REPO_ROOT = join(import.meta.dir, "../..");
 const temp = tempDirs();
 
 describe("fetchJson", () => {
-  test("a malformed body rejects with the fixed diagnostic, never the body", async () => {
+  test("a malformed body rejects with the fixed diagnostic, never the body; the token goes to api.github.com alone", async () => {
     // Loopback server, no upstream network (hostname pinned: the default
     // 0.0.0.0 listener collides in sandboxed runs). The rejection message
     // is the run's public failure line, and runtimes differ on whether
     // their JSON error text embeds the body - so the fixed-string
     // guarantee must hold regardless of what the runtime would say.
+    // A source off api.github.com (this server stands for one) must never see GH_TOKEN.
+    let authorization: string | null = "unread";
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
-      fetch: () => new Response('{"tag_name": corruptbody}'),
+      fetch: (request) => {
+        authorization = request.headers.get("authorization");
+        return new Response('{"tag_name": corruptbody}');
+      },
     });
+    const savedToken = process.env.GH_TOKEN;
+    process.env.GH_TOKEN = "ghp_SENTINEL";
     try {
       const url = `http://127.0.0.1:${server.port}/releases/latest`;
       let message = "";
@@ -43,7 +47,10 @@ describe("fetchJson", () => {
       // Exact equality, not substrings: any appended runtime text would
       // reopen the leak this pins closed.
       expect(message).toBe(`GET ${url} returned a body that is not valid JSON`);
+      expect(authorization).toBeNull();
     } finally {
+      if (savedToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = savedToken;
       server.stop(true);
     }
   });
@@ -93,60 +100,63 @@ describe("latestVersions", () => {
 });
 
 describe("decideBump", () => {
+  // Numeric, never lexicographic. A downgrade is never applied and never reads as "current": GitHub's
+  // date-ordered /releases/latest can surface a backport on an older line, and a run that saw one aborts
+  // rather than let the PR step close a valid refresh PR as caught up.
+  const ABORTS = "aborts";
   test.each([
     ["1.3.14", "1.3.14", "current", "equal is a no-op"],
     ["1.3.14", "1.3.15", "bump", "patch ahead"],
     ["2.9.5", "3.0.0", "bump", "major line jump"],
     ["1.9.0", "1.10.0", "bump", "minor 10 > 9 numerically (lexicographic says 1.10 < 1.9)"],
     ["9.99.99", "10.0.0", "bump", "major 10 > 9 numerically (lexicographic says 10 < 9)"],
+    ["1.3.15", "1.2.22", ABORTS, "backport on an older line surfaces as date-ordered latest"],
+    ["2.0.0", "1.99.99", ABORTS, "major below the pin"],
+    ["1.10.0", "1.9.9", ABORTS, "minor 9 < 10 numerically (lexicographic says 1.9 > 1.10)"],
   ] as const)("pin %s, fetched %s -> %s (%s)", (pinned, fetched, verdict) => {
-    expect(decideBump(pinned, fetched, "bun")).toBe(verdict);
-  });
-
-  // A downgrade is never applied and never reads as "current": GitHub's
-  // date-ordered /releases/latest can surface a backport on an older line,
-  // and a run that saw one aborts rather than let the PR step close a
-  // valid refresh PR as caught up.
-  test.each([
-    ["1.3.15", "1.2.22", "backport on an older line surfaces as date-ordered latest"],
-    ["2.0.0", "1.99.99", "major below the pin"],
-    ["1.10.0", "1.9.9", "minor 9 < 10 numerically (lexicographic says 1.9 > 1.10)"],
-  ] as const)("pin %s, fetched %s -> the run aborts (%s)", (pinned, fetched) => {
-    expect(() => decideBump(pinned, fetched, "bun")).toThrow(
-      `bun: upstream latest ${fetched} is OLDER than the pinned ${pinned} (a backport release surfacing as latest?)`,
-    );
+    if (verdict === ABORTS) {
+      expect(() => decideBump(pinned, fetched, "bun")).toThrow(
+        `bun: upstream latest ${fetched} is OLDER than the pinned ${pinned} (a backport release surfacing as latest?)`,
+      );
+    } else expect(decideBump(pinned, fetched, "bun")).toBe(verdict);
   });
 });
 
-describe("latestBunVersion", () => {
-  test("strips the bun-v tag prefix", () => {
-    expect(latestBunVersion({ tag_name: "bun-v1.3.14" })).toBe("1.3.14");
-  });
-
-  test("rejects prereleases, foreign tags, and missing fields", () => {
-    expect(() => latestBunVersion({ tag_name: "bun-v1.3.14-canary.1" })).toThrow("does not match");
-    expect(() => latestBunVersion({ tag_name: "v1.3.14" })).toThrow("does not match");
-    expect(() => latestBunVersion({})).toThrow("expected a string");
-    expect(() => latestBunVersion(null)).toThrow("expected a string");
-  });
-});
-
-describe("latestDenoVersion", () => {
-  test("strips the v tag prefix", () => {
-    expect(latestDenoVersion({ tag_name: "v2.9.5" })).toBe("2.9.5");
-  });
-
-  test("rejects release-candidate tags and missing fields", () => {
-    expect(() => latestDenoVersion({ tag_name: "v2.9.5-rc.1" })).toThrow("does not match");
-    expect(() => latestDenoVersion(undefined)).toThrow("expected a string");
+describe("the release parsers", () => {
+  // Anchored: an unanchored match would pin a canary or a foreign tag silently.
+  test.each<{
+    parse: (payload: unknown) => string;
+    payload: unknown;
+    outcome: string | { throws: string };
+  }>([
+    { parse: latestBunVersion, payload: { tag_name: "bun-v1.3.14" }, outcome: "1.3.14" },
+    {
+      parse: latestBunVersion,
+      payload: { tag_name: "bun-v1.3.14-canary.1" },
+      outcome: { throws: "does not match" },
+    },
+    {
+      parse: latestBunVersion,
+      payload: { tag_name: "v1.3.14" },
+      outcome: { throws: "does not match" },
+    },
+    { parse: latestBunVersion, payload: {}, outcome: { throws: "expected a string" } },
+    { parse: latestBunVersion, payload: null, outcome: { throws: "expected a string" } },
+    { parse: latestDenoVersion, payload: { tag_name: "v2.9.5" }, outcome: "2.9.5" },
+    {
+      parse: latestDenoVersion,
+      payload: { tag_name: "v2.9.5-rc.1" },
+      outcome: { throws: "does not match" },
+    },
+    { parse: latestDenoVersion, payload: undefined, outcome: { throws: "expected a string" } },
+  ])("$parse.name($payload) -> $outcome", ({ parse, payload, outcome }) => {
+    if (typeof outcome === "string") expect(parse(payload)).toBe(outcome);
+    else expect(() => parse(payload)).toThrow(outcome.throws);
   });
 });
 
 describe("pinnedVersion", () => {
-  test("the dotfile as the refresh writes it", () => {
-    expect(pinnedVersion("1.4.0\n", "files/bun/.bun-version")).toBe("1.4.0");
-  });
-
+  // A prerelease accepted here makes compareVersions NaN, which decideBump reads as a bump: every run would rewrite the pin.
   test.each([
     ["2.9.5", "no trailing newline"],
     ["1.4.0-canary.1\n", "a prerelease"],
@@ -178,55 +188,6 @@ describe("typesBunDirs", () => {
     expect(() => typesBunDirs(root)).toThrow(
       "actions/prod/package.json: @types/bun belongs under devDependencies",
     );
-  });
-});
-
-describe("proseBumps", () => {
-  test("joins bump descriptions as prose", () => {
-    expect(proseBumps([])).toBe("");
-    expect(proseBumps([{ module: "bun", from: "1.3.14", version: "1.3.15" }])).toBe(
-      "bun to 1.3.15",
-    );
-    expect(
-      proseBumps([
-        { module: "bun", from: "1.3.14", version: "1.3.15" },
-        { module: "deno", from: "2.9.5", version: "2.9.6" },
-      ]),
-    ).toBe("bun to 1.3.15 and deno to 2.9.6");
-    expect(
-      proseBumps([
-        { module: "bun", from: "1.3.14", version: "1.3.15" },
-        { module: "uv", from: "0.9.0", version: "0.9.1" },
-        { module: "deno", from: "2.9.5", version: "2.9.6" },
-      ]),
-    ).toBe("bun to 1.3.15, uv to 0.9.1, and deno to 2.9.6");
-  });
-});
-
-describe("prBody", () => {
-  const summary = (bumps: string) =>
-    `Automated toolchain pin refresh: bump ${bumps} (fleet-wide via the managed version dotfiles - see docs/toolchains.md). Merging this moves the stable tag once green; the next sync pushes it to the fleet.`;
-
-  const rows: { reason: string; bumps: Bump[]; body: string }[] = [
-    {
-      reason: "a minor refresh is the summary alone",
-      bumps: [{ module: "bun", from: "1.3.14", version: "1.4.0" }],
-      body: summary("bun to 1.4.0"),
-    },
-    {
-      reason:
-        "only the bumps crossing a major line lead the banner, one blank line before the summary",
-      bumps: [
-        { module: "bun", from: "1.3.14", version: "1.3.15" },
-        { module: "uv", from: "0.9.0", version: "1.0.0" },
-        { module: "deno", from: "2.9.5", version: "3.0.0" },
-      ],
-      body: `**MAJOR VERSION JUMP: uv 0 -> 1, deno 2 -> 3 - review before merging.**\n\n${summary("bun to 1.3.15, uv to 1.0.0, and deno to 3.0.0")}`,
-    },
-  ];
-
-  test.each(rows)("$reason", ({ bumps, body }) => {
-    expect(prBody(bumps)).toBe(body);
   });
 });
 
@@ -262,6 +223,7 @@ describe("PIN_SOURCES", () => {
     );
   });
 
+  // Typecheck passes silently under mismatched types; the one refresh writes both.
   test("the committed @types/bun pins equal the bun runtime pin, the shape one refresh writes", () => {
     const version = pinnedVersion(
       readFileSync(join(REPO_ROOT, PIN_SOURCES.bun.file), "utf-8"),

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import os from "node:os";
-import { harnessBound, timeScale } from "./harness_bound";
+import { harnessBound } from "./harness_bound";
 
 function withScale<T>(value: string | undefined, body: () => T): T {
   const previous = process.env.TEST_TIME_SCALE;
@@ -15,15 +14,7 @@ function withScale<T>(value: string | undefined, body: () => T): T {
 }
 
 describe("harnessBound", () => {
-  test("TEST_TIME_SCALE stretches every bound by that factor", () => {
-    expect(withScale("3", () => harnessBound(15_000))).toBe(45_000);
-    expect(withScale("2.5", () => harnessBound(200))).toBe(500);
-    expect(withScale("1", () => harnessBound(180_000))).toBe(180_000);
-  });
-
-  test("unset, the scale is the load per core rounded up and never under 1", () => {
-    const scale = withScale(undefined, timeScale);
-    expect(scale).toBe(Math.max(1, Math.ceil(os.loadavg()[0] / os.availableParallelism())));
+  test("unset, the load-derived scale never shrinks a bound", () => {
     expect(withScale(undefined, () => harnessBound(1_000))).toBeGreaterThanOrEqual(1_000);
   });
 

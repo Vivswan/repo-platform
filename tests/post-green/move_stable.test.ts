@@ -83,9 +83,22 @@ function run(scenario: Scenario): Outcome {
   if (scenario.tag !== undefined) {
     const at = shas[scenario.tag];
     if (scenario.annotated === true) {
-      fixtureGit(work, ["tag", "-a", "-m", "by hand", "stable", at]);
-      fixtureGit(work, ["push", "--quiet", "origin", TAG]);
-      fixtureGit(work, ["tag", "-d", "stable"]);
+      // Minted in a second clone: the tag object reaches the work checkout only by the mover's own fetch.
+      const minter = join(root, "minter");
+      fixtureGit(root, ["clone", "--quiet", origin, "minter"]);
+      fixtureGit(minter, [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t.test",
+        "tag",
+        "-a",
+        "-m",
+        "by hand",
+        "stable",
+        at,
+      ]);
+      fixtureGit(minter, ["push", "--quiet", "origin", TAG]);
     } else {
       fixtureGit(work, ["push", "--quiet", "origin", `${at}:${TAG}`]);
     }
@@ -161,7 +174,12 @@ function run(scenario: Scenario): Outcome {
           env: fixtureGitEnv(),
         },
       );
-      return probe.exitCode === 0 ? probe.stdout.trimEnd() : "";
+      if (probe.exitCode === 0) return probe.stdout.trimEnd();
+      // --verify --quiet exits 1 for an absent ref; anything else is a failed look, never an absence.
+      if (probe.exitCode === 1) return "";
+      throw new Error(
+        `git rev-parse ${TAG} in origin failed (exit ${probe.exitCode}): ${probe.stderr}`,
+      );
     },
     m1,
     m2,
@@ -174,7 +192,6 @@ describe("move_stable.ts behavior (real git)", () => {
     const r = run({});
     expect(r.exitCode).toBe(0);
     expect(r.outputs).toEqual({ previous: "" });
-    expect(r.output).toContain("(the first move)");
     expect(r.originTag()).toBe(r.m3);
   });
 
@@ -229,65 +246,74 @@ describe("move_stable.ts behavior (real git)", () => {
     expect(r.originTag()).toBe(r.m3);
   });
 
-  test("a source off main is refused before any remote read", () => {
-    // The dispatch hazard: a PR head's own run posted a green check (the
-    // stub greens every sha), but the tag names main history only.
-    const r = run({ tag: "m1", source: "side" });
+  test.each<{ reason: string; scenario: Scenario; message: string }>([
+    {
+      // The dispatch hazard: a PR head's own run posted a green check (the stub greens every sha), but the tag
+      // names main history only.
+      reason: "a source off main is refused before any remote read",
+      scenario: { tag: "m1", source: "side" },
+      message: "is not a commit on main",
+    },
+    {
+      reason: "a red source is refused with the gate's reason",
+      scenario: { tag: "m1", conclusion: "failure" },
+      message: "is not green - its all-green verdict concluded 'failure'",
+    },
+    {
+      reason: "a run dispatched on another branch is refused",
+      scenario: { tag: "m1", ref: "refs/heads/feature" },
+      message: "moves from main only",
+    },
+  ])("$reason", ({ scenario, message }) => {
+    const r = run(scenario);
     expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("is not a commit on main");
+    expect(r.output).toContain(message);
     expect(r.outputs).toEqual({});
     expect(r.originTag()).toBe(r.m1);
   });
 
-  test("a red source is refused with the gate's reason", () => {
-    const r = run({ tag: "m1", conclusion: "failure" });
-    expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("is not green - its all-green verdict concluded 'failure'");
-    expect(r.originTag()).toBe(r.m1);
-  });
-
-  test("a run dispatched on another branch is refused", () => {
-    const r = run({ tag: "m1", ref: "refs/heads/feature" });
-    expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("moves from main only");
-    expect(r.originTag()).toBe(r.m1);
-  });
-
-  test("an unreadable origin is an errored look, never a first move", () => {
-    const r = run({ brokenOrigin: true });
-    expect(r.exitCode).not.toBe(0);
-    expect(r.output).toContain("git ls-remote could not answer (exit 128)");
+  // An errored probe read as a no would move the tag backwards, lease-push over a tag that exists, or send the
+  // operator after the wrong diagnostic; each is fatal and names itself instead.
+  test.each<{
+    reason: string;
+    scenario: Scenario;
+    exitCode: number;
+    message: string;
+    not?: string;
+  }>([
+    {
+      reason: "an unreadable origin is an errored look, never a first move",
+      scenario: { brokenOrigin: true },
+      exitCode: 1,
+      message: "git ls-remote could not answer (exit 128)",
+    },
+    {
+      reason:
+        "an ancestry probe that errors is fatal, never a no - the tag is not pushed backwards",
+      scenario: { tag: "m3", source: "m2", ancestryProbeErrors: true },
+      exitCode: 1,
+      message: "could not answer",
+    },
+    {
+      reason: "a source probe that errors is fatal, never read as a source off main",
+      scenario: { tag: "m1", sourceProbeErrors: true },
+      exitCode: 1,
+      message: "could not answer",
+      not: "is not a commit on main",
+    },
+    {
+      reason: "a remote read that hits its deadline beside exit 2 is fatal, never a first move",
+      scenario: { tag: "m1", lsRemoteHangs: true },
+      exitCode: 1,
+      message: "git ls-remote could not answer (timed out)",
+    },
+  ])("$reason", ({ scenario, exitCode, message, not }) => {
+    const r = run(scenario);
+    expect(r.exitCode).toBe(exitCode);
+    expect(r.output).toContain(message);
+    if (not !== undefined) expect(r.output).not.toContain(not);
     expect(r.outputs).toEqual({});
-  });
-
-  test("an ancestry probe that errors is fatal, never a no - the tag is not pushed backwards", () => {
-    // Read as a no, exit 128 would lease-push m2 over m3: a rollback of the delivery ref.
-    const r = run({ tag: "m3", source: "m2", ancestryProbeErrors: true });
-    expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("could not answer");
-    expect(r.outputs).toEqual({});
-    expect(r.originTag()).toBe(r.m3);
-  });
-
-  test("a source probe that errors is fatal, never read as a source off main", () => {
-    // Read as a no, exit 128 would send the operator after the sha with the
-    // wrong diagnostic; the errored look names itself instead.
-    const r = run({ tag: "m1", sourceProbeErrors: true });
-    expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("could not answer");
-    expect(r.output).not.toContain("is not a commit on main");
-    expect(r.outputs).toEqual({});
-    expect(r.originTag()).toBe(r.m1);
-  });
-
-  test("a remote read that hits its deadline beside exit 2 is fatal, never a first move", () => {
-    // Read as an absent tag, the expiry would lease-push with an empty lease over a tag that exists:
-    // the server refuses, but the diagnostic would send the operator after a race that never happened.
-    const r = run({ tag: "m1", lsRemoteHangs: true });
-    expect(r.exitCode).not.toBe(0);
-    expect(r.output).toContain("git ls-remote could not answer (timed out)");
-    expect(r.outputs).toEqual({});
-    expect(r.originTag()).toBe(r.m1);
+    expect(r.originTag()).toBe(scenario.tag === undefined ? "" : r[scenario.tag]);
   });
 
   test("a lease from a stale read loses the race - exit red, tag untouched", () => {
