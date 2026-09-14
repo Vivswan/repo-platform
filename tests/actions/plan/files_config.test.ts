@@ -930,3 +930,18 @@ describe("the upstream registry grammar", () => {
     },
   );
 });
+
+describe("selectEntries with the registration's except", () => {
+  // The plan-side pin of the registration's `except`: selection.test.ts pins the predicate and tests/ci the
+  // writer's whole path, and the plan job's ownedPaths and declaredMirrors read the entry list judged here.
+  // Silently undropped, the writer would overwrite a path the repository declared its own.
+  test("an excepted path is dropped whatever its clause; a path no entry has changes nothing", () => {
+    const config = parseFilesConfig(BASE);
+    const paths = (except: string[]) =>
+      selectEntries(config, { modules: ["fuzzer"], private: false, except }).map((e) => e.path);
+    const all = [".github/workflows/ci.yml", ".gitignore", ".github/workflows/nightly-fuzz.yml"];
+    expect(paths([])).toEqual(all);
+    expect(paths([".github/workflows/ci.yml"])).toEqual(all.slice(1));
+    expect(paths([...all, "nothing.yml"])).toEqual([]);
+  });
+});

@@ -151,6 +151,7 @@ function run(scenario: Scenario): Outcome {
 }
 
 describe("resolve_build.ts behavior (real git)", () => {
+  // The executed entry, and GitHub's API surface: filter=latest is what makes a re-run's verdict the one read.
   test("the commit the stable tag names, green and on main, is the run's build", () => {
     const r = run({ tag: "m3" });
     expect(r.exitCode).toBe(0);
@@ -169,6 +170,7 @@ describe("resolve_build.ts behavior (real git)", () => {
     expect(r.outputs).toEqual({ build: r.shas.m3 });
   });
 
+  // git fact: rev-parse of an annotated tag answers the tag object unless asked for ^{commit}.
   test("an annotated tag resolves to the commit it names, never the tag object", () => {
     const r = run({ tag: "m2", annotated: true });
     expect(r.exitCode).toBe(0);
@@ -183,39 +185,48 @@ describe("resolve_build.ts behavior (real git)", () => {
     expect(r.outputs).toEqual({ build: r.shas.m3 });
   });
 
-  test("a tag off main's history is refused before the green gate is read", () => {
-    const r = run({ tag: "side" });
-    expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("is not on main's history");
-    expect(r.output).not.toContain("refusing to guess");
-    expect(r.ghCalls).toEqual([]);
-    expect(r.outputs).toEqual({});
-  });
+  // Every gate refuses closed with its own words and ships no output; the tag fetch and the ancestry gate run
+  // before the green gate is read, so those refusals make no gh call. The two real "no" rows are the controls for
+  // the git-error list below: a genuine no never carries the refusing-to-guess diagnostic.
+  test.each<{ reason: string; scenario: Scenario; says: string[]; ghCalls: number }>([
+    {
+      reason: "a tag off main's history",
+      scenario: { tag: "side" },
+      says: ["is not on main's history"],
+      ghCalls: 0,
+    },
+    {
+      reason: "a red commit under the tag",
+      scenario: { tag: "m3", conclusion: "failure" },
+      says: ["is not green: its all-green verdict concluded 'failure'"],
+      ghCalls: 1,
+    },
+    {
+      reason: "no stable tag on origin",
+      scenario: {},
+      says: ["fetching the stable tag failed", "Dispatch post-green.yml"],
+      ghCalls: 0,
+    },
+    {
+      reason: "a tagged commit without the writer's data file",
+      scenario: { tag: "m0" },
+      says: ["carries no files.yml"],
+      ghCalls: 1,
+    },
+  ])(
+    "$reason is refused with the gate's reason, and nothing is shipped",
+    ({ scenario, says, ghCalls }) => {
+      const r = run(scenario);
+      expect(r.exitCode).toBe(1);
+      for (const line of says) expect(r.output).toContain(line);
+      expect(r.output).not.toContain("refusing to guess");
+      expect(r.ghCalls).toHaveLength(ghCalls);
+      expect(r.outputs).toEqual({});
+    },
+  );
 
-  test("a red commit under the tag is refused with the gate's reason", () => {
-    const r = run({ tag: "m3", conclusion: "failure" });
-    expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("is not green: its all-green verdict concluded 'failure'");
-    expect(r.outputs).toEqual({});
-  });
-
-  test("no stable tag on origin names the dispatch that mints it", () => {
-    const r = run({});
-    expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("fetching the stable tag failed");
-    expect(r.output).toContain("Dispatch post-green.yml");
-    expect(r.outputs).toEqual({});
-  });
-
-  test("a tagged commit without the writer's data file is refused", () => {
-    const r = run({ tag: "m0" });
-    expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("carries no files.yml");
-    expect(r.output).not.toContain("refusing to guess");
-    expect(r.outputs).toEqual({});
-  });
-
-  // The two tests above are the controls: the same questions answered with a real "no" still fail closed.
+  // A git error read as a no published the wrong answer once (#220); rev-parse, not cat-file, is what lets the
+  // data-file question fail with git's own words instead of a no.
   test.each([
     ["the ancestry question", "is not on main's history"],
     ["the files.yml question", "carries no files.yml"],

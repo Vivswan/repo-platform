@@ -188,23 +188,6 @@ export function layerPaths(config: LayerConfig, selection: Selection): string[] 
   ];
 }
 
-/** Every selection and both visibilities, the override included; tracking labels come from each registration and are not here. actions/plan/reserved_labels.ts reads the names alone. */
-export function allLayerLabels(config: LayerConfig, tree: string): Label[] {
-  const labels: Label[] = [];
-  for (const layer of loadLayers(config, tree).values()) {
-    for (const label of sectionEntries(layer.doc, "labels")) {
-      if (typeof label.name !== "string") continue;
-      if (labels.some((seen) => seen.name === label.name)) continue;
-      labels.push({
-        name: label.name,
-        color: String(label.color ?? ""),
-        description: String(label.description ?? ""),
-      });
-    }
-  }
-  return labels;
-}
-
 export function declaredPrivate(overlay: unknown): boolean | null {
   const repository = isMapping(overlay) ? overlay.repository : null;
   const value = isMapping(repository) ? repository.private : null;

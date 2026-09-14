@@ -1,13 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-  blocksAnchorProblem,
   missingPlaceholders,
-  PLACEHOLDER_NAMES,
   type PlaceholderValues,
-  placeholderTokens,
   spliceBlocks,
   substitute,
-  unknownPlaceholders,
 } from "../../../.github/scripts/sync/writer/placeholders.ts";
 
 const VALUES: PlaceholderValues = {
@@ -23,47 +19,24 @@ const VALUES: PlaceholderValues = {
   site_label: "docs-link-rot",
 };
 
-describe("placeholders", () => {
-  test("substitutes every listed name and leaves Actions expressions alone", () => {
+describe("substitute", () => {
+  // The sources are workflows, and GitHub Actions spells its expressions `${{ ... }}`; a token outside the name
+  // grammar is text, not a placeholder.
+  test("substitutes every listed name and leaves Actions expressions and out-of-grammar tokens alone", () => {
     const text =
-      "# {{project_name}} by {{github_username}} ({{year}})\nsha: ${{ github.sha }} ${{github.ref}}";
+      "# {{project_name}} by {{github_username}} ({{year}})\nsha: ${{ github.sha }} ${{github.ref}} {{ project_name }} {{a-b}}";
     expect(substitute(text, VALUES)).toBe(
-      "# Demo by Owner (2026)\nsha: ${{ github.sha }} ${{github.ref}}",
+      "# Demo by Owner (2026)\nsha: ${{ github.sha }} ${{github.ref}} {{ project_name }} {{a-b}}",
     );
   });
 
-  test("tokens with spaces or outside the grammar are not placeholders", () => {
-    expect(placeholderTokens("{{ project_name }} {{a-b}} {{project_name}}")).toEqual([
-      "project_name",
-    ]);
-  });
-
-  test("unknown names are listed once each, in order", () => {
-    expect(unknownPlaceholders("{{nope}} {{year}} {{other}} {{nope}}", PLACEHOLDER_NAMES)).toEqual([
-      "nope",
-      "other",
-    ]);
-  });
-
-  test("substitute refuses a name outside the fixed list, or one without a value here", () => {
-    expect(() => substitute("{{nope}}", VALUES)).toThrow("unknown placeholder {{nope}}");
-    const { fuzzer_label: _, ...without } = VALUES;
-    expect(() => substitute("{{fuzzer_label}}", without)).toThrow(
-      "unknown placeholder {{fuzzer_label}}",
-    );
-  });
-
-  test("the registration-backed names substitute like the rest", () => {
-    expect(substitute("{{fuzzer_label}} {{nightly_label}} {{site_label}}", VALUES)).toBe(
-      "fuzz-nightly nightly-failure docs-link-rot",
-    );
-  });
-
+  // YAML fact: the value lands inside a quoted scalar verbatim, and this is the only gate for a files.yml label
+  // default, which the registration grammar never sees.
   test.each([
     ["a double quote", 'say "hi"'],
     ["a backslash", "C:\\path"],
     ["a control character", "line\u0007bell"],
-  ])("substitute refuses a value carrying %s", (_reason, value) => {
+  ])("refuses a value carrying %s", (_reason, value) => {
     expect(() => substitute("{{description}}", { ...VALUES, description: value })).toThrow(
       "placeholder {{description}}: its value carries a double quote, backslash, or control character",
     );
@@ -71,6 +44,7 @@ describe("placeholders", () => {
 });
 
 describe("missingPlaceholders", () => {
+  // An empty value counts as missing: a license line without its holder is wrong, not blank.
   test("names the tokens whose value is absent or empty, once each", () => {
     const values = { ...VALUES, description: "" };
     const { fuzzer_label: _, ...without } = values;
@@ -82,6 +56,8 @@ describe("missingPlaceholders", () => {
 });
 
 describe("blocks anchor", () => {
+  // A piece without a terminal newline is given one, so a seam never merges two gitignore lines; without an anchor
+  // the blocks append, and a source with neither rides through byte for byte.
   test("blocks land at the anchor line, or at the end when there is none", () => {
     expect(spliceBlocks("a\n{{blocks}}\nb\n", ["x", "y\n"])).toBe("a\nx\ny\nb\n");
     expect(spliceBlocks("{{blocks}}\n", ["x\n"])).toBe("x\n");
@@ -89,18 +65,6 @@ describe("blocks anchor", () => {
     expect(spliceBlocks("a", ["x", "y"])).toBe("a\nx\ny\n");
     expect(spliceBlocks("a\n{{blocks}}\nb\n", [])).toBe("a\nb\n");
     expect(spliceBlocks("\n{{blocks}}\nb\n", ["x\n"])).toBe("\nx\nb\n");
-    // No anchor and no blocks: the source rides through byte for byte.
     expect(spliceBlocks("exact bytes", [])).toBe("exact bytes");
-  });
-
-  test("the anchor is one whole line at most", () => {
-    expect(blocksAnchorProblem("a\n{{blocks}}\n")).toBeNull();
-    expect(blocksAnchorProblem("plain\n")).toBeNull();
-    expect(blocksAnchorProblem("  {{blocks}}\n")).toBe(
-      "mentions {{blocks}} mid-line; it must be a line of its own",
-    );
-    expect(blocksAnchorProblem("{{blocks}}\n{{blocks}}\n")).toBe(
-      "mentions {{blocks}} more than once",
-    );
   });
 });

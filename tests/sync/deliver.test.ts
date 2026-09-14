@@ -157,110 +157,153 @@ const silent = (result: Run) => {
 };
 
 describe("deliver.ts", () => {
-  test("a tree the build already matches is unchanged: no push, no issue, and with no open PR nothing beyond the lookup", () => {
-    const result = run();
+  const prCommands = (result: Run) => calls(result.gh, "pr").map((argv) => argv[2]);
+  const CLOSE = [
+    "12",
+    "-R",
+    TARGET,
+    "--delete-branch",
+    "--comment",
+    `superseded: the target already matches build ${BUILD}`,
+  ];
+
+  // A stale sync PR must never merge: an armed one is disarmed BEFORE it is closed, every open one is closed with
+  // the reason and its branch deleted, and nothing is pushed, edited, or armed.
+  test.each<{ reason: string; stub: Record<string, string>; pr: string[]; close: string[] | null }>(
+    [
+      { reason: "no open PR: nothing beyond the lookup", stub: {}, pr: ["list"], close: null },
+      {
+        reason: "an open PR never armed is closed without a disarm call",
+        stub: { STUB_PR: "12" },
+        pr: ["list", "view", "close"],
+        close: CLOSE,
+      },
+      {
+        reason: "an open armed PR is disarmed, then closed as obsolete",
+        stub: { STUB_PR: "12", STUB_ARMED: "true" },
+        pr: ["list", "view", "merge", "close"],
+        close: CLOSE,
+      },
+    ],
+  )("a tree the build already matches is unchanged: $reason", ({ stub, pr, close }) => {
+    const result = run({ stub });
     silent(result);
     expect(result.exitCode).toBe(0);
     expect(result.verdict).toBe("unchanged");
+    expect(prCommands(result)).toEqual(pr);
+    const closes: string[][] = close === null ? [] : [close];
+    expect(calls(result.gh, "pr", "close").map((argv) => argv.slice(3))).toEqual(closes);
     expect(calls(result.git, "push")).toEqual([]);
-    expect(calls(result.gh, "pr").map((argv) => argv[2])).toEqual(["list"]);
-    expect(result.gh.some((argv) => argv[4] === "POST")).toBe(false);
-  });
-
-  test("an unchanged tree closes the open armed PR as obsolete: disarmed, closed with the reason, branch deleted", () => {
-    const result = run({ stub: { STUB_PR: "12", STUB_ARMED: "true" } });
-    silent(result);
-    expect(result.verdict).toBe("unchanged");
+    expect(result.gh.some((argv) => argv[4] === "POST" || argv.includes("--auto"))).toBe(false);
     const disarmAt = result.sequence.findIndex((line) => line.includes("--disable-auto"));
     const closeAt = result.sequence.findIndex((line) => line.startsWith("gh pr close"));
-    expect(disarmAt).toBeGreaterThanOrEqual(0);
-    expect(closeAt).toBeGreaterThan(disarmAt);
-    const close = calls(result.gh, "pr", "close")[0];
-    expect(close.slice(3)).toEqual([
-      "12",
-      "-R",
-      TARGET,
-      "--delete-branch",
-      "--comment",
-      `superseded: the target already matches build ${BUILD}`,
-    ]);
-    expect(calls(result.git, "push")).toEqual([]);
-    expect(calls(result.gh, "pr", "edit")).toEqual([]);
-    expect(result.gh.some((argv) => argv.includes("--auto"))).toBe(false);
-    expect(result.log).toContain("closed the obsolete sync pull request #12");
+    expect(disarmAt >= 0).toBe(pr.includes("merge"));
+    if (disarmAt >= 0) expect(closeAt).toBeGreaterThan(disarmAt);
+    if (close !== null) expect(result.log).toContain("closed the obsolete sync pull request #12");
   });
 
-  test("a fork's PR from a same-named branch is skipped: the target's own PR is the one closed", () => {
-    const list = JSON.stringify([
-      { number: 9, isCrossRepository: true },
-      { number: 12, isCrossRepository: false },
-    ]);
-    const result = run({ stub: { STUB_PR_LIST: list, STUB_ARMED: "true" } });
+  // GitHub's `gh pr list --head` matches a fork's branch of the same name, so a fork could impersonate the sync PR:
+  // the listing asks isCrossRepository and only the target's own PR is viewed, closed, or refreshed.
+  test.each<{ reason: string; stub: Record<string, string>; verdict: string; pr: string[] }>([
+    {
+      reason:
+        "beside the target's own PR, the fork's is skipped and the target's is the one closed",
+      stub: {
+        STUB_PR_LIST: JSON.stringify([
+          { number: 9, isCrossRepository: true },
+          { number: 12, isCrossRepository: false },
+        ]),
+        STUB_ARMED: "true",
+      },
+      verdict: "unchanged",
+      pr: ["list", "view", "merge", "close"],
+    },
+    {
+      reason: "alone, it is no sync PR: a change opens the target's own",
+      stub: {
+        STUB_DIRTY: "1",
+        STUB_PR_LIST: JSON.stringify([{ number: 9, isCrossRepository: true }]),
+      },
+      verdict: "opened",
+      pr: ["list", "create", "merge"],
+    },
+  ])("a fork's PR from a same-named branch, $reason", ({ stub, verdict, pr }) => {
+    const result = run({ stub });
     silent(result);
-    expect(result.verdict).toBe("unchanged");
+    expect(result.verdict).toBe(verdict);
     expect(calls(result.gh, "pr", "list")[0]).toContain("number,isCrossRepository");
-    expect(calls(result.gh, "pr", "view")[0][3]).toBe("12");
-    expect(calls(result.gh, "pr", "close")[0][3]).toBe("12");
+    expect(prCommands(result)).toEqual(pr);
+    for (const argv of calls(result.gh, "pr", "view").concat(calls(result.gh, "pr", "close"))) {
+      expect(argv[3]).toBe("12");
+    }
     expect(result.sequence.some((line) => line.includes(" 9 "))).toBe(false);
   });
 
-  test("a fork's PR alone is no sync PR: a change opens the target's own", () => {
-    const list = JSON.stringify([{ number: 9, isCrossRepository: true }]);
-    const result = run({ stub: { STUB_DIRTY: "1", STUB_PR_LIST: list } });
-    silent(result);
-    expect(result.verdict).toBe("opened");
-    expect(calls(result.gh, "pr", "edit")).toEqual([]);
-    expect(calls(result.gh, "pr", "view")).toEqual([]);
-  });
-
-  test("a listing gh returns unparsed files the failure instead of crashing", () => {
-    const result = run({ stub: { STUB_PR_LIST: "not json" } });
-    silent(result);
-    expect(result.verdict).toBe("failed");
-    expect(result.issueBody).toContain("listing the sync pull request failed");
-  });
-
-  test("an unchanged tree closes an open PR that was never armed without a disarm call", () => {
-    const result = run({ stub: { STUB_PR: "12" } });
-    expect(result.verdict).toBe("unchanged");
-    expect(result.gh.some((argv) => argv.includes("--disable-auto"))).toBe(false);
-    expect(calls(result.gh, "pr", "close")[0]).toContain("12");
-  });
-
-  test.each([
-    ["pr list", "listing the sync pull request failed"],
-    ["pr view", "reading the sync pull request's auto-merge state failed"],
-    ["pr merge", "disarming the sync pull request's auto-merge failed"],
-    ["pr close", "closing the obsolete sync pull request failed"],
+  // The must() chain fails closed at each gh call with its own reason, nothing runs after it, and a non-JSON answer
+  // from gh is a failure too, never a crash.
+  test.each<{ reason: string; stub: Record<string, string>; failure: string; last: string }>([
+    ...(
+      [
+        ["pr list", "listing the sync pull request failed"],
+        ["pr view", "reading the sync pull request's auto-merge state failed"],
+        ["pr merge", "disarming the sync pull request's auto-merge failed"],
+        ["pr close", "closing the obsolete sync pull request failed"],
+      ] as const
+    ).map(([command, failure]) => ({
+      reason: `gh ${command} fails`,
+      stub: { STUB_PR: "12", STUB_ARMED: "true", STUB_GH_FAIL: command },
+      failure,
+      last: `gh ${command}`,
+    })),
+    {
+      reason: "gh pr list answers non-JSON",
+      stub: { STUB_PR_LIST: "not json" },
+      failure: "listing the sync pull request failed",
+      last: "gh pr list",
+    },
   ])(
-    "an unchanged tree whose obsolete-PR cleanup fails at `gh %s` files the failure and stops there",
-    (command, reason) => {
-      const result = run({ stub: { STUB_PR: "12", STUB_ARMED: "true", STUB_GH_FAIL: command } });
+    "an unchanged tree whose obsolete-PR cleanup fails ($reason) files the failure and stops there",
+    ({ stub, failure, last }) => {
+      const result = run({ stub });
       silent(result);
       expect(result.verdict).toBe("failed");
-      expect(result.issueBody).toContain(reason);
+      expect(result.issueBody).toContain(failure);
       const prLines = result.sequence.filter((line) => line.startsWith("gh pr"));
-      expect(prLines.at(-1)?.startsWith(`gh ${command}`)).toBe(true);
+      expect(prLines.at(-1)?.startsWith(last)).toBe(true);
     },
   );
 
-  test("a clean change on a non-manual run opens the PR and arms auto-merge", () => {
-    const result = run({ stub: { STUB_DIRTY: "1" } });
-    silent(result);
-    expect(result.verdict).toBe("opened");
-    expect(result.git.map((argv) => argv.slice(3, 5).join(" "))).toContain("commit -q");
-    const push = calls(result.git, "push")[0];
-    expect(push).toContain("--force-with-lease=automation/repo-platform:");
-    expect(push).toContain(`https://x-access-token:${PAT}@github.com/${TARGET}.git`);
-    const create = calls(result.gh, "pr", "create")[0];
-    expect(create).toContain("--base");
-    expect(create).toContain("main");
-    expect(create).toContain("--body-file");
-    const merge = calls(result.gh, "pr", "merge")[0];
-    expect(merge.slice(3)).toEqual(["7", "-R", TARGET, "--squash", "--auto"]);
-    expect(result.log).not.toContain(PAT);
-    expect(result.summary).toBe("");
-  });
+  // The push authenticates alone (the checkout kept no token) under a lease, so a concurrent writer fails loudly;
+  // squash is the fleet's merge method; the token must reach neither the log nor the body; and a manual run never
+  // arms auto-merge, since the operator asked to look.
+  test.each<{ manual: boolean; merge: string[][]; log: string | null }>([
+    { manual: false, merge: [["7", "-R", TARGET, "--squash", "--auto"]], log: null },
+    { manual: true, merge: [], log: "manual run" },
+  ])(
+    "a clean change opens the PR whose body carries the report (manual: $manual)",
+    ({ manual, merge, log }) => {
+      const result = run({ manual, stub: { STUB_DIRTY: "1" } });
+      silent(result);
+      expect(result.verdict).toBe("opened");
+      expect(result.git.map((argv) => argv.slice(3, 5).join(" "))).toContain("commit -q");
+      const push = calls(result.git, "push")[0];
+      expect(push).toContain("--force-with-lease=automation/repo-platform:");
+      expect(push).toContain(`https://x-access-token:${PAT}@github.com/${TARGET}.git`);
+      const create = calls(result.gh, "pr", "create")[0];
+      expect(create.slice(create.indexOf("--base"), create.indexOf("--base") + 2)).toEqual([
+        "--base",
+        "main",
+      ]);
+      const body = readFileSync(create[create.indexOf("--body-file") + 1], "utf-8");
+      expect(body).toContain(`build \`${BUILD}\``);
+      expect(body).toContain(REPORT.trimEnd());
+      expect(calls(result.gh, "pr", "merge").map((argv) => argv.slice(3))).toEqual(merge);
+      if (log !== null) expect(result.log).toContain(log);
+      expect(result.log).not.toContain(PAT);
+      expect(body).not.toContain(PAT);
+      expect(result.summary).toBe("");
+    },
+  );
 
   // The branch path: the module PR's own branch gets the files, so no sync PR, no auto-merge, and the failure issue is
   // neither closed nor consulted; the report the PR body would carry goes to the job summary instead.
@@ -333,14 +376,8 @@ describe("deliver.ts", () => {
     });
   });
 
-  test("the PR body opens with the source line and carries the writer's report", () => {
-    const root = run({ stub: { STUB_DIRTY: "1" } });
-    const bodyArg = calls(root.gh, "pr", "create")[0];
-    const body = readFileSync(bodyArg[bodyArg.indexOf("--body-file") + 1], "utf-8");
-    expect(body).toContain(`build \`${BUILD}\``);
-    expect(body).toContain(REPORT.trimEnd());
-  });
-
+  // The incoming revision may need review, so an armed PR is disarmed before the branch moves under it, and the
+  // base follows the checkout's branch (a renamed default branch). Drifted, auto-merge would fire on an unreviewed hold.
   test("an existing armed PR is disarmed before the push, refreshed onto the checkout's branch, and left disarmed when the report holds", () => {
     const result = run({
       hold: true,
@@ -371,77 +408,96 @@ describe("deliver.ts", () => {
     expect(result.log).toContain("holds the PR for review");
   });
 
-  test("a manual run never arms auto-merge, even on a clean report", () => {
-    const result = run({ manual: true, stub: { STUB_DIRTY: "1" } });
-    expect(result.verdict).toBe("opened");
-    expect(result.gh.some((argv) => argv.includes("--auto"))).toBe(false);
-    expect(result.log).toContain("manual run");
-  });
+  // A failed step still ends the row with a verdict and an issue carrying that step's own log (the writer's report,
+  // the checkout's clone log); nothing is committed or pushed, and a failed clone's directory is not asked anything.
+  test.each<{
+    reason: string;
+    options: Options;
+    says: string[];
+    gitAsked: boolean;
+  }>([
+    {
+      reason: "a failed writer",
+      options: { writer: "failure" },
+      says: ["the writer exited with an error", REPORT.trimEnd()],
+      gitAsked: true,
+    },
+    {
+      reason: "a failed checkout",
+      options: {
+        checkout: "failure",
+        writer: "skipped",
+        checkoutLog: "$ git clone -> exit 128\nfatal: could not read from remote\n",
+      },
+      says: ["the target checkout failed", "## Checkout log", "fatal: could not read from remote"],
+      gitAsked: false,
+    },
+  ])(
+    "$reason files the issue with its log and records the failed verdict, touching no tree",
+    ({ options, says, gitAsked }) => {
+      const result = run(options);
+      silent(result);
+      expect(result.exitCode).toBe(0);
+      expect(result.verdict).toBe("failed");
+      const create = result.gh.find((argv) => argv[4] === "POST");
+      expect(create?.slice(1, 5)).toEqual(["api", `repos/${TARGET}/issues`, "--method", "POST"]);
+      expect(create).toContain(`title=${FAILURE_ISSUE_TITLE}`);
+      for (const line of says) expect(result.issueBody).toContain(line);
+      expect(calls(result.git, "commit")).toEqual([]);
+      expect(calls(result.git, "push")).toEqual([]);
+      if (!gitAsked) expect(result.git).toEqual([]);
+    },
+  );
 
-  test("a failed writer files the issue with the log tail and records the failed verdict", () => {
-    const result = run({ writer: "failure" });
-    silent(result);
-    expect(result.exitCode).toBe(0);
-    expect(result.verdict).toBe("failed");
-    const create = result.gh.find((argv) => argv[4] === "POST");
-    expect(create?.slice(1, 5)).toEqual(["api", `repos/${TARGET}/issues`, "--method", "POST"]);
-    expect(create).toContain(`title=${FAILURE_ISSUE_TITLE}`);
-    expect(result.issueBody).toContain("the writer exited with an error");
-    expect(result.issueBody).toContain(REPORT.trimEnd());
-    expect(calls(result.git, "push")).toEqual([]);
-  });
-
-  test("a failed checkout files the issue with the clone's log and without touching the tree", () => {
-    const result = run({
-      checkout: "failure",
-      writer: "skipped",
-      checkoutLog: "$ git clone -> exit 128\nfatal: could not read from remote\n",
-    });
-    expect(result.verdict).toBe("failed");
-    expect(result.issueBody).toContain("the target checkout failed");
-    expect(result.issueBody).toContain("## Checkout log");
-    expect(result.issueBody).toContain("fatal: could not read from remote");
-    expect(result.git).toEqual([]);
-  });
-
-  test("a failed git add files the issue instead of committing a partial tree", () => {
-    const result = run({ stub: { STUB_DIRTY: "1", STUB_ADD_FAIL: "1" } });
-    silent(result);
-    expect(result.verdict).toBe("failed");
-    expect(result.issueBody).toContain("git add failed in the target");
-    expect(calls(result.git, "commit")).toEqual([]);
-    expect(calls(result.git, "push")).toEqual([]);
-  });
-
-  test.each([
+  // symbolic-ref, not rev-parse --abbrev-ref: a tag named main answers heads/main under the latter. A ref outside
+  // refs/heads/, an empty answer, and a git error are all refused with git's own words in the report, and every
+  // git failure before the commit files with its reason and stops there.
+  test.each<{
+    read: string;
+    stub: Record<string, string>;
+    reason: string;
+    logged: string;
+    git: string[];
+  }>([
+    {
+      read: "fails at git add",
+      stub: { STUB_ADD_FAIL: "1" },
+      reason: "git add failed in the target",
+      logged: "$ git add -> exit 128\nfatal: unable to stage",
+      git: ["config", "config", "add"],
+    },
     {
       read: "errors",
-      head: "error",
+      stub: { STUB_HEAD: "error" },
       reason: "git symbolic-ref failed in the target",
       logged: "$ git symbolic-ref -> exit 128\nfatal: not a git repository: target",
+      git: ["config", "config", "add", "status", "symbolic-ref"],
     },
     {
       read: "finds HEAD detached",
-      head: "detached",
+      stub: { STUB_HEAD: "detached" },
       reason: "git symbolic-ref failed in the target",
       logged: "$ git symbolic-ref -> exit 128\nfatal: ref HEAD is not a symbolic ref",
+      git: ["config", "config", "add", "status", "symbolic-ref"],
     },
     {
       read: "answers a ref outside refs/heads/",
-      head: "refs/remotes/origin/main",
+      stub: { STUB_HEAD: "refs/remotes/origin/main" },
       reason: "the target checkout is not on a branch",
       logged: "$ git symbolic-ref -> exit 0",
+      git: ["config", "config", "add", "status", "symbolic-ref"],
     },
     {
       read: "answers nothing on exit 0",
-      head: "empty",
+      stub: { STUB_HEAD: "empty" },
       reason: "the target checkout is not on a branch",
       logged: "$ git symbolic-ref -> exit 0",
+      git: ["config", "config", "add", "status", "symbolic-ref"],
     },
   ])(
     "a checkout whose branch read $read files that failure, with git's words, before any branch or commit",
-    ({ head, reason, logged }) => {
-      const result = run({ stub: { STUB_DIRTY: "1", STUB_HEAD: head } });
+    ({ stub, reason, logged, git }) => {
+      const result = run({ stub: { STUB_DIRTY: "1", ...stub } });
       silent(result);
       expect(result.verdict).toBe("failed");
       expect(result.issueBody).toContain(
@@ -449,16 +505,11 @@ describe("deliver.ts", () => {
       );
       expect(result.issueBody).toContain(`## Delivery log\n\n\`\`\`\`text\n`);
       expect(result.issueBody).toContain(`${logged}\nfiling the failure report: ${reason}`);
-      expect(result.git.map((argv) => argv[3])).toEqual([
-        "config",
-        "config",
-        "add",
-        "status",
-        "symbolic-ref",
-      ]);
+      expect(result.git.map((argv) => argv[3])).toEqual(git);
     },
   );
 
+  // git prints the token URL in its 403; the redaction is the one thing between the PAT and a public issue body.
   test("a refused push files the issue with git's redacted error and reopens an existing report", () => {
     const result = run({
       stub: { STUB_DIRTY: "1", STUB_PUSH_FAIL: "1", STUB_ISSUE: "41 closed" },
@@ -473,29 +524,52 @@ describe("deliver.ts", () => {
     expect(result.log).not.toContain(PAT);
   });
 
-  test("a clean delivery closes an open failure report", () => {
-    const result = run({ stub: { STUB_DIRTY: "1", STUB_ISSUE: "41 open" } });
-    expect(result.verdict).toBe("opened");
-    const patch = result.gh.find((argv) => argv[2] === `repos/${TARGET}/issues/41`);
-    expect(patch).toContain("state=closed");
-  });
-
-  test.each([
-    ["a clean delivery", {}, "opened", "state=closed"],
-    ["a failed delivery", { STUB_PUSH_FAIL: "1" }, "failed", "state=open"],
+  // GitHub lists issues created-ascending across pages; the open report is the one being watched, so it outranks
+  // an older closed one, whether the delivery closes it or reopens it.
+  test.each<{
+    reason: string;
+    stub: Record<string, string>;
+    issues: string;
+    verdict: string;
+    patches: string[][];
+  }>([
+    {
+      reason: "a clean delivery closes the one open report",
+      stub: {},
+      issues: "41 open",
+      verdict: "opened",
+      patches: [["41", "state=closed"]],
+    },
+    {
+      reason: "a clean delivery",
+      stub: {},
+      issues: "8 closed\n12 open\n",
+      verdict: "opened",
+      patches: [["12", "state=closed"]],
+    },
+    {
+      reason: "a failed delivery",
+      stub: { STUB_PUSH_FAIL: "1" },
+      issues: "8 closed\n12 open\n",
+      verdict: "failed",
+      patches: [["12", "state=open"]],
+    },
   ])(
-    "%s addresses the open failure report, never the older closed one",
-    (_, stub, verdict, state) => {
-      const result = run({ stub: { STUB_DIRTY: "1", ...stub, STUB_ISSUE: "8 closed\n12 open\n" } });
+    "$reason addresses the open failure report, never the older closed one",
+    ({ stub, issues, verdict, patches }) => {
+      const result = run({ stub: { STUB_DIRTY: "1", ...stub, STUB_ISSUE: issues } });
       silent(result);
       expect(result.verdict).toBe(verdict);
-      const patches = result.gh
-        .filter((argv) => argv[1] === "api" && argv[4] === "PATCH")
-        .map((argv) => [argv[2], argv.find((word) => word.startsWith("state="))]);
-      expect(patches).toEqual([[`repos/${TARGET}/issues/12`, state]]);
+      expect(
+        result.gh
+          .filter((argv) => argv[1] === "api" && argv[4] === "PATCH")
+          .map((argv) => [argv[2], argv.find((word) => word.startsWith("state="))]),
+      ).toEqual(patches.map(([number, state]) => [`repos/${TARGET}/issues/${number}`, state]));
     },
   );
 
+  // The failed verdict is written only once the issue exists; otherwise verdict.ts's row step goes red instead of
+  // reading a stale verdict as a delivery.
   test("a failure the target cannot take (the issue write refused) leaves no verdict and exits red", () => {
     const result = run({ writer: "failure", stub: { STUB_ISSUE_FAIL: "1" } });
     silent(result);
@@ -505,6 +579,7 @@ describe("deliver.ts", () => {
 });
 
 describe("failureBody", () => {
+  // CommonMark: a fence closes on a run at least as long, so each fence must exceed the longest run the log quotes.
   test("fences each log tail past its longest backtick run and skips empty logs", () => {
     const body = failureBody({
       runUrl: "u",
@@ -520,6 +595,8 @@ describe("failureBody", () => {
     expect(fenceFor("none")).toBe("````");
   });
 
+  // The failure issue carries the END of a long log, where git and the writer put their last words; keeping the
+  // head instead would drop the diagnostic and the issue would still read as complete.
   test("tail keeps the last bytes of a long log and says how much it dropped", () => {
     const dir = temp.dir("deliver-tail-");
     const file = join(dir, "log");
@@ -530,6 +607,7 @@ describe("failureBody", () => {
 });
 
 describe("closedFences", () => {
+  // CommonMark's closing rule, which the cut relies on: a run at least as long, alone on its line, no info string.
   test.each([
     { text: "```\nx", closed: "```\nx\n```", reason: "a three-backtick fence left open" },
     {
@@ -559,18 +637,16 @@ describe("boundedReport", () => {
   const longLine = `+${"x".repeat(70_000)}`;
   const longDiff = `## Sync report\n\n### Replaced local edits\n\n\`\`\`diff\n${longLine}\n\`\`\``;
 
-  test("a report under the cap is untouched", () => {
-    expect(boundedReport(`## Sync report\n${review}`)).toBe(`## Sync report\n${review}`);
-  });
-
+  // GitHub refuses a body past 65,536 characters after the branch is pushed, so the report is cut on a line
+  // boundary; the marker and the Review section must render as Markdown, so the fence is closed first. A report
+  // under the cap is untouched (the control).
   test("a report over the cap is cut on a line boundary, its Review section kept whole", () => {
+    expect(boundedReport(`## Sync report\n${review}`)).toBe(`## Sync report\n${review}`);
     const report = `${longDiff}${review}`;
     const bounded = boundedReport(report);
     expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
     expect(bounded.startsWith("## Sync report\n\n### Replaced local edits")).toBe(true);
     expect(bounded).not.toContain(longLine);
-    // The cut fell inside the diff's fence, so the fence is closed before the
-    // marker and the Review section render as Markdown.
     expect(bounded).toContain("```diff\n```\n\n> [!WARNING]");
     expect(omitted(bounded)).toEqual([`\n${longLine}\n\`\`\``.length]);
     expect(bounded.endsWith(review)).toBe(true);
@@ -578,28 +654,83 @@ describe("boundedReport", () => {
     expect(body.length).toBeLessThan(65_536);
   });
 
-  test("an oversized Review section behind an oversized diff keeps its heading and leading reasons", () => {
-    const reasons = Array.from(
-      { length: 1_750 },
-      (_, i) => `- mirror skills/${i}/LICENSE.md refused`,
-    );
-    const bigReview = `\n### Review\n\nHold for review: **yes**\n\n${reasons.join("\n")}\n`;
-    expect(bigReview.length).toBeGreaterThan(BODY_CAP);
-    const bounded = boundedReport(`${longDiff}${bigReview}`);
-    expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
-    expect(bounded.startsWith("## Sync report\n")).toBe(true);
-    expect(bounded).toContain(
-      "\n### Review\n\nHold for review: **yes**\n\n- mirror skills/0/LICENSE.md refused\n",
-    );
-    expect(bounded).toContain("- mirror skills/1000/LICENSE.md refused\n");
-    expect(bounded).not.toContain(longLine);
-    // The Review section took the whole room, so the diff section left no
-    // trace rather than a dangling heading; the one marker is the Review's.
-    expect(bounded).not.toContain("Replaced local edits");
-    expect(bounded).toMatch(new RegExp(`${CUT.source}$`));
+  // The ranking: the Review section takes its room first, then the tables and notes, then the diffs; a section
+  // with no room left leaves no trace rather than a dangling heading, and one marker stands for each cut section.
+  const reasons = (count: number) =>
+    Array.from({ length: count }, (_, i) => `- mirror skills/${i}/LICENSE.md refused`).join("\n");
+  const header = "## Sync report\n";
+  const written = "\n### Written\n\n| Path |\n| --- |\n| `a` |\n";
+  const replaced = `\n### Replaced local edits\n\n\`\`\`diff\n${"+d\n".repeat(200)}\`\`\`\n`;
+  const retired = `\n### Retired\n\n| Path |\n| --- |\n${"| `r` |\n".repeat(20)}`;
+  const bigReview = `\n### Review\n\nHold for review: **yes**\n\n${reasons(1_750)}\n`;
+  test.each<{
+    reason: string;
+    report: string;
+    cap: number;
+    head: string;
+    tail: string | RegExp;
+    present: string[];
+    absent: string[];
+    /** The exact count the one marker accounts for, when the cut section's kept prefix can be read back. */
+    accounted?: (bounded: string) => number;
+  }>([
+    {
+      reason:
+        "an oversized Review section behind an oversized diff keeps its heading and leading reasons; the diff leaves no trace",
+      report: `${longDiff}${bigReview}`,
+      cap: BODY_CAP,
+      head: header,
+      tail: CUT,
+      present: [
+        "\n### Review\n\nHold for review: **yes**\n\n- mirror skills/0/LICENSE.md refused\n",
+        "- mirror skills/1000/LICENSE.md refused\n",
+      ],
+      absent: [longLine, "Replaced local edits"],
+    },
+    {
+      reason: "the tables and notes take their room before the diffs when both cannot fit",
+      report: `${header}${written}${replaced}${retired}${review}`,
+      cap: header.length + written.length + retired.length + review.length + 200,
+      head: `${header}${written}\n### Replaced local edits\n\n\`\`\`diff\n+d\n`,
+      tail: `${retired}${review}`,
+      present: [],
+      absent: [],
+      // The kept lines, the closing fence, and the marker are all that stand for the diff section, and the marker
+      // accounts for the rest of it.
+      accounted: (bounded) => {
+        const section = bounded.slice(
+          header.length + written.length,
+          -(retired.length + review.length),
+        );
+        const kept = section.slice(0, section.indexOf(MARKER)).replace(/\n```$/, "");
+        expect(replaced.startsWith(kept)).toBe(true);
+        return replaced.length - kept.length;
+      },
+    },
+    {
+      reason: "a Review section that alone exceeds the cap is cut too",
+      report: `## Sync report\n\n### Review\n\nHold for review: **yes**\n\n${reasons(3000)}\n`,
+      cap: BODY_CAP,
+      head: "## Sync report\n\n### Review\n\nHold for review: **yes**",
+      tail: CUT,
+      present: [],
+      absent: [],
+    },
+  ])("$reason", ({ report, cap, head, tail, present, absent, accounted }) => {
+    expect(report.length).toBeGreaterThan(cap);
+    const bounded = boundedReport(report, cap);
+    expect(bounded.length).toBeLessThanOrEqual(cap);
+    expect(bounded.startsWith(head)).toBe(true);
+    if (typeof tail === "string") expect(bounded.endsWith(tail)).toBe(true);
+    else expect(bounded).toMatch(new RegExp(`${tail.source}$`));
+    for (const text of present) expect(bounded).toContain(text);
+    for (const text of absent) expect(bounded).not.toContain(text);
     expect(omitted(bounded)).toHaveLength(1);
+    if (accounted !== undefined) expect(omitted(bounded)).toEqual([accounted(bounded)]);
   });
 
+  // Cross-file with report.ts: the section split on "\n### " and the REVIEW_HEADING and REPLACED_HEADING
+  // constants must match renderReport's headings, and the hold reasons (what the reviewer reads) survive any cut.
   test("a rendered report keeps every hold reason, table, and note whole; only the diffs are cut", () => {
     const outcome: SyncOutcome = {
       build: BUILD,
@@ -635,33 +766,11 @@ describe("boundedReport", () => {
     expect(omitted(bounded)[0]).toBeGreaterThan(report.length - BODY_CAP);
   });
 
-  test("the tables and notes take their room before the diffs when both cannot fit", () => {
-    const header = "## Sync report\n";
-    const written = "\n### Written\n\n| Path |\n| --- |\n| `a` |\n";
-    const replaced = `\n### Replaced local edits\n\n\`\`\`diff\n${"+d\n".repeat(200)}\`\`\`\n`;
-    const retired = `\n### Retired\n\n| Path |\n| --- |\n${"| `r` |\n".repeat(20)}`;
-    const cap = header.length + written.length + retired.length + review.length + 200;
-    const bounded = boundedReport(`${header}${written}${replaced}${retired}${review}`, cap);
-    expect(bounded.length).toBeLessThanOrEqual(cap);
-    expect(
-      bounded.startsWith(`${header}${written}\n### Replaced local edits\n\n\`\`\`diff\n+d\n`),
-    ).toBe(true);
-    expect(bounded.endsWith(`${retired}${review}`)).toBe(true);
-    // The kept lines, the closing fence, and the marker are all that stand
-    // for the diff section, and the marker accounts for the rest of it.
-    const section = bounded.slice(
-      header.length + written.length,
-      -(retired.length + review.length),
-    );
-    const kept = section.slice(0, section.indexOf(MARKER)).replace(/\n```$/, "");
-    expect(replaced.startsWith(kept)).toBe(true);
-    expect(omitted(bounded)).toEqual([replaced.length - kept.length]);
-  });
-
+  // The exhaustive sweep over every cap: a half heading or a dangling heading is exactly the silent drift a
+  // boundary bug produces, and this is the case that holds the Review-first ranking.
   test("a cut section keeps its whole heading line or leaves no trace, at every cap", () => {
-    const header = "## Sync report\n";
-    const written = `\n### Written\n\n| Path |\n| --- |\n${"| `a` |\n".repeat(30)}`;
-    const report = `${header}${written}${review}`;
+    const wide = `\n### Written\n\n| Path |\n| --- |\n${"| `a` |\n".repeat(30)}`;
+    const report = `${header}${wide}${review}`;
     const seen = { dropped: 0, headed: 0 };
     for (let cap = header.length + review.length; cap < report.length; cap++) {
       const bounded = boundedReport(report, cap);
@@ -679,6 +788,8 @@ describe("boundedReport", () => {
     expect(seen.headed).toBeGreaterThan(0);
   });
 
+  // Cross-file with report.ts fencedDiff (one backtick longer than any quoted run) against deliver.ts openFence:
+  // three backticks would leave the marker and the Review section rendering as code.
   test("a cut inside a four-backtick fence (a diff quoting a fence line) is closed with four backticks", () => {
     const outcome: SyncOutcome = {
       build: BUILD,
@@ -699,23 +810,7 @@ describe("boundedReport", () => {
     expect(report).toContain("````diff\n");
     const bounded = boundedReport(report);
     expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
-    // The cut fell inside the diff, whose fence is four backticks: three
-    // would leave the marker and the Review section rendering as code.
     expect(bounded).toContain("@@\n ```\n-old\n````\n\n> [!WARNING]");
     expect(bounded.endsWith(review)).toBe(true);
-  });
-
-  test("a Review section that alone exceeds the cap is cut too", () => {
-    const reasons = Array.from(
-      { length: 3000 },
-      (_, i) => `- mirror skills/${i}/LICENSE.md refused`,
-    );
-    const report = `## Sync report\n\n### Review\n\nHold for review: **yes**\n\n${reasons.join("\n")}\n`;
-    const bounded = boundedReport(report);
-    expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
-    expect(bounded.startsWith("## Sync report\n\n### Review\n\nHold for review: **yes**")).toBe(
-      true,
-    );
-    expect(bounded).toMatch(new RegExp(`${CUT.source}$`));
   });
 });

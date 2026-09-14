@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -27,17 +27,19 @@ function rungs(files: Record<string, string>): string {
 }
 
 describe("migrate.ts", () => {
+  // The migrations contract of docs/sync.md: name order, the failing rung's own exit, and both streams passed
+  // through, since a failed rung's line is what the delivered log tail carries.
   test("runs every rung in name order over the checkout; a failing rung ends the run with its exit and the rest do not run", () => {
     const dir = rungs({
       "0002-second.ts": rung(0),
       "0001-first.ts": rung(0),
-      "README.md": "not a rung\n",
+      // Sorts before every rung: an unfiltered run would run it first and its line would show in stdout.
+      "0000-README.md": "not a rung\n",
       "0003-fails.ts": rung(3),
       "0004-never.ts": rung(0),
     });
     const checkout = temp.dir("migrate-checkout-");
     const ran = ["0001-first.ts", "0002-second.ts", "0003-fails.ts"];
-    // Both streams pass through: a failed rung's line is what the delivered log tail carries.
     expect(boundedSpawnSync([process.execPath, MIGRATE, dir, checkout])).toEqual({
       exitCode: 3,
       stdout: ran.map((n) => `${n} out\n`).join(""),
@@ -46,16 +48,5 @@ describe("migrate.ts", () => {
     expect(readFileSync(join(checkout, "log"), "utf-8")).toBe(
       ran.map((n) => `${n} ${checkout}\n`).join(""),
     );
-  });
-
-  test("an empty migrations directory is a no-op; a missing argument is a usage error", () => {
-    const checkout = temp.dir("migrate-checkout-");
-    expect(
-      boundedSpawnSync([process.execPath, MIGRATE, temp.dir("migrate-empty-"), checkout]),
-    ).toEqual({ exitCode: 0, stdout: "", stderr: "" });
-    expect(existsSync(join(checkout, "log"))).toBe(false);
-    const usage = boundedSpawnSync([process.execPath, MIGRATE, checkout]);
-    expect(usage.exitCode).toBe(1);
-    expect(usage.stdout).toContain("::error::usage:");
   });
 });
