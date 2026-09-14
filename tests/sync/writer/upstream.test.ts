@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Glob } from "bun";
 import {
   fetchText,
   fetchUpstream,
@@ -17,6 +18,26 @@ const SHA = "0123456789abcdef0123456789abcdef01234567";
 const ref = (path: string) => ({ repository: "github/gitignore", sha: SHA, path });
 const served = serveUpstream(join(FIXTURES, "upstream"));
 afterAll(() => served.stop());
+
+// A test that spawns the writer without --upstream passes while the network is up and fails offline; two such tests were
+// each found by review after the fact, so the roster is pinned here, helpers that spawn the writer for a test included.
+test("every test that runs the writer, directly or through a script, passes --upstream, so no test reaches the real host", () => {
+  const root = join(import.meta.dir, "../../..");
+  const read = (rel: string) => readFileSync(join(root, rel), "utf-8");
+  const WRITER = ".github/scripts/sync/writer/sync.ts";
+  const spawners = [
+    WRITER,
+    ...[...new Glob(".github/scripts/**/*.ts").scanSync(root)].filter(
+      (rel) => rel !== WRITER && read(rel).includes("sync/writer/sync.ts"),
+    ),
+  ].map((rel) => rel.slice(rel.lastIndexOf("/") + 1));
+  expect(spawners).toEqual(["sync.ts", "write_fleet_lint_tree.ts"]);
+  const tests = [...new Glob("tests/**/*.test.ts").scanSync(root)]
+    .filter((rel) => spawners.some((name) => read(rel).includes(`/${name}`)))
+    .sort();
+  expect(tests.length).toBeGreaterThanOrEqual(4);
+  expect(tests.filter((rel) => !read(rel).includes("--upstream"))).toEqual([]);
+});
 
 describe("normalizeUpstream", () => {
   test.each([
