@@ -206,6 +206,8 @@ describe("the CLI", () => {
       GITHUB_REF: "refs/heads/main",
       GITHUB_OUTPUT: output,
       GREEN_WAIT_MS: "0",
+      // Unset in the base env: an ambient value from the shell would take every row down the called path.
+      [SOURCE_SHA]: undefined,
       PATH: `${bin}:${process.env.PATH}`,
       STUB_CALLS: calls,
       FAKE_CHECK_RUNS: GREEN.stdout,
