@@ -11,7 +11,14 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { CHECK_NAME } from "../../.github/scripts/shared/all_green.ts";
-import { GITHUB_ACTIONS_APP_ID } from "../../.github/scripts/sync/writer/settings_layers.ts";
+import {
+  foldSettings,
+  GITHUB_ACTIONS_APP_ID,
+  loadLayer,
+  loadOverrideLayer,
+  readLayer,
+  sectionEntries,
+} from "../../.github/scripts/sync/writer/settings_layers.ts";
 import { parseFilesConfig, SOURCE_PREFIX } from "../../actions/plan/files_config.ts";
 import { declaredLayers, type LayerSources } from "../../actions/plan/reserved_labels.ts";
 import { tempDirs } from "../shared/temp_dir";
@@ -34,11 +41,7 @@ type Ruleset = {
 
 /** A layer's plain list, or the rendered document's `{_undeclared, entries}` wrapper. */
 function readRulesets(path: string): Ruleset[] {
-  const doc = parseYaml(readFileSync(path, "utf-8")) as {
-    rulesets?: Ruleset[] | { entries: Ruleset[] };
-  } | null;
-  const declared = doc?.rulesets;
-  return Array.isArray(declared) ? declared : (declared?.entries ?? []);
+  return sectionEntries(parseYaml(readFileSync(path, "utf-8")), "rulesets") as Ruleset[];
 }
 
 const requiredChecks = (ruleset: Ruleset | undefined) =>
@@ -151,5 +154,38 @@ describe("every settings layer", () => {
       actorsSeen: 1,
       violations: [`${join(tree, "rules/main-branch.yml")}: ruleset main`],
     });
+  });
+});
+
+describe("the override's ruleset policy", () => {
+  test("a ruleset no layer declares is deleted, and an overlay asking to keep undeclared rulesets is overruled", () => {
+    // The override merges above every overlay (docs/settings.md), so the
+    // policy it declares is the fleet's answer: no repository can hold a
+    // dropped ruleset alive by declaring keep.
+    const settings = FILES.settings;
+    if (settings === null) throw new Error("files.yml declares no settings block");
+    const tree = join(REPO_ROOT, SOURCE_PREFIX);
+    const overlay = readLayer(
+      "rulesets:\n  _undeclared: keep\n  entries:\n    - {name: mine, target: branch, enforcement: active, rules: [{type: deletion}]}\n",
+      ".github/settings.local.yml",
+    );
+    const folded = foldSettings(
+      [
+        loadLayer(join(tree, settings.baseline)),
+        overlay,
+        loadOverrideLayer(join(tree, settings.override)),
+      ],
+      "the fold",
+    );
+    if ("refused" in folded) throw new Error(folded.refused);
+    // The bytes the apply reads, not the fold's object: the render writes these.
+    const rendered = parseYaml(folded.yaml) as Record<string, unknown>;
+    expect(rendered.rulesets).toMatchObject({ _undeclared: "delete" });
+    expect(sectionEntries(rendered, "rulesets").map((r) => r.name)).toEqual([
+      "main",
+      "mine",
+      "non-bypassable",
+      "pr-title",
+    ]);
   });
 });

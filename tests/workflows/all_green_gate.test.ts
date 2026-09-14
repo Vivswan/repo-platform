@@ -43,8 +43,10 @@ test("ci.yml's gate needs exactly the jobs that do not ride behind it", () => {
 });
 
 test("both gate jobs post the check as CHECK_NAME, fail closed, and the override ruleset requires that context", () => {
-  const { rulesets } = parseYaml(read("files/settings/override.yml")) as { rulesets: Ruleset[] };
-  const contexts = rulesets
+  const { rulesets } = parseYaml(read("files/settings/override.yml")) as {
+    rulesets: { entries: Ruleset[] };
+  };
+  const contexts = rulesets.entries
     .find((ruleset) => ruleset.name === "main")
     ?.rules.find((rule) => rule.type === "required_status_checks")
     ?.parameters?.required_status_checks?.map((check) => check.context);

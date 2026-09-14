@@ -352,7 +352,7 @@ describe("the layer topology fails CLOSED", () => {
       reason: "a layer with a section the apply does not know",
       config: CONFIG,
       damage: (tree) => writeFileSync(join(tree, "site/settings.yml"), "labels_v2: []\n"),
-      problem: "unknown top-level section(s) in files/site/settings.yml: labels_v2",
+      problem: "unknown top-level section in files/site/settings.yml: labels_v2",
     },
   ])("$reason is a load problem naming the file", ({ config, damage, problem }) => {
     // The control: every committed declaration has its file, so the one
@@ -440,12 +440,12 @@ describe("foldSettings", () => {
     {
       reason: "a null on a section the apply does not know",
       text: "labels_v2: null\n",
-      message: "unknown top-level section(s) in here: labels_v2",
+      message: "unknown top-level section in here: labels_v2",
     },
     {
       reason: "an underscore key outside the library's two directives (no private notes)",
       text: "_notes: {why: mine}\nrepository: {has_wiki: false}\n",
-      message: "unknown underscore key(s) in here: _notes",
+      message: "unknown underscore key in here: _notes",
     },
   ])("refuses $reason, naming the layer", ({ text, message }) => {
     expect(foldSettings([layer("here", text)], "f")).toEqual({
@@ -546,7 +546,7 @@ describe("foldSettings", () => {
     });
   });
 
-  test("the bytes are the apply's own merged file: the layers' key order, the knob leading its wrapper", () => {
+  test("the bytes are the apply's own canonical file: keys in schema order whatever the layers' order, the knob leading its wrapper", () => {
     const folded = foldSettings(
       [
         layer(
@@ -561,9 +561,9 @@ describe("foldSettings", () => {
       settings: expect.any(Object),
       yaml: [
         "repository:",
+        "  description: mine",
         "  has_issues: true",
         "  has_wiki: false",
-        "  description: mine",
         "labels:",
         "  _undeclared: delete",
         "  entries:",
@@ -582,7 +582,7 @@ describe("foldSettings", () => {
     );
     expect(folded).toEqual({
       settings: { repository: { has_wiki: false }, pages: null },
-      yaml: "pages: null\nrepository:\n  has_wiki: false\n",
+      yaml: "repository:\n  has_wiki: false\npages: null\n",
     });
   });
 
@@ -722,9 +722,9 @@ describe("the override layer", () => {
     // an unpinned entry lets any app satisfy the context by name.
     const shipped = () => parseYaml(readFileSync(OVERRIDE, "utf-8")) as Record<string, unknown>;
     const checksParams = (doc: Record<string, unknown>) => {
-      const main = (doc.rulesets as { name: string; rules: Record<string, unknown>[] }[]).find(
-        (r) => r.name === "main",
-      );
+      const main = sectionEntries(doc, "rulesets").find((r) => r.name === "main") as
+        | { rules: Record<string, unknown>[] }
+        | undefined;
       return main?.rules.find((r) => r.type === "required_status_checks")?.parameters as {
         required_status_checks: { context: string; integration_id?: number }[];
       };
