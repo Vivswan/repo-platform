@@ -110,29 +110,40 @@ describe("the managed rulesets", () => {
 
   test("the fleet protection rulesets are NOT in these layers", () => {
     // The main and non-bypassable PROTECTION rules live in the override, which merges above these layers;
-    // the private side contributes no ruleset of its own.
-    //   pr-title  -> the baseline's, on every visibility, so the disabled deselection heal reaches every repo
+    // the private side contributes no ruleset of its own, and no module-free selection declares one.
     //   main      -> the public overlay's entry alone: the code_quality rule and the public-only copilot_code_review auto-request
-    expect(rulesetNames(selection())).toEqual(["pr-title", "main"]);
+    expect(rulesetNames(selection())).toEqual(["main"]);
     expect(mainRuleTypes(selection())).toEqual(["code_quality", "copilot_code_review"]);
-    expect(rulesetNames(selection({ private: true }))).toEqual(["pr-title"]);
+    expect(rulesetNames(selection({ private: true }))).toEqual([]);
   });
 
-  test("the pr-title module flips the baseline's disabled required-check ruleset active", () => {
-    const enforcement = (s: Selection) =>
-      rulesets(s).find((r) => r.name === "pr-title")?.enforcement;
-    expect(enforcement(selection())).toBe("disabled");
-    expect(enforcement(selection({ modules: ["pr-title"] }))).toBe("active");
-    // Visibility-independent: pr-title checks run on private repos too.
-    expect(enforcement(selection({ modules: ["pr-title"], private: true }))).toBe("active");
-    // The flip must not lose the baseline's shape: the merged entry still
-    // carries the pinned required check.
-    const merged = rulesets(selection({ modules: ["pr-title"] })).find(
-      (r) => r.name === "pr-title",
-    ) as { rules?: { type: string; parameters?: Record<string, unknown> }[] };
-    const checks = merged.rules?.find((r) => r.type === "required_status_checks")?.parameters
-      ?.required_status_checks as { context: string; integration_id: number }[];
-    expect(checks).toEqual([{ context: "pr-title", integration_id: GITHUB_ACTIONS_APP_ID }]);
+  test("the pr-title module declares its whole required-check ruleset, on every visibility", () => {
+    const prTitle = (s: Selection) => rulesets(s).find((r) => r.name === "pr-title");
+    // Absent without the module: the apply deletes it from a repository that deselected.
+    expect(prTitle(selection())).toBeUndefined();
+    // The whole entry, not its name: an unpinned check or a missing bypass
+    // would render fine and misbehave at apply time, fleet-wide.
+    const expected = {
+      name: "pr-title",
+      target: "branch",
+      enforcement: "active",
+      conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+      rules: [
+        {
+          type: "required_status_checks",
+          parameters: {
+            strict_required_status_checks_policy: false,
+            do_not_enforce_on_create: true,
+            required_status_checks: [
+              { context: "pr-title", integration_id: GITHUB_ACTIONS_APP_ID },
+            ],
+          },
+        },
+      ],
+      bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+    };
+    expect(prTitle(selection({ modules: ["pr-title"] }))).toEqual(expected);
+    expect(prTitle(selection({ modules: ["pr-title"], private: true }))).toEqual(expected);
   });
 
   test("code_quality renders for every public repo, toolchain or not", () => {
@@ -152,7 +163,6 @@ describe("the managed rulesets", () => {
     // The whole ruleset, not its name: a stale or misspelled module layer
     // would otherwise pass here and die fleet-wide at apply time.
     expect(rulesetNames(selection({ modules: ["release-please"] }))).toEqual([
-      "pr-title",
       "main",
       "release-tags",
     ]);

@@ -419,20 +419,9 @@ describe("sync.ts end to end", () => {
     // The override's policy, not the library's default of keep.
     expect(doc.rulesets._undeclared).toBe("delete");
     const rulesets = doc.rulesets.entries;
-    expect(rulesets.map((r) => r.name)).toEqual(["main", "pr-title", "release-branches"]);
-    // The baseline's disabled ruleset and the seed's own ride through whole.
+    expect(rulesets.map((r) => r.name)).toEqual(["main", "release-branches"]);
+    // The seed's own ruleset rides through whole.
     expect(rulesets[1]).toEqual({
-      name: "pr-title",
-      target: "branch",
-      enforcement: "disabled",
-      rules: [
-        {
-          type: "required_status_checks",
-          parameters: { required_status_checks: [{ context: "pr-title", integration_id: 15368 }] },
-        },
-      ],
-    });
-    expect(rulesets[2]).toEqual({
       name: "release-branches",
       target: "branch",
       enforcement: "active",

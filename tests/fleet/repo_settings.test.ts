@@ -185,7 +185,6 @@ describe("the override's ruleset policy", () => {
       "main",
       "mine",
       "non-bypassable",
-      "pr-title",
     ]);
   });
 });

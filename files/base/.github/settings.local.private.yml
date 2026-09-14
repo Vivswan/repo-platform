@@ -4,7 +4,7 @@
 #
 #   a key declared here   -> wins over the fleet default; null opts out
 #   labels (a list)       -> replace the fleet entry by name; undeclared labels are deleted by the apply
-#   rulesets (a list)     -> merge into the fleet entry by name; undeclared rulesets are left alone
+#   rulesets (a list)     -> merge into the fleet entry by name; undeclared rulesets are deleted by the apply
 
 repository:
   description: "{{description}}"

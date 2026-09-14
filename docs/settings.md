@@ -9,9 +9,9 @@ Every managed repository carries a rendered `.github/settings.yml`: a managed fi
 
 | # | Layer | Home | Contents |
 |---|---|---|---|
-| 1 | Fleet baseline | [files/settings/baseline.yml](../files/settings/baseline.yml) | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels, the disabled `pr-title` ruleset |
+| 1 | Fleet baseline | [files/settings/baseline.yml](../files/settings/baseline.yml) | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels |
 | 2 | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | `security_and_analysis` and the `main` ruleset's `code_quality` and `copilot_code_review` rules for public repos; the `settings-as-code-report` marker label for private ones |
-| 3 | Module layer | `files/<module>/settings.yml` | what selecting that module adds: a toolchain module's dependabot label, release-please's four labels and its `release-tags` ruleset, [pr-title's activation](#the-pr-title-ruleset) |
+| 3 | Module layer | `files/<module>/settings.yml` | what selecting that module adds: a toolchain module's dependabot label, release-please's four labels and its `release-tags` ruleset, [pr-title's ruleset](#the-pr-title-ruleset) |
 | 4 | CodeQL layer | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml) | the `code_scanning` rule for public repos with a CodeQL toolchain: GitHub rejects it on private repos, and a repo with no CodeQL run would block every merge on it |
 | 5 | Repo overlay | the repo's own `.github/settings.local.yml` | identity keys (`description`, `homepage`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides |
 | 6 | Fleet override | [files/settings/override.yml](../files/settings/override.yml) | the invariants no repo may weaken: the squash-only merge policy (the PR title as the squash subject, a blank squash body), `allow_auto_merge`, `enable_vulnerability_alerts`, the `main` and `non-bypassable` protection rulesets, and the rulesets' `_undeclared: delete` policy |
@@ -142,16 +142,11 @@ The two protection rulesets live in [files/settings/override.yml](../files/setti
 
 ### The pr-title ruleset
 
-A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](https://github.com/Vivswan/repo-platform/blob/main/files/pr-title/.github/workflows/pr-title.yml) workflow's own `pr-title` check (Actions-pinned, like `all-green`) on repos selecting the pr-title module. Its ownership is split on purpose:
-
-| Piece | Home | Why |
-| --- | --- | --- |
-| The full ruleset shape, DISABLED | the baseline ([files/settings/baseline.yml](../files/settings/baseline.yml)) | Deselecting the module renders the requirement back to disabled through the ordinary apply. |
-| `enforcement: active` | the module's layer ([files/pr-title/settings.yml](../files/pr-title/settings.yml)) | Selecting the module is what activates the requirement. |
+A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](https://github.com/Vivswan/repo-platform/blob/main/files/pr-title/.github/workflows/pr-title.yml) workflow's own `pr-title` check (Actions-pinned, like `all-green`) on repos selecting the pr-title module. The module's layer ([files/pr-title/settings.yml](../files/pr-title/settings.yml)) carries the whole ruleset, so selecting the module declares it and deselecting drops it from the render.
 
 It is a separate ruleset rather than a rule in `main` because a `required_status_checks` rule merged into `main` from a lower layer would be replaced by the override's own rule of that type; active rulesets on one branch union their required checks.
 
-The workflow and the activation ride one sync PR, so selecting the module never requires a check nothing creates. Deselecting keeps a bounded window: the sync PR that deletes `pr-title.yml` also renders the ruleset disabled, but the still-active requirement wedges that PR on its own head until an admin bypass merges it; the apply after the merge disables it.
+The workflow and the ruleset ride one sync PR, so selecting the module never requires a check nothing creates. Deselecting keeps a bounded window: the sync PR that deletes `pr-title.yml` also drops the ruleset from the render, but the still-live requirement wedges that PR on its own head until an admin bypass merges it; the apply after the merge deletes the ruleset.
 
 ### Copilot code review
 

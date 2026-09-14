@@ -21,7 +21,7 @@ rulesets:
   # A ruleset no layer declares any more leaves on the next apply instead of outliving its layer.
   _undeclared: delete
   entries:
-    # ONE required check, all-green (docs/all-green.md); the pr-title module's check rides its own baseline-owned ruleset, so this context never changes with module selection.
+    # ONE required check, all-green (docs/all-green.md); the pr-title module's check rides its own module-owned ruleset, so this context never changes with module selection.
     # loadOverrideLayer refuses this file when the all-green context or its integration_id pin is missing.
     #
     #   bypass actor 5 (RepositoryRole admin)   -> direct pushes to main keep working
