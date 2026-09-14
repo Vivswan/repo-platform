@@ -115,10 +115,10 @@ function finding(
         : `differs from what ${build} writes`;
   const was = shown(before);
   const is = shown(after);
-  // Equal text under an unequal verdict is a byte-only edit when both sides are files; a presence or kind change (an
-  // empty file created or removed) has nothing more to show than its verdict line.
+  // Equal text under an unequal verdict is a byte-only edit when both sides are of one kind; a presence or kind change
+  // (an empty file created or removed) has nothing more to show than its verdict line.
   if (was === is) {
-    const bytesOnly = before?.kind === "file" && after?.kind === "file";
+    const bytesOnly = before !== undefined && after !== undefined && before.kind === after.kind;
     return bytesOnly
       ? [`${path}: ${verdict}`, "(the bytes differ where the decoded text does not)"]
       : [`${path}: ${verdict}`];
