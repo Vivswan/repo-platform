@@ -152,7 +152,7 @@ describe("the release pins", () => {
     else expect(() => tagVersion(tag, template, "o/a")).toThrow(outcome.throws);
   });
 
-  // A prerelease accepted here makes compareVersions NaN, which decideBump reads as a bump: every run would rewrite the pin.
+  // A prerelease accepted here makes compareVersions NaN, so decideBump can neither see a downgrade nor read current: it always bumps.
   test.each([
     ["2.9.5", "no trailing newline"],
     ["1.4.0-canary.1\n", "a prerelease"],
