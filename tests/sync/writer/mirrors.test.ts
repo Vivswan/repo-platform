@@ -23,6 +23,7 @@ import {
 } from "../../../.github/scripts/sync/writer/mirrors.ts";
 import {
   type MirrorProblem,
+  mirrorDeclarationProblems,
   mirrorPathProblem,
   type OwnedPaths,
   patternMatches,
@@ -44,9 +45,12 @@ function tree(files: Record<string, string>): string {
 function owned(sources: string[], writes: string[] = [], stale: string[] = []): OwnedPaths {
   return {
     sources: new Set(sources),
-    writes: new Set([...sources, ...writes, ".github/repo-platform-manifest.json"]),
-    stale: new Set(stale),
-    excepted: new Set(),
+    reserved: new Map([
+      ...[...sources, ...writes, ".github/repo-platform-manifest.json"].map(
+        (path) => [path, "a path files.yml writes"] as const,
+      ),
+      ...stale.map((path) => [path, "a path a stale manifest record retires"] as const),
+    ]),
   };
 }
 
@@ -262,6 +266,40 @@ describe("applyMirrors", () => {
     expect(existsSync(join(root, "copies"))).toBe(false);
   });
 
+  // A reservation the map carries and neither judge names reaches the plan's verdicts and both of the writer's checks (the
+  // declarations, then each path the checkout expands a pattern to), so a kind added to the map alone is refused everywhere.
+  test("the writer refuses a reserved path with the plan's own words, whatever reserved it", () => {
+    const what = "a path a rule of tomorrow keeps";
+    const claims: OwnedPaths = {
+      sources: new Set(["LICENSE.md"]),
+      reserved: new Map([
+        ["vendor/NOTICE.md", what],
+        ["vendor/pkg/sub/NOTICE.md", what],
+      ]),
+    };
+    const written = bytes({ "LICENSE.md": "L\n" });
+    const declared = [
+      { source: "LICENSE.md", kind: "copy" as const, targets: ["vendor/NOTICE.md", "vendor/*"] },
+    ];
+    const root = tree({ "LICENSE.md": "L\n", "vendor/pkg/sub/NOTICE.md": "N\n" });
+    const planned = mirrorDeclarationProblems(declared, claims);
+    expect(planned).toEqual([
+      failure("LICENSE.md", "vendor/NOTICE.md", `the target is ${what}`),
+      failure("LICENSE.md", "vendor/*", `the pattern matches 'vendor/NOTICE.md', ${what}`),
+    ]);
+    expect(failuresOf(() => applyMirrors(root, declared, written, claims, {}))).toEqual(planned);
+
+    // The checkout alone shows 'vendor/*/sub' landing above the reserved path: the plan passes it, the writer's expansion
+    // refuses it with the verdict the plan's judge gives that path.
+    const expanded = [{ source: "LICENSE.md", kind: "copy" as const, targets: ["vendor/*/sub"] }];
+    const verdict = `is a path prefix of 'vendor/pkg/sub/NOTICE.md', ${what}`;
+    expect(mirrorDeclarationProblems(expanded, claims)).toEqual([]);
+    expect(mirrorPathProblem("vendor/pkg/sub", claims)).toBe(verdict);
+    expect(failuresOf(() => applyMirrors(root, expanded, written, claims, {}))).toEqual([
+      expands("LICENSE.md", "vendor/*/sub", "vendor/pkg/sub", verdict),
+    ]);
+  });
+
   test("a literal pass fails whole on a link above a target, a held source, or a directory the glob pass would need, and writes over no link it could have replaced", () => {
     const root = tree({
       "LICENSE.md": "v2\n",
@@ -473,14 +511,17 @@ describe("applyMirrors", () => {
     const claims = owned(["LICENSE.md", "AGENTS.md"], ["docs/README.md"]);
     const root = tree(
       Object.fromEntries(
-        [...claims.writes, ".repo-platform.yml", "skills/a/README.md"].map((path) => [path, ""]),
+        [...claims.reserved.keys(), ".repo-platform.yml", "skills/a/README.md"].map((path) => [
+          path,
+          "",
+        ]),
       ),
     );
     const expanded = expandPattern(checkoutProbe(root), pattern);
     expect(expanded.filter((path) => mirrorPathProblem(path, claims) !== null)).toEqual(refused);
     expect(expanded.filter((path) => patternMatches(pattern, path))).toEqual(expanded);
     expect(
-      [...claims.writes, ".repo-platform.yml"]
+      [...claims.reserved.keys(), ".repo-platform.yml"]
         .filter((path) => patternMatches(pattern, path))
         .sort(),
     ).toEqual(refused);

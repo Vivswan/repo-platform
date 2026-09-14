@@ -20,45 +20,43 @@ export type MirrorKind = Mirror["kind"];
 export interface OwnedPaths {
   /** The managed and split entry paths: the only files a mirror may copy. */
   sources: ReadonlySet<string>;
-  writes: ReadonlySet<string>;
-  /** Every recorded path the run retires as no longer selected: the
-   *  writer's alone (it reads the manifest), empty at the plan. */
-  stale: ReadonlySet<string>;
-  /** The registration's `except`: the repository's own, so no mirror lands at, under, or above one. */
-  excepted: ReadonlySet<string>;
+  /** Every path no mirror may land at, under, or above, by what claims it. */
+  reserved: ReadonlyMap<string, string>;
 }
 
-export function ownedPaths(config: Pick<FilesConfig, "files">, selection: Selection): OwnedPaths {
+/** `stale` is every recorded path the run retires as no longer selected: the writer's (it reads the manifest), empty at the plan. */
+export function ownedPaths(
+  config: Pick<FilesConfig, "files">,
+  selection: Selection,
+  stale: Iterable<string> = [],
+): OwnedPaths {
   const entries = selectEntries(config, selection);
+  const reserved = new Map<string, string>();
+  const claim = (paths: Iterable<string>, what: string) => {
+    for (const path of paths) if (!reserved.has(path)) reserved.set(path, what);
+  };
+  claim([...entries.map((entry) => entry.path), MANIFEST_NAME], "a path files.yml writes");
+  claim(stale, "a path a stale manifest record retires");
+  claim(selection.except ?? [], "a path the registration excepts");
   return {
     sources: new Set(
       entries
         .filter((entry) => entry.class === "managed" || entry.class === "split")
         .map((entry) => entry.path),
     ),
-    writes: new Set([...entries.map((entry) => entry.path), MANIFEST_NAME]),
-    stale: new Set(),
-    excepted: new Set(selection.except ?? []),
+    reserved,
   };
-}
-
-function reserved(owned: OwnedPaths): [ReadonlySet<string>, string][] {
-  return [
-    [owned.writes, "a path files.yml writes"],
-    [owned.stale, "a path a stale manifest record retires"],
-    [owned.excepted, "a path the registration excepts"],
-  ];
 }
 
 /** An exact match is not nesting: `path` itself among `others` is null here, and the caller judges equality first. */
 export function nestedWith(
   path: string,
-  others: ReadonlySet<string>,
+  others: ReadonlySet<string> | ReadonlyMap<string, unknown>,
 ): { under: string } | { above: string } | null {
   for (let dir = dirname(path); dir !== "." && dir !== "/"; dir = dirname(dir)) {
     if (others.has(dir)) return { under: dir };
   }
-  for (const other of others) {
+  for (const other of others.keys()) {
     if (other.startsWith(`${path}/`)) return { above: other };
   }
   return null;
@@ -73,16 +71,13 @@ export function mirrorPathProblem(path: string, owned: OwnedPaths): string | nul
   if (path === REGISTRATION_PATH) return "is the registration itself";
   if (path.startsWith(`${REGISTRATION_PATH}/`)) return "sits under the registration";
   if (path.toLowerCase().startsWith(".github/workflows/")) return "sits under .github/workflows/";
-  for (const [paths, what] of reserved(owned)) {
-    if (paths.has(path)) return `is ${what}`;
-    const nested = nestedWith(path, paths);
-    if (nested !== null) {
-      return "under" in nested
-        ? `sits under '${nested.under}', ${what}`
-        : `is a path prefix of '${nested.above}', ${what}`;
-    }
-  }
-  return null;
+  const what = owned.reserved.get(path);
+  if (what !== undefined) return `is ${what}`;
+  const nested = nestedWith(path, owned.reserved);
+  if (nested === null) return null;
+  return "under" in nested
+    ? `sits under '${nested.under}', ${owned.reserved.get(nested.under)}`
+    : `is a path prefix of '${nested.above}', ${owned.reserved.get(nested.above)}`;
 }
 
 export interface MirrorProblem {
@@ -248,21 +243,19 @@ export function mirrorDeclarationProblems(
   const literals = clean.filter(({ target }) => !isGlob(target));
   const literalKinds = new Map(literals.map(({ target, kind }) => [target, kind]));
   const probe = knownProbe(literalKinds);
-  const known: [ReadonlySet<string>, string][] = [
-    [new Set([REGISTRATION_PATH]), "the registration"],
-    ...reserved(owned),
-  ];
-  const reservedPaths = new Set(known.flatMap(([paths]) => [...paths]));
+  const known = new Map([[REGISTRATION_PATH, "the registration"], ...owned.reserved]);
   const claims: Claim[] = literals.map((literal) => ({ ...literal, path: literal.target }));
   for (const { source, target, kind } of clean) {
     if (!isGlob(target)) continue;
-    for (const [paths, what] of known) {
-      for (const path of [...paths].filter((path) => patternMatches(target, path)).sort()) {
-        problems.push({ source, target, problem: `the pattern matches '${path}', ${what}` });
-      }
+    for (const path of [...known.keys()].filter((path) => patternMatches(target, path)).sort()) {
+      problems.push({
+        source,
+        target,
+        problem: `the pattern matches '${path}', ${known.get(path)}`,
+      });
     }
     for (const path of [target, ...expandPattern(probe, target)]) {
-      if (!reservedPaths.has(path)) claims.push({ source, target, path, kind });
+      if (!known.has(path)) claims.push({ source, target, path, kind });
     }
   }
   const judged = judgeClaims(claims, new Set(), (path) => mirrorPathProblem(path, owned));
