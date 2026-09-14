@@ -1,5 +1,5 @@
 // One entry per line, 4-space indent, the JSON-quoted path, one inline JSON object, so two syncs' manifests differ in
-// hash values alone and a review diff reads line by line.
+// hash values and the self entry's commit alone and a review diff reads line by line.
 //
 // DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal imports only.
 
@@ -50,6 +50,8 @@ export type ManifestEntryShape = {
   grammar?: unknown;
   /** A mirror's materialization: "symlink" when the path is a link to the source; absent for a copy. */
   kind?: unknown;
+  /** The manifest's own entry alone: the platform commit the repository is judged against. */
+  commit?: unknown;
 } & { [F in SplitDeclarationField]?: unknown };
 
 /** The closed entry-field vocabulary, the runtime twin of ManifestEntryShape: `satisfies` refuses
@@ -60,6 +62,7 @@ export const ENTRY_FIELDS = [
   "hash",
   "grammar",
   "kind",
+  "commit",
   ...MANAGED_REGION_WIRE_FIELDS,
 ] as const satisfies readonly (keyof ManifestEntryShape)[];
 /** Compile-time only. @public */
@@ -70,7 +73,7 @@ const ENTRY_FIELD_SET: ReadonlySet<string> = new Set(ENTRY_FIELDS);
 
 /** The fields a record of each class carries. The sync writer reads a previous record and the validator's parity check
  *  judges a target's manifest through this one table, so a field on the wrong class is a hand edit to both. The manifest's own
- *  entry (managed, hash null) is no record of a written file: neither reader judges it here. */
+ *  entry (managed, hash null, the commit) is no record of a written file: neither reader judges it here. */
 export const RECORD_FIELDS = {
   managed: ["class", "hash"],
   split: ["class", "hash", "grammar", ...MANAGED_REGION_WIRE_FIELDS],
@@ -78,10 +81,11 @@ export const RECORD_FIELDS = {
   mirror: ["class", "hash", "kind"],
 } as const satisfies Record<RecordedClass, readonly (typeof ENTRY_FIELDS)[number][]>;
 
-/** The manifest's own entry: managed, hash null. */
+/** The manifest's own entry: managed, hash null, the commit the repository is judged against. */
 export const SELF_ENTRY_FIELDS = [
   "class",
   "hash",
+  "commit",
 ] as const satisfies readonly (typeof ENTRY_FIELDS)[number][];
 
 export function strayFields(fields: readonly string[], entry: ManifestEntryShape): string[] {

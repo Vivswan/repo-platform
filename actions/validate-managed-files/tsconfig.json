@@ -9,5 +9,5 @@
     "allowImportingTsExtensions": true,
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "validator/**/*.ts", "../shared/*.ts"]
+  "include": ["check.ts", "src/**/*.ts", "validator/**/*.ts", "../shared/*.ts"]
 }

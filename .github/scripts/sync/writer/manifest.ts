@@ -20,6 +20,7 @@ import {
 import {
   GENERATED_NOTICE,
   MANIFEST_NAME,
+  PLATFORM_NAME,
   REGISTRATION_PATH,
 } from "../../../../actions/shared/platform.ts";
 import { existingFile, writeFile } from "./target_files.ts";
@@ -101,15 +102,24 @@ const COMMENT =
   "hash covers the region from the BEGIN line through the END line), starter (written once, " +
   "repo-owned from then on), mirror (a byte copy of a written file, or with kind symlink a " +
   "relative symbolic link to it whose hash is sha256 of the link target, declared in files.yml or " +
-  `${REGISTRATION_PATH}).`;
+  `${REGISTRATION_PATH}). This file's own entry names the ${PLATFORM_NAME} commit the repository is judged against ` +
+  "until a sync moves it.";
 
-/** The manifest's own entry carries no hash: a self-hash would be circular. The build that wrote the tree is named by
- *  the sync commit and its PR alone, so an unchanged tree renders byte-identical under a new build. */
-export function renderManifest(records: Record<string, ManifestRecord>): string {
+const COMMIT_RE = /^[0-9a-f]{40}$/;
+
+/** The commit the manifest's own entry names, null when it names none the writer can read (a manifest from before
+ *  the field, or a hand edit): the stamp rule in sync.ts then takes the build. */
+export function recordedCommit(records: Records): string | null {
+  const commit = records[MANIFEST_NAME]?.commit;
+  return typeof commit === "string" && COMMIT_RE.test(commit) ? commit : null;
+}
+
+/** The manifest's own entry carries the commit and no hash: a self-hash would be circular. */
+export function renderManifest(records: Record<string, ManifestRecord>, commit: string): string {
   const lines = Object.entries(records)
     .filter(([path]) => path !== MANIFEST_NAME)
     .map(([path, record]) => [path, entryBody(record as Record<string, JsonValue>)] as const);
-  lines.push([MANIFEST_NAME, entryBody({ class: "managed", hash: null })]);
+  lines.push([MANIFEST_NAME, entryBody({ class: "managed", hash: null, commit })]);
   lines.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return [
     "{",
@@ -122,6 +132,10 @@ export function renderManifest(records: Record<string, ManifestRecord>): string 
   ].join("\n");
 }
 
-export function writeManifest(target: string, records: Record<string, ManifestRecord>): void {
-  writeFile(target, MANIFEST_NAME, Buffer.from(renderManifest(records)));
+export function writeManifest(
+  target: string,
+  records: Record<string, ManifestRecord>,
+  commit: string,
+): void {
+  writeFile(target, MANIFEST_NAME, Buffer.from(renderManifest(records, commit)));
 }
