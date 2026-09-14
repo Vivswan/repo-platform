@@ -1,10 +1,29 @@
 ---
-# One key on purpose: files/settings/baseline.yml carries the full pr-title ruleset DISABLED and this flips it active, so deselecting the module heals it back through the ordinary apply.
-# A full copy living only here would outlive the module (the apply never deletes an undeclared ruleset) and wedge every PR on a check nothing creates.
-#
-#   a rule in `main` instead   -> rules append across layers keyed by type, so the override layer's required_status_checks would replace it
-#   its own active ruleset      -> active rulesets on one branch union their required checks
+# Its own ruleset, not a rule in `main`: rules append across layers keyed by type, so the override's required_status_checks would replace it there; active rulesets on one branch union their required checks.
+# Deselecting the module drops it from the render and the next apply deletes it (files/settings/override.yml declares `_undeclared: delete` for rulesets).
 
 rulesets:
   - name: pr-title
+    target: branch
     enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: required_status_checks
+        parameters:
+          strict_required_status_checks_policy: false
+          do_not_enforce_on_create: true
+          required_status_checks:
+            # The managed pr-title.yml workflow's job check run, pinned to
+            # the GitHub Actions app like the main ruleset's all-green
+            # context: no other app and no plain commit status can satisfy
+            # the context by name.
+            - context: pr-title
+              integration_id: 15368
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
