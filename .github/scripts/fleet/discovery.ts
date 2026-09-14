@@ -7,7 +7,6 @@ import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { env } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
-import { classifyEntry } from "./sync_scope.ts";
 
 /** A stalled-network backstop, not a latency budget: the slowest call is the paginated user/repos
  * listing, and two minutes covers several hundred repos. The plan jobs' timeout-minutes are sized
@@ -119,7 +118,7 @@ function dispatchInput(): string {
 
 /** Lowercased because GitHub identity is case-insensitive. A non-empty ONLY_REPO wins over the
  * dispatch input: the post-green call, the harnesses, and local runs pass the scope that way. */
-export function readDispatchRepo(owner?: string): string {
+export function readDispatchRepo(): string {
   let repo = env("ONLY_REPO");
   if (repo === "") repo = dispatchInput();
   // Empty entries survive on purpose (",", "a/b,,c/d"): the scope parser
@@ -128,14 +127,6 @@ export function readDispatchRepo(owner?: string): string {
   return repo
     .split(",")
     .map((entry) => entry.trim())
-    .map((entry) =>
-      owner !== undefined &&
-      entry !== "" &&
-      classifyEntry(entry) === "invalid" &&
-      !entry.includes("/")
-        ? `${owner}/${entry}`
-        : entry,
-    )
     .join(",")
     .toLowerCase();
 }
@@ -170,8 +161,7 @@ export function notAdoptedNotice(display: string, consequence?: string): string 
   return `${display}: skipped - no ${REGISTRATION_PATH} on its default branch, so it has not adopted the platform. ${inserted}Register it (docs/new-repo.md) to opt in, or revoke the fleet token's write access to leave the fleet.`;
 }
 
-/** A hand-written settings.yml applied alone would delete every fleet label it does not list, so
- * the apply waits for the render. */
+/** A new repository before its first sync PR merges: the sync writes the file. */
 export function notRenderedNotice(display: string): string {
-  return `${display}: skipped - its .github/settings.yml is not yet rendered; the sync PR carrying the rendered settings has not merged.`;
+  return `${display}: skipped - it has no .github/settings.yml yet; the sync PR that renders it has not merged.`;
 }

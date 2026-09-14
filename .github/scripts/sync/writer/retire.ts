@@ -1,12 +1,8 @@
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import type { RetiredEntry } from "../../../../actions/plan/files_config.ts";
 import { cleanManagedRegion } from "../../../../actions/shared/grammar.ts";
-import { capture } from "../../shared/proc.ts";
 import { mirrorKind, type Records, readRecord, sha256 } from "./manifest.ts";
-import { insideTarget, probe, removeFile, writeFile } from "./target_files.ts";
+import { probe, removeFile, writeFile } from "./target_files.ts";
 
-export type RetireOutcome = "deleted" | "region removed" | "moved" | "held" | "kept" | "released";
+export type RetireOutcome = "deleted" | "region removed" | "held" | "released";
 
 export interface RetireRow {
   path: string;
@@ -48,7 +44,6 @@ export function judge(target: string, path: string, records: Records): Judgement
   const record = readRecord(records[path]);
   if (record === null) return { verdict: "unrecorded" };
   if (record.class === "starter") return foreign("a starter is repo-owned");
-  if (record.hash === null) return foreign("the record carries no hash");
   const linkRecorded =
     record.class === "link" || (record.class === "mirror" && mirrorKind(record) === "symlink");
   const found = probe(target, path);
@@ -105,30 +100,14 @@ export function release(path: string, records: Records): RetireRow {
   };
 }
 
-/** `git mv`, so the rename lands in the sync commit as one. */
-function gitMove(target: string, from: string, to: string): void {
-  insideTarget(target, from);
-  mkdirSync(dirname(insideTarget(target, to)), { recursive: true });
-  const result = capture(["git", "-C", target, "mv", "--", from, to]);
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `git mv ${from} ${to} failed (exit ${result.exitCode}): ${result.stderr.trim()}`,
-    );
-  }
-}
-
-/** `stale`: paths an earlier sync recorded that nothing selects now. */
-export function retire(
-  target: string,
-  entries: RetiredEntry[],
-  stale: string[],
-  selected: ReadonlySet<string>,
-  records: Records,
-): RetireRow[] {
+/** `stale`: paths an earlier sync recorded that nothing selects now (sync.ts builds it from the readable managed, split, and link records). */
+export function retire(target: string, stale: string[], records: Records): RetireRow[] {
   const rows: RetireRow[] = [];
-  const dispose = (path: string, detail: string) => {
+  const detail = "no longer selected";
+  for (const path of stale) {
+    if (probe(target, path).kind === "absent") continue;
     const judgement = judge(target, path, records);
-    if (judgement.verdict === "unrecorded") return;
+    if (judgement.verdict === "unrecorded") continue;
     if (judgement.verdict === "own" || judgement.verdict === "blank") {
       removeFile(target, path);
       delete records[path];
@@ -143,40 +122,9 @@ export function retire(
         outcome: "region removed",
         detail: `${detail}; repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it`,
       });
-    } else if (records[path]?.class === "starter") {
-      rows.push({ path, outcome: "kept", detail: judgement.reason });
     } else {
       rows.push({ path, outcome: "held", detail: judgement.reason });
     }
-  };
-  const present = (path: string) => probe(target, path).kind !== "absent";
-  for (const entry of entries) {
-    if (!present(entry.path)) continue;
-    if (entry.moved_to !== undefined && !selected.has(entry.moved_to)) {
-      dispose(entry.path, `retired (its new home ${entry.moved_to} is not selected here)`);
-      continue;
-    }
-    if (entry.moved_to !== undefined) {
-      if (!present(entry.moved_to)) {
-        gitMove(target, entry.path, entry.moved_to);
-        if (records[entry.path] !== undefined) {
-          records[entry.moved_to] = records[entry.path];
-          delete records[entry.path];
-        }
-        rows.push({ path: entry.path, outcome: "moved", detail: `to ${entry.moved_to}` });
-      } else {
-        rows.push({
-          path: entry.path,
-          outcome: "held",
-          detail: `${entry.moved_to} already exists, so the file was not moved over it`,
-        });
-      }
-      continue;
-    }
-    dispose(entry.path, "retired");
-  }
-  for (const path of stale) {
-    if (present(path)) dispose(path, "no longer selected");
   }
   return rows;
 }

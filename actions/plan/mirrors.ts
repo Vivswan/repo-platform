@@ -21,7 +21,6 @@ export interface OwnedPaths {
   /** The managed and split entry paths: the only files a mirror may copy. */
   sources: ReadonlySet<string>;
   writes: ReadonlySet<string>;
-  retires: ReadonlySet<string>;
   /** Every recorded path the run retires as no longer selected: the
    *  writer's alone (it reads the manifest), empty at the plan. */
   stale: ReadonlySet<string>;
@@ -29,10 +28,7 @@ export interface OwnedPaths {
   excepted: ReadonlySet<string>;
 }
 
-export function ownedPaths(
-  config: Pick<FilesConfig, "files" | "retired">,
-  selection: Selection,
-): OwnedPaths {
+export function ownedPaths(config: Pick<FilesConfig, "files">, selection: Selection): OwnedPaths {
   const entries = selectEntries(config, selection);
   return {
     sources: new Set(
@@ -41,7 +37,6 @@ export function ownedPaths(
         .map((entry) => entry.path),
     ),
     writes: new Set([...entries.map((entry) => entry.path), MANIFEST_NAME]),
-    retires: new Set(config.retired.map((entry) => entry.path)),
     stale: new Set(),
     excepted: new Set(selection.except ?? []),
   };
@@ -50,7 +45,6 @@ export function ownedPaths(
 function reserved(owned: OwnedPaths): [ReadonlySet<string>, string][] {
   return [
     [owned.writes, "a path files.yml writes"],
-    [owned.retires, "a path files.yml retires"],
     [owned.stale, "a path a stale manifest record retires"],
     [owned.excepted, "a path the registration excepts"],
   ];
@@ -70,7 +64,7 @@ export function nestedWith(
   return null;
 }
 
-/** A path above or below one files.yml writes or retires is as impossible as the path itself: the file would have to be
+/** A path above or below one files.yml writes or a stale record retires is as impossible as the path itself: the file would have to be
  *  a directory too. The registration is the one repo-owned file the sync reads, so a copy over it, or a directory made
  *  of it, would unregister the repository. */
 export function mirrorPathProblem(path: string, owned: OwnedPaths): string | null {

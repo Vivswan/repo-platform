@@ -41,7 +41,7 @@ const owner = requireEnv("OWNER");
 const runId = requireEnv("GITHUB_RUN_ID");
 const sha = requireEnv("GITHUB_SHA");
 
-const scope = parseScope(readDispatchRepo(owner), new Set(moduleRoster()));
+const scope = parseScope(readDispatchRepo(), new Set(moduleRoster()));
 if (scope.kind === "error") {
   error(scope.message);
   process.exit(1);
@@ -124,13 +124,15 @@ function probeAdoption(slug: string, display: string): ProbeResult<{ modules: st
   return { kind: "retry", detail: probe.stderr.replace(/\n+$/, "") };
 }
 
-// The apply reads each target's own .github/settings.yml, so a hand-written one is as unready as a
-// missing one.
+// The apply reads each target's own .github/settings.yml. A hand-written one applied alone would delete every fleet
+// label it does not list, so it fails the plan (counted below: the log is public and the target may be private); a
+// missing one is a repository before its first sync PR, skipped with a notice.
+let handWritten = 0;
 function probeRendered(slug: string, display: string): ProbeResult<true> {
   const probe = readRepoFile(slug, ".github/settings.yml");
   if (probe.exitCode === 0) {
     if (probe.stdout.split("\n", 1)[0] === RENDERED_HEADER) return { kind: "pass", value: true };
-    notice(notRenderedNotice(display));
+    handWritten++;
     return { kind: "drop" };
   }
   if (/HTTP 404/.test(probe.stderr)) {
@@ -211,6 +213,14 @@ for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
   targets.push(row);
 }
 
+if (handWritten > 0) {
+  error(
+    `${handWritten} selected ${handWritten === 1 ? "target carries" : "targets carry"} a hand-written ` +
+      ".github/settings.yml (names withheld - a target may be private): the apply reads the rendered " +
+      "file alone, so merge the sync PR that renders it, then re-run",
+  );
+  process.exit(1);
+}
 const leftOutLine = modulesLeftOutLine(scope, leftOut);
 if (leftOutLine !== null) console.log(leftOutLine);
 emitPlan(targets);

@@ -204,121 +204,94 @@ describe("readDispatchRepo", () => {
     }
   }
 
+  // One grammar for both selectors: a bare name rides through unchanged for the scope parser to refuse (sync_scope.ts).
   test.each([
     {
       reason: "ONLY_REPO is trimmed and case-folded",
       onlyRepo: "  Vivswan/Steady  ",
       eventBody: undefined,
-      owner: undefined,
       expected: "vivswan/steady",
     },
     {
-      reason: "a bare name gets the owner prefixed before folding",
+      reason: "a bare name stays bare: nothing here spells an owner onto it",
       onlyRepo: "Central-Home",
       eventBody: undefined,
-      owner: "Vivswan",
-      expected: "vivswan/central-home",
-    },
-    {
-      reason: "without an owner a bare name stays bare (the sync selector's contract)",
-      onlyRepo: "Central-Home",
-      eventBody: undefined,
-      owner: undefined,
       expected: "central-home",
     },
     {
-      reason: "a slug input is never owner-prefixed",
-      onlyRepo: "Other/Shared-Private",
-      eventBody: undefined,
-      owner: "Vivswan",
-      expected: "other/shared-private",
-    },
-    {
-      reason: 'the literal "all" is the whole-fleet scope, never a bare repo name to prefix',
+      reason: 'the literal "all" is the whole-fleet scope',
       onlyRepo: "All",
       eventBody: undefined,
-      owner: "Vivswan",
       expected: "all",
     },
     {
-      reason: "the visibility tokens are scope tokens, never bare repo names to prefix",
+      reason: "the visibility tokens are scope tokens",
       onlyRepo: " Public,private ",
       eventBody: undefined,
-      owner: "Vivswan",
       expected: "public,private",
     },
     {
-      reason:
-        "a comma list is trimmed and owner-prefixed per entry; empties survive for the scope parser to reject",
+      reason: "a comma list is trimmed per entry; empties survive for the scope parser to reject",
       onlyRepo: " Central-Home, Other/Shared ,,Vivswan/Third, ",
       eventBody: undefined,
-      owner: "Vivswan",
-      expected: "vivswan/central-home,other/shared,,vivswan/third,",
+      expected: "central-home,other/shared,,vivswan/third,",
     },
     {
       reason: "a lone comma is not an empty scope",
       onlyRepo: ",",
       eventBody: undefined,
-      owner: "Vivswan",
       expected: ",",
     },
     {
       reason: "a list from the event payload folds the same way",
       onlyRepo: "",
       eventBody: JSON.stringify({ inputs: { repo: "Vivswan/A,Vivswan/B" } }),
-      owner: undefined,
       expected: "vivswan/a,vivswan/b",
     },
     {
       reason: "an empty ONLY_REPO falls back to the event payload's repo input",
       onlyRepo: "",
       eventBody: JSON.stringify({ inputs: { repo: "Vivswan/Hidden-Server" } }),
-      owner: undefined,
       expected: "vivswan/hidden-server",
     },
     {
       reason: "a non-empty ONLY_REPO overrides the event payload",
       onlyRepo: "Vivswan/from-env",
       eventBody: JSON.stringify({ inputs: { repo: "Vivswan/from-event" } }),
-      owner: undefined,
       expected: "vivswan/from-env",
     },
     {
       reason: "an event payload without a repo input reads as empty",
       onlyRepo: "",
       eventBody: JSON.stringify({ inputs: {} }),
-      owner: undefined,
       expected: "",
     },
     {
       reason: "a null inputs key reads as empty (an inputs-less API dispatch)",
       onlyRepo: "",
       eventBody: JSON.stringify({ inputs: null }),
-      owner: undefined,
       expected: "",
     },
     {
       reason: "a payload without an inputs key reads as empty (schedule and release events)",
       onlyRepo: "",
       eventBody: JSON.stringify({ action: "published" }),
-      owner: undefined,
       expected: "",
     },
     {
-      reason: "nothing set reads as empty, and an owner never prefixes an empty input",
+      reason: "nothing set reads as empty",
       onlyRepo: "",
       eventBody: undefined,
-      owner: "Vivswan",
       expected: "",
     },
-  ])("$reason", ({ onlyRepo, eventBody, owner, expected }) => {
+  ])("$reason", ({ onlyRepo, eventBody, expected }) => {
     let eventPath = "";
     if (eventBody !== undefined) {
       eventPath = join(root, `event-${Bun.hash(eventBody).toString(16)}.json`);
       writeFileSync(eventPath, eventBody);
     }
     withEnv({ ONLY_REPO: onlyRepo, GITHUB_EVENT_PATH: eventPath }, () => {
-      expect(readDispatchRepo(owner)).toBe(expected);
+      expect(readDispatchRepo()).toBe(expected);
     });
   });
 

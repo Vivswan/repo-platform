@@ -34,9 +34,6 @@ files:
     source: files/docs-site/docs-site.with-pages.yml
   - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
   - { path: CLAUDE.md, class: link, target: AGENTS.md }
-retired:
-  - { path: .github/old-tool.yml }
-  - { path: SECURITY.md, moved_to: .github/SECURITY.md }
 `;
 
 function defaultProblemsOf(text: string): string[] {

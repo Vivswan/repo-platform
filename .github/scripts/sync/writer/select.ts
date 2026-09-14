@@ -1,14 +1,12 @@
-// Unknown module names are dropped and reported, never an error: the plan job already failed the PR that introduced them.
+// The registration's modules in files.yml order. A name files.yml does not offer is refused in the plan's words
+// (actions/plan/registration.ts), never dropped: the PR check and the sync speak one refusal.
 
 import type { FilesConfig } from "../../../../actions/plan/files_config.ts";
+import { unknownModuleProblems } from "../../../../actions/plan/registration.ts";
 
-export function resolveModules(
-  config: FilesConfig,
-  requested: string[],
-): { selected: string[]; dropped: string[] } {
+export function selectModules(config: FilesConfig, requested: string[]): string[] {
   const known = Object.keys(config.modules);
-  return {
-    selected: known.filter((name) => requested.includes(name)),
-    dropped: requested.filter((name) => !known.includes(name)),
-  };
+  const problems = unknownModuleProblems(requested, known);
+  if (problems.length > 0) throw new Error(problems.join("\n"));
+  return known.filter((name) => requested.includes(name));
 }

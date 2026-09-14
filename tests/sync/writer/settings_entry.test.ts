@@ -117,7 +117,6 @@ function input(overrides: Partial<SettingsRenderInput> = {}): SettingsRenderInpu
     config: CONFIG,
     tree: TREE,
     modules: ["bun"],
-    private: false,
     registration: registration("modules: [bun]\n"),
     overlay: OVERLAY,
     overlayPath: ".github/settings.local.yml",
@@ -204,33 +203,19 @@ describe("renderSettings", () => {
     });
   });
 
-  test.each<{ reason: string; overlay: string; operator: boolean; privateLayers: boolean }>([
+  test.each<{ reason: string; overlay: string; privateLayers: boolean }>([
     {
-      reason: "an overlay declaring private beats the operator's public",
+      reason: "an overlay declaring private selects the private layers",
       overlay: OVERLAY.replace("private: false", "private: true"),
-      operator: false,
       privateLayers: true,
     },
     {
-      reason: "an overlay declaring public beats the operator's private",
+      reason: "an overlay declaring public selects the public layers",
       overlay: OVERLAY,
-      operator: true,
       privateLayers: false,
     },
-    {
-      reason: "an overlay declaring no visibility leaves the operator's private standing",
-      overlay: "repository: {description: x}\n",
-      operator: true,
-      privateLayers: true,
-    },
-    {
-      reason: "an overlay declaring no visibility leaves the operator's public standing",
-      overlay: "repository: {description: x}\n",
-      operator: false,
-      privateLayers: false,
-    },
-  ])("$reason", ({ overlay, operator, privateLayers }) => {
-    const { doc } = rendered({ overlay, private: operator });
+  ])("$reason", ({ overlay, privateLayers }) => {
+    const { doc } = rendered({ overlay });
     const labels = names(doc.labels);
     const security = (doc.repository as Record<string, unknown>).security_and_analysis;
     const mainRules = ((ruleset(doc, "main")?.rules ?? []) as { type: string }[]).map(
@@ -252,10 +237,19 @@ describe("renderSettings", () => {
     }
   });
 
+  test("an overlay declaring no visibility holds the row: the render follows the overlay alone, never the operator's fact", () => {
+    expect(held({ overlay: "repository: {description: x}\n" })).toBe(
+      ".github/settings.local.yml declares no repository.private; the render follows the overlay's visibility alone",
+    );
+    expect(held({ overlay: "repository: {description: x, private: 'false'}\n" })).toBe(
+      ".github/settings.local.yml declares no repository.private; the render follows the overlay's visibility alone",
+    );
+  });
+
   test("an overlay may beat the layers below the override and null one of their keys out", () => {
     const { doc } = rendered({
       overlay: [
-        "repository: {description: Mine, has_wiki: null, allow_merge_commit: true}",
+        "repository: {description: Mine, has_wiki: null, allow_merge_commit: true, private: false}",
         'labels: [{name: bug, color: "000000", description: Restyled}]',
         "",
       ].join("\n"),
@@ -302,9 +296,10 @@ describe("renderSettings", () => {
       labels: undefined,
     },
     {
-      reason: "an empty overlay with a tracking stream renders the roster and the tuple",
+      reason:
+        "an overlay declaring visibility alone, with a tracking stream, renders the roster and the tuple",
       modules: ["fuzzer"],
-      overlay: "",
+      overlay: "repository: {private: false}\n",
       labels: [
         { name: "bug", color: "d73a4a", description: "Something isn't working" },
         { name: "dependencies", color: "0366d6", description: "Dependency updates" },
@@ -321,7 +316,9 @@ describe("renderSettings", () => {
     });
     expect(entries(doc.labels)).toEqual(labels);
     expect(names(doc.rulesets)).toEqual(
-      overlay === "" ? ["pr-title", "main"] : ["pr-title", "main", "release-branches"],
+      overlay.includes("rulesets")
+        ? ["pr-title", "main", "release-branches"]
+        : ["pr-title", "main"],
     );
   });
 
@@ -412,14 +409,14 @@ describe("renderSettings", () => {
     },
     {
       reason: "a malformed overlay",
-      overrides: { overlay: "labels: {bug: x}\n" },
+      overrides: { overlay: "repository: {private: false}\nlabels: {bug: x}\n" },
       detail: expect.stringContaining(
         ".github/settings.local.yml has malformed section entries: labels.entries: Invalid input: expected array",
       ),
     },
     {
       reason: "an overlay whose alias names its own ancestor",
-      overrides: { overlay: "repository: &r {self: *r}\n" },
+      overrides: { overlay: "repository: &r {private: false, self: *r}\n" },
       detail:
         'layer ".github/settings.local.yml": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees',
     },

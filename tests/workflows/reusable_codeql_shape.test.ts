@@ -4,14 +4,20 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { REPO_ROOT } from "../shared/action_step";
 
-type Step = { id?: string; uses?: string; with?: Record<string, string> };
+type Step = {
+  id?: string;
+  uses?: string;
+  if?: string;
+  run?: string;
+  with?: Record<string, string>;
+};
 const read = (rel: string) => parseYaml(readFileSync(join(REPO_ROOT, rel), "utf8"));
 const workflow = read(".github/workflows/reusable-codeql.yml") as {
   on: { workflow_call: { inputs: Record<string, { required?: boolean; type?: string }> } };
   jobs: { analyze: { steps: Step[] } };
 };
 const caller = read(".github/workflows/fleet-ci.yml") as {
-  jobs: { codeql: { uses: string; with: Record<string, string> } };
+  jobs: { codeql: { if: string; uses: string; with: Record<string, string> } };
 };
 
 describe("reusable-codeql.yml", () => {
@@ -29,5 +35,12 @@ describe("reusable-codeql.yml", () => {
     });
     expect(caller.jobs.codeql.uses).toBe("./.github/workflows/reusable-codeql.yml");
     expect(caller.jobs.codeql.with).toEqual({ language: "${{ matrix.language }}" });
+  });
+
+  test("visibility is the caller's plan gate alone: the job opens on the checkout, with no conditional or run step of its own", () => {
+    const steps = workflow.jobs.analyze.steps;
+    expect(steps[0]?.uses).toMatch(/^actions\/checkout@/);
+    expect(steps.filter((step) => step.if !== undefined || step.run !== undefined)).toEqual([]);
+    expect(caller.jobs.codeql.if).toContain("needs.plan.outputs.codeql-languages != '[]'");
   });
 });

@@ -28,7 +28,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Understand the issue a red night filed | [Tracking issues: lifecycle](tracking-issues.md#issue-lifecycle) |
 | Ship a release while a tracking issue is open | [Tracking issues: release gating](tracking-issues.md#release-gating) |
 | Rename a tracking label without breaking the stream | [Tracking issues: renaming the label](tracking-issues.md#renaming-the-label) |
-| Add, rename, or retire a file the platform writes | [Sync: files.yml](sync.md#filesyml) |
+| Add or remove a file the platform writes | [Sync: files.yml](sync.md#filesyml) |
 | Read a sync PR's report, or find why a row held | [Sync: the report](sync.md#the-report) |
 | Check why the `stable` tag can be trusted | [Build provenance](build-provenance.md) |
 | Change a managed workflow so it uses a new input of a platform action | [Build provenance: a new action input and its workflow land together](build-provenance.md#a-new-action-input-and-its-workflow-land-together) |

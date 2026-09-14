@@ -1,4 +1,4 @@
-# A called job can only downgrade the caller's token: adding a scope here breaks every caller not yet synced with it.
+# A called job can only downgrade the caller's token, so a scope added here lands in the managed auto-assign.yml caller in the same change.
 # This runs in the CALLER's repository, where repo-platform's scripts do not exist, so the steps are gh commands.
 
 name: Reusable Auto Assign

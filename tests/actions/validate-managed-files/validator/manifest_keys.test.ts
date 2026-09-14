@@ -21,9 +21,7 @@ describe("manifest keys are the repository paths the sync writes", () => {
   const CI = ".github/workflows/ci.yml";
   const keyError = (key: string, problem: string) =>
     `${MANIFEST}: entry '${key}' is not a repository path the sync writes (the path ${problem}) - ` +
-    "a hand edit; the sync ignores such a record and no class can be judged for it; delete the entry " +
-    "(git history has the stamped original) or re-run the sync (dispatch sync-repos.yml in " +
-    "repo-platform with repo=<owner>/<name>), which replaces platform files whole";
+    "a hand edit, and no class can be judged for it; delete the entry (git history has the stamped original)";
 
   const STARTER = '{"class": "starter"}';
   const MANAGED = `{"class": "managed", "hash": "${"0".repeat(64)}"}`;

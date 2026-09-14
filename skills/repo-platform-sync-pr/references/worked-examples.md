@@ -15,7 +15,7 @@ Resolution: expected. `ci.yml` is the same file in every repository. Move the jo
 
 ## 2. `region removed` retirement of a split file
 
-The platform retired a split file (`.github/SECURITY.md`) and the repo had written below its END marker. The region still matched the recorded hash, so the Retired row reads `region removed`: the markers and the platform's region went, your text stayed as a plain file, and the PR holds once.
+A split file the platform stopped writing here (the fleet `LICENSE.md`, after the repo added `custom-license`) had text the repo wrote below its END marker. The region still matched the recorded hash, so the Retired row reads `region removed`: the markers and the platform's region went, your text stayed as a plain file, and the PR holds once.
 
 Resolution: the file is now yours. Keep it or delete it; the record left with the region, so no row returns for it. A region that no longer matches the recorded hash reads `held` instead, and that row returns every sync until the file is gone.
 
@@ -25,11 +25,11 @@ Resolution: the file is now yours. Keep it or delete it; the record left with th
 
 Resolution: single-segment globs only: `docs/*/LICENSE.md`. Fix the declaration in an ordinary PR, dispatch the sync again; it writes the copies and closes the issue.
 
-## 4. Registration note: an unknown module
+## 4. A registration naming a module the platform does not offer
 
-`modules:` lists `pr-titles`. The Registration notes section names it as dropped; the PR holds; the module's files were not written.
+`modules:` lists `pr-titles`. The `plan` job of fleet CI rejects it on the PR that adds it; a name that lands anyway fails the sync: no PR, and the `[repo-platform] sync failed` issue's writer log reads `.repo-platform.yml: module "pr-titles" is not a module files.yml offers (known: ...)`.
 
-Resolution: the name is `pr-title`. Fix `.repo-platform.yml`, merge, dispatch the sync again.
+Resolution: the name is `pr-title`. Fix `.repo-platform.yml`, merge, dispatch the sync again; it writes the module's files and closes the issue.
 
 ## 5. A first-sync `unchanged` starter at a path the repo already had
 

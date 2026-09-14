@@ -16,10 +16,9 @@ on:
       sha:
         description: >-
           The judged commit this run vouches for; keys the job's lane and the
-          release-PR path's head check. Empty falls back to github.sha.
-        required: false
+          release-PR path's head check.
+        required: true
         type: string
-        default: ""
       tracking-labels:
         description: Comma-separated nightly tracking-issue labels; release-health blocks on open issues carrying them. Empty disables the tracking gates.
         required: false
@@ -50,7 +49,7 @@ jobs:
     # The caller holds no lane: a shared lane keeps one pending call and cancels the older one,
     # so a release commit's call could be cancelled.
     concurrency:
-      group: release-cut-${{ inputs.sha || github.sha }}
+      group: release-cut-${{ inputs.sha }}
       cancel-in-progress: false
     # Caps a caller that grants more; the read keys feed release-health.
     permissions:
@@ -93,7 +92,7 @@ jobs:
         if: steps.health.outputs.release-cut == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          JUDGED: ${{ inputs.sha || github.sha }}
+          JUDGED: ${{ inputs.sha }}
         run: |
           head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)"
           if [ "$head" != "$JUDGED" ]; then

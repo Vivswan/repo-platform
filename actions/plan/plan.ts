@@ -20,10 +20,9 @@ import {
   FilesConfigError,
   type ModuleData,
   parseFilesConfig,
-  type RetiredEntry,
 } from "./files_config.ts";
 import { describeMirrorProblem, mirrorDeclarationProblems, ownedPaths } from "./mirrors.ts";
-import { parseRegistration, type Registration } from "./registration.ts";
+import { parseRegistration, type Registration, unknownModuleProblems } from "./registration.ts";
 import {
   declaredLabelTuple,
   type LabelTuple,
@@ -51,9 +50,8 @@ export interface FilesData {
   /** Every module in files.yml order, which is the canonical module order. */
   modules: Module[];
   defaults: PlanDefaults;
-  /** The file entries and retirements, for the paths a mirror may name. */
+  /** The file entries, for the paths a mirror may name. */
   files: FileEntry[];
-  retired: RetiredEntry[];
   layers: LayerSources;
 }
 
@@ -96,7 +94,6 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
     modules: Object.entries(modules).map(([name, data]) => ({ ...data, name })),
     defaults,
     files: config.files,
-    retired: config.retired,
     layers: { modules: config.modules, settings: config.settings },
   };
 }
@@ -106,7 +103,6 @@ export interface PlanInput {
   modules: Module[];
   defaults: PlanDefaults;
   files: FileEntry[];
-  retired: RetiredEntry[];
   /** Lowercased: the settings layers' label names. */
   reservedLabels: ReadonlySet<string>;
   /** The fleet security stream's tuple, the settings baseline's SECURITY_LABEL entry. */
@@ -115,17 +111,11 @@ export interface PlanInput {
 }
 
 export function selectModules(input: PlanInput): Module[] {
-  const known = new Map(input.modules.map((module) => [module.name, module]));
-  const unknown = input.registration.modules.filter((name) => !known.has(name));
-  if (unknown.length > 0) {
-    throw new PlanError(
-      unknown.map(
-        (name) =>
-          `${REGISTRATION_PATH}: module "${name}" is not a module files.yml offers ` +
-          `(known: ${[...known.keys()].join(", ")})`,
-      ),
-    );
-  }
+  const problems = unknownModuleProblems(
+    input.registration.modules,
+    input.modules.map((module) => module.name),
+  );
+  if (problems.length > 0) throw new PlanError(problems);
   const selected = new Set(input.registration.modules);
   return input.modules.filter((module) => selected.has(module.name));
 }

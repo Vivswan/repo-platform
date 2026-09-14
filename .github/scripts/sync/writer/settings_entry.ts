@@ -49,8 +49,6 @@ export interface SettingsRenderInput {
   tree: string;
   /** The repository's selected modules, files.yml order. */
   modules: string[];
-  /** The operator's visibility fact, used when the overlay declares none. */
-  private: boolean;
   registration: Registration;
   overlay: string | null;
   overlayPath: string;
@@ -152,11 +150,14 @@ export function renderSettings(input: SettingsRenderInput): SettingsRender {
   }
   const directive = layeringDirective(overlay, input.overlayPath);
   if (directive !== null) return { held: directive };
+  const visibility = declaredPrivate(overlay.doc);
+  if (visibility === null) {
+    return {
+      held: `${input.overlayPath} declares no repository.private; the render follows the overlay's visibility alone`,
+    };
+  }
   const config = layerConfig(input.config);
-  const selection: Selection = {
-    modules: input.modules,
-    private: declaredPrivate(overlay.doc) ?? input.private,
-  };
+  const selection: Selection = { modules: input.modules, private: visibility };
   const fleet = [
     ...layerPaths(config, selection).map((rel) => loadLayer(join(input.tree, rel))),
     loadOverrideLayer(join(input.tree, config.settings.override)),

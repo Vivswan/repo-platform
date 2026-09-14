@@ -13,6 +13,19 @@ import { LABEL_RE } from "../shared/label.ts";
 import { REGISTRATION_PATH } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
 
+/** The one refusal of a module files.yml does not offer: the plan on every PR and the sync writer speak it alike, so no reader drops a name quietly. */
+export function unknownModuleProblems(
+  requested: readonly string[],
+  known: readonly string[],
+): string[] {
+  return requested
+    .filter((name) => !known.includes(name))
+    .map(
+      (name) =>
+        `${REGISTRATION_PATH}: module "${name}" is not a module files.yml offers (known: ${known.join(", ")})`,
+    );
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

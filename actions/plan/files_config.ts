@@ -67,11 +67,6 @@ export interface SettingsLayers {
   override: string;
 }
 
-export interface RetiredEntry {
-  path: string;
-  moved_to?: string;
-}
-
 const names = z.array(z.string().min(1)).min(1);
 
 const derived = z.strictObject({ declaring: z.string().min(1) });
@@ -124,11 +119,6 @@ const settingsSchema = z.strictObject({
   override: z.string().min(1),
 });
 
-const retiredSchema = z.strictObject({
-  path: z.string().min(1),
-  moved_to: z.string().min(1).optional(),
-});
-
 /** A module name is one path segment of the files/ tree. */
 const moduleName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "not a module name");
 
@@ -154,7 +144,6 @@ const configSchema = z.strictObject({
   modules: z.record(moduleName, moduleDataSchema).default({}),
   settings: settingsSchema.optional(),
   files: z.array(fileSchema),
-  retired: z.array(retiredSchema).default([]),
 });
 
 export interface FilesConfig {
@@ -165,7 +154,6 @@ export interface FilesConfig {
    *  entry exists. */
   settings: SettingsLayers | null;
   files: FileEntry[];
-  retired: RetiredEntry[];
 }
 
 export function selectEntries(
@@ -399,8 +387,6 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       }
     }
   }
-  const filePaths = new Set(files.map((entry) => entry.path));
-  const retiredPaths = new Set(data.retired.map((entry) => entry.path));
   for (const [index, entry] of files.entries()) {
     if (!("render" in entry)) continue;
     const where = `files: ${entry.path}`;
@@ -408,7 +394,6 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     const problem = pathProblem(target);
     if (problem !== null) problems.push(`${where}: overlay ${target}, which ${problem}`);
     if (target === entry.path) problems.push(`${where}: overlay names its own path`);
-    if (retiredPaths.has(target)) problems.push(`${where}: overlay ${target}, a retired path`);
     if (target === MANIFEST_NAME) problems.push(`${where}: overlay names the manifest`);
     const atTarget = files.filter((other) => other.path === target);
     if (atTarget.length === 0 || atTarget.some((other) => other.class !== "starter")) {
@@ -467,24 +452,12 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       problems.push(`settings: override '${declared.override}' is declared twice`);
     }
   }
-  for (const entry of data.retired) {
-    for (const path of [entry.path, ...(entry.moved_to === undefined ? [] : [entry.moved_to])]) {
-      const problem = pathProblem(path);
-      if (problem !== null) problems.push(`retired: ${path} ${problem}`);
-    }
-    if (filePaths.has(entry.path)) {
-      problems.push(
-        `retired: ${entry.path} is also a files entry - a path is written or retired, not both`,
-      );
-    }
-  }
   return {
     config: {
       placeholders: data.placeholders,
       modules: data.modules,
       settings,
       files,
-      retired: data.retired,
     },
     problems,
   };

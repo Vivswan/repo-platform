@@ -32,9 +32,6 @@ files:
     source: files/nightly/nightly.with-site.yml
   - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
   - { path: CLAUDE.md, class: link, target: AGENTS.md }
-retired:
-  - { path: .github/old-tool.yml }
-  - { path: SECURITY.md, moved_to: .github/SECURITY.md }
 `;
 
 const sourceOf = (entry: FileEntry) =>
@@ -74,10 +71,6 @@ describe("parseFilesConfig", () => {
     });
     expect(config.placeholders).toEqual(["project_name", "year"]);
     expect(Object.keys(config.modules)).toEqual(["bun", "site", "nightly", "fuzzer"]);
-    expect(config.retired).toEqual([
-      { path: ".github/old-tool.yml" },
-      { path: "SECURITY.md", moved_to: ".github/SECURITY.md" },
-    ]);
   });
 
   test("the module data the readers resolve defaults from is typed; other keys ride along", () => {
@@ -224,9 +217,9 @@ describe("parseFilesConfig", () => {
       "modules.../bun: Invalid key in record",
     ],
     [
-      "a path both written and retired",
-      "files:\n  - { path: a, class: managed }\nretired:\n  - { path: a }\nplaceholders: []",
-      "written or retired, not both",
+      "a retired list: a file the platform stops writing leaves its entry, and the sync retires the recorded file",
+      "files: []\nretired:\n  - { path: a }\nplaceholders: []",
+      '(root): Unrecognized key: "retired"',
     ],
   ])("refuses %s", (_reason, text, fragment) => {
     expect(problemsOf(text).join("\n")).toContain(fragment);
@@ -244,14 +237,9 @@ describe("render, overlay, and the settings block", () => {
     "  override: files/settings/override.yml",
   ].join("\n");
   const doc = (files: string[], extra: string[] = [SETTINGS]) =>
-    [
-      "placeholders: []",
-      "modules:\n  bun: {}\n  pages: {}",
-      ...extra,
-      "files:",
-      ...files,
-      "retired:\n  - { path: old.yml }",
-    ].join("\n");
+    ["placeholders: []", "modules:\n  bun: {}\n  pages: {}", ...extra, "files:", ...files].join(
+      "\n",
+    );
   const RENDERED =
     "  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml }";
   const STARTER = "  - { path: .github/settings.local.yml, class: starter }";
@@ -386,14 +374,6 @@ describe("render, overlay, and the settings block", () => {
       "an overlay a managed entry writes",
       doc(["  - { path: .github/settings.local.yml, class: managed }", RENDERED]),
       "files: .github/settings.yml: overlay .github/settings.local.yml, which must be written by starter entries only - the overlay is the repository's own file, seeded once",
-    ],
-    [
-      "an overlay at a retired path",
-      doc([
-        STARTER,
-        "  - { path: .github/settings.yml, class: managed, render: settings, overlay: old.yml }",
-      ]),
-      "files: .github/settings.yml: overlay old.yml, a retired path",
     ],
     [
       "an overlay no entry writes",

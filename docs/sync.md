@@ -17,7 +17,7 @@ The sync writer copies the platform's files into a managed repository. It reads 
 | Where do blocks land, and what may a value contain? | `spliceBlocks` and `substitute` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | What happens when an entry's class differs from its record? | `writeEntry` in [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) |
 | How is `.github/settings.yml` rendered? | [sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts) over [settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts), which folds with the github-settings-as-code library ([settings.md](settings.md)) |
-| When does a retired file leave? | [sync/writer/retire.ts](../.github/scripts/sync/writer/retire.ts) |
+| When does a file the platform stopped writing leave? | [sync/writer/retire.ts](../.github/scripts/sync/writer/retire.ts) |
 | What does the manifest record? | [sync/writer/manifest.ts](../.github/scripts/sync/writer/manifest.ts) |
 | What holds a PR for review? | `holdReasons` in [sync/writer/report.ts](../.github/scripts/sync/writer/report.ts) |
 | The whole run, as a CLI | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) |
@@ -36,7 +36,7 @@ bun .github/scripts/sync/writer/sync.ts \
 - `--build` is the delivery commit's full sha, 40 lowercase hex characters (`git fetch origin +refs/tags/stable:refs/tags/stable` then `git rev-parse stable^{commit}`, the forced refspec so a local tag left by an earlier fetch is refreshed), stamped into the manifest's `commit` field, which the fleet validator reads as a full sha; a short or uppercase one is refused before anything is written.
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the default `copyright_holder`.
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
-- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a `--build` that is not a full sha, a bad `files.yml`, an unreadable registration, a symlinked ancestor at a path the writer touches, a directory or a symlink at the manifest or registration path, a directory at a retired path or at a `moved_to` destination, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
+- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a `--build` that is not a full sha, a bad `files.yml`, an unreadable registration, a registration naming a module `files.yml` does not offer, a manifest record the writer cannot read ([Retirement](#retirement)), a symlinked ancestor at a path the writer touches, a directory or a symlink at the manifest or registration path, a directory at a stale record's path, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
 
 ## files.yml
 
@@ -65,9 +65,6 @@ files:
   - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
   - {path: .github/actions/site-build/action.yml, class: starter}
   - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
-retired:
-  - {path: CONTRIBUTING.md}
-  - {path: SECURITY.md, moved_to: .github/SECURITY.md}
 ```
 
 | Key | Meaning |
@@ -84,8 +81,6 @@ retired:
 | `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
 | `settings.baseline`, `settings.layers`, `settings.override` | The settings layers ([settings.md](settings.md)), clean paths under `files/`, present exactly when a `render: settings` entry exists: the baseline, then each `{source, when}` layer whose `when` holds (absent means always) in declared order, then the override above the repository's overlay. |
-| `retired[].path` | A path the platform no longer writes. The entry leaves the roster only after a live probe (`gh api repos/<owner>/<repo>/contents/<path>` over every fleet repository) shows that no repository carries the path. |
-| `retired[].moved_to` | The path the file moves to (`git mv`) when that path is absent. |
 
 Blocks land at the anchor line: the word `blocks` inside double braces, alone on its line, spelled like a placeholder. A source without one gets them appended at the end. Every piece is newline-terminated first, so the seams never merge two lines. The anchor appears at most once and only as a whole line, in sources of entries that declare `blocks` (for a split entry, inside the region body). A starter's blocks are rendered once, at creation.
 
@@ -98,11 +93,10 @@ The loader refuses, all problems at once:
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
 - a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
 - `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source` or `blocks`, or without `overlay`
-- an `overlay` path that is not clean, is the entry's own path, a retired path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
+- an `overlay` path that is not clean, is the entry's own path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
 - a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`; a layer source declared twice; a layer `when` naming a module absent from `modules` or declaring a key no module carries
 - a declared settings layer missing from the tree, not a YAML mapping, or naming one label (case-insensitively) or one ruleset twice
 - two entries for one `path` whose conditions can both hold (below)
-- a path listed under both `files` and `retired`
 - a `files` entry at `.github/repo-platform-manifest.json`, the manifest the writer itself writes last
 
 ## files.yml reference
@@ -180,7 +174,7 @@ A module with no files still appears under `modules` (`custom-license`) so a reg
 
 A list position may name a module-data key instead of the modules: `any: {declaring: codeql_language}` is the list of every module whose data carries `codeql_language`, in `modules` order. The loader expands it, so a list spelled this way follows the modules block and a new module joins it by declaring the key; a key no module declares is a loader error.
 
-- The selected modules are the registration's `modules` filtered to the names `files.yml` knows, in `files.yml` order. Unknown names are dropped and listed under Registration notes, which holds the PR.
+- The selected modules are the registration's `modules` in `files.yml` order. A name `files.yml` does not offer fails the sync in the plan's words (the refusal the `plan` job gives the PR that introduces it); nothing is dropped.
 - Two entries for one path must be provably exclusive: a module one requires and the other forbids, an `any` list the other forbids entirely, or opposite `private` values. Anything subtler is a loader error.
 - The registration's `except` lists paths the repository keeps as its own: no entry at one is selected, whatever its `when`, and a record an earlier sync left there is `released` ([Retirement](#retirement)): the record leaves, the file is not touched. A [mirror](#mirrors) target at, under, or above an excepted path is refused as one at a path `files.yml` writes is. An `except` path no `files.yml` entry writes is a Registration note, which holds the PR.
 
@@ -203,39 +197,33 @@ A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`,
 | --- | --- |
 | the path already holds exactly what the entry writes | `unchanged`; the record takes the new class |
 | what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated` |
-| anything else, a `starter` record or a record with `hash: null` included | the record is stale, and the file is written as an unrecorded one under the new class, with the detail `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`. Written: `replaced local edits` with the diff for a `managed` entry, `region added` (or `replaced local edits` when the file already carries the markers) for a `split` one; the write's own record replaces the stale one and the PR holds once. Already the incoming content (a `split` region above a repository-owned tail, say): `unchanged` with the same detail, the record restamped, no hold. Held (a regular file where a `link` is declared, a symlink where a file is): the detail is the writer's refusal reason, the previous record is kept, and the path is held again next run |
+| anything else, a `starter` record included | the record is stale, and the file is written as an unrecorded one under the new class, with the detail `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`. Written: `replaced local edits` with the diff for a `managed` entry, `region added` (or `replaced local edits` when the file already carries the markers) for a `split` one; the write's own record replaces the stale one and the PR holds once. Already the incoming content (a `split` region above a repository-owned tail, say): `unchanged` with the same detail, the record restamped, no hold. Held (a regular file where a `link` is declared, a symlink where a file is): the detail is the writer's refusal reason, the previous record is kept, and the path is held again next run |
 | the new class is `starter` | a handover: the file is the repository's own, nothing is held |
 
 Without the rule, a managed file that becomes split would have the region prepended above its old content and report `updated`.
 
 ## Retirement
 
-Retirement runs before writing. Rows appear only for files present, save a `released` row, which reports a record. A `moved_to` whose destination is written for this repository is moved or held whatever the record says; every other retirement of an unrecorded file produces no row, since no manifest record vouches for it and it is not the platform's to retire.
+A recorded `managed`, `split`, or `link` path that no selected entry writes now (a module deselected, or an entry that left `files.yml`) is stale, and retirement runs over the stale records before writing, every row with the detail `no longer selected`. Rows appear only for files present, save a `released` row, which reports a record; an unrecorded file produces no row, since no manifest record vouches for it and it is not the platform's to retire.
 
-| State of the retired file | Outcome |
+| State of the stale file | Outcome |
 | --- | --- |
-| `managed` or a `mirror` copy, content equals the recorded hash | `deleted` |
+| `managed`, content equals the recorded hash | `deleted` |
 | `split`, region equals the recorded hash, nothing outside the region | `deleted` |
 | `split`, region equals the recorded hash, repository-owned content outside it | `region removed`: the marker lines and the region go, the content above and below stays byte for byte as a plain file, and the record leaves; the blank lines that framed the region become one when content stands on both sides and none when it stands on one side only, so a tail under a top region starts at its first content line, and blank lines away from the seam stay. The PR holds this once, with a detail asking the reader to complete the file (a heading and intro if it lost them) or delete it. Next run the path is unrecorded and produces no row. |
 | `split`, region equals the recorded hash, only blank lines outside it | `deleted`, with the detail saying so |
 | `split`, region differs from the recorded hash, or markers missing or malformed | `held` |
-| `link` or a `kind: symlink` mirror, a symlink whose target hashes to the recorded hash | `deleted` (the link goes; what it points at is never touched) |
-| a symlink with another target; a regular file where a `link` or a `kind: symlink` mirror was recorded; a symlink where a `managed`, `split`, or `mirror` copy was recorded | `held` |
-| content differs, or a record with `hash: null` | `held` |
-| recorded as `starter` | `kept` (repo-owned) |
-| a `managed`, `split`, `link`, or `starter` record at a path the registration's `except` names, whatever sits at the path | `released`: the record leaves, nothing at the path is probed or touched, and the PR does not hold; the row appears whether or not a file is present, since the manifest changed. A `retired` entry at an excepted path is skipped: retirement never sees the path |
-| `moved_to` given, new path absent | `moved` (`git mv`; the record travels, so the following write of the new path judges it as the platform's own) |
-| `moved_to` given, new path present | `held` |
-| `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: the outcomes above apply |
+| `link`, a symlink whose target hashes to the recorded hash | `deleted` (the link goes; what it points at is never touched) |
+| a symlink with another target; a regular file where a `link` was recorded; a symlink where a `managed` or `split` file was recorded | `held` |
+| content differs | `held` |
+| a `managed`, `split`, `link`, or `starter` record at a path the registration's `except` names, whatever sits at the path | `released`: the record leaves, nothing at the path is probed or touched, and the PR does not hold; the row appears whether or not a file is present, since the manifest changed |
 
-Beyond the `retired` list:
-
-- A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted.
-- A stale record at a path that no `files.yml` entry declares or retires now (a hand edit, or an entry deleted without a `retired` row) is retired the same way and, while a file sits at the path, noted (`manifest record for <path> had no writer: ...`), which holds the PR for the Retired row's outcome.
-- A held or kept file and a held entry keep their records in the new manifest every run (a record with `hash: null` is carried as such), so the file is held again next time and never becomes an unrecorded orphan.
-- A record that is not exactly a shape the writer writes (an unknown class, a field the class does not carry, a hash that is neither null nor a sha256 digest or is missing where the class carries one, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers) is never held: it is dropped with a note whichever list names its path. The path is unrecorded from then on: a selected entry or a declared mirror writes it as any unrecorded path, and anywhere else the file is the repository's own.
-- A `mirror` record no declaration reaches any more is dropped with a note too; the copy stays as the repository's own, and a mirror declared again adopts it while it still holds the source's content.
-- A repository-owned tail left in a retired `CONTRIBUTING.md` or `.github/SECURITY.md` hides the account default, so the PR's reviewer deletes or completes it before merging, in one commit on the sync branch ([the sync-pr skill](../skills/repo-platform-sync-pr/SKILL.md#repository-owned-markdown-after-a-retirement)).
+- A stale record at a path no `files.yml` entry declares at all (a hand edit, or an entry that left `files.yml`) is retired the same way and, while a file sits at the path, noted (`manifest record for <path> had no writer: ...`), which holds the PR for the Retired row's outcome; a recorded path that is not a clean repository path is ignored and noted.
+- A held file and a held entry keep their records in the new manifest every run, so the file is held again next time and never becomes an unrecorded orphan.
+- A `starter` record whose entry nothing selects leaves the manifest; the file is the repository's own either way.
+- A `mirror` record no declaration reaches any more is dropped with a note; the copy stays as the repository's own, and a mirror declared again adopts it while it still holds the source's content.
+- A record that is not exactly a shape the writer writes (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers) fails the run with a count before anything is written: the target's own `validate-managed-files` check names each, so the fix is a manifest edit (git history has the stamped original) and a new dispatch.
+- A file the platform stops writing needs no grammar of its own: its entry leaves `files.yml`, and every target retires the recorded file as above on its next sync. A transition the sync cannot carry by itself is one rung in `migrations/`, the only home for transitional code ([fleet-guidelines.md](fleet-guidelines.md#no-backwards-compatibility-code)).
 
 ## Mirrors
 
@@ -247,7 +235,7 @@ The registration's `mirrors` list (`source`, `targets`, `kind`) carries a file t
 - A symbolic link above a target, in a literal or a `*` directory segment, is never followed or listed through: a linked directory, or a link that cannot be looked through (resolving to nothing, to a name too long, or through a directory the runner may not read), fails the run by name, the rest of the pattern riding along (`skills/link/sub/*.md`); only a link that provably resolves to a file is no directory and is passed over like a file. A link a final segment matches is the target itself, judged by the declared kind (the table below).
 - A matched path the grammar refuses (one grown past 1024 bytes through long directory names) is never probed and fails by name the same way.
 
-A copy the writer cannot make would leave the repository out of sync with only a hold row to show it, so every declaration is either written or fails the run. Two readers judge it. The `plan` job of fleet CI rejects, on the PR that introduces it, what `files.yml` alone proves unwritable (the rules in [actions/plan/mirrors.ts](../actions/plan/mirrors.ts)): a source that is not a `managed` or `split` file `files.yml` writes for the repository; a `**`; a target or pattern that is unsafe (a control character, a segment over 255 bytes, or a path over 1024 bytes included), is or sits under the registration itself, sits under `.github/workflows/`, or is, sits under, or is a path prefix of a path `files.yml` writes or retires or the registration excepts; a pattern that matches (segment for segment, as the writer expands it) the registration or a path `files.yml` writes or retires or the registration excepts (the claim reserves the path, whether or not the file stands in the checkout that run); and, over the literal targets and the directories they create (the only part of the tree the plan knows, since the literal pass writes them before any pattern expands), every path a declaration is certain to claim, judged as the writer judges a claim: a literal target declared twice; a path nested with another claimed path (both sides, whatever their sources; a pattern's own text counts as written, so `skills/*` nests under a literal `skills`, while two different pattern texts are nested as written, never by what they can match: `tests/*/foo` with `tests/a*/foo/bar` passes the plan and fails at sync time on any checkout with a `tests/a*` directory); a pattern's path that sits under or above a path `files.yml` writes or retires or the registration excepts, or that the grammar refuses; and a path claimed by two sources or as a copy and as a symbolic link (one pattern text declared twice included, since both expand alike). The writer runs the same check, with the stale manifest records it retires as a further reserved set (`a path a stale manifest record retires`), then judges each pass's claims the same way with what only the checkout shows. A failure exits nonzero, one `::error::` line per verdict for each declaration and path (`.repo-platform.yml: mirrors: source '<s>', target '<t>': <reason>`, a pattern's reason naming the path it expanded to), before the pass writes anything: no PR is opened, the operator's row reads `failed, report filed in the target repository`, and the failure issue's writer log carries the lines.
+A copy the writer cannot make would leave the repository out of sync with only a hold row to show it, so every declaration is either written or fails the run. Two readers judge it. The `plan` job of fleet CI rejects, on the PR that introduces it, what `files.yml` alone proves unwritable (the rules in [actions/plan/mirrors.ts](../actions/plan/mirrors.ts)): a source that is not a `managed` or `split` file `files.yml` writes for the repository; a `**`; a target or pattern that is unsafe (a control character, a segment over 255 bytes, or a path over 1024 bytes included), is or sits under the registration itself, sits under `.github/workflows/`, or is, sits under, or is a path prefix of a path `files.yml` writes or the registration excepts; a pattern that matches (segment for segment, as the writer expands it) the registration or a path `files.yml` writes or the registration excepts (the claim reserves the path, whether or not the file stands in the checkout that run); and, over the literal targets and the directories they create (the only part of the tree the plan knows, since the literal pass writes them before any pattern expands), every path a declaration is certain to claim, judged as the writer judges a claim: a literal target declared twice; a path nested with another claimed path (both sides, whatever their sources; a pattern's own text counts as written, so `skills/*` nests under a literal `skills`, while two different pattern texts are nested as written, never by what they can match: `tests/*/foo` with `tests/a*/foo/bar` passes the plan and fails at sync time on any checkout with a `tests/a*` directory); a pattern's path that sits under or above a path `files.yml` writes or the registration excepts, or that the grammar refuses; and a path claimed by two sources or as a copy and as a symbolic link (one pattern text declared twice included, since both expand alike). The writer runs the same check, with the stale manifest records it retires as a further reserved set (`a path a stale manifest record retires`), then judges each pass's claims the same way with what only the checkout shows. A failure exits nonzero, one `::error::` line per verdict for each declaration and path (`.repo-platform.yml: mirrors: source '<s>', target '<t>': <reason>`, a pattern's reason naming the path it expanded to), before the pass writes anything: no PR is opened, the operator's row reads `failed, report filed in the target repository`, and the failure issue's writer log carries the lines.
 
 | Outcome | When |
 | --- | --- |
@@ -255,7 +243,7 @@ A copy the writer cannot make would leave the repository out of sync with only a
 | `current` | the target already holds the new content: the bytes for a `copy`, a link to the source for a `symlink` |
 | `replaced local edits` | the target held other content: a file with other bytes, a file where a link is declared, a link where a copy is declared, or a link elsewhere where a link is declared; the diff (of link targets where a link is declared; of the old link target against the new bytes where a copy is) is in the Replaced local edits section and holds the PR |
 | `replaced` | a directory stood at the target (removed whole, the links inside unlinked and never followed) or a file stood where an ancestor directory must be (removed); the detail names which, and holds the PR |
-| the run fails | the source was held this run; the pattern matches nothing, or reads through a symbolic link or a file in its literal prefix; a claimed path is unsafe, nests with a path `files.yml` writes or retires, a stale record retires, or the registration excepts, sits under a symbolic link, or (a pattern's) sits under a file or in a directory that does not exist; a path is a prefix of or sits under another target (both sides; a target an earlier pass settled included); a path is claimed by more than one source, or as a copy and as a link. Every claim of a pass is judged before the pass writes |
+| the run fails | the source was held this run; the pattern matches nothing, or reads through a symbolic link or a file in its literal prefix; a claimed path is unsafe, nests with a path `files.yml` writes, a stale record retires, or the registration excepts, sits under a symbolic link, or (a pattern's) sits under a file or in a directory that does not exist; a path is a prefix of or sits under another target (both sides; a target an earlier pass settled included); a path is claimed by more than one source, or as a copy and as a link. Every claim of a pass is judged before the pass writes |
 
 Every row's target is recorded as class `mirror` with the copy's hash, or with `kind: symlink` and the hash of the link target string, so the next sync can tell its own previous write from a local edit ([docs/new-repo.md](new-repo.md#mirror-copies-of-platform-files)).
 
@@ -271,7 +259,7 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 | Written | path, class, change, detail for every selected entry (detail is a held row's reason, or the stale-class explanation on a class-flip row) |
 | Replaced local edits | one unified diff per replaced file, capped at 40 lines |
 | Retired | path, outcome, detail |
-| Registration notes | dropped unknown modules; an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry; a stale record no `files.yml` entry declares or retires now, while a file sits at its path; a mirror record no declaration reaches; an `except` path no `files.yml` entry writes |
+| Registration notes | an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record at a path that is not a clean repository path; a stale record no `files.yml` entry declares now, while a file sits at its path; a mirror record no declaration reaches; an `except` path no `files.yml` entry writes |
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
@@ -342,7 +330,6 @@ The settings apply ([settings-repos.yml](../.github/workflows/settings-repos.yml
 
 Limits, stated plainly:
 
-- Run logs from before this model still contain slugs; delete old runs if that matters.
 - The masker is substring-based, so a private repository's bare name is registered only from four characters (masking `api` would garble every innocent occurrence of those letters); the file-and-target rules do not depend on the mask.
 - Inside one row job, an innocent occurrence of the repository's name (a dependency sharing it) renders as `***` too. Cosmetic, and scoped to that job.
 - Mask registration is a snapshot: a repository renamed while its row runs surfaces under its new name, which no mask covers.
