@@ -31,6 +31,17 @@ describe("actions/semgrep", () => {
     const command = String(stepNamed(action, "Scan").run);
     expect(command.match(/--severity[= ](\S+)/g)).toEqual(["--severity ERROR"]);
     expect(command).not.toContain("--error");
+    // The registry's whole default ruleset over the whole checkout, on one pinned release: a narrower config or
+    // target skips files with nothing red, and an unpinned install moves the fleet to each new release silently.
+    expect([
+      command.match(/--config[= ](\S+)/g),
+      / \. \\\n\s+&& status=0/.test(command),
+      String(stepNamed(action, "Install semgrep").run),
+    ]).toEqual([
+      ["--config p/default"],
+      true,
+      expect.stringMatching(/^python3 -m pip install --quiet semgrep==\d+\.\d+\.\d+$/),
+    ]);
     expect(
       [0, 2].map((exit) => {
         const run = scan(exit);
