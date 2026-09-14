@@ -361,7 +361,7 @@ describe("the recorded class against files.yml", () => {
   const errors = (stderr: string) => stderr.split("\n").filter((line) => line.startsWith("error:"));
 
   // The starter row is the one that passed before: its branch verifies
-  // nothing, so a relabel switched parity off. Every record here is readable (a stamped hash) so
+  // nothing, so a relabel switched parity off. Every record here is readable (a starter, or a stamped hash) so
   // the class verdict, not the readability refusal, is what the row exercises.
   test.each([
     { recorded: "starter", entry: '{"class": "starter"}' },

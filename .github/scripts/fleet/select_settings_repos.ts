@@ -81,7 +81,7 @@ function warn(message: string): void {
   }
 }
 
-// A drop has already printed its own notice.
+// A drop is a notice already printed, or a hand-written settings.yml counted and refused after the probes.
 type ProbeResult<T> =
   | { kind: "pass"; value: T }
   | { kind: "drop" }
@@ -178,7 +178,7 @@ for (const row of discovered) {
   if (row.private) for (const form of maskForms(row.repo)) addMask(form);
 }
 
-// A slug the probes later DROP is a routine notice, so a valid scope may select nothing.
+// A slug the probes later DROP is a notice or a counted refusal after the probes, so a valid scope may select nothing.
 const known = new Set(discovered.map((row) => row.repo.toLowerCase()));
 const refusal = scopeRefusal(scope, known, owner);
 if (refusal !== null) {
