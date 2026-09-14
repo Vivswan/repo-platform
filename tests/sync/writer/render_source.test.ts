@@ -63,7 +63,7 @@ describe("an entry whose source is an upstream ref", () => {
       [
         "placeholders: []",
         "modules:",
-        "  bun: { notes: [Node] }",
+        `  bun: ${blocks === "" ? "{}" : "{ notes: [Node] }"}`,
         "files:",
         "  - path: NOTES.md",
         `    ${region}`,
