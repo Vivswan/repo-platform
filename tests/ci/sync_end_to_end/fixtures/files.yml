@@ -43,16 +43,14 @@ files:
     region: hash
     blocks: gitignore_sources
     replace: {"[\r]": "?"}
-    upstream:
-      repository: github/gitignore
-      sha: 0123456789abcdef0123456789abcdef01234567
-      always: [Windows, macOS, Linux]
-      paths:
-        Windows: Global/Windows.gitignore
-        macOS: Global/macOS.gitignore
-        Linux: Global/Linux.gitignore
-        Node: Node.gitignore
-        Bun: Bun.gitignore
+    always: [Windows, macOS, Linux]
+    sources:
+      Windows: {repository: github/gitignore, sha: 0123456789abcdef0123456789abcdef01234567, path: Global/Windows.gitignore}
+      macOS: {repository: github/gitignore, sha: 0123456789abcdef0123456789abcdef01234567, path: Global/macOS.gitignore}
+      Linux: {repository: github/gitignore, sha: 0123456789abcdef0123456789abcdef01234567, path: Global/Linux.gitignore}
+      Node: {repository: github/gitignore, sha: 0123456789abcdef0123456789abcdef01234567, path: Node.gitignore}
+      Bun: {repository: github/gitignore, sha: 0123456789abcdef0123456789abcdef01234567, path: Bun.gitignore}
+      fuzzer: files/fuzzer/fuzzer.gitignore
   - path: AGENTS.md
     class: split
     region: html
@@ -60,9 +58,14 @@ files:
     class: managed
     blocks: dependabot_ecosystems
     source: files/base/.github/dependabot.template
+    sources:
+      bun: files/bun/.github/dependabot.bun.yml
+      deno: files/deno/.github/dependabot.deno.yml
   - path: .github/workflows/checks.yml
     class: starter
     blocks: checks_examples
+    sources:
+      bun: files/bun/.github/workflows/checks.bun.yml
   - path: .github/actions/site-build/action.yml
     class: starter
   - path: .github/settings.local.yml

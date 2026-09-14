@@ -62,15 +62,18 @@ describe("the commit pins", () => {
       "files:",
       `  - {path: a.md, class: managed, source: {repository: o/a, sha: "${OLD}", path: a.md}}`,
       "  - path: .gitignore",
-      "    upstream:",
-      "      repository: o/a",
-      `      sha: ${OLD}`,
-      "      paths: {X: x}",
+      "    sources:",
+      "      X:",
+      "        repository: o/a",
+      `        sha: ${OLD}`,
+      "        path: x",
       `  - {path: b.md, class: managed, source: {repository: o/b, sha: ${OLD}, path: b.md}}`,
       "",
     ].join("\n");
     expect(repin(text, { repository: "o/a", sha: OLD }, NEW)).toBe(
-      text.replace(`"${OLD}"`, NEW).replace(`sha: ${OLD}\n      paths`, `sha: ${NEW}\n      paths`),
+      text
+        .replace(`"${OLD}"`, NEW)
+        .replace(`sha: ${OLD}\n        path`, `sha: ${NEW}\n        path`),
     );
     expect(() => repin(text, { repository: "o/c", sha: OLD }, NEW)).toThrow(
       `files.yml names no pin o/c@${OLD}`,
@@ -249,11 +252,10 @@ describe("the refresh", () => {
     "    class: split",
     "    region: hash",
     "    blocks: gitignore_sources",
-    "    upstream:",
-    "      repository: o/a",
-    `      sha: ${OLD}`,
-    "      always: [Linux]",
-    "      paths: {Linux: Global/Linux.gitignore, Node: Node.gitignore}",
+    "    always: [Linux]",
+    "    sources:",
+    `      Linux: {repository: o/a, sha: ${OLD}, path: Global/Linux.gitignore}`,
+    `      Node: {repository: o/a, sha: ${OLD}, path: Node.gitignore}`,
     "",
   ].join("\n");
   const DOTFILES = { "files/bun/.bun-version": "1.4.0\n", "files/deno/.dvmrc": "2.9.5\n" };
@@ -315,7 +317,7 @@ describe("the refresh", () => {
           diffs: new Map([["Node.gitignore", NODE_DIFF]]),
         },
       ],
-      written: { ...DOTFILES, "files.yml": CONFIG.replace(OLD, NEW) },
+      written: { ...DOTFILES, "files.yml": CONFIG.replaceAll(OLD, NEW) },
       prose: "o/a to 89abcde",
       body: [
         "## o/a: `0123456` -> `89abcde`",

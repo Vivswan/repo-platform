@@ -17,7 +17,7 @@ const temp = tempDirs();
 const REPO_ROOT = join(import.meta.dir, "../..");
 const FILES = join(REPO_ROOT, "files");
 const BASE = readFileSync(join(FILES, "base/.gitignore"), "utf-8");
-const FUZZER = readFileSync(join(FILES, "fuzzer/.block.fuzzer.gitignore"), "utf-8");
+const FUZZER = readFileSync(join(FILES, "fuzzer/fuzzer.gitignore"), "utf-8");
 
 test("every repository takes the three github/gitignore OS templates, in this order, before any module block", () => {
   const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
@@ -26,9 +26,9 @@ test("every repository takes the three github/gitignore OS templates, in this or
     { source: string | UpstreamRef }
   >;
   const ref = (path: string) => ({ repository: "github/gitignore", path });
-  expect(gitignore.upstream).toMatchObject({
+  expect(gitignore).toMatchObject({
     always: ["Windows", "macOS", "Linux"],
-    refs: {
+    sources: {
       Windows: ref("Global/Windows.gitignore"),
       macOS: ref("Global/macOS.gitignore"),
       Linux: ref("Global/Linux.gitignore"),

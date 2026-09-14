@@ -23,12 +23,13 @@ const OS_BLOCKS =
   "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\nIcon?\n\n" +
   "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n\n";
 const SHA = "0123456789abcdef0123456789abcdef01234567";
+const REF = (path: string) => `{repository: github/gitignore, sha: ${SHA}, path: ${path}}`;
 
 // The fixture upstream read straight from disk: the same bytes the e2e test serves over loopback.
 const fromDisk = (url: string) =>
   Bun.file(join(FIXTURES, "upstream", url.split("/").slice(6).join("/"))).text();
 const bodies = await fetchUpstream(upstreamRefs(config.files), "http://upstream", fromDisk);
-const withoutAlways = { ...gitignore, upstream: { ...gitignore.upstream, always: [] } } as Sourced;
+const withoutAlways = { ...gitignore, always: [] } as Sourced;
 const render = (entry: Sourced, modules: string[]) =>
   renderSourced(config, TREE, entry, modules, {}, bodies) as string;
 
@@ -69,15 +70,16 @@ describe("an entry whose source is an upstream ref", () => {
         `    ${region}`,
         `    source: ${source}`,
         blocks,
-        `    upstream: {repository: github/gitignore, sha: ${SHA}, always: [Linux], paths: {Linux: Global/Linux.gitignore${blocks === "" ? "" : ", Node: Node.gitignore"}}}`,
+        "    always: [Linux]",
+        `    sources: {Linux: ${REF("Global/Linux.gitignore")}${blocks === "" ? "" : `, Node: ${REF("Node.gitignore")}`}}`,
         '    replace: {"*": "STAR"}',
         "",
       ].join("\n"),
     );
-  const REF = `{repository: github/gitignore, sha: ${SHA}, path: Global/Windows.gitignore}`;
+  const WINDOWS = REF("Global/Windows.gitignore");
 
   test("an upstream without blocks still renders its always values on every selection", async () => {
-    const parsed = doc(REF, "class: managed", "");
+    const parsed = doc(WINDOWS, "class: managed", "");
     const entry = parsed.files[0] as Sourced;
     const fetched = await fetchUpstream(upstreamRefs(parsed.files), "http://upstream", fromDisk);
     for (const modules of [[], ["bun"]]) {
@@ -89,13 +91,13 @@ describe("an entry whose source is an upstream ref", () => {
     [
       "managed: the fetched source, then the blocks with no heading",
       "class: managed",
-      REF,
+      WINDOWS,
       "Thumbs.db\nSTAR~\n\nSTAR.log\n\n",
     ],
     [
       "split, hash region: each fetched block under a # heading",
       "class: split\n    region: hash",
-      REF,
+      WINDOWS,
       "# BEGIN REPO-PLATFORM MANAGED\nThumbs.db\n" +
         "## Linux (github/gitignore Global/Linux.gitignore)\nSTAR~\n\n" +
         "## Node (github/gitignore Node.gitignore)\nSTAR.log\n\n" +
@@ -104,7 +106,7 @@ describe("an entry whose source is an upstream ref", () => {
     [
       "split, html region: each fetched block under an html comment heading",
       "class: split\n    region: html",
-      REF,
+      WINDOWS,
       "<!-- BEGIN REPO-PLATFORM MANAGED -->\nThumbs.db\n" +
         "<!-- Linux (github/gitignore Global/Linux.gitignore) -->\nSTAR~\n\n" +
         "<!-- Node (github/gitignore Node.gitignore) -->\nSTAR.log\n\n" +

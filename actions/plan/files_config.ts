@@ -21,7 +21,7 @@ interface EntryBase {
   when: When | null;
 }
 
-/** One file fetched from github.com at a commit the refresh workflow moves; the same shape whether it is an entry's source or a block. */
+/** One file fetched from github.com at a commit the refresh workflow moves. */
 export interface UpstreamRef {
   /** owner/name. */
   repository: string;
@@ -30,19 +30,17 @@ export interface UpstreamRef {
   path: string;
 }
 
-export interface UpstreamBlocks {
-  /** Values every repository takes, before the selected modules' blocks. */
-  always: string[];
-  /** Block value to the file it is fetched from. */
-  refs: Record<string, UpstreamRef>;
-}
+/** Relative to the files/ tree, or fetched; an entry's own body and each of its blocks read through this one shape. */
+export type Source = string | UpstreamRef;
 
 interface SourcedEntry extends EntryBase {
-  /** Relative to the files/ tree, or fetched. */
-  source: string | UpstreamRef;
+  source: Source;
   /** The module-data key whose values name the blocks. */
   blocks?: string;
-  upstream?: UpstreamBlocks;
+  /** Values every repository takes, before the selected modules' blocks. */
+  always: string[];
+  /** Block value to where it comes from; checkFilesConfig refused a listed value without one. */
+  sources: Record<string, Source>;
   /** Literal rewrites of every fetched body of the entry; a tree file is edited instead. */
   replace?: Record<string, string>;
 }
@@ -115,8 +113,6 @@ const whenSchema = z
 
 const LIST_KEYS = ["modules", "any", "without"] as const;
 
-/** A block value sits between a file's stem and its extension, so it is one
- *  word without dots. */
 export const BLOCK_VALUE_RE = /^[A-Za-z0-9_-]+$/;
 
 /** All three go into the raw-content URL verbatim, so only the characters GitHub itself admits pass, and a `..` segment
@@ -135,24 +131,8 @@ const refSchema = z.strictObject({
     }),
 });
 
-/** One pin per registry, so a bump is one edit. */
-const upstreamSchema = refSchema
-  .omit({ path: true })
-  .extend({
-    always: z.array(z.string().min(1)).default([]),
-    paths: z.record(z.string().regex(BLOCK_VALUE_RE, "not a block name"), refSchema.shape.path),
-  })
-  .transform(
-    ({ repository, sha, always, paths }): UpstreamBlocks => ({
-      always,
-      refs: Object.fromEntries(
-        Object.entries(paths).map(([value, path]) => [value, { repository, sha, path }]),
-      ),
-    }),
-  );
-
 /** The shape is picked before parsing, as listSchema does, so a bad ref field keeps its name. */
-const sourceSchema: z.ZodType<string | UpstreamRef> = z.unknown().transform((value, ctx) => {
+const sourceSchema: z.ZodType<Source> = z.unknown().transform((value, ctx) => {
   const parsed = (typeof value === "string" ? z.string().min(1) : refSchema).safeParse(value);
   if (parsed.success) return parsed.data;
   for (const issue of parsed.error.issues) ctx.addIssue({ ...issue, code: "custom" });
@@ -166,7 +146,8 @@ const fileSchema = z.strictObject({
   when: whenSchema.optional(),
   region: z.enum(["hash", "html"]).optional(),
   blocks: z.string().min(1).optional(),
-  upstream: upstreamSchema.optional(),
+  always: z.array(z.string().min(1)).optional(),
+  sources: z.record(z.string().regex(BLOCK_VALUE_RE, "not a block name"), sourceSchema).optional(),
   replace: z.record(z.string().min(1), z.string()).optional(),
   render: z.enum(["settings"]).optional(),
   overlay: z.string().min(1).optional(),
@@ -262,9 +243,10 @@ export function selectEntries(
 
 export const SOURCE_PREFIX = "files/";
 
-export type BlockSource =
-  | { kind: "tree"; source: string }
-  | { kind: "upstream"; value: string; ref: UpstreamRef };
+export interface Block {
+  value: string;
+  source: Source;
+}
 
 /** Host-free, so one key names the same file under the real host and the tests' loopback host. */
 export function refKey(ref: UpstreamRef): string {
@@ -275,30 +257,12 @@ export function upstreamRefs(files: FileEntry[]): UpstreamRef[] {
   const refs = new Map<string, UpstreamRef>();
   for (const entry of files) {
     if ("render" in entry) continue;
-    const own = typeof entry.source === "string" ? [] : [entry.source];
-    for (const ref of [...own, ...Object.values(entry.upstream?.refs ?? {})]) {
-      if (!refs.has(refKey(ref))) refs.set(refKey(ref), ref);
+    for (const source of [entry.source, ...Object.values(entry.sources)]) {
+      if (typeof source === "string") continue;
+      if (!refs.has(refKey(source))) refs.set(refKey(source), source);
     }
   }
   return [...refs.values()];
-}
-
-/** A value the entry's upstream names is fetched at the pin; any other is the module's own file beside its copy of the
- *  path, the value between the stem and the extension so every tool parses it by its real extension.
- *    upstream  AGENTS.md, Style                   -> {value: Style, ref: {..., path: docs/Style.md}}
- *    tree      bun, .github/dependabot.yml, bun   -> bun/.github/dependabot.block.bun.yml */
-export function blockSource(
-  entry: Pick<SourcedEntry, "path" | "upstream">,
-  module: string,
-  value: string,
-): BlockSource {
-  // Own keys only: a value spelled `constructor` is a local block, not Object's.
-  const refs = entry.upstream?.refs;
-  if (refs !== undefined && Object.hasOwn(refs, value)) {
-    return { kind: "upstream", value, ref: refs[value] };
-  }
-  const { dir, stem, ext } = splitEntryPath(entry.path);
-  return { kind: "tree", source: `${module}/${dir}${stem}.block.${value}${ext}` };
 }
 
 /** The values each module lists under a key, in files.yml order; checkFilesConfig refused any list that is not block names. */
@@ -308,41 +272,19 @@ export function blockLists(modules: Record<string, ModuleData>, key: string): [s
   );
 }
 
-/** The upstream `always` values, then each selected module's list in files.yml order; a source named twice lands once, so a
- *  shared upstream block two toolchains list is one block while each toolchain's own file under one value name is its own. */
 export function blockSources(
   config: Pick<FilesConfig, "modules">,
   entry: FileEntry,
   modules: string[],
-): BlockSource[] {
+): Block[] {
   if ("render" in entry) return [];
-  const sources = new Map<string, BlockSource>();
-  const add = (source: BlockSource) => {
-    const key = source.kind === "tree" ? source.source : `upstream ${refKey(source.ref)}`;
-    if (!sources.has(key)) sources.set(key, source);
-  };
-  const upstream = entry.upstream;
-  if (upstream !== undefined) {
-    for (const value of upstream.always)
-      add({ kind: "upstream", value, ref: upstream.refs[value] });
-  }
+  const values = new Set(entry.always);
   const lists = entry.blocks === undefined ? [] : blockLists(config.modules, entry.blocks);
-  for (const [module, values] of lists) {
+  for (const [module, listed] of lists) {
     if (!modules.includes(module)) continue;
-    for (const value of values) add(blockSource(entry, module, value));
+    for (const value of listed) values.add(value);
   }
-  return [...sources.values()];
-}
-
-function splitEntryPath(entryPath: string): { dir: string; stem: string; ext: string } {
-  const slash = entryPath.lastIndexOf("/");
-  const base = entryPath.slice(slash + 1);
-  const dot = base.lastIndexOf(".");
-  return {
-    dir: entryPath.slice(0, slash + 1),
-    stem: dot === -1 ? base : base.slice(0, dot),
-    ext: dot === -1 ? "" : base.slice(dot),
-  };
+  return [...values].map((value) => ({ value, source: entry.sources[value] }));
 }
 
 export class FilesConfigError extends Error {
@@ -478,39 +420,33 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     if (entry.render === undefined && entry.overlay !== undefined) {
       problems.push(`${where}: overlay applies to rendered entries only`);
     }
-    if (entry.upstream !== undefined) {
-      const { always, refs } = entry.upstream;
-      if (Object.keys(refs).length === 0) problems.push(`${where}: upstream names no path`);
-      for (const value of always) {
-        if (!Object.hasOwn(refs, value)) {
-          problems.push(
-            `${where}: upstream.always names '${value}', which upstream.paths does not`,
-          );
-        }
-      }
-      // A registered path nothing lists is dead configuration the writer would fetch for no block.
-      const listed = new Set([
-        ...always,
-        ...(entry.blocks === undefined
-          ? []
-          : blockLists(data.modules, entry.blocks).flatMap(([, values]) => values)),
-      ]);
-      for (const value of Object.keys(refs)) {
-        if (!listed.has(value)) {
-          problems.push(`${where}: upstream.paths.${value}: no module lists the value`);
-        }
+    const always = entry.always ?? [];
+    const sources = entry.sources ?? {};
+    const listed = new Set([
+      ...always,
+      ...(entry.blocks === undefined
+        ? []
+        : blockLists(data.modules, entry.blocks).flatMap(([, values]) => values)),
+    ]);
+    // Own keys only: a value spelled `constructor` names a block, not Object's.
+    for (const value of listed) {
+      if (!Object.hasOwn(sources, value)) {
+        problems.push(`${where}: sources does not name '${value}', which always or a module lists`);
       }
     }
-    if (
-      entry.replace !== undefined &&
-      entry.upstream === undefined &&
-      typeof entry.source !== "object"
-    ) {
+    // A source nothing lists is dead configuration the writer would fetch or verify for no block.
+    for (const value of Object.keys(sources)) {
+      if (!listed.has(value)) {
+        problems.push(`${where}: sources.${value}: neither always nor a module lists the value`);
+      }
+    }
+    const fetches = [entry.source, ...Object.values(sources)].some((s) => typeof s === "object");
+    if (entry.replace !== undefined && !fetches) {
       problems.push(`${where}: replace applies to entries fetching an upstream source or blocks`);
     }
     // Fetching keys are refused by name on a rendered entry, which reads no source: silently dropping one would leave a
     // pin the refresh never moves.
-    const fetching = (["source", "blocks", "upstream", "replace"] as const).filter(
+    const fetching = (["source", "blocks", "always", "sources", "replace"] as const).filter(
       (key) => entry[key] !== undefined,
     );
     if (entry.render !== undefined) {
@@ -532,19 +468,27 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
         overlay: entry.overlay,
       };
     }
+    // A tree path is checked and made tree-relative here, so every reader past the loader joins it under --tree as is.
+    const resolved = (what: string, source: Source): Source => {
+      if (typeof source !== "string") return source;
+      if (!source.startsWith(SOURCE_PREFIX) || pathProblem(source) !== null) {
+        problems.push(`${where}: ${what} '${source}' must be a clean path under ${SOURCE_PREFIX}`);
+      }
+      return source.slice(SOURCE_PREFIX.length);
+    };
     const written = entry.source ?? `${SOURCE_PREFIX}${when?.modules?.[0] ?? "base"}/${entry.path}`;
-    if (
-      typeof written === "string" &&
-      (!written.startsWith(SOURCE_PREFIX) || pathProblem(written) !== null)
-    ) {
-      problems.push(`${where}: source '${written}' must be a clean path under ${SOURCE_PREFIX}`);
-    }
     const base = {
       path: entry.path,
-      source: typeof written === "string" ? written.slice(SOURCE_PREFIX.length) : written,
+      source: resolved("source", written),
       when,
       ...(entry.blocks === undefined ? {} : { blocks: entry.blocks }),
-      ...(entry.upstream === undefined ? {} : { upstream: entry.upstream }),
+      always,
+      sources: Object.fromEntries(
+        Object.entries(sources).map(([value, source]) => [
+          value,
+          resolved(`sources.${value}`, source),
+        ]),
+      ),
       ...(entry.replace === undefined ? {} : { replace: entry.replace }),
     };
     if (entry.class === "managed") return { ...base, class: "managed" };

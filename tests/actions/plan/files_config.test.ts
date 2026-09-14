@@ -3,8 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  type BlockSource,
-  blockSource,
+  type Block,
   blockSources,
   checkFilesConfig,
   type FileEntry,
@@ -26,7 +25,7 @@ modules:
   fuzzer: {}
 files:
   - { path: .github/workflows/ci.yml, class: managed }
-  - { path: .gitignore, class: split, region: hash, blocks: gitignore_sources }
+  - { path: .gitignore, class: split, region: hash, blocks: gitignore_sources, sources: {Node: files/bun/Node.gitignore, Bun: files/bun/Bun.gitignore} }
   - path: .github/workflows/nightly.yml
     class: managed
     when: { modules: [nightly], without: [site] }
@@ -299,6 +298,8 @@ describe("render, overlay, and the settings block", () => {
       class: "managed",
       source: "base/.github/settings.yml",
       when: null,
+      always: [],
+      sources: {},
     });
     expect(() => parseFilesConfig(text, "/build/files.yml")).toThrow(FilesConfigError);
     expect(() => parseFilesConfig(text, "/build/files.yml")).toThrow(
@@ -612,37 +613,9 @@ describe("mutuallyExclusive", () => {
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const ref = (path: string) => ({ repository: "github/gitignore", sha: SHA, path });
-const UPSTREAM = {
-  always: ["Windows"],
-  refs: {
-    Windows: ref("Global/Windows.gitignore"),
-    Node: ref("Node.gitignore"),
-    bun: ref("bun.gitignore"),
-  },
-};
+const REF = (path: string) => `{repository: github/gitignore, sha: ${SHA}, path: ${path}}`;
 
 describe("block sources", () => {
-  const entry = { path: ".gitignore", upstream: UPSTREAM };
-
-  // The files/ tree names a module's block `stem.block.value.ext` beside its copy of the path, a convention only the
-  // tree states; a value named like an Object prototype key is a tree block, not the upstream's.
-  test("a value the upstream names is fetched by ref; any other is the module's own file, the value between the stem and the extension", () => {
-    expect([
-      blockSource(entry, "bun", "Node"),
-      blockSource(entry, "fuzzer", "fuzzer"),
-      blockSource(entry, "x", "constructor"),
-      blockSource({ path: ".github/dependabot.yml" }, "bun", "bun"),
-      blockSource({ path: ".github/CODEOWNERS" }, "bun", "x"),
-    ]).toEqual([
-      { kind: "upstream", value: "Node", ref: ref("Node.gitignore") },
-      { kind: "tree", source: "fuzzer/.block.fuzzer.gitignore" },
-      { kind: "tree", source: "x/.block.constructor.gitignore" },
-      { kind: "tree", source: "bun/.github/dependabot.block.bun.yml" },
-      { kind: "tree", source: "bun/.github/CODEOWNERS.block.x" },
-    ]);
-  });
-
-  const PATHS = "Windows: Global/Windows.gitignore, Node: Node.gitignore, bun: bun.gitignore";
   const shared = parseFilesConfig(
     [
       "placeholders: []",
@@ -656,34 +629,31 @@ describe("block sources", () => {
       "    class: split",
       "    region: hash",
       "    blocks: g",
-      `    upstream: {repository: github/gitignore, sha: ${SHA}, always: [Windows], paths: {${PATHS}}}`,
+      "    always: [Windows]",
+      `    sources: {Windows: ${REF("Global/Windows.gitignore")}, Node: ${REF("Node.gitignore")}, bun: ${REF("bun.gitignore")}, fuzzer: files/fuzzer/fuzzer.gitignore}`,
       "",
     ].join("\n"),
   );
-  const up = (value: string, path: string) => ({
-    kind: "upstream" as const,
-    value,
-    ref: ref(path),
-  });
+  const up = (value: string, path: string) => ({ value, source: ref(path) });
 
   const own = parseFilesConfig(
     [
       "placeholders: []",
       "modules:",
-      "  bun: { t: [toolchain] }",
-      "  deno: { t: [toolchain] }",
+      "  bun: { t: [bun] }",
+      "  deno: { t: [deno] }",
       "files:",
-      "  - { path: AGENTS.md, class: split, region: html, blocks: t }",
-      "  - { path: d.yml, class: managed, blocks: t }",
-      "  - { path: s.yml, class: starter, blocks: t }",
+      "  - { path: AGENTS.md, class: split, region: html, blocks: t, sources: {bun: files/bun/AGENTS.toolchain.md, deno: files/deno/AGENTS.toolchain.md} }",
+      "  - { path: d.yml, class: managed, blocks: t, sources: {bun: files/bun/d.yml, deno: files/deno/d.yml} }",
+      "  - { path: s.yml, class: starter, blocks: t, sources: {bun: files/bun/s.yml, deno: files/deno/s.yml} }",
       "",
     ].join("\n"),
   );
-  const tree = (source: string) => ({ kind: "tree" as const, source });
+  const tree = (value: string, source: string) => ({ value, source });
 
-  // The block order is the written file's order on every repository, and a source two toolchains name lands once while
-  // each toolchain's own file under one value name is its own block.
-  test.each<{ config: FilesConfig; entry: number; selected: string[]; expected: BlockSource[] }>([
+  // The block order is the written file's order on every repository, and a value two toolchains list lands once; a tree
+  // source is made tree-relative like the entry's own.
+  test.each<{ config: FilesConfig; entry: number; selected: string[]; expected: Block[] }>([
     {
       config: shared,
       entry: 0,
@@ -692,7 +662,7 @@ describe("block sources", () => {
         up("Windows", "Global/Windows.gitignore"),
         up("Node", "Node.gitignore"),
         up("bun", "bun.gitignore"),
-        tree("fuzzer/.block.fuzzer.gitignore"),
+        tree("fuzzer", "fuzzer/fuzzer.gitignore"),
       ],
     },
     {
@@ -711,24 +681,24 @@ describe("block sources", () => {
       config: own,
       entry: 0,
       selected: ["bun", "deno"],
-      expected: [tree("bun/AGENTS.block.toolchain.md"), tree("deno/AGENTS.block.toolchain.md")],
+      expected: [tree("bun", "bun/AGENTS.toolchain.md"), tree("deno", "deno/AGENTS.toolchain.md")],
     },
-    { config: own, entry: 1, selected: ["bun"], expected: [tree("bun/d.block.toolchain.yml")] },
-    { config: own, entry: 2, selected: ["deno"], expected: [tree("deno/s.block.toolchain.yml")] },
+    { config: own, entry: 1, selected: ["bun"], expected: [tree("bun", "bun/d.yml")] },
+    { config: own, entry: 2, selected: ["deno"], expected: [tree("deno", "deno/s.yml")] },
   ])(
-    "blockSources for entry $entry under $selected: the always values first, then the selected modules in files.yml order, a source named twice once, a value name per module its own file",
+    "blockSources for entry $entry under $selected: the always values first, then the selected modules in files.yml order, a value listed twice once",
     ({ config, entry, selected, expected }) => {
       expect(blockSources(config, config.files[entry], selected)).toEqual(expected);
     },
   );
 });
 
-describe("the upstream registry grammar", () => {
+describe("the block sources grammar", () => {
   const doc = (modules: string, entry: string) =>
     `placeholders: []\nmodules:\n${modules}files:\n  - ${entry}\n`;
   const BUN = "  bun: { g: [Node] }\n";
-  const registry = (fields: string) =>
-    `{ path: .gitignore, class: split, region: hash, blocks: g, upstream: {repository: github/gitignore, sha: ${SHA}, ${fields}} }`;
+  const entry = (fields: string) =>
+    `{ path: .gitignore, class: split, region: hash, blocks: g, ${fields} }`;
 
   const OTHER = "89abcdef0123456789abcdef0123456789abcdef";
   const sourced = parseFilesConfig(
@@ -738,31 +708,35 @@ describe("the upstream registry grammar", () => {
       "  bun: { g: [Node] }",
       "files:",
       `  - { path: NOTES.md, class: managed, source: {repository: o/notes, sha: ${OTHER}, path: docs/NOTES.md}, replace: {"a": "b"} }`,
-      `  - { path: .gitignore, class: split, region: hash, when: {without: [bun]}, upstream: {repository: github/gitignore, sha: ${SHA}, always: [Linux], paths: {Linux: Global/Linux.gitignore}} }`,
-      `  - { path: .gitignore, class: split, region: hash, when: {modules: [bun]}, blocks: g, upstream: {repository: github/gitignore, sha: ${SHA}, paths: {Node: Node.gitignore, Linux: Global/Linux.gitignore}, always: [Linux]} }`,
-      "  - { path: LICENSE.md, class: managed, blocks: g }",
+      `  - { path: .gitignore, class: split, region: hash, when: {without: [bun]}, always: [Linux], sources: {Linux: ${REF("Global/Linux.gitignore")}} }`,
+      `  - { path: .gitignore, class: split, region: hash, when: {modules: [bun]}, blocks: g, always: [Linux], sources: {Node: ${REF("Node.gitignore")}, Linux: ${REF("Global/Linux.gitignore")}} }`,
+      "  - { path: LICENSE.md, class: managed }",
       "",
     ].join("\n"),
   );
 
   // upstreamRefs is the writer's fetch list: a ref listed twice is fetched twice, one dropped leaves a block unsourced.
-  test("an entry's source may be a ref, an upstream needs no blocks, `always` defaults to none, and upstreamRefs yields every distinct ref in files.yml order", () => {
-    const valid = checkFilesConfig(doc(BUN, registry("paths: {Node: Node.gitignore}")));
+  test("an entry's source may be a ref, always needs no blocks, `always` and `sources` default to none, and upstreamRefs yields every distinct ref in files.yml order", () => {
+    const valid = checkFilesConfig(doc(BUN, entry(`sources: {Node: ${REF("Node.gitignore")}}`)));
     expect(valid.problems).toEqual([]);
     expect(valid.config.files[0]).toMatchObject({
       blocks: "g",
-      upstream: { always: [], refs: { Node: ref("Node.gitignore") } },
+      always: [],
+      sources: { Node: ref("Node.gitignore") },
     });
     expect(sourced.files[0]).toEqual({
       path: "NOTES.md",
       class: "managed",
       when: null,
       source: { repository: "o/notes", sha: OTHER, path: "docs/NOTES.md" },
+      always: [],
+      sources: {},
       replace: { a: "b" },
     });
     expect(sourced.files[1]).toMatchObject({
       source: "base/.gitignore",
-      upstream: { always: ["Linux"], refs: { Linux: ref("Global/Linux.gitignore") } },
+      always: ["Linux"],
+      sources: { Linux: ref("Global/Linux.gitignore") },
     });
     expect(upstreamRefs(sourced.files)).toEqual([
       { repository: "o/notes", sha: OTHER, path: "docs/NOTES.md" },
@@ -771,47 +745,58 @@ describe("the upstream registry grammar", () => {
     ]);
   });
 
-  // Each row is a registry that fetches the wrong file or none with no run red: a value the paths do not name, a path
-  // nothing lists, a list spelled as one word.
+  // Each row is an entry that would splice the wrong block or none with no run red: a listed value with no source, a
+  // source nothing lists, a tree source outside files/, a list spelled as one word.
   test.each([
     [
       "a block list that is not a list",
-      doc("  bun: { g: Node }\n", registry("paths: {Node: Node.gitignore}")),
+      doc("  bun: { g: Node }\n", entry(`sources: {Node: ${REF("Node.gitignore")}}`)),
       "modules.bun.g: Invalid input: expected array, received string",
     ],
     [
       "a block value that is a path or a dotted name",
-      doc("  bun: { g: [../x, Node.old] }\n", registry("paths: {}")),
+      doc("  bun: { g: [../x, Node.old] }\n", entry("sources: {}")),
       "modules.bun.g must be a list of block names (letters, digits, _ -)",
     ],
     [
       "a block value that is a number, however name-like its spelling",
-      doc("  bun: { g: [123] }\n", registry("paths: {}")),
+      doc("  bun: { g: [123] }\n", entry("sources: {}")),
       "modules.bun.g.0: Invalid input: expected string, received number",
     ],
     [
-      "an upstream naming no path",
-      doc(
-        BUN,
-        `{ path: .gitignore, class: split, region: hash, upstream: {repository: github/gitignore, sha: ${SHA}, paths: {}} }`,
-      ),
-      "files: .gitignore: upstream names no path",
+      "a listed value sources does not name",
+      doc("  bun: { g: [Node, Bun] }\n", entry(`sources: {Node: ${REF("Node.gitignore")}}`)),
+      "files: .gitignore: sources does not name 'Bun', which always or a module lists",
+    ],
+    [
+      "a listed value spelled like an Object prototype key, which sources does not name",
+      doc("  bun: { g: [constructor] }\n", entry("sources: {}")),
+      "files: .gitignore: sources does not name 'constructor', which always or a module lists",
+    ],
+    [
+      "an always value sources does not name",
+      doc(BUN, entry(`always: [Linux], sources: {Node: ${REF("Node.gitignore")}}`)),
+      "files: .gitignore: sources does not name 'Linux', which always or a module lists",
+    ],
+    [
+      "a source neither always nor a module lists",
+      doc(BUN, entry(`sources: {Node: ${REF("Node.gitignore")}, Rust: files/rust/Rust.gitignore}`)),
+      "files: .gitignore: sources.Rust: neither always nor a module lists the value",
+    ],
+    [
+      "a tree source outside files/",
+      doc(BUN, entry("sources: {Node: other/Node.gitignore}")),
+      "files: .gitignore: sources.Node 'other/Node.gitignore' must be a clean path under files/",
+    ],
+    [
+      "a tree source leaving files/",
+      doc(BUN, entry("sources: {Node: files/../Node.gitignore}")),
+      "files: .gitignore: sources.Node 'files/../Node.gitignore' must be a clean path under files/",
     ],
     [
       "replace on an entry that fetches nothing",
-      doc(BUN, `{ path: .gitignore, class: split, region: hash, replace: {"a": "b"} }`),
+      doc(BUN, entry(`replace: {"a": "b"}, sources: {Node: files/bun/Node.gitignore}`)),
       "files: .gitignore: replace applies to entries fetching an upstream source or blocks",
-    ],
-
-    [
-      "an always value the paths do not name",
-      doc(BUN, registry("always: [Linux], paths: {Node: Node.gitignore}")),
-      "files: .gitignore: upstream.always names 'Linux', which upstream.paths does not",
-    ],
-    [
-      "a registered path no module lists",
-      doc(BUN, registry("paths: {Node: Node.gitignore, Rust: Rust.gitignore}")),
-      "files: .gitignore: upstream.paths.Rust: no module lists the value",
     ],
   ])("%s is refused by name", (_case, text, problem) => {
     expect(problemsOf(text)).toContain(problem);
@@ -819,51 +804,46 @@ describe("the upstream registry grammar", () => {
 
   // Every field goes into the raw-content URL verbatim, so a `#` reads as a fragment and a `..` segment leaves the pinned
   // commit; the same schema judges a block ref and an entry's source ref.
-  const upstreamEntry = (fields: Record<string, string>) => {
-    const u = {
-      repository: "github/gitignore",
-      sha: SHA,
-      paths: "{Node: Node.gitignore}",
-      ...fields,
-    };
-    return `{ path: .gitignore, class: split, region: hash, blocks: g, upstream: {repository: ${u.repository}, sha: ${u.sha}, paths: ${u.paths}} }`;
+  const blockEntry = (fields: Record<string, string>) => {
+    const u = { repository: "github/gitignore", sha: SHA, path: "Node.gitignore", ...fields };
+    return entry(`sources: {Node: {repository: ${u.repository}, sha: ${u.sha}, path: ${u.path}}}`);
   };
   const sourceEntry = (source: string) => `{ path: x.md, class: managed, source: ${source} }`;
   test.each([
     [
-      "an upstream repository that is not owner/name",
-      upstreamEntry({ repository: "gitignore" }),
-      "files.0.upstream.repository: not an owner/name repository",
+      "a block ref repository that is not owner/name",
+      blockEntry({ repository: "gitignore" }),
+      "files.0.sources.Node.repository: not an owner/name repository",
     ],
     [
-      "an upstream repository whose owner or name is a traversal segment the URL would normalize away",
-      upstreamEntry({ repository: "../gitignore" }),
-      "files.0.upstream.repository: not an owner/name repository",
+      "a block ref repository whose owner or name is a traversal segment the URL would normalize away",
+      blockEntry({ repository: "../gitignore" }),
+      "files.0.sources.Node.repository: not an owner/name repository",
     ],
     [
-      "an upstream path with a URL delimiter, which fetch would read as a fragment",
-      upstreamEntry({ paths: "{Node: 'templates/a#b.gitignore'}" }),
-      "files.0.upstream.paths.Node: not a plain path (letters, digits, . _ - /)",
+      "a block ref path with a URL delimiter, which fetch would read as a fragment",
+      blockEntry({ path: "'templates/a#b.gitignore'" }),
+      "files.0.sources.Node.path: not a plain path (letters, digits, . _ - /)",
     ],
     [
-      "an upstream path leaving the pinned commit, which the URL would normalize away",
-      upstreamEntry({ paths: "{Node: ../HEAD/Node.gitignore}" }),
-      "files.0.upstream.paths.Node: carries an empty, '.', or '..' segment",
+      "a block ref path leaving the pinned commit, which the URL would normalize away",
+      blockEntry({ path: "../HEAD/Node.gitignore" }),
+      "files.0.sources.Node.path: carries an empty, '.', or '..' segment",
     ],
     [
-      "a short upstream sha",
-      upstreamEntry({ sha: SHA.slice(0, 12) }),
-      "files.0.upstream.sha: not a full lowercase commit sha",
+      "a short block ref sha",
+      blockEntry({ sha: SHA.slice(0, 12) }),
+      "files.0.sources.Node.sha: not a full lowercase commit sha",
     ],
     [
-      "a missing upstream sha",
-      upstreamEntry({ sha: "null" }),
-      "files.0.upstream.sha: Invalid input: expected string, received null",
+      "a missing block ref sha",
+      blockEntry({ sha: "null" }),
+      "files.0.sources.Node.sha: Invalid input: expected string, received null",
     ],
     [
-      "a dotted value as a paths key",
-      upstreamEntry({ paths: "{Node.old: Node.gitignore}" }),
-      "files.0.upstream.paths.Node.old: Invalid key in record",
+      "a dotted value as a sources key",
+      entry(`sources: {Node.old: ${REF("Node.gitignore")}}`),
+      "files.0.sources.Node.old: Invalid key in record",
     ],
     [
       "a source ref with a short sha",
