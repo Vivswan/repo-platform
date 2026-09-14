@@ -2,7 +2,7 @@
 // lets a later run adopt the open PR instead of opening a second one, and the unconditional step (no `if:`) is what lets a
 // no-diff run close a stale one. The major is pinned, not the patch: adopting, title and body refresh, and the close on
 // no diff are the behaviors a major may change; Dependabot's minor and patch bumps flow.
-// The fleet PAT is the push token and the only one named: a github.token push would leave the PR's CI unstarted, and
+// The fleet PAT is the push token: a github.token push would leave the PR's CI unstarted, and
 // the checkout takes the default token so the PAT's first read is the guard step (fleet_token_environment.test.ts).
 
 import { expect, test } from "bun:test";

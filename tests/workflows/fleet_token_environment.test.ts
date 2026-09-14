@@ -74,7 +74,7 @@ describe(`the ${SECRET} readers`, () => {
   });
 
   // An earlier reader would clone, probe, or push as nobody; a conditional guard is no guard. A read outside `steps`
-  // (a workflow or job `env`, a `container` or `services` env) reaches every step, the ones before the guard included.
+  // (a workflow or job `env`, a `container` or `services` env) reaches the job before the guard runs.
   test("every reader's first step reading the secret is the unconditional guard step", () => {
     const enclosing = readers.filter(({ job: { steps, ...rest }, workflowEnv }) =>
       readsSecret(workflowEnv, rest),
