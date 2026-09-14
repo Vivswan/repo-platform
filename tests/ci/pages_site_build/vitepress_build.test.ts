@@ -1,3 +1,7 @@
+// One deploy build of a three-tier fixture (HEAD, v0.2.0, v0.1.0) read by most cases; the theme's
+// unit tests pin each rule over hand-written input, these pin what the real vitepress and vite
+// builds emit.
+
 import { beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -48,6 +52,7 @@ describe("the versioned vitepress deploy", () => {
   }, TEST_TIMEOUT_MS);
 
   test("lays out root = newest tag, latest = HEAD, one dir per tag, and the indexes", () => {
+    // docs/site.md's docs-only Layout row as the artifact tree, llms.txt included.
     const expected = [
       "index.html",
       "latest/index.html",
@@ -62,6 +67,8 @@ describe("the versioned vitepress deploy", () => {
   });
 
   test("isolates each tier's content: the HEAD edit in latest alone, the v0.2.0 line at the root", () => {
+    // Each tier builds from its own git tree, not the working tree; the layout case stays green
+    // on a build that copies HEAD everywhere.
     expect(readSite(site, "latest/setup.html")).toContain("HEAD-only line");
     expect(readSite(site, "setup.html")).not.toContain("HEAD-only line");
     expect(readSite(site, "v0.2.0/setup.html")).not.toContain("HEAD-only line");
@@ -70,42 +77,44 @@ describe("the versioned vitepress deploy", () => {
   });
 
   test("renders the zh-cn locale only in the tiers whose tree carries it, with the translations menu", () => {
+    // The per-tier locales config reaching vitepress; the translations menu has no unit home.
     expect(readSite(site, "latest/zh-cn/index.html")).toContain("locale landing page");
     expect(isFile(site, "v0.2.0/zh-cn/index.html")).toBe(true);
     expect(existsSync(join(site, "v0.1.0/zh-cn"))).toBe(false);
     expect(latestIndex).toContain("VPNavBarTranslations");
   });
 
-  test("carries the version switcher, the fleet hue, and a head without an invented favicon", () => {
-    expect(latestIndex).toContain("docs-site-version-switcher");
+  test("marks the tier being read in the facts card, names it in the provenance label and line per tier, and stamps the repository's hue", () => {
+    // The tier's and the repository's identity reaching the render: facts_panel.test pins the
+    // card's markup alone, theme_tokens.test the hue's CSS selectors, neither the built HTML.
+    // vitepress inlines the site data as an escaped JSON string, hence the backslashes; anchored
+    // on the provenance key because the version dropdown lists every tier's label in every page.
+    const tiers: [string, string, string][] = [
+      ["latest/", "main", "latest"],
+      ["v0.2.0/", "v0.2.0", "v0.2.0"],
+      ["v0.1.0/", "v0.1.0", "v0.1.0"],
+    ];
+    for (const [rel, label, current] of tiers) {
+      const page = readSite(site, `${rel}index.html`);
+      const labels = tiers
+        .map(([, other]) => other)
+        .filter((other) => page.includes(`\\"provenance\\":{\\"label\\":\\"${other}\\"`));
+      expect([rel, labels]).toEqual([rel, [label]]);
+      expect(texts(page, '.fleet-facts-items a[aria-current="true"]')).toEqual([current]);
+      expect(page).toContain(`Built from ${label}`);
+    }
     expect(latestIndex).toContain('data-fleet-hue="');
-    // The description falls back to the site title (no settings.yml
-    // description in the fixture); a docs tree without public/favicon.*
-    // gets no icon link, since an invented one would 404 on every page.
+    // The site description falls back to the title when settings.yml names none.
     expect(
       select(latestIndex, 'meta[name="description"]').map((meta) => meta.attrs.content),
     ).toEqual(["Fixture Docs"]);
-    expect(select(latestIndex, 'link[rel="icon"]')).toEqual([]);
   });
 
-  test("inlines each tier's own provenance label into its site data", () => {
-    // vitepress inlines the site data as an escaped JSON string, hence the
-    // backslashes; anchored on the provenance key because the version
-    // dropdown lists every tier's label in every page.
-    expect(latestIndex).toContain('\\"provenance\\":{\\"label\\":\\"main\\"');
-    const v010 = readSite(site, "v0.1.0/index.html");
-    expect(v010).toContain('\\"provenance\\":{\\"label\\":\\"v0.1.0\\"');
-    expect(v010).not.toContain('\\"provenance\\":{\\"label\\":\\"main\\"');
-  });
-
-  test("applies carbon's skin and filters its fonts without stripping the theme's own", () => {
-    // The brand token hex is stable because vitepress-carbon is pinned
-    // EXACT in the action's package.json; a bump that moves it updates
-    // this pin.
-    expect(latestAssets).toContain("58a6ff");
-    // Carbon's remote @imports and its unused Mona Sans @font-face are
-    // dropped (so vite emits neither the woff2 nor a preload link); the
-    // theme's fontsource asset is the positive control.
+  test("filters carbon's remote fonts and its unused face without stripping the theme's own", () => {
+    // vitepress-carbon's CSS carries remote @imports and an unused Mona Sans @font-face, which
+    // the theme's build filter drops (so vite emits neither the woff2 nor a preload link); a
+    // carbon bump that moves the import past the filter makes every page fetch Google fonts.
+    // The theme's fontsource asset is the positive control.
     expect(latestAssets).not.toContain("fonts.googleapis.com");
     expect(latestAssets).not.toContain("fonts.cdnfonts.com");
     expect(latestAssets).not.toContain("Mona-Sans");
@@ -114,23 +123,6 @@ describe("the versioned vitepress deploy", () => {
     ).toEqual([]);
     expect(select(latestIndex, 'link[as="font"]')).toEqual([]);
     expect(latestAssets).toContain("wix-madefor-text-latin-wght-normal");
-  });
-
-  test("renders the facts card with the tier being read marked, and the provenance line per tier", () => {
-    expect(latestIndex).toContain("fleet-facts");
-    expect(latestIndex).toContain(
-      'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo">' +
-        '<span class="fleet-facts-segment">fixture-owner/</span><wbr>' +
-        '<span class="fleet-facts-segment">fixture-repo</span><',
-    );
-    expect(latestIndex).toContain('aria-current="true">latest</a>');
-    expect(latestIndex).toContain('fleet-facts-note">reading');
-    expect(latestIndex).toContain("fleet-provenance");
-    expect(latestIndex).toContain("Built from main");
-    expect(latestIndex).toContain("Source: docs/README.md");
-    const v020 = readSite(site, "v0.2.0/index.html");
-    expect(v020).toContain('aria-current="true">v0.2.0</a>');
-    expect(v020).toContain("Built from v0.2.0");
   });
 
   test("hands the landing's other-version links to the browser and routes the tier's own pages", () => {
@@ -164,19 +156,11 @@ describe("the versioned vitepress deploy", () => {
     expect(latestAssets).toContain("onBeforeRouteChange=");
   });
 
-  test("wraps every table in the scroll wrapper, which is the one tab stop", () => {
-    const setup = readSite(site, "latest/setup.html");
-    expect(setup).toContain('<div class="vp-table" tabindex="0"><table>');
-    expect(setup).not.toContain("<table tabindex");
-    expect(setup).toContain("</table></div>");
-    expect(latestAssets).toContain(".vp-table{overflow-x:auto;max-width:100%;");
-  });
-
   test("renders every custom-block kind with its class and sentence-case title", () => {
+    // vitepress's alert and container markup is what the theme's CSS targets (the title as the
+    // block's first paragraph); a vitepress bump that moves it restyles every alert silently.
     const alerts = readSite(site, "latest/alerts.html");
     const kinds = ["note", "tip", "important", "warning", "caution"];
-    // The title is the block's first paragraph, where the theme's CSS
-    // expects it.
     const titles = kinds.map((kind) =>
       texts(alerts, `.${kind}.custom-block.github-alert > p.custom-block-title:first-child`),
     );
@@ -188,12 +172,11 @@ describe("the versioned vitepress deploy", () => {
       '<div class="danger custom-block"><p class="custom-block-title">Danger</p>',
     );
     expect(alerts).toContain('<details class="details custom-block"><summary>Show</summary>');
-    expect(latestAssets).toContain(
-      ".vp-doc .custom-block.warning{border-left-color:var(--color-warning)}",
-    );
   });
 
   test("colors code tokens and ansi fences through the theme's custom properties", () => {
+    // shiki's `ansi` language and the CSS-variables theme, as the build emits them; the ansi
+    // palette has no unit home.
     const alerts = readSite(site, "latest/alerts.html");
     expect(alerts).toContain('style="color:var(--fleet-code-token-comment);"');
     expect(alerts).toContain('style="color:var(--fleet-code-ansi-red);"');
@@ -202,12 +185,13 @@ describe("the versioned vitepress deploy", () => {
   });
 
   test("renders a mermaid fence as the mount with its escaped source, and loads mermaid only from it", () => {
+    // Only a real vite build shows which chunk holds mermaid and which pages preload it: the
+    // package is its own chunk (mermaidAPI is its export, in nothing else), no page's HTML
+    // preloads or scripts it, and the theme chunk that owns the mount reaches it by dynamic
+    // import alone.
     const alerts = readSite(site, "latest/alerts.html");
     expect(alerts).toContain(MERMAID_MOUNT_HTML);
     expect(alerts).not.toContain("language-mermaid");
-    // The mermaid package is its own chunk (mermaidAPI is its export, in
-    // nothing else): no page's HTML preloads or scripts it, the theme chunk
-    // that owns the mount reaches it by dynamic import alone.
     const assets = assetFiles(site, "latest/assets");
     const scripts = assets.filter((file) => file.name.endsWith(".js"));
     const mermaidChunks = scripts.filter((file) => file.text.includes("mermaidAPI"));
@@ -221,32 +205,12 @@ describe("the versioned vitepress deploy", () => {
     expect(latestAssets).toContain(".fleet-mermaid{");
   });
 
-  test("ships the scrollers' reduced-motion override and the print sheet's cell wrapping", () => {
-    // Both rules are pinned whole, selectors included: carbon resets
-    // background-attachment under reduced motion for BOTH scrollers, and
-    // a declaration alone could sit under either selector.
-    expect(latestAssets).toContain(
-      ".vp-doc .vp-table,.vp-doc [class*=language-] pre{background-attachment:local,local,scroll,scroll!important}",
-    );
-    expect(latestAssets).toContain(
-      ".vp-doc .vp-table :is(th,td){overflow-wrap:anywhere}.vp-doc .vp-table :is(th,td) code{white-space:normal;overflow-wrap:anywhere}",
-    );
-  });
-
-  test("turns the landing table into the launcher panel and indexes headings for it", () => {
-    // The curated row is in view with the page's two h2s folded behind the
-    // group's fold row; every other page carries the nav button; the
-    // inlined page index carries the h2 (the proof it indexes headings).
-    expect(latestIndex).toContain('class="fleet-launcher fleet-launcher-mode-panel"');
+  test("places the landing table's row and the sidebar's groups in the launcher, mounts its button on every other page, and orders the sidebar by landing, ranked group, table placement, unplaced, directory", () => {
+    // The landing table and the sidebar both reaching the real page. The unit tests pin the
+    // order and the model over hand-written input and mount the launcher component alone; the
+    // theme's slot and the rendered group titles have no other home.
     expect(latestIndex).toContain('fleet-launcher-label">Set things up<');
-    expect(latestIndex).toContain(">Show 2 headings on Setup<");
-    expect(latestIndex).not.toContain('fleet-launcher-label">Install steps<');
-    expect(latestIndex).toContain('fleet-launcher-target">guide<');
     expect(readSite(site, "latest/setup.html")).toContain('class="fleet-launcher-button"');
-    expect(latestAssets).toContain('"anchor":"install-steps"');
-  });
-
-  test("orders the sidebar by landing, ranked group, table placement, unplaced, directory", () => {
     expect(texts(latestIndex, ".VPSidebar .text")).toEqual([
       "Fixture",
       "Basics",
@@ -258,8 +222,6 @@ describe("the versioned vitepress deploy", () => {
       "Guide",
       "Guide",
     ]);
-    // The launcher's groups follow the sidebar after the curated row, and
-    // the guide/ directory's title keeps its capital.
     expect(texts(latestIndex, ".fleet-launcher-group-title")).toEqual([
       "Setup",
       "Zulu",
@@ -271,12 +233,13 @@ describe("the versioned vitepress deploy", () => {
     expect(readSite(site, "latest/alpha.html")).not.toContain("group: Basics");
     expect(readSite(site, "latest/zulu.html")).not.toContain("order: 1");
   });
-});
 
-describe("a shipped favicon", () => {
   test(
-    "is linked at the tier's own base and served there, for the tag and HEAD tiers",
+    "links a shipped favicon at the tier's own base and serves it there, for the tag and HEAD tiers",
     () => {
+      // Per-tier `head` and public/ copy. The control is the fixture above, whose docs tree
+      // ships no public/favicon.*: an invented icon link would 404 on every page.
+      expect(select(latestIndex, 'link[rel="icon"]')).toEqual([]);
       const workspace = temp.dir("pages-site-favicon-");
       mkdirSync(join(workspace, "docs", "public"), { recursive: true });
       writeFileSync(join(workspace, "docs", "README.md"), "# Favicon\n\nfavicon landing page\n");
@@ -305,24 +268,11 @@ describe("a shipped favicon", () => {
 
 describe("link strictness", () => {
   test(
-    "CHECK mode is green on clean docs and red on a dead internal link",
+    "the deploy builds a dead link sealed in a tag lenient and fails the same rot on HEAD, as the PR check does",
     () => {
-      const workspace = temp.dir("pages-site-check-");
-      docsFixture(workspace);
-      const clean = buildSite(workspace, DOCS_REPO, runnerTemp(temp), { CHECK: "true" });
-      expect(clean.exitCode, describeRun(clean)).toBe(0);
-      appendDeadLink(workspace);
-      const rotten = buildSite(workspace, DOCS_REPO, runnerTemp(temp), { CHECK: "true" });
-      expect(rotten.exitCode, describeRun(rotten)).not.toBe(0);
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "the deploy builds a dead link sealed in a tag lenient and fails the same rot on HEAD",
-    () => {
-      // Hardcoding strictness either way in the builder turns exactly one
-      // of these two runs the wrong color: history cannot be fixed, HEAD can.
+      // Hardcoding strictness either way in the builder turns exactly one of the deploy runs
+      // the wrong color: history cannot be fixed, HEAD can. pages-site.test reads the wiring
+      // as a value; only a build shows it armed.
       const workspace = temp.dir("pages-site-deploy-");
       docsFixture(workspace);
       appendDeadLink(workspace);
@@ -336,6 +286,8 @@ describe("link strictness", () => {
       appendDeadLink(workspace);
       const strict = buildSite(workspace, DOCS_REPO, runnerTemp(temp), DEPLOY_ENV);
       expect(strict.exitCode, describeRun(strict)).not.toBe(0);
+      const check = buildSite(workspace, DOCS_REPO, runnerTemp(temp), { CHECK: "true" });
+      expect(check.exitCode, describeRun(check)).not.toBe(0);
     },
     TEST_TIMEOUT_MS,
   );

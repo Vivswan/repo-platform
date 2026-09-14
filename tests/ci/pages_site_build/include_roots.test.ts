@@ -1,3 +1,6 @@
+// Other repository roots (skills/, agents/) rendered inside the docs mount, per tier, the way the
+// deploy stages them: a root that exists at some refs and not others, and its links across mounts.
+
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -7,6 +10,7 @@ import {
   buildSite,
   commitAll,
   describeRun,
+  expectRefusedBeforeBuild,
   initRepo,
   isFile,
   readAssets,
@@ -25,6 +29,9 @@ const REPO = "fixture-owner/inc-repo";
  *  hook's dist, prebuilt in the fixture) sits at "/" over the docs at
  *  "/docs/". */
 const INCLUDE = [{ path: "skills", mount: "skills", page: "SKILL.md" }];
+
+/** The agents/ root mounted INSIDE the skills root's mount, listed child first. */
+const NESTED_INCLUDE = [{ path: "agents", mount: "skills/agents", page: "AGENT.md" }, ...INCLUDE];
 
 /** The website's one page links INTO the docs mount, into an include page
  *  among them: the class of link nothing but the assembled-site gate can
@@ -114,6 +121,8 @@ describe("include roots in the assembled site", () => {
   test(
     "renders skills/ inside the docs mount per tier, titles and sources them from SKILL.md, and passes the cross-mount link gate",
     () => {
+      // Per-tier staging of a root absent at some refs, and the edit-link and blob-link bases
+      // at the tier's ref, are whole-run facts with no unit home.
       const workspace = temp.dir("pages-site-include-");
       includeFixture(workspace);
       const runner = runnerTemp(temp);
@@ -210,6 +219,8 @@ describe("include roots in the assembled site", () => {
   test(
     "fails the assembly on a website link into a missing docs page and on a docs link to a missing anchor, naming both",
     () => {
+      // A link from the website half into the docs mount has no judge but the assembled-site
+      // gate; site_links.test.ts pins the checker over one tree.
       const workspace = temp.dir("pages-site-include-broken-");
       includeFixture(workspace);
       website(workspace, '<a href="/inc-repo/docs/skills/missing/">gone</a>');
@@ -243,58 +254,71 @@ function refusalFixture(repo: string, mutate: (repo: string) => void): void {
   mutate(repo);
 }
 
-const CHECK_ENV = { CHECK: "true", CONFIG: siteConfig({ include: INCLUDE }) };
-
 describe("include root staging refusals", () => {
-  test.each<[string, (repo: string) => void, string]>([
-    [
-      "HEAD without the root",
-      (repo) => rmSync(join(repo, "skills"), { recursive: true }),
-      "skills/ does not exist in the repository - the docs site includes it at skills/; create it or drop the include",
-    ],
-    [
-      "the root a file",
-      (repo) => {
+  // Only the "carries both" message has a unit home (pages-site.test.ts); the staging judges
+  // the others against the tree, so a refusal that slipped would surface as a built collision.
+  test.each<{
+    reason: string;
+    include: typeof INCLUDE;
+    mutate: (repo: string) => void;
+    message: string;
+  }>([
+    {
+      reason: "HEAD without the root",
+      include: INCLUDE,
+      mutate: (repo) => rmSync(join(repo, "skills"), { recursive: true }),
+      message:
+        "skills/ does not exist in the repository - the docs site includes it at skills/; create it or drop the include",
+    },
+    {
+      reason: "the root a file",
+      include: INCLUDE,
+      mutate: (repo) => {
         rmSync(join(repo, "skills"), { recursive: true });
         writeFileSync(join(repo, "skills"), "not a directory\n");
       },
-      "the include root 'skills' is a file, not a directory, at HEAD",
-    ],
-    [
-      "the docs tree already carrying the mount",
-      (repo) => {
+      message: "the include root 'skills' is a file, not a directory, at HEAD",
+    },
+    {
+      reason: "the docs tree already carrying the mount",
+      include: INCLUDE,
+      mutate: (repo) => {
         mkdirSync(join(repo, "docs", "skills"));
         writeFileSync(join(repo, "docs", "skills", "README.md"), "# Hand-written\n");
       },
-      "the include root 'skills' mounts at 'skills/', which the docs tree (docs/, or a root mounted above it) already carries at HEAD - two sources would claim one URL; mount the root under another name",
-    ],
-    [
-      "a child carrying both the page and index.md",
-      (repo) => writeFileSync(join(repo, "skills", "alpha", "index.md"), "# Also alpha\n"),
-      "skills/alpha/ carries both SKILL.md and index.md - both would serve at skills/alpha/; remove one",
-    ],
+      message:
+        "the include root 'skills' mounts at 'skills/', which the docs tree (docs/, or a root mounted above it) already carries at HEAD - two sources would claim one URL; mount the root under another name",
+    },
+    {
+      reason: "a child carrying both the page and index.md",
+      include: INCLUDE,
+      mutate: (repo) => writeFileSync(join(repo, "skills", "alpha", "index.md"), "# Also alpha\n"),
+      message:
+        "skills/alpha/ carries both SKILL.md and index.md - both would serve at skills/alpha/; remove one",
+    },
+    {
+      reason: "the parent root's own source carrying the child's mount",
+      include: NESTED_INCLUDE,
+      mutate: (repo) => {
+        mkdirSync(join(repo, "agents", "one"), { recursive: true });
+        writeFileSync(join(repo, "agents", "one", "AGENT.md"), "---\nname: one\n---\n\nOne.\n");
+        mkdirSync(join(repo, "skills", "agents"));
+        writeFileSync(join(repo, "skills", "agents", "README.md"), "# Hand-written agents\n");
+      },
+      message:
+        "the include root 'agents' mounts at 'skills/agents/', which the docs tree (docs/, or a root mounted above it) already carries at HEAD - two sources would claim one URL; mount the root under another name",
+    },
   ])(
-    "refuses %s before any build",
-    (_, mutate, message) => {
+    "refuses $reason before any build",
+    ({ include, mutate, message }) => {
       const workspace = temp.dir("pages-site-include-refusal-");
       refusalFixture(workspace, mutate);
-      const result = buildSite(workspace, REPO, runnerTemp(temp), CHECK_ENV);
-      expect(result.exitCode, describeRun(result)).not.toBe(0);
-      expect(result.stderr).toContain(`::error::${message}`);
-      expect(result.stdout).not.toContain("vitepress");
+      const env = { CHECK: "true", CONFIG: siteConfig({ include }) };
+      expectRefusedBeforeBuild(buildSite(workspace, REPO, runnerTemp(temp), env), message);
     },
     TEST_TIMEOUT_MS,
   );
 });
-
-/** The agents/ root mounted INSIDE the skills root's mount, listed child
- *  first: staging order is the mount's depth, never the list's. */
-const NESTED_CHECK_ENV = {
-  CHECK: "true",
-  CONFIG: siteConfig({
-    include: [{ path: "agents", mount: "skills/agents", page: "AGENT.md" }, ...INCLUDE],
-  }),
-};
 
 /** The skill links the agent in repository space; the agent links back. */
 function nestedFixture(repo: string): void {
@@ -317,17 +341,17 @@ describe("nested include mounts", () => {
   test(
     "a root mounted inside another's mount stages whichever is listed first, and links cross between them",
     () => {
+      // Staging order is the mount's depth, never the list's: a child staged first lands outside
+      // its parent's tree and its links go to GitHub, which the gate never judges.
       const workspace = temp.dir("pages-site-include-nested-");
       nestedFixture(workspace);
       const runner = runnerTemp(temp);
-      const result = buildSite(workspace, REPO, runner, NESTED_CHECK_ENV);
+      const env = { CHECK: "true", CONFIG: siteConfig({ include: NESTED_INCLUDE }) };
+      const result = buildSite(workspace, REPO, runner, env);
       expect(result.exitCode, describeRun(result)).toBe(0);
       expect(result.stdout).toMatch(
         /docs build check passed \(\d+ links judged across \d+ pages\)/,
       );
-      // Both roots rendered, the child inside the parent's mount, and each
-      // page's link to the other is an on-site route (a missing root would
-      // have sent it to GitHub, which the gate never judges).
       const dist = join(dirname(runner.site), "build-0", ".vitepress", "dist");
       const skill = readSite(dist, "skills/alpha/index.html");
       const agent = readSite(dist, "skills/agents/one/index.html");
@@ -335,23 +359,6 @@ describe("nested include mounts", () => {
       expect(select(agent, ".vp-doc a").map((a) => a.attrs.href)).toContain(
         "./../../alpha/#install",
       );
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "refuses the child mount when the parent's own source carries that directory",
-    () => {
-      const workspace = temp.dir("pages-site-include-nested-collision-");
-      nestedFixture(workspace);
-      mkdirSync(join(workspace, "skills", "agents"));
-      writeFileSync(join(workspace, "skills", "agents", "README.md"), "# Hand-written agents\n");
-      const result = buildSite(workspace, REPO, runnerTemp(temp), NESTED_CHECK_ENV);
-      expect(result.exitCode, describeRun(result)).not.toBe(0);
-      expect(result.stderr).toContain(
-        "::error::the include root 'agents' mounts at 'skills/agents/', which the docs tree (docs/, or a root mounted above it) already carries at HEAD - two sources would claim one URL; mount the root under another name",
-      );
-      expect(result.stdout).not.toContain("vitepress");
     },
     TEST_TIMEOUT_MS,
   );
