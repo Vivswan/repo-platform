@@ -51,16 +51,19 @@ function expressionsOf(node: unknown): string[] {
 }
 
 /** In a run, a key leaves through `echo "key=..." >> "$GITHUB_OUTPUT"` (the write on the same line); a shell assignment
- *  `key=$(...)` is not a write. In a script it leaves as a template or string line `key=`, a quoted name handed to a
- *  writer (`setOutput("key", ...)`), or a record key the writer walks (`"key":`, `{ key:`). */
+ *  `key=$(...)` is not a write. In a script it leaves as a template or string line `key=`, the name handed to the
+ *  writer (`setOutput("key"`), a quoted record key (`"key":` opening an entry), or the only key of a returned record
+ *  (`return { key: x }`). The text is read, not run: a reference to a name some other single-key record returns
+ *  passes here and is caught by the step's own test. */
 function writesKey(text: string, key: string, form: "run" | "script"): boolean {
   const name = key.replaceAll("-", "\\-");
   if (form === "run") return new RegExp(`(["']|echo\\s+)${name}=[^\\n]*GITHUB_OUTPUT`).test(text);
   const lines = text.replaceAll("\\n", "\n");
   return (
     new RegExp(`(^|["'\`])${name}=`, "m").test(lines) ||
-    new RegExp(`["'\`]${name}["'\`]`).test(lines) ||
-    new RegExp(`(^|[{,])\\s*${name}:`, "m").test(lines)
+    new RegExp(`setOutput\\(\\s*["'\`]${name}["'\`]`).test(lines) ||
+    new RegExp(`(^|[{,])\\s*["'\`]${name}["'\`]\\s*:`, "m").test(lines) ||
+    new RegExp(`return\\s*\\{\\s*${name}:[^{},]*\\}`).test(lines)
   );
 }
 
@@ -83,7 +86,7 @@ function stepWrites(actionName: string, step: Step, key: string): boolean {
   }
   const own = OWN_ACTION.exec(String(step.uses));
   if (own === null) return true;
-  return key in (loadAction(own[1]).outputs ?? {});
+  return Object.hasOwn(loadAction(own[1]).outputs ?? {}, key);
 }
 
 function manifestProblems(name: string, action: Action): string[] {
@@ -139,7 +142,7 @@ function callerProblems(caller: Caller, actions: Map<string, Action>): string[] 
   const declared = action.inputs ?? {};
   const passed = Object.keys(caller.with ?? {});
   const problems = passed
-    .filter((key) => !(key in declared))
+    .filter((key) => !Object.hasOwn(declared, key))
     .map((key) => `passes '${key}', which ${name} does not declare`);
   for (const [key, spec] of Object.entries(declared)) {
     if (spec.required === true && spec.default === undefined && !passed.includes(key)) {
@@ -197,7 +200,20 @@ test("every with: key a workflow, a starter, or a composite passes to a platform
     sites.map(([site, caller]) => [site, callerProblems(caller, actions)]),
   );
   expect(judged).toEqual(Object.fromEntries(sites.map(([site]) => [site, []])));
-  // Every action is called from somewhere the fleet or this repository runs; one nobody calls is dead surface.
+  // A knob with one value across every caller is a constant: an input no caller passes, or an action no caller
+  // names, is dead surface the diff alone would let in.
+  const passed = new Map(ACTION_NAMES.map((name) => [name, new Set<string>()]));
+  for (const [, caller] of sites) {
+    const name = OWN_ACTION.exec(caller.uses)?.[1] ?? "";
+    for (const key of Object.keys(caller.with ?? {})) passed.get(name)?.add(key);
+  }
+  const unpassed = Object.fromEntries(
+    [...actions].map(([name, action]) => [
+      name,
+      Object.keys(action.inputs ?? {}).filter((key) => !passed.get(name)?.has(key)),
+    ]),
+  );
+  expect(unpassed).toEqual(Object.fromEntries(ACTION_NAMES.map((name) => [name, []])));
   const called = new Set(sites.map(([, caller]) => OWN_ACTION.exec(caller.uses)?.[1]));
   expect([...called].sort()).toEqual(ACTION_NAMES);
   const control = {

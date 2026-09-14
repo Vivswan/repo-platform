@@ -36,6 +36,8 @@ describe("actions/zizmor", () => {
     );
     expect(new Set(attempts.map((step) => withOf(step).version)).size).toBe(1);
     expect(withOf(upload).version).toMatch(/^\d+\.\d+\.\d+$/);
+    // One severity floor for the upload and the gate: split, code scanning shows findings the gate waves through.
+    expect(new Set(attempts.map((step) => withOf(step)["min-severity"])).size).toBe(1);
     // Under continue-on-error GitHub sets outcome to failure and conclusion to success: a retry keyed on conclusion
     // never runs, and a high finding on a transient first attempt passes. actionlint does not read action.yml.
     expect(
