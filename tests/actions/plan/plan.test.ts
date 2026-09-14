@@ -58,6 +58,7 @@ function input(text: string, isPrivate = false, modules: Module[] = MODULES): Pl
     modules,
     defaults: FILES_DATA.defaults,
     files: FILES_DATA.files,
+    mirrors: FILES_DATA.mirrors,
     reservedLabels: RESERVED,
     securityLabel: SECURITY,
     private: isPrivate,
@@ -274,9 +275,27 @@ describe("planCi", () => {
     },
     {
       reason: "a mirror target that is a path files.yml writes",
+      text: "modules: [bun]\nmirrors:\n  - {source: LICENSE.md, targets: [AGENTS.md]}\n",
+      error:
+        ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'AGENTS.md': the target is a path files.yml writes",
+    },
+    {
+      reason:
+        "a mirror target the fleet's mirror claims (one path, one claimant, both declarations named by their document)",
       text: "modules: [bun]\nmirrors:\n  - {source: LICENSE.md, targets: [CLAUDE.md]}\n",
       error:
-        ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'CLAUDE.md': the target is a path files.yml writes",
+        "files.yml: mirrors: source 'AGENTS.md', target 'CLAUDE.md': the target is claimed by more than one source\n" +
+        "files.yml: mirrors: source 'AGENTS.md', target 'CLAUDE.md': the target is claimed as a copy and as a symbolic link\n" +
+        ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'CLAUDE.md': the target is claimed by more than one source\n" +
+        ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'CLAUDE.md': the target is claimed as a copy and as a symbolic link",
+    },
+    {
+      reason: "the fleet's mirror source excepted by the registration",
+      text: "modules: [bun]\nexcept: [AGENTS.md]\n",
+      error:
+        "files.yml: mirrors: source 'AGENTS.md', target 'CLAUDE.md': the source is not a managed or split file files.yml writes for this repository\n" +
+        "files.yml: mirrors: source 'AGENTS.md', target '.github/agents.md': the source is not a managed or split file files.yml writes for this repository\n" +
+        "files.yml: mirrors: source 'AGENTS.md', target '.github/copilot-instructions.md': the source is not a managed or split file files.yml writes for this repository",
     },
     {
       reason: "a mirror target under .github/workflows/",
@@ -296,11 +315,14 @@ describe("planCi", () => {
     expect(() => planCi(input(text))).toThrow(error);
   });
 
-  test("a sound mirror declaration plans exactly like the registration without it", () => {
+  test("a sound mirror declaration, or an except naming a fleet mirror target, plans exactly like the bare registration", () => {
     const bare = "modules: [bun]\n";
     const text = `${bare}mirrors:\n  - {source: LICENSE.md, targets: [skills/*/LICENSE.md, template/LICENSE.md]}\n  - {source: AGENTS.md, targets: [skills/*/AGENTS.md]}\n`;
     expect(planCi(input(text), THURSDAY)).toEqual(planCi(input(bare), THURSDAY));
     expect(planCi(input(text), THURSDAY).modules).toEqual(["bun"]);
+    expect(planCi(input(`${bare}except: [CLAUDE.md]\n`), THURSDAY)).toEqual(
+      planCi(input(bare), THURSDAY),
+    );
   });
 
   test("a tracking label default files.yml spells outside the label grammar fails, naming the data file", () => {

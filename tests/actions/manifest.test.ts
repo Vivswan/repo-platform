@@ -62,7 +62,7 @@ describe("unknownEntryFields", () => {
       `    "b.md": ${entryBody({ class: "managed", hash: "h" })}`,
       `    ${JSON.stringify(MANIFEST_NAME)}: ${entryBody({ class: "managed", hash: null })}`,
       `    "c.md": ${entryBody({ class: "split", grammar: "managed-region", begin: "# b", end: "# e", hash: "h" })}`,
-      `    "d.md": ${entryBody({ class: "link", hash: "h" })}`,
+      `    "d.md": ${entryBody({ class: "mirror", kind: "symlink", hash: "h" })}`,
     ];
     const rendered = parseManifestFiles(`{"files": {\n${lines.join(",\n")}\n}}`);
     expect(rendered.problem).toBeNull();

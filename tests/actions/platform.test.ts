@@ -78,8 +78,8 @@ describe("the platform slug and every string the fleet observes derived from it"
         "BEGIN/END-bounded region is rewritten and the repository owns everything outside it; the " +
         "hash covers the region from the BEGIN line through the END line), starter (written once, " +
         "repo-owned from then on), mirror (a byte copy of a written file, or with kind symlink a " +
-        "relative symbolic link to it whose hash is sha256 of the link target, declared in " +
-        '.repo-platform.yml), link (a relative symbolic link; hash is sha256 of its target).",',
+        "relative symbolic link to it whose hash is sha256 of the link target, declared in files.yml or " +
+        '.repo-platform.yml).",',
       gitignoreCiSection: "## CI workspace paths (repo-platform)\n/results.sarif\n",
       gitignoreFuzzerSection:
         "## Fuzzer workspace paths (repo-platform fuzzer)\n/.fuzz-failures/\n",

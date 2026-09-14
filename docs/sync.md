@@ -5,7 +5,7 @@ group: Fleet operations
 
 # Sync writer
 
-The sync writer copies the platform's files into a managed repository. It reads one data file, `files.yml`, and one tree of plain files, `files/`. There is no template language and no merge: managed content is copied whole, split regions are copied between the repository-owned halves, starters are copied once, and links are relative symlinks the writer places and repairs. The one file the writer renders instead of copying is `.github/settings.yml`, folded from the settings layers and the repository's own overlay ([settings.md](settings.md)). Code is the source of truth; this page is the map.
+The sync writer copies the platform's files into a managed repository. It reads one data file, `files.yml`, and one tree of plain files, `files/`. There is no template language and no merge: managed content is copied whole, split regions are copied between the repository-owned halves, starters are copied once, and mirrors carry a written file to more paths as copies or relative symlinks. The one file the writer renders instead of copying is `.github/settings.yml`, folded from the settings layers and the repository's own overlay ([settings.md](settings.md)). Code is the source of truth; this page is the map.
 
 | Question | Owner |
 | --- | --- |
@@ -13,7 +13,7 @@ The sync writer copies the platform's files into a managed repository. It reads 
 | Which placeholder tokens exist? | `PLACEHOLDER_NAMES` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | How are the values derived from `.repo-platform.yml`? | [sync/writer/registration.ts](../.github/scripts/sync/writer/registration.ts) |
 | Which entries apply to one repository? | `selects` in [actions/shared/selection.ts](../actions/shared/selection.ts), the one rule the writer, the fleet plan, and the validator select by; `selectEntries` in [actions/plan/files_config.ts](../actions/plan/files_config.ts) |
-| How is each class written? | [sync/writer/write_managed.ts](../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../.github/scripts/sync/writer/write_starter.ts), [write_link.ts](../.github/scripts/sync/writer/write_link.ts) |
+| How is each class written? | [sync/writer/write_managed.ts](../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../.github/scripts/sync/writer/write_starter.ts); the mirrors, the fleet's and the repository's, by [mirrors.ts](../.github/scripts/sync/writer/mirrors.ts) |
 | Where do blocks land, and what may a value contain? | `spliceBlocks` and `substitute` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | What happens when an entry's class differs from its record? | `writeEntry` in [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) |
 | How is `.github/settings.yml` rendered? | [sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts) over [settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts), which folds with the github-settings-as-code library ([settings.md](settings.md)) |
@@ -58,12 +58,13 @@ files:
   - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
   - {path: .github/settings.local.yml, class: starter}
   - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}
-  - {path: CLAUDE.md, class: link, target: AGENTS.md}
-  - {path: .github/agents.md, class: link, target: ../AGENTS.md}
+  - {path: AGENTS.md, class: split, region: html}
   - {path: .typography-allow, class: managed, when: {without: [release-please]}}
   - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
   - {path: .github/actions/site-build/action.yml, class: starter}
   - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
+mirrors:
+  - {source: AGENTS.md, kind: symlink, targets: [CLAUDE.md, .github/agents.md]}
 ```
 
 | Key | Meaning |
@@ -71,15 +72,15 @@ files:
 | `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
 | `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. Any key is allowed; `blocks` entries name one of these keys. One key carries a placeholder default: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
-| `files[].class` | `managed`, `split`, `starter`, or `link` (below). |
-| `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. Not for links. |
+| `files[].class` | `managed`, `split`, or `starter` (below). |
+| `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. |
 | `files[].when` | The selection condition (below). Absent or empty means always. |
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
 | `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source two toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
-| `files[].target` | Link entries only: the symlink target, relative to the link's own directory (`../AGENTS.md` from `.github/`). It must resolve to a clean repository path other than the link itself. |
 | `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
 | `settings.baseline`, `settings.layers`, `settings.override` | The settings layers ([settings.md](settings.md)), clean paths under `files/`, present exactly when a `render: settings` entry exists: the baseline, then each `{source, when}` layer whose `when` holds (absent means always) in declared order, then the override above the repository's overlay. |
+| `mirrors` | The fleet's mirrors, in the registration's grammar (`source`, `targets`, `kind`; [Mirrors](#mirrors)), judged and written as one list with the repository's own, the fleet's first. Every repository gets each target, save one its `except` names. Absent means none. |
 
 Blocks land at the anchor line: the word `blocks` inside double braces, alone on its line, spelled like a placeholder. A source without one gets them appended at the end. Every piece is newline-terminated first, so the seams never merge two lines. The anchor appears at most once and only as a whole line, in sources of entries that declare `blocks` (for a split entry, inside the region body). A starter's blocks are rendered once, at creation.
 
@@ -87,7 +88,7 @@ The loader refuses, all problems at once:
 
 - a placeholder the writer cannot derive, or a source file using a token outside `placeholders`
 - a `when` naming a module absent from `modules`, or declaring a key no module carries
-- a `split` without `region`; `region` on a non-split entry; `target` on a non-link entry; a link with a `source` or `blocks`, without a `target`, or with a target that is absolute, leaves the repository, or is the link itself
+- a `split` without `region`; `region` on a non-split entry
 - a `source` outside `files/`, or one missing from the tree (block files included)
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
 - a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
@@ -108,7 +109,10 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `split` (region `hash`) | `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS` |
 | `split` (region `html`) | `AGENTS.md`, `LICENSE.md` |
 | `starter` | `checks.yml`, `post-green.yml`, the release hooks, the site-build hook (`.github/actions/site-build/action.yml`), `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml`, the release-please, fuzzer, and nightly starters |
-| `link` | `CLAUDE.md` (to `AGENTS.md`), `.github/agents.md` and `.github/copilot-instructions.md` (to `../AGENTS.md`) |
+
+| Fleet mirror | Targets |
+| --- | --- |
+| `AGENTS.md`, `kind: symlink` | `CLAUDE.md`, `.github/agents.md`, `.github/copilot-instructions.md` |
 
 | `when` form | Used by |
 | --- | --- |
@@ -118,7 +122,7 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `without: {declaring: <key>}` | the plain variant of `AGENTS.md` (`agents_toolchain`) |
 | `private: true` / `false` | the public, private, and CodeQL settings layers |
 
-The three links carry no `when`: every repository gets them.
+A fleet mirror carries no `when`: every repository gets its targets, save one its `except` names.
 
 | `blocks` key | Entry | Block files |
 | --- | --- | --- |
@@ -178,7 +182,7 @@ A list position may name a module-data key instead of the modules: `any: {declar
 
 - The selected modules are the registration's `modules` in `files.yml` order. A name `files.yml` does not offer fails the sync in the plan's words (the refusal the `plan` job gives the PR that introduces it); nothing is dropped.
 - Two entries for one path must be provably exclusive: a module one requires and the other forbids, an `any` list the other forbids entirely, or opposite `private` values. Anything subtler is a loader error.
-- The registration's `except` lists paths the repository keeps as its own: no entry at one is selected, whatever its `when`, and a record an earlier sync left there is `released` ([Retirement](#retirement)): the record leaves, the file is not touched. A [mirror](#mirrors) target at, under, or above an excepted path is refused as one at a path `files.yml` writes is. An `except` path no `files.yml` entry writes is a Registration note, which holds the PR.
+- The registration's `except` lists paths the repository keeps as its own: no entry at one is selected, whatever its `when`, and a record an earlier sync left there is `released` ([Retirement](#retirement)): the record leaves, the file is not touched. A fleet [mirror](#mirrors) target at one is dropped from the fleet's list; a repository mirror target at, under, or above an excepted path is refused as one at a path `files.yml` writes is. An `except` path no `files.yml` entry or fleet mirror writes is a Registration note, which holds the PR.
 
 ## Classes
 
@@ -187,26 +191,25 @@ A list position may name a module-data key instead of the modules: `any: {declar
 | `managed` | whole file, every sync; a `render: settings` entry writes the rendered settings document instead of a copy | replaced and reported (`replaced local edits`, with a diff), holds the PR | `hash` = sha256 of the file |
 | `split` | the marker-bounded region, every sync | everything above BEGIN and below END is kept; a file that never mentions the markers gets the region above its content and the verdict `region added`, which holds the PR; marker text duplicated or buried mid-line fails the run | `hash` = sha256 of the region, marker lines included |
 | `starter` | once, when the path is absent (a link there counts as present) | never touched again | no hash |
-| `link` | a relative symlink, every sync | a link elsewhere is re-pointed and reported like a local edit (the old target is the replaced text); a regular file at the path is held | `hash` = sha256 of the target string |
 
 Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither), `region added` (a split region placed above repository-owned content), `held` (not written; the Detail column says why). A managed or split entry finding a symlink at its path is held: the writer never reads through a link and has no record of writing one there. An entry of any class finding a directory (or anything else that is neither a file nor a link) at its path is held with `<what> sits at the path, and the writer will not replace it`. A rendered entry whose overlay path holds anything but a regular file is held too, with the detail naming what sits there. A rendered entry is also held when its overlay is missing, does not parse, names one label twice, or when the registration's tracking labels are refused ([settings.md](settings.md)).
 
 ## Class flips
 
-A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`, `link`) that `files.yml` now declares under another is a class flip. `files.yml` is the truth for a path's class, and the recorded content is the platform's own previous write, so:
+A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`) that `files.yml` now declares under another is a class flip. `files.yml` is the truth for a path's class, and the recorded content is the platform's own previous write, so:
 
 | State | Outcome |
 | --- | --- |
 | the path already holds exactly what the entry writes | `unchanged`; the record takes the new class |
 | what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated` |
-| anything else, a `starter` record included | the record is stale, and the file is written as an unrecorded one under the new class, with the detail `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`. Written: `replaced local edits` with the diff for a `managed` entry, `region added` (or `replaced local edits` when the file already carries the markers) for a `split` one; the write's own record replaces the stale one and the PR holds once. Already the incoming content (a `split` region above a repository-owned tail, say): `unchanged` with the same detail, the record restamped, no hold. Held (a regular file where a `link` is declared, a symlink where a file is): the detail is the writer's refusal reason, the previous record is kept, and the path is held again next run |
+| anything else, a `starter` record included | the record is stale, and the file is written as an unrecorded one under the new class, with the detail `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`. Written: `replaced local edits` with the diff for a `managed` entry, `region added` (or `replaced local edits` when the file already carries the markers) for a `split` one; the write's own record replaces the stale one and the PR holds once. Already the incoming content (a `split` region above a repository-owned tail, say): `unchanged` with the same detail, the record restamped, no hold. Held (a symlink where a file is declared): the detail is the writer's refusal reason, the previous record is kept, and the path is held again next run |
 | the new class is `starter` | a handover: the file is the repository's own, nothing is held |
 
 Without the rule, a managed file that becomes split would have the region prepended above its old content and report `updated`.
 
 ## Retirement
 
-A recorded `managed`, `split`, or `link` path that no selected entry writes now (a module deselected, or an entry that left `files.yml`) is stale, and retirement runs over the stale records before writing, every row with the detail `no longer selected`. Rows appear only for files present, save a `released` row, which reports a record; an unrecorded file produces no row, since no manifest record vouches for it and it is not the platform's to retire.
+A recorded `managed` or `split` path that no selected entry writes now (a module deselected, or an entry that left `files.yml`) is stale, and retirement runs over the stale records before writing, every row with the detail `no longer selected`. Rows appear only for files present, save a `released` row, which reports a record; an unrecorded file produces no row, since no manifest record vouches for it and it is not the platform's to retire.
 
 | State of the stale file | Outcome |
 | --- | --- |
@@ -215,21 +218,32 @@ A recorded `managed`, `split`, or `link` path that no selected entry writes now 
 | `split`, region equals the recorded hash, repository-owned content outside it | `region removed`: the marker lines and the region go, the content above and below stays byte for byte as a plain file, and the record leaves; the blank lines that framed the region become one when content stands on both sides and none when it stands on one side only, so a tail under a top region starts at its first content line, and blank lines away from the seam stay. The PR holds this once, with a detail asking the reader to complete the file (a heading and intro if it lost them) or delete it. Next run the path is unrecorded and produces no row. |
 | `split`, region equals the recorded hash, only blank lines outside it | `deleted`, with the detail saying so |
 | `split`, region differs from the recorded hash, or markers missing or malformed | `held` |
-| `link`, a symlink whose target hashes to the recorded hash | `deleted` (the link goes; what it points at is never touched) |
-| a symlink with another target; a regular file where a `link` was recorded; a symlink where a `managed` or `split` file was recorded | `held` |
+| a symlink where a `managed` or `split` file was recorded | `held` |
 | content differs | `held` |
-| a `managed`, `split`, `link`, or `starter` record at a path the registration's `except` names, whatever sits at the path | `released`: the record leaves, nothing at the path is probed or touched, and the PR does not hold; the row appears whether or not a file is present, since the manifest changed |
+| a `managed`, `split`, or `starter` record at a path the registration's `except` names, whatever sits at the path | `released`: the record leaves, nothing at the path is probed or touched, and the PR does not hold; the row appears whether or not a file is present, since the manifest changed |
 
 - A stale record at a path no `files.yml` entry declares at all (a hand edit, or an entry that left `files.yml`) is retired the same way and, while a file sits at the path, noted (`manifest record for <path> had no writer: ...`), which holds the PR for the Retired row's outcome; a recorded path that is not a clean repository path is ignored and noted.
 - A held file and a held entry keep their records in the new manifest every run, so the file is held again next time and never becomes an unrecorded orphan.
 - A `starter` record whose entry nothing selects leaves the manifest; the file is the repository's own either way.
-- A `mirror` record no declaration reaches any more is dropped with a note; the copy stays as the repository's own, and a mirror declared again adopts it while it still holds the source's content.
+- A `mirror` record no declaration reaches any more (a fleet target the registration excepts included) is dropped with a note; the copy stays as the repository's own, and a mirror declared again adopts it while it still holds the source's content.
 - A record that is not exactly a shape the writer writes (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers) fails the run with a count before anything is written: the target's own `validate-managed-files` check names each, so the fix is a manifest edit (git history has the stamped original) and a new dispatch.
-- A file the platform stops writing needs no grammar of its own: its entry leaves `files.yml`, and every target retires the recorded file as above on its next sync. A transition the sync cannot carry by itself is one rung in `migrations/`, the only home for transitional code ([fleet-guidelines.md](fleet-guidelines.md#no-backwards-compatibility-code)).
+- A file the platform stops writing needs no grammar of its own: its entry leaves `files.yml`, and every target retires the recorded file as above on its next sync. A transition the sync cannot carry by itself is one rung in `migrations/` ([Migrations](#migrations)).
+
+## Migrations
+
+`migrations/` is the only home for transitional code ([fleet-guidelines.md](fleet-guidelines.md#no-backwards-compatibility-code)): the writer and the validator know the current shape alone, so a fleet transition the writer cannot carry by itself (a manifest record class that left, say) is one rung there.
+
+- A rung is one self-contained bun script, `migrations/<NNNN>-<what>.ts <checkout>`, numbered in the order it was written, idempotent (a checkout it has already crossed is a no-op), and never retired: a target that missed a round crosses every rung on its next sync.
+- The operator runs every rung in the build's `migrations/` over the target checkout, in name order, before the writer reads it ([sync/migrate.ts](../.github/scripts/sync/migrate.ts)); nothing outside `migrations/` knows any rung. A rung that exits nonzero fails the row: the rungs after it and the writer do not run, nothing is delivered, and the failure is filed as the writer's with the rung's line in the log tail.
+- A rung ships with the PR that changes the shape and rides the same fleet-sync round (`fleet-sync:all`), with one test seen red on the old shape and a no-op control.
+
+| Rung | Transition |
+| --- | --- |
+| `0001-link-records-are-mirrors` | a `link` manifest record becomes `{"class": "mirror", "kind": "symlink"}` with its hash kept, the fleet's `AGENTS.md` symlinks having become mirrors the fleet declares |
 
 ## Mirrors
 
-The registration's `mirrors` list (`source`, `targets`, `kind`) carries a file this sync wrote to each target.
+Two `mirrors` lists in one grammar (`source`, `targets`, `kind`) carry a file this sync wrote to each target: the fleet's in `files.yml`, then the repository's in its registration. One pass judges and writes both as one list, the fleet's declarations first, so a repository target meeting a fleet target is judged as any two claims on one path are (below): refused when it is another source's, another kind's, nested, or a literal spelled twice; a pattern of the same source and kind finds the fleet's literal current. A fleet target the registration's `except` names is dropped from the list, as an entry at that path would be. A failure line names the document that declares the pair: the registration when it does, `files.yml` otherwise.
 
 - `kind` is how a target carries the source, and every reader judges the target through it: `copy` (the default) writes the source's bytes; `symlink` places a symbolic link to the source, relative to the target's directory (`skills/a/LICENSE.md -> ../../LICENSE.md`). A Windows checkout materializes a link only with `core.symlinks` on; no fleet runner is Windows today.
 - Single-segment `*` globs: a `*` directory segment matches directories, a final `*` matches existing files, a literal final segment lands in every matched directory. A glob never creates a directory.
@@ -237,7 +251,7 @@ The registration's `mirrors` list (`source`, `targets`, `kind`) carries a file t
 - A symbolic link above a target, in a literal or a `*` directory segment, is never followed or listed through: a linked directory, or a link that cannot be looked through (resolving to nothing, to a name too long, or through a directory the runner may not read), fails the run by name, the rest of the pattern riding along (`skills/link/sub/*.md`); only a link that provably resolves to a file is no directory and is passed over like a file. A link a final segment matches is the target itself, judged by the declared kind (the table below).
 - A matched path the grammar refuses (one grown past 1024 bytes through long directory names) is never probed and fails by name the same way.
 
-A copy the writer cannot make would leave the repository out of sync with only a hold row to show it, so every declaration is either written or fails the run. Two readers judge it. The `plan` job of fleet CI rejects, on the PR that introduces it, what `files.yml` alone proves unwritable (the rules in [actions/plan/mirrors.ts](../actions/plan/mirrors.ts)): a source that is not a `managed` or `split` file `files.yml` writes for the repository; a `**`; a target or pattern that is unsafe (a control character, a segment over 255 bytes, or a path over 1024 bytes included), is or sits under the registration itself, sits under `.github/workflows/`, or is, sits under, or is a path prefix of a path `files.yml` writes or the registration excepts; a pattern that matches (segment for segment, as the writer expands it) the registration or a path `files.yml` writes or the registration excepts (the claim reserves the path, whether or not the file stands in the checkout that run); and, over the literal targets and the directories they create (the only part of the tree the plan knows, since the literal pass writes them before any pattern expands), every path a declaration is certain to claim, judged as the writer judges a claim: a literal target declared twice; a path nested with another claimed path (both sides, whatever their sources; a pattern's own text counts as written, so `skills/*` nests under a literal `skills`, while two different pattern texts are nested as written, never by what they can match: `tests/*/foo` with `tests/a*/foo/bar` passes the plan and fails at sync time on any checkout with a `tests/a*` directory); a pattern's path that sits under or above a path `files.yml` writes or the registration excepts, or that the grammar refuses; and a path claimed by two sources or as a copy and as a symbolic link (one pattern text declared twice included, since both expand alike). The writer runs the same check, with the stale manifest records it retires reserved alongside (`a path a stale manifest record retires`), then judges each pass's claims the same way with what only the checkout shows. A failure exits nonzero, one `::error::` line per verdict for each declaration and path (`.repo-platform.yml: mirrors: source '<s>', target '<t>': <reason>`, a pattern's reason naming the path it expanded to), before the pass writes anything: no PR is opened, the operator's row reads `failed, report filed in the target repository`, and the failure issue's writer log carries the lines.
+A copy the writer cannot make would leave the repository out of sync with only a hold row to show it, so every declaration is either written or fails the run. Two readers judge it. The `plan` job of fleet CI rejects, on the PR that introduces it, what `files.yml` alone proves unwritable (the rules in [actions/plan/mirrors.ts](../actions/plan/mirrors.ts)): a source that is not a `managed` or `split` file `files.yml` writes for the repository; a `**`; a target or pattern that is unsafe (a control character, a segment over 255 bytes, or a path over 1024 bytes included), is or sits under the registration itself, sits under `.github/workflows/`, or is, sits under, or is a path prefix of a path `files.yml` writes or the registration excepts; a pattern that matches (segment for segment, as the writer expands it) the registration or a path `files.yml` writes or the registration excepts (the claim reserves the path, whether or not the file stands in the checkout that run); and, over the literal targets and the directories they create (the only part of the tree the plan knows, since the literal pass writes them before any pattern expands), every path a declaration is certain to claim, judged as the writer judges a claim: a literal target declared twice; a path nested with another claimed path (both sides, whatever their sources; a pattern's own text counts as written, so `skills/*` nests under a literal `skills`, while two different pattern texts are nested as written, never by what they can match: `tests/*/foo` with `tests/a*/foo/bar` passes the plan and fails at sync time on any checkout with a `tests/a*` directory); a pattern's path that sits under or above a path `files.yml` writes or the registration excepts, or that the grammar refuses; and a path claimed by two sources or as a copy and as a symbolic link (one pattern text declared twice included, since both expand alike). The writer runs the same check, with the stale manifest records it retires reserved alongside (`a path a stale manifest record retires`), then judges each pass's claims the same way with what only the checkout shows. A failure exits nonzero, one `::error::` line per verdict for each declaration and path (`<.repo-platform.yml or files.yml>: mirrors: source '<s>', target '<t>': <reason>`, a pattern's reason naming the path it expanded to), before the pass writes anything: no PR is opened, the operator's row reads `failed, report filed in the target repository`, and the failure issue's writer log carries the lines.
 
 | Outcome | When |
 | --- | --- |
@@ -255,7 +269,7 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 
 The delivery commit is named in full by the PR body and by its first 12 characters by the sync commit's subject.
 
-Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror` (with `kind: symlink` for a link, hash of the target string), `link` (hash of the target string). The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
+Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror` (with `kind: symlink` for a link, hash of the target string); a fleet mirror is recorded as a repository mirror is. The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
 
 ## The report
 
@@ -265,7 +279,7 @@ Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`
 | Written | path, class, change, detail for every selected entry (detail is a held row's reason, or the stale-class explanation on a class-flip row) |
 | Replaced local edits | one unified diff per replaced file, capped at 40 lines |
 | Retired | path, outcome, detail |
-| Registration notes | an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record at a path that is not a clean repository path; a stale record no `files.yml` entry declares now, while a file sits at its path; a mirror record no declaration reaches; an `except` path no `files.yml` entry writes |
+| Registration notes | an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record at a path that is not a clean repository path; a stale record no `files.yml` entry declares now, while a file sits at its path; a mirror record no declaration reaches; an `except` path no `files.yml` entry or fleet mirror writes |
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
@@ -289,9 +303,10 @@ The sync targets this repository like any other: its [.repo-platform.yml](../.re
 | row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/` |
 | row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | one listing of the owner's writable repositories (the same call discovery makes, no re-selection), the row's key recomputed over it and the one repository carrying it taken (no such repository: the step refuses, naming no repository); every form of the name is registered with the masker before anything else prints, and the name and its visibility ride `GITHUB_ENV` from here (the next run step's preamble spells them under `env:`, masked by then) |
 | row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text); the token is stripped from the remote afterwards; `continue-on-error` |
-| row 4: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
-| row 5: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log` |
-| row 6: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
+| row 4: migrate | [sync/migrate.ts](../.github/scripts/sync/migrate.ts) | every rung of the build's `migrations/` over the target, in name order ([Migrations](#migrations)); its log is `sync.log` until the writer's report replaces it; `continue-on-error`, and a failed rung skips the writer |
+| row 5: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
+| row 6: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log` |
+| row 7: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 
 The vocabulary, complete (`tests/sync/verdict.test.ts` pins it):
 

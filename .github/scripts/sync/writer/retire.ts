@@ -13,7 +13,7 @@ export interface RetireRow {
 
 /** unrecorded -> no record, or one readRecord refuses, so nothing at the path is the writer's to judge
  *  blank      -> a split whose region is the last write with only blank lines around it, so nothing is worth handing over
- *  A symbolic link is judged by its target string, never read through; under a record that is not a link or a symlink mirror it is foreign, as mirrors.ts reads it. */
+ *  A symbolic link is judged by its target string, never read through; under a record that is not a symlink mirror it is foreign, as mirrors.ts reads it. */
 export type Judgement =
   | { verdict: "unrecorded" }
   | { verdict: "own" }
@@ -45,8 +45,7 @@ export function judge(target: string, path: string, records: Records): Judgement
   const record = readRecord(records[path]);
   if (record === null) return { verdict: "unrecorded" };
   if (record.class === "starter") return foreign("a starter is repo-owned");
-  const linkRecorded =
-    record.class === "link" || (record.class === "mirror" && mirrorKind(record) === "symlink");
+  const linkRecorded = record.class === "mirror" && mirrorKind(record) === "symlink";
   const found = probe(target, path);
   if (found.kind === "absent") return { verdict: "own" };
   if (linkRecorded) {
@@ -101,7 +100,7 @@ export function release(path: string, records: Records): RetireRow {
   };
 }
 
-/** `stale`: paths an earlier sync recorded that nothing selects now (sync.ts builds it from the readable managed, split, and link records). */
+/** `stale`: paths an earlier sync recorded that nothing selects now (sync.ts builds it from the readable managed and split records). */
 export function retire(target: string, stale: string[], records: Records): RetireRow[] {
   const rows: RetireRow[] = [];
   const detail = "no longer selected";

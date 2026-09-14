@@ -22,7 +22,13 @@ import {
   type ModuleData,
   parseFilesConfig,
 } from "./files_config.ts";
-import { describeMirrorProblem, mirrorDeclarationProblems, ownedPaths } from "./mirrors.ts";
+import {
+  declaredMirrors,
+  describeMirrorProblem,
+  type Mirrors,
+  mirrorDeclarationProblems,
+  ownedPaths,
+} from "./mirrors.ts";
 import { parseRegistration, type Registration, unknownModuleProblems } from "./registration.ts";
 import {
   declaredLabelTuple,
@@ -53,6 +59,7 @@ export interface FilesData {
   defaults: PlanDefaults;
   /** The file entries, for the paths a mirror may name. */
   files: FileEntry[];
+  mirrors: Mirrors;
   layers: LayerSources;
 }
 
@@ -91,6 +98,7 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
     modules,
     defaults,
     files: config.files,
+    mirrors: config.mirrors,
     layers: { modules: config.modules, settings: config.settings },
   };
 }
@@ -100,6 +108,7 @@ export interface PlanInput {
   modules: Module[];
   defaults: PlanDefaults;
   files: FileEntry[];
+  mirrors: Mirrors;
   /** Lowercased: the settings layers' label names. */
   reservedLabels: ReadonlySet<string>;
   /** The fleet security stream's tuple, the settings baseline's SECURITY_LABEL entry. */
@@ -191,14 +200,15 @@ export function codeqlLanguages(selected: Module[], isPrivate: boolean): string[
 
 export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
   const selected = selectModules(input);
-  if (input.registration.mirrors !== undefined) {
-    const owned = ownedPaths(input, {
-      modules: selected.map((module) => module.name),
-      private: input.private,
-      except: input.registration.except,
-    });
-    const problems = mirrorDeclarationProblems(input.registration.mirrors, owned);
-    if (problems.length > 0) throw new PlanError(problems.map(describeMirrorProblem));
+  const owned = ownedPaths(input, {
+    modules: selected.map((module) => module.name),
+    private: input.private,
+    except: input.registration.except,
+  });
+  const { fleet, own } = declaredMirrors(input, input.registration);
+  const problems = mirrorDeclarationProblems([...fleet, ...own], owned);
+  if (problems.length > 0) {
+    throw new PlanError(problems.map((problem) => describeMirrorProblem(problem, own)));
   }
   return {
     modules: selected.map((module) => module.name),

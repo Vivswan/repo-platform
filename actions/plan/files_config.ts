@@ -1,5 +1,4 @@
 // Lives inside the plan action because it needs yaml and zod, which the dependency-free actions/shared zone cannot carry.
-import { dirname, normalize } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { MANIFEST_NAME } from "../shared/platform.ts";
@@ -11,8 +10,10 @@ import {
   selects,
   type When,
 } from "../shared/selection.ts";
+import type { Mirrors } from "./mirrors.ts";
+import { mirrorsSchema } from "./registration.ts";
 
-export type FileClass = "managed" | "split" | "starter" | "link";
+export type FileClass = "managed" | "split" | "starter";
 export type RegionKind = "hash" | "html";
 
 interface EntryBase {
@@ -46,13 +47,7 @@ export interface SplitEntry extends SourcedEntry {
   region: RegionKind;
 }
 
-export interface LinkEntry extends EntryBase {
-  class: "link";
-  /** The symlink target, relative to the link's own directory. */
-  target: string;
-}
-
-export type FileEntry = ManagedEntry | RenderedEntry | StarterEntry | SplitEntry | LinkEntry;
+export type FileEntry = ManagedEntry | RenderedEntry | StarterEntry | SplitEntry;
 
 export interface SettingsLayerEntry {
   /** The layer file, relative to the files/ tree. */
@@ -103,12 +98,11 @@ const LIST_KEYS = ["modules", "any", "without"] as const;
 
 const fileSchema = z.strictObject({
   path: z.string().min(1),
-  class: z.enum(["managed", "split", "starter", "link"]),
+  class: z.enum(["managed", "split", "starter"]),
   source: z.string().min(1).optional(),
   when: whenSchema.optional(),
   region: z.enum(["hash", "html"]).optional(),
   blocks: z.string().min(1).optional(),
-  target: z.string().min(1).optional(),
   render: z.enum(["settings"]).optional(),
   overlay: z.string().min(1).optional(),
 });
@@ -157,6 +151,7 @@ const configSchema = z.strictObject({
   modules: z.record(moduleName, moduleDataSchema).default({}),
   settings: settingsSchema.optional(),
   files: z.array(fileSchema),
+  mirrors: mirrorsSchema.default([]),
 });
 
 export interface FilesConfig {
@@ -167,6 +162,8 @@ export interface FilesConfig {
    *  entry exists. */
   settings: SettingsLayers | null;
   files: FileEntry[];
+  /** The fleet's mirrors, in the registration's grammar; the mirror pass writes them before the repository's own. */
+  mirrors: Mirrors;
 }
 
 export function selectEntries(
@@ -217,22 +214,6 @@ export class FilesConfigError extends Error {
   ) {
     super(`${label}:\n${problems.map((problem) => `  - ${problem}`).join("\n")}`);
   }
-}
-
-export function linkDestination(path: string, target: string): string {
-  const dir = dirname(path);
-  return normalize(dir === "." ? target : `${dir}/${target}`);
-}
-
-export function linkTargetProblem(path: string, target: string): string | null {
-  if (target.startsWith("/")) return "target is absolute";
-  if (target.includes("\\")) return "target contains a backslash";
-  if (target.split("/").some((segment) => segment === "")) return "target carries an empty segment";
-  const destination = linkDestination(path, target);
-  const problem = pathProblem(destination);
-  if (problem !== null) return `target resolves to '${destination}', which ${problem}`;
-  if (destination === path) return "target is the link itself";
-  return null;
 }
 
 /** Only the provable cases; anything subtler reads as overlapping. */
@@ -344,21 +325,6 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
         );
       }
     }
-    if (entry.class === "link") {
-      if (entry.source !== undefined || entry.blocks !== undefined) {
-        problems.push(`${where}: a link entry has a target, not a source or blocks`);
-      }
-      const target = entry.target ?? "";
-      if (target === "") problems.push(`${where}: a link entry needs a target`);
-      else {
-        const targetProblem = linkTargetProblem(entry.path, target);
-        if (targetProblem !== null) problems.push(`${where}: ${targetProblem}`);
-      }
-      return { path: entry.path, when, class: "link", target };
-    }
-    if (entry.target !== undefined) {
-      problems.push(`${where}: target applies to link entries only`);
-    }
     if (entry.class === "managed" && entry.render !== undefined && entry.overlay !== undefined) {
       return {
         path: entry.path,
@@ -465,6 +431,7 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       modules: data.modules,
       settings,
       files,
+      mirrors: data.mirrors,
     },
     problems,
   };

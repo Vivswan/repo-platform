@@ -125,7 +125,7 @@ export function blockCandidates(
   entry: FileEntry,
   modules: string[],
 ): BlockSource[] {
-  if (entry.class === "link" || "render" in entry || entry.blocks === undefined) return [];
+  if ("render" in entry || entry.blocks === undefined) return [];
   const candidates: BlockSource[] = [];
   for (const module of Object.keys(config.modules)) {
     if (!modules.includes(module)) continue;
@@ -182,7 +182,7 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
   };
   const allModules = Object.keys(config.modules);
   for (const entry of config.files) {
-    if (entry.class === "link" || "render" in entry) continue;
+    if ("render" in entry) continue;
     const own = use(entry.source);
     own.entries += 1;
     if (entry.blocks !== undefined) own.withBlocks += 1;
