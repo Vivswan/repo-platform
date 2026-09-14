@@ -95,9 +95,8 @@ function checkoutPath(step: Step): string | null {
   return path.replace(/\/+$/, "");
 }
 
-/** Step lists whose working directory is a repository checkout: every step of a composite action (it runs inside the
- *  caller's checkout), a workflow job that checks out at the root, and a spliced block (its anchor follows the
- *  starter's checkout step). A job checking out into subdirectories alone has no tree a sibling could land in. */
+/** A composite action runs inside the caller's checkout and a spliced block's anchor follows the starter's checkout
+ *  step, so both always count; a job checking out into subdirectories alone has no tree a sibling could land in. */
 function checkedOutStepLists(rel: string, text: string, fragment: boolean): Step[][] {
   const stubbed = text.replaceAll(/^\{\{blocks\}\}$/gm, "").replaceAll(/\{\{[\w-]+\}\}/g, "x");
   if (fragment) return [parseYaml(`steps:\n${stubbed}`).steps ?? []];
