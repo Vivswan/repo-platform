@@ -65,8 +65,9 @@ describe(`the ${SECRET} readers`, () => {
     expect(undeclared.map(({ site }) => site)).toEqual([]);
   });
 
-  test("no workflow declares the secret as a call input or passes it on a call", () => {
-    // A caller job cannot declare an environment, so a passed copy is the empty string: dead plumbing.
+  // actions/runner#4453: an environment secret reaches a called job only when every caller on the chain inherits
+  // (a called workflow inherits down only what it received). A mapped copy is the caller's empty read.
+  test("a caller inherits exactly when its call reaches a job declaring the environment; none maps the secret", () => {
     const declaring = workflows
       .filter(({ doc }) =>
         Object.keys(doc.on.workflow_call?.secrets ?? {}).some(
@@ -75,11 +76,32 @@ describe(`the ${SECRET} readers`, () => {
       )
       .map(({ rel }) => rel);
     expect(declaring).toEqual([]);
-    const passing = workflows.flatMap(({ rel, doc }) =>
+    const reachesEnvironment = (rel: string, seen = new Set<string>()): boolean => {
+      const doc = workflows.find((workflow) => workflow.rel === rel)?.doc;
+      if (doc === undefined || seen.has(rel)) return false;
+      seen.add(rel);
+      return Object.values(doc.jobs).some(
+        (job) =>
+          job.environment === ENVIRONMENT ||
+          (job.uses?.startsWith("./") === true && reachesEnvironment(job.uses.slice(2), seen)),
+      );
+    };
+    const calls = workflows.flatMap(({ rel, doc }) =>
       Object.entries(doc.jobs)
-        .filter(([, job]) => job.uses !== undefined && job.secrets !== undefined)
-        .map(([id]) => `${rel} job ${id}`),
+        .filter(([, job]) => job.uses !== undefined)
+        .map(([id, job]) => ({
+          site: `${rel} job ${id}`,
+          secrets: job.secrets,
+          needsInherit:
+            job.uses?.startsWith("./") === true && reachesEnvironment(job.uses.slice(2)),
+        })),
     );
-    expect(passing).toEqual([]);
+    expect(calls.filter((call) => call.needsInherit).length).toBeGreaterThan(0);
+    const mapping = calls.filter(({ secrets }) => secrets !== undefined && secrets !== "inherit");
+    expect(mapping.map(({ site }) => site)).toEqual([]);
+    const wrong = calls.filter(
+      ({ secrets, needsInherit }) => (secrets === "inherit") !== needsInherit,
+    );
+    expect(wrong.map(({ site }) => site)).toEqual([]);
   });
 });

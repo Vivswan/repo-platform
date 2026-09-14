@@ -129,6 +129,9 @@ jobs:
       contents: read
       checks: read
     uses: ./.github/workflows/sync-repos.yml
+    # actions/runner#4453: the called jobs' environment secret resolves empty unless the caller inherits (no mapping:
+    # a mapped copy is this job's empty read). The environment secret still wins over a same-named repository secret.
+    secrets: inherit
     with:
       repos: ${{ needs.read-directives.outputs.repos }}
 
@@ -146,6 +149,8 @@ jobs:
       contents: read
       checks: read
     uses: ./.github/workflows/settings-repos.yml
+    # actions/runner#4453, as on sync-fleet.
+    secrets: inherit
     with:
       repos: all
       sha: ${{ inputs.sha }}
