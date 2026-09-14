@@ -88,7 +88,9 @@ The tag names a main commit whose own CI run passed, so there is no generated tr
 
 The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
-**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run). The writer records it as given: in full in the PR body, by its first 12 characters in the sync commit's subject. The tree itself carries no build stamp, so an unchanged tree opens no PR ([sync.md](sync.md#the-manifest)).
+**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run), named in full in the PR body and by its first 12 characters in the sync commit's subject.
+
+**The manifest's own entry** records the commit the repository is judged against: the build when the delivered surface changed since the recorded commit, else the recorded commit, so it moves only when the delivered surface moved ([sync.md](sync.md#the-manifest)).
 
 Old delivery commits stay reachable forever: they are main history.
 

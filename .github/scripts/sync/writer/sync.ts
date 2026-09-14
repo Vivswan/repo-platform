@@ -2,7 +2,7 @@
 // Exit 0 whether or not the report holds the PR; a nonzero exit is a data or environment error the operator must fix.
 
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   type FileEntry,
   selectEntries,
@@ -14,6 +14,7 @@ import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import { pathProblem } from "../../../../actions/shared/repo_path.ts";
 import type { Selection } from "../../../../actions/shared/selection.ts";
 import { sha256 } from "../../../../actions/shared/values.ts";
+import { deliveredSurfaceChanged } from "../../shared/delivered_surface.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
 import { loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
@@ -24,6 +25,7 @@ import {
   type Records,
   readRecord,
   readRecords,
+  recordedCommit,
   regionMarkers,
   writeManifest,
 } from "./manifest.ts";
@@ -200,6 +202,16 @@ function writeEntry(
   return { outcome, record: rendered.record, content: rendered.content };
 }
 
+/** The commit the manifest names from here on: the recorded one while the delivered surface is the same at this build,
+ *  else this build. The repository is judged against that commit (actions/validate-managed-files/check.ts), so it moves
+ *  only when the delivered surface moved. `files.yml` sits at the platform root, which is the checkout the diff reads. */
+function judgedCommit(options: SyncOptions, records: Records): string {
+  const recorded = recordedCommit(records);
+  if (recorded === null || recorded === options.build) return options.build;
+  const platform = dirname(resolve(options.files));
+  return deliveredSurfaceChanged(platform, recorded, options.build) ? options.build : recorded;
+}
+
 export async function runSync(options: SyncOptions): Promise<SyncReport> {
   const config = loadFilesConfig(options.files, options.tree);
   const slug = parseRepositorySlug(options.repository);
@@ -214,6 +226,7 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
   };
   const { records, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
+  const commit = judgedCommit(options, records);
 
   const selection: Selection = {
     modules: selected,
@@ -378,7 +391,7 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
         "the source's content)",
     );
   }
-  writeManifest(options.target, Object.fromEntries(next));
+  writeManifest(options.target, Object.fromEntries(next), commit);
   return buildReport({
     build: options.build,
     modules: selected,

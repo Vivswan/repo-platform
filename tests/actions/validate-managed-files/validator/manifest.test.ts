@@ -109,7 +109,7 @@ describe("the manifest's state", () => {
 
   // RECORD_FIELDS and ENTRY_FIELDS are the writer's tables too: a record the validator passes and the writer refuses
   // fails the next sync on a repository the check called green. The self entry is the exception to both tables (managed,
-  // hash null, nothing else): its content holds every other hash, and a resync rewrites it without reading it.
+  // hash null, the commit): its content holds every other hash, and a resync rewrites it without reading it.
   const SELF_MUST =
     `error: ${MANIFEST}: entry '${MANIFEST}' must be managed with hash null (its content includes ` +
     "every other hash, so a self-hash would be circular); re-run the sync to regenerate it";
@@ -146,13 +146,20 @@ describe("the manifest's state", () => {
       ],
     },
     {
-      reason: "the build commit earlier syncs stamped on the self entry",
+      reason: "the self entry stamped with the delivery commit",
       entries: {
         [MANIFEST]:
           '{"class": "managed", "hash": null, "commit": "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01"}',
       },
+      expected: [],
+    },
+    {
+      reason: "the commit on a managed record, a field its class does not carry",
+      entries: {
+        "docs/pinned.md": `{"class": "managed", "hash": "${"d".repeat(64)}", "commit": "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01"}`,
+      },
       expected: [
-        `error: ${MANIFEST}: entry '${MANIFEST}' carries field(s) "commit" outside the manifest's vocabulary - no sync writes them; ${REVERT_OR_RESYNC}`,
+        `error: ${MANIFEST}: entry 'docs/pinned.md' carries "commit", which the sync never records on a managed entry; ${REPAIR}`,
       ],
     },
     {

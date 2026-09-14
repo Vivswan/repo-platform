@@ -43,7 +43,9 @@ bun .github/scripts/sync/writer/sync.ts \
 
 - **`--tree`** is the `files/` directory itself; every tree `source` starts with `files/` and resolves under it; a ref source is fetched ([Upstream refs](#upstream-refs)).
 
-- **`--build`** is the delivery commit's full sha, 40 lowercase hex characters (`git fetch origin +refs/tags/stable:refs/tags/stable` then `git rev-parse stable^{commit}`, the forced refspec so a local tag left by an earlier fetch is refreshed). It is recorded as given: in full in the PR body, by its first 12 characters in the sync commit's subject. A short or uppercase one is refused before anything is written.
+- **`--build`** is the delivery commit's full sha, 40 lowercase hex characters (`git fetch origin +refs/tags/stable:refs/tags/stable` then `git rev-parse stable^{commit}`, the forced refspec so a local tag left by an earlier fetch is refreshed). A short or uppercase one is refused before anything is written.
+
+  - Named in full in the PR body, by its first 12 characters in the sync commit's subject, and in the manifest's own entry under the stamp rule ([The manifest](#the-manifest)).
 
 - **`--repository`** names the GitHub repository; the owner is the `github_username` placeholder and the default `copyright_holder`.
 
@@ -59,6 +61,7 @@ bun .github/scripts/sync/writer/sync.ts \
   - an unreadable registration
   - a registration naming a module `files.yml` does not offer
   - a manifest record the writer cannot read ([Retirement](#retirement))
+  - a recorded commit the build checkout cannot fetch ([The manifest](#the-manifest))
   - a symlinked ancestor at a path the writer touches
 
   - a directory or a symlink at the manifest or registration path
@@ -435,9 +438,36 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 
 `.github/repo-platform-manifest.json`, the layout `actions/shared/manifest.ts` already parses: one entry per line, sorted by path.
 
-- **The manifest's own entry** is `managed` with `hash: null` and nothing else.
-- **So an unchanged tree opens no PR:** a tree the build did not change therefore renders byte-identical under a new `stable`, and no sync PR opens for it.
-- **The delivery commit** is named in full by the PR body and by its first 12 characters by the sync commit's subject.
+- **The manifest's own entry** is `managed` with `hash: null` and `commit`, the repo-platform commit the repository is judged against:
+
+```json
+".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "c07568b70e1f4b0a9d2c3e4f5a6b7c8d9e0f1a2b"}
+```
+
+- **The stamp rule,** decided before anything is written (`judgedCommit` in [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts)):
+
+| The manifest names | The build is | The entry after the sync |
+| --- | --- | --- |
+| no commit the writer can read (a manifest from before the field, or a hand edit) | any | the build |
+| commit C | C | C |
+| commit C | N, with the delivered surface byte-identical between C and N | C; when nothing else changed, no sync PR opens |
+| commit C | N, with the delivered surface different | N |
+
+- **The delivered surface** is `files.yml`, `files/`, `actions/`, `.github/scripts/sync/`, `.github/scripts/shared/`, `migrations/`, `bun.lock`, and `package.json`: the writer's data, its import closure, and its dependency versions, the paths that decide what a sync writes (`DELIVERED_SURFACE` in [shared/delivered_surface.ts](../.github/scripts/shared/delivered_surface.ts)). The lockfile and the manifest are on it because a dependency's version, or which action-local dependencies the postinstall installs, can change a rendered byte.
+
+- **The diff runs in the build checkout** under `build/`, which is one commit deep, so the writer fetches C by sha first; a C the remote cannot serve fails the run.
+
+- **The delivery commit** is also named in full by the PR body and by its first 12 characters by the sync commit's subject.
+
+### Judged at the synced commit
+
+[actions/validate-managed-files/check.ts](../actions/validate-managed-files/check.ts) judges a repository byte to byte against what one platform tree writes. Nothing runs it yet: the fleet validator will check out repo-platform at the manifest's `commit` and run that commit's `check.ts`, so a platform change reddens a repository only once it syncs.
+
+- **It copies the repository to scratch** (what git lists when the target is a checkout's own root; every path but `.git` in any other tree), runs the tree's own writer over the copy with `--build` as the commit, and removes the copy.
+
+- **Every reason the writer would hold** the sync PR for is printed first (a link or a directory where a file is declared, a placeholder with no value), then every path whose bytes differ, the manifest's own line included, with a unified diff under each changed file. A pending registration change is red until the sync that carries it lands.
+
+- **Exit 0** when identical, 1 with findings, 2 when the writer refused (its message is the output).
 
 **Classes recorded:** `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror` (with `kind: symlink` for a link, hash of the target string); a fleet mirror is recorded as a repository mirror is. The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
 
@@ -484,11 +514,11 @@ The sync targets this repository like any other: its [.repo-platform.yml](../.re
 | plan: resolve the build | [sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts) | the commit the `stable` tag names, re-verified main history with a green `all-green` check ([build-provenance.md](build-provenance.md)) and carrying `files.yml`; every row checks out exactly this commit |
 | plan: discover and select | [fleet/discover_repos.ts](../.github/scripts/fleet/discover_repos.ts), [fleet/select_sync_repos.ts](../.github/scripts/fleet/select_sync_repos.ts) | the rows: the repositories the fleet token can push to that have adopted the platform, narrowed by the dispatch `repo` input or the called `repos` scope ([fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts)), written sorted to `$RUNNER_TEMP/rows.json`, and the matrix rows: one `{row, key}` per row, the key an HMAC of the slug under the fleet token and the run id in three-character groups (`edd~166~...`: opaque in the public log, so a private row is identified without being named, and spelling no four characters of a private name, since the runner drops a job output that carries a masked value); the log names the public slugs and counts the private ones |
 | plan: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `plan` | `plan: <N> rows` |
-| row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/` |
+| row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/`, whose dependencies are installed there (`bun install --cwd build`) so its writer renders with its own versions |
 | row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | one listing of the owner's writable repositories (the same call discovery makes, no re-selection), the row's key recomputed over it and the one repository carrying it taken (no such repository: the step refuses, naming no repository); every form of the name is registered with the masker before anything else prints; a dispatched branch is probed with one `git ls-remote` and a branch the repository does not have refuses too; the name and its visibility ride `GITHUB_ENV` from here (the next run step's preamble spells them under `env:`, masked by then) |
 | row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text), at the dispatched branch when there is one; the token is stripped from the remote afterwards; `continue-on-error` |
-| row 4: migrate | [sync/migrate.ts](../.github/scripts/sync/migrate.ts) | every rung of the build's `migrations/` over the target, in name order ([Migrations](#migrations)); its log is `sync.log` until the writer's report replaces it; `continue-on-error`, and a failed rung skips the writer |
-| row 5: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
+| row 4: migrate | the build's own [sync/migrate.ts](../.github/scripts/sync/migrate.ts), run from `build/` | every rung of the build's `migrations/` over the target, in name order ([Migrations](#migrations)); its log is `sync.log` until the writer's report replaces it; `continue-on-error`, and a failed rung skips the writer |
+| row 5: write | the build's own [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts), run from `build/` | the one writer step, so the commit the manifest records is the code that wrote the tree: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
 | row 6: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log`; on a branch dispatch the commit lands on the dispatched branch instead ([syncing a branch](#syncing-a-branch)) |
 | row 7: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 

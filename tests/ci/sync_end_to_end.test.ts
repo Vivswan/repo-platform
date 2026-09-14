@@ -4,7 +4,6 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   readlinkSync,
   symlinkSync,
@@ -16,6 +15,7 @@ import { sha256 } from "../../actions/shared/values.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
+import { snapshotTree } from "../shared/tree_snapshot";
 import { spawnUpstream } from "../shared/upstream_server";
 
 const temp = tempDirs();
@@ -153,8 +153,8 @@ function oldManifest(): string {
     // The same with nothing at the path: nothing to review, so no note; the
     // record leaves the manifest like any other stale record of an absent file.
     "HANDMADE-GONE.md": `{"class": "managed", "hash": "${sha256(HANDMADE)}"}`,
-    // A self entry an earlier writer stamped with a build: the field leaves on this sync.
-    [MANIFEST]: `{"class": "managed", "hash": null, "commit": "1111111111111111111111111111111111111111"}`,
+    // A self entry from before the commit field: this sync stamps the build.
+    [MANIFEST]: '{"class": "managed", "hash": null}',
   };
   const lines = Object.entries(entries).map(
     ([path, body]) => `    ${JSON.stringify(path)}: ${body}`,
@@ -228,22 +228,6 @@ function seedTarget(): string {
   return target;
 }
 
-function snapshot(root: string, prefix = ""): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const entry of readdirSync(join(root, prefix), { withFileTypes: true })) {
-    const rel = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-    if (rel === ".git") continue;
-    if (entry.isDirectory()) {
-      for (const [path, hash] of snapshot(root, rel)) out.set(path, hash);
-    } else if (entry.isSymbolicLink()) {
-      out.set(rel, `-> ${readlinkSync(join(root, rel))}`);
-    } else {
-      out.set(rel, sha256(readFileSync(join(root, rel), "latin1")));
-    }
-  }
-  return out;
-}
-
 interface Summary {
   hold: boolean;
   holdReasons: string[];
@@ -301,7 +285,7 @@ describe("sync.ts end to end", () => {
 
   beforeAll(() => {
     target = seedTarget();
-    seeded = snapshot(target);
+    seeded = snapshotTree(target);
     ({ stdout, summary } = runSync(target, join(temp.dir("sync-e2e-summary-"), "summary.json")));
   });
 
@@ -595,7 +579,7 @@ describe("sync.ts end to end", () => {
     }
   });
 
-  test("records what it wrote in the manifest; the self entry carries no hash and no build", () => {
+  test("records what it wrote in the manifest; the self entry carries the build and no hash", () => {
     const manifest = JSON.parse(read(MANIFEST)) as {
       files: Record<string, Record<string, unknown>>;
     };
@@ -637,7 +621,7 @@ describe("sync.ts end to end", () => {
         "docs/LICENSE.md",
       ].sort(),
     );
-    expect(manifest.files[MANIFEST]).toEqual({ class: "managed", hash: null });
+    expect(manifest.files[MANIFEST]).toEqual({ class: "managed", hash: null, commit: BUILD });
     expect(manifest.files["LICENSE.md"]).toEqual({
       class: "managed",
       hash: sha256(read("LICENSE.md")),
@@ -773,17 +757,12 @@ describe("sync.ts end to end", () => {
     ]);
   });
 
-  test("a second run under a new build changes no byte and reports every file unchanged", () => {
-    const before = snapshot(target);
+  test("a second run under the same build changes no byte and reports every file unchanged", () => {
+    const before = snapshotTree(target);
     // Control: the oracle sees the first run's changes, so an equal
     // snapshot below is evidence, not a blind comparison.
     expect(before).not.toEqual(seeded);
-    // A stable move over an unchanged tree: nothing names the build in the tree, so nothing is delivered.
-    const again = runSync(
-      target,
-      join(temp.dir("sync-e2e-summary2-"), "summary.json"),
-      BUILD.replace(/^abcdef/, "fedcba"),
-    );
+    const again = runSync(target, join(temp.dir("sync-e2e-summary2-"), "summary.json"));
     expect(again.summary.written.map((row) => row.change)).toEqual(
       summary.written.map((row) => (row.change === "held" ? "held" : "unchanged")),
     );
@@ -811,7 +790,7 @@ describe("sync.ts end to end", () => {
           !r.startsWith("retirement of CONTRIBUTING.md"),
       ),
     );
-    expect(snapshot(target)).toEqual(before);
+    expect(snapshotTree(target)).toEqual(before);
   });
 });
 
@@ -1092,7 +1071,7 @@ describe("sync.ts over an upstream that does not serve a registered block", () =
       "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
     );
     fixtureGit(target, ["init", "-q", "-b", "main"]);
-    const before = snapshot(target);
+    const before = snapshotTree(target);
     const empty = await spawnUpstream(temp.dir("sync-e2e-upstream-empty-"));
     const summary = join(temp.dir("sync-e2e-upstream-summary-"), "summary.json");
     try {
@@ -1104,7 +1083,7 @@ describe("sync.ts over an upstream that does not serve a registered block", () =
     } finally {
       empty.stop();
     }
-    expect(snapshot(target)).toEqual(before);
+    expect(snapshotTree(target)).toEqual(before);
     expect(existsSync(summary)).toBe(false);
   });
 });
@@ -1143,7 +1122,7 @@ describe("sync.ts over --previous-files", () => {
       "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
     );
     fixtureGit(target, ["init", "-q", "-b", "main"]);
-    const before = snapshot(target);
+    const before = snapshotTree(target);
     const summary = join(temp.dir("sync-e2e-previous-summary-"), "summary.json");
     const previous = join(FIXTURES, "files.yml");
     expect(spawnSync(target, summary, BUILD, ["--previous-files", previous])).toEqual({
@@ -1152,7 +1131,7 @@ describe("sync.ts over --previous-files", () => {
         '::error::unknown or valueless argument "--previous-files" - allowed flags: --files, --tree, --target, --build, --repository, --private, --summary, --upstream\n',
       stderr: "",
     });
-    expect(snapshot(target)).toEqual(before);
+    expect(snapshotTree(target)).toEqual(before);
     expect(existsSync(summary)).toBe(false);
   });
 });
@@ -1287,7 +1266,7 @@ describe("sync.ts over a registration naming a module files.yml does not offer",
       "modules: [bun, uv]\nproject: {name: Demo, slug: demo, description: A demo}\n",
     );
     fixtureGit(target, ["init", "-q", "-b", "main"]);
-    const before = snapshot(target);
+    const before = snapshotTree(target);
     const summary = join(temp.dir("sync-e2e-unknown-module-summary-"), "summary.json");
     expect(spawnSync(target, summary)).toEqual({
       exitCode: 1,
@@ -1295,7 +1274,7 @@ describe("sync.ts over a registration naming a module files.yml does not offer",
         '::error::.repo-platform.yml: module "uv" is not a module files.yml offers (known: bun, deno, pages, docs-site, fuzzer)\n',
       stderr: "",
     });
-    expect(snapshot(target)).toEqual(before);
+    expect(snapshotTree(target)).toEqual(before);
     expect(existsSync(summary)).toBe(false);
   });
 });
@@ -1348,14 +1327,14 @@ describe("sync.ts over manifest records it cannot read", () => {
     }
     symlinkSync("elsewhere", join(target, "docs"));
     fixtureGit(target, ["init", "-q", "-b", "main"]);
-    const before = snapshot(target);
+    const before = snapshotTree(target);
     const summary = join(temp.dir("sync-e2e-unreadable-summary-"), "summary.json");
     expect(spawnSync(target, summary)).toEqual({
       exitCode: 1,
       stdout: refusal(Object.keys(records).length),
       stderr: "",
     });
-    expect(snapshot(target)).toEqual(before);
+    expect(snapshotTree(target)).toEqual(before);
     expect(existsSync(summary)).toBe(false);
   });
 });

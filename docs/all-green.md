@@ -259,7 +259,7 @@ One label on the PR, before it merges.
 
 - **The public sync by default, never a gate:** [fleet-sync-default.yml](../.github/workflows/fleet-sync-default.yml) adds `fleet-sync:public` to a pull request of this repository that changes what a sync delivers and wears no fleet-sync label, and keeps one sticky comment saying so ([its script](../.github/scripts/fleet/fleet_sync_default.ts)).
 
-  - Watches `files.yml`, `files/`, `migrations/`, `.github/scripts/sync/writer/`, and `actions/validate-managed-files/`. Any other workflow or action change is live at `stable` on merge and gets no label.
+  - **Watches the delivered surface** ([sync.md](sync.md#the-manifest)): `files.yml`, `files/`, `actions/`, `.github/scripts/sync/`, `.github/scripts/shared/`, `migrations/`, `bun.lock`, and `package.json`, so a lockfile bump gets the label too. Any other change is live at `stable` on merge and gets no label.
 
   - Not forced: a human removing the label is final for that pull request (the comment then reads `removed by <login>; not re-adding it`), and a human's own fleet-sync label is never touched. `fleet-sync:all` only when necessary and approved by the repository owner: it bills private Actions minutes.
 

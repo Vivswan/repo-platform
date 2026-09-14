@@ -34,7 +34,9 @@ describe("the platform slug and every string the fleet observes derived from it"
       htmlMarkers: HTML_REGION_MARKERS,
       generatedNotice: GENERATED_NOTICE,
       renderedSettingsHeader: RENDERED_HEADER,
-      manifestComment: renderManifest({}).split("\n")[1],
+      manifestComment: renderManifest({}, "0123456789abcdef0123456789abcdef01234567").split(
+        "\n",
+      )[1],
       syncIdentity: SYNC_IDENTITY,
       automationBranch: AUTOMATION_BRANCH,
       failureIssueTitle: FAILURE_ISSUE_TITLE,
@@ -58,7 +60,8 @@ describe("the platform slug and every string the fleet observes derived from it"
         "hash covers the region from the BEGIN line through the END line), starter (written once, " +
         "repo-owned from then on), mirror (a byte copy of a written file, or with kind symlink a " +
         "relative symbolic link to it whose hash is sha256 of the link target, declared in files.yml or " +
-        '.repo-platform.yml).",',
+        ".repo-platform.yml). This file's own entry names the repo-platform commit the repository is " +
+        'judged against until a sync moves it.",',
       syncIdentity: {
         name: "repo-platform-sync",
         email: "repo-platform-sync@users.noreply.github.com",

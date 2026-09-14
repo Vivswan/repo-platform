@@ -45,7 +45,8 @@ describe("parseManifestFiles", () => {
 describe("unknownEntryFields", () => {
   // RECORD_FIELDS is the writer's table and ENTRY_FIELDS the validator's: a field the writer records that the validator
   // does not know makes every fresh sync's manifest red, and a field the validator knows that no class carries lets a
-  // hand edit pass as vocabulary. The self entry is the one record RECORD_FIELDS does not describe.
+  // hand edit pass as vocabulary. The self entry is the one record RECORD_FIELDS does not describe, and its commit is
+  // the one vocabulary field no class carries.
   const SAMPLE: Record<string, JsonValue> = {
     hash: "h",
     grammar: "managed-region",
@@ -69,7 +70,9 @@ describe("unknownEntryFields", () => {
     );
     const rendered = parseManifestFiles(`{"files": {\n${lines.join(",\n")}\n}}`);
     expect([rendered.problem, unknownEntryFields(rendered.files ?? {})]).toEqual([null, []]);
-    expect(new Set(Object.values(RECORD_FIELDS).flat())).toEqual(new Set(ENTRY_FIELDS));
+    expect(new Set<string>([...Object.values(RECORD_FIELDS).flat(), ...SELF_ENTRY_FIELDS])).toEqual(
+      new Set<string>(ENTRY_FIELDS),
+    );
     expect(
       unknownEntryFields({
         "x.yml": { class: "managed", hash: null, withheld: true } as ManifestEntryShape,

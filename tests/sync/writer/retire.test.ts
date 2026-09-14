@@ -15,6 +15,7 @@ import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 const M = HASH_REGION_MARKERS;
+const BUILD = "0123456789abcdef0123456789abcdef01234567";
 // A variable, so neither the linter nor the type checker reads the lookup
 // as the inherited property.
 const PROTO = "__proto__";
@@ -164,7 +165,7 @@ describe("retire", () => {
     const target = checkout({ "old.md": "o\n" });
     // An object literal keyed __proto__ would set the fixture's prototype.
     writeFileSync(join(target, PROTO), "mine\n");
-    writeManifest(target, { "old.md": { class: "managed", hash: sha256("o\n") } });
+    writeManifest(target, { "old.md": { class: "managed", hash: sha256("o\n") } }, BUILD);
     const unrecorded = readRecords(target).records;
     expect(retire(target, [PROTO], unrecorded)).toEqual([]);
     expect(readFileSync(join(target, PROTO), "utf-8")).toBe("mine\n");
@@ -172,6 +173,7 @@ describe("retire", () => {
     writeManifest(
       target,
       Object.fromEntries([[PROTO, { class: "managed", hash: sha256("mine\n") }]]),
+      BUILD,
     );
     const records = readRecords(target).records;
     expect(Object.hasOwn(records, PROTO)).toBe(true);
