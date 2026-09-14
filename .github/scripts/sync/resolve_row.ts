@@ -2,8 +2,9 @@
 // The row's transport and its resolver. A row rides the public matrix as an index and a key; the
 // resolver reads the key back against ONE listing of the owner's writable repositories, masks every
 // form of the name before anything else reaches stdout, and hands the name on through GITHUB_ENV
-// (TARGET, TARGET_PRIVATE), which the runner never echoes. fleet/resolve_settings_target.ts is the
-// settings apply's entry to the same resolver.
+// (TARGET, TARGET_PRIVATE), which the runner spells under `env:` in the next run step's preamble, so
+// the masks must precede it. fleet/resolve_settings_target.ts is the settings apply's entry to the
+// same resolver.
 
 import { createHmac } from "node:crypto";
 import { appendFileSync } from "node:fs";
@@ -16,7 +17,7 @@ import { maskForms } from "../shared/mask.ts";
  *  every run, so a private row rides the matrix and the step env unnamed.
  *
  *  The runner drops a job output that carries a masked value. The bare-name mask starts at
- *  shared/mask.ts's four characters, and the slug and URL forms carry `/` or `:`, which the matrix
+ *  shared/mask.ts's four characters, and the slug carries `/`, which the matrix
  *  never does, so the digest rides in three-character groups behind a separator no slug, URL, or
  *  base64 spelling of one contains.
  *    private repository `beef`, raw digest `...becbeef8c...`  -> the whole matrix dropped, every row red */
