@@ -8,13 +8,3 @@ labels:
   - name: dependencies
     color: "0366d6"
     description: Dependency updates
-rulesets:
-  - name: pr-title
-    target: branch
-    enforcement: disabled
-    rules:
-      - type: required_status_checks
-        parameters:
-          required_status_checks:
-            - context: pr-title
-              integration_id: 15368

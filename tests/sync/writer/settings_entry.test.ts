@@ -61,13 +61,15 @@ const LAYERS: Record<string, string> = {
   "settings/override.yml": [
     "repository: {allow_merge_commit: false, squash_merge_commit_title: PR_TITLE}",
     "rulesets:",
-    "  - name: main",
-    "    target: branch",
-    "    enforcement: active",
-    "    rules:",
-    "      - type: deletion",
-    "      - type: required_status_checks",
-    "        parameters: {required_status_checks: [{context: all-green, integration_id: 15368}]}",
+    "  _undeclared: delete",
+    "  entries:",
+    "    - name: main",
+    "      target: branch",
+    "      enforcement: active",
+    "      rules:",
+    "        - type: deletion",
+    "        - type: required_status_checks",
+    "          parameters: {required_status_checks: [{context: all-green, integration_id: 15368}]}",
     "",
   ].join("\n"),
   "bun/settings.yml": 'labels:\n  - {name: javascript, color: "168700", description: JS updates}\n',
@@ -165,15 +167,15 @@ describe("renderSettings", () => {
       allow_merge_commit: false,
       squash_merge_commit_title: "PR_TITLE",
     });
-    // Baseline, then each selected module's layer in files.yml order, in the
-    // wrapper form the apply reads: undeclared labels are deleted, undeclared
-    // rulesets kept, both spelled out by the fold.
+    // Every layer's labels sorted by name, in the wrapper form the apply
+    // reads: undeclared labels are deleted by the apply's default, undeclared
+    // rulesets by the override's policy, both spelled out by the fold.
     expect(names(doc.labels)).toEqual(["bug", "dependencies", "javascript", "rust"]);
     expect(doc.labels).toMatchObject({ _undeclared: "delete" });
-    expect(doc.rulesets).toMatchObject({ _undeclared: "keep" });
-    // Baseline ruleset, the public overlay's main entry grown by the module
-    // layer and the override, then the overlay's own.
-    expect(names(doc.rulesets)).toEqual(["pr-title", "main", "release-branches"]);
+    expect(doc.rulesets).toMatchObject({ _undeclared: "delete" });
+    // The public layer's main entry grown by the module layer and the
+    // override, the baseline's, and the overlay's own, sorted by name.
+    expect(names(doc.rulesets)).toEqual(["main", "pr-title", "release-branches"]);
     // The baseline's ruleset rides through whole: still disabled, its rule intact.
     expect(ruleset(doc, "pr-title")).toEqual({
       name: "pr-title",
@@ -203,6 +205,23 @@ describe("renderSettings", () => {
     });
   });
 
+  test("the override's ruleset policy beats an overlay asking to keep undeclared rulesets", () => {
+    // The override merges above the overlay, so its policy is the fleet's
+    // answer for every repository; the overlay's own entry still rides along.
+    const { doc } = rendered({
+      overlay: [
+        "repository: {description: Mine, homepage: '', topics: '', private: false}",
+        "rulesets:",
+        "  _undeclared: keep",
+        "  entries:",
+        "    - {name: release-branches, target: branch, enforcement: active, rules: [{type: deletion}]}",
+        "",
+      ].join("\n"),
+    });
+    expect(doc.rulesets).toMatchObject({ _undeclared: "delete" });
+    expect(names(doc.rulesets)).toEqual(["main", "pr-title", "release-branches"]);
+  });
+
   test.each<{ reason: string; overlay: string; privateLayers: boolean }>([
     {
       reason: "an overlay declaring private selects the private layers",
@@ -222,7 +241,7 @@ describe("renderSettings", () => {
       (r) => r.type,
     );
     if (privateLayers) {
-      expect(labels).toEqual(["bug", "dependencies", "settings-as-code-report", "javascript"]);
+      expect(labels).toEqual(["bug", "dependencies", "javascript", "settings-as-code-report"]);
       expect(security).toBeUndefined();
       expect(mainRules).toEqual(["deletion", "required_status_checks"]);
     } else {
@@ -271,8 +290,8 @@ describe("renderSettings", () => {
     expect(entries(doc.labels)).toEqual([
       { name: "bug", color: "d73a4a", description: "Something isn't working" },
       { name: "dependencies", color: "0366d6", description: "Dependency updates" },
-      { name: "javascript", color: "168700", description: "JS updates" },
       { name: "fuzz-me", color: "B60205", description: "Automated nightly fuzz failure" },
+      { name: "javascript", color: "168700", description: "JS updates" },
       { name: "nightly-failure", color: "D93F0B", description: "Automated nightly CI failure" },
     ]);
   });
@@ -317,8 +336,8 @@ describe("renderSettings", () => {
     expect(entries(doc.labels)).toEqual(labels);
     expect(names(doc.rulesets)).toEqual(
       overlay.includes("rulesets")
-        ? ["pr-title", "main", "release-branches"]
-        : ["pr-title", "main"],
+        ? ["main", "pr-title", "release-branches"]
+        : ["main", "pr-title"],
     );
   });
 
@@ -441,14 +460,14 @@ describe("renderSettings", () => {
       reason: "an overlay naming a section the apply does not know",
       overrides: { overlay: `${OVERLAY}labels_v2: []\n` },
       detail: expect.stringContaining(
-        "unknown top-level section(s) in .github/settings.local.yml: labels_v2",
+        "unknown top-level section in .github/settings.local.yml: labels_v2",
       ),
     },
     {
       reason: "an overlay nulling a section the apply does not know",
       overrides: { overlay: `${OVERLAY}labels_v2: null\n` },
       detail: expect.stringContaining(
-        "unknown top-level section(s) in .github/settings.local.yml: labels_v2",
+        "unknown top-level section in .github/settings.local.yml: labels_v2",
       ),
     },
     {

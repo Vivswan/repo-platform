@@ -400,44 +400,34 @@ describe("sync.ts end to end", () => {
       private: false,
       allow_merge_commit: false,
     });
-    // Baseline labels, the bun layer's, then the tracking label with the
-    // registration's name and the fuzzer module's tuple.
+    // Baseline labels, the bun layer's, and the tracking label with the
+    // registration's name and the fuzzer module's tuple, sorted by name.
     expect(doc.labels).toEqual({
       entries: [
         { name: "bug", color: "d73a4a", description: "Something isn't working" },
         { name: "dependencies", color: "0366d6", description: "Dependency updates" },
+        { name: "fuzz-me", color: "B60205", description: "Automated nightly fuzz failure" },
         {
           name: "javascript",
           color: "168700",
           description: "Pull requests that update javascript code",
         },
-        { name: "fuzz-me", color: "B60205", description: "Automated nightly fuzz failure" },
       ],
       _undeclared: "delete",
     });
-    expect(doc.rulesets._undeclared).toBe("keep");
+    // The override's policy, not the library's default of keep.
+    expect(doc.rulesets._undeclared).toBe("delete");
     const rulesets = doc.rulesets.entries;
-    expect(rulesets.map((r) => r.name)).toEqual(["pr-title", "main", "release-branches"]);
-    // The baseline's disabled ruleset and the seed's own ride through whole.
-    expect(rulesets[0]).toEqual({
-      name: "pr-title",
-      target: "branch",
-      enforcement: "disabled",
-      rules: [
-        {
-          type: "required_status_checks",
-          parameters: { required_status_checks: [{ context: "pr-title", integration_id: 15368 }] },
-        },
-      ],
-    });
-    expect(rulesets[2]).toEqual({
+    expect(rulesets.map((r) => r.name)).toEqual(["main", "release-branches"]);
+    // The seed's own ruleset rides through whole.
+    expect(rulesets[1]).toEqual({
       name: "release-branches",
       target: "branch",
       enforcement: "active",
       rules: [{ type: "deletion" }],
       bypass_actors: [],
     });
-    expect(rulesets[1]?.rules?.map((r) => r.type)).toEqual([
+    expect(rulesets[0]?.rules?.map((r) => r.type)).toEqual([
       "code_quality",
       "deletion",
       "required_status_checks",
