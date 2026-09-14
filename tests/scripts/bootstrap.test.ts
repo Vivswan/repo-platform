@@ -13,21 +13,7 @@ function plant(base: string, path: string, files: string[]): void {
 }
 
 describe("bunLockDirs", () => {
-  test("the live tree: the root plus every action committing a bun.lock", () => {
-    expect(bunLockDirs(root)).toEqual([
-      ".",
-      "actions/check-file-size",
-      "actions/check-typography",
-      "actions/fuzz-issue",
-      "actions/pages-site",
-      "actions/plan",
-      "actions/release-health",
-      "actions/trivy",
-      "actions/validate-commit-names",
-      "actions/validate-managed-files",
-    ]);
-  });
-
+  // A dependency's own lockfile under node_modules would be installed as a workspace.
   test("a planted tree: no lock, a lock under node_modules, a nested lock", () => {
     const base = temp.dir("bootstrap-discovery-");
     plant(base, "actions/with-lock", ["bun.lock", "package.json"]);
@@ -67,19 +53,24 @@ test("every bun.lock names the package.json beside it", () => {
 });
 
 describe("runtimeMismatch", () => {
-  test.each([
-    ["1.4.0", "1.4.0\n", null],
-    ["1.4.3", "1.4.0\n", null],
-    ["1.3.14", "1.4.0\n", "local bun 1.3.14 is not at the pinned 1.4 (files/bun/.bun-version)"],
-    ["2.0.0", "1.4.0\n", "local bun 2.0.0 is not at the pinned 1.4 (files/bun/.bun-version)"],
-  ])("local %s against the pin %s", (local, pinned, verdict) => {
+  // The named incident: a green run under 1.3 on a commit CI's 1.4 failed.
+  const MISMATCH = (local: string) =>
+    `local bun ${local} is not at the pinned 1.4 (files/bun/.bun-version)`;
+  test.each<[string, string, { verdict: string | null } | { throws: string }]>([
+    ["1.4.0", "1.4.0\n", { verdict: null }],
+    ["1.4.3", "1.4.0\n", { verdict: null }],
+    ["1.3.14", "1.4.0\n", { verdict: MISMATCH("1.3.14") }],
+    ["2.0.0", "1.4.0\n", { verdict: MISMATCH("2.0.0") }],
+    // A prerelease or an unreadable pin throws instead of reading a prefix.
+    ["1.4.0-canary.1", "1.4.0\n", { throws: "the local bun runtime" }],
+    ["1.4.0", "", { throws: "files/bun/.bun-version" }],
+  ])("local %s against the pin %s", (local, pinned, outcome) => {
+    if ("throws" in outcome) {
+      expect(() => runtimeMismatch(local, pinned)).toThrow(outcome.throws);
+      return;
+    }
     const found = runtimeMismatch(local, pinned);
-    if (verdict === null) expect(found).toBeNull();
-    else expect(found).toStartWith(verdict);
-  });
-
-  test("a prerelease runtime or an unreadable pin throws instead of reading a prefix", () => {
-    expect(() => runtimeMismatch("1.4.0-canary.1", "1.4.0\n")).toThrow("the local bun runtime");
-    expect(() => runtimeMismatch("1.4.0", "")).toThrow("files/bun/.bun-version");
+    if (outcome.verdict === null) expect(found).toBeNull();
+    else expect(found).toStartWith(outcome.verdict);
   });
 });

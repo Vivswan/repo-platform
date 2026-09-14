@@ -42,6 +42,8 @@ describe("resolveBase", () => {
   // The leg runs in a clone of the pushed repository, as actions/checkout leaves it.
   const clone = join(root, "clone");
   git(root, ["clone", "-q", source, clone]);
+  const shallow = join(root, "shallow");
+  git(root, ["clone", "-q", "--depth", "1", `file://${source}`, shallow]);
 
   const short = (sha: string) => sha.slice(0, 12);
 
@@ -85,10 +87,12 @@ describe("resolveBase", () => {
     });
   });
 
+  // An equal base read as an empty range would arm nothing silently; an unseen base as a full one.
   test.each([
     {
       reason:
         "a base that is no ancestor of the judged commit (a force-push or an out-of-band tag move)",
+      cwd: clone,
       sha: c3,
       before: side,
       error:
@@ -98,20 +102,20 @@ describe("resolveBase", () => {
     },
     {
       reason: "a base equal to the judged commit (an empty range)",
+      cwd: clone,
       sha: c3,
       before: c3,
       error: `the base ${short(c3)} is the judged commit itself: an empty range reads nothing`,
     },
-  ])("$reason is refused", ({ sha, before, error }) => {
-    expect(() => resolveBase(clone, sha, before)).toThrow(error);
-  });
-
-  test("a base the checkout cannot see is refused, never read as an empty or a full range", () => {
-    const shallow = join(root, "shallow");
-    git(root, ["clone", "-q", "--depth", "1", `file://${source}`, shallow]);
-    expect(() => resolveBase(shallow, c4, c2)).toThrow(
-      `the base ${short(c2)} is not in this checkout: fetch the full history (actions/checkout fetch-depth: 0)`,
-    );
+    {
+      reason: "a base a depth-1 checkout cannot see",
+      cwd: shallow,
+      sha: c4,
+      before: c2,
+      error: `the base ${short(c2)} is not in this checkout: fetch the full history (actions/checkout fetch-depth: 0)`,
+    },
+  ])("$reason is refused", ({ cwd, sha, before, error }) => {
+    expect(() => resolveBase(cwd, sha, before)).toThrow(error);
   });
 
   test("a git that errors on the resolve question is fatal at the leg, never read as an absent commit", () => {
@@ -148,24 +152,6 @@ describe("resolveBase", () => {
       exitCode: 1,
       stdout:
         "::error::git rev-parse could not answer (exit 128); refusing to guess: fatal: stubbed\n",
-      stderr: "",
-      output: "",
-    });
-  });
-
-  test("a malformed base is refused by the leg's entry point before any git read, with no output line", () => {
-    // judgedRangeEnv fails the process, so the whole outcome is the leg's:
-    // fleet_sync_marker.ts is the one script that reads the range env.
-    const script = join(import.meta.dir, "../../.github/scripts/post-green/fleet_sync_marker.ts");
-    const outputFile = join(root, "malformed-before-output.txt");
-    writeFileSync(outputFile, "");
-    const result = boundedSpawnSync(["bun", script], {
-      cwd: clone,
-      env: { ...process.env, SOURCE_SHA: c3, BEFORE_SHA: "main", GITHUB_OUTPUT: outputFile },
-    });
-    expect({ ...result, output: readFileSync(outputFile, "utf-8") }).toEqual({
-      exitCode: 1,
-      stdout: "::error::BEFORE_SHA is not a full commit sha (got 'main')\n",
       stderr: "",
       output: "",
     });

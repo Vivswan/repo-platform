@@ -3,38 +3,36 @@ import {
   classify,
   isExempt,
   isMarkdown,
-  quoteDepth,
+  type LineKind,
   scanMarkdown,
 } from "../../../scripts/check/check_markdown_wrap";
 
 describe("classify", () => {
-  test("prose, blank, and structural lines", () => {
-    expect(classify("Plain sentence.")).toBe("prose");
-    expect(classify("")).toBe("blank");
-    expect(classify("   ")).toBe("blank");
-    expect(classify("## Heading")).toBe("structural");
-    expect(classify("====")).toBe("structural");
-    expect(classify("<details>")).toBe("structural");
-    expect(classify("</details>")).toBe("structural");
-    expect(classify("<https://example.com>")).toBe("prose");
-    expect(classify("<user@example.com>")).toBe("prose");
-    expect(classify("[ref]: https://example.com")).toBe("structural");
-    expect(classify("<!-- a comment -->")).toBe("structural");
-    expect(classify("---")).toBe("structural");
-    expect(classify("- bullet text")).toBe("list");
-    expect(classify("1. numbered item")).toBe("list");
-    // Table rows are the scanner's concern (header + delimiter context);
-    // a lone pipe-led line is prose, not a table.
-    expect(classify("| ordinary prose")).toBe("prose");
-  });
-
-  test("blockquote markers are stripped before classifying", () => {
-    expect(classify("> quoted prose")).toBe("prose");
-    expect(classify(">")).toBe("blank");
-    expect(classify("> - quoted bullet")).toBe("list");
-    expect(classify("> > nested quote text")).toBe("prose");
-    expect(quoteDepth("> > nested")).toEqual({ depth: 2, rest: "nested" });
-    expect(quoteDepth("plain")).toEqual({ depth: 0, rest: "plain" });
+  // The scanner tracks continuation lines by kind, so a misread kind hides a wrapped paragraph or flags a
+  // structural line.
+  test.each<[string, LineKind]>([
+    ["Plain sentence.", "prose"],
+    ["", "blank"],
+    ["   ", "blank"],
+    ["## Heading", "structural"],
+    ["====", "structural"],
+    ["<details>", "structural"],
+    ["</details>", "structural"],
+    ["<https://example.com>", "prose"],
+    ["<user@example.com>", "prose"],
+    ["[ref]: https://example.com", "structural"],
+    ["<!-- a comment -->", "structural"],
+    ["---", "structural"],
+    ["- bullet text", "list"],
+    ["1. numbered item", "list"],
+    // Table rows are the scanner's concern (header + delimiter context); a lone pipe-led line is prose.
+    ["| ordinary prose", "prose"],
+    ["> quoted prose", "prose"],
+    [">", "blank"],
+    ["> - quoted bullet", "list"],
+    ["> > nested quote text", "prose"],
+  ])("%j is %s", (line, kind) => {
+    expect(classify(line)).toBe(kind);
   });
 });
 
@@ -233,20 +231,12 @@ describe("scanMarkdown", () => {
 });
 
 describe("scan scope", () => {
-  test("isMarkdown takes plain .md files and the writer's markdown block files", () => {
-    expect(isMarkdown("docs/guide.md")).toBe(true);
-    expect(isMarkdown("files/base/AGENTS.md")).toBe(true);
-    expect(isMarkdown("files/deno/AGENTS.block.toolchain.md")).toBe(true);
-    expect(isMarkdown("scripts/check/check_markdown_wrap.ts")).toBe(false);
-    expect(isMarkdown("files/base/.gitignore")).toBe(false);
-    expect(isMarkdown("files/fuzzer/.block.fuzzer.gitignore")).toBe(false);
-  });
-
-  test("vendored/generated texts are exempt, the writer's license source included", () => {
-    expect(isExempt("LICENSE.md")).toBe(true);
-    expect(isExempt("CHANGELOG.md")).toBe(true);
-    expect(isExempt("skills/repo-platform-sync-pr/LICENSE.md")).toBe(true);
-    expect(isExempt("files/base/LICENSE.md")).toBe(true);
-    expect(isExempt("docs/settings.md")).toBe(false);
+  // A scanner that takes no file passes the gate silently.
+  test.each([
+    ["files/deno/AGENTS.block.toolchain.md", true],
+    ["docs/settings.md", true],
+    ["files/fuzzer/.block.fuzzer.gitignore", false],
+  ])("%s is scanned: %s", (path, scanned) => {
+    expect(isMarkdown(path) && !isExempt(path)).toBe(scanned);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { boundedSpawnSync } from "./bounded_spawn";
+import { type BoundedSpawnResult, boundedSpawnSync } from "./bounded_spawn";
 import { harnessBound } from "./harness_bound";
 
 // Fixtures run through process.execPath, never a PATH lookup: several
@@ -13,19 +13,27 @@ const bunExe = process.execPath;
 const BACKSTOP_MS = harnessBound(10_000);
 
 describe("boundedSpawnSync", () => {
-  test("a healthy child under the default bound returns its own exit code and both streams", () => {
-    // No timeoutMs: runs under SPAWN_TIMEOUT_MS, so the wrapper's bound
-    // guard below would throw here on a non-positive or non-finite default.
-    expect(boundedSpawnSync([bunExe, "-e", "console.log('out'); console.error('err');"])).toEqual({
-      exitCode: 0,
-      stdout: "out\n",
-      stderr: "err\n",
-    });
-  });
-
-  test("a nonzero exit is a result, not a throw", () => {
-    const bad = boundedSpawnSync([bunExe, "-e", "process.exit(3)"]);
-    expect(bad.exitCode).toBe(3);
+  // No timeoutMs: the rows run under SPAWN_TIMEOUT_MS, so the bound guard
+  // would throw here on a non-positive or non-finite default.
+  test.each<{ reason: string; argv: string[]; stdin?: Buffer; result: BoundedSpawnResult }>([
+    {
+      reason: "a healthy child returns its own exit code and both streams",
+      argv: [bunExe, "-e", "console.log('out'); console.error('err');"],
+      result: { exitCode: 0, stdout: "out\n", stderr: "err\n" },
+    },
+    {
+      reason: "a nonzero exit is a result, not a throw",
+      argv: [bunExe, "-e", "process.exit(3)"],
+      result: { exitCode: 3, stdout: "", stderr: "" },
+    },
+    {
+      reason: "stdin bytes pass through",
+      argv: ["cat"],
+      stdin: Buffer.from("fed via stdin"),
+      result: { exitCode: 0, stdout: "fed via stdin", stderr: "" },
+    },
+  ])("under the default bound, $reason", ({ argv, stdin, result }) => {
+    expect(boundedSpawnSync(argv, { stdin })).toEqual(result);
   });
 
   // The two hung fixtures wait out the scaled bound, so their own bun-test timeouts scale with it.
@@ -50,7 +58,7 @@ describe("boundedSpawnSync", () => {
     harnessBound(5_000),
   );
 
-  test("a signal death is failed-to-look, naming the signal", () => {
+  test("a signal death is failed-to-look, naming the signal - read as exit 0 it would pass any exit assertion", () => {
     expect(() => boundedSpawnSync([bunExe, "-e", "process.kill(process.pid, 'SIGKILL')"])).toThrow(
       /died on signal SIGKILL/,
     );
@@ -83,12 +91,6 @@ describe("boundedSpawnSync", () => {
         /a bound must be a positive finite number/,
       );
     }
-  });
-
-  test("stdin bytes pass through", () => {
-    const r = boundedSpawnSync(["cat"], { stdin: Buffer.from("fed via stdin") });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toBe("fed via stdin");
   });
 
   test("POISON CONTROL: an explicit env passes verbatim - no process.env spread", () => {

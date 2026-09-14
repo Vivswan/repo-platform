@@ -33,7 +33,19 @@ function ghReturning(
   });
 }
 
+const ghFailing =
+  (exitCode: number, stderr: string): GhRunner =>
+  () => ({
+    exitCode,
+    stdout: "",
+    stderr,
+    timedOut: false,
+    pid: 0,
+  });
+
 describe("allGreenFailure", () => {
+  // Pinned explicitly: GitHub's default is latest today, and `all` would list a re-run's stale check run beside the
+  // fresh one.
   test("queries the sha's all-green check runs by name with filter=latest", () => {
     const calls: string[][] = [];
     const gh = (command: string[]): RunResult => {
@@ -50,24 +62,21 @@ describe("allGreenFailure", () => {
     ]);
   });
 
-  test.each([
-    ["a completed successful verdict is green", [{}]],
-    [
-      "any success among several verdicts is green (a re-judged sha ran the same tree)",
-      [{ conclusion: "failure" }, {}],
-    ],
-  ])("%s", (_reason, checks) => {
-    expect(allGreenFailure("o/r", SHA, ghReturning(checks), NO_WAIT)).toBeNull();
-  });
-
   // Pinned as the WHOLE reason string: the prose is what verdictPending matches
   // and what lands in the sync and publish logs, so a reworded fragment fails
-  // here rather than drifting.
+  // here rather than drifting. The app filter is GitHub's: a third-party app
+  // can post a check named all-green.
   const NO_CHECK =
     "no all-green verdict check exists there (waited 0s) - CI has not vouched for the commit; re-run the sha's CI run (the all-green job posts the check) if one should exist";
   const API_FAILURE = (detail: string) =>
     `reading its all-green check runs failed (${detail}) - an API failure, not proof the commit is red, but the gate fails closed`;
-  const refusals: [string, GhRunner, string][] = [
+  const verdicts: [string, GhRunner, string | null][] = [
+    ["a completed successful verdict is green", ghReturning([{}]), null],
+    [
+      "any success among several verdicts is green (a re-judged sha ran the same tree)",
+      ghReturning([{ conclusion: "failure" }, {}]),
+      null,
+    ],
     [
       "a failed verdict names its conclusion",
       ghReturning([{ conclusion: "failure" }]),
@@ -97,16 +106,20 @@ describe("allGreenFailure", () => {
     ],
     [
       "an API failure fails closed with the error's tail, not a pass",
-      () => ({ exitCode: 1, stdout: "", stderr: "gh: HTTP 502\n", timedOut: false, pid: 0 }),
+      ghFailing(1, "gh: HTTP 502\n"),
       API_FAILURE("gh: HTTP 502"),
     ],
     [
-      "a silent API failure still reports the exit code",
-      () => ({ exitCode: 4, stdout: "", stderr: "", timedOut: false, pid: 0 }),
-      API_FAILURE("exit 4"),
+      "a multi-line gh failure reports its LAST line (gh's offline diagnostic puts the detail second)",
+      ghFailing(
+        1,
+        "error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n",
+      ),
+      API_FAILURE("check your internet connection or https://githubstatus.com"),
     ],
+    ["a silent API failure still reports the exit code", ghFailing(4, ""), API_FAILURE("exit 4")],
   ];
-  test.each(refusals)("%s", (_reason, gh, expected) => {
+  test.each(verdicts)("%s", (_reason, gh, expected) => {
     expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toBe(expected);
   });
 
@@ -155,12 +168,7 @@ describe("allGreenFailure", () => {
     const pending = [
       allGreenFailure("o/r", SHA, ghReturning([]), NO_WAIT),
       allGreenFailure("o/r", SHA, ghReturning([{ status: "queued", conclusion: null }]), NO_WAIT),
-      allGreenFailure(
-        "o/r",
-        SHA,
-        () => ({ exitCode: 1, stdout: "", stderr: "gh: HTTP 502\n", timedOut: false, pid: 0 }),
-        NO_WAIT,
-      ),
+      allGreenFailure("o/r", SHA, ghFailing(1, "gh: HTTP 502\n"), NO_WAIT),
     ];
     for (const reason of pending) expect(verdictPending(reason ?? "")).toBe(true);
     const final = allGreenFailure("o/r", SHA, ghReturning([{ conclusion: "failure" }]), NO_WAIT);

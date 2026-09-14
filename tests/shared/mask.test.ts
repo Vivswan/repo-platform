@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 
+// A made-up slug shaped like a private repository's; no such repository exists.
 const HIDDEN = "Vivswan/Hidden-Server";
 /** The exact-case and lower-case spellings a job log carries of the name, one per line. */
 const SPELLINGS = [
@@ -46,22 +47,8 @@ function runnerMask(log: string, values: string[]): string {
   return out + log.slice(cursor);
 }
 
-describe("runnerMask", () => {
-  test.each<{ log: string; values: string[]; masked: string }>([
-    { log: "abcdEFGH", values: ["abcd", "EFGH"], masked: "***" },
-    { log: "abcdxEFGH", values: ["abcd", "EFGH"], masked: "***x***" },
-    {
-      log: "Vivswan/Hidden-Server",
-      values: ["Hidden-Server", "Vivswan/Hidden-Server"],
-      masked: "***",
-    },
-    { log: "abcd", values: ["EFGH"], masked: "abcd" },
-  ])("$log with $values -> $masked", ({ log, values, masked }) => {
-    expect(runnerMask(log, values)).toBe(masked);
-  });
-});
-
 describe("maskForms", () => {
+  // MIN_MASKED_NAME is the floor a short bare name rides under.
   test.each<{ slug: string; forms: string[] }>([
     {
       slug: HIDDEN,
@@ -75,6 +62,15 @@ describe("maskForms", () => {
   });
 
   test("the forms leave no spelling of the name in a log, the URL ones falling with the slug", () => {
+    // The model of the runner's masker is armed first.
+    for (const [log, values, masked] of [
+      ["abcdEFGH", ["abcd", "EFGH"], "***"],
+      ["abcdxEFGH", ["abcd", "EFGH"], "***x***"],
+      ["Vivswan/Hidden-Server", ["Hidden-Server", "Vivswan/Hidden-Server"], "***"],
+      ["abcd", ["EFGH"], "abcd"],
+    ] as const) {
+      expect(runnerMask(log, [...values])).toBe(masked);
+    }
     expect(runnerMask(SPELLINGS, maskForms(HIDDEN))).toBe(
       [
         "***",

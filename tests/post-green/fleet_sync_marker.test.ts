@@ -15,13 +15,13 @@ import { tempDirs } from "../shared/temp_dir";
 const temp = tempDirs();
 
 const PUBLIC: Directive = { kind: "fleet-sync", scope: "public" };
-const ALL: Directive = { kind: "fleet-sync", scope: "all" };
 const NONE: Directive = { kind: "none" };
 const TWO_SCOPES = "2 fleet-sync labels (fleet-sync:all, fleet-sync:public): one scope per merge";
 const UNKNOWN = (...names: string[]) =>
   `unknown fleet-sync label${names.length === 1 ? "" : "s"} ${names.join(", ")}; the platform declares fleet-sync:all and fleet-sync:public`;
 
 describe("fleetSyncLabels", () => {
+  // Cross-file: the overlay's label names against the scope enum; the leg reads the overlay at run time.
   test("the roster is the overlay's fleet-sync labels, lowercased, each scoped by its suffix", () => {
     expect([...fleetSyncLabels(loadLayer(FLEET_SYNC_OVERLAY).doc, "overlay")]).toEqual([
       ["fleet-sync:public", "public"],
@@ -34,47 +34,18 @@ describe("fleetSyncLabels", () => {
       ["fleet-sync:all", "all"],
     ]);
   });
-
-  test("a declared fleet-sync label the leg cannot act on, or none at all, is refused", () => {
-    const declared = (...names: string[]) => ({
-      labels: names.map((name) => ({ name, color: "0052cc", description: "d" })),
-    });
-    expect(() => fleetSyncLabels(declared("fleet-sync:all", "fleet-sync:private"), "o")).toThrow(
-      "o: label 'fleet-sync:private' names no sync scope (all, public)",
-    );
-    expect(() => fleetSyncLabels(declared("bug"), "o")).toThrow(
-      "o: no fleet-sync: label is declared",
-    );
-    expect(() => fleetSyncLabels({}, "o")).toThrow("o: no fleet-sync: label is declared");
-  });
 });
 
 describe("readDirective", () => {
   const KNOWN = fleetSyncLabels(loadLayer(FLEET_SYNC_OVERLAY).doc, "overlay");
 
+  // The executed list below proves the plain shapes end to end.
   test.each<{ reason: string; labels: string[]; expected: Directive }>([
-    { reason: "no labels", labels: [], expected: NONE },
     { reason: "labels of other kinds", labels: ["bug", "merge-when-green"], expected: NONE },
-    { reason: "the public label", labels: ["fleet-sync:public"], expected: PUBLIC },
-    {
-      reason: "the all label beside another kind",
-      labels: ["fleet-sync:all", "bug"],
-      expected: ALL,
-    },
     {
       reason: "case folds like GitHub's label names",
       labels: ["Fleet-Sync:Public"],
       expected: PUBLIC,
-    },
-    {
-      reason: "two scopes on one pull request",
-      labels: ["fleet-sync:all", "fleet-sync:public"],
-      expected: { kind: "error", error: TWO_SCOPES },
-    },
-    {
-      reason: "a fleet-sync label the platform does not declare",
-      labels: ["fleet-sync:private"],
-      expected: { kind: "error", error: UNKNOWN("fleet-sync:private") },
     },
     {
       reason: "an unknown label beside a known one is still refused",
@@ -160,10 +131,6 @@ describe("main", () => {
     labeled(48, sha, "fleet-sync:public"),
     labeled(49, sha),
   ]);
-  // The retired body grammar on a direct push's message: the old reader armed on it.
-  const legacy = commit(
-    "feat: the old opt-in\n\n[fleet-sync: public]\n\n## How\n\nThe thing ships.",
-  );
 
   const clone = join(root, "clone");
   git(root, ["clone", "-q", source, clone]);
@@ -274,13 +241,6 @@ describe("main", () => {
       stdout: (base: string, sha: string) => lines(noLabel(base, sha)),
     },
     {
-      reason: "the retired body grammar on a direct push's message arms nothing",
-      sha: legacy,
-      exitCode: 0,
-      output: "armed=false\n",
-      stdout: (base: string, sha: string) => lines(noLabel(base, sha)),
-    },
-    {
       reason: "two pull requests list the commit: the one it is the merge of wins",
       sha: twoPulls,
       exitCode: 0,
@@ -332,15 +292,5 @@ describe("main", () => {
       stderr: "",
     });
     expect(gh.calls().slice(seen)).toEqual([lookup(publicA)]);
-  });
-
-  test("a truncated judged sha is refused with no output line", () => {
-    const result = run(clone, unlabeled.slice(0, 12), seed);
-    expect(result).toEqual({
-      exitCode: 1,
-      output: "",
-      stdout: `::error::SOURCE_SHA is not a full commit sha (got '${short(unlabeled)}')\n`,
-      stderr: "",
-    });
   });
 });

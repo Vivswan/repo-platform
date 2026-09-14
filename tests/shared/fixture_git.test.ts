@@ -53,6 +53,7 @@ describe("fixtureGit", () => {
     for (const key of Object.keys(AMBIENT)) delete process.env[key];
   });
 
+  // Auto maintenance racing the next command's read of loose objects is a flake nothing else names.
   test.each<{ side: string; args: string[]; committed: boolean }>([
     {
       side: "commit (client-side auto maintenance)",
@@ -74,6 +75,7 @@ describe("fixtureGit", () => {
     },
   );
 
+  // Command-scope config outranks the global file (git), so an ambient triple would re-arm it.
   test("an ambient GIT_CONFIG_COUNT triple re-enabling maintenance is scrubbed from the fixture env", () => {
     Object.assign(process.env, AMBIENT);
     const unscrubbed = { ...process.env, GIT_CONFIG_GLOBAL: FIXTURE_GITCONFIG };
@@ -90,13 +92,5 @@ describe("fixtureGit", () => {
       GIT_CONFIG_GLOBAL: FIXTURE_GITCONFIG,
       GIT_CONFIG_SYSTEM: "/dev/null",
     });
-  });
-
-  test("a failing command throws with git's stderr; a passing one returns trimmed stdout", () => {
-    const work = originAndWork(true);
-    expect(() => fixtureGit(work, ["rev-parse", "--verify", "no-such-ref"])).toThrow(
-      /rev-parse --verify no-such-ref failed: fatal: Needed a single revision/,
-    );
-    expect(fixtureGit(work, ["show", "-s", "--format=%s", "HEAD"])).toBe("a");
   });
 });

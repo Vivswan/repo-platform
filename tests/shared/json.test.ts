@@ -36,41 +36,41 @@ writeFileSync(
   ].join("\n"),
 );
 
-function run(payload: string) {
-  const proc = boundedSpawnSync(["bun", entry], { env: { ...process.env, PAYLOAD: payload } });
-  return {
-    exitCode: proc.exitCode,
-    stdout: proc.stdout,
-    stderr: proc.stderr,
-  };
-}
+// The bare identifier is the leaking form Bun's raw error would quote.
+const LEAK = "hiddenserver";
 
 describe("parseJsonWith", () => {
-  test("valid JSON of the expected shape parses through", () => {
-    const r = run('{"repo": "owner/name"}');
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain("repo-name-length=10");
-  });
-
-  test("malformed JSON fails with a value-free diagnostic (no SyntaxError echo)", () => {
-    // The bare identifier is the leaking form Bun's raw error would quote.
-    const r = run('{"repo": hiddenserver}');
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::json.test: payload: not valid JSON");
-    expect(r.stdout + r.stderr).not.toContain("hiddenserver");
-  });
-
-  test("valid JSON of the wrong shape names paths and codes, never the value", () => {
-    const r = run('{"repo": ["hiddenserver"]}');
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain(
-      "::error::json.test: payload: unexpected shape - repo: invalid_type",
-    );
-    expect(r.stdout + r.stderr).not.toContain("hiddenserver");
+  test.each([
+    [
+      "valid JSON of the expected shape parses through",
+      `{"repo": "owner/name"}`,
+      0,
+      "repo-name-length=10\n",
+    ],
+    [
+      "malformed JSON fails with a value-free diagnostic (no SyntaxError echo)",
+      `{"repo": ${LEAK}}`,
+      1,
+      "::error::json.test: payload: not valid JSON\n",
+    ],
+    [
+      "valid JSON of the wrong shape names paths and codes, never the value",
+      `{"repo": ["${LEAK}"]}`,
+      1,
+      "::error::json.test: payload: unexpected shape - repo: invalid_type\n",
+    ],
+  ])("%s", (_reason, payload, exitCode, stdout) => {
+    const proc = boundedSpawnSync(["bun", entry], { env: { ...process.env, PAYLOAD: payload } });
+    expect({ exitCode: proc.exitCode, stdout: proc.stdout, stderr: proc.stderr }).toEqual({
+      exitCode,
+      stdout,
+      stderr: "",
+    });
   });
 });
 
 describe("hasDuplicateJsonKeys", () => {
+  // JSON.parse keeps the last duplicate silently: the conflict-mangled manifest hazard the module's JSDoc names.
   const cases: [string, string, boolean][] = [
     [
       "a duplicated key in one object is caught (JSON.parse would keep only the last)",
@@ -110,38 +110,31 @@ describe("hasDuplicateJsonKeys", () => {
 describe("parseJsonWithThrow", () => {
   const schema = z.object({ repo: z.string() });
 
-  test("valid JSON of the expected shape parses through", () => {
-    expect(parseJsonWithThrow(schema, '{"repo": "owner/name"}', "json.test: payload")).toEqual({
-      repo: "owner/name",
-    });
-  });
-
-  test("malformed JSON throws value-free, never exits", () => {
+  test.each([
+    [
+      "malformed JSON throws value-free, never exits",
+      `{"repo": ${LEAK}}`,
+      "Error: json.test: payload: not valid JSON",
+    ],
+    [
+      "wrong-shaped JSON throws paths and codes, never the value",
+      `{"repo": ["${LEAK}"]}`,
+      "Error: json.test: payload: unexpected shape - repo: invalid_type",
+    ],
+  ])("%s", (_reason, payload, message) => {
     let thrown: unknown;
     try {
-      parseJsonWithThrow(schema, '{"repo": hiddenserver}', "json.test: payload");
+      parseJsonWithThrow(schema, payload, "json.test: payload");
     } catch (err) {
       thrown = err;
     }
-    expect(String(thrown)).toContain("json.test: payload: not valid JSON");
-    expect(String(thrown)).not.toContain("hiddenserver");
-  });
-
-  test("wrong-shaped JSON throws paths and codes, never the value", () => {
-    let thrown: unknown;
-    try {
-      parseJsonWithThrow(schema, '{"repo": ["hiddenserver"]}', "json.test: payload");
-    } catch (err) {
-      thrown = err;
-    }
-    expect(String(thrown)).toBe("Error: json.test: payload: unexpected shape - repo: invalid_type");
-    expect(String(thrown)).not.toContain("hiddenserver");
+    // The test process outliving the call is itself the no-exit proof.
+    expect(String(thrown)).toBe(message);
   });
 
   test("an unexpected exception rethrows unchanged from the exiting forms, never as a payload diagnosis", () => {
     // Only JsonShapeError gets the ::error:: + exit treatment; a throwing
-    // transform is a code bug whose stack must survive. The test process
-    // outliving the call is itself the no-exit proof.
+    // transform is a code bug whose stack must survive.
     const throwing = z.string().transform((): string => {
       throw new Error("transform blew up");
     });
