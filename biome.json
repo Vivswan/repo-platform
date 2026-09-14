@@ -49,7 +49,8 @@
         ".github/scripts/**",
         "scripts/**",
         "!**/*.test.ts",
-        "!actions/shared/platform.ts"
+        "!actions/shared/platform.ts",
+        "!migrations/**"
       ],
       "plugins": ["./biome/platform_name.grit"]
     },

@@ -6,7 +6,12 @@
   "includeEntryExports": true,
   "workspaces": {
     ".": {
-      "entry": ["scripts/**/*.ts", ".github/scripts/**/*.ts", "tests/**/*.ts"],
+      "entry": [
+        "scripts/**/*.ts",
+        ".github/scripts/**/*.ts",
+        "migrations/**/*.ts",
+        "tests/**/*.ts"
+      ],
       "project": ["**/*.{ts,mts}"],
       // Local-only tools behind `command -v` guards in package.json scripts.
       "ignoreBinaries": ["actionlint", "gitleaks", "uvx"]

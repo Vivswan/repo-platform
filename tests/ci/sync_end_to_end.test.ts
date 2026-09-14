@@ -1265,12 +1265,14 @@ describe("sync.ts over a registration naming a module files.yml does not offer",
 
 describe("sync.ts over manifest records it cannot read", () => {
   // Each is a shape no writer of this platform stamps: a mirror kind it never writes, a split record without its
-  // markers, a class it does not record, a hash another tool left null, a starter carrying a field. The count is the
+  // markers, a class it does not record or no longer records, a hash another tool left null, a starter carrying a field. The count is the
   // whole message: manifest keys are target content and the writer log reaches a public issue.
   const UNREADABLE = {
     ".github/old-tool.yml": `{"class": "mirror", "kind": "hardlink", "hash": "${sha256(OLD_TOOL)}"}`,
     "CONTRIBUTING.md": `{"class": "split", "grammar": "managed-region", "hash": "${sha256(OLD_CONTRIBUTING_REGION)}"}`,
     "BESPOKE.md": `{"class": "bespoke", "hash": "${sha256("b\n")}"}`,
+    // The class the fleet's symlinks left behind; migrations/0001 restamps it before the writer runs.
+    "CLAUDE.md": `{"class": "link", "hash": "${sha256("AGENTS.md")}"}`,
     "UNHASHED.md": '{"class": "managed", "hash": null}',
     "docs/old.md": '{"class": "starter", "hash": null}',
   };

@@ -225,7 +225,19 @@ A recorded `managed` or `split` path that no selected entry writes now (a module
 - A `starter` record whose entry nothing selects leaves the manifest; the file is the repository's own either way.
 - A `mirror` record no declaration reaches any more (a fleet target the registration excepts included) is dropped with a note; the copy stays as the repository's own, and a mirror declared again adopts it while it still holds the source's content.
 - A record that is not exactly a shape the writer writes (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers) fails the run with a count before anything is written: the target's own `validate-managed-files` check names each, so the fix is a manifest edit (git history has the stamped original) and a new dispatch.
-- A file the platform stops writing needs no grammar of its own: its entry leaves `files.yml`, and every target retires the recorded file as above on its next sync. A transition the sync cannot carry by itself is one rung in `migrations/`, the only home for transitional code ([fleet-guidelines.md](fleet-guidelines.md#no-backwards-compatibility-code)).
+- A file the platform stops writing needs no grammar of its own: its entry leaves `files.yml`, and every target retires the recorded file as above on its next sync. A transition the sync cannot carry by itself is one rung in `migrations/` ([Migrations](#migrations)).
+
+## Migrations
+
+`migrations/` is the only home for transitional code ([fleet-guidelines.md](fleet-guidelines.md#no-backwards-compatibility-code)): the writer and the validator know the current shape alone, so a fleet transition the writer cannot carry by itself (a manifest record class that left, say) is one rung there.
+
+- A rung is one self-contained bun script, `migrations/<NNNN>-<what>.ts <checkout>`, numbered in the order it was written, idempotent (a checkout it has already crossed is a no-op), and never retired: a target that missed a round crosses every rung on its next sync.
+- The operator runs every rung in the build's `migrations/` over the target checkout, in name order, before the writer reads it ([sync/migrate.ts](../.github/scripts/sync/migrate.ts)); nothing outside `migrations/` knows any rung. A rung that exits nonzero fails the row: the rungs after it and the writer do not run, nothing is delivered, and the failure is filed as the writer's with the rung's line in the log tail.
+- A rung ships with the PR that changes the shape and rides the same fleet-sync round (`fleet-sync:all`), with one test seen red on the old shape and a no-op control.
+
+| Rung | Transition |
+| --- | --- |
+| `0001-link-records-are-mirrors` | a `link` manifest record becomes `{"class": "mirror", "kind": "symlink"}` with its hash kept, the fleet's `AGENTS.md` symlinks having become mirrors the fleet declares |
 
 ## Mirrors
 
@@ -289,9 +301,10 @@ The sync targets this repository like any other: its [.repo-platform.yml](../.re
 | row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/` |
 | row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | one listing of the owner's writable repositories (the same call discovery makes, no re-selection), the row's key recomputed over it and the one repository carrying it taken (no such repository: the step refuses, naming no repository); every form of the name is registered with the masker before anything else prints, and the name and its visibility ride `GITHUB_ENV` from here (the next run step's preamble spells them under `env:`, masked by then) |
 | row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text); the token is stripped from the remote afterwards; `continue-on-error` |
-| row 4: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
-| row 5: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log` |
-| row 6: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
+| row 4: migrate | [sync/migrate.ts](../.github/scripts/sync/migrate.ts) | every rung of the build's `migrations/` over the target, in name order ([Migrations](#migrations)); its log is `sync.log` until the writer's report replaces it; `continue-on-error`, and a failed rung skips the writer |
+| row 5: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
+| row 6: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log` |
+| row 7: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 
 The vocabulary, complete (`tests/sync/verdict.test.ts` pins it):
 

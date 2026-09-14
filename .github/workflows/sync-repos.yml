@@ -172,10 +172,21 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/sync/checkout_target.ts > "$RUNNER_TEMP/checkout-stdio.log" 2>&1
 
+      # Every rung of the build's migrations/, in name order, over the target
+      # (docs/sync.md, Migrations). Its log is the writer's until the writer
+      # writes its report over it: a failed rung skips the writer and is
+      # delivered as the writer's failure, the rung's line in the log tail.
+      - name: Run the migrations over the target
+        id: migrate
+        if: steps.checkout.outcome == 'success'
+        continue-on-error: true
+        run: bun .github/scripts/sync/migrate.ts build/migrations target > "$RUNNER_TEMP/sync.log" 2>&1
+
       # The one writer step (docs/sync.md): its report is the PR body, its
       # summary the hold decision; a failure is delivered as an issue.
       - name: Write the build into the target
         id: write
+        if: steps.migrate.outcome == 'success'
         continue-on-error: true
         # The writer's git calls are local to the clone, so no network bound
         # covers this step: its timeout is its bound.
