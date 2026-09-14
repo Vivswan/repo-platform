@@ -15,7 +15,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Plain ASCII punctuation](#plain-ascii-punctuation) | check-typography |
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); `deno fmt --prose-wrap preserve` (deno repos); review elsewhere |
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | validate-managed-files; the writer's starter rule |
-| [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; validate-managed-files' parity check |
+| [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; validate-managed-files |
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
@@ -115,7 +115,7 @@ Merge, revert, reapply, fixup, squash, amend, and bare version-number subjects a
 
 **How:** change the source under `files/` in repo-platform; the starters are the `class: starter` entries of its [files.yml](../files.yml).
 
-**Enforced by:** validate-managed-files (the manifest parity check) for managed files; the writer for the starters (written only when the path is absent, never touched again).
+**Enforced by:** validate-managed-files (byte to byte against the recorded commit's write) for managed files; the writer for the starters (written only when the path is absent, never touched again).
 
 ## Split files: the managed region
 
@@ -128,7 +128,7 @@ Merge, revert, reapply, fixup, squash, amend, and bare version-number subjects a
 - A file that never mentions the markers gets the region placed above its content and the PR held for review (`region added`).
 - Marker text duplicated or buried mid-line fails the run, so nothing is dropped silently. Marker text must appear exactly once per marker in the file.
 
-**Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [sync.md](sync.md#classes)); validate-managed-files' parity check on the region.
+**Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [sync.md](sync.md#classes)); validate-managed-files on the region.
 
 ## Copilot review comments are advisory
 

@@ -20,6 +20,10 @@ function escapeData(message: string): string {
   return message.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
 }
 
+export function notice(message: string): void {
+  console.log(`::notice::${escapeData(message)}`);
+}
+
 export function warning(message: string): void {
   console.log(`::warning::${escapeData(message)}`);
 }

@@ -38,8 +38,14 @@
       "ignoreDependencies": ["@commitlint/config-conventional"]
     },
     "actions/validate-managed-files": {
-      // The two orchestrator scripts and the validator action.yml runs, and the byte-to-byte check run by path.
-      "entry": ["check.ts", "src/run.ts", "src/report.ts", "validator/validate_managed_files.ts"],
+      // The three step scripts and the hygiene validator action.yml runs, and the byte-to-byte check run by path.
+      "entry": [
+        "check.ts",
+        "src/read_commit.ts",
+        "src/run.ts",
+        "src/report.ts",
+        "validator/validate_managed_files.ts"
+      ],
       "project": ["**/*.{ts,mts}"]
     },
     "actions/pages-site": {

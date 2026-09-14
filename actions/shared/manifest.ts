@@ -10,9 +10,8 @@ import {
   type SplitShapes,
 } from "./grammar.ts";
 
-/** Every class a recorded entry can carry. The sync writer's record union
- *  and the validator's class dispatch are both pinned to this table, so a
- *  class one side learns reaches the other or the build fails. */
+/** Every class a recorded entry can carry. The sync writer's record union (sync/writer/manifest.ts) is pinned to
+ *  this table, so a class one side learns reaches the other or the build fails. */
 export const RECORDED_CLASSES = ["managed", "split", "starter", "mirror"] as const;
 export type RecordedClass = (typeof RECORDED_CLASSES)[number];
 const RECORDED_CLASS_SET: ReadonlySet<string> = new Set(RECORDED_CLASSES);
@@ -56,7 +55,7 @@ export type ManifestEntryShape = {
 
 /** The closed entry-field vocabulary, the runtime twin of ManifestEntryShape: `satisfies` refuses
  *  a stranger and the AssertNever pin refuses an omission (a new grammar's tuple joins here or the
- *  build fails). The validator reports any other key. */
+ *  build fails). */
 export const ENTRY_FIELDS = [
   "class",
   "hash",
@@ -69,11 +68,10 @@ export const ENTRY_FIELDS = [
 export type EntryFieldsExhaustive = AssertNever<
   Exclude<keyof ManifestEntryShape, (typeof ENTRY_FIELDS)[number]>
 >;
-const ENTRY_FIELD_SET: ReadonlySet<string> = new Set(ENTRY_FIELDS);
 
-/** The fields a record of each class carries. The sync writer reads a previous record and the validator's parity check
- *  judges a target's manifest through this one table, so a field on the wrong class is a hand edit to both. The manifest's own
- *  entry (managed, hash null, the commit) is no record of a written file: neither reader judges it here. */
+/** The fields a record of each class carries; the sync writer reads a previous record through this table, so a field on
+ *  the wrong class is a hand edit it refuses. The manifest's own entry (managed, hash null, the commit) is no record of
+ *  a written file and is not judged here. */
 export const RECORD_FIELDS = {
   managed: ["class", "hash"],
   split: ["class", "hash", "grammar", ...MANAGED_REGION_WIRE_FIELDS],
@@ -81,28 +79,8 @@ export const RECORD_FIELDS = {
   mirror: ["class", "hash", "kind"],
 } as const satisfies Record<RecordedClass, readonly (typeof ENTRY_FIELDS)[number][]>;
 
-/** The manifest's own entry: managed, hash null, the commit the repository is judged against. */
-export const SELF_ENTRY_FIELDS = [
-  "class",
-  "hash",
-  "commit",
-] as const satisfies readonly (typeof ENTRY_FIELDS)[number][];
-
 export function strayFields(fields: readonly string[], entry: ManifestEntryShape): string[] {
   return Object.keys(entry).filter((key) => !fields.includes(key));
-}
-
-export function isEntryField(key: string): boolean {
-  return ENTRY_FIELD_SET.has(key);
-}
-
-export function unknownEntryFields(
-  files: Record<string, ManifestEntryShape>,
-): { path: string; fields: string[] }[] {
-  return Object.entries(files).flatMap(([path, entry]) => {
-    const fields = Object.keys(entry).filter((key) => !isEntryField(key));
-    return fields.length === 0 ? [] : [{ path, fields }];
-  });
 }
 
 /** Every consumer reads through here, so no station can act on a manifest another one refused. Every problem string

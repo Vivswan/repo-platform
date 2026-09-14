@@ -362,7 +362,7 @@ Rows appear only for files present, save a `released` row, which reports a recor
 
 - **A record that is not exactly a shape the writer writes** (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers) fails the run with a count before anything is written.
 
-- **The fix for such a record:** the target's own `validate-managed-files` check names each, so the fix is a manifest edit (git history has the stamped original) and a new dispatch.
+- **The fix for such a record:** the target's own `validate-managed-files` check shows the refusal, so the fix is a manifest edit (git history has the stamped original) and a new dispatch.
 
 - **A file the platform stops writing needs no grammar of its own:** its entry leaves `files.yml`, and every target retires the recorded file as above on its next sync. A transition the sync cannot carry by itself is one rung in `migrations/` ([Migrations](#migrations)).
 
@@ -472,13 +472,28 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 
 ### Judged at the synced commit
 
-[actions/validate-managed-files/check.ts](../actions/validate-managed-files/check.ts) judges a repository byte to byte against what one platform tree writes. Nothing runs it yet: the fleet validator will check out repo-platform at the manifest's `commit` and run that commit's `check.ts`, so a platform change reddens a repository only once it syncs.
+The fleet's `validate-managed-files` check judges a repository as [check.ts](../actions/validate-managed-files/check.ts) judges it at the commit the manifest records, byte to byte against what that platform tree writes, so a platform change reddens a repository only once it syncs.
 
-- **It copies the repository to scratch** (what git lists when the target is a checkout's own root; every path but `.git` in any other tree), runs the tree's own writer over the copy with `--build` as the commit, and removes the copy.
+- **The action reads the recorded commit first** ([shared/recorded_commit.ts](../actions/shared/recorded_commit.ts)), checks out repo-platform at it beside the tree, installs that checkout's dependencies, runs its `check.ts` over the repository, and removes the checkout before the hygiene checks walk the tree.
+
+- **`check.ts` copies the repository to scratch** (what git lists when the target is a checkout's own root; every path but `.git` in any other tree), runs the tree's own writer over the copy with `--build` as the commit, and removes the copy.
 
 - **Every reason the writer would hold** the sync PR for is printed first (a link or a directory where a file is declared, a placeholder with no value), then every path whose bytes differ, the manifest's own line included, with a unified diff under each changed file. A pending registration change is red until the sync that carries it lands.
 
 - **Exit 0** when identical, 1 with findings, 2 when the writer refused (its message is the output).
+
+| The action finds | The verdict |
+| --- | --- |
+| no `commit` on the manifest's own entry | not judged: `no synced commit recorded; merge the pending sync PR or dispatch a sync` |
+| a `commit` that is not a full 40-hex sha, or a manifest that does not parse | not judged, the reason naming the manifest |
+| a commit repo-platform's history lacks (the checkout fails) | not judged, the checkout step's outcome in the reason |
+| a repository path at `.repo-platform-judge`, where the check places its checkout | not judged: move it |
+| `check.ts` exit 1 or 2 | findings: its output fenced under `#### repo-platform at <commit>`, with the remedy |
+| `check.ts` exit 0 | clean, unless a hygiene check finds something |
+
+- **Freshness informs and never fails:** the action compares the recorded commit with the `stable` tag in the platform checkout (git ancestry alone) and writes one line to the job summary and an annotation: up to date; `stable` moved N commits past it and the next sync moves the judge; or the commit is not on `stable`'s history and a sync re-stamps it once the delivered surface differs.
+
+- **The hygiene checks** (YAML, conflict markers, `release-as`) read no platform data and run from the action at `stable` ([new-repo.md](new-repo.md#the-managed-files-check)).
 
 **Classes recorded:** `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror` (with `kind: symlink` for a link, hash of the target string); a fleet mirror is recorded as a repository mirror is. The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
 
@@ -511,7 +526,9 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 The sync targets this repository like any other: its [.repo-platform.yml](../.repo-platform.yml) registers it, and the writer keeps its root copies of the files it ships (`.editorconfig`, the `.gitignore` region, `LICENSE.md`, the `AGENTS.md` region, the rendered `.github/settings.yml`, the links) by sync PR, recorded in its own manifest.
 
 - **Its `except`:** the paths whose file is this repository's own and cannot be the fleet's (its `ci.yml`, `dependabot.yml`, `.yamllint`, and the starters it does not take).
-- **Its CI** runs the [plan action](../actions/plan/action.yml) over the registration on every PR, as fleet CI does, and `bun run validate` judges the manifest.
+- **Its CI** runs the [plan action](../actions/plan/action.yml) over the registration on every PR, as fleet CI does, and `bun run validate` judges the checkout as the fleet check does. A PR that changes `files/` stays green until this repository syncs itself.
+
+- **`bun run validate`** is [scripts/validate_self.ts](../scripts/validate_self.ts): it extracts the recorded commit with `git archive`, installs it, runs its `check.ts` over the checkout, removes the extract, then runs the hygiene checks in self mode (gitignored paths and the writer's sources under `files/` are not judged as YAML).
 
 ## The operator
 

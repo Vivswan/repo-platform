@@ -26,7 +26,7 @@ The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.tx
 
 - **The site hook:** the [site module's](site.md) build hook is the repository's own composite action, so it installs whatever toolchain its steps name (the seeded example reads `.bun-version`); the fleet's docs build runs under the fleet's own bun, never the repository's pin.
 
-- **Parity:** validate-managed-files' parity check fails a repo whose dotfile differs from the one its last sync wrote.
+- **Parity:** validate-managed-files fails a repo whose dotfile differs from the one its recorded commit's sync writes.
 
 - **This repository's actions:** repo-platform's own composite actions (under `actions/`) pin their bun from the same file. A `uses:` fetch is the whole repository at the ref, so the pin path climbs from the action's directory to the repository root.
 

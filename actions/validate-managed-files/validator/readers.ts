@@ -1,5 +1,4 @@
 import { lstatSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
 
 export function isRegularFile(path: string): boolean {
   try {
@@ -8,15 +7,6 @@ export function isRegularFile(path: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** The shape of a YAML file for the structural checks, which need its
- *  content rather than its verdict: duplicate keys are tolerated here
- *  because the yaml check already reports them, and a second, wrong
- *  diagnostic (a registration with `modules` written twice is not a
- *  registration missing `modules`) must not ride on top. */
-export function shapeOfYaml(text: string): unknown {
-  return parseYaml(text, { uniqueKeys: false });
 }
 
 /** A conflict-marker line: 7 angles + space, or exactly 7 equals. Checked per line, CRLF included, so a checkout

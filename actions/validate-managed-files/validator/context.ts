@@ -1,14 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { type FileEntry, FilesConfigError, parseFilesConfig } from "../../plan/files_config.ts";
-import { unknownModuleProblems } from "../../plan/registration.ts";
-import { type ManifestEntryShape, parseManifestFiles } from "../../shared/manifest.ts";
-import { MANIFEST_NAME, REGISTRATION_PATH } from "../../shared/platform.ts";
-import { pathProblem } from "../../shared/repo_path.ts";
-import { type Selection, selects } from "../../shared/selection.ts";
-import { isMapping } from "../../shared/values.ts";
-import { hasConflictMarker, isRegularFile, shapeOfYaml } from "./readers.ts";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -28,131 +20,10 @@ const SKIP_DIRS = new Set([
   ".mypy_cache",
 ]);
 
-/** A manifest key the sync would never write (`./x`, `a//b`, a traversal), with pathProblem's reason. Read as a
- *  record, a traversal key's hash would come from outside the root, and `./x` resolves to a declared file while
- *  matching no declaration. */
-export interface RefusedKey {
-  key: string;
-  problem: string;
-}
-
-export type Manifest =
-  | { state: "absent" }
-  /** Conflict-marked text is the conflict-marker check's report; the shared
-   *  parser would resolve the blocks toward one side, and this validator
-   *  must never quietly read one side of a conflicted manifest. */
-  | { state: "conflicted" }
-  | { state: "malformed"; problem: string }
-  | {
-      state: "parsed";
-      records: Record<string, ManifestEntryShape>;
-      refused: readonly RefusedKey[];
-    };
-
-/** The problem is reported once, by checks/registration.ts; every other reader leaves the data unjudged. */
-export type Vocabulary =
-  | { modules: ReadonlySet<string>; files: readonly FileEntry[] }
-  | { problem: string };
-
-/** `self` is the operator's own checkout, whose walk skips gitignored paths and the writer's sources; it is judged
- *  like every other target otherwise. */
-export type Target = { self: boolean; private: boolean };
-
-/** Every cross-check dependency (a missing modules list, a conflicted manifest) is a field here, never an ordering
- *  between checks. */
 export interface Context {
   root: string;
   /** Every regular file below root, sorted, relative paths. */
   files: readonly string[];
-  /** The registration's top-level `modules` and `except` values as written
-   *  (undefined when the key is missing, null when the document is not a
-   *  mapping); the record is null when the file is absent. */
-  registration: { modules: unknown; except: unknown } | null;
-  vocabulary: Vocabulary;
-  /** The class files.yml writes each path under for THIS repository, by the
-   *  one selection rule: a path whose declarations are all deselected
-   *  is absent here as it is from the writer's reservations (ownedPaths in
-   *  actions/plan/mirrors.ts). null when the registration or the data file
-   *  leaves the selection unknown. */
-  classes: ReadonlyMap<string, string> | null;
-  manifest: Manifest;
-}
-
-function loadRegistration(root: string): { modules: unknown; except: unknown } | null {
-  const path = join(root, REGISTRATION_PATH);
-  if (!isRegularFile(path)) return null;
-  let data: unknown = {};
-  try {
-    data = shapeOfYaml(readFileSync(path, "utf-8")) ?? {};
-  } catch {
-    data = {};
-  }
-  return isMapping(data)
-    ? { modules: data.modules, except: data.except }
-    : { modules: null, except: null };
-}
-
-/** The plan's loader, so a `when` the validator judges live is one the plan accepted; a refused file is one problem
- *  in the loader's words. */
-function loadVocabulary(filesConfig: string): Vocabulary {
-  if (!isRegularFile(filesConfig)) {
-    return { problem: `${filesConfig}: the module data file is missing` };
-  }
-  try {
-    const config = parseFilesConfig(readFileSync(filesConfig, "utf-8"), filesConfig);
-    return { modules: new Set(Object.keys(config.modules)), files: config.files };
-  } catch (error) {
-    if (!(error instanceof FilesConfigError)) throw error;
-    return { problem: `${filesConfig}: ${error.problems.join("; ")}` };
-  }
-}
-
-/** A module files.yml does not know leaves the selection unknown (checks/registration.ts reports it; the plan and the
- *  writer refuse it), never a narrower one. One declaration per path is live because the loader refuses two that can
- *  both hold (docs/sync.md, Selection). */
-function liveClasses(
-  vocabulary: Vocabulary,
-  registration: { modules: unknown; except: unknown } | null,
-  privateRepo: boolean,
-): ReadonlyMap<string, string> | null {
-  if ("problem" in vocabulary || !Array.isArray(registration?.modules)) return null;
-  const strings = (value: unknown) =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-  const modules = registration.modules;
-  if (
-    !modules.every((name): name is string => typeof name === "string") ||
-    unknownModuleProblems(modules, [...vocabulary.modules]).length > 0
-  ) {
-    return null;
-  }
-  const selection: Selection = {
-    modules,
-    private: privateRepo,
-    except: strings(registration.except),
-  };
-  const classes = new Map<string, string>();
-  for (const entry of vocabulary.files) {
-    if (selects(entry, selection)) classes.set(entry.path, entry.class);
-  }
-  return classes;
-}
-
-function loadManifest(root: string): Manifest {
-  const path = join(root, MANIFEST_NAME);
-  if (!isRegularFile(path)) return { state: "absent" };
-  const text = readFileSync(path, "utf-8");
-  if (hasConflictMarker(text)) return { state: "conflicted" };
-  const parsed = parseManifestFiles(text);
-  if (parsed.problem !== null) return { state: "malformed", problem: parsed.problem };
-  const refused: RefusedKey[] = [];
-  const accepted: [string, ManifestEntryShape][] = [];
-  for (const [key, entry] of Object.entries(parsed.files)) {
-    const problem = pathProblem(key);
-    if (problem === null) accepted.push([key, entry]);
-    else refused.push({ key, problem });
-  }
-  // fromEntries defines own properties, so a key spelled like an inherited one (`__proto__`) stays a record.
-  return { state: "parsed", records: Object.fromEntries(accepted), refused };
 }
 
 /** --directory reports an ignored directory collapsed, so the walk prunes it without ever descending (.claude/worktrees/
@@ -199,19 +70,13 @@ function walk(root: string, ignored: ReturnType<typeof gitIgnored>): string[] {
 const WRITER_SOURCES = "files/";
 
 /** Managed repositories walk every path: they are validated as plain trees and everything in them is content. Self mode
- *  skips gitignored paths: the operator checkout carries gitignored working state (agent worktrees with in-progress
+ *  (the operator's own checkout) skips gitignored paths, which carry working state (agent worktrees with in-progress
  *  rebases) that is not the repository's content. */
-export function loadContext(root: string, filesConfig: string, target: Target): Context {
-  const registration = loadRegistration(root);
-  const vocabulary = loadVocabulary(filesConfig);
+export function loadContext(root: string, self: boolean): Context {
   return {
     root,
-    files: target.self
+    files: self
       ? walk(root, gitIgnored(root)).filter((rel) => !rel.startsWith(WRITER_SOURCES))
       : walk(root, null),
-    registration,
-    vocabulary,
-    classes: liveClasses(vocabulary, registration, target.private),
-    manifest: loadManifest(root),
   };
 }

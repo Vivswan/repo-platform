@@ -60,11 +60,11 @@ The render and the apply read one dialect, spelled out in the library's [layerin
 
 ## Editing your settings
 
-- **Edit `.github/settings.local.yml`, never the rendered `.github/settings.yml`.** The next sync re-renders the managed file from the new overlay. A hand edit of the rendered file is replaced on that sync, reported under Replaced local edits with the diff, and holds the PR; before that, the [managed files check](new-repo.md#the-managed-files-check) reds the PR that edits it (manifest parity).
+- **Edit `.github/settings.local.yml`, never the rendered `.github/settings.yml`.** The next sync re-renders the managed file from the new overlay. A hand edit of the rendered file is replaced on that sync, reported under Replaced local edits with the diff, and holds the PR; before that, the [managed files check](new-repo.md#the-managed-files-check) reds the PR that edits it.
 
-- **An overlay edit is two PRs:** the overlay PR in the repository, then the sync PR carrying the re-render. The rendered file stays stale in between, and the apply (the nightly cron plus every green main run, [below](#when-it-runs)) keeps applying the old render until the sync PR merges.
+- **An overlay edit is one PR with the branch sync:** the managed files check reds the overlay PR while the rendered file is stale, and the `repo-platform:sync` label or the branch dispatch ([sync.md](sync.md#syncing-a-branch)) re-renders `.github/settings.yml` onto the PR's branch as one commit, so the PR merges green. The apply (the nightly cron plus every green main run, [below](#when-it-runs)) applies the new render once it is on main.
 
-- **What brings the sync PR:**
+- **What re-renders on main without a PR of the repository's own:**
   - the Tuesday cron
   - a `fleet-sync:public` or `fleet-sync:all` label on a merged platform PR, from that merge's green run ([all-green.md](all-green.md#opting-a-pr-into-an-immediate-fleet-sync))
   - `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true`, at once

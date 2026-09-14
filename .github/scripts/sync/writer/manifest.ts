@@ -48,8 +48,8 @@ export function mirrorKind(record: MirrorRecord): MirrorKind {
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 
-/** retire.ts and mirrors.ts judge through this too, so no path is held or vouched for on a record the writer could not carry; the validator's
- *  parity check reads the same field table, so a shape refused here is a finding on the target side. */
+/** retire.ts and mirrors.ts judge through this too, so no path is held or vouched for on a record the writer could not carry; check.ts runs
+ *  this writer over a copy of the target, so a shape refused here is the target's validate-managed-files finding. */
 export function readRecord(entry: ManifestEntryShape | undefined): ManifestRecord | null {
   if (entry === undefined || !isRecordedClass(entry.class)) return null;
   if (strayFields(RECORD_FIELDS[entry.class], entry).length > 0) return null;

@@ -23,9 +23,9 @@ const PROTO = "__proto__";
 const CTOR = "constructor";
 
 describe("renderManifest", () => {
-  // Cross-file: the validator's parser (actions/shared/manifest.ts) reads what the writer renders; the self entry's
-  // null hash is what manifest_parity keys on, and its commit is what recordedCommit reads for sync.ts's
-  // judgedCommit; sorted one-line entries keep the fleet's diffs readable.
+  // Cross-file: the shared parser (actions/shared/manifest.ts) reads what the writer renders; the self entry's null
+  // hash is what readRecord reads as no record, and its commit is what recordedCommit reads for sync.ts's
+  // judgedCommit and the fleet action checks repo-platform out at; sorted one-line entries keep the fleet's diffs readable.
   test("one entry per line, sorted, with the self entry carrying the commit and no hash", () => {
     const text = renderManifest(
       {

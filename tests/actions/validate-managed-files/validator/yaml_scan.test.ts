@@ -31,12 +31,10 @@ describe("duplicate mapping keys", () => {
       absent: "advisory",
     },
     {
-      // The list is present, written twice: readers.ts parses with `uniqueKeys: false` so the registration
-      // check does not add a second, wrong diagnostic.
-      reason: "the registration, with no second wrong diagnostic",
+      reason: "the registration",
       path: ".repo-platform.yml",
       content: "modules: [uv]\nmodules: [bun]\n",
-      absent: "`modules` is missing",
+      absent: "advisory",
     },
   ])(
     "a duplicate key anywhere fails with the tailored message: $reason",
