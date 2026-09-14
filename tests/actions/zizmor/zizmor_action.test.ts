@@ -49,10 +49,12 @@ describe("actions/zizmor", () => {
       [undefined, "steps.gate.outcome == 'failure'", undefined, gate.with],
     ]);
     // SARIF mode suppresses zizmor's finding exit codes, so a gate in SARIF mode never fails.
-    expect([withOf(upload)["advanced-security"], withOf(gate)["advanced-security"]]).toEqual([
-      true,
-      false,
-    ]);
+    // This repository's ci.yml omits `upload-sarif`, so its code-scanning alerts follow the declared default.
+    expect([
+      action.inputs?.["upload-sarif"].default,
+      withOf(upload)["advanced-security"],
+      withOf(gate)["advanced-security"],
+    ]).toEqual(["true", true, false]);
   });
 
   const render = (repo: string) =>

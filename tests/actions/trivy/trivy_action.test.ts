@@ -55,6 +55,11 @@ describe("the trivy action", () => {
     expect(scans[0].with?.version).toMatch(/^v\d+\.\d+\.\d+$/);
     expect(scans[0].with?.trivyignores).toBe("${{ steps.bypass.outputs.ignorefile }}");
     expect(scans[0].with?.["cache-dir"]).toBe("${{ runner.temp }}/trivy-cache");
+    // Both scans walk the whole checkout as a filesystem: a narrower ref leaves the rest unscanned, green.
+    expect(scans.map((scan) => [scan.with?.["scan-type"], scan.with?.["scan-ref"]])).toEqual([
+      ["fs", "."],
+      ["fs", "."],
+    ]);
   });
 
   test("the two modes: the blocking scan alone fails and ignores unfixed; the nightly scans what the replay command says and hands one results file to the report and SARIF steps", () => {

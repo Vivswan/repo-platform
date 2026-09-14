@@ -439,7 +439,7 @@ describe("plan.ts as a child", () => {
   const SITE_CONFIG = (title: string, include: string) =>
     `config={"site_title":"${title}","docs_path":"docs","include":${include},"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}\n`;
 
-  // The row names are fleet-ci's `needs.plan.outputs` contract: a renamed or missing row leaves its jobs unselected, green.
+  // The row names are the outputs fleet-ci's plan step hands its jobs: a renamed or missing row leaves them unselected, green.
   // fleet-ci passes no `mode`, so the default-mode row runs under the manifest's declared default.
   const MODE_DEFAULT = String(loadAction("actions/plan/action.yml").inputs?.mode.default);
   test.each<{ reason: string; registration: string; env: Record<string, string>; output: string }>([
