@@ -16,7 +16,7 @@ const SPELLINGS = [
   "hidden-server",
 ].join("\n");
 /** The runner's masker: every case-sensitive substring occurrence of a registered value, overlapping
- *  matches merged into one `***`, so a value inside a longer registered value shows nothing of either. */
+ *  and adjacent matches merged into one `***`, so a value inside a longer one shows nothing of either. */
 function runnerMask(log: string, values: string[]): string {
   const ranges: [number, number][] = [];
   for (const value of values) {
@@ -27,16 +27,39 @@ function runnerMask(log: string, values: string[]): string {
   ranges.sort((a, b) => a[0] - b[0]);
   let out = "";
   let cursor = 0;
+  let open: [number, number] | undefined;
   for (const [start, end] of ranges) {
-    if (start < cursor) {
-      cursor = Math.max(cursor, end);
+    if (open !== undefined && start <= open[1]) {
+      open[1] = Math.max(open[1], end);
       continue;
     }
-    out += `${log.slice(cursor, start)}***`;
-    cursor = end;
+    if (open !== undefined) {
+      out += `${log.slice(cursor, open[0])}***`;
+      cursor = open[1];
+    }
+    open = [start, end];
+  }
+  if (open !== undefined) {
+    out += `${log.slice(cursor, open[0])}***`;
+    cursor = open[1];
   }
   return out + log.slice(cursor);
 }
+
+describe("runnerMask", () => {
+  test.each<{ log: string; values: string[]; masked: string }>([
+    { log: "abcdEFGH", values: ["abcd", "EFGH"], masked: "***" },
+    { log: "abcdxEFGH", values: ["abcd", "EFGH"], masked: "***x***" },
+    {
+      log: "Vivswan/Hidden-Server",
+      values: ["Hidden-Server", "Vivswan/Hidden-Server"],
+      masked: "***",
+    },
+    { log: "abcd", values: ["EFGH"], masked: "abcd" },
+  ])("$log with $values -> $masked", ({ log, values, masked }) => {
+    expect(runnerMask(log, values)).toBe(masked);
+  });
+});
 
 describe("maskForms", () => {
   test.each<{ slug: string; forms: string[] }>([
