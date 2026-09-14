@@ -7,7 +7,7 @@
 
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { FilesConfig } from "../../actions/plan/files_config.ts";
+import { type FilesConfig, upstreamRefs } from "../../actions/plan/files_config.ts";
 
 function serve(dir: string): ReturnType<typeof Bun.serve> {
   return Bun.serve({
@@ -51,18 +51,15 @@ export async function spawnUpstream(dir: string): Promise<Upstream> {
   return { host: `http://127.0.0.1:${text.trim()}`, stop: () => proc.kill() };
 }
 
-/** A one-line stub of every path files.yml registers, served from its own process: for a test that runs the writer over
- *  the real files.yml and reads something other than the .gitignore, since the writer fetches every registered path first. */
+/** A one-line stub of every file files.yml fetches, served from its own process: for a test that runs the writer over
+ *  the real files.yml and reads a file no fetch renders, since the writer fetches every ref first. */
 export async function spawnStubUpstream(
   config: Pick<FilesConfig, "files">,
   dir: string,
 ): Promise<Upstream> {
-  for (const entry of config.files) {
-    if (entry.class === "link" || "render" in entry || entry.upstream === undefined) continue;
-    for (const path of Object.values(entry.upstream.paths)) {
-      mkdirSync(dirname(join(dir, path)), { recursive: true });
-      writeFileSync(join(dir, path), "# stub\n");
-    }
+  for (const { path } of upstreamRefs(config.files)) {
+    mkdirSync(dirname(join(dir, path)), { recursive: true });
+    writeFileSync(join(dir, path), "# stub\n");
   }
   return spawnUpstream(dir);
 }

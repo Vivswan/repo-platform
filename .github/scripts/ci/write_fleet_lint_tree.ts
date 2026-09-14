@@ -40,7 +40,7 @@ export function writtenWorkflows(target: string): string[] {
     : [];
 }
 
-/** `upstream` reaches the writer's --upstream: CI lints what the real github/gitignore renders, the test what a stub does. */
+/** Optional so the CI step keeps the real host and only the test injects a stub. */
 export function writeTargets(dest: string, upstream?: string): Record<string, string[]> {
   const filesText = readFileSync(join(REPO_ROOT, "files.yml"), "utf-8");
   const written: Record<string, string[]> = {};

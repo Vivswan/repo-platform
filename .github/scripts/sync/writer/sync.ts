@@ -3,7 +3,11 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type FileEntry, selectEntries } from "../../../../actions/plan/files_config.ts";
+import {
+  type FileEntry,
+  selectEntries,
+  upstreamRefs,
+} from "../../../../actions/plan/files_config.ts";
 import { declaredMirrors, ownedPaths } from "../../../../actions/plan/mirrors.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
@@ -44,7 +48,7 @@ import { keepReason, type RetireRow, release, retire } from "./retire.ts";
 import { selectModules } from "./select.ts";
 import { renderSettings } from "./settings_entry.ts";
 import { type Found, occupant, probe, removeFile, writeFile } from "./target_files.ts";
-import { fetchUpstreamBodies, RAW_HOST, type UpstreamBodies } from "./upstream_blocks.ts";
+import { fetchUpstream, RAW_HOST, type UpstreamBodies } from "./upstream.ts";
 import { type WriteOutcome, writeManaged } from "./write_managed.ts";
 import { writeSplit } from "./write_split.ts";
 import { writeStarter } from "./write_starter.ts";
@@ -56,7 +60,7 @@ export interface SyncOptions {
   build: string;
   repository: string;
   private: boolean;
-  /** The raw-content host the upstream blocks are fetched from. */
+  /** The raw-content host every upstream ref is fetched from. */
   upstream: string;
 }
 
@@ -206,7 +210,7 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
     registration,
     slug,
     values: placeholderValues(registration, slug, options.private, config.defaults),
-    upstream: await fetchUpstreamBodies(config.files, options.upstream),
+    upstream: await fetchUpstream(upstreamRefs(config.files), options.upstream),
   };
   const { records, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);

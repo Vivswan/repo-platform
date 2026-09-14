@@ -6,7 +6,11 @@ import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
-import { type FileEntry, parseFilesConfig } from "../../actions/plan/files_config.ts";
+import {
+  type FileEntry,
+  parseFilesConfig,
+  type UpstreamRef,
+} from "../../actions/plan/files_config.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -19,15 +23,15 @@ test("every repository takes the three github/gitignore OS templates, in this or
   const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
   const gitignore = config.files.find((entry) => entry.path === ".gitignore") as Extract<
     FileEntry,
-    { source: string }
+    { source: string | UpstreamRef }
   >;
+  const ref = (path: string) => ({ repository: "github/gitignore", path });
   expect(gitignore.upstream).toMatchObject({
-    repository: "github/gitignore",
     always: ["Windows", "macOS", "Linux"],
-    paths: {
-      Windows: "Global/Windows.gitignore",
-      macOS: "Global/macOS.gitignore",
-      Linux: "Global/Linux.gitignore",
+    refs: {
+      Windows: ref("Global/Windows.gitignore"),
+      macOS: ref("Global/macOS.gitignore"),
+      Linux: ref("Global/Linux.gitignore"),
     },
   });
 });

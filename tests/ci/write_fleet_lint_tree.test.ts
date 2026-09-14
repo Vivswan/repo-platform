@@ -10,7 +10,7 @@ import { spawnStubUpstream } from "../shared/upstream_server";
 const temp = tempDirs();
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 const SCRIPT = join(REPO_ROOT, ".github/scripts/ci/write_fleet_lint_tree.ts");
-// The lint reads workflows, so the gitignore blocks are stubs and never the network.
+// The lint reads workflows, so every upstream file is a stub and never the network.
 const upstream = await spawnStubUpstream(
   parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
   temp.dir("fleet-lint-upstream-"),

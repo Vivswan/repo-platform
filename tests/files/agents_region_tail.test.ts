@@ -15,7 +15,7 @@ const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const FILES_TREE = join(REPO_ROOT, "files");
 const BUILD = "0".repeat(40);
 
-// This test reads AGENTS.md alone, so the upstream blocks are stubs and never the network.
+// This test reads AGENTS.md alone, so every upstream file is a stub and never the network.
 const upstream = await spawnStubUpstream(
   parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
   temp.dir("agents-tail-upstream-"),

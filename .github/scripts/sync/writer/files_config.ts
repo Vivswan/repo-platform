@@ -134,10 +134,13 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
   const allModules = Object.keys(config.modules);
   for (const entry of config.files) {
     if ("render" in entry) continue;
-    const own = use(entry.source);
-    own.entries += 1;
-    if (entry.blocks !== undefined) own.withBlocks += 1;
-    if (entry.class === "split") own.regions.add(entry.region);
+    // A fetched source is not in the tree; renderRegion refuses a body mentioning the markers at render time.
+    if (typeof entry.source === "string") {
+      const own = use(entry.source);
+      own.entries += 1;
+      if (entry.blocks !== undefined) own.withBlocks += 1;
+      if (entry.class === "split") own.regions.add(entry.region);
+    }
     // A block file is spliced into the source, so it is read like one but may not carry the anchor itself.
     for (const block of blockSources(config, entry, allModules)) {
       if (block.kind !== "tree") continue;

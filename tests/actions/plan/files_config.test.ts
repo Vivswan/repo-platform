@@ -9,6 +9,7 @@ import {
   parseFilesConfig,
   selectEntries,
   starterCoverage,
+  upstreamRefs,
 } from "../../../actions/plan/files_config.ts";
 
 const BASE = `
@@ -310,7 +311,7 @@ describe("render, overlay, and the settings block", () => {
     );
     expect(checked.problems).toEqual([
       "files: a: render applies to managed entries only",
-      "files: a: a rendered entry has no source or blocks",
+      "files: a: a rendered entry has no source",
       "files: a: a rendered entry needs overlay, the repository file it renders from",
       "settings: missing - a render: settings entry reads its layers from it",
     ]);
@@ -356,7 +357,7 @@ describe("render, overlay, and the settings block", () => {
         STARTER,
         "  - { path: .github/settings.yml, class: managed, render: settings, source: files/base/x }",
       ]),
-      "files: .github/settings.yml: a rendered entry has no source or blocks",
+      "files: .github/settings.yml: a rendered entry has no source",
     ],
     [
       "overlay on a starter",
@@ -649,21 +650,24 @@ describe("mutuallyExclusive", () => {
 });
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
+const ref = (path: string) => ({ repository: "github/gitignore", sha: SHA, path });
 const UPSTREAM = {
-  repository: "github/gitignore",
-  sha: SHA,
   always: ["Windows"],
-  paths: { Windows: "Global/Windows.gitignore", Node: "Node.gitignore", bun: "bun.gitignore" },
+  refs: {
+    Windows: ref("Global/Windows.gitignore"),
+    Node: ref("Node.gitignore"),
+    bun: ref("bun.gitignore"),
+  },
 };
 
 describe("block sources", () => {
   const entry = { path: ".gitignore", upstream: UPSTREAM };
 
-  test("a value the upstream names is fetched by path; any other is the module's own file, the value between the stem and the extension", () => {
+  test("a value the upstream names is fetched by ref; any other is the module's own file, the value between the stem and the extension", () => {
     expect(blockSource(entry, "bun", "Node")).toEqual({
       kind: "upstream",
       value: "Node",
-      path: "Node.gitignore",
+      ref: ref("Node.gitignore"),
     });
     expect(blockSource(entry, "fuzzer", "fuzzer")).toEqual({
       kind: "tree",
@@ -705,7 +709,11 @@ describe("block sources", () => {
       "",
     ].join("\n"),
   );
-  const up = (value: string, path: string) => ({ kind: "upstream" as const, value, path });
+  const up = (value: string, path: string) => ({
+    kind: "upstream" as const,
+    value,
+    ref: ref(path),
+  });
 
   test("blockSources: the always values first, then the selected modules in files.yml order, a source named twice once", () => {
     expect(blockSources(shared, shared.files[0], ["fuzzer", "deno", "bun"])).toEqual([
@@ -757,18 +765,47 @@ describe("the upstream registry grammar", () => {
   const registry = (fields: string) =>
     `{ path: .gitignore, class: split, region: hash, blocks: g, upstream: {repository: github/gitignore, sha: ${SHA}, ${fields}} }`;
 
-  test("a valid registry parses with `always` defaulting to none", () => {
+  test("a valid registry parses to one ref per value with `always` defaulting to none", () => {
     const parsed = checkFilesConfig(doc(BUN, registry("paths: {Node: Node.gitignore}")));
     expect(parsed.problems).toEqual([]);
     expect(parsed.config.files[0]).toMatchObject({
       blocks: "g",
-      upstream: {
-        repository: "github/gitignore",
-        sha: SHA,
-        always: [],
-        paths: { Node: "Node.gitignore" },
-      },
+      upstream: { always: [], refs: { Node: ref("Node.gitignore") } },
     });
+  });
+
+  const OTHER = "89abcdef0123456789abcdef0123456789abcdef";
+  const sourced = parseFilesConfig(
+    [
+      "placeholders: []",
+      "modules:",
+      "  bun: { g: [Node] }",
+      "files:",
+      `  - { path: NOTES.md, class: managed, source: {repository: o/notes, sha: ${OTHER}, path: docs/NOTES.md}, replace: {"a": "b"} }`,
+      `  - { path: .gitignore, class: split, region: hash, when: {without: [bun]}, upstream: {repository: github/gitignore, sha: ${SHA}, always: [Linux], paths: {Linux: Global/Linux.gitignore}} }`,
+      `  - { path: .gitignore, class: split, region: hash, when: {modules: [bun]}, blocks: g, upstream: {repository: github/gitignore, sha: ${SHA}, paths: {Node: Node.gitignore, Linux: Global/Linux.gitignore}, always: [Linux]} }`,
+      "  - { path: LICENSE.md, class: managed, blocks: g }",
+      "",
+    ].join("\n"),
+  );
+
+  test("an entry's source may be a ref, an upstream needs no blocks, and upstreamRefs yields every distinct ref in files.yml order", () => {
+    expect(sourced.files[0]).toEqual({
+      path: "NOTES.md",
+      class: "managed",
+      when: null,
+      source: { repository: "o/notes", sha: OTHER, path: "docs/NOTES.md" },
+      replace: { a: "b" },
+    });
+    expect(sourced.files[1]).toMatchObject({
+      source: "base/.gitignore",
+      upstream: { always: ["Linux"], refs: { Linux: ref("Global/Linux.gitignore") } },
+    });
+    expect(upstreamRefs(sourced.files)).toEqual([
+      { repository: "o/notes", sha: OTHER, path: "docs/NOTES.md" },
+      ref("Global/Linux.gitignore"),
+      ref("Node.gitignore"),
+    ]);
   });
 
   test.each([
@@ -788,18 +825,19 @@ describe("the upstream registry grammar", () => {
       "modules.bun.g must be a list of block names (letters, digits, _ -)",
     ],
     [
-      "upstream on an entry without blocks",
+      "an upstream naming no path",
       doc(
         BUN,
         `{ path: .gitignore, class: split, region: hash, upstream: {repository: github/gitignore, sha: ${SHA}, paths: {}} }`,
       ),
-      "files: .gitignore: upstream applies to entries with blocks only",
+      "files: .gitignore: upstream names no path",
     ],
     [
-      "a path that leaves the repository",
-      doc(BUN, registry("paths: {Node: ../Node.gitignore}")),
-      "files: .gitignore: upstream.paths.Node is ../Node.gitignore, which carries an empty, '.', or '..' segment",
+      "replace on an entry that fetches nothing",
+      doc(BUN, `{ path: .gitignore, class: split, region: hash, replace: {"a": "b"} }`),
+      "files: .gitignore: replace applies to entries fetching an upstream source or blocks",
     ],
+
     [
       "an always value the paths do not name",
       doc(BUN, registry("always: [Linux], paths: {Node: Node.gitignore}")),
@@ -831,6 +869,11 @@ describe("the upstream registry grammar", () => {
       "files.0.upstream.paths.Node: not a plain path (letters, digits, . _ - /)",
     ],
     [
+      "a path leaving the pinned commit, which the URL would normalize away",
+      { paths: "{Node: ../HEAD/Node.gitignore}" },
+      "files.0.upstream.paths.Node: carries an empty, '.', or '..' segment",
+    ],
+    [
       "a short sha",
       { sha: SHA.slice(0, 12) },
       "files.0.upstream.sha: not a full lowercase commit sha",
@@ -855,4 +898,35 @@ describe("the upstream registry grammar", () => {
     const entry = `{ path: .gitignore, class: split, region: hash, blocks: g, upstream: {repository: ${u.repository}, sha: ${u.sha}, paths: ${u.paths}} }`;
     expect(problemsOf(doc(BUN, entry))).toEqual([problem]);
   });
+
+  test.each([
+    [
+      "a short sha",
+      `{repository: o/a, sha: abc, path: x.md}`,
+      "files.0.source.sha: not a full lowercase commit sha",
+    ],
+    [
+      "a field the ref does not carry",
+      `{repository: o/a, sha: ${SHA}, path: x.md, always: []}`,
+      'files.0.source: Unrecognized key: "always"',
+    ],
+    [
+      "a path with a URL delimiter",
+      `{repository: o/a, sha: ${SHA}, path: 'a#b.md'}`,
+      "files.0.source.path: not a plain path (letters, digits, . _ - /)",
+    ],
+    [
+      "a path leaving the pinned commit",
+      `{repository: o/a, sha: ${SHA}, path: ../HEAD/x.md}`,
+      "files.0.source.path: carries an empty, '.', or '..' segment",
+    ],
+    ["an empty string", `''`, "files.0.source: Too small: expected string to have >=1 characters"],
+  ])(
+    "a source ref with %s is refused by the same schema a block ref is",
+    (_case, source, problem) => {
+      expect(
+        problemsOf(doc("  bun: {}\n", `{ path: x.md, class: managed, source: ${source} }`)),
+      ).toEqual([problem]);
+    },
+  );
 });

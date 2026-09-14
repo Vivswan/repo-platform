@@ -85,11 +85,14 @@ files:
   # --- base: every repository
   - {path: .editorconfig, class: split, region: hash}
   - {path: .gitattributes, class: split, region: hash}
-  # The github/gitignore templates are fetched at the pin by every sync; refresh-gitignore.yml moves the pin weekly.
+  # The github/gitignore templates are fetched at the pin by every sync; refresh-upstream.yml moves the pin weekly.
+  # macOS names its Finder icon file "Icon\r", which the template spells as a class holding a bare CR byte; text gates
+  # refuse the byte, so the rendered line matches the file by a one-character glob instead.
   - path: .gitignore
     class: split
     region: hash
     blocks: gitignore_sources
+    replace: {"[\r]": "?"}
     upstream:
       repository: github/gitignore
       sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4

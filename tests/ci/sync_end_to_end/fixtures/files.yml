@@ -42,6 +42,7 @@ files:
     class: split
     region: hash
     blocks: gitignore_sources
+    replace: {"[\r]": "?"}
     upstream:
       repository: github/gitignore
       sha: 0123456789abcdef0123456789abcdef01234567
