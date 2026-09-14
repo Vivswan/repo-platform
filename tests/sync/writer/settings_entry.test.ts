@@ -150,6 +150,8 @@ const ruleset = (doc: Record<string, unknown>, name: string) =>
   entries(doc.rulesets)?.find((entry) => entry.name === name);
 
 describe("renderSettings", () => {
+  // The full rendered document over a synthetic tree: the operator line names the applying repository, the
+  // override beats the baseline's merge flag, and the overlay's identity keys ride through.
   test("folds the layers low to high for a public selection, the override last", () => {
     const { text, doc } = rendered({ modules: ["bun", "rust"] });
     expect(
@@ -205,12 +207,13 @@ describe("renderSettings", () => {
     });
   });
 
-  test("the override's ruleset policy beats an overlay asking to keep undeclared rulesets", () => {
-    // The override merges above the overlay, so its policy is the fleet's
-    // answer for every repository; the overlay's own entry still rides along.
+  // The fleet-mandatory override sits above the repository's overlay: reversed, a repository could weaken the merge
+  // gate. Below the override the overlay wins, and its null opts a lower layer's key out.
+  test("the overlay beats the layers below the override and never the override: its null drops has_wiki, its ruleset policy and merge flag lose", () => {
     const { doc } = rendered({
       overlay: [
-        "repository: {description: Mine, homepage: '', topics: '', private: false}",
+        "repository: {description: Mine, homepage: '', topics: '', private: false, has_wiki: null, allow_merge_commit: true}",
+        'labels: [{name: bug, color: "000000", description: Restyled}]',
         "rulesets:",
         "  _undeclared: keep",
         "  entries:",
@@ -218,10 +221,25 @@ describe("renderSettings", () => {
         "",
       ].join("\n"),
     });
+    expect(doc.repository).toEqual({
+      description: "Mine",
+      homepage: "",
+      topics: "",
+      private: false,
+      security_and_analysis: { secret_scanning: { status: "enabled" } },
+      allow_merge_commit: false,
+      squash_merge_commit_title: "PR_TITLE",
+    });
+    expect(entries(doc.labels)).toEqual([
+      { name: "bug", color: "000000", description: "Restyled" },
+      { name: "dependencies", color: "0366d6", description: "Dependency updates" },
+      { name: "javascript", color: "168700", description: "JS updates" },
+    ]);
     expect(doc.rulesets).toMatchObject({ _undeclared: "delete" });
     expect(names(doc.rulesets)).toEqual(["main", "pr-title", "release-branches"]);
   });
 
+  // Visibility comes from the overlay, never the operator's fact, and the layer stack follows it.
   test.each<{ reason: string; overlay: string; privateLayers: boolean }>([
     {
       reason: "an overlay declaring private selects the private layers",
@@ -256,32 +274,8 @@ describe("renderSettings", () => {
     }
   });
 
-  test("an overlay declaring no visibility holds the row: the render follows the overlay alone, never the operator's fact", () => {
-    expect(held({ overlay: "repository: {description: x}\n" })).toBe(
-      ".github/settings.local.yml declares no repository.private; the render follows the overlay's visibility alone",
-    );
-    expect(held({ overlay: "repository: {description: x, private: 'false'}\n" })).toBe(
-      ".github/settings.local.yml declares no repository.private; the render follows the overlay's visibility alone",
-    );
-  });
-
-  test("an overlay may beat the layers below the override and null one of their keys out", () => {
-    const { doc } = rendered({
-      overlay: [
-        "repository: {description: Mine, has_wiki: null, allow_merge_commit: true, private: false}",
-        'labels: [{name: bug, color: "000000", description: Restyled}]',
-        "",
-      ].join("\n"),
-    });
-    expect(entries(doc.labels)?.[0]).toEqual({
-      name: "bug",
-      color: "000000",
-      description: "Restyled",
-    });
-    expect(doc.repository).not.toHaveProperty("has_wiki");
-    expect((doc.repository as Record<string, unknown>).allow_merge_commit).toBe(false);
-  });
-
+  // Cross-file: files_config's trackingTuples feeds the render and the plan's trackingLabels names the stream;
+  // the registration's name wins over the module default.
   test("tracking labels are appended with the module's tuple, the registration's name beating the default", () => {
     const { doc } = rendered({
       modules: ["bun", "fuzzer", "nightly"],
@@ -296,6 +290,8 @@ describe("renderSettings", () => {
     ]);
   });
 
+  // The opt-out leaves the labels to the repository: a roster of tracking labels alone would have the apply delete
+  // every other label on the repository.
   test.each<{
     reason: string;
     modules: string[];
@@ -326,8 +322,6 @@ describe("renderSettings", () => {
       ],
     },
   ])("$reason", ({ modules, overlay, labels }) => {
-    // The opt-out leaves the labels to the repository; a roster of tracking
-    // labels alone would have the apply delete every other label.
     const { doc } = rendered({
       modules,
       overlay,
@@ -341,30 +335,35 @@ describe("renderSettings", () => {
     );
   });
 
-  test("a layer naming one label twice is the operator's error: the render throws, naming the layer", () => {
-    // A hold would leave every target waiting on a fix only files/ can take.
-    const damaged = tree({
-      ...LAYERS,
-      "bun/settings.yml":
-        'labels:\n  - {name: javascript, color: "168700"}\n  - {name: JavaScript, color: "168700"}\n',
-    });
-    expect(() => renderSettings(input({ tree: damaged }))).toThrow(
-      `layer "${join(damaged, "bun/settings.yml")}": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer`,
-    );
-  });
-
-  test("two fleet layers valid alone but not together are the operator's error: the render throws, never holds", () => {
-    // Each layer passes its own judgment; only the fold refuses. The overlay
-    // is the one per-repository input, so a fold the fleet layers alone
-    // already fail cannot be the repository's to fix.
-    const conflicting = tree({
-      ...LAYERS,
-      "settings/baseline.yml": `${LAYERS["settings/baseline.yml"]}actions: {allowed_actions: all}\n`,
-      "settings/public.yml": `${LAYERS["settings/public.yml"]}actions: {selected_actions: {github_owned_allowed: true}}\n`,
-    });
-    expect(() => renderSettings(input({ tree: conflicting }))).toThrow(
-      "the fleet settings layers has malformed section entries: actions.selected_actions",
-    );
+  // The throw-versus-hold boundary: what the repository owns holds its row, what the fleet owns fails the run, since
+  // a hold would leave every target waiting on a fix only files/ can take. Each layer passes its own judgment; the
+  // fold is the first to refuse the conflicting pair.
+  test.each<{
+    reason: string;
+    layers: Record<string, string>;
+    message: (tree: string) => string;
+  }>([
+    {
+      reason: "a layer naming one label twice",
+      layers: {
+        "bun/settings.yml":
+          'labels:\n  - {name: javascript, color: "168700"}\n  - {name: JavaScript, color: "168700"}\n',
+      },
+      message: (tree) =>
+        `layer "${join(tree, "bun/settings.yml")}": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer`,
+    },
+    {
+      reason: "two fleet layers valid alone but not together",
+      layers: {
+        "settings/baseline.yml": `${LAYERS["settings/baseline.yml"]}actions: {allowed_actions: all}\n`,
+        "settings/public.yml": `${LAYERS["settings/public.yml"]}actions: {selected_actions: {github_owned_allowed: true}}\n`,
+      },
+      message: () =>
+        "the fleet settings layers has malformed section entries: actions.selected_actions",
+    },
+  ])("$reason is the operator's error: the render throws, never holds", ({ layers, message }) => {
+    const damaged = tree({ ...LAYERS, ...layers });
+    expect(() => renderSettings(input({ tree: damaged }))).toThrow(message(damaged));
   });
 
   test("a fleet label renaming into a tracking label's name reserves that name too", () => {
@@ -389,22 +388,7 @@ describe("renderSettings", () => {
     );
   });
 
-  test("an undeclared-policy knob in the overlay is the repository's choice and rides through", () => {
-    const { doc } = rendered({ overlay: `${OVERLAY}labels: {_undeclared: keep, entries: []}\n` });
-    expect(names(doc.labels)).toEqual(["bug", "dependencies", "javascript"]);
-    expect(doc.labels).toMatchObject({ _undeclared: "keep" });
-  });
-
-  test("rules: null in the overlay drops the lower layers' rules and keeps the override's", () => {
-    const { doc } = rendered({ overlay: `${OVERLAY}  - {name: main, rules: null}\n` });
-    const entries = (doc.rulesets as { entries: { name: string; rules: { type: string }[] }[] })
-      .entries;
-    expect(entries.find((r) => r.name === "main")?.rules.map((r) => r.type)).toEqual([
-      "deletion",
-      "required_status_checks",
-    ]);
-  });
-
+  // Determinism: a render that varied would open a sync PR on every run for every repository.
   test("two renders of the same inputs are byte-identical, the library's own merged-file bytes", () => {
     const long = "word ".repeat(24).trim();
     const overrides = {
@@ -420,11 +404,25 @@ describe("renderSettings", () => {
     });
   });
 
+  // The hold reasons a repository reads in its row: what it owns (the overlay, its labels) holds and names the fix.
   test.each<{ reason: string; overrides: Partial<SettingsRenderInput>; detail: unknown }>([
     {
       reason: "no overlay",
       overrides: { overlay: null },
       detail: "no overlay at .github/settings.local.yml (its starter is held or missing)",
+    },
+    {
+      // The render follows the overlay's visibility alone, never the operator's fact.
+      reason: "an overlay declaring no visibility",
+      overrides: { overlay: "repository: {description: x}\n" },
+      detail:
+        ".github/settings.local.yml declares no repository.private; the render follows the overlay's visibility alone",
+    },
+    {
+      reason: "an overlay declaring visibility as the string 'false'",
+      overrides: { overlay: "repository: {description: x, private: 'false'}\n" },
+      detail:
+        ".github/settings.local.yml declares no repository.private; the render follows the overlay's visibility alone",
     },
     {
       reason: "a malformed overlay",

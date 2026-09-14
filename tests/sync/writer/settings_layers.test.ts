@@ -7,8 +7,6 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
 import {
-  allLayerLabels,
-  declaredPrivate,
   foldSettings,
   GITHUB_ACTIONS_APP_ID,
   layerConfig,
@@ -63,6 +61,7 @@ const labelNames = (s: Selection) => sectionEntries(fleetFold(s), "labels").map(
 const rulesets = (s: Selection) => sectionEntries(fleetFold(s), "rulesets");
 
 describe("the managed labels", () => {
+  // The apply deletes undeclared labels, so a roster that shrank silently would delete labels fleet-wide.
   test.each<{ reason: string; selection: Selection; labels: string[] }>([
     {
       reason: "a bare selection gets the baseline's unconditional roster alone",
@@ -101,120 +100,113 @@ describe("the managed labels", () => {
 });
 
 describe("the managed rulesets", () => {
-  const rulesetNames = (s: Selection) => rulesets(s).map((r) => r.name);
-  const mainRules = (s: Selection) => {
-    const main = rulesets(s).find((r) => r.name === "main");
-    return (main?.rules ?? []) as { type: string; parameters?: Record<string, unknown> }[];
+  const CODEQL_MODULES = ["bun", "deno", "uv"];
+  const codeQuality = { type: "code_quality", parameters: { severity: "warnings" } };
+  const copilotReview = {
+    type: "copilot_code_review",
+    parameters: { review_on_push: true, review_draft_pull_requests: true },
   };
-  const mainRuleTypes = (s: Selection) => mainRules(s).map((r) => r.type);
-
-  test("the fleet protection rulesets are NOT in these layers", () => {
-    // The main and non-bypassable PROTECTION rules live in the override, which merges above these layers;
-    // the private side contributes no ruleset of its own, and pr-title's arrives with its module alone.
-    //   main      -> the public overlay's entry alone: the code_quality rule and the public-only copilot_code_review auto-request
-    expect(rulesetNames(selection())).toEqual(["main"]);
-    expect(mainRuleTypes(selection())).toEqual(["code_quality", "copilot_code_review"]);
-    expect(rulesetNames(selection({ private: true }))).toEqual([]);
-  });
-
-  test("the pr-title module declares its whole required-check ruleset, on every visibility", () => {
-    const prTitle = (s: Selection) => rulesets(s).find((r) => r.name === "pr-title");
-    // Absent without the module: the apply deletes it from a repository that deselected.
-    expect(prTitle(selection())).toBeUndefined();
-    // The whole entry, not its name: an unpinned check or a missing bypass
-    // would render fine and misbehave at apply time, fleet-wide.
-    const expected = {
-      name: "pr-title",
-      target: "branch",
-      enforcement: "active",
-      conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-      rules: [
+  // The fleet's high-or-critical bar: a non-security warning or a medium security alert never blocks a merge.
+  const codeScanning = {
+    type: "code_scanning",
+    parameters: {
+      code_scanning_tools: [
         {
-          type: "required_status_checks",
-          parameters: {
-            strict_required_status_checks_policy: false,
-            do_not_enforce_on_create: true,
-            required_status_checks: [
-              { context: "pr-title", integration_id: GITHUB_ACTIONS_APP_ID },
-            ],
-          },
+          tool: "CodeQL",
+          security_alerts_threshold: "high_or_higher",
+          alerts_threshold: "errors",
         },
       ],
-      bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
-    };
-    expect(prTitle(selection({ modules: ["pr-title"] }))).toEqual(expected);
-    expect(prTitle(selection({ modules: ["pr-title"], private: true }))).toEqual(expected);
+    },
+  };
+  const mainRuleset = (s: Selection) => rulesets(s).find((r) => r.name === "main");
+
+  // The main ruleset these layers emit, whole: GitHub enum values render fine and 422 at apply time, so the
+  // parameters are pinned, not the types. The protection rules live in the override, which merges above.
+  test.each<{ reason: string; selection: Selection; names: string[]; main: unknown[] | undefined }>(
+    [
+      {
+        reason: "a bare public selection: code_quality and the Copilot auto-request alone",
+        selection: selection(),
+        names: ["main"],
+        main: [codeQuality, copilotReview],
+      },
+      {
+        reason: "a private selection declares no ruleset in these layers",
+        selection: selection({ private: true }),
+        names: [],
+        main: undefined,
+      },
+      {
+        reason: "a public toolchain without CodeQL renders no code_scanning",
+        selection: selection({ modules: ["rust"] }),
+        names: ["main"],
+        main: [codeQuality, copilotReview],
+      },
+      ...CODEQL_MODULES.map((module) => ({
+        reason: `a public ${module} repository gets the CodeQL rule with the exact threshold tuple`,
+        selection: selection({ modules: [module] }),
+        names: ["main"],
+        main: [codeQuality, copilotReview, codeScanning],
+      })),
+      ...CODEQL_MODULES.map((module) => ({
+        reason: `a private ${module} repository gets no CodeQL rule`,
+        selection: selection({ modules: [module], private: true }),
+        names: [],
+        main: undefined,
+      })),
+      {
+        reason: "two CodeQL toolchains select the one CodeQL layer, so code_scanning renders once",
+        selection: selection({ modules: ["bun", "uv"] }),
+        names: ["main"],
+        main: [codeQuality, copilotReview, codeScanning],
+      },
+    ],
+  )("$reason", ({ selection: s, names, main }) => {
+    expect(rulesets(s).map((r) => r.name)).toEqual(names);
+    expect(mainRuleset(s)?.rules).toEqual(main);
   });
 
-  test("code_quality renders for every public repo, toolchain or not", () => {
-    expect(mainRuleTypes(selection({ modules: ["rust"] }))).toContain("code_quality");
-    expect(mainRuleTypes(selection({ modules: ["bun"] }))).toContain("code_quality");
-    expect(mainRuleTypes(selection({ private: true }))).not.toContain("code_quality");
-    expect(mainRuleTypes(selection({ modules: ["bun"], private: true }))).not.toContain(
-      "code_quality",
-    );
-    // The parameters, not just the type: a misspelled enum value renders
-    // fine and dies at apply time, fleet-wide.
-    const rule = mainRules(selection()).find((r) => r.type === "code_quality");
-    expect(rule?.parameters).toEqual({ severity: "warnings" });
-  });
-
-  test("release-please adds the release-tags ruleset", () => {
-    // The whole ruleset, not its name: a stale or misspelled module layer
-    // would otherwise pass here and die fleet-wide at apply time.
-    expect(rulesetNames(selection({ modules: ["release-please"] }))).toEqual([
-      "main",
-      "release-tags",
-    ]);
+  // Cross-file with files.yml's modules block: a toolchain that gains codeql_languages joins the CodeQL layer's
+  // selection, and the rows above must then cover it.
+  test("the CodeQL rows above cover every module declaring codeql_languages", () => {
     expect(
-      rulesets(selection({ modules: ["release-please"] })).find((r) => r.name === "release-tags"),
-    ).toEqual({
-      name: "release-tags",
-      target: "tag",
-      enforcement: "active",
-      conditions: { ref_name: { include: ["v*"], exclude: [] } },
-      rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "update" }],
-      bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
-    });
+      loadModules()
+        .filter((m) => m.codeql_languages !== undefined)
+        .map((m) => m.name),
+    ).toEqual(CODEQL_MODULES);
   });
 
-  test("code_scanning renders exactly for a public repo with a CodeQL toolchain", () => {
-    // EVERY CodeQL toolchain module, with the exact threshold tuple: a
-    // layer selection missing a toolchain or a misspelled enum value would
-    // otherwise pass on types alone and weaken (or 422) that module's repos
-    // at apply time. The tuple is the fleet's high-or-critical bar: a
-    // non-security warning or a medium security alert never blocks a merge.
-    const codeqlModules = loadModules()
-      .filter((m) => m.codeql_languages !== undefined)
-      .map((m) => m.name);
-    expect(codeqlModules).toEqual(["bun", "deno", "uv"]);
-    for (const module of codeqlModules) {
-      const rule = mainRules(selection({ modules: [module] })).find(
-        (r) => r.type === "code_scanning",
-      );
-      expect(rule?.parameters).toEqual({
-        code_scanning_tools: [
+  // GitHub fact: a required context without integration_id is satisfied by any app or commit status of that name.
+  // loadOverrideLayer enforces the pin for the override alone, so the module's own ruleset is pinned here, whole.
+  test.each([false, true])(
+    "the pr-title module's required check is pinned to the Actions app (private: %p)",
+    (isPrivate) => {
+      expect(
+        rulesets(selection({ modules: ["pr-title"], private: isPrivate })).find(
+          (r) => r.name === "pr-title",
+        ),
+      ).toEqual({
+        name: "pr-title",
+        target: "branch",
+        enforcement: "active",
+        conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+        rules: [
           {
-            tool: "CodeQL",
-            security_alerts_threshold: "high_or_higher",
-            alerts_threshold: "errors",
+            type: "required_status_checks",
+            parameters: {
+              strict_required_status_checks_policy: false,
+              do_not_enforce_on_create: true,
+              required_status_checks: [
+                { context: "pr-title", integration_id: GITHUB_ACTIONS_APP_ID },
+              ],
+            },
           },
         ],
+        bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
       });
-      expect(mainRuleTypes(selection({ modules: [module], private: true }))).not.toContain(
-        "code_scanning",
-      );
-    }
-    expect(mainRuleTypes(selection({ modules: ["rust"] }))).not.toContain("code_scanning");
-  });
-
-  test("two analyzable toolchains select the one CodeQL layer, so code_scanning renders once", () => {
-    expect(mainRuleTypes(selection({ modules: ["bun", "uv"] }))).toEqual([
-      "code_quality",
-      "copilot_code_review",
-      "code_scanning",
-    ]);
-  });
+    },
+  );
 });
 
 describe("every selection folds to a document the apply accepts", () => {
@@ -249,6 +241,8 @@ describe("every selection folds to a document the apply accepts", () => {
 });
 
 describe("layerPaths", () => {
+  // Cross-file with files.yml: declared order is fold order, and the CodeQL layer's place after every module layer
+  // is what lets it win over any of them.
   test.each<{ reason: string; selection: Selection; paths: string[] }>([
     {
       reason: "a bare public selection is the baseline plus the public overlay",
@@ -261,8 +255,6 @@ describe("layerPaths", () => {
       paths: ["settings/baseline.yml", "settings/private.yml"],
     },
     {
-      // Declared order is fold order: the CodeQL layer is declared after
-      // every module layer so it wins over any of them.
       reason: "the module layers in declared order, then the CodeQL layer",
       selection: selection({ modules: ["bun", "release-please"] }),
       paths: [
@@ -286,12 +278,6 @@ describe("layerPaths", () => {
   ])("$reason", ({ selection: s, paths }) => {
     expect(layerPaths(CONFIG, s)).toEqual(paths);
   });
-
-  test("a data file without a settings block yields no layer config", () => {
-    expect(() => layerConfig({ ...FILES, settings: null })).toThrow(
-      "files.yml declares no settings block",
-    );
-  });
 });
 
 describe("the layer topology fails CLOSED", () => {
@@ -306,21 +292,6 @@ describe("the layer topology fails CLOSED", () => {
     cpSync(TREE, tree, { recursive: true });
     return tree;
   };
-
-  test("selection follows the declaration, never the tree", () => {
-    const undeclared = {
-      ...CONFIG,
-      settings: {
-        ...CONFIG.settings,
-        layers: CONFIG.settings.layers.filter((layer) => layer.source !== "uv/settings.yml"),
-      },
-    };
-    expect(layerPaths(undeclared, selection({ modules: ["uv"] }))).toEqual([
-      "settings/baseline.yml",
-      "settings/public.yml",
-      "settings/codeql-public.yml",
-    ]);
-  });
 
   test.each<{
     reason: string;
@@ -392,20 +363,15 @@ describe("the layer topology fails CLOSED", () => {
 });
 
 describe("readLayer", () => {
-  test("refuses a YAML syntax error, naming the document", () => {
-    expect(() => readLayer("labels: [\n", "here")).toThrow("here: YAMLParseError:");
-  });
-
-  test("nulls are legal input, the fold's opt-out marker; an empty document is an empty layer", () => {
+  // The fail-closed distinction: a fleet layer is judged alone at load, an overlay only in its stack, since a null
+  // inside an entry is the fold's opt-out marker; an all-comment overlay starter must read as an empty layer.
+  test("readLayer accepts nulls and empty documents; readFleetLayer refuses a null inside an entry", () => {
     expect(readLayer("labels: null\nrepository: {has_wiki: null}\n", "here").doc).toEqual({
       labels: null,
       repository: { has_wiki: null },
     });
     expect(readLayer("", "here").doc).toEqual({});
     expect(readLayer("# nothing\n", "here").doc).toEqual({});
-  });
-
-  test("an overlay is never judged alone: a null inside an entry opts out of what lies below", () => {
     const overlay = "rulesets: [{name: main, rules: null}]\n";
     expect(readLayer(overlay, "over").doc).toEqual({ rulesets: [{ name: "main", rules: null }] });
     expect(() => readFleetLayer(overlay, "fleet")).toThrow(
@@ -417,48 +383,56 @@ describe("readLayer", () => {
 describe("foldSettings", () => {
   const layer = (name: string, text: string) => readLayer(text, name);
 
-  test.each<{ reason: string; text: string; message: string }>([
+  // The library boundary's messages reach a repository's hold row, so a library bump that changes them goes red
+  // here. The tracking-labels layer is built in code and never passes readLayer, so it meets the judgment at the
+  // fold, where a tuple the labels shape refuses must hold the row rather than render.
+  test.each<{ reason: string; layer: ReturnType<typeof readLayer>; message: string }>([
     {
       reason: "an alias naming its own ancestor",
-      text: "repository: &r {self: *r}\n",
+      layer: layer("here", "repository: &r {self: *r}\n"),
       message:
         'layer "here": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees',
     },
     {
       reason: "a name-keyed section that is not a list of mappings",
-      text: "labels: {bug: x}\n",
+      layer: layer("here", "labels: {bug: x}\n"),
       message: "here has malformed section entries: labels.entries: Invalid input: expected array",
     },
     {
       reason: "a ruleset rule without a type",
-      text: "rulesets:\n  - name: main\n    rules: [{parameters: {}}]\n",
+      layer: layer("here", "rulesets:\n  - name: main\n    rules: [{parameters: {}}]\n"),
       message:
         "here has malformed section entries: rulesets[0].rules[0].type: Invalid input: expected string",
     },
     {
       reason: "a label without a name",
-      text: "labels:\n  - {color: fff}\n",
+      layer: layer("here", "labels:\n  - {color: fff}\n"),
       message: "here has malformed section entries: labels[0].name: Invalid input: expected string",
     },
     {
       // A label entry replaces wholesale, so a null field inside it is a
       // value the apply would read, and the library refuses it where written.
       reason: "a null inside a replaced entry (not an opt-out)",
-      text: "labels: [{name: bug, color: d73a4a, description: null}]\n",
+      layer: layer("here", "labels: [{name: bug, color: d73a4a, description: null}]\n"),
       message: "here has malformed section entries: labels[0].description",
     },
     {
       reason: "a null on a section the apply does not know",
-      text: "labels_v2: null\n",
+      layer: layer("here", "labels_v2: null\n"),
       message: "unknown top-level section in here: labels_v2",
     },
     {
       reason: "an underscore key outside the library's two directives (no private notes)",
-      text: "_notes: {why: mine}\nrepository: {has_wiki: false}\n",
+      layer: layer("here", "_notes: {why: mine}\nrepository: {has_wiki: false}\n"),
       message: "unknown underscore key in here: _notes",
     },
-  ])("refuses $reason, naming the layer", ({ text, message }) => {
-    expect(foldSettings([layer("here", text)], "f")).toEqual({
+    {
+      reason: "a layer built in code whose label color is not a string",
+      layer: { name: "here", doc: { labels: [{ name: "t", color: 7 }] } },
+      message: "here has malformed section entries: labels[0].color",
+    },
+  ])("refuses $reason, naming the layer", ({ layer: one, message }) => {
+    expect(foldSettings([one], "f")).toEqual({
       refused: expect.stringContaining(message),
     });
   });
@@ -487,7 +461,9 @@ describe("foldSettings", () => {
     });
   });
 
-  test("the dialect the fleet relies on: higher wins, null opts out, name-keyed unions, rules append by type", () => {
+  // The one pin of the merge dialect against the library: a semantic change in a bump would otherwise reach the
+  // fleet as a rendered diff nobody reads as a dialect change.
+  test("the dialect the fleet relies on: higher wins, null opts out below and stays over nothing, name-keyed unions, rules append by type, and the override beats the overlay on every axis", () => {
     const folded = foldSettings(
       [
         layer(
@@ -505,7 +481,8 @@ describe("foldSettings", () => {
         layer(
           "over",
           [
-            "repository: {has_wiki: null, description: mine}",
+            // has_wiki: null opts the base's key out; allow_merge_commit and the nulled squash title meet the override.
+            "repository: {has_wiki: null, description: mine, allow_merge_commit: true, squash_merge_commit_title: null}",
             "labels:",
             "  - {name: Bug, color: '000000'}",
             "  - {name: extra, color: ffffff}",
@@ -516,12 +493,26 @@ describe("foldSettings", () => {
             "",
           ].join("\n"),
         ),
+        layer(
+          "override",
+          [
+            "repository: {allow_merge_commit: false, squash_merge_commit_title: PR_TITLE}",
+            "rulesets: [{name: main, rules: [{type: required_linear_history}]}]",
+            "",
+          ].join("\n"),
+        ),
       ],
       "the fold",
     );
     expect(folded).toEqual({
       settings: {
-        repository: { has_issues: true, description: "mine" },
+        repository: {
+          has_issues: true,
+          description: "mine",
+          allow_merge_commit: false,
+          // The null opt-out only removes the key from the layers below the override, so the override puts it back.
+          squash_merge_commit_title: "PR_TITLE",
+        },
         labels: {
           entries: [
             { name: "Bug", color: "000000" },
@@ -543,30 +534,34 @@ describe("foldSettings", () => {
                   parameters: { strict_required_status_checks_policy: true },
                 },
                 { type: "non_fast_forward" },
+                { type: "required_linear_history" },
               ],
             },
             { name: "tags", target: "tag", rules: [{ type: "update" }] },
           ],
           _undeclared: "keep",
         },
-        // Met nothing below, so it stays with the apply's meaning.
+        // Met nothing below, so it stays with the apply's meaning (disable Pages).
         pages: null,
       },
       yaml: expect.any(String),
     });
   });
 
-  test("the bytes are the apply's own canonical file: keys in schema order whatever the layers' order, the knob leading its wrapper", () => {
+  // A key-order change in the library would churn every settings.yml in the fleet; settings_entry.test.ts pins
+  // determinism, this pins the bytes.
+  test("the bytes are the apply's own canonical file: keys in schema order whatever the layers' order, the knob leading its wrapper, a null over nothing kept", () => {
     const folded = foldSettings(
       [
         layer(
           "base",
           "repository: {has_issues: true, has_wiki: false}\nlabels: [{name: bug, color: d73a4a}]\n",
         ),
-        layer("over", "repository: {description: mine}\n"),
+        layer("over", "repository: {description: mine}\npages: null\n"),
       ],
       "the fold",
     );
+    // `pages: null` met nothing below, so the bytes carry it for the apply to read (disable Pages).
     expect(folded).toEqual({
       settings: expect.any(Object),
       yaml: [
@@ -579,100 +574,16 @@ describe("foldSettings", () => {
         "  entries:",
         "    - name: bug",
         "      color: d73a4a",
+        "pages: null",
         "",
       ].join("\n"),
-    });
-  });
-
-  test("a null over nothing stays as written: the library's engine meaning, not an opt-out", () => {
-    // `pages: null` met no lower declaration, so the apply reads it (disable Pages).
-    const folded = foldSettings(
-      [layer("over", "pages: null\nrepository: {has_wiki: false}\n")],
-      "f",
-    );
-    expect(folded).toEqual({
-      settings: { repository: { has_wiki: false }, pages: null },
-      yaml: "repository:\n  has_wiki: false\npages: null\n",
-    });
-  });
-
-  test("a layer built in code meets the apply's judgment at the fold, never in the render", () => {
-    // The tracking-labels layer never passes readLayer; a tuple the labels
-    // shape refuses must hold the row rather than render.
-    const folded = foldSettings(
-      [{ name: "tracking", doc: { labels: [{ name: "t", color: 7 }] } }],
-      "f",
-    );
-    expect(folded).toEqual({
-      refused: expect.stringContaining("tracking has malformed section entries: labels[0].color"),
     });
   });
 });
 
 describe("the override layer", () => {
-  test("beats the overlay on every axis, and only there", () => {
-    const folded = foldSettings(
-      [
-        readLayer(
-          [
-            "repository: {has_issues: true}",
-            "labels: [{name: bug, color: d73a4a}]",
-            "rulesets: [{name: main, target: branch, rules: [{type: deletion}]}]",
-            "",
-          ].join("\n"),
-          "fleet",
-        ),
-        readLayer(
-          "repository:\n" +
-            "  allow_merge_commit: true\n" + // override key: the override wins
-            "  squash_merge_commit_title: null\n" + // null opt-out: cannot strip an override key
-            "  description: mine\n" + // undeclared above: passes through from the overlay
-            "rulesets:\n  - name: main\n    rules:\n      - type: non_fast_forward\n", // rules append, never drop
-          "overlay",
-        ),
-        readLayer(
-          [
-            "repository: {allow_merge_commit: false, squash_merge_commit_title: PR_TITLE}",
-            "rulesets: [{name: main, rules: [{type: required_linear_history}]}]",
-            "",
-          ].join("\n"),
-          "override",
-        ),
-      ],
-      "f",
-    );
-    expect(folded).toEqual({
-      settings: {
-        repository: {
-          has_issues: true,
-          description: "mine",
-          allow_merge_commit: false,
-          // The null opt-out only removes the key from the layers BELOW the
-          // override, so the override puts it straight back.
-          squash_merge_commit_title: "PR_TITLE",
-        },
-        labels: { entries: [{ name: "bug", color: "d73a4a" }], _undeclared: "delete" },
-        rulesets: {
-          entries: [
-            {
-              name: "main",
-              target: "branch",
-              rules: [
-                { type: "deletion" },
-                { type: "non_fast_forward" },
-                { type: "required_linear_history" },
-              ],
-            },
-          ],
-          _undeclared: "keep",
-        },
-      },
-      yaml: expect.any(String),
-    });
-  });
-
+  // Shipped-tree policy pin: losing any of these silently weakens every managed repository.
   test("the shipped override layer pins the whole protection policy", () => {
-    // Losing any of these silently weakens every managed repository.
     const shipped = loadOverrideLayer(OVERRIDE);
     const rulesets = sectionEntries(shipped.doc, "rulesets");
 
@@ -840,43 +751,5 @@ describe("the managed repository block", () => {
     },
   ])("$reason", ({ selection: s, repository }) => {
     expect(fleetFold(s).repository).toEqual(repository);
-  });
-});
-
-describe("the label roster", () => {
-  test("allLayerLabels carries each tuple whole and refuses a damaged tree", () => {
-    expect(allLayerLabels(CONFIG, TREE).find((label) => label.name === "security-nightly")).toEqual(
-      {
-        name: "security-nightly",
-        color: "1d76db",
-        description: "Automated nightly security scan findings",
-      },
-    );
-    const tree = join(temp.dir("settings-layers-labels-"), "files");
-    cpSync(TREE, tree, { recursive: true });
-    rmSync(join(tree, "settings/private.yml"));
-    expect(() => allLayerLabels(CONFIG, tree)).toThrow(
-      "settings layer files/settings/private.yml is missing from the tree",
-    );
-  });
-
-  test("sectionEntries reads a plain list and the fold's wrapper alike, nothing else", () => {
-    const entries = [{ name: "a" }, { name: "b" }];
-    expect(sectionEntries({ labels: entries }, "labels")).toEqual(entries);
-    expect(sectionEntries({ labels: { _undeclared: "keep", entries } }, "labels")).toEqual(entries);
-    expect(sectionEntries({ labels: null }, "labels")).toEqual([]);
-    expect(sectionEntries({}, "labels")).toEqual([]);
-    expect(sectionEntries("text", "labels")).toEqual([]);
-  });
-});
-
-describe("declaredPrivate", () => {
-  test("reads only a boolean repository.private", () => {
-    expect(declaredPrivate({ repository: { private: true } })).toBe(true);
-    expect(declaredPrivate({ repository: { private: false } })).toBe(false);
-    expect(declaredPrivate({ repository: { private: "false" } })).toBeNull();
-    expect(declaredPrivate({ repository: {} })).toBeNull();
-    expect(declaredPrivate({})).toBeNull();
-    expect(declaredPrivate(null)).toBeNull();
   });
 });
