@@ -8,6 +8,7 @@ import {
   failureBody,
   fenceFor,
   prBody,
+  prTitle,
   tail,
 } from "../../.github/scripts/sync/deliver.ts";
 import {
@@ -15,11 +16,20 @@ import {
   holdReasons,
   renderReport,
   type SyncOutcome,
+  type SyncReport,
 } from "../../.github/scripts/sync/writer/report.ts";
 import { FAILURE_ISSUE_TITLE } from "../../actions/shared/platform.ts";
 import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { FIXTURE_GITCONFIG, fixtureGit } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
+import {
+  committedDiff,
+  MISSING_PATH,
+  MISSING_PATH_LINE,
+  WRITTEN_DIFF,
+  writtenTree,
+} from "../shared/written_tree";
 
 const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/deliver.ts");
@@ -28,13 +38,16 @@ const PAT = "ghp_SENTINEL";
 const BUILD = "abcdef0123456789abcdef0123456789abcdef01";
 const REPORT = "## Sync report\n\n| Build |\n| --- |\n| x |\n";
 const PR_URL = `https://github.com/${TARGET}/pull/7`;
+const REAL_GIT = Bun.which("git") ?? "git";
 
+// With STUB_REAL_GIT set, every call but the network ones (push, ls-remote) runs the real git over the fixture checkout.
 // Like the real gh, the stub refuses `--slurp` beside `--jq` before any request.
 const GIT_LINES = [
   'printf "git %s\\n" "$*" >>"$STUB_SEQUENCE"',
+  'if [ -n "${STUB_REAL_GIT:-}" ]; then case " $* " in *" push "*|*" ls-remote "*) ;; *) exec "$STUB_REAL_GIT" "$@" ;; esac; fi',
   'case "$*" in',
-  '  *" add --all") if [ "${STUB_ADD_FAIL:-}" = 1 ]; then echo "fatal: unable to stage" >&2; exit 128; fi ;;',
-  '  *" status --porcelain") if [ -n "${STUB_DIRTY:-}" ]; then echo " M x"; fi ;;',
+  '  *" add -f -- "*) if [ "${STUB_ADD_FAIL:-}" = 1 ]; then echo "fatal: unable to stage" >&2; exit 128; fi ;;',
+  '  *" diff --cached --name-only -z --no-renames") if [ -n "${STUB_DIRTY:-}" ]; then printf "x\\0"; fi ;;',
   '  *" rev-parse HEAD") echo "${STUB_HEAD_SHA:-}" ;;',
   '  *" symbolic-ref HEAD") case "${STUB_HEAD:-refs/heads/main}" in',
   '    error) echo "fatal: not a git repository: target" >&2; exit 128 ;;',
@@ -70,6 +83,10 @@ interface Options {
   /** The clone log checkout_target.ts left behind, when any. */
   checkoutLog?: string;
   stub?: Record<string, string>;
+  /** Builds a real checkout under root/target and answers the writer's summary over it; git then runs for real. */
+  written?: (root: string) => SyncReport;
+  /** False leaves no migrated list, as a build whose runner predates it does. */
+  migrated?: boolean;
 }
 
 interface Run {
@@ -84,14 +101,23 @@ interface Run {
   sequence: string[];
   /** The job summary (GITHUB_STEP_SUMMARY), empty unless a branch delivery wrote its report there. */
   summary: string;
+  target: string;
 }
 
 function run(options: Options = {}): Run {
   const root = temp.dir("deliver-");
   const runnerTemp = join(root, "temp");
   mkdirSync(runnerTemp);
-  mkdirSync(join(root, "target"));
-  writeFileSync(join(runnerTemp, "summary.json"), JSON.stringify({ hold: options.hold ?? false }));
+  const target = join(root, "target");
+  mkdirSync(target);
+  if (options.migrated !== false) writeFileSync(join(runnerTemp, "migrated.txt"), "");
+  const summary = options.written?.(root) ?? {
+    hold: options.hold ?? false,
+    written: [],
+    retired: [],
+    mirrors: [],
+  };
+  writeFileSync(join(runnerTemp, "summary.json"), JSON.stringify(summary));
   writeFileSync(join(runnerTemp, "sync.log"), REPORT);
   if (options.checkoutLog !== undefined)
     writeFileSync(join(runnerTemp, "checkout.log"), options.checkoutLog);
@@ -116,7 +142,7 @@ function run(options: Options = {}): Run {
       GITHUB_STEP_SUMMARY: summaryFile,
       TARGET,
       TARGET_PRIVATE: options.public === true ? "false" : "true",
-      TARGET_DIR: join(root, "target"),
+      TARGET_DIR: target,
       PAT,
       GH_TOKEN: PAT,
       STUB_PAT: PAT,
@@ -127,6 +153,8 @@ function run(options: Options = {}): Run {
       MANUAL: options.manual === true ? "true" : "false",
       CHECKOUT_OUTCOME: options.checkout ?? "success",
       WRITER_OUTCOME: options.writer ?? "success",
+      GIT_CONFIG_GLOBAL: FIXTURE_GITCONFIG,
+      ...(options.written === undefined ? {} : { STUB_REAL_GIT: REAL_GIT }),
       ...(options.stub ?? {}),
     },
   });
@@ -143,6 +171,7 @@ function run(options: Options = {}): Run {
       .split("\n")
       .filter((line) => line !== ""),
     summary: readFileSync(summaryFile, "utf-8"),
+    target,
   };
 }
 
@@ -323,7 +352,7 @@ describe("deliver.ts", () => {
         "config",
         "config",
         "add",
-        "status",
+        "diff",
         "symbolic-ref",
         "rev-parse",
         "commit",
@@ -376,6 +405,58 @@ describe("deliver.ts", () => {
     });
   });
 
+  // A target whose own .gitignore covers a managed path (an excepted, ignored .bun-version whose exception the PR
+  // removes): `git add --all` skipped it, the run went green with the manifest naming a file the commit lacked, and
+  // the validator went red on the target's next PR. The commit changes exactly the rows the summary says changed on
+  // disk plus what the rungs reported: a bracketed path stages itself and not the sibling its glob form matches, a
+  // released record's absent file is not asked of git, and a row naming a path git cannot find fails the run.
+  test.each<{
+    reason: string;
+    written: (root: string) => SyncReport;
+    verdict: string;
+    diff: string[] | null;
+    issue: string[];
+  }>([
+    {
+      reason:
+        "the ignored file, the bracketed file, and the rung's edit are in the commit beside the manifest",
+      written: (root) => writtenTree(root, BUILD),
+      verdict: "opened",
+      diff: WRITTEN_DIFF,
+      issue: [],
+    },
+    {
+      reason: "a written row git cannot find fails the delivery with git's line naming the path",
+      written: (root) => {
+        const summary = writtenTree(root, BUILD);
+        summary.written.push({
+          path: MISSING_PATH,
+          class: "managed",
+          change: "created",
+          detail: "",
+        });
+        return summary;
+      },
+      verdict: "failed",
+      diff: null,
+      issue: ["staging the written paths failed in the checkout", MISSING_PATH_LINE],
+    },
+  ])("over a real checkout, $reason", ({ written, verdict, diff, issue }) => {
+    const result = run({ written });
+    silent(result);
+    expect(result.verdict).toBe(verdict);
+    if (diff === null) {
+      expect(fixtureGit(result.target, ["log", "--format=%s"])).toBe("base");
+    } else {
+      expect(committedDiff(result.target)).toEqual(diff);
+      expect(fixtureGit(result.target, ["log", "-1", "--format=%s"])).toBe(prTitle(BUILD));
+      expect(fixtureGit(result.target, ["symbolic-ref", "HEAD"])).toBe(
+        "refs/heads/automation/repo-platform",
+      );
+    }
+    for (const text of issue) expect(result.issueBody).toContain(text);
+  });
+
   // The incoming revision may need review, so an armed PR is disarmed before the branch moves under it, and the
   // base follows the checkout's branch (a renamed default branch). Drifted, auto-merge would fire on an unreviewed hold.
   test("an existing armed PR is disarmed before the push, refreshed onto the checkout's branch, and left disarmed when the report holds", () => {
@@ -410,6 +491,8 @@ describe("deliver.ts", () => {
 
   // A failed step still ends the row with a verdict and an issue carrying that step's own log (the writer's report,
   // the checkout's clone log); nothing is committed or pushed, and a failed clone's directory is not asked anything.
+  // A build whose migration runner left no list (this delivery runs from main, the runner from the build, and a cron
+  // or dispatch can copy the build before the tag moves) is such a failure, named, not an unread crash.
   test.each<{
     reason: string;
     options: Options;
@@ -431,6 +514,14 @@ describe("deliver.ts", () => {
       },
       says: ["the target checkout failed", "## Checkout log", "fatal: could not read from remote"],
       gitAsked: false,
+    },
+    {
+      reason: "a build whose migration runner left no migrated list",
+      options: { migrated: false },
+      says: [
+        "the build's migration runner left no migrated list: the build is older than this delivery",
+      ],
+      gitAsked: true,
     },
   ])(
     "$reason files the issue with its log and records the failed verdict, touching no tree",
@@ -462,7 +553,7 @@ describe("deliver.ts", () => {
     {
       read: "fails at git add",
       stub: { STUB_ADD_FAIL: "1" },
-      reason: "git add failed in the target",
+      reason: "staging the written paths failed in the checkout",
       logged: "$ git add -> exit 128\nfatal: unable to stage",
       git: ["config", "config", "add"],
     },
@@ -471,28 +562,28 @@ describe("deliver.ts", () => {
       stub: { STUB_HEAD: "error" },
       reason: "git symbolic-ref failed in the target",
       logged: "$ git symbolic-ref -> exit 128\nfatal: not a git repository: target",
-      git: ["config", "config", "add", "status", "symbolic-ref"],
+      git: ["config", "config", "add", "diff", "symbolic-ref"],
     },
     {
       read: "finds HEAD detached",
       stub: { STUB_HEAD: "detached" },
       reason: "git symbolic-ref failed in the target",
       logged: "$ git symbolic-ref -> exit 128\nfatal: ref HEAD is not a symbolic ref",
-      git: ["config", "config", "add", "status", "symbolic-ref"],
+      git: ["config", "config", "add", "diff", "symbolic-ref"],
     },
     {
       read: "answers a ref outside refs/heads/",
       stub: { STUB_HEAD: "refs/remotes/origin/main" },
       reason: "the target checkout is not on a branch",
       logged: "$ git symbolic-ref -> exit 0",
-      git: ["config", "config", "add", "status", "symbolic-ref"],
+      git: ["config", "config", "add", "diff", "symbolic-ref"],
     },
     {
       read: "answers nothing on exit 0",
       stub: { STUB_HEAD: "empty" },
       reason: "the target checkout is not on a branch",
       logged: "$ git symbolic-ref -> exit 0",
-      git: ["config", "config", "add", "status", "symbolic-ref"],
+      git: ["config", "config", "add", "diff", "symbolic-ref"],
     },
   ])(
     "a checkout whose branch read $read files that failure, with git's words, before any branch or commit",
