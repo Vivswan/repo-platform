@@ -1,0 +1,38 @@
+# A change under files.yml, files/, migrations/, the sync writer, or the managed-files validator reaches the fleet only when a
+# sync runs, so a pull request touching them gets fleet-sync:public by default, with one sticky comment saying so; a human
+# removing the label is final for that pull request (docs/all-green.md). Information only: the script exits 0 on every path and
+# the job is outside all-green's needs.
+name: Fleet Sync Default
+
+# Every event that changes the answer: the diff (a push, a retarget arrives as edited, a reopen) or the labels. The bot's own
+# label writes fire no run (GITHUB_TOKEN events never do), so a run cannot trigger itself.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+# One reconcile per pull request at a time: a labeled event right behind a push would otherwise race it on the label and comment.
+concurrency:
+  group: fleet-sync-default-${{ github.event.pull_request.number }}
+
+jobs:
+  default:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: files/bun/.bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
+      - name: Reconcile the label and its comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bun .github/scripts/fleet/fleet_sync_default.ts
