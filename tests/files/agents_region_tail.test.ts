@@ -2,12 +2,12 @@
 // heading must be the repository-specific one with or without blocks.
 
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { blockSource, parseFilesConfig } from "../../actions/plan/files_config";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
-import { spawnUpstream } from "../shared/upstream_server";
+import { spawnStubUpstream } from "../shared/upstream_server";
 
 const temp = tempDirs();
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
@@ -15,18 +15,11 @@ const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const FILES_TREE = join(REPO_ROOT, "files");
 const BUILD = "0".repeat(40);
 
-// The writer fetches every upstream block files.yml registers before it writes anything, so a stub of each registered path
-// is served over loopback: this test reads AGENTS.md alone, never the network.
-const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
-const stubs = temp.dir("agents-tail-upstream-");
-for (const entry of config.files) {
-  if (entry.class === "link" || "render" in entry || entry.upstream === undefined) continue;
-  for (const path of Object.values(entry.upstream.paths)) {
-    mkdirSync(dirname(join(stubs, path)), { recursive: true });
-    writeFileSync(join(stubs, path), "# stub\n");
-  }
-}
-const upstream = await spawnUpstream(stubs);
+// This test reads AGENTS.md alone, so the upstream blocks are stubs and never the network.
+const upstream = await spawnStubUpstream(
+  parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
+  temp.dir("agents-tail-upstream-"),
+);
 afterAll(() => upstream.stop());
 
 function writtenAgents(label: string, modules: string[]): string {

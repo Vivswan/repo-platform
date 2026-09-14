@@ -783,6 +783,11 @@ describe("the upstream registry grammar", () => {
       "modules.bun.g must be a list of block names (letters, digits, _ -)",
     ],
     [
+      "a block value that is a number, however name-like its spelling",
+      doc("  bun: { g: [123] }\n", registry("paths: {}")),
+      "modules.bun.g must be a list of block names (letters, digits, _ -)",
+    ],
+    [
       "upstream on an entry without blocks",
       doc(
         BUN,

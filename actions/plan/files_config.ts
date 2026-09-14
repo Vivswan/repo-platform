@@ -385,7 +385,10 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     for (const [module, values] of Object.entries(data.modules)) {
       const list = values[key];
       if (list === undefined) continue;
-      if (!Array.isArray(list) || list.some((value) => !BLOCK_VALUE_RE.test(String(value)))) {
+      if (
+        !Array.isArray(list) ||
+        list.some((value) => typeof value !== "string" || !BLOCK_VALUE_RE.test(value))
+      ) {
         problems.push(
           `modules.${module}.${key} must be a list of block names (letters, digits, _ -)`,
         );

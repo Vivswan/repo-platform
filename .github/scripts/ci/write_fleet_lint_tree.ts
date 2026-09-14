@@ -40,7 +40,8 @@ export function writtenWorkflows(target: string): string[] {
     : [];
 }
 
-export function writeTargets(dest: string): Record<string, string[]> {
+/** `upstream` reaches the writer's --upstream: CI lints what the real github/gitignore renders, the test what a stub does. */
+export function writeTargets(dest: string, upstream?: string): Record<string, string[]> {
   const filesText = readFileSync(join(REPO_ROOT, "files.yml"), "utf-8");
   const written: Record<string, string[]> = {};
   for (const [name, modules] of Object.entries(selections(filesText))) {
@@ -68,6 +69,7 @@ export function writeTargets(dest: string): Record<string, string[]> {
         "false",
         "--summary",
         join(dest, `${name}.summary.json`),
+        ...(upstream === undefined ? [] : ["--upstream", upstream]),
       ],
       { cwd: REPO_ROOT },
     );
@@ -80,12 +82,16 @@ export function writeTargets(dest: string): Record<string, string[]> {
 }
 
 if (import.meta.main) {
-  const dest = process.argv[2];
-  if (dest === undefined || process.argv.length > 3) {
-    console.error("usage: write_fleet_lint_tree.ts <dest>");
+  const [dest, flag, upstream, ...rest] = process.argv.slice(2);
+  const shape =
+    dest !== undefined &&
+    rest.length === 0 &&
+    (flag === undefined ? upstream === undefined : flag === "--upstream" && upstream !== undefined);
+  if (!shape) {
+    console.error("usage: write_fleet_lint_tree.ts <dest> [--upstream <raw-content host>]");
     process.exit(2);
   }
-  for (const [name, workflows] of Object.entries(writeTargets(resolve(dest)))) {
+  for (const [name, workflows] of Object.entries(writeTargets(resolve(dest), upstream))) {
     console.log(`${name}: ${workflows.length} workflow(s): ${workflows.join(", ")}`);
   }
 }

@@ -5,8 +5,9 @@
 // own event loop for the child's whole run, so an in-process server would never answer: that test spawns the host as
 // its own process (`bun tests/shared/upstream_server.ts <dir>` prints the port and serves until killed).
 
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import type { FilesConfig } from "../../actions/plan/files_config.ts";
 
 function serve(dir: string): ReturnType<typeof Bun.serve> {
   return Bun.serve({
@@ -48,6 +49,22 @@ export async function spawnUpstream(dir: string): Promise<Upstream> {
     text += new TextDecoder().decode(value);
   }
   return { host: `http://127.0.0.1:${text.trim()}`, stop: () => proc.kill() };
+}
+
+/** A one-line stub of every path files.yml registers, served from its own process: for a test that runs the writer over
+ *  the real files.yml and reads something other than the .gitignore, since the writer fetches every registered path first. */
+export async function spawnStubUpstream(
+  config: Pick<FilesConfig, "files">,
+  dir: string,
+): Promise<Upstream> {
+  for (const entry of config.files) {
+    if (entry.class === "link" || "render" in entry || entry.upstream === undefined) continue;
+    for (const path of Object.values(entry.upstream.paths)) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), "# stub\n");
+    }
+  }
+  return spawnUpstream(dir);
 }
 
 if (import.meta.main) {
