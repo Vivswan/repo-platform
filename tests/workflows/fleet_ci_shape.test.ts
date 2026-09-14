@@ -40,7 +40,7 @@ const CHECKS_JOB = "standard-checks";
 const checksJob = fleetCi.jobs[CHECKS_JOB];
 const checkSteps = checksJob?.steps ?? [];
 const label = (step: Step) => step.id ?? step.name ?? step.uses ?? "";
-/** The `${{ }}` GitHub accepts around an `if:` goes; the clauses are split on `&&` and trimmed. */
+/** GitHub accepts `${{ }}` around an `if:`, so it is stripped before the clauses are read. */
 const clausesOf = (condition: string | undefined) =>
   (condition ?? "")
     .trim()
@@ -248,7 +248,8 @@ describe("fleet-ci.yml", () => {
 
   // GitHub resolves a read of an output nobody sets to '' with no error, so the skeleton's `contains(needs.ci.outputs.modules,
   // '"site"')` would skip its leg forever, green, and a module job here would do the same. Every read is walked to the step
-  // that sets it and on to the action declaring the output, so a rename anywhere on the chain fails here.
+  // that sets it and on to the action declaring the output, under ONE name the whole way (a workflow_call output wired to a
+  // job output of another name is a swap nothing else catches), so a rename or a swap anywhere on the chain fails here.
   const PLATFORM_ACTION = new RegExp(`^${PLATFORM_SLUG}/actions/([\\w-]+)@`);
   const actionOutputs = (uses: string): string[] | null => {
     const name = PLATFORM_ACTION.exec(uses)?.[1];
@@ -275,16 +276,19 @@ describe("fleet-ci.yml", () => {
     const wired = /^\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
     if (wired === null)
       return `job '${jobName}' output '${output}' is ${value}, not one step output`;
+    if (wired[2] !== output)
+      return `job '${jobName}' output '${output}' is wired to steps.${wired[1]}.outputs.${wired[2]}, another name`;
     return stepOutputGap(job, wired[1], wired[2]);
   };
 
   test("every output read resolves to a step that sets it: the skeleton's, the jobs', and the steps'", () => {
     const gaps: string[] = [];
-    const reads: string[] = [];
     const skeleton = readFileSync(join(ROOT, "files/base/.github/workflows/ci.yml"), "utf8");
+    const skeletonReads = new Set(
+      [...skeleton.matchAll(/needs\.ci\.outputs\.([\w-]+)/g)].map((match) => match[1]),
+    );
     const called = fleetCi.on.workflow_call.outputs;
-    for (const [, output] of skeleton.matchAll(/needs\.ci\.outputs\.([\w-]+)/g)) {
-      reads.push(`skeleton needs.ci.outputs.${output}`);
+    for (const output of skeletonReads) {
       const value = called[output]?.value;
       if (value === undefined) {
         gaps.push(
@@ -294,24 +298,29 @@ describe("fleet-ci.yml", () => {
       }
       const wired = /^\$\{\{ jobs\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
       const gap =
-        wired === null ? `is ${value}, not one job output` : jobOutputGap(wired[1], wired[2]);
+        wired === null
+          ? `is ${value}, not one job output`
+          : wired[2] !== output
+            ? `is wired to jobs.${wired[1]}.outputs.${wired[2]}, another name`
+            : jobOutputGap(wired[1], wired[2]);
       if (gap !== null) gaps.push(`workflow_call output '${output}': ${gap}`);
     }
     for (const [jobName, job] of Object.entries(fleetCi.jobs)) {
       const text = JSON.stringify(job);
       for (const [, needed, output] of text.matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-        reads.push(`${jobName} needs.${needed}.outputs.${output}`);
         const gap = jobOutputGap(needed, output);
         if (gap !== null)
           gaps.push(`job '${jobName}' reads needs.${needed}.outputs.${output}: ${gap}`);
       }
       for (const [, id, output] of text.matchAll(/steps\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-        reads.push(`${jobName} steps.${id}.outputs.${output}`);
         const gap = stepOutputGap(job, id, output);
         if (gap !== null) gaps.push(`job '${jobName}' reads steps.${id}.outputs.${output}: ${gap}`);
       }
     }
-    // Armed: the skeleton's two legs and the plan's five job outputs are among the reads.
-    expect({ gaps, reads: new Set(reads).size > 8 }).toEqual({ gaps: [], reads: true });
+    // The skeleton's read set is the contract this file keeps: the two legs the release and site jobs key on.
+    expect({ gaps, skeletonReads: [...skeletonReads].sort() }).toEqual({
+      gaps: [],
+      skeletonReads: ["modules", "tracking-labels"],
+    });
   });
 });

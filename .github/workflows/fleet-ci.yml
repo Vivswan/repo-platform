@@ -163,11 +163,14 @@ jobs:
           echo "$failed"
           exit 1
 
-  # Public only: the dependency-graph API is free just there. != 'true' so an empty visibility
-  # output runs the check, where a private repository fails loudly instead of skipping silently.
+  # Public only: the dependency-graph API is free just there. A successful plan publishes `modules` (at least `[]`) and
+  # a failed one publishes nothing, so `modules != ''` skips the job after a failed plan; `private != 'true'` then runs
+  # the check on an empty visibility, where a private repository fails loudly instead of skipping silently.
   dependency-review:
     needs: [standard-checks]
-    if: ${{ !cancelled() && needs.standard-checks.outputs.private != 'true' && github.event_name == 'pull_request' }}
+    if: >-
+      !cancelled() && needs.standard-checks.outputs.modules != '' &&
+      needs.standard-checks.outputs.private != 'true' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -175,10 +178,12 @@ jobs:
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@stable
 
-  # Public only: code scanning is where the findings go (!= 'true' as above).
+  # Public only: code scanning is where the findings go (the sentinel and != 'true' as above).
   semgrep:
     needs: [standard-checks]
-    if: ${{ !cancelled() && needs.standard-checks.outputs.private != 'true' && github.event_name != 'schedule' }}
+    if: >-
+      !cancelled() && needs.standard-checks.outputs.modules != '' &&
+      needs.standard-checks.outputs.private != 'true' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
