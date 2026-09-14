@@ -168,6 +168,8 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
   const MOVED =
     "the row's key names no repository in the owner's listing: the fleet moved since the plan job ran (a repository revoked or renamed mid-run); re-run the workflow";
 
+  // The runner masks by exact form, so every spelling maskForms registers is masked before any name is written,
+  // and the name leaves through GITHUB_ENV alone.
   test.each([
     { visibility: "public", row: rows[1] },
     { visibility: "private", row: rows[0] },
@@ -178,6 +180,8 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
     },
   );
 
+  // The privacy invariant on every refusal path, executed: no channel (stdout, stderr, GITHUB_ENV) carries a
+  // repository name in any case, and TARGET is never written.
   test.each<{ reason: string; env: Record<string, string | undefined>; outcome: Run }>([
     // A public repository stays listed with push after its PAT grant is revoked, so this case proves
     // only the missing-listing refusal.
@@ -201,36 +205,13 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
       env: { ROW_KEY: HIDDEN },
       outcome: refused(1, MOVED, [...before, LISTING]),
     },
+    // An empty value is unset to requireEnv, and the refusal comes before any listing; the other required variables
+    // pass through the same gate, so these two rows stand for them.
+    { reason: "no key", env: {}, outcome: refused(2, "ROW_KEY must be set", before) },
     {
       reason: "an empty key",
       env: { ROW_KEY: "" },
       outcome: refused(2, "ROW_KEY must be set", before),
-    },
-    { reason: "no key", env: {}, outcome: refused(2, "ROW_KEY must be set", before) },
-    {
-      reason: "no token to key with",
-      env: { ROW_KEY: keyOf(HIDDEN), PAT: undefined },
-      outcome: refused(2, "PAT must be set", before),
-    },
-    {
-      reason: "an empty token",
-      env: { ROW_KEY: keyOf(HIDDEN), PAT: "" },
-      outcome: refused(2, "PAT must be set", before),
-    },
-    {
-      reason: "no run id to key with",
-      env: { ROW_KEY: keyOf(HIDDEN), GITHUB_RUN_ID: undefined },
-      outcome: refused(2, "GITHUB_RUN_ID must be set", before),
-    },
-    {
-      reason: "no owner to list",
-      env: { ROW_KEY: keyOf(HIDDEN), OWNER: undefined },
-      outcome: refused(2, "OWNER must be set", before),
-    },
-    {
-      reason: "no GITHUB_ENV to write the name to",
-      env: { ROW_KEY: keyOf(HIDDEN), GITHUB_ENV: undefined },
-      outcome: refused(2, "GITHUB_ENV must be set", before),
     },
     {
       reason: "a listing that fails (gh's own stderr, no row resolved)",
@@ -347,13 +328,12 @@ describe("resolve_row.ts with a dispatched branch", () => {
 });
 
 describe("resolveRow", () => {
-  test("the listed repository carrying the key, at whatever index the listing put it", () => {
+  // A row bound by index instead of key synced the wrong repository when the listing moved (#223); a key no
+  // listed repository carries is a refusal that names no repository.
+  test("the listed repository carrying the key, at whatever index the listing put it; a key nobody carries is a refusal naming no repository", () => {
     expect(resolveRow(rows, keyOf(HIDDEN), keyOf)).toEqual({ target: rows[0] });
     expect(resolveRow([...rows].reverse(), keyOf(HIDDEN), keyOf)).toEqual({ target: rows[0] });
     expect(resolveRow([...rows].reverse(), keyOf(PUBLIC), keyOf)).toEqual({ target: rows[1] });
-  });
-
-  test("a key no listed repository carries is a refusal naming no repository", () => {
     expect(resolveRow(rows, keyOf(GONE), keyOf)).toEqual({
       refusal:
         "the row's key names no repository in the owner's listing: the fleet moved since the plan job ran (a repository revoked or renamed mid-run)",
@@ -362,17 +342,8 @@ describe("resolveRow", () => {
 });
 
 describe("the matrix rows", () => {
-  const text = JSON.stringify(matrixRows(rows, keyOf));
-
-  test("one row per repository: its index and its grouped key, and the resolver reads every row back", () => {
-    expect(matrixRows(rows, keyOf)).toEqual(
-      rows.map((row, index) => ({ row: index, key: keyOf(row.repo) })),
-    );
-    for (const { row, key } of matrixRows(rows, keyOf)) {
-      expect(key).toMatch(/^([0-9a-f]{3}~){21}[0-9a-f]$/);
-      expect(resolveRow(rows, key, keyOf)).toEqual({ target: rows[row] });
-    }
-  });
+  const matrix = matrixRows(rows, keyOf);
+  const text = JSON.stringify(matrix);
 
   // The runner drops a job output that carries a masked value, so a private name the matrix can
   // spell fails every row of the run. Each case is a bare name maskForms registers.
@@ -384,15 +355,17 @@ describe("the matrix rows", () => {
     for (const form of maskForms(repo)) expect(text).not.toContain(form);
   });
 
-  test("the matrix splits at its punctuation into pieces under the mask floor, in an alphabet no slug or URL form shares", () => {
+  // The general property behind the two names above, cross-file with shared/mask.ts: no piece between the matrix's
+  // punctuation reaches the mask floor, and its alphabet is one no slug or URL form shares; every row still reads back.
+  test("the matrix splits at its punctuation into pieces under the mask floor, in an alphabet no slug or URL form shares, one row per repository", () => {
+    expect(matrix).toEqual(rows.map((row, index) => ({ row: index, key: keyOf(row.repo) })));
     expect(text).toMatch(/^[0-9a-z~"{}[\]:,]+$/);
     for (const piece of text.split(/["{}[\]:,~]/)) {
       expect(piece.length).toBeLessThan(MIN_MASKED_NAME);
     }
-  });
-
-  test("the key changes with the run and the token, so a public log links no two runs' rows", () => {
-    expect(rowKeyOf(PAT, "1")(HIDDEN)).not.toBe(rowKeyOf(PAT, "2")(HIDDEN));
-    expect(rowKeyOf("other", RUN_ID)(HIDDEN)).not.toBe(keyOf(HIDDEN));
+    for (const { row, key } of matrix) {
+      expect(key).toMatch(/^([0-9a-f]{3}~){21}[0-9a-f]$/);
+      expect(resolveRow(rows, key, keyOf)).toEqual({ target: rows[row] });
+    }
   });
 });

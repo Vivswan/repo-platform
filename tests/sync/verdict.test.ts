@@ -1,28 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  DELIVERY_VERDICTS,
-  ROWS_FILE,
-  UNRESOLVED,
-  VERDICT_FILE,
-} from "../../.github/scripts/sync/verdict.ts";
+import { ROWS_FILE, VERDICT_FILE } from "../../.github/scripts/sync/verdict.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/verdict.ts");
-
-/** The complete vocabulary, one pattern per line shape (docs/sync.md). */
-const VOCABULARY = [
-  /^plan: \d+ rows$/,
-  /^row \d+: unchanged$/,
-  /^row \d+: PR opened$/,
-  /^row \d+: PR refreshed$/,
-  /^row \d+: branch pushed$/,
-  /^row \d+: failed, report filed in the target repository$/,
-  /^row \d+: failed before the target was resolved; re-run the workflow$/,
-];
 
 interface Run {
   exitCode: number;
@@ -58,84 +42,77 @@ function run(
 }
 
 describe("verdict.ts", () => {
-  const printed: string[] = [];
-  const speaks = (result: Run, line: string) => {
-    expect(result.stderr).toBe("");
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(`${line}\n`);
-    printed.push(line);
-  };
-  const silent = (result: Run) => {
+  // These are the only lines the operator's public log prints on its own behalf; rows.json carries real private
+  // slugs, and the plan line must carry none of them.
+  test.each([
+    { rows: '[{"repo":"o/a","private":false},{"repo":"o/b","private":true}]', count: 2 },
+    { rows: "[]", count: 0 },
+  ])("plan prints the row count from the selector's file: $count rows", ({ rows, count }) => {
+    const result = run("plan", {}, { rows });
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: `plan: ${count} rows\n`,
+      stderr: "",
+      outputs: `count=${count}\n`,
+    });
+  });
+
+  // The lines are docs/sync.md's vocabulary spelled here, independent of the printer's own table, so a swapped
+  // mapping cannot pass by agreeing with itself; an unresolved row is told from a delivered one by TARGET alone.
+  test.each<{ verdict?: string; row: string; line: string }>([
+    { verdict: "unchanged", row: "0", line: "row 0: unchanged" },
+    { verdict: "opened", row: "1", line: "row 1: PR opened" },
+    { verdict: "refreshed", row: "2", line: "row 2: PR refreshed" },
+    { verdict: "pushed", row: "3", line: "row 3: branch pushed" },
+    { verdict: "failed", row: "4", line: "row 4: failed, report filed in the target repository" },
+    {
+      // No TARGET: the resolver refused, so no verdict file exists and the row says so under its own index.
+      row: "5",
+      line: "row 5: failed before the target was resolved; re-run the workflow",
+    },
+  ])("a row prints $line", ({ verdict, row, line }) => {
+    const target = verdict === undefined ? "" : "o/r";
+    expect(run("row", { ROW: row, TARGET: target }, { verdict })).toEqual({
+      exitCode: 0,
+      stdout: `${line}\n`,
+      stderr: "",
+      outputs: "",
+    });
+  });
+
+  // A missing or unknown verdict file, a rows file off its shape, or a bad call must fail the row and print
+  // nothing: a line invented here would read as a delivery in the public log.
+  test.each<{
+    reason: string;
+    mode: string;
+    env: Record<string, string>;
+    files?: { verdict?: string; rows?: string };
+  }>([
+    {
+      reason: "a plan over a non-list rows file",
+      mode: "plan",
+      env: {},
+      files: { rows: '{"repo":"a"}' },
+    },
+    { reason: "a plan with no rows file", mode: "plan", env: {} },
+    {
+      reason: "a resolved row with no verdict file",
+      mode: "row",
+      env: { ROW: "1", TARGET: "o/r" },
+    },
+    {
+      reason: "a resolved row with a verdict outside the vocabulary",
+      mode: "row",
+      env: { ROW: "1", TARGET: "o/r" },
+      files: { verdict: "exploded" },
+    },
+    { reason: "an unknown mode", mode: "verdict", env: {} },
+    { reason: "a row index that is not a number", mode: "row", env: { ROW: "x", TARGET: "" } },
+  ])("$reason is silent and red", ({ mode, env, files }) => {
+    const result = run(mode, env, files);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
+    expect(result.outputs).toBe("");
     expect(result.exitCode).not.toBe(0);
-  };
-
-  test("plan prints the row count from the selector's file", () => {
-    const result = run(
-      "plan",
-      {},
-      { rows: '[{"repo":"o/a","private":false},{"repo":"o/b","private":true}]' },
-    );
-    speaks(result, "plan: 2 rows");
-    expect(result.outputs).toBe("count=2\n");
-    expect(result.stdout).not.toContain("o/");
-  });
-
-  test("an empty plan is zero rows", () => {
-    const result = run("plan", {}, { rows: "[]" });
-    speaks(result, "plan: 0 rows");
-    expect(result.outputs).toBe("count=0\n");
-  });
-
-  test("a plan over a non-list or a missing rows file is silent and red", () => {
-    silent(run("plan", {}, { rows: '{"repo":"a"}' }));
-    silent(run("plan", {}));
-  });
-
-  test("a row whose target was never resolved says so", () => {
-    speaks(run("row", { ROW: "3", TARGET: "" }), `row 3: ${UNRESOLVED}`);
-  });
-
-  // The expected lines are spelled here, independent of the printer's own
-  // table, so a swapped mapping cannot pass by agreeing with itself.
-  test.each([
-    { verdict: "unchanged", line: "row 0: unchanged" },
-    { verdict: "opened", line: "row 0: PR opened" },
-    { verdict: "refreshed", line: "row 0: PR refreshed" },
-    { verdict: "pushed", line: "row 0: branch pushed" },
-    { verdict: "failed", line: "row 0: failed, report filed in the target repository" },
-  ])("a delivered row prints the $verdict line", ({ verdict, line }) => {
-    speaks(run("row", { ROW: "0", TARGET: "o/r" }, { verdict }), line);
-  });
-
-  test("the delivery verdicts are exactly the five lines above", () => {
-    expect([...DELIVERY_VERDICTS].sort()).toEqual([
-      "failed",
-      "opened",
-      "pushed",
-      "refreshed",
-      "unchanged",
-    ]);
-  });
-
-  test("a resolved row with no verdict, or an unknown one, is silent and red", () => {
-    silent(run("row", { ROW: "1", TARGET: "o/r" }));
-    silent(run("row", { ROW: "1", TARGET: "o/r" }, { verdict: "exploded" }));
-  });
-
-  test("an unknown mode or a bad row index is silent and red", () => {
-    silent(run("verdict", {}));
-    silent(run("row", { ROW: "x", TARGET: "" }));
-  });
-
-  test("every printed line is in the vocabulary, and every vocabulary line was printed", () => {
-    const matched = new Set<number>();
-    for (const line of printed) {
-      const hits = VOCABULARY.flatMap((pattern, index) => (pattern.test(line) ? [index] : []));
-      expect(hits).toHaveLength(1);
-      matched.add(hits[0]);
-    }
-    expect([...matched].sort()).toEqual(VOCABULARY.map((_, index) => index));
   });
 });

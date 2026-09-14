@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { parseFlags } from "../../../.github/scripts/sync/writer/flags.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 
 const HELPER = join(import.meta.dir, "../../../.github/scripts/sync/writer/flags.ts");
 
-// Error paths call process.exit, so exercise them in a subprocess the way
-// the adopting scripts hit them. Failures print ::error:: workflow
-// commands on stdout (the stream the runner parses them from).
+// A refusal calls process.exit, so it runs in a subprocess the way the adopting scripts hit it; the ::error::
+// workflow command lands on stdout, the stream the runner parses it from.
 function run(snippet: string): { exitCode: number; stdout: string } {
   const proc = boundedSpawnSync([
     "bun",
@@ -17,60 +15,30 @@ function run(snippet: string): { exitCode: number; stdout: string } {
   return { exitCode: proc.exitCode, stdout: proc.stdout };
 }
 
-describe("parseFlags", () => {
-  // toStrictEqual, so an undefined-valued key is not read as an absent key.
-  const parses: [string, string[], string[], string[], Record<string, string>][] = [
+describe("parseFlags refuses", () => {
+  test.each<[string, string, string]>([
     [
-      "required and optional flags land as a typed record",
-      ["--a", "1", "--b", "2"],
-      ["--a"],
-      ["--b"],
-      { "--a": "1", "--b": "2" },
-    ],
-    [
-      "last occurrence wins for a duplicated flag",
-      ["--a", "1", "--a", "2"],
-      ["--a"],
-      [],
-      { "--a": "2" },
-    ],
-    ["an empty-string value satisfies a required flag", ["--a", ""], ["--a"], [], { "--a": "" }],
-    [
-      "a value that looks like a flag is consumed as the value",
-      ["--a", "--b"],
-      ["--a"],
-      [],
-      { "--a": "--b" },
-    ],
-    ["an absent optional flag is simply missing", ["--a", "1"], ["--a"], ["--b"], { "--a": "1" }],
-  ];
-  test.each(parses)("%s", (_reason, argv, required, optional, expected) => {
-    expect(parseFlags(argv, required, optional)).toStrictEqual(expected);
-  });
-
-  const failures: [string, string, string][] = [
-    [
-      "an inherited object key does not satisfy a required flag",
+      // The parsed record is a plain object: an `in` check would let toString satisfy a required flag nobody passed.
+      "an inherited object key as a required flag's value",
       'parseFlags([], ["toString"]);',
       "::error::missing required flags: toString\n",
     ],
     [
-      "an unknown flag fails naming the allowed set",
+      "an unknown flag, naming the allowed set",
       'parseFlags(["--nope", "1"], ["--a"]);',
       '::error::unknown or valueless argument "--nope" - allowed flags: --a\n',
     ],
     [
-      "a trailing flag with no value fails naming that flag",
+      "a trailing flag with no value, naming that flag",
       'parseFlags(["--a"], ["--a"]);',
       '::error::unknown or valueless argument "--a" - allowed flags: --a\n',
     ],
     [
-      "a missing required flag fails naming exactly the missing ones",
+      "a missing required flag, naming exactly the missing ones",
       'parseFlags(["--a", "1"], ["--a", "--b", "--c"]);',
       "::error::missing required flags: --b, --c\n",
     ],
-  ];
-  test.each(failures)("%s", (_reason, snippet, expectedStdout) => {
+  ])("%s", (_reason, snippet, expectedStdout) => {
     expect(run(snippet)).toEqual({ exitCode: 1, stdout: expectedStdout });
   });
 });

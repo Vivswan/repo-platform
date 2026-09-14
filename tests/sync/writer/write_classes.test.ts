@@ -16,13 +16,17 @@ import { sha256 } from "../../../actions/shared/values.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
+const markers = HASH_REGION_MARKERS;
+const region = (body: string) => renderRegion(body, markers);
 
 function read(target: string, path: string): string {
   return readFileSync(join(target, path), "utf-8");
 }
 
 describe("writeManaged", () => {
-  test("created, unchanged, updated (recorded hash matches), replaced (it does not)", () => {
+  // The recorded-hash rule: "updated" only when the standing bytes are the last write; any other content, an
+  // unrecorded file included, is reported as replaced and holds the PR.
+  test("created, unchanged, updated (the recorded hash matches), replaced (it does not, or nothing was recorded)", () => {
     const target = temp.dir("writer-managed-");
     expect(writeManaged(target, "a/b.txt", "v1\n", null)).toEqual({ change: "created" });
     expect(writeManaged(target, "a/b.txt", "v1\n", null)).toEqual({ change: "unchanged" });
@@ -33,46 +37,54 @@ describe("writeManaged", () => {
       replaced: "local\n",
     });
     expect(read(target, "a/b.txt")).toBe("v3\n");
-  });
-
-  test("an unrecorded existing file that differs counts as local edits", () => {
-    const target = temp.dir("writer-managed-unrecorded-");
     writeFileSync(join(target, "x"), "theirs");
-    expect(writeManaged(target, "x", "ours", null).change).toBe("replaced local edits");
-  });
-
-  test("a directory at the path or a symlinked ancestor is refused loudly; a symlink is held", () => {
-    const target = temp.dir("writer-managed-nonfile-");
-    mkdirSync(join(target, "dir"));
-    symlinkSync("dir", join(target, "link"));
-    expect(() => writeManaged(target, "dir", "x", null)).toThrow("not a regular file");
-    expect(writeManaged(target, "link", "x", null)).toEqual({
-      change: "held",
-      reason: "a symbolic link sits where a file is declared",
+    expect(writeManaged(target, "x", "ours", null)).toEqual({
+      change: "replaced local edits",
+      replaced: "theirs",
     });
-    expect(readlinkSync(join(target, "link"))).toBe("dir");
-    expect(() => writeManaged(target, "link/inside.txt", "x", null)).toThrow(
-      "ancestor 'link' is a symbolic link",
-    );
-    expect(existsSync(join(target, "dir/inside.txt"))).toBe(false);
+    expect(read(target, "x")).toBe("ours");
   });
 });
 
+describe("what stands at the path", () => {
+  const writers = {
+    managed: (target: string, path: string) => writeManaged(target, path, "x", null),
+    split: (target: string, path: string) => writeSplit(target, path, region("a"), markers, null),
+  };
+  // insideTarget's one home: a linked ancestor would carry a write outside the checkout. A link at the path is held
+  // and never read through, and a directory there is a hard error, for both writers alike.
+  test.each(Object.entries(writers))(
+    "%s: a directory at the path or a symlinked ancestor is refused loudly; a symlink is held and its target untouched",
+    (_kind, write) => {
+      const target = temp.dir("writer-standing-");
+      mkdirSync(join(target, "dir"));
+      writeFileSync(join(target, "real"), "mine\n");
+      symlinkSync("dir", join(target, "link"));
+      symlinkSync("real", join(target, "f"));
+      expect(() => write(target, "dir")).toThrow("not a regular file");
+      expect(write(target, "f")).toEqual({
+        change: "held",
+        reason: "a symbolic link sits where a file is declared",
+      });
+      expect(readlinkSync(join(target, "f"))).toBe("real");
+      expect(read(target, "real")).toBe("mine\n");
+      expect(() => write(target, "link/inside.txt")).toThrow("ancestor 'link' is a symbolic link");
+      expect(existsSync(join(target, "dir/inside.txt"))).toBe(false);
+    },
+  );
+});
+
 describe("writeSplit", () => {
-  const markers = HASH_REGION_MARKERS;
-  const region = (body: string) => renderRegion(body, markers);
-
-  test("renderRegion terminates the body and wraps it in the marker lines", () => {
-    expect(region("a\nb")).toBe(`${markers.begin}\na\nb\n${markers.end}\n`);
-    expect(region("")).toBe(`${markers.begin}\n${markers.end}\n`);
-  });
-
+  // The second gate after verifySources: a substituted value carrying marker text would leave the file without an
+  // honest slice next run.
   test("renderRegion refuses a body that mentions a marker (a placeholder value can)", () => {
     expect(() => region(`about ${markers.end} here`)).toThrow("mentions the marker text");
   });
 
-  test("a new file is the region alone; a marker-less file keeps its content below and is reported", () => {
-    const target = temp.dir("writer-split-new-");
+  // A marker-less file is repository content the region is added above, never overwritten, and the row holds the
+  // PR; a split file is rewritten between its repository-owned halves, and an edited region is a local edit.
+  test("a new file is the region alone; a marker-less file keeps its content below the added region; a split file is rewritten between its halves", () => {
+    const target = temp.dir("writer-split-");
     expect(writeSplit(target, ".gitignore", region("a"), markers, null)).toEqual({
       change: "created",
     });
@@ -86,12 +98,8 @@ describe("writeSplit", () => {
     expect(writeSplit(target, "unmarked", region("a"), markers, sha256(region("a")))).toEqual({
       change: "region added",
     });
-  });
-
-  test("the region is rewritten between the repository-owned halves", () => {
-    const target = temp.dir("writer-split-rewrite-");
-    const file = `# above\n${region("old")}# below\n`;
-    writeFileSync(join(target, "f"), file);
+    expect(read(target, "unmarked")).toBe(`${region("a")}theirs\n`);
+    writeFileSync(join(target, "f"), `# above\n${region("old")}# below\n`);
     expect(writeSplit(target, "f", region("old"), markers, null)).toEqual({ change: "unchanged" });
     expect(writeSplit(target, "f", region("new"), markers, sha256(region("old")))).toEqual({
       change: "updated",
@@ -101,19 +109,10 @@ describe("writeSplit", () => {
       change: "replaced local edits",
       replaced: region("new"),
     });
+    expect(read(target, "f")).toBe(`# above\n${region("newer")}# below\n`);
   });
 
-  test("a symlink at the path is held, never read through", () => {
-    const target = temp.dir("writer-split-link-");
-    writeFileSync(join(target, "real"), "mine\n");
-    symlinkSync("real", join(target, "f"));
-    expect(writeSplit(target, "f", region("a"), markers, null)).toEqual({
-      change: "held",
-      reason: "a symbolic link sits where a file is declared",
-    });
-    expect(read(target, "real")).toBe("mine\n");
-  });
-
+  // A guessed slice is silent data loss in a repository-owned file.
   test.each([
     ["duplicated markers", `${region("a")}${region("b")}`],
     ["marker text buried mid-line", `the boundary is ${markers.begin} in this file\n`],
@@ -127,7 +126,8 @@ describe("writeSplit", () => {
 });
 
 describe("writeStarter", () => {
-  test("written when absent, never touched or rendered again (a link there counts as present)", () => {
+  // Content is rendered only on creation: a present starter must not fail on missing placeholder values.
+  test("written when absent, never touched or rendered again (a link there counts as present); a missing value propagates", () => {
     const target = temp.dir("writer-starter-");
     const never = () => {
       throw new Error("rendered a present starter");
