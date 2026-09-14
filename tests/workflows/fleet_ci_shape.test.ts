@@ -1,7 +1,7 @@
 // fleet-ci.yml is the fleet's gate-job home; the yaml is the source and the diff its review, so only what a green run cannot
 // show is pinned here: GitHub's step rule (a bare step implies success(), so a failed check would hide every later one), the
-// judge's jq program executed, and the schedule census the yaml cannot express (the skeleton's `ci` caller is unconditional,
-// so a job without a schedule clause runs nightly fleet-wide).
+// judge's jq program executed, the schedule census the yaml cannot express (the skeleton's `ci` caller is unconditional, so a
+// job without a schedule clause runs nightly fleet-wide), and two gates whose wrong spelling stays green on every run.
 
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -13,9 +13,11 @@ import { tempDirs } from "../shared/temp_dir";
 const temp = tempDirs();
 
 interface Step {
+  id?: string;
   uses?: string;
   run?: string;
   if?: string;
+  with?: Record<string, string>;
   "continue-on-error"?: boolean;
 }
 interface Job {
@@ -121,6 +123,40 @@ describe("fleet-ci.yml", () => {
       });
     });
   }
+
+  // The merge ref GitHub checks out by default already contains main's tip, so the ancestry check would pass for every
+  // PR, stale ones included; only the PR head makes it a check.
+  test("release-pr checks out the PR head, never the merge ref", () => {
+    const steps = fleetCi.jobs["release-pr"]?.steps ?? [];
+    const ancestry = steps.findIndex((step) =>
+      (step.run ?? "").includes("merge-base --is-ancestor"),
+    );
+    expect(ancestry).toBeGreaterThan(0);
+    const checkouts = steps
+      .slice(0, ancestry)
+      .filter((step) => /^actions\/checkout@/.test(step.uses ?? ""));
+    expect(checkouts.map((step) => step.with?.ref)).toStrictEqual([
+      "${{ github.event.pull_request.head.sha }}",
+    ]);
+  });
+
+  // The action defers its verdict to the integrity output and stays green; only `!= 'success'` re-raises on 'failure' AND
+  // on an output that resolved empty (a broken mapping). A positive spelling (`== 'true'`) never fires on either: green.
+  test("validate-managed-files re-raises on anything but a literal success", () => {
+    const steps = fleetCi.jobs["validate-managed-files"]?.steps ?? [];
+    const validate = steps.find((step) => step.id === "validate");
+    expect(validate?.uses).toContain("/actions/validate-managed-files@");
+    const last = steps.at(-1);
+    expect({
+      if: last?.if,
+      lastLine: last?.run?.trim().split("\n").at(-1),
+      "continue-on-error": last?.["continue-on-error"],
+    }).toEqual({
+      if: "steps.validate.outputs.integrity != 'success'",
+      lastLine: "exit 1",
+      "continue-on-error": undefined,
+    });
+  });
 
   // Which jobs a scheduled run may reach: the plan and CodeQL on its weekly day (the nightly security scan rides
   // fleet-nightly.yml). Every other job's condition excludes the schedule event outright (the skip clause, or a PR-only

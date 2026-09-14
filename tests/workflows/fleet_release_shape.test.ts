@@ -1,15 +1,17 @@
-// The release-cut wiring GitHub reads as literals and never checks: the step order and the job lane. Both drift silently,
-// since every run that does run is green.
+// The release-cut wiring GitHub reads as literals and never checks: the step order, the job lane, and the action's output
+// mapping. Each drifts silently, since every run that does run is green.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { REPO_ROOT } from "../shared/action_step";
+import { loadAction, REPO_ROOT } from "../shared/action_step";
 
 interface Step {
   id?: string;
+  if?: string;
   run?: string;
+  env?: Record<string, string>;
 }
 interface Job {
   concurrency?: { group: string };
@@ -24,6 +26,27 @@ const job = (
 const skeleton = parseYaml(
   read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
 ) as { jobs: Record<string, Job> };
+
+// A mistyped output name in action.yml (release_cut) reads as empty to every consumer: cut, head, propose, and the guard all
+// skip, and the run is green. Set equality on purpose: an output nobody reads is dead surface.
+test("every release-health output is the check step's own, and every output the release job reads exists", () => {
+  const action = loadAction("actions/release-health/action.yml");
+  const outputs = Object.entries(action.outputs ?? {}).map(([name, { value }]) => ({
+    name,
+    value,
+  }));
+  expect(outputs.length).toBeGreaterThan(0);
+  const check = action.runs.steps.find((step) => step.id === "check");
+  expect(String(check?.run)).toContain("release-health.ts");
+  expect(outputs).toEqual(
+    outputs.map(({ name }) => ({ name, value: `\${{ steps.check.outputs.${name} }}` })),
+  );
+  const reads = [...JSON.stringify(job.steps).matchAll(/steps\.health\.outputs\.([\w-]+)/g)].map(
+    (match) => match[1],
+  );
+  expect(reads.length).toBeGreaterThan(0);
+  expect(new Set(reads)).toEqual(new Set(outputs.map(({ name }) => name)));
+});
 
 describe("fleet-release.yml's release-please job", () => {
   // release-please's propose phase ABORTS green while a merged PR still wears "autorelease: pending", so the stale-pending
