@@ -27,9 +27,9 @@ Settings stop being applied too: the central run only manages enrolled repos car
    git rm .repo-platform.yml .github/repo-platform-manifest.json
    ```
 
-2. Rewrite `.github/workflows/ci.yml`. The managed file is a thin caller of repo-platform's `fleet-ci.yml` reusable, and that call is all-or-nothing: its `validate-managed-files` job goes red once `.repo-platform.yml` is gone, and no input turns it off. Replace the `ci` job:
+2. Rewrite `.github/workflows/ci.yml`. The managed file is a thin caller of repo-platform's `fleet-ci.yml` reusable, and that call is all-or-nothing: its `validate-managed-files` step goes red once `.repo-platform.yml` is gone, and no input turns it off. Replace the `ci` job:
    - copy the jobs you want out of `fleet-ci.yml` into ci.yml (the composite actions they call stay public), or write your own
-   - drop the copied `plan` job, which reads the registration you deleted: remove `plan` from every copied job's `needs` list and replace each `needs.plan.outputs.*` condition and value with your repo's literals
+   - drop the copied `plan`, `validate`, and `managed-files` steps, which read the registration you deleted: remove `steps.plan.outcome == 'success' &&` from every copied step's condition, remove `standard-checks` from every copied job's `needs` list, and replace each `steps.plan.outputs.*` and `needs.standard-checks.outputs.*` condition and value with your repo's literals (actionlint reports a read of the deleted step)
    - the `release` and `site` legs need `ci` and read `needs.ci.outputs.*` in their conditions and inputs (`modules`, `tracking-labels`): delete the legs you do not keep and replace every such read in the rest with your repo's literals
    - after every job you remove, rewire each surviving job's `needs` to jobs that still exist (actionlint reports a dangling one)
    - the `nightly` caller runs `fleet-nightly.yml` on the schedule in a public repository, and its plan job reads the registration too: delete the job, or inline the scan with literal configuration

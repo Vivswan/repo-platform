@@ -5,6 +5,7 @@
 #   `./` ACTION path   -> the CALLER's checkout, so action refs stay Vivswan/repo-platform/actions/<name>@stable
 #   `./` WORKFLOW ref  -> this repository (reusable-codeql.yml)
 #   job permissions    -> checked against the skeleton ci.yml's caller grant BEFORE the job's `if` runs (tests/workflows/caller_ceilings.test.ts)
+#   `!cancelled()`     -> on every job below standard-checks: a bare job skips when a dependency fails, so a red check would hide its verdict
 # A job needing more than that grant lives in fleet-nightly.yml behind its own caller.
 
 name: Fleet CI
@@ -14,19 +15,33 @@ on:
     outputs:
       modules:
         description: The repository's module selection in canonical order, a compact JSON array.
-        value: ${{ jobs.plan.outputs.modules }}
+        value: ${{ jobs.standard-checks.outputs.modules }}
       tracking-labels:
         description: Comma-separated nightly tracking-issue labels of the selected stream modules.
-        value: ${{ jobs.plan.outputs.tracking-labels }}
+        value: ${{ jobs.standard-checks.outputs.tracking-labels }}
 
 permissions:
   contents: read
 
 jobs:
-  # The visibility input is empty on events without a repository object; the action asks the API then.
-  plan:
+  # One job for the plan and every check that runs in every repository: GitHub bills a job a rounded-up minute, so as
+  # separate jobs of 4 to 30 seconds they billed five to six minutes per push for about two minutes of work. A check
+  # step runs under `!cancelled() && steps.plan.outcome == 'success'`, so one red check hides no other and a plan that
+  # failed runs none; the judge at the end fails the job naming each failed step.
+  #
+  #   step ids               -> the check names the judge reports; a skipped step stood down, it is never a failure
+  #   != 'schedule'          -> the nightly cron reaches only the plan (CodeQL reads it on its weekly day)
+  #   knip's install last    -> trivy and the base checks judge the checkout before node_modules exists
+  #   the visibility input   -> empty on events without a repository object; the plan action asks the API then
+  standard-checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The sticky findings comments of validate-managed-files and file-size.
+      pull-requests: write
+      # zizmor's SARIF upload.
+      security-events: write
     outputs:
       modules: ${{ steps.plan.outputs.modules }}
       private: ${{ steps.plan.outputs.private }}
@@ -34,83 +49,55 @@ jobs:
       tracking-labels: ${{ steps.plan.outputs.tracking-labels }}
       weekly: ${{ steps.plan.outputs.weekly }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # fetch-depth 0: commit-names walks history and gitleaks scans the event's range.
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: .repo-platform.yml
-          sparse-checkout-cone-mode: false
-      - uses: Vivswan/repo-platform/actions/plan@stable
-        id: plan
+          fetch-depth: 0
+      - id: plan
+        uses: Vivswan/repo-platform/actions/plan@stable
         with:
           private: ${{ github.event.repository.private }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The action DEFERS its failure so the findings comment posts first; the step below re-raises it.
-  # != 'schedule': the nightly cron carries only the jobs that ask for it (codeql); the nightly scan
-  # itself rides fleet-nightly.yml.
-  validate-managed-files:
-    needs: [plan]
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      # Only for the sticky comment, and only on this job.
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/validate-managed-files@stable
-        id: validate
+      # The action DEFERS its failure so the findings comment posts first; the managed-files step re-raises it.
+      - id: validate
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: Vivswan/repo-platform/actions/validate-managed-files@stable
         with:
-          private: ${{ needs.plan.outputs.private }}
+          private: ${{ steps.plan.outputs.private }}
       # Fail-closed: != 'success' re-raises on 'failure' AND on an output
       # that resolved empty (a broken mapping must never read as green).
-      - name: Fail on a finding
-        if: steps.validate.outputs.integrity != 'success'
+      - id: managed-files
+        if: ${{ !cancelled() && steps.validate.outcome == 'success' && steps.validate.outputs.integrity != 'success' }}
         run: |
           echo "::error::validate-managed-files failed; see the findings on this PR (or the job summary) and the step log above."
           exit 1
 
-  # One job, not seven: a standalone job bills a rounded-up minute per push. !cancelled() on each
-  # step keeps later checks running past a failure, and the judge names every failed one.
-  base-checks:
-    needs: [plan]
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      # Write only for check-file-size's sticky comment.
-      pull-requests: write
-    steps:
-      # fetch-depth 0: commit-names walks history and gitleaks scans the event's range.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      # Step ids are the check names the judge reports.
       - id: typography
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: Vivswan/repo-platform/actions/check-typography@stable
       - id: file-size
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: Vivswan/repo-platform/actions/check-file-size@stable
       - id: commit-names
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: Vivswan/repo-platform/actions/validate-commit-names@stable
       - id: actionlint
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
       - id: yamllint
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: Vivswan/repo-platform/actions/yamllint@stable
       # Allowlist in the repo-owned _typos.toml, layered under the fleet's.
       - id: typos
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: Vivswan/repo-platform/actions/typos@stable
       # Allowlist false positives in the repo-owned .gitleaks.toml;
       # comments off: findings land in the log and summary, not PR comments.
       - id: gitleaks
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -118,19 +105,59 @@ jobs:
           # The action's default binary predates .gitleaks.toml's
           # minVersion floor and skips that check silently; pin past it.
           GITLEAKS_VERSION: "8.30.1"
-      - name: Judge the base checks
+
+      # SARIF uploads on public repositories only (a private personal repository has no code scanning);
+      # != 'true' so an empty visibility output uploads, where a private repository fails loudly
+      # instead of skipping silently.
+      - id: zizmor
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: Vivswan/repo-platform/actions/zizmor@stable
+        with:
+          upload-sarif: ${{ steps.plan.outputs.private != 'true' }}
+
+      # Blocks for every visibility (docs/security-scans.md); the only bypass is the repository's
+      # .trivyignore.yaml, statement and expiry per entry.
+      - id: trivy
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: Vivswan/repo-platform/actions/trivy@stable
+
+      # knip resolves imports through node_modules, so the repository's own bun installs first; it runs knip's
+      # defaults, overridden by whatever knip configuration the repository carries (a configured entry or
+      # project list replaces the default list, it does not extend it). A repository committed right after
+      # selecting the module has no package.json yet, so knip stands down then.
+      - id: bun
+        if: >-
+          !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' &&
+          contains(steps.plan.outputs.modules, '"bun"')
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - id: bun-install
+        if: ${{ !cancelled() && steps.bun.outcome == 'success' && hashFiles('package.json') != '' }}
+        run: bun install --frozen-lockfile
+      - id: knip
+        if: ${{ !cancelled() && steps.bun-install.outcome == 'success' }}
+        uses: Vivswan/repo-platform/actions/knip@stable
+      - name: Note why knip stood down
+        if: ${{ !cancelled() && steps.bun.outcome == 'success' && steps.bun-install.outcome == 'skipped' }}
+        run: echo "::notice::knip stood down, this repository has no package.json to install from"
+
+      - name: Judge the checks
         if: always()
         env:
           STEPS: ${{ toJSON(steps) }}
         run: |
           {
-            printf '## Base checks\n\n| check | outcome | verdict |\n| --- | --- | --- |\n'
+            printf '## Standard checks\n\n| check | outcome | verdict |\n| --- | --- | --- |\n'
             jq -r 'to_entries[] | "| \(.key) | \(.value.outcome) | \(
-              if .value.conclusion != "success" then "FAILED" else "ok" end) |"' <<<"$STEPS"
+              if .value.conclusion == "success" then "ok"
+              elif .value.conclusion == "skipped" then "stood down"
+              else "FAILED" end) |"' <<<"$STEPS"
           } >>"$GITHUB_STEP_SUMMARY"
-          failed="$(jq -r 'to_entries[] | select(.value.conclusion != "success") | "::error::base check failed: \(.key)"' <<<"$STEPS")"
+          failed="$(jq -r 'to_entries[] | select(.value.conclusion != "success" and .value.conclusion != "skipped")
+            | "::error::check failed: \(.key)"' <<<"$STEPS")"
           if [ -z "$failed" ]; then
-            echo "all base checks passed"
+            echo "every check passed"
             exit 0
           fi
           echo "$failed"
@@ -139,8 +166,8 @@ jobs:
   # Public only: the dependency-graph API is free just there. != 'true' so an empty visibility
   # output runs the check, where a private repository fails loudly instead of skipping silently.
   dependency-review:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.private != 'true' && github.event_name == 'pull_request' }}
+    needs: [standard-checks]
+    if: ${{ !cancelled() && needs.standard-checks.outputs.private != 'true' && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -148,50 +175,10 @@ jobs:
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@stable
 
-  # SARIF uploads on public repositories only (a private personal repository has no code scanning);
-  # != 'true' so an empty visibility output uploads, where a private repository fails loudly
-  # instead of skipping silently.
-  zizmor:
-    needs: [plan]
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      # The SARIF upload only.
-      security-events: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/zizmor@stable
-        with:
-          upload-sarif: ${{ needs.plan.outputs.private != 'true' }}
-
-  # knip resolves imports through node_modules, so the repository's own bun installs first; it runs knip's
-  # defaults, overridden by whatever knip configuration the repository carries (a configured entry or
-  # project list replaces the default list, it does not extend it). A repository committed right after
-  # selecting the module has no package.json yet, so the job stands down then.
-  knip:
-    needs: [plan]
-    if: contains(fromJSON(needs.plan.outputs.modules), 'bun') && github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - id: bun-install
-        if: hashFiles('package.json') != ''
-        run: bun install --frozen-lockfile
-      - uses: Vivswan/repo-platform/actions/knip@stable
-        if: steps.bun-install.outcome == 'success'
-      - if: steps.bun-install.outcome == 'skipped'
-        run: echo "::notice::knip stood down, this repository has no package.json to install from"
-
   # Public only: code scanning is where the findings go (!= 'true' as above).
   semgrep:
-    needs: [plan]
-    if: needs.plan.outputs.private != 'true' && github.event_name != 'schedule'
+    needs: [standard-checks]
+    if: ${{ !cancelled() && needs.standard-checks.outputs.private != 'true' && github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -204,12 +191,15 @@ jobs:
 
   # On the nightly schedule it runs on the week's Monday alone (the plan's weekly output).
   codeql:
-    needs: [plan]
-    if: needs.plan.outputs.codeql-languages != '[]' && needs.plan.outputs.codeql-languages != '' && (github.event_name != 'schedule' || needs.plan.outputs.weekly == 'true')
+    needs: [standard-checks]
+    if: >-
+      !cancelled() &&
+      needs.standard-checks.outputs.codeql-languages != '[]' && needs.standard-checks.outputs.codeql-languages != '' &&
+      (github.event_name != 'schedule' || needs.standard-checks.outputs.weekly == 'true')
     strategy:
       fail-fast: false
       matrix:
-        language: ${{ fromJSON(needs.plan.outputs.codeql-languages) }}
+        language: ${{ fromJSON(needs.standard-checks.outputs.codeql-languages) }}
     permissions:
       contents: read
       security-events: write
@@ -221,8 +211,8 @@ jobs:
   # A dead internal link fails the PR here instead of the site leg after the merge. The hashFiles
   # guard sits on the step: GitHub does not allow hashFiles in a job-level if.
   docs-check:
-    needs: [plan]
-    if: contains(fromJSON(needs.plan.outputs.modules), 'site') && github.event_name == 'pull_request'
+    needs: [standard-checks]
+    if: ${{ !cancelled() && contains(needs.standard-checks.outputs.modules, '"site"') && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -238,8 +228,10 @@ jobs:
   # CHECK time: a stale release PR cuts a release missing commits already on main (other PRs stay mergeable while behind).
   # Health can go stale between check and release, so the release path re-runs the same action as its pre-flight.
   release-pr:
-    needs: [plan]
-    if: contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    needs: [standard-checks]
+    if: >-
+      !cancelled() && contains(needs.standard-checks.outputs.modules, '"release-please"') &&
+      github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # vulnerability-alerts read is the Dependabot alerts API key; without it the security gate fails.
@@ -271,17 +263,6 @@ jobs:
         with:
           mode: pull-request
           # Empty disables the tracking gates (no stream module selected).
-          tracking-labels: ${{ needs.plan.outputs.tracking-labels }}
+          tracking-labels: ${{ needs.standard-checks.outputs.tracking-labels }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Blocks for every visibility (docs/security-scans.md); the only bypass is the repository's
-  # .trivyignore.yaml, statement and expiry per entry.
-  trivy:
-    needs: [plan]
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/trivy@stable

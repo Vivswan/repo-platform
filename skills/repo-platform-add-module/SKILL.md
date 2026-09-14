@@ -77,7 +77,7 @@ git commit -am "chore: select the nightly module"
 gh pr create
 ```
 
-The `plan` job of fleet CI parses `.repo-platform.yml` on the PR: an unknown key, a wrong shape, a duplicate module name, a module name the platform does not offer, or a `labels.*` key whose module is not selected fails there. Merge when green.
+The `plan` step of fleet CI parses `.repo-platform.yml` on the PR: an unknown key, a wrong shape, a duplicate module name, a module name the platform does not offer, or a `labels.*` key whose module is not selected fails there. Merge when green.
 
 One exception to "registration first", where a gate job the selection turns on reads a file of yours on that same PR: `site` on a repo with a `docs/` directory. The `docs-check` job builds `docs/` strictly and needs `docs/README.md` (the landing page). Add it in the same PR, or the PR is red. A repo whose own website renders `docs/` sets `site.path: null` instead: the website publishes alone and `docs-check` stands down.
 
