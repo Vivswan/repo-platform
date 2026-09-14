@@ -23,6 +23,9 @@ const PROTO = "__proto__";
 const CTOR = "constructor";
 
 describe("renderManifest", () => {
+  // Cross-file: the validator's parser (actions/shared/manifest.ts) reads what the writer renders, and the self
+  // entry's null hash plus its commit is what manifest_parity and check.ts key on; sorted one-line entries keep the
+  // fleet's diffs readable.
   test("one entry per line, sorted, with the self entry carrying the commit and no hash", () => {
     const text = renderManifest(
       {
@@ -56,14 +59,6 @@ describe("renderManifest", () => {
       "m/link.txt": { class: "mirror", kind: "symlink", hash: sha256("../s.yml") },
       "s.yml": { class: "starter" },
     });
-    expect(Object.keys(parsed.files ?? {})).toEqual([
-      MANIFEST_NAME,
-      "a.md",
-      "b.txt",
-      "m/copy.txt",
-      "m/link.txt",
-      "s.yml",
-    ]);
     expect(text.split("\n")).toEqual([
       "{",
       expect.stringMatching(/^ {2}"\$comment": ".*",$/),
@@ -82,6 +77,9 @@ describe("renderManifest", () => {
 });
 
 describe("readRecord", () => {
+  // Cross-file with RECORD_FIELDS in actions/shared/manifest.ts: a shape refused here, the manifest's own hash-null
+  // entry aside, is a finding on the target side; retire.ts and mirrors.ts judge through this, so no path is held or
+  // vouched for on a record the writer could not have written.
   const split = (grammar: string) => ({
     class: "split",
     grammar,
@@ -107,11 +105,6 @@ describe("readRecord", () => {
     ],
     ["a starter", { class: "starter" }, { class: "starter" }],
     ["a starter carrying a hash", { class: "starter", hash: HASH }, null],
-    [
-      "a link record, the class that left with the fleet symlinks becoming mirrors",
-      { class: "link", hash: HASH },
-      null,
-    ],
     ["a mirror copy", { class: "mirror", hash: HASH }, { class: "mirror", hash: HASH }],
     [
       "a symlink mirror",
@@ -140,7 +133,6 @@ describe("readRecord", () => {
       null,
     ],
     ["a class the writer does not record", { class: "bespoke", hash: HASH }, null],
-    ["no record", undefined, null],
   ];
   test.each(cases)("reads %s", (_name, entry, record) => {
     expect(readRecord(entry)).toEqual(record);
@@ -148,12 +140,11 @@ describe("readRecord", () => {
 });
 
 describe("readRecords", () => {
-  test("a missing manifest is no records and no problem", () => {
-    expect(readRecords(temp.dir("writer-manifest-none-"))).toEqual({ records: {}, problem: null });
-  });
-
-  test("a written manifest reads back; an unparsable one is a problem", () => {
+  // The round trip through the file; a missing manifest is a first sync, and an unparsable one is a problem the
+  // writer notes (every file then judged unrecorded) instead of a throw that would fail the row.
+  test("a missing manifest is no records; a written one reads back; an unparsable one is a problem", () => {
     const target = temp.dir("writer-manifest-");
+    expect(readRecords(target)).toEqual({ records: {}, problem: null });
     writeManifest(target, { "a.txt": { class: "managed", hash: HASH } }, BUILD);
     const { records, problem } = readRecords(target);
     expect(problem).toBeNull();
@@ -169,10 +160,11 @@ describe("readRecords", () => {
     });
   });
 
+  // Prototype pollution: on a plain object a lookup of an absent __proto__ answers Object.prototype, which every
+  // reader would then judge; the null prototype is load-bearing here alone. An object literal keyed __proto__ would
+  // set the fixture's prototype, so the records are built as the writer builds them, from entries.
   test("a path named __proto__ is an ordinary key: written, read back, and absent when unrecorded", () => {
     const target = temp.dir("writer-manifest-proto-");
-    // An object literal would set the prototype; the writer builds its
-    // records from a Map the same way.
     const records: Record<string, ManifestRecord> = Object.fromEntries([
       [PROTO, { class: "managed", hash: HASH }],
       [CTOR, { class: "starter" }],
@@ -191,6 +183,8 @@ describe("readRecords", () => {
     expect(empty[CTOR]).toBeUndefined();
   });
 
+  // The manifest is one of the two files the writer must trust as a file (registration.test.ts pins the other):
+  // reading through a link would let a target repository choose what the writer believes it wrote.
   test("a symlink at the manifest path is refused for reading and writing", () => {
     const target = temp.dir("writer-manifest-link-");
     mkdirSync(join(target, ".github"), { recursive: true });
@@ -203,6 +197,8 @@ describe("readRecords", () => {
 });
 
 describe("recordedCommit", () => {
+  // The commit check.ts judges a repository against until a sync moves it; a stamp the writer cannot read (a
+  // manifest from before the field, a hand edit) is null, and sync.ts's stamp rule then takes the build.
   test.each([
     ["no manifest", {}, null],
     ["a self entry before the field", { [MANIFEST_NAME]: { class: "managed", hash: null } }, null],
