@@ -79,13 +79,13 @@ describe("parseFilesConfig", () => {
         "placeholders: []",
         "files: []",
         "modules:",
-        "  bun: { codeql_language: javascript-typescript }",
+        "  bun: { codeql_languages: [javascript-typescript] }",
         "  site: { path: docs, tracking_label: { key: site, default: docs-link-rot, color: D4A72C, description: Link rot } }",
       ].join("\n"),
     );
     expect(config.modules).toEqual({
       bun: {
-        codeql_language: "javascript-typescript",
+        codeql_languages: ["javascript-typescript"],
       },
       site: {
         path: "docs",
@@ -193,7 +193,7 @@ describe("parseFilesConfig", () => {
     ],
     [
       "a when list mixing names with a derived list",
-      "files:\n  - { path: a, class: managed, when: { any: [bun, { declaring: codeql_language }] } }\nplaceholders: []\nmodules:\n  bun: {}",
+      "files:\n  - { path: a, class: managed, when: { any: [bun, { declaring: codeql_languages }] } }\nplaceholders: []\nmodules:\n  bun: {}",
       "files.0.when.any.1: Invalid input: expected string, received object",
     ],
     [
@@ -215,6 +215,21 @@ describe("parseFilesConfig", () => {
       "a module name that is not one path segment",
       "files: []\nmodules:\n  ../bun: {}\nplaceholders: []",
       "modules.../bun: Invalid key in record",
+    ],
+    [
+      "a many-of module-data key spelled as one word: the retired codeql_language",
+      "files: []\nmodules:\n  bun: { codeql_language: python }\nplaceholders: []",
+      "modules.bun.codeql_language: Invalid input: expected array, received string",
+    ],
+    [
+      "a many-of module-data key spelled as one word: a block list",
+      "files: []\nmodules:\n  uv: { gitignore_sources: Python }\nplaceholders: []",
+      "modules.uv.gitignore_sources: Invalid input: expected array, received string",
+    ],
+    [
+      "a many-of module-data key spelled as one word: a key the object prototype also carries",
+      "files: []\nmodules:\n  uv: { constructor: Python }\nplaceholders: []",
+      "modules.uv.constructor: Invalid input: expected array, received string",
     ],
     [
       "a retired list: a file the platform stops writing leaves its entry, and the sync retires the recorded file",
@@ -520,10 +535,10 @@ describe("a module list declared by module data", () => {
     [
       "placeholders: []",
       "modules:",
-      "  bun: { codeql_language: javascript-typescript }",
-      "  deno: { codeql_language: javascript-typescript }",
+      "  bun: { codeql_languages: [javascript-typescript] }",
+      "  deno: { codeql_languages: [javascript-typescript] }",
       "  rust: {}",
-      "  extra: { codeql_language: python }",
+      "  extra: { codeql_languages: [python] }",
       "settings:",
       "  baseline: files/settings/baseline.yml",
       "  layers:",
@@ -539,9 +554,9 @@ describe("a module list declared by module data", () => {
   test("the loader expands the list from the modules block, and selection reads the expanded list", () => {
     const config = parseFilesConfig(
       doc(
-        "{ private: false, any: { declaring: codeql_language } }",
-        "{ private: false, any: { declaring: codeql_language } }",
-        "{ private: false, without: { declaring: codeql_language } }",
+        "{ private: false, any: { declaring: codeql_languages } }",
+        "{ private: false, any: { declaring: codeql_languages } }",
+        "{ private: false, without: { declaring: codeql_languages } }",
       ),
     );
     expect(config.settings?.layers).toEqual([

@@ -122,10 +122,10 @@ const settingsSchema = z.strictObject({
 /** A module name is one path segment of the files/ tree. */
 const moduleName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "not a module name");
 
-/** looseObject: every other key rides along untyped (the block lists). A tracking label's `key` names the registration's `labels` key and the `<key>_label` placeholder. */
-const moduleDataSchema = z.looseObject({
+/** A tracking label's `key` names the registration's `labels` key and the `<key>_label` placeholder. */
+const moduleDataShape = z.looseObject({
   description: z.string().min(1).optional(),
-  codeql_language: z.string().min(1).optional(),
+  codeql_languages: names.optional(),
   tracking_label: z
     .looseObject({
       key: z.string().regex(/^[a-z][a-z0-9_]*$/, "not a label key"),
@@ -135,6 +135,19 @@ const moduleDataSchema = z.looseObject({
     })
     .optional(),
   path: z.string().min(1).optional(),
+});
+
+/** Every key outside the shape is a many-of key (a block list a file entry's `blocks` names), so one spelled as a word is refused
+ *  here and a reader (scripts/generate/build_gitignore.ts, the writer's blockCandidates) indexes it as a list. Refined rather than
+ *  a catchall: zod folds a catchall into an index signature the typed keys contradict. */
+const moduleDataSchema = moduleDataShape.superRefine((data, ctx) => {
+  for (const [key, value] of Object.entries(data)) {
+    if (Object.hasOwn(moduleDataShape.shape, key)) continue;
+    const parsed = names.safeParse(value);
+    if (parsed.success) continue;
+    for (const issue of parsed.error.issues)
+      ctx.addIssue({ ...issue, code: "custom", path: [key, ...issue.path] });
+  }
 });
 
 export type ModuleData = z.infer<typeof moduleDataSchema>;

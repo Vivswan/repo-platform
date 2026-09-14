@@ -186,7 +186,7 @@ export const SECURITY_LABEL = "security-nightly";
 /** Personal-account code scanning is public-only, so a private repository gets no CodeQL. */
 export function codeqlLanguages(selected: Module[], isPrivate: boolean): string[] {
   if (isPrivate) return [];
-  return [...new Set(selected.flatMap((m) => (m.codeql_language ? [m.codeql_language] : [])))];
+  return [...new Set(selected.flatMap((m) => m.codeql_languages ?? []))];
 }
 
 export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
