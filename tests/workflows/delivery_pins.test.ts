@@ -143,7 +143,10 @@ describe("self pins resolve at the delivery ref", () => {
   const callable = callableWorkflowNames(workflows);
   const exists = (rel: string) => existsSync(join(REPO_ROOT, rel));
 
-  test("the callable roster takes every workflow_call spelling, only directly under .github/workflows", () => {
+  // The controls that arm the sweep below: GitHub's resolution rule (a `.github/workflows/` stem must be callable and
+  // present; any other stem needs action.yml or action.yaml), the roster's workflow_call spellings, and the owner
+  // spellings a self pin may carry (a mistyped owner is a self pin on a repository that does not exist, not a third party).
+  test("a missing action directory, a non-callable workflow, a missing workflow file, and a mistyped owner each fail; every workflow_call spelling and owner spelling resolves", () => {
     const at = (name: string, text: string) => ({ path: `.github/workflows/${name}`, text });
     expect(
       callableWorkflowNames([
@@ -154,9 +157,6 @@ describe("self pins resolve at the delivery ref", () => {
         at("nested/call.yml", "on: workflow_call\n"),
       ]),
     ).toEqual(["list.yml", "mapping.yml", "string.yaml"]);
-  });
-
-  test("a missing action directory, a non-callable workflow, and a workflow file that is not there each fail to resolve; a callable one resolves in any case", () => {
     const pins = sourceSelfPins(
       [
         "      - uses: Vivswan/repo-platform/actions/plan@stable",
@@ -173,9 +173,6 @@ describe("self pins resolve at the delivery ref", () => {
       "repo-platform/.github/workflows/ci.yml",
       "repo-platform/.github/workflows/reusable-ghost.yml",
     ]);
-  });
-
-  test("a mistyped owner is a self pin on a repository that does not exist, not a third-party pin", () => {
     const owners = sourceSelfPins(
       [
         "      - uses: Vivswan/repo-platform/actions/plan@stable",
