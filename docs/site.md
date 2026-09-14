@@ -179,6 +179,9 @@ The issue body is lychee's report: a count table, then every failing URL with it
 | mail links | not http(s) |
 | private-network and loopback URLs | not on the public network (`--exclude-all-private`) |
 | same-site links and assets, relative or spelled with the site's own URL | judged against the artifact at build time, not over the network |
+| URLs matching the repository's root `.lycheeignore` | the repository's own list of what an anonymous crawl cannot judge: hosts behind a bot wall (403) or a login redirect |
+
+`.lycheeignore` is [lychee's own format](https://lychee.cli.rs/recipes/excluding-links/): one regular expression per line, `#` starting a comment. lychee reads it from its working directory alone, so the deploy copies the repository's copy into the assembled site after the Pages upload; the served site never carries it. Keep it to hosts that are alive in a browser and reject automated clients, each with the reason: a broken link excluded there is never reported again.
 
 ## Module parameters (registration keys)
 

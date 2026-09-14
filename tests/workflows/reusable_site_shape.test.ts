@@ -234,6 +234,19 @@ describe("reusable-site.yml", () => {
     expect(issues[0]?.with?.["artifacts-dir"]).toBe(ARTIFACTS_DIR);
   });
 
+  test("the repository's root .lycheeignore is staged into lychee's working directory after the upload (never served) and before the check, on the check's own condition", () => {
+    const stage = stepIndex((step) => (step.run ?? "").startsWith("cp .lycheeignore"));
+    const links = stepIndex((step) => step.id === "links");
+    expect(stage).toBeGreaterThan(usesIndex("actions/upload-pages-artifact@"));
+    expect(stage).toBeLessThan(links);
+    expect(steps[stage]).toEqual({
+      name: expect.any(String),
+      if: `${steps[links]?.if} && hashFiles('.lycheeignore') != ''`,
+      env: { SITE_DIR: "${{ steps.site.outputs.site-dir }}" },
+      run: 'cp .lycheeignore "$SITE_DIR/"',
+    });
+  });
+
   test("lychee's report is the one failure of the fuzz-issue contract: written under the artifacts-dir, it rides into the issue body whole", () => {
     const output = String(steps.find((step) => step.id === "links")?.with?.output);
     const report = steps.find((step) => step.with?.mode === "report");
