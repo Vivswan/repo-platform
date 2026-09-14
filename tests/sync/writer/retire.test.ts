@@ -164,7 +164,7 @@ describe("retire", () => {
     const target = checkout({ "old.md": "o\n" });
     // An object literal keyed __proto__ would set the fixture's prototype.
     writeFileSync(join(target, PROTO), "mine\n");
-    writeManifest(target, { "old.md": { class: "managed", hash: sha256("o\n") } }, "b".repeat(40));
+    writeManifest(target, { "old.md": { class: "managed", hash: sha256("o\n") } });
     const unrecorded = readRecords(target).records;
     expect(retire(target, [PROTO], unrecorded)).toEqual([]);
     expect(readFileSync(join(target, PROTO), "utf-8")).toBe("mine\n");
@@ -172,7 +172,6 @@ describe("retire", () => {
     writeManifest(
       target,
       Object.fromEntries([[PROTO, { class: "managed", hash: sha256("mine\n") }]]),
-      "b".repeat(40),
     );
     const records = readRecords(target).records;
     expect(Object.hasOwn(records, PROTO)).toBe(true);

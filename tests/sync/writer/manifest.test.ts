@@ -14,7 +14,6 @@ import { type ManifestEntryShape, parseManifestFiles } from "../../../actions/sh
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
-const BUILD = "0123456789abcdef0123456789abcdef01234567";
 const HASH = sha256("x");
 // Spelled as variables: the linter and the type checker read a literal
 // `.__proto__` or `.constructor` member as the inherited property.
@@ -22,28 +21,25 @@ const PROTO = "__proto__";
 const CTOR = "constructor";
 
 describe("renderManifest", () => {
-  test("one entry per line, sorted, with the self entry carrying the build", () => {
-    const text = renderManifest(
-      {
-        "b.txt": { class: "managed", hash: HASH },
-        "a.md": {
-          class: "split",
-          grammar: "managed-region",
-          begin: "<!-- B -->",
-          end: "<!-- E -->",
-          hash: HASH,
-        },
-        "s.yml": { class: "starter" },
-        "m/copy.txt": { class: "mirror", hash: HASH },
-        "m/link.txt": { class: "mirror", kind: "symlink", hash: sha256("../s.yml") },
-        "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
+  test("one entry per line, sorted, with the self entry carrying no hash", () => {
+    const text = renderManifest({
+      "b.txt": { class: "managed", hash: HASH },
+      "a.md": {
+        class: "split",
+        grammar: "managed-region",
+        begin: "<!-- B -->",
+        end: "<!-- E -->",
+        hash: HASH,
       },
-      BUILD,
-    );
+      "s.yml": { class: "starter" },
+      "m/copy.txt": { class: "mirror", hash: HASH },
+      "m/link.txt": { class: "mirror", kind: "symlink", hash: sha256("../s.yml") },
+      "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
+    });
     const parsed = parseManifestFiles(text);
     expect(parsed.problem).toBeNull();
     expect(parsed.files).toEqual({
-      [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD },
+      [MANIFEST_NAME]: { class: "managed", hash: null },
       "a.md": {
         class: "split",
         grammar: "managed-region",
@@ -71,7 +67,7 @@ describe("renderManifest", () => {
       "{",
       expect.stringMatching(/^ {2}"\$comment": ".*",$/),
       '  "files": {',
-      `    ${JSON.stringify(MANIFEST_NAME)}: {"class": "managed", "hash": null, "commit": "${BUILD}"},`,
+      `    ${JSON.stringify(MANIFEST_NAME)}: {"class": "managed", "hash": null},`,
       `    "CLAUDE.md": {"class": "link", "hash": "${link}"},`,
       `    "a.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- B -->", "end": "<!-- E -->", "hash": "${HASH}"},`,
       `    "b.txt": {"class": "managed", "hash": "${HASH}"},`,
@@ -96,19 +92,17 @@ describe("readRecord", () => {
   const cases: [string, ManifestEntryShape | undefined, ManifestRecord | null][] = [
     ["a managed record", { class: "managed", hash: HASH }, { class: "managed", hash: HASH }],
     ["a record without a hash", { class: "managed" }, null],
-    ["a record another tool left unstamped (hash null)", { class: "managed", hash: null }, null],
+    [
+      "the manifest's own entry, or a record another tool left unstamped (hash null)",
+      { class: "managed", hash: null },
+      null,
+    ],
     ["a hash that is no digest", { class: "managed", hash: "nothex" }, null],
     [
       "a record carrying a field its class does not",
       { class: "managed", hash: HASH, kind: "symlink" },
       null,
     ],
-    [
-      "the manifest's own entry, no record of a written file",
-      { class: "managed", hash: null, commit: BUILD },
-      null,
-    ],
-    ["a commit on a managed record", { class: "managed", hash: HASH, commit: BUILD }, null],
     ["a starter", { class: "starter" }, { class: "starter" }],
     ["a starter carrying a hash", { class: "starter", hash: HASH }, null],
     ["a link", { class: "link", hash: HASH }, { class: "link", hash: HASH }],
@@ -154,12 +148,12 @@ describe("readRecords", () => {
 
   test("a written manifest reads back; an unparsable one is a problem", () => {
     const target = temp.dir("writer-manifest-");
-    writeManifest(target, { "a.txt": { class: "managed", hash: HASH } }, BUILD);
+    writeManifest(target, { "a.txt": { class: "managed", hash: HASH } });
     const { records, problem } = readRecords(target);
     expect(problem).toBeNull();
     expect(records).toEqual({
       "a.txt": { class: "managed", hash: HASH },
-      [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD },
+      [MANIFEST_NAME]: { class: "managed", hash: null },
     });
     mkdirSync(join(target, ".github"), { recursive: true });
     writeFileSync(join(target, MANIFEST_NAME), "{ not json");
@@ -177,7 +171,7 @@ describe("readRecords", () => {
       [PROTO, { class: "managed", hash: HASH }],
       [CTOR, { class: "starter" }],
     ]);
-    writeManifest(target, records, BUILD);
+    writeManifest(target, records);
     expect(readFileSync(join(target, MANIFEST_NAME), "utf-8")).toContain(
       `    "__proto__": {"class": "managed", "hash": "${HASH}"},`,
     );
@@ -197,7 +191,7 @@ describe("readRecords", () => {
     writeFileSync(join(target, "notes.json"), '{"files": {}}');
     symlinkSync("../notes.json", join(target, MANIFEST_NAME));
     expect(() => readRecords(target)).toThrow("not a regular file");
-    expect(() => writeManifest(target, {}, BUILD)).toThrow("not a regular file");
+    expect(() => writeManifest(target, {})).toThrow("not a regular file");
     expect(readFileSync(join(target, "notes.json"), "utf-8")).toBe('{"files": {}}');
   });
 });

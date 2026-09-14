@@ -139,6 +139,7 @@ function oldManifest(): string {
     // The same with nothing at the path: nothing to review, so no note; the
     // record leaves the manifest like any other stale record of an absent file.
     "HANDMADE-GONE.md": `{"class": "managed", "hash": "${sha256(HANDMADE)}"}`,
+    // A self entry an earlier writer stamped with a build: the field leaves on this sync.
     [MANIFEST]: `{"class": "managed", "hash": null, "commit": "1111111111111111111111111111111111111111"}`,
   };
   const lines = Object.entries(entries).map(
@@ -263,8 +264,12 @@ function spawnSync(target: string, summaryPath: string, build = BUILD, extra: st
   );
 }
 
-function runSync(target: string, summaryPath: string): { stdout: string; summary: Summary } {
-  const result = spawnSync(target, summaryPath);
+function runSync(
+  target: string,
+  summaryPath: string,
+  build = BUILD,
+): { stdout: string; summary: Summary } {
+  const result = spawnSync(target, summaryPath, build);
   expect(result.stderr).toBe("");
   expect(result.exitCode).toBe(0);
   return { stdout: result.stdout, summary: JSON.parse(readFileSync(summaryPath, "utf-8")) };
@@ -573,7 +578,7 @@ describe("sync.ts end to end", () => {
     }
   });
 
-  test("records what it wrote in the manifest, the build on the self entry", () => {
+  test("records what it wrote in the manifest; the self entry carries no hash and no build", () => {
     const manifest = JSON.parse(read(MANIFEST)) as {
       files: Record<string, Record<string, unknown>>;
     };
@@ -616,7 +621,7 @@ describe("sync.ts end to end", () => {
         "docs/LICENSE.md",
       ].sort(),
     );
-    expect(manifest.files[MANIFEST]).toEqual({ class: "managed", hash: null, commit: BUILD });
+    expect(manifest.files[MANIFEST]).toEqual({ class: "managed", hash: null });
     expect(manifest.files["LICENSE.md"]).toEqual({
       class: "managed",
       hash: sha256(read("LICENSE.md")),
@@ -753,12 +758,17 @@ describe("sync.ts end to end", () => {
     ]);
   });
 
-  test("a second run changes no byte and reports every file unchanged", () => {
+  test("a second run under a new build changes no byte and reports every file unchanged", () => {
     const before = snapshot(target);
     // Control: the oracle sees the first run's changes, so an equal
     // snapshot below is evidence, not a blind comparison.
     expect(before).not.toEqual(seeded);
-    const again = runSync(target, join(temp.dir("sync-e2e-summary2-"), "summary.json"));
+    // A stable move over an unchanged tree: nothing names the build in the tree, so nothing is delivered.
+    const again = runSync(
+      target,
+      join(temp.dir("sync-e2e-summary2-"), "summary.json"),
+      BUILD.replace(/^abcdef/, "fedcba"),
+    );
     expect(again.summary.written.map((row) => row.change)).toEqual(
       summary.written.map((row) => (row.change === "held" ? "held" : "unchanged")),
     );
@@ -877,7 +887,7 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
         writeFileSync(join(target, OVERLAY), THEIRS);
         writeFileSync(
           join(target, MANIFEST),
-          `{\n  "files": {\n    ${JSON.stringify(MANIFEST)}: {"class": "managed", "hash": null, "commit": null},\n    ${JSON.stringify(SETTINGS)}: {"class": "starter"}\n  }\n}\n`,
+          `{\n  "files": {\n    ${JSON.stringify(MANIFEST)}: {"class": "managed", "hash": null},\n    ${JSON.stringify(SETTINGS)}: {"class": "starter"}\n  }\n}\n`,
         );
       },
       rows: [

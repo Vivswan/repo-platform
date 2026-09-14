@@ -60,7 +60,7 @@ describe("unknownEntryFields", () => {
     const lines = [
       `    "a.md": ${entryBody({ class: "starter" })}`,
       `    "b.md": ${entryBody({ class: "managed", hash: "h" })}`,
-      `    ${JSON.stringify(MANIFEST_NAME)}: ${entryBody({ class: "managed", commit: "c" })}`,
+      `    ${JSON.stringify(MANIFEST_NAME)}: ${entryBody({ class: "managed", hash: null })}`,
       `    "c.md": ${entryBody({ class: "split", grammar: "managed-region", begin: "# b", end: "# e", hash: "h" })}`,
       `    "d.md": ${entryBody({ class: "link", hash: "h" })}`,
     ];

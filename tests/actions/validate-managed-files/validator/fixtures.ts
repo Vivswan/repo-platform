@@ -13,8 +13,6 @@ export const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
 export const E = "<!-- END REPO-PLATFORM MANAGED -->";
 export const HB = "# BEGIN REPO-PLATFORM MANAGED";
 export const HE = "# END REPO-PLATFORM MANAGED";
-// The build commit a sync records: the writer stamps the full sha.
-export const COMMIT = "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01";
 
 export const FILES_YML = [
   "placeholders: []",
@@ -83,7 +81,7 @@ export function manifestOf(entries: Record<string, string>): string {
 
 export function stampedBaseline(): Record<string, string> {
   return {
-    [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${COMMIT}"}`,
+    [MANIFEST]: '{"class": "managed", "hash": null}',
     ".gitignore": splitEntry(BASELINE[".gitignore"], HB, HE),
     ".editorconfig": splitEntry(BASELINE[".editorconfig"], HB, HE),
     "LICENSE.md": splitEntry(BASELINE["LICENSE.md"], B, E),
@@ -93,7 +91,7 @@ export function stampedBaseline(): Record<string, string> {
 }
 
 export const SELF_ENTRY = {
-  [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${COMMIT}"}`,
+  [MANIFEST]: '{"class": "managed", "hash": null}',
 };
 
 export function gitFreeEnv(): Record<string, string> {

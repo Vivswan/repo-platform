@@ -385,7 +385,7 @@ export function runSync(options: SyncOptions): SyncReport {
         "the source's content)",
     );
   }
-  writeManifest(options.target, Object.fromEntries(next), options.build);
+  writeManifest(options.target, Object.fromEntries(next));
   return buildReport({
     build: options.build,
     modules: selected,
@@ -407,9 +407,8 @@ function main(argv: string[]): number {
   if (flags["--private"] !== "true" && flags["--private"] !== "false") {
     fail("--private must be true or false");
   }
-  // The manifest's commit field is read as a full sha by the fleet's
-  // validator (manifest_shape.ts), so a short one would fail every
-  // all-green in the target after the sync merges.
+  // The build is recorded as given (in full in the PR body, its first 12 characters in the sync commit's subject), so
+  // only the canonical full sha is accepted.
   if (!/^[0-9a-f]{40}$/.test(flags["--build"])) {
     fail(
       `--build must be the build commit's full sha (40 lowercase hex characters), got ${JSON.stringify(flags["--build"])}`,

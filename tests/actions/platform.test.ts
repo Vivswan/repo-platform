@@ -47,9 +47,7 @@ describe("the platform slug and every string the fleet observes derived from it"
       htmlMarkers: HTML_REGION_MARKERS,
       generatedNotice: GENERATED_NOTICE,
       renderedSettingsHeader: RENDERED_HEADER,
-      manifestComment: renderManifest({}, "0123456789abcdef0123456789abcdef01234567").split(
-        "\n",
-      )[1],
+      manifestComment: renderManifest({}).split("\n")[1],
       gitignoreCiSection: CI_WORKSPACE_SECTION,
       gitignoreFuzzerSection: PLATFORM_SECTIONS.fuzzer,
       syncBot: SYNC_BOT,
@@ -81,8 +79,7 @@ describe("the platform slug and every string the fleet observes derived from it"
         "hash covers the region from the BEGIN line through the END line), starter (written once, " +
         "repo-owned from then on), mirror (a byte copy of a written file, or with kind symlink a " +
         "relative symbolic link to it whose hash is sha256 of the link target, declared in " +
-        ".repo-platform.yml), link (a relative symbolic link; hash is sha256 of its target). This " +
-        "file's own entry records the build commit that wrote the tree.\",",
+        '.repo-platform.yml), link (a relative symbolic link; hash is sha256 of its target).",',
       gitignoreCiSection: "## CI workspace paths (repo-platform)\n/results.sarif\n",
       gitignoreFuzzerSection:
         "## Fuzzer workspace paths (repo-platform fuzzer)\n/.fuzz-failures/\n",
