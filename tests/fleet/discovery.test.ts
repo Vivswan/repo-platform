@@ -8,6 +8,7 @@ import {
   notAdoptedNotice,
   parseDiscovered,
   pushProbeSkipNotice,
+  readDispatchBranch,
   readDispatchRepo,
   scrubSlug,
 } from "../../.github/scripts/fleet/discovery.ts";
@@ -295,16 +296,51 @@ describe("readDispatchRepo", () => {
     });
   });
 
+  // The branch rides the payload as the repo does (never step env) and verbatim: a padded or case-changed value must
+  // reach the resolve probe as typed, never as the branch it resembles.
+  test.each([
+    {
+      reason: "the branch input beside the repo, whitespace and case kept",
+      eventBody: JSON.stringify({ inputs: { repo: "Vivswan/A", branch: " Feat/Add-Site " } }),
+      expected: " Feat/Add-Site ",
+    },
+    {
+      reason: "a no-break space is kept too",
+      eventBody: JSON.stringify({ inputs: { branch: "feat/add-site\u00a0" } }),
+      expected: "feat/add-site\u00a0",
+    },
+    {
+      reason: "a payload without a branch input reads as empty",
+      eventBody: JSON.stringify({ inputs: { repo: "Vivswan/A" } }),
+      expected: "",
+    },
+    {
+      reason: "a called run's payload (a push event, no inputs key) reads as empty",
+      eventBody: JSON.stringify({ ref: "refs/heads/main" }),
+      expected: "",
+    },
+    { reason: "nothing set reads as empty", eventBody: undefined, expected: "" },
+  ])("readDispatchBranch: $reason", ({ eventBody, expected }) => {
+    let eventPath = "";
+    if (eventBody !== undefined) {
+      eventPath = join(root, `event-${Bun.hash(eventBody).toString(16)}.json`);
+      writeFileSync(eventPath, eventBody);
+    }
+    withEnv({ GITHUB_EVENT_PATH: eventPath }, () => {
+      expect(readDispatchBranch()).toBe(expected);
+    });
+  });
+
   // The malformed cases exit the process (parseWith), so they run behind
   // a subprocess entry file.
   const dispatchEntry = join(root, "dispatch_entry.ts");
   writeFileSync(
     dispatchEntry,
     [
-      `import { readDispatchRepo } from ${JSON.stringify(
+      `import { readDispatchBranch, readDispatchRepo } from ${JSON.stringify(
         join(import.meta.dir, "../../.github/scripts/fleet/discovery.ts"),
       )};`,
-      "console.log(JSON.stringify(readDispatchRepo()));",
+      "console.log(JSON.stringify([readDispatchRepo(), readDispatchBranch()]));",
       "",
     ].join("\n"),
   );
@@ -325,15 +361,23 @@ describe("readDispatchRepo", () => {
   test("a wrong-typed repo input fails loudly, naming the path but never the value", () => {
     const r = runDispatch(JSON.stringify({ inputs: { repo: 31337 } }), "wrong-type");
     expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::readDispatchRepo: event payload: unexpected shape");
+    expect(r.stdout).toContain("::error::dispatch inputs: event payload: unexpected shape");
     expect(r.stdout).toContain("inputs.repo");
+    expect(r.stdout + r.stderr).not.toContain("31337");
+  });
+
+  test("a wrong-typed branch input fails loudly, naming the path but never the value", () => {
+    const r = runDispatch(JSON.stringify({ inputs: { branch: 31337 } }), "wrong-type-branch");
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain("::error::dispatch inputs: event payload: unexpected shape");
+    expect(r.stdout).toContain("inputs.branch");
     expect(r.stdout + r.stderr).not.toContain("31337");
   });
 
   test("a non-object payload fails loudly instead of miscasting", () => {
     const r = runDispatch(JSON.stringify("Vivswan/hidden-server"), "non-object");
     expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::readDispatchRepo: event payload: unexpected shape");
+    expect(r.stdout).toContain("::error::dispatch inputs: event payload: unexpected shape");
     expect(r.stdout + r.stderr).not.toContain("hidden-server");
   });
 
@@ -343,7 +387,7 @@ describe("readDispatchRepo", () => {
     // that parseJsonWith's fixed diagnostic replaces it.
     const r = runDispatch('{"inputs": {"repo": hiddenserver}}', "unparsable");
     expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::readDispatchRepo: event payload: not valid JSON");
+    expect(r.stdout).toContain("::error::dispatch inputs: event payload: not valid JSON");
     expect(r.stdout + r.stderr).not.toContain("hiddenserver");
   });
 });

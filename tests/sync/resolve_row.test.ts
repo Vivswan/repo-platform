@@ -2,7 +2,7 @@
 // name, and each entry script's stdout is nothing but ::add-mask:: commands for every form of the
 // name after ONE listing, the name leaving through GITHUB_ENV alone, every refusal naming no repository.
 
-import { beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { supersededNotice } from "../../.github/scripts/fleet/newest_main.ts";
@@ -65,97 +65,95 @@ const ENTRIES = [
   },
 ];
 
+/** One stub PATH and one listing for every describe in this file. */
+const fixture = (() => {
+  const root = temp.dir("resolve-row-");
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  const entry = (full_name: string, overrides: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      full_name,
+      archived: false,
+      private: true,
+      owner: { login: full_name.split("/")[0] },
+      permissions: { push: true },
+      ...overrides,
+    });
+  const pages = `[[${[
+    entry(HIDDEN),
+    entry(PUBLIC, { private: false }),
+    entry(BEEF),
+    entry(INCLUDE),
+    entry("Vivswan/archived-out", { archived: true }),
+    entry("Vivswan/read-only", { permissions: { push: false } }),
+    entry("Other/cross-owner"),
+  ].join(",")}]]`;
+  writeFileSync(join(root, "pages.json"), `${pages}\n`);
+  writeFileSync(join(root, "malformed.json"), '[[{"full_name":"Vivswan/shapeless"}]]\n');
+  writeFileSync(
+    join(bin, "gh"),
+    [
+      "#!/usr/bin/env bash",
+      'echo "gh $*" >> "$STUB_CALLS"',
+      'if [ -n "$STUB_FAIL_DISCOVERY" ]; then',
+      '  echo "HTTP 500 from stub" >&2',
+      "  exit 1",
+      "fi",
+      'cat "$STUB_PAGES"',
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  writeStubGit(bin);
+  return { bin, pages: join(root, "pages.json"), malformed: join(root, "malformed.json") };
+})();
+
+/** An entry script under the workflow's env for the step; a case sets a variable to undefined to leave it unset. */
+function run(script: string, env: Record<string, string | undefined>): Run {
+  const work = temp.dir("resolve-row-run-");
+  const envFile = join(work, "env.txt");
+  const callsFile = join(work, "calls.txt");
+  writeFileSync(envFile, "");
+  writeFileSync(callsFile, "");
+  const merged: Record<string, string | undefined> = {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    HOME: process.env.HOME,
+    STUB_PAGES: fixture.pages,
+    STUB_CALLS: callsFile,
+    STUB_MAIN_TIP: SHA,
+    GITHUB_ENV: envFile,
+    GITHUB_RUN_ID: RUN_ID,
+    GITHUB_SHA: SHA,
+    PAT,
+    OWNER: "Vivswan",
+    ...env,
+  };
+  const result = boundedSpawnSync(["bun", join(import.meta.dir, "../../.github/scripts", script)], {
+    env: Object.fromEntries(
+      Object.entries(merged).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    ),
+  });
+  return {
+    ...result,
+    env: readFileSync(envFile, "utf-8"),
+    calls: readFileSync(callsFile, "utf-8")
+      .split("\n")
+      .filter((line) => line !== ""),
+  };
+}
+
+const masks = (row: Row) =>
+  maskForms(row.repo)
+    .map((form) => `::add-mask::${form}\n`)
+    .join("");
+
 describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
   /** The calls a row makes before its listing. */
   const before = newestWins ? [TIP_READ] : [];
-  const root = temp.dir("resolve-row-");
-  const bin = join(root, "bin");
-
-  // The owner's listing as the stub `gh` answers user/repos: the rows, an archived and a read-only
-  // repository the listing drops, and a cross-owner one the owner filter drops. Every call is logged.
-  beforeAll(() => {
-    mkdirSync(bin);
-    const entry = (full_name: string, overrides: Record<string, unknown> = {}) =>
-      JSON.stringify({
-        full_name,
-        archived: false,
-        private: true,
-        owner: { login: full_name.split("/")[0] },
-        permissions: { push: true },
-        ...overrides,
-      });
-    const pages = `[[${[
-      entry(HIDDEN),
-      entry(PUBLIC, { private: false }),
-      entry(BEEF),
-      entry(INCLUDE),
-      entry("Vivswan/archived-out", { archived: true }),
-      entry("Vivswan/read-only", { permissions: { push: false } }),
-      entry("Other/cross-owner"),
-    ].join(",")}]]`;
-    writeFileSync(join(root, "pages.json"), `${pages}\n`);
-    writeFileSync(join(root, "malformed.json"), '[[{"full_name":"Vivswan/shapeless"}]]\n');
-    writeFileSync(
-      join(bin, "gh"),
-      [
-        "#!/usr/bin/env bash",
-        'echo "gh $*" >> "$STUB_CALLS"',
-        'if [ -n "$STUB_FAIL_DISCOVERY" ]; then',
-        '  echo "HTTP 500 from stub" >&2',
-        "  exit 1",
-        "fi",
-        'cat "$STUB_PAGES"',
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
-    );
-    writeStubGit(bin);
-  });
-
-  /** The workflow's env for the step; a case sets a variable to undefined to leave it unset. */
-  function run(env: Record<string, string | undefined>): Run {
-    const work = temp.dir("resolve-row-run-");
-    const envFile = join(work, "env.txt");
-    const callsFile = join(work, "calls.txt");
-    writeFileSync(envFile, "");
-    writeFileSync(callsFile, "");
-    const merged: Record<string, string | undefined> = {
-      PATH: `${bin}:${process.env.PATH}`,
-      HOME: process.env.HOME,
-      STUB_PAGES: join(root, "pages.json"),
-      STUB_CALLS: callsFile,
-      STUB_MAIN_TIP: SHA,
-      GITHUB_ENV: envFile,
-      GITHUB_RUN_ID: RUN_ID,
-      GITHUB_SHA: SHA,
-      PAT,
-      OWNER: "Vivswan",
-      ...env,
-    };
-    const result = boundedSpawnSync(
-      ["bun", join(import.meta.dir, "../../.github/scripts", script)],
-      {
-        env: Object.fromEntries(
-          Object.entries(merged).filter(
-            (entry): entry is [string, string] => entry[1] !== undefined,
-          ),
-        ),
-      },
-    );
-    return {
-      ...result,
-      env: readFileSync(envFile, "utf-8"),
-      calls: readFileSync(callsFile, "utf-8")
-        .split("\n")
-        .filter((line) => line !== ""),
-    };
-  }
 
   const resolved = (row: Row): Run => ({
     exitCode: 0,
-    stdout: maskForms(row.repo)
-      .map((form) => `::add-mask::${form}\n`)
-      .join(""),
+    stdout: masks(row),
     stderr: "",
     env: handOn(row),
     calls: [...before, LISTING],
@@ -176,7 +174,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
   ])(
     "a $visibility row resolves after one listing and no probe, every form masked before the name is written",
     ({ row }) => {
-      expect(run({ ROW_KEY: keyOf(row.repo) })).toEqual(resolved(row));
+      expect(run(script, { ROW_KEY: keyOf(row.repo) })).toEqual(resolved(row));
     },
   );
 
@@ -247,7 +245,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
     },
     {
       reason: "a listing off user/repos' shape (paths and codes, never the payload)",
-      env: { ROW_KEY: keyOf(HIDDEN), STUB_PAGES: join(root, "malformed.json") },
+      env: { ROW_KEY: keyOf(HIDDEN), STUB_PAGES: fixture.malformed },
       outcome: refused(
         1,
         `${label}: user/repos response: unexpected shape - 0.0.archived: invalid_type; 0.0.private: invalid_type; 0.0.owner: invalid_type`,
@@ -283,13 +281,68 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
         ]
       : []),
   ])("$reason: the row writes no TARGET and names no repository", ({ env, outcome }) => {
-    const result = run(env);
+    const result = run(script, env);
     expect(result).toEqual(outcome);
     for (const channel of [result.stdout, result.stderr, result.env]) {
       for (const name of ["pub-repo", "hidden-server", "revoked-mid-run", "shapeless"]) {
         expect(channel.toLowerCase()).not.toContain(name);
       }
     }
+  });
+});
+
+// The sync row alone probes a dispatched branch, after the listing and before the name is written: the probe is one
+// ls-remote of that ref, and a missing branch is a refusal, so the row prints the unresolved line and delivers nothing.
+describe("resolve_row.ts with a dispatched branch", () => {
+  const { script, handOn } = ENTRIES[0];
+  const BRANCH = "feat/add-site";
+  const eventFile = join(temp.dir("resolve-row-branch-"), "event.json");
+  writeFileSync(eventFile, JSON.stringify({ inputs: { branch: BRANCH } }));
+  const probe = (row: Row) =>
+    `git ls-remote --exit-code --symref https://x-access-token:${PAT}@github.com/${row.repo}.git HEAD refs/heads/${BRANCH}`;
+  const dispatched = (env: Record<string, string>) =>
+    run(script, { GITHUB_EVENT_PATH: eventFile, ...env });
+
+  test("a branch the target carries: the row resolves after the listing and one probe", () => {
+    expect(dispatched({ ROW_KEY: keyOf(rows[1].repo) })).toEqual({
+      exitCode: 0,
+      stdout: masks(rows[1]),
+      stderr: "",
+      env: handOn(rows[1]),
+      calls: [LISTING, probe(rows[1])],
+    });
+  });
+
+  test.each<{ reason: string; env: Record<string, string>; error: string }>([
+    {
+      reason: "the target's default branch",
+      env: { STUB_DEFAULT_BRANCH: BRANCH },
+      error:
+        "the dispatched branch is the target's default branch: a branch sync commits onto a PR branch; a plain dispatch syncs the default branch through a PR",
+    },
+    {
+      reason: "a branch the target does not carry",
+      env: { STUB_MISSING_REF: `refs/heads/${BRANCH}` },
+      error: "the dispatched branch does not exist in the target repository",
+    },
+    {
+      reason: "a ref that only ends in the branch's name (ls-remote matches ref suffixes)",
+      env: { STUB_REF_PREFIX: "refs/heads/nested/" },
+      error: "the dispatched branch does not exist in the target repository",
+    },
+    {
+      reason: "a probe git cannot answer",
+      env: { STUB_GIT_FAIL: "1" },
+      error: "git ls-remote could not read the target's branches (exit 128); re-run the workflow",
+    },
+  ])("$reason refuses after the masks, writing no TARGET", ({ env, error }) => {
+    expect(dispatched({ ROW_KEY: keyOf(rows[0].repo), ...env })).toEqual({
+      exitCode: 1,
+      stdout: `${masks(rows[0])}::error::${error}\n`,
+      stderr: "",
+      env: "",
+      calls: [LISTING, probe(rows[0])],
+    });
   });
 });
 

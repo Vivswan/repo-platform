@@ -8,9 +8,15 @@
 
 import { createHmac } from "node:crypto";
 import { appendFileSync } from "node:fs";
-import { type DiscoveredRepo, discoverOwnerRepos } from "../fleet/discovery.ts";
+import {
+  captureNetwork,
+  type DiscoveredRepo,
+  discoverOwnerRepos,
+  readDispatchBranch,
+} from "../fleet/discovery.ts";
 import { addMask, fail, requireEnv } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
+import { tokenUrl } from "../shared/token_url.ts";
 
 /** A row's identity as the public matrix carries it: an HMAC of the slug under the fleet token and
  *  the run id. Without the token it names nothing, and the same repository keys differently in
@@ -55,11 +61,15 @@ export function resolveRow(
 
 /** The listing is the check, not a re-selection: a repository the listing no longer names fails the
  *  step naming nothing, and one still listed is this run's target whatever its registration or the
- *  token's grant now says.
+ *  token's grant now says. `admit` refuses a resolved target before its name is handed on.
  *
  *  Env: ROW_KEY (the plan's key for this row), PAT and GITHUB_RUN_ID (the key's inputs), OWNER and
  *  GH_TOKEN (the listing), GITHUB_ENV. */
-export function resolveTarget(script: string, handOn: (target: DiscoveredRepo) => string): void {
+export function resolveTarget(
+  script: string,
+  handOn: (target: DiscoveredRepo) => string,
+  admit: (target: DiscoveredRepo) => string | null = () => null,
+): void {
   const keyOf = rowKeyOf(requireEnv("PAT"), requireEnv("GITHUB_RUN_ID"));
   const rowKey = requireEnv("ROW_KEY");
   const owner = requireEnv("OWNER");
@@ -68,12 +78,44 @@ export function resolveTarget(script: string, handOn: (target: DiscoveredRepo) =
   const resolved = resolveRow(rows, rowKey, keyOf);
   if ("refusal" in resolved) fail(`${resolved.refusal}; re-run the workflow`);
   for (const form of maskForms(resolved.target.repo)) addMask(form);
+  const refusal = admit(resolved.target);
+  if (refusal !== null) fail(refusal);
   appendFileSync(envFile, handOn(resolved.target));
+}
+
+/** A dispatched branch the target does not carry, or its default branch, refuses here, so the row prints the unresolved
+ *  line and delivers nothing; git's streams stay captured (they spell the token URL). One ls-remote answers both: HEAD's
+ *  symref line names the default branch, and the branch's own line must spell the exact ref, since ls-remote matches a
+ *  pattern against ref SUFFIXES (`refs/heads/nested/refs/heads/x` answers a probe for `refs/heads/x`). */
+export function branchRefusal(target: DiscoveredRepo): string | null {
+  const branch = readDispatchBranch();
+  if (branch === "") return null;
+  const ref = `refs/heads/${branch}`;
+  const probe = captureNetwork([
+    "git",
+    "ls-remote",
+    "--exit-code",
+    "--symref",
+    tokenUrl(target.repo, requireEnv("PAT")),
+    "HEAD",
+    ref,
+  ]);
+  if (probe.exitCode !== 0) {
+    return `git ls-remote could not read the target's branches (exit ${probe.exitCode}); re-run the workflow`;
+  }
+  const lines = probe.stdout.split("\n").map((line) => line.split("\t"));
+  const isDefault = lines.some(([left, right]) => left === `ref: ${ref}` && right === "HEAD");
+  if (isDefault) {
+    return "the dispatched branch is the target's default branch: a branch sync commits onto a PR branch; a plain dispatch syncs the default branch through a PR";
+  }
+  const listed = lines.some(([, right]) => right === ref);
+  return listed ? null : "the dispatched branch does not exist in the target repository";
 }
 
 if (import.meta.main) {
   resolveTarget(
     "resolve_row",
     (target) => `TARGET=${target.repo}\nTARGET_PRIVATE=${target.private}\n`,
+    branchRefusal,
   );
 }

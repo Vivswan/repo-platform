@@ -19,6 +19,7 @@ const VOCABULARY = [
   /^row \d+: unchanged$/,
   /^row \d+: PR opened$/,
   /^row \d+: PR refreshed$/,
+  /^row \d+: branch pushed$/,
   /^row \d+: failed, report filed in the target repository$/,
   /^row \d+: failed before the target was resolved; re-run the workflow$/,
 ];
@@ -102,13 +103,20 @@ describe("verdict.ts", () => {
     { verdict: "unchanged", line: "row 0: unchanged" },
     { verdict: "opened", line: "row 0: PR opened" },
     { verdict: "refreshed", line: "row 0: PR refreshed" },
+    { verdict: "pushed", line: "row 0: branch pushed" },
     { verdict: "failed", line: "row 0: failed, report filed in the target repository" },
   ])("a delivered row prints the $verdict line", ({ verdict, line }) => {
     speaks(run("row", { ROW: "0", TARGET: "o/r" }, { verdict }), line);
   });
 
-  test("the delivery verdicts are exactly the four lines above", () => {
-    expect([...DELIVERY_VERDICTS].sort()).toEqual(["failed", "opened", "refreshed", "unchanged"]);
+  test("the delivery verdicts are exactly the five lines above", () => {
+    expect([...DELIVERY_VERDICTS].sort()).toEqual([
+      "failed",
+      "opened",
+      "pushed",
+      "refreshed",
+      "unchanged",
+    ]);
   });
 
   test("a resolved row with no verdict, or an unknown one, is silent and red", () => {

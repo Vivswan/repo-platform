@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import {
+  branchDispatchRefusal,
   classifyEntry,
   modulesAdmit,
   modulesFilterFor,
@@ -316,5 +317,51 @@ describe("scopeRefusal", () => {
     },
   ])("$reason", ({ scope, expected }) => {
     expect(scopeRefusal(scope, known, "o")).toBe(expected);
+  });
+});
+
+// The messages are spelled here, independent of the source: a branch dispatch names one repository and nothing else.
+describe("branchDispatchRefusal", () => {
+  const ONE = list([], ["o/a"]);
+  const MANUAL =
+    "manual is meaningless with branch: a branch sync commits onto the branch and opens no PR; drop manual";
+  const ONE_REPO =
+    "branch takes exactly one owner/name in repo: the sync commits onto that one repository's branch (no list, no all, no visibility token, no modules: filter)";
+
+  test("one slug without manual is the admitted shape", () => {
+    expect(branchDispatchRefusal(ONE, false)).toBeNull();
+  });
+
+  test.each<{ reason: string; scope: Scope; manual: boolean; expected: string }>([
+    { reason: "manual beside branch", scope: ONE, manual: true, expected: MANUAL },
+    { reason: "two slugs", scope: list([], ["o/a", "o/b"]), manual: false, expected: ONE_REPO },
+    { reason: "all", scope: ALL, manual: false, expected: ONE_REPO },
+    {
+      reason: "a visibility token",
+      scope: list(["public"], []),
+      manual: false,
+      expected: ONE_REPO,
+    },
+    {
+      reason: "a slug beside a visibility token",
+      scope: list(["private"], ["o/a"]),
+      manual: false,
+      expected: ONE_REPO,
+    },
+    {
+      reason: "a modules filter",
+      scope: list([], [], [["site"]]),
+      manual: false,
+      expected: ONE_REPO,
+    },
+    {
+      reason: "a slug beside a modules filter",
+      scope: list([], ["o/a"], [["site"]]),
+      manual: false,
+      expected: ONE_REPO,
+    },
+    { reason: "manual outranks the scope refusal", scope: ALL, manual: true, expected: MANUAL },
+  ])("$reason is refused", ({ scope, manual, expected }) => {
+    expect(branchDispatchRefusal(scope, manual)).toBe(expected);
   });
 });

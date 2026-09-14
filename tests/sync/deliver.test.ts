@@ -35,6 +35,7 @@ const GIT_LINES = [
   'case "$*" in',
   '  *" add --all") if [ "${STUB_ADD_FAIL:-}" = 1 ]; then echo "fatal: unable to stage" >&2; exit 128; fi ;;',
   '  *" status --porcelain") if [ -n "${STUB_DIRTY:-}" ]; then echo " M x"; fi ;;',
+  '  *" rev-parse HEAD") echo "${STUB_HEAD_SHA:-}" ;;',
   '  *" symbolic-ref HEAD") case "${STUB_HEAD:-refs/heads/main}" in',
   '    error) echo "fatal: not a git repository: target" >&2; exit 128 ;;',
   '    detached) echo "fatal: ref HEAD is not a symbolic ref" >&2; exit 128 ;;',
@@ -62,6 +63,8 @@ const GH_LINES = [
 interface Options {
   hold?: boolean;
   manual?: boolean;
+  branch?: string;
+  public?: boolean;
   writer?: "success" | "failure" | "skipped";
   checkout?: "success" | "failure";
   /** The clone log checkout_target.ts left behind, when any. */
@@ -79,6 +82,8 @@ interface Run {
   gh: string[][];
   issueBody: string | null;
   sequence: string[];
+  /** The job summary (GITHUB_STEP_SUMMARY), empty unless a branch delivery wrote its report there. */
+  summary: string;
 }
 
 function run(options: Options = {}): Run {
@@ -92,6 +97,13 @@ function run(options: Options = {}): Run {
     writeFileSync(join(runnerTemp, "checkout.log"), options.checkoutLog);
   const sequenceFile = join(root, "sequence.log");
   writeFileSync(sequenceFile, "");
+  const summaryFile = join(root, "step-summary.md");
+  writeFileSync(summaryFile, "");
+  let eventPath = "";
+  if (options.branch !== undefined) {
+    eventPath = join(root, "event.json");
+    writeFileSync(eventPath, JSON.stringify({ inputs: { repo: TARGET, branch: options.branch } }));
+  }
   const git = argvStub(root, "git", GIT_LINES);
   const gh = argvStub(root, "gh", GH_LINES);
   const result = boundedSpawnSync(["bun", SCRIPT], {
@@ -100,8 +112,10 @@ function run(options: Options = {}): Run {
       PATH: `${git.bin}:${process.env.PATH}`,
       HOME: process.env.HOME,
       RUNNER_TEMP: runnerTemp,
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_STEP_SUMMARY: summaryFile,
       TARGET,
-      TARGET_PRIVATE: "true",
+      TARGET_PRIVATE: options.public === true ? "false" : "true",
       TARGET_DIR: join(root, "target"),
       PAT,
       GH_TOKEN: PAT,
@@ -128,6 +142,7 @@ function run(options: Options = {}): Run {
     sequence: readFileSync(sequenceFile, "utf-8")
       .split("\n")
       .filter((line) => line !== ""),
+    summary: readFileSync(summaryFile, "utf-8"),
   };
 }
 
@@ -244,6 +259,78 @@ describe("deliver.ts", () => {
     const merge = calls(result.gh, "pr", "merge")[0];
     expect(merge.slice(3)).toEqual(["7", "-R", TARGET, "--squash", "--auto"]);
     expect(result.log).not.toContain(PAT);
+    expect(result.summary).toBe("");
+  });
+
+  // The branch path: the module PR's own branch gets the files, so no sync PR, no auto-merge, and the failure issue is
+  // neither closed nor consulted; the report the PR body would carry goes to the job summary instead.
+  describe("a dispatched branch", () => {
+    const BRANCH = "feat/add-site";
+    const TIP = "2222222222222222222222222222222222222222";
+    const onBranch = { STUB_HEAD: `refs/heads/${BRANCH}`, STUB_HEAD_SHA: TIP };
+
+    test("a change is one commit on the checkout's branch, pushed with a lease on the cloned tip, with no gh call at all", () => {
+      const result = run({ branch: BRANCH, public: true, stub: { ...onBranch, STUB_DIRTY: "1" } });
+      silent(result);
+      expect(result.exitCode).toBe(0);
+      expect(result.verdict).toBe("pushed");
+      expect(result.gh).toEqual([]);
+      expect(calls(result.git, "checkout")).toEqual([]);
+      expect(result.git.map((argv) => argv[3])).toEqual([
+        "config",
+        "config",
+        "add",
+        "status",
+        "symbolic-ref",
+        "rev-parse",
+        "commit",
+        "push",
+      ]);
+      const push = calls(result.git, "push")[0];
+      expect(push.slice(3)).toEqual([
+        "push",
+        "--quiet",
+        `--force-with-lease=${BRANCH}:${TIP}`,
+        `https://x-access-token:${PAT}@github.com/${TARGET}.git`,
+        `HEAD:refs/heads/${BRANCH}`,
+      ]);
+      expect(result.log).not.toContain(PAT);
+      expect(result.summary).toContain(`Build \`${BUILD}\` pushed onto \`${BRANCH}\``);
+      expect(result.summary).toContain(REPORT.trimEnd());
+      // The masker holds the name: a spelled one would render as `***` in the summary, the run link's included on a self-sync.
+      expect(result.summary).not.toContain("hidden-server");
+      expect(result.summary).not.toContain("repo-platform/actions");
+    });
+
+    test("a private target's summary withholds the report and the branch: both are the repository's own", () => {
+      const result = run({ branch: BRANCH, stub: { ...onBranch, STUB_DIRTY: "1" } });
+      expect(result.verdict).toBe("pushed");
+      expect(result.summary).toContain("withheld");
+      expect(result.summary).not.toContain(BRANCH);
+      expect(result.summary).not.toContain(TARGET);
+      expect(result.summary).not.toContain("| x |");
+    });
+
+    test("a branch already matching the build is unchanged, and no PR or issue is looked up", () => {
+      const result = run({ branch: BRANCH, stub: onBranch });
+      silent(result);
+      expect(result.verdict).toBe("unchanged");
+      expect(result.gh).toEqual([]);
+      expect(calls(result.git, "push")).toEqual([]);
+      expect(result.summary).toBe("");
+    });
+
+    test("a refused branch push files the failure issue, as every delivery failure does", () => {
+      const result = run({
+        branch: BRANCH,
+        stub: { ...onBranch, STUB_DIRTY: "1", STUB_PUSH_FAIL: "1" },
+      });
+      silent(result);
+      expect(result.verdict).toBe("failed");
+      expect(result.issueBody).toContain("pushing the branch failed");
+      expect(result.issueBody).not.toContain(PAT);
+      expect(result.summary).toBe("");
+    });
   });
 
   test("the PR body opens with the source line and carries the writer's report", () => {

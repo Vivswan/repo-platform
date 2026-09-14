@@ -140,3 +140,18 @@ export function scopeRefusal(
   }
   return null;
 }
+
+/** A branch dispatch commits onto one repository's branch and opens no PR, so a scope that could select
+ *  two repositories, or a `manual` that only governs a PR's auto-merge, is a dispatch that means nothing. */
+export function branchDispatchRefusal(scope: Scope, manual: boolean): string | null {
+  if (manual) {
+    return "manual is meaningless with branch: a branch sync commits onto the branch and opens no PR; drop manual";
+  }
+  const oneSlug =
+    scope.kind === "list" &&
+    scope.slugs.size === 1 &&
+    scope.visibility.size === 0 &&
+    scope.modules.length === 0;
+  if (oneSlug) return null;
+  return "branch takes exactly one owner/name in repo: the sync commits onto that one repository's branch (no list, no all, no visibility token, no modules: filter)";
+}
