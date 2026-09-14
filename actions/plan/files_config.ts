@@ -349,6 +349,34 @@ function declaredKeys(when: WrittenWhen | null): string[] {
   });
 }
 
+/** Zod's record drops a `__proto__` key the yaml parser carries, so the name is refused on the raw document, where it is still
+ *  visible: dropped, an unlisted or out-of-tree source would pass and a listed value would be reported as unnamed. */
+function protoProblems(raw: unknown): string[] {
+  const record = (value: unknown): Record<string, unknown> | null =>
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  const problems: string[] = [];
+  const doc = record(raw);
+  if (doc === null) return problems;
+  for (const [module, data] of Object.entries(record(doc.modules) ?? {})) {
+    for (const [key, list] of Object.entries(record(data) ?? {})) {
+      if (Object.hasOwn(moduleDataShape.shape, key) || !Array.isArray(list)) continue;
+      list.forEach((value, index) => {
+        if (value === "__proto__")
+          problems.push(`modules.${module}.${key}.${index}: not a block name`);
+      });
+    }
+  }
+  (Array.isArray(doc.files) ? doc.files : []).forEach((entry, index) => {
+    const sources = record(record(entry)?.sources);
+    if (sources !== null && Object.hasOwn(sources, "__proto__")) {
+      problems.push(`files.${index}.sources.__proto__: not a block name`);
+    }
+  });
+  return problems;
+}
+
 /** Problems are returned so a reader with checks of its own (the writer's placeholder vocabulary) folds them into one report.
  *  Neither the files/ tree nor the placeholder vocabulary is consulted here, so every reader parses the same way. */
 export function checkFilesConfig(text: string, label = "files.yml"): CheckedFilesConfig {
@@ -359,6 +387,8 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
     throw new FilesConfigError(label, [`YAML parse error: ${detail}`]);
   }
+  const proto = protoProblems(raw);
+  if (proto.length > 0) throw new FilesConfigError(label, proto);
   const result = configSchema.safeParse(raw);
   if (!result.success) {
     throw new FilesConfigError(

@@ -789,6 +789,16 @@ describe("the block sources grammar", () => {
       "files: .gitignore: sources.Node 'other/Node.gitignore' must be a clean path under files/",
     ],
     [
+      "a sources key spelled __proto__ on an entry nothing lists, which the record schema would drop",
+      doc("  bun: {}\n", entry("sources: {__proto__: outside/tree.md}")),
+      "files.0.sources.__proto__: not a block name",
+    ],
+    [
+      "a listed value spelled __proto__, which the record schema would drop from sources",
+      doc("  bun: { g: [__proto__] }\n", entry("sources: {__proto__: files/bun/out.md}")),
+      "modules.bun.g.0: not a block name",
+    ],
+    [
       "a tree source leaving files/",
       doc(BUN, entry("sources: {Node: files/../Node.gitignore}")),
       "files: .gitignore: sources.Node 'files/../Node.gitignore' must be a clean path under files/",

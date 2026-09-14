@@ -122,7 +122,7 @@ mirrors:
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
 | `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names one block (below); a value listed twice lands once. |
 | `files[].always` | Managed, split, and starter entries: block values every repository takes, before the modules' blocks; each needs a source in `sources`. |
-| `files[].sources` | Managed, split, and starter entries: block value to its source, in the grammar of `files[].source`: a tree file under `files/` or an upstream ref `{repository, sha, path}` ([Upstream refs](#upstream-refs)). Every value `always` or a module lists has one, and every source is listed by one of them. A tree block is spliced as its file reads. A fetched block is headed in the entry's region comment, `## <value> (<repository> <path>)` under `hash`, `<!-- <value> (<repository> <path>) -->` under `html`, bare on an entry without a region, and ends with a blank line. |
+| `files[].sources` | Managed, split, and starter entries: block value to its source, in the grammar of `files[].source`: a tree file under `files/`, spliced as it reads, or an upstream ref ([Upstream refs](#upstream-refs)). Every value `always` or a module lists has one, and every source is listed by one of them. |
 | `files[].replace` | Entries fetching an upstream source or blocks: literal rewrites `{<from>: <to>}` applied to every fetched body of the entry, in order (`{"[\r]": "?"}` turns the macOS template's class holding a bare CR byte, which check-typography refuses, into a one-character glob). A tree file is edited instead. |
 | `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
@@ -144,7 +144,7 @@ The loader refuses, all problems at once:
 
 - a `split` without `region`; `region` on a non-split entry
 
-- a `source` outside `files/`, or one missing from the tree (a block's tree source included)
+- a `source` or `sources` tree path outside `files/`, or one missing from the tree
 
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
 
@@ -154,9 +154,9 @@ The loader refuses, all problems at once:
 
 - `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source`, `blocks`, `always`, `sources`, or `replace`, or without `overlay`
 
-- a block list that is not a list of names (letters, digits, `_`, `-`)
+- a block list that is not a list of names (letters, digits, `_`, `-`); a block value or `sources` key spelled `__proto__`, which the schema would drop
 
-- an upstream ref (a `source` object, or a `sources` value) whose `repository` is not `owner/name`, whose `sha` is not 40 lowercase hex characters, or whose path is not a clean path of letters, digits, `. _ - /`; a value `always` or a module lists that `sources` does not name; a `sources` value neither `always` nor a module lists; a `sources` tree path outside `files/`; `replace` on an entry fetching nothing
+- an upstream ref (a `source` object, or a `sources` value) whose `repository` is not `owner/name`, whose `sha` is not 40 lowercase hex characters, or whose path is not a clean path of letters, digits, `. _ - /`; a value `always` or a module lists that `sources` does not name; a `sources` value neither `always` nor a module lists; `replace` on an entry fetching nothing
 
 - an `overlay` path that is not clean, is the entry's own path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter; a conditional one a starter with the same `when`)
 
@@ -174,7 +174,9 @@ An upstream ref is `{repository, sha, path}`: a file of a github.com repository 
 
 - Fetched from `https://raw.githubusercontent.com/<repository>/<sha>/<path>` (`--upstream` swaps the host), every ref once per sync and before any file is written. A fetch that fails or answers anything but 200 fails the sync with one `::error::` line, nothing written.
 
-- The body is normalized (CRLF to LF, trailing spaces and tabs stripped, surrounding blank lines dropped), then rewritten by the entry's `replace`. As a source it is the entry's text; as a block it is headed by the entry's region (`files[].sources` above).
+- The body is normalized (CRLF to LF, trailing spaces and tabs stripped, surrounding blank lines dropped), then rewritten by the entry's `replace`. As a source it is the entry's text.
+
+- As a block it is headed in the entry's region comment, `## <value> (<repository> <path>)` under `hash`, `<!-- <value> (<repository> <path>) -->` under `html`, bare on an entry without a region, and ends with a blank line.
 
 - Two syncs render the same bytes until [refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) moves the pin: weekly, its `commit` leg moves every distinct `{repository, sha}` the data file spells to that repository's HEAD by one PR on `automation/refresh-commit-pins`, its body each fetched file's diff between the two commits; the next sync renders the change wherever the file lands. The workflow's other leg moves the modules' release pins ([toolchains.md](toolchains.md#keeping-the-pins-fresh)) on a branch of their own.
 
