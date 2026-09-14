@@ -17,7 +17,6 @@ const runValidator = validatorRunner(temp);
 const PATH = "docs/conditioned.md";
 const errors = (stderr: string) => stderr.split("\n").filter((line) => line.startsWith("error:"));
 
-/** FILES_YML with its modules block replaced and one conditioned entry appended. */
 const dataFile = (modules: string | null, when: string) =>
   `${FILES_YML.replace(/modules:\n( {2}.*\n)*/, modules === null ? "" : `${modules}\n`)}  - {path: ${PATH}, class: managed, when: ${when}}\n`;
 

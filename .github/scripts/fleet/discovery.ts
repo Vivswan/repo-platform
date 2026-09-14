@@ -3,7 +3,7 @@
 
 import { readFileSync, writeSync } from "node:fs";
 import { z } from "zod";
-import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
+import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { env } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
@@ -163,5 +163,5 @@ export function notAdoptedNotice(display: string, consequence?: string): string 
 
 /** A new repository before its first sync PR merges: the sync writes the file. */
 export function notRenderedNotice(display: string): string {
-  return `${display}: skipped - it has no .github/settings.yml yet; the sync PR that renders it has not merged.`;
+  return `${display}: skipped - it has no ${SETTINGS_PATH} yet; the sync PR that renders it has not merged.`;
 }
