@@ -3,16 +3,9 @@
 // request's own repository (docs/sync.md, "Syncing a branch by label"). The log is the repository's own, so nothing here
 // is redacted; the pull request's one sticky comment is the record a human reads.
 //
-//   label off first          -> adding it again is a new run whatever happens below
-//   writer or rung failed    -> the log tail in the comment, red
-//   the writer holds         -> the report in the comment, red, nothing pushed: a hold is a human's call, and this
-//                               branch is a human's (judged before the tree is compared: a held link leaves no diff)
-//   a workflow file changed  -> red, nothing pushed: the repository token cannot create or update a file under
-//                               .github/workflows, so the comment names the operator's branch dispatch instead
-//   tree already matches     -> the comment says so, green, nothing pushed (still asking for the empty commit when the
-//                               tip is this bot's: a relabel queued behind the run that pushed lands here)
-//   pushed                   -> the report in the comment, which asks for an empty commit: a push with the repository
-//                               token fires no pull_request run, and a dispatched ci.yml run would judge less than one
+// The label comes off before anything is judged, so adding it again is always a new run. A hold is refused before the
+// tree is compared: a held link leaves no diff. The repository token cannot create or update a file under
+// .github/workflows, so a diff touching one is refused whole and the comment names the operator's branch dispatch.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,12 +35,13 @@ type Outcome =
   | { kind: "failed"; what: "a migration rung" | "the writer"; log: string }
   | { kind: "held"; report: string }
   | { kind: "workflow files"; paths: string[]; report: string }
-  | { kind: "unchanged"; tipIsOurs: boolean }
+  | { kind: "unchanged" }
   | { kind: "push rejected"; log: string }
   | { kind: "pushed"; commit: string; report: string };
 
-const EMPTY_COMMIT_LINE =
-  'The checks do not run on a commit pushed with the repository token: push an empty commit (`git commit --allow-empty -m "chore: run the checks"`) to run them on the new head.';
+/** GitHub holds the pull_request run a repository-token push creates for approval; the auto-format starter's notice says the same. */
+const APPROVAL_LINE =
+  "GitHub holds the new head's pull_request run for approval, so its checks stay unreported until you approve the run from the merge box or push a commit of your own.";
 
 function commentBody(
   outcome: Outcome,
@@ -77,10 +71,7 @@ function commentBody(
           ...report(outcome.report),
         ];
       case "unchanged":
-        return [
-          `${build}: ${branch} already matches it, nothing pushed ${run}.`,
-          ...(outcome.tipIsOurs ? [EMPTY_COMMIT_LINE] : []),
-        ];
+        return [`${build}: ${branch} already matches it, nothing pushed ${run}.`];
       case "push rejected":
         return [
           `${build} NOT pushed: the push onto ${branch} was refused ${run}. A commit that reached the branch meanwhile is the usual cause; add the \`${SYNC_LABEL}\` label again once the branch is where you want it.`,
@@ -89,7 +80,7 @@ function commentBody(
       case "pushed":
         return [
           `${build} pushed onto ${branch} as ${outcome.commit} ${run}.`,
-          EMPTY_COMMIT_LINE,
+          APPROVAL_LINE,
           ...report(outcome.report),
         ];
     }
@@ -228,11 +219,7 @@ class BranchDelivery {
       );
     }
     if (changed.length === 0) {
-      const author = this.must(
-        this.git("log", "-1", "--format=%an"),
-        "reading the tip's author failed",
-      ).trim();
-      this.comment({ kind: "unchanged", tipIsOurs: author === SYNC_IDENTITY.name });
+      this.comment({ kind: "unchanged" });
       console.log(`the branch already matches build ${this.build}; nothing to push`);
       return;
     }

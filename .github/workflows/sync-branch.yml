@@ -5,12 +5,8 @@
 # repository token alone (docs/sync.md, "Syncing a branch by label"). The label is a trigger, not a state: the
 # delivery step takes it off first, so adding it again is always a new run.
 #
-#   label added -> check out the branch and the platform at stable -> migrations, then the writer over the branch
-#               -> one commit pushed onto the branch -> one sticky comment on the pull request
-#
-# The checks do not run on the pushed commit: a push with the repository token fires no pull_request run, and a
-# dispatched ci.yml run would judge less than one (the pull-request-only gates skip, and the pr-title check never
-# posts), so the comment asks the human for an empty commit instead.
+# GitHub holds the pull_request run a repository-token push creates for approval, so the pushed head's checks
+# stay unreported until a human approves the run from the merge box or pushes a commit; the comment says so.
 
 name: Sync Branch
 
