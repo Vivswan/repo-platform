@@ -17,7 +17,7 @@ import { maskForms } from "../shared/mask.ts";
  *  every run, so a private row rides the matrix and the step env unnamed.
  *
  *  The runner drops a job output that carries a masked value. The bare-name mask starts at
- *  shared/mask.ts's four characters, and the slug and URL forms carry `/` or `:`, which the matrix
+ *  shared/mask.ts's four characters, and the slug carries `/`, which the matrix
  *  never does, so the digest rides in three-character groups behind a separator no slug, URL, or
  *  base64 spelling of one contains.
  *    private repository `beef`, raw digest `...becbeef8c...`  -> the whole matrix dropped, every row red */

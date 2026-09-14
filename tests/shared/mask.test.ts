@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 
 const HIDDEN = "Vivswan/Hidden-Server";
-/** Every spelling a job log can carry of the name, one per line. */
+/** The exact-case and lower-case spellings a job log carries of the name, one per line. */
 const SPELLINGS = [
   "Vivswan/Hidden-Server",
   "vivswan/hidden-server",
