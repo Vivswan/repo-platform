@@ -255,13 +255,7 @@ export function whenKey(when: When | null): string {
 
 /** Only the provable cases; anything subtler is refused. */
 export function starterCoverage(rendered: When | null, starters: (When | null)[]): boolean {
-  if (rendered === null) {
-    if (starters.length === 1) return starters[0] === null;
-    const visibilities = starters.map((when) =>
-      when !== null && Object.keys(when).length === 1 ? when.private : undefined,
-    );
-    return starters.length === 2 && visibilities.includes(true) && visibilities.includes(false);
-  }
+  if (rendered === null) return starters.length === 1 && starters[0] === null;
   const key = whenKey(rendered);
   return starters.some((when) => whenKey(when) === key);
 }
@@ -413,7 +407,7 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       )
     ) {
       problems.push(
-        `${where}: overlay ${target}, whose starters are not selected exactly when this entry is - an unconditional rendered entry needs one unconditional starter or a private true/false pair, a conditional one a starter with the same when`,
+        `${where}: overlay ${target}, whose starters are not selected exactly when this entry is - an unconditional rendered entry needs one unconditional starter, a conditional one a starter with the same when`,
       );
     }
   }

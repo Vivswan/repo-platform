@@ -3,4 +3,4 @@ repository:
   description: "{{description}}"
   homepage: ""
   topics: ""
-  private: false
+  private: {{private}}

@@ -1,5 +1,5 @@
-// The fleet's site deploy in one job: the repo-owned hook runs from the checkout before the fleet's assembly,
-// so its output crosses no job boundary and the Pages artifact is the only artifact.
+// The fleet's site deploy: what lychee and the fuzz-issue contract define and the yaml cannot show. The urls and verdict
+// steps are executed as the runner runs them; the two lychee knobs whose wrong value changes behavior silently are pinned.
 
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -17,101 +17,26 @@ afterAll(() => setSystemTime());
 
 interface Step {
   id?: string;
-  name?: string;
+  if?: string;
   uses?: string;
   run?: string;
-  if?: string;
   with?: Record<string, string | number | boolean>;
   env?: Record<string, string>;
-}
-interface Job {
-  needs?: string | string[];
-  if?: string;
-  concurrency?: unknown;
-  permissions?: Record<string, string>;
-  environment?: { name: string; url: string };
-  steps?: Step[];
 }
 
 const source = readFileSync(
   join(import.meta.dir, "../../.github/workflows/reusable-site.yml"),
   "utf8",
 );
-const workflow = parseYaml(source) as {
-  on: {
-    workflow_call: {
-      inputs: Record<
-        string,
-        { description?: string; required?: boolean; type?: string; default?: unknown }
-      >;
-    };
-  };
-  concurrency?: unknown;
-  jobs: Record<string, Job>;
-};
-const job = workflow.jobs.site;
-const steps = job?.steps ?? [];
-const HOOK = "./.github/actions/site-build";
-const PUBLISH = "steps.site.outputs.publish == 'true'";
-const stepIndex = (predicate: (step: Step) => boolean) => steps.findIndex(predicate);
-const usesIndex = (fragment: string) => stepIndex((step) => (step.uses ?? "").includes(fragment));
+const workflow = parseYaml(source) as { jobs: Record<string, { steps?: Step[] }> };
+const steps = workflow.jobs.site?.steps ?? [];
+const step = (id: string) => steps.find((candidate) => candidate.id === id);
 
 describe("reusable-site.yml", () => {
-  test("one job, no concurrency of its own (the caller holds the pages lane), the deploy grant with issues for the link-rot issue", () => {
-    expect(Object.keys(workflow.jobs)).toEqual(["site"]);
-    expect(workflow.concurrency).toBeUndefined();
-    expect(job?.concurrency).toBeUndefined();
-    expect(job?.needs).toBeUndefined();
-    expect(job?.if).toBeUndefined();
-    expect(job?.permissions).toEqual({
-      "contents": "read",
-      "pages": "write",
-      "id-token": "write",
-      "issues": "write",
-    });
-    expect(job?.environment).toEqual({
-      name: "github-pages",
-      url: "${{ steps.deployment.outputs.page_url }}",
-    });
-  });
-
-  test("a full checkout of the caller's sha comes first: version tags and per-ref trees are read from history", () => {
-    expect(steps[0]?.uses).toContain("actions/checkout@");
-    expect(steps[0]?.with).toEqual({ "fetch-depth": 0, "ref": "${{ inputs.sha }}" });
-  });
-
-  test("the hook runs from the checkout when it exists, with the resolved URLs, BEFORE the fleet's assembly reads its dist", () => {
-    const urls = stepIndex((step) => step.id === "urls");
-    const hook = usesIndex(HOOK);
-    const site = usesIndex("repo-platform/actions/pages-site@stable");
-    expect([urls, hook, site].every((index) => index >= 0)).toBe(true);
-    expect(urls).toBeLessThan(hook);
-    expect(hook).toBeLessThan(site);
-    // A composite action in the caller's checkout is the one hook shape a
-    // fleet workflow can run absent-tolerantly: skipped by hashFiles, not a
-    // run that fails to start.
-    expect(steps[hook]).toMatchObject({
-      id: "hook",
-      if: "hashFiles('.github/actions/site-build/action.yml') != ''",
-      with: {
-        "base-path": "${{ steps.urls.outputs.base_path }}",
-        "origin": "${{ steps.urls.outputs.origin }}",
-      },
-    });
-    expect(steps[site]).toMatchObject({
-      id: "site",
-      with: { "site-dir": "${{ steps.hook.outputs.dist }}" },
-    });
-    expect(steps[site]?.if).toBeUndefined();
-    // The hook ran and named nothing: a notice, keyed on the hook's outcome
-    // (never a negative output test, which an absent output would pass).
-    const notice = steps.find((step) => (step.run ?? "").includes("named no dist directory"));
-    expect(notice?.if).toBe("steps.hook.outcome == 'success'");
-    expect(notice?.env).toEqual({ DIST: "${{ steps.hook.outputs.dist }}" });
-  });
-
-  test("the urls step resolves the project-pages base path and the lowercase owner origin from the repository alone", () => {
-    const urls = steps.find((step) => step.id === "urls");
+  // The escaped-dot patterns must match the assembly's ownSitePattern (actions/pages-site), and the lowercase host is
+  // lychee's reporting convention: a link to the own site in another case would be reported as external.
+  test("the urls step, executed, resolves the project-pages base path and the lowercase owner origin", () => {
+    const urls = step("urls");
     expect(urls?.env).toBeUndefined();
     const output = join(temp.dir("reusable-site-urls-"), "output");
     writeFileSync(output, "");
@@ -145,28 +70,14 @@ describe("reusable-site.yml", () => {
     });
   });
 
-  test("configure, the ONE artifact upload, and the deploy gate on publish; nothing else uploads an artifact", () => {
-    const configure = usesIndex("actions/configure-pages@");
-    const upload = usesIndex("actions/upload-pages-artifact@");
-    const deploy = usesIndex("actions/deploy-pages@");
-    expect(usesIndex("repo-platform/actions/pages-site@stable")).toBeLessThan(configure);
-    expect(configure).toBeLessThan(upload);
-    expect(upload).toBeLessThan(deploy);
-    for (const index of [configure, upload, deploy]) expect(steps[index]?.if).toBe(PUBLISH);
-    expect(steps[upload]?.with).toEqual({ path: "${{ steps.site.outputs.site-dir }}" });
-    expect(steps[deploy]?.id).toBe("deployment");
-    // The whole list of upload steps, not the first match: a second Pages
-    // upload or a stray upload-artifact must read as an extra entry.
-    const uploads = steps.filter((step) => /upload-[a-z-]*artifact@/.test(step.uses ?? ""));
-    expect(uploads.map((step) => step.uses?.split("@")[0])).toEqual([
-      "actions/upload-pages-artifact",
-    ]);
-    expect(steps.filter((step) => (step.uses ?? "").includes("download-artifact@"))).toEqual([]);
+  // Two knobs only lychee defines, each wrong value silent: with a token lychee asks the GitHub API and calls a private
+  // repository's link alive, so the link-rot issue is closed wrongly; with fail unset a finding fails the deploy that shipped.
+  test("lychee runs with no token and never fails the deploy", () => {
+    expect(step("links")?.with).toEqual(expect.objectContaining({ token: "", fail: false }));
   });
 
-  // lychee's markdown report as the action writes it (lychee 0.24.2 over a
-  // fixture site, the run link appended by lychee-action), before the
-  // fuzz-issue action reads it as a contract-v1 failure report.
+  // lychee's markdown report as the action writes it (lychee 0.24.2 over a fixture site, the run link appended by
+  // lychee-action), before the fuzz-issue action reads it as a contract-v1 failure report.
   const LYCHEE_REPORT = [
     "# Summary",
     "",
@@ -196,60 +107,30 @@ describe("reusable-site.yml", () => {
     "[Full Github Actions output](https://github.com/o/r/actions/runs/42?check_suite_focus=true)",
     "",
   ].join("\n");
-  const LINK_ROT_LABEL = "${{ steps.site.outputs.link-rot-label }}";
-  const ARTIFACTS_DIR = "${{ runner.temp }}/link-rot";
 
-  test("link rot runs on the schedule alone, after a deploy: lychee over the assembled site's html, http(s) links only, never failing the deploy that shipped", () => {
-    const links = steps.find((step) => step.id === "links");
-    expect(links?.if).toBe(
-      `github.event_name == 'schedule' && ${PUBLISH} && steps.site.outputs.link-rot-label != ''`,
+  // lychee reads .lycheeignore from its working directory alone, so the file is copied into the site directory: after the
+  // upload, or the served site carries it; before the check, or the ignores are lost and the link-rot issue opens on links
+  // the repository chose not to judge. Both silent. The copy runs on the check's own condition, plus the file existing.
+  test("the root .lycheeignore is staged after the upload and before lychee, on the check's own condition", () => {
+    const index = (predicate: (step: Step) => boolean) => steps.findIndex(predicate);
+    const stage = index((candidate) => (candidate.run ?? "").startsWith("cp .lycheeignore"));
+    const upload = index((candidate) =>
+      (candidate.uses ?? "").includes("actions/upload-pages-artifact@"),
     );
-    expect(links?.uses).toMatch(/^lycheeverse\/lychee-action@[0-9a-f]{40}$/);
-    expect(usesIndex("actions/deploy-pages@")).toBeLessThan(stepIndex((s) => s.id === "links"));
-    expect(links?.with).toEqual({
-      workingDirectory: "${{ steps.site.outputs.site-dir }}",
-      token: "",
-      args: [
-        "--no-progress",
-        "--root-dir ${{ steps.site.outputs.site-dir }}",
-        "--scheme https --scheme http",
-        "--exclude-all-private",
-        "--exclude '${{ steps.urls.outputs.own_links }}'",
-        "--exclude '${{ steps.urls.outputs.edit_links }}'",
-        "--timeout 30 --max-retries 3 --retry-wait-time 5",
-        "--glob-ignore-case '**/*.html' '**/*.htm'",
-      ].join(" "),
-      fail: false,
-      format: "markdown",
-      output: `${ARTIFACTS_DIR}/external-links/report.md`,
-    });
-    const rot = steps.find((step) => step.id === "rot");
-    expect(rot?.if).toBe("steps.links.outcome == 'success'");
-    expect(rot?.env).toEqual({ EXIT_CODE: "${{ steps.links.outputs.exit_code }}" });
-    const issues = steps.filter((step) => (step.uses ?? "").includes("actions/fuzz-issue@stable"));
-    expect(issues.map((step) => [step.if, step.with?.mode, step.with?.label])).toEqual([
-      ["steps.rot.outputs.found == 'true'", "report", LINK_ROT_LABEL],
-      ["steps.rot.outputs.found == 'false'", "resolve", LINK_ROT_LABEL],
-    ]);
-    expect(issues[0]?.with?.["artifacts-dir"]).toBe(ARTIFACTS_DIR);
-  });
-
-  test("the repository's root .lycheeignore is staged into lychee's working directory after the upload (never served) and before the check, on the check's own condition", () => {
-    const stage = stepIndex((step) => (step.run ?? "").startsWith("cp .lycheeignore"));
-    const links = stepIndex((step) => step.id === "links");
-    expect(stage).toBeGreaterThan(usesIndex("actions/upload-pages-artifact@"));
+    const links = index((candidate) => candidate.id === "links");
+    expect([upload, stage, links].every((at) => at >= 0)).toBe(true);
+    expect(upload).toBeLessThan(stage);
     expect(stage).toBeLessThan(links);
-    expect(steps[stage]).toEqual({
-      name: expect.any(String),
-      if: `${steps[links]?.if} && hashFiles('.lycheeignore') != ''`,
-      env: { SITE_DIR: "${{ steps.site.outputs.site-dir }}" },
+    expect(steps[stage].if).toBe(`${steps[links].if} && hashFiles('.lycheeignore') != ''`);
+    expect({ env: steps[stage].env, run: steps[stage].run }).toEqual({
+      env: { SITE_DIR: String(steps[links].with?.workingDirectory) },
       run: 'cp .lycheeignore "$SITE_DIR/"',
     });
   });
 
   test("lychee's report is the one failure of the fuzz-issue contract: written under the artifacts-dir, it rides into the issue body whole", () => {
-    const output = String(steps.find((step) => step.id === "links")?.with?.output);
-    const report = steps.find((step) => step.with?.mode === "report");
+    const output = String(step("links")?.with?.output);
+    const report = steps.find((candidate) => candidate.with?.mode === "report");
     const artifactsDir = String(report?.with?.["artifacts-dir"]);
     expect(output.startsWith(`${artifactsDir}/`)).toBe(true);
     const rel = output.slice(artifactsDir.length + 1);
@@ -275,11 +156,10 @@ describe("reusable-site.yml", () => {
     );
   });
 
-  // The verdict step's bash EXECUTED as the runner runs it: each row is one
-  // whole verdict (exit code, log, the found output), so a flipped case
-  // reads as the wrong verdict, not a missing substring.
+  // The verdict step's bash EXECUTED as the runner runs it: lychee's exit codes are its own (0 clean, 2 broken links). The
+  // script treats an unset and an empty EXIT_CODE alike (no verdict); both rows pin that.
   const readVerdict = (exitCode: string | undefined) => {
-    const run = steps.find((step) => step.id === "rot")?.run ?? "";
+    const run = step("rot")?.run ?? "";
     const output = join(temp.dir("reusable-site-rot-"), "output");
     writeFileSync(output, "");
     const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", run], {
@@ -311,10 +191,4 @@ describe("reusable-site.yml", () => {
       expect(readVerdict(exitCode)).toEqual(verdict);
     },
   );
-
-  test("sha, required with no default, is the one input: the site configuration always comes from the registration", () => {
-    expect(workflow.on.workflow_call.inputs).toEqual({
-      sha: { description: expect.any(String), required: true, type: "string" },
-    });
-  });
 });

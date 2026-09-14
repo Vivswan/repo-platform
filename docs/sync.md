@@ -41,7 +41,7 @@ bun .github/scripts/sync/writer/sync.ts \
 ## files.yml
 
 ```yaml
-placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, fuzzer_label, fuzzer_label_color, fuzzer_label_description]
+placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, private, fuzzer_label, fuzzer_label_color, fuzzer_label_description]
 modules:
   bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
@@ -56,8 +56,7 @@ files:
   - {path: .github/workflows/ci.yml, class: managed}
   - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources}
   - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
-  - {path: .github/settings.local.yml, class: starter, when: {private: false}}
-  - {path: .github/settings.local.yml, class: starter, when: {private: true}, source: files/base/.github/settings.local.private.yml}
+  - {path: .github/settings.local.yml, class: starter}
   - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}
   - {path: CLAUDE.md, class: link, target: AGENTS.md}
   - {path: .github/agents.md, class: link, target: ../AGENTS.md}
@@ -93,7 +92,7 @@ The loader refuses, all problems at once:
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
 - a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
 - `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source` or `blocks`, or without `overlay`
-- an `overlay` path that is not clean, is the entry's own path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
+- an `overlay` path that is not clean, is the entry's own path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter; a conditional one a starter with the same `when`)
 - a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`; a layer source declared twice; a layer `when` naming a module absent from `modules` or declaring a key no module carries
 - a declared settings layer missing from the tree, not a YAML mapping, or naming one label (case-insensitively) or one ruleset twice
 - two entries for one `path` whose conditions can both hold (below)
@@ -117,7 +116,7 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `any: {declaring: <key>}` | the CodeQL settings layer (`codeql_language`), `auto-format.yml` (`toolchain_steps`), the Toolchain variant of `AGENTS.md` (`agents_toolchain`) |
 | `without: [...]` | `LICENSE.md` (not `custom-license`), the plain variant of `.typography-allow` |
 | `without: {declaring: <key>}` | the plain variant of `AGENTS.md` (`agents_toolchain`) |
-| `private: true` / `false` | the two `.github/settings.local.yml` starters, the public, private, and CodeQL settings layers |
+| `private: true` / `false` | the public, private, and CodeQL settings layers |
 
 The three links carry no `when`: every repository gets them.
 
@@ -154,6 +153,7 @@ A module with no files still appears under `modules` (`custom-license`) so a reg
 | `github_username_lower` | the owner, lower-cased |
 | `copyright_holder` | `project.copyright_holder`, else the owner |
 | `year` | the current UTC year |
+| `private` | the writer's `--private` flag, `true` or `false`; the `.github/settings.local.yml` starter declares the visibility with it |
 | `fuzzer_label`, `nightly_label`, `site_label` | `labels.<key>` from the registration, else the `default` of the `modules.<m>.tracking_label` whose `key` is `fuzzer`, `nightly`, or `site` |
 | `<key>_label_color`, `<key>_label_description` | the `color` and `description` of the same `tracking_label`: the tuple the starter's report step creates the label with, and the render declares it with |
 
