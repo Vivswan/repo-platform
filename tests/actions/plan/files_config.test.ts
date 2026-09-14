@@ -5,7 +5,6 @@ import {
   checkFilesConfig,
   type FileEntry,
   FilesConfigError,
-  linkTargetProblem,
   mutuallyExclusive,
   parseFilesConfig,
   selectEntries,
@@ -31,11 +30,9 @@ files:
     when: { modules: [nightly, site] }
     source: files/nightly/nightly.with-site.yml
   - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
-  - { path: CLAUDE.md, class: link, target: AGENTS.md }
 `;
 
-const sourceOf = (entry: FileEntry) =>
-  entry.class === "link" || "render" in entry ? null : entry.source;
+const sourceOf = (entry: FileEntry) => ("render" in entry ? null : entry.source);
 
 function problemsOf(text: string, label?: string): string[] {
   try {
@@ -56,14 +53,8 @@ describe("parseFilesConfig", () => {
       "nightly/nightly.standalone.yml",
       "nightly/nightly.with-site.yml",
       "fuzzer/.github/workflows/nightly-fuzz.yml",
-      null,
     ]);
-    expect(config.files[5]).toEqual({
-      path: "CLAUDE.md",
-      class: "link",
-      target: "AGENTS.md",
-      when: null,
-    });
+    expect(config.mirrors).toEqual([]);
     expect(config.files[1]).toMatchObject({
       class: "split",
       region: "hash",
@@ -97,6 +88,16 @@ describe("parseFilesConfig", () => {
         },
       },
     });
+  });
+
+  test("mirrors parse in the registration's grammar, kind defaulting to copy", () => {
+    const config = parseFilesConfig(
+      `${BASE}mirrors:\n  - { source: AGENTS.md, kind: symlink, targets: [CLAUDE.md, .github/agents.md] }\n  - { source: LICENSE.md, targets: [template/LICENSE.md] }\n`,
+    );
+    expect(config.mirrors).toEqual([
+      { source: "AGENTS.md", kind: "symlink", targets: ["CLAUDE.md", ".github/agents.md"] },
+      { source: "LICENSE.md", kind: "copy", targets: ["template/LICENSE.md"] },
+    ]);
   });
 
   test("two entries for one path must be mutually exclusive by when", () => {
@@ -142,24 +143,14 @@ describe("parseFilesConfig", () => {
       "region applies to split entries only",
     ],
     [
-      "a link without a target",
-      "files:\n  - { path: a, class: link }\nplaceholders: []",
-      "a link entry needs a target",
+      "a link entry: a fleet symlink is a mirror now",
+      "files:\n  - { path: CLAUDE.md, class: link, target: AGENTS.md }\nplaceholders: []",
+      'files.0.class: Invalid option: expected one of "managed"|"split"|"starter"',
     ],
     [
-      "a link with a source or blocks",
-      "files:\n  - { path: a, class: link, target: b, source: files/base/a }\nplaceholders: []",
-      "a link entry has a target, not a source or blocks",
-    ],
-    [
-      "a target on a managed entry",
-      "files:\n  - { path: a, class: managed, target: b }\nplaceholders: []",
-      "target applies to link entries only",
-    ],
-    [
-      "a link target leaving the repository",
-      "files:\n  - { path: .github/a, class: link, target: ../../x }\nplaceholders: []",
-      "target resolves to '../x', which carries an empty, '.', or '..' segment",
+      "a mirror without targets",
+      "files: []\nmirrors:\n  - { source: AGENTS.md, targets: [] }\nplaceholders: []",
+      "mirrors.0.targets: Too small",
     ],
     [
       "a tracking label without a default",
@@ -594,24 +585,6 @@ describe("starterCoverage", () => {
     [{ modules: ["a", "b"] }, [{ any: ["a", "b"] }], false],
   ])("%j over %j -> %p", (rendered, starters, expected) => {
     expect(starterCoverage(rendered, starters)).toBe(expected);
-  });
-});
-
-describe("linkTargetProblem", () => {
-  test.each([
-    ["CLAUDE.md", "AGENTS.md", null],
-    [".github/agents.md", "../AGENTS.md", null],
-    ["CLAUDE.md", "/etc/passwd", "target is absolute"],
-    ["CLAUDE.md", "a//b", "target carries an empty segment"],
-    [
-      "CLAUDE.md",
-      "../x",
-      "target resolves to '../x', which carries an empty, '.', or '..' segment",
-    ],
-    ["CLAUDE.md", "CLAUDE.md", "target is the link itself"],
-    ["docs/a", "../docs/a", "target is the link itself"],
-  ])("%s -> %s: %p", (path, target, problem) => {
-    expect(linkTargetProblem(path, target)).toBe(problem);
   });
 });
 

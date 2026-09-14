@@ -2,11 +2,12 @@ import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import {
   type Claim,
+  type DeclaredMirrors,
   describeMirrorProblem,
   judgeClaims,
+  type Mirror,
   type MirrorKind,
   type MirrorProblem,
-  type Mirrors,
   mirrorDeclarationProblems,
   mirrorPathProblem,
   type OwnedPaths,
@@ -40,8 +41,15 @@ export interface ReplacedText {
 }
 
 export class MirrorFailure extends Error {
-  constructor(readonly failures: MirrorProblem[]) {
-    super(failures.map(describeMirrorProblem).join("\n"));
+  /** One line per verdict, each naming the document that declares the pair. */
+  readonly lines: string[];
+  constructor(
+    readonly failures: MirrorProblem[],
+    own: readonly Mirror[],
+  ) {
+    const lines = failures.map((failure) => describeMirrorProblem(failure, own));
+    super(lines.join("\n"));
+    this.lines = lines;
   }
 }
 
@@ -107,13 +115,14 @@ type Pass = "literal" | "glob";
  *  claims here plus the stale records the run retires; `records` are the previous sync's, read for the last mirror hash. */
 export function applyMirrors(
   target: string,
-  mirrors: Mirrors,
+  { fleet, own }: DeclaredMirrors,
   written: ReadonlyMap<string, Buffer>,
   owned: OwnedPaths,
   records: Records,
 ): { rows: MirrorRow[]; replaced: ReplacedText[]; records: Map<string, MirrorRecord> } {
+  const mirrors = [...fleet, ...own];
   const declared = mirrorDeclarationProblems(mirrors, owned);
-  if (declared.length > 0) throw new MirrorFailure(declared);
+  if (declared.length > 0) throw new MirrorFailure(declared, own);
   const rows: MirrorRow[] = [];
   const replaced: ReplacedText[] = [];
   const next = new Map<string, MirrorRecord>();
@@ -128,9 +137,9 @@ export function applyMirrors(
     }
     return stat?.isFile() ? { kind: "copy", carries: readFileSync(abs) } : null;
   };
-  /** Only a mirror record of the kind that stands there vouches for it: a split or link record's hash covers a region or
-   *  a link target, not the file. A record of either kind vouches for its own write, so a declaration's kind can change over it. */
-  const own = (path: string, found: Standing): boolean => {
+  /** Only a mirror record of the kind that stands there vouches for it: a split record's hash covers a region, a symlink
+   *  mirror's a link target, not the file. A record of either kind vouches for its own write, so a declaration's kind can change over it. */
+  const vouched = (path: string, found: Standing): boolean => {
     const record = readRecord(records[path]);
     return (
       found !== null &&
@@ -208,7 +217,7 @@ export function applyMirrors(
   const settle = (claims: Placement[], pass: Pass, failures: MirrorProblem[]): Placement[] => {
     const judged = judgeClaims(claims, settled, (path) => pathFailure(path, pass));
     failures.push(...judged.problems);
-    if (failures.length > 0) throw new MirrorFailure(failures);
+    if (failures.length > 0) throw new MirrorFailure(failures, own);
     settled = judged.settled;
     return claims;
   };
@@ -231,7 +240,7 @@ export function applyMirrors(
         rows.push({ source, target: path, outcome: "current", detail: "" });
         continue;
       }
-      const previous = own(path, found);
+      const previous = vouched(path, found);
       if (found !== null && found.kind !== kind) removeFile(target, path);
       if (kind === "symlink") writeLink(target, path, placed.toString("utf-8"));
       else writeFile(target, path, placed);

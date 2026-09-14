@@ -26,7 +26,7 @@ const MANIFEST = ".github/repo-platform-manifest.json";
 const YEAR = String(new Date().getUTCFullYear());
 
 const droppedMirrorNote = (path: string) =>
-  `manifest record for \`${path}\` dropped: no mirror in .repo-platform.yml reaches it now, so ` +
+  `manifest record for \`${path}\` dropped: no mirror in files.yml or .repo-platform.yml reaches it now, so ` +
   "the file is the repository's own (a mirror declared again adopts it while it still holds the " +
   "source's content)";
 
@@ -62,6 +62,12 @@ const LOCAL_DOCKERIGNORE = "dist/\n";
 const UNHASHED = "# unhashed notes\n";
 const HANDMADE = "# my own notes, recorded by hand\n";
 const LOCAL_DEPENDABOT = "version: 2\n# my own update schedule\n";
+const LOCAL_COPILOT = "# my own copilot notes\n";
+const FLEET_LINKS = {
+  "CLAUDE.md": "AGENTS.md",
+  ".github/agents.md": "../AGENTS.md",
+  ".github/copilot-instructions.md": "../AGENTS.md",
+};
 const noWriterNote = (path: string) =>
   `manifest record for \`${path}\` had no writer: no files.yml entry declares the path now; ` +
   "it is retired as a stale record (the Retired row has the outcome)";
@@ -116,9 +122,8 @@ function oldManifest(): string {
     // A mirror record under a directory that is now a symlink loop: the
     // record is noted, never looked up through the loop.
     "other/loop/sub/x.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
-    // Two link records: one still selected, one no entry writes any more.
-    "CLAUDE.md": `{"class": "link", "hash": "${sha256("AGENTS.md")}"}`,
-    ".github/copilot-instructions.md": `{"class": "link", "hash": "${sha256("../AGENTS.md")}"}`,
+    // The fleet's symlink, recorded and standing: current.
+    "CLAUDE.md": `{"class": "mirror", "kind": "symlink", "hash": "${sha256("AGENTS.md")}"}`,
     // Two managed records whose entries are split now: one still the
     // recorded content, one edited since.
     ".editorconfig": `{"class": "managed", "hash": "${sha256(OLD_EDITORCONFIG)}"}`,
@@ -195,6 +200,8 @@ function seedTarget(): string {
     ".dockerignore": LOCAL_DOCKERIGNORE,
     "HANDMADE.md": HANDMADE,
     ".github/dependabot.yml": LOCAL_DEPENDABOT,
+    // A hand-written file where the fleet's symlink lands: replaced, its text shown.
+    ".github/copilot-instructions.md": LOCAL_COPILOT,
     [MANIFEST]: oldManifest(),
   };
   for (const [rel, content] of Object.entries(files)) {
@@ -204,7 +211,6 @@ function seedTarget(): string {
   // An executable whose class flips must keep its mode.
   chmodSync(join(target, ".editorconfig"), 0o755);
   symlinkSync("AGENTS.md", join(target, "CLAUDE.md"));
-  symlinkSync("../AGENTS.md", join(target, ".github/copilot-instructions.md"));
   symlinkSync("loop", join(target, "other/loop"));
   fixtureGit(target, ["init", "-q", "-b", "main"]);
   fixtureGit(target, ["add", "-A"]);
@@ -234,7 +240,7 @@ interface Summary {
   modules: string[];
   written: { path: string; class: string; change: string; detail: string }[];
   retired: { path: string; outcome: string; detail: string }[];
-  mirrors: { source: string; target: string; outcome: string }[];
+  mirrors: { source: string; target: string; outcome: string; detail: string }[];
   notes: string[];
 }
 
@@ -316,8 +322,6 @@ describe("sync.ts end to end", () => {
       row(".github/SECURITY.md", "managed", "created"),
       row(".gitignore", "split", "updated"),
       row("AGENTS.md", "split", "created"),
-      row("CLAUDE.md", "link", "unchanged"),
-      row(".github/agents.md", "link", "created"),
       row(".github/dependabot.yml", "managed", "replaced local edits"),
       row(".github/workflows/checks.yml", "starter", "created"),
       row(HOOK, "starter", "created"),
@@ -434,12 +438,26 @@ describe("sync.ts end to end", () => {
     ]);
   });
 
-  test("links: the recorded symlink is adopted, the new one created, the stale one removed", () => {
-    expect(readlinkSync(join(target, "CLAUDE.md"))).toBe("AGENTS.md");
-    expect(readlinkSync(join(target, ".github/agents.md"))).toBe("../AGENTS.md");
-    expect(lstatSync(join(target, ".github/agents.md")).isSymbolicLink()).toBe(true);
-    expect(existsSync(join(target, ".github/copilot-instructions.md"))).toBe(false);
+  test("the fleet's symlinks land as mirrors: the recorded one current, the absent one written, the hand-written file replaced", () => {
+    for (const [path, to] of Object.entries(FLEET_LINKS)) {
+      expect(lstatSync(join(target, path)).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(join(target, path))).toBe(to);
+      expect(read(path)).toBe(read("AGENTS.md"));
+    }
     expect(read("AGENTS.md")).toContain("# Demo Project");
+    expect(summary.mirrors.slice(0, 3)).toEqual([
+      { source: "AGENTS.md", target: "CLAUDE.md", outcome: "current", detail: "" },
+      { source: "AGENTS.md", target: ".github/agents.md", outcome: "written", detail: "" },
+      {
+        source: "AGENTS.md",
+        target: ".github/copilot-instructions.md",
+        outcome: "replaced local edits",
+        detail: "",
+      },
+    ]);
+    expect(stdout).toContain(
+      "#### `.github/copilot-instructions.md`\n\n```diff\n--- .github/copilot-instructions.md\n+++ .github/copilot-instructions.md\n@@\n-# my own copilot notes\n-\n+../AGENTS.md",
+    );
   });
 
   test("blocks land at the anchor line of a managed file and at the end of a starter", () => {
@@ -501,11 +519,6 @@ describe("sync.ts end to end", () => {
         detail:
           "no longer selected; repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it",
       },
-      {
-        path: ".github/copilot-instructions.md",
-        outcome: "deleted",
-        detail: "no longer selected",
-      },
       { path: "HANDMADE.md", outcome: "deleted", detail: "no longer selected" },
     ]);
     expect(existsSync(join(target, "HANDMADE.md"))).toBe(false);
@@ -530,8 +543,11 @@ describe("sync.ts end to end", () => {
       outcome,
       detail,
     });
-    // Rows follow the declarations, literals first.
+    // Rows follow the declarations, the fleet's first, literals before globs.
     expect(summary.mirrors).toEqual([
+      mirror("AGENTS.md", "CLAUDE.md", "current"),
+      mirror("AGENTS.md", ".github/agents.md", "written"),
+      mirror("AGENTS.md", ".github/copilot-instructions.md", "replaced local edits"),
       mirror("LICENSE.md", "skills/new/LICENSE.md", "written"),
       mirror("LICENSE.md", "plain", "replaced", "a directory stood at the target"),
       mirror(
@@ -581,8 +597,7 @@ describe("sync.ts end to end", () => {
         ".github/SECURITY.md",
         ".gitignore",
         "AGENTS.md",
-        "CLAUDE.md",
-        ".github/agents.md",
+        ...Object.keys(FLEET_LINKS),
         ".github/dependabot.yml",
         ".github/workflows/checks.yml",
         HOOK,
@@ -629,11 +644,9 @@ describe("sync.ts end to end", () => {
     expect(manifest.files[HOOK]).toEqual({ class: "starter" });
     expect(manifest.files[OVERLAY]).toEqual({ class: "starter" });
     expect(manifest.files[SETTINGS]).toEqual({ class: "managed", hash: sha256(read(SETTINGS)) });
-    expect(manifest.files["CLAUDE.md"]).toEqual({ class: "link", hash: sha256("AGENTS.md") });
-    expect(manifest.files[".github/agents.md"]).toEqual({
-      class: "link",
-      hash: sha256("../AGENTS.md"),
-    });
+    for (const [path, to] of Object.entries(FLEET_LINKS)) {
+      expect(manifest.files[path]).toEqual({ class: "mirror", kind: "symlink", hash: sha256(to) });
+    }
     const regionRecord = (body: string) => ({
       class: "split",
       grammar: "managed-region",
@@ -728,6 +741,7 @@ describe("sync.ts end to end", () => {
       "local edits replaced in .github/workflows/ci.yml",
       "local edits replaced in .github/dependabot.yml",
       "local edits replaced in constructor",
+      "local edits replaced in .github/copilot-instructions.md",
       "local edits replaced in template/LICENSE.md",
       "local edits replaced in skills/beta/LICENSE.md",
       "local edits replaced in skills/gamma/LICENSE.md",
@@ -919,9 +933,11 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
 describe("sync.ts over a registration with an empty description", () => {
   test("an entry needing a placeholder with no value is held, noted, and never written empty", () => {
     const target = temp.dir("sync-e2e-bare-target-");
+    // The fleet's symlinks are excepted: their held source would fail the run (the next test).
     writeFileSync(
       join(target, ".repo-platform.yml"),
-      'modules: [bun, fuzzer]\nproject: {name: Demo, slug: demo, description: ""}\n',
+      'modules: [bun, fuzzer]\nproject: {name: Demo, slug: demo, description: ""}\n' +
+        `except: [${Object.keys(FLEET_LINKS).join(", ")}]\n`,
     );
     // Both fixture starters need {{description}}: the present one is the
     // repository's own and is not rendered, the absent one is held. The
@@ -988,6 +1004,30 @@ describe("sync.ts over a registration with an empty description", () => {
     };
     expect(manifest.files["AGENTS.md"]).toBeUndefined();
     expect(manifest.files[HOOK]).toEqual({ class: "starter" });
+    for (const path of Object.keys(FLEET_LINKS)) expect(existsSync(join(target, path))).toBe(false);
+  });
+
+  test("the fleet's mirror of a held source fails the run, naming files.yml as the declaring document", () => {
+    const target = temp.dir("sync-e2e-held-source-target-");
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      'modules: [bun]\nproject: {name: Demo, slug: demo, description: ""}\n',
+    );
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const result = spawnSync(
+      target,
+      join(temp.dir("sync-e2e-held-source-summary-"), "summary.json"),
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe(
+      `${Object.keys(FLEET_LINKS)
+        .map(
+          (path) =>
+            `::error::files.yml: mirrors: source 'AGENTS.md', target '${path}': the source was held this run, so there is nothing to copy`,
+        )
+        .join("\n")}\n`,
+    );
+    expect(existsSync(join(target, MANIFEST))).toBe(false);
   });
 });
 
@@ -1090,8 +1130,12 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
     fixtureGit(target, ["init", "-q", "-b", "main"]);
     return target;
   }
-  const error = (source: string, target: string, problem: string) =>
-    `::error::.repo-platform.yml: mirrors: source '${source}', target '${target}': ${problem}`;
+  const error = (
+    source: string,
+    target: string,
+    problem: string,
+    declared = ".repo-platform.yml",
+  ) => `::error::${declared}: mirrors: source '${source}', target '${target}': ${problem}`;
 
   test("an impossible declaration exits nonzero naming every problem, and records nothing", () => {
     const target = seed(
@@ -1102,6 +1146,8 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
         "  - {source: LICENSE.md, targets: [copies/a, copies/a/b, .github/repo-platform-manifest.json]}",
         "  - {source: README.md, targets: [skills/*/README.md]}",
         "  - {source: LICENSE.md, targets: [docs/GONE.md, docs/**/LICENSE.md]}",
+        // A target the fleet's mirror claims: one path, one claimant, both documents named.
+        "  - {source: LICENSE.md, targets: [CLAUDE.md]}",
         "",
       ].join("\n"),
     );
@@ -1123,6 +1169,20 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
         ),
         error("LICENSE.md", "docs/GONE.md", "the target is a path a stale manifest record retires"),
         error("LICENSE.md", "docs/**/LICENSE.md", "the pattern uses '**'"),
+        error(
+          "AGENTS.md",
+          "CLAUDE.md",
+          "the target is claimed by more than one source",
+          "files.yml",
+        ),
+        error(
+          "AGENTS.md",
+          "CLAUDE.md",
+          "the target is claimed as a copy and as a symbolic link",
+          "files.yml",
+        ),
+        error("LICENSE.md", "CLAUDE.md", "the target is claimed by more than one source"),
+        error("LICENSE.md", "CLAUDE.md", "the target is claimed as a copy and as a symbolic link"),
         error(
           "LICENSE.md",
           "copies/a",
@@ -1267,16 +1327,23 @@ describe("sync.ts over a registration with except", () => {
     writeFileSync(
       join(target, ".repo-platform.yml"),
       "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n" +
-        "except: [.github/workflows/ci.yml, docs/nothing.md]\n",
+        "except: [.github/workflows/ci.yml, docs/nothing.md, CLAUDE.md]\n",
     );
     mkdirSync(join(target, ".github/workflows"), { recursive: true });
     writeFileSync(join(target, ".github/workflows/ci.yml"), LOCAL_CI);
+    writeFileSync(join(target, "CLAUDE.md"), LOCAL_COPILOT);
     fixtureGit(target, ["init", "-q", "-b", "main"]);
     const { summary } = runSync(target, join(temp.dir("sync-e2e-except-summary-"), "summary.json"));
     const paths = summary.written.map((row) => row.path);
     expect(paths).not.toContain(".github/workflows/ci.yml");
     expect(paths).toContain("LICENSE.md");
     expect(readFileSync(join(target, ".github/workflows/ci.yml"), "utf-8")).toBe(LOCAL_CI);
+    // An excepted fleet mirror target is the repository's own; the other targets still land.
+    expect(readFileSync(join(target, "CLAUDE.md"), "utf-8")).toBe(LOCAL_COPILOT);
+    expect(summary.mirrors.map((row) => row.target)).toEqual([
+      ".github/agents.md",
+      ".github/copilot-instructions.md",
+    ]);
     const note = "`except` names `docs/nothing.md`, a path no files.yml entry writes";
     expect(summary.notes).toEqual([note]);
     expect(summary.hold).toBe(true);
@@ -1285,6 +1352,7 @@ describe("sync.ts over a registration with except", () => {
       files: Record<string, unknown>;
     };
     expect(manifest.files[".github/workflows/ci.yml"]).toBeUndefined();
+    expect(manifest.files["CLAUDE.md"]).toBeUndefined();
   });
 });
 

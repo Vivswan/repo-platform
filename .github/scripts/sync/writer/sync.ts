@@ -4,7 +4,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type FileEntry, selectEntries } from "../../../../actions/plan/files_config.ts";
-import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirrors.ts";
+import { declaredMirrors, ownedPaths } from "../../../../actions/plan/mirrors.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import { pathProblem } from "../../../../actions/shared/repo_path.ts";
@@ -17,7 +17,6 @@ import { parseFlags } from "./flags.ts";
 import {
   MANIFEST_NAME,
   type ManifestRecord,
-  type MirrorRecord,
   type Records,
   readRecord,
   readRecords,
@@ -45,7 +44,6 @@ import { keepReason, type RetireRow, release, retire } from "./retire.ts";
 import { selectModules } from "./select.ts";
 import { renderSettings } from "./settings_entry.ts";
 import { type Found, occupant, probe, removeFile, writeFile } from "./target_files.ts";
-import { writeLink } from "./write_link.ts";
 import { type WriteOutcome, writeManaged } from "./write_managed.ts";
 import { writeSplit } from "./write_split.ts";
 import { writeStarter } from "./write_starter.ts";
@@ -81,13 +79,6 @@ function render(
 ): Rendered | { missing: string[] } | { held: string } {
   const { target } = options;
   const { values } = facts;
-  if (entry.class === "link") {
-    return {
-      content: entry.target,
-      record: { class: "link", hash: sha256(entry.target) },
-      write: (recorded) => writeLink(target, entry.path, entry.target, recorded),
-    };
-  }
   if ("render" in entry) {
     // The overlay starter is written earlier in the same loop when absent;
     // only a regular file there is read.
@@ -138,10 +129,7 @@ function render(
   };
 }
 
-function alreadyWritten(found: Found, entry: FileEntry, content: string): boolean {
-  if (entry.class === "link") {
-    return found.kind === "link" && found.target.equals(Buffer.from(content, "utf-8"));
-  }
+function alreadyWritten(found: Found, content: string): boolean {
   return found.kind === "file" && found.bytes.equals(Buffer.from(content, "utf-8"));
 }
 
@@ -154,7 +142,7 @@ interface Written {
   detail?: string;
 }
 
-/** A record under another class than the entry declares is a class flip. A managed, split, or link record the file still matches marks it the platform's own previous write, replaced whole;
+/** A record under another class than the entry declares is a class flip. A managed, split, or mirror record the file still matches marks it the platform's own previous write, replaced whole;
  *  otherwise (a stale record, or a starter record, which carries no hash and is repo-owned) the file is judged unrecorded. A flip to starter hands the file over and is never judged. */
 function writeEntry(
   options: SyncOptions,
@@ -173,11 +161,7 @@ function writeEntry(
       ? previous.class
       : null;
   const found = flipped === null ? null : probe(options.target, entry.path);
-  if (
-    found !== null &&
-    found.kind !== "absent" &&
-    !alreadyWritten(found, entry, rendered.content)
-  ) {
+  if (found !== null && found.kind !== "absent" && !alreadyWritten(found, rendered.content)) {
     if (keepReason(options.target, entry.path, records) !== null) {
       const outcome = rendered.write(null);
       if ("missing" in outcome) return outcome;
@@ -189,8 +173,8 @@ function writeEntry(
       };
     }
     // A file staying a file is overwritten in place, which keeps its mode;
-    // only a file becoming a link (or the reverse) is removed first.
-    if (found.kind === "file" && entry.class !== "link") {
+    // only a link becoming a file is removed first.
+    if (found.kind === "file") {
       writeFile(options.target, entry.path, Buffer.from(rendered.content, "utf-8"));
       return { outcome: { change: "updated" }, record: rendered.record, content: rendered.content };
     }
@@ -229,7 +213,10 @@ export function runSync(options: SyncOptions): SyncReport {
   };
   const entries = selectEntries(config, selection);
   const entryPaths = new Set(entries.map((entry) => entry.path));
-  const declared = new Set(config.files.map((entry) => entry.path));
+  const declared = new Set([
+    ...config.files.map((entry) => entry.path),
+    ...config.mirrors.flatMap((mirror) => mirror.targets),
+  ]);
   notes.push(
     ...(registration.except ?? [])
       .filter((path) => !declared.has(path))
@@ -250,7 +237,7 @@ export function runSync(options: SyncOptions): SyncReport {
       unreadable++;
       continue;
     }
-    // A mirror record is mirrors.ts's to carry or drop: `except` speaks of files.yml entries.
+    // A mirror record is mirrors.ts's to carry or drop: `except` retires no record, it drops the target from the declarations.
     if (record.class === "mirror") continue;
     if (excepted.has(path)) {
       released.push(release(path, records));
@@ -297,8 +284,8 @@ export function runSync(options: SyncOptions): SyncReport {
   const rows: WrittenRow[] = [];
   const replaced: SyncReport["replaced"] = [];
   for (const entry of entries) {
-    // The class writers hold a file or a link in the way; anything else
-    // they refuse loudly, and the sync must still end in a report.
+    // The class writers hold a link in the way; anything else they refuse
+    // loudly, and the sync must still end in a report.
     const taken = occupant(options.target, entry.path);
     if (taken === "a directory" || taken === "something that is not a regular file") {
       carry(entry.path);
@@ -351,17 +338,20 @@ export function runSync(options: SyncOptions): SyncReport {
     }
   }
 
-  const mirrors =
-    registration.mirrors === undefined
-      ? { rows: [], replaced: [], records: new Map<string, MirrorRecord>() }
-      : applyMirrors(options.target, registration.mirrors, written, owned, records);
+  const mirrors = applyMirrors(
+    options.target,
+    declaredMirrors(config, registration),
+    written,
+    owned,
+    records,
+  );
   for (const [path, record] of mirrors.records) next.set(path, record);
   for (const { path, before, after } of mirrors.replaced) {
     replaced.push({ path, diff: unifiedDiff(path, before, after) });
   }
   // A mirror record no declaration reaches now (removed from the
-  // registration, or its glob no longer matches) leaves the manifest with a
-  // note; the copy stays as the repository's own. A path under a linked
+  // registration, excepted, or its glob no longer matches) leaves the manifest
+  // with a note; the copy stays as the repository's own. A path under a linked
   // directory is never looked up (the link may loop); its record is noted too.
   for (const [path, entry] of Object.entries(records)) {
     if (readRecord(entry)?.class !== "mirror" || next.has(path) || pathProblem(path) !== null) {
@@ -374,7 +364,7 @@ export function runSync(options: SyncOptions): SyncReport {
       continue;
     }
     notes.push(
-      `manifest record for \`${path}\` dropped: no mirror in ${REGISTRATION_PATH} reaches it now, so ` +
+      `manifest record for \`${path}\` dropped: no mirror in files.yml or ${REGISTRATION_PATH} reaches it now, so ` +
         "the file is the repository's own (a mirror declared again adopts it while it still holds " +
         "the source's content)",
     );
@@ -419,7 +409,7 @@ function main(argv: string[]): number {
       private: flags["--private"] === "true",
     });
   } catch (error) {
-    if (error instanceof MirrorFailure) fail(error.failures.map(describeMirrorProblem));
+    if (error instanceof MirrorFailure) fail(error.lines);
     fail(error instanceof Error ? error.message : String(error));
   }
   if (flags["--summary"] !== undefined) {

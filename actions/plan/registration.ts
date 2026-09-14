@@ -115,6 +115,17 @@ const label = z
     "must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters",
   );
 
+/** One grammar for both documents that declare mirrors: files.yml's fleet list (actions/plan/files_config.ts) and the
+ *  registration's own. `kind` is how each target carries the source: its bytes, or a relative symbolic link to it
+ *  (docs/sync.md, Mirrors). */
+export const mirrorsSchema = z.array(
+  z.strictObject({
+    source: z.string().min(1),
+    targets: z.array(z.string().min(1)).min(1),
+    kind: z.enum(["copy", "symlink"]).default("copy"),
+  }),
+);
+
 /** Module names and `labels` keys are checked against files.yml by the reader that has it; the schema pins shapes alone. */
 export const registrationSchema = z.strictObject({
   modules: z.array(z.unknown()),
@@ -152,17 +163,7 @@ export const registrationSchema = z.strictObject({
   // Paths the repository keeps as its own: no files.yml entry there is
   // written for it (docs/sync.md, Selection).
   except: z.array(judged(pathProblem)).optional(),
-  mirrors: z
-    .array(
-      z.strictObject({
-        source: z.string().min(1),
-        targets: z.array(z.string().min(1)).min(1),
-        // How each target carries the source: its bytes, or a relative
-        // symbolic link to it (docs/sync.md, Mirrors).
-        kind: z.enum(["copy", "symlink"]).default("copy"),
-      }),
-    )
-    .optional(),
+  mirrors: mirrorsSchema.optional(),
 });
 
 export type Registration = Omit<z.infer<typeof registrationSchema>, "modules"> & {

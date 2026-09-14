@@ -13,7 +13,7 @@ import {
 /** Every class a recorded entry can carry. The sync writer's record union
  *  and the validator's class dispatch are both pinned to this table, so a
  *  class one side learns reaches the other or the build fails. */
-export const RECORDED_CLASSES = ["managed", "split", "starter", "mirror", "link"] as const;
+export const RECORDED_CLASSES = ["managed", "split", "starter", "mirror"] as const;
 export type RecordedClass = (typeof RECORDED_CLASSES)[number];
 const RECORDED_CLASS_SET: ReadonlySet<string> = new Set(RECORDED_CLASSES);
 
@@ -76,7 +76,6 @@ export const RECORD_FIELDS = {
   split: ["class", "hash", "grammar", ...MANAGED_REGION_WIRE_FIELDS],
   starter: ["class"],
   mirror: ["class", "hash", "kind"],
-  link: ["class", "hash"],
 } as const satisfies Record<RecordedClass, readonly (typeof ENTRY_FIELDS)[number][]>;
 
 /** The manifest's own entry: managed, hash null. */

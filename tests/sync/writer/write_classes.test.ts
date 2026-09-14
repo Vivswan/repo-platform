@@ -8,7 +8,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { writeLink } from "../../../.github/scripts/sync/writer/write_link.ts";
 import { writeManaged } from "../../../.github/scripts/sync/writer/write_managed.ts";
 import { renderRegion, writeSplit } from "../../../.github/scripts/sync/writer/write_split.ts";
 import { writeStarter } from "../../../.github/scripts/sync/writer/write_starter.ts";
@@ -143,38 +142,5 @@ describe("writeStarter", () => {
       missing: ["description"],
     });
     expect(existsSync(join(target, "m.yml"))).toBe(false);
-  });
-});
-
-describe("writeLink", () => {
-  test("created, unchanged, re-pointed (updated on a recorded target, replaced otherwise)", () => {
-    const target = temp.dir("writer-link-");
-    expect(writeLink(target, ".github/agents.md", "../AGENTS.md", null)).toEqual({
-      change: "created",
-    });
-    expect(readlinkSync(join(target, ".github/agents.md"))).toBe("../AGENTS.md");
-    expect(writeLink(target, ".github/agents.md", "../AGENTS.md", null)).toEqual({
-      change: "unchanged",
-    });
-    expect(writeLink(target, ".github/agents.md", "../CLAUDE.md", sha256("../AGENTS.md"))).toEqual({
-      change: "updated",
-    });
-    expect(writeLink(target, ".github/agents.md", "../AGENTS.md", sha256("nope"))).toEqual({
-      change: "replaced local edits",
-      replaced: "../CLAUDE.md",
-    });
-    expect(readlinkSync(join(target, ".github/agents.md"))).toBe("../AGENTS.md");
-  });
-
-  test("a regular file at the path is held with its content intact; a directory is refused", () => {
-    const target = temp.dir("writer-link-file-");
-    writeFileSync(join(target, "CLAUDE.md"), "my own notes\n");
-    mkdirSync(join(target, "dir"));
-    expect(writeLink(target, "CLAUDE.md", "AGENTS.md", null)).toEqual({
-      change: "held",
-      reason: "a regular file sits where a link is declared",
-    });
-    expect(read(target, "CLAUDE.md")).toBe("my own notes\n");
-    expect(() => writeLink(target, "dir", "AGENTS.md", null)).toThrow("not a regular file");
   });
 });

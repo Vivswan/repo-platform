@@ -76,7 +76,7 @@ describe("keepReason", () => {
 });
 
 describe("keepReason on symbolic links", () => {
-  test("a link is judged by its target string under a link or symlink-mirror record, and by class under any other", () => {
+  test("a link is judged by its target string under a symlink-mirror record, and by class under any other", () => {
     // as-mirror-file.md holds the link target string itself, so only the record's kind can tell it from the link.
     const target = checkout({
       "AGENTS.md": "agents\n",
@@ -90,10 +90,10 @@ describe("keepReason on symbolic links", () => {
     // Raw target bytes that decode to the recorded target's text: only a byte comparison tells them apart.
     symlinkSync(Buffer.from([0xff, 0x2e, 0x6d, 0x64]), join(target, "malformed.md"));
     const records: Records = {
-      "malformed.md": { class: "link", hash: sha256("\uFFFD.md") },
+      "malformed.md": { class: "mirror", kind: "symlink", hash: sha256("\uFFFD.md") },
       "CLAUDE.md": { class: "managed", hash: sha256("AGENTS.md") },
-      "other.md": { class: "link", hash: sha256("AGENTS.md") },
-      "as-file.md": { class: "link", hash: sha256("AGENTS.md") },
+      "other.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
+      "as-file.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
       "mirror-link.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
       "as-mirror-file.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
       "mirror-copy-as-link.md": { class: "mirror", hash: sha256("AGENTS.md") },
@@ -182,12 +182,12 @@ describe("retire", () => {
     expect(Object.hasOwn(records, PROTO)).toBe(false);
   });
 
-  test("a link record is judged by its target string, and an absent stale path makes no row", () => {
+  test("a symlink mirror record is judged by its target string, and an absent stale path makes no row", () => {
     const target = checkout({ "docs.yml": "d\n", "AGENTS.md": "a\n" });
     symlinkSync("AGENTS.md", join(target, "CLAUDE.md"));
     const records: Records = {
       "docs.yml": { class: "managed", hash: sha256("d\n") },
-      "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
+      "CLAUDE.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
     };
     expect(retire(target, ["docs.yml", "gone.yml", "CLAUDE.md"], records)).toEqual([
       { path: "docs.yml", outcome: "deleted", detail: "no longer selected" },

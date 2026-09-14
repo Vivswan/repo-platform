@@ -33,7 +33,6 @@ files:
     when: { modules: [docs-site, pages] }
     source: files/docs-site/docs-site.with-pages.yml
   - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
-  - { path: CLAUDE.md, class: link, target: AGENTS.md }
 `;
 
 function defaultProblemsOf(text: string): string[] {

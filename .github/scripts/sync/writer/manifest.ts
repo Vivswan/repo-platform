@@ -31,8 +31,7 @@ export type ManifestRecord =
   | { class: "managed"; hash: string }
   | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string }
   | { class: "starter" }
-  | MirrorRecord
-  | { class: "link"; hash: string };
+  | MirrorRecord;
 /** Silent means copy, in the record as in the registration; a symlink's hash covers its link target, a copy's the bytes. */
 export type MirrorRecord =
   | { class: "mirror"; hash: string }
@@ -59,8 +58,6 @@ export function readRecord(entry: ManifestEntryShape | undefined): ManifestRecor
   switch (entry.class) {
     case "managed":
       return { class: "managed", hash };
-    case "link":
-      return { class: "link", hash };
     case "mirror":
       if (!("kind" in entry)) return { class: "mirror", hash };
       return entry.kind === "symlink" ? { class: "mirror", kind: "symlink", hash } : null;
@@ -103,8 +100,8 @@ const COMMENT =
   "BEGIN/END-bounded region is rewritten and the repository owns everything outside it; the " +
   "hash covers the region from the BEGIN line through the END line), starter (written once, " +
   "repo-owned from then on), mirror (a byte copy of a written file, or with kind symlink a " +
-  "relative symbolic link to it whose hash is sha256 of the link target, declared in " +
-  `${REGISTRATION_PATH}), link (a relative symbolic link; hash is sha256 of its target).`;
+  "relative symbolic link to it whose hash is sha256 of the link target, declared in files.yml or " +
+  `${REGISTRATION_PATH}).`;
 
 /** The manifest's own entry carries no hash: a self-hash would be circular. The build that wrote the tree is named by
  *  the sync commit and its PR alone, so an unchanged tree renders byte-identical under a new build. */
