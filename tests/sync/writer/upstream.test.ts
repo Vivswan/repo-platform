@@ -19,7 +19,9 @@ const ref = (path: string) => ({ repository: "github/gitignore", sha: SHA, path 
 const served = serveUpstream(join(FIXTURES, "upstream"));
 afterAll(() => served.stop());
 
-// A test that spawns the writer without --upstream passes online and fails offline, so the roster is pinned.
+// A test that spawns the writer without --upstream passes online and fails offline, so the roster is pinned. A spawner
+// resolves the script path with join() or resolve(); a bare path literal is data (deliveredBySync's table names the
+// writer).
 test("every test that runs the writer, directly or through a script, passes --upstream, so no test reaches the real host", () => {
   const root = join(import.meta.dir, "../../..");
   const read = (rel: string) => readFileSync(join(root, rel), "utf-8");
@@ -31,8 +33,10 @@ test("every test that runs the writer, directly or through a script, passes --up
     ),
   ].map((rel) => rel.slice(rel.lastIndexOf("/") + 1));
   expect(spawners).toEqual(["sync.ts", "write_fleet_lint_tree.ts"]);
+  const spawns = (text: string, name: string) =>
+    new RegExp(`\\b(?:join|resolve)\\([^()]*/${name.replaceAll(".", "\\.")}",?\\s*\\)`).test(text);
   const tests = [...new Glob("tests/**/*.test.ts").scanSync(root)]
-    .filter((rel) => spawners.some((name) => read(rel).includes(`/${name}`)))
+    .filter((rel) => spawners.some((name) => spawns(read(rel), name)))
     .sort();
   expect(tests.length).toBeGreaterThanOrEqual(4);
   expect(tests.filter((rel) => !read(rel).includes("--upstream"))).toEqual([]);
