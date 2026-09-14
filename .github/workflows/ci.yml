@@ -409,6 +409,10 @@ jobs:
       checks: read
       pull-requests: read
     uses: ./.github/workflows/post-green.yml
+    # A called workflow inherits down only what it received: the fleet legs' environment secret needs the whole
+    # chain to inherit (post-green.yml's callers, actions/runner#4453).
+    # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit
+    secrets: inherit # zizmor: ignore[secrets-inherit]
     with:
       sha: ${{ github.sha }}
       before: ${{ github.event.before }}
