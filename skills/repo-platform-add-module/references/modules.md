@@ -45,7 +45,7 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 
 ## pr-title
 
-- Managed: `pr-title.yml`, whose `pr-title` check the module's ruleset requires; the module's settings layer activates the ruleset in the rendered `.github/settings.yml`, so the workflow and the requirement ride one sync PR. Removal retires the workflow and renders the ruleset disabled in the same sync PR; the still-active check can wedge that PR until an admin merges it, and the apply after the merge drops the requirement.
+- Managed: `pr-title.yml`, whose `pr-title` check the module's ruleset requires; the module's settings layer carries the whole ruleset, so the workflow and the requirement ride one sync PR. Removal retires the workflow and drops the ruleset from the render in the same sync PR; the still-live check can wedge that PR until an admin merges it, and the apply after the merge deletes the ruleset.
 
 ## custom-license
 

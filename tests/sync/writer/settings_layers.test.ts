@@ -110,7 +110,7 @@ describe("the managed rulesets", () => {
 
   test("the fleet protection rulesets are NOT in these layers", () => {
     // The main and non-bypassable PROTECTION rules live in the override, which merges above these layers;
-    // the private side contributes no ruleset of its own, and no module-free selection declares one.
+    // the private side contributes no ruleset of its own, and pr-title's arrives with its module alone.
     //   main      -> the public overlay's entry alone: the code_quality rule and the public-only copilot_code_review auto-request
     expect(rulesetNames(selection())).toEqual(["main"]);
     expect(mainRuleTypes(selection())).toEqual(["code_quality", "copilot_code_review"]);

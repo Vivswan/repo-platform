@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { CHECK_NAME } from "../../.github/scripts/shared/all_green.ts";
+import { sectionEntries } from "../../.github/scripts/sync/writer/settings_layers.ts";
 import { PLATFORM_OWNER } from "../../actions/shared/platform.ts";
 
 interface Job {
@@ -18,10 +19,7 @@ interface Job {
   name?: string;
   strategy?: unknown;
 }
-interface Ruleset {
-  name: string;
-  rules: { type: string; parameters?: { required_status_checks?: { context: string }[] } }[];
-}
+type Rule = { type: string; parameters?: { required_status_checks?: { context: string }[] } };
 
 const ROOT = join(import.meta.dir, "../..");
 const read = (rel: string) =>
@@ -43,12 +41,11 @@ test("ci.yml's gate needs exactly the jobs that do not ride behind it", () => {
 });
 
 test("both gate jobs post the check as CHECK_NAME, fail closed, and the override ruleset requires that context", () => {
-  const { rulesets } = parseYaml(read("files/settings/override.yml")) as {
-    rulesets: { entries: Ruleset[] };
-  };
-  const contexts = rulesets.entries
-    .find((ruleset) => ruleset.name === "main")
-    ?.rules.find((rule) => rule.type === "required_status_checks")
+  const main = sectionEntries(parseYaml(read("files/settings/override.yml")), "rulesets").find(
+    (ruleset) => ruleset.name === "main",
+  );
+  const contexts = (main?.rules as Rule[] | undefined)
+    ?.find((rule) => rule.type === "required_status_checks")
     ?.parameters?.required_status_checks?.map((check) => check.context);
   const gate = (jobs: Record<string, Job>) => {
     const job = jobs[CHECK_NAME];
