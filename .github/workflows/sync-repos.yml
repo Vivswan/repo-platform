@@ -27,9 +27,10 @@ on:
       branch:
         description: >-
           A branch of the ONE repository named in repo: the row checks it out, runs the writer over it, and
-          commits the result onto it (no PR, no issue; the report goes to the job summary), so the PR
-          that changes a module selection carries its own files. Refused with manual, with a scope
-          other than one owner/name, or for a branch the repository does not have
+          commits the result onto it (no PR; the report goes to the job summary; a failure files the
+          target's issue as always), so the PR that changes a module selection carries its own files.
+          Refused with manual, with a scope other than one owner/name, or for a branch the repository
+          does not have
         required: false
         type: string
   # Named `repos`, not `repo`, on purpose: the dispatch input may be a private slug and never rides in step env,
