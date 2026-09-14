@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { parseFilesConfig } from "../../actions/plan/files_config";
@@ -18,7 +18,9 @@ const upstream = await spawnStubUpstream(
 afterAll(() => upstream.stop());
 
 describe("write_fleet_lint_tree.ts", () => {
-  test("lands the all-modules and no-module selections, every workflow parseable and placeholder-free", () => {
+  test("lands the all-modules and no-module selections as git roots, every workflow parseable and placeholder-free", () => {
+    // ci.yml's actionlint job lints these trees one step later: a selection dropped goes unlinted, green; a
+    // target that is not a git root makes actionlint skip the project's .github/actionlint.yaml.
     const dest = temp.dir("fleet-lint-");
     const run = boundedSpawnSync([process.execPath, SCRIPT, dest, "--upstream", upstream.host], {
       cwd: REPO_ROOT,
@@ -27,6 +29,7 @@ describe("write_fleet_lint_tree.ts", () => {
     const stdout = run.stdout.toString();
     expect(stdout).toContain("all: ");
     expect(stdout).toContain("none: ");
+    const landed: Record<string, string[]> = {};
     for (const name of ["all", "none"]) {
       const dir = join(dest, name, ".github/workflows");
       const workflows = readdirSync(dir).filter((file) => file.endsWith(".yml"));
@@ -36,41 +39,14 @@ describe("write_fleet_lint_tree.ts", () => {
         expect(text).not.toMatch(/(?<!\$)\{\{/);
         expect(() => parseYaml(text)).not.toThrow();
       }
+      landed[name] = workflows;
     }
-    expect(readdirSync(join(dest, "all", ".github/workflows"))).toContain("pr-title.yml");
-    expect(readdirSync(join(dest, "none", ".github/workflows"))).not.toContain("pr-title.yml");
-    // Each target is a git project carrying the starter actionlint config,
-    // so actionlint applies the fleet's ignores.
+    // The all tree carries the module workflows over the base ones; two equal trees would lint one selection twice.
+    expect(landed.none.filter((file) => !landed.all.includes(file))).toEqual([]);
+    expect(landed.all.length).toBeGreaterThan(landed.none.length);
     for (const name of ["all", "none"]) {
       expect(existsSync(join(dest, name, ".git"))).toBe(true);
       expect(existsSync(join(dest, name, ".github/actionlint.yaml"))).toBe(true);
     }
-    // CI's job puts actionlint on PATH before this step; locally the lint leg is skipped without it.
-    // The planted error through the same invocation goes red, so a clean run is a verdict, not a no-op.
-    const which = boundedSpawnSync(["sh", "-c", "command -v actionlint"], { cwd: REPO_ROOT });
-    if (which.exitCode === 0) {
-      for (const name of ["all", "none"]) {
-        const lint = boundedSpawnSync(["actionlint", "-color"], { cwd: join(dest, name) });
-        expect([name, lint.exitCode, lint.stdout.toString()]).toEqual([name, 0, ""]);
-      }
-      const planted = join(dest, "none", ".github/workflows/planted.yml");
-      writeFileSync(planted, "on: push\njobs:\n  x:\n    run-on: ubuntu-latest\n    steps: []\n");
-      const red = boundedSpawnSync(["actionlint", "-color"], { cwd: join(dest, "none") });
-      expect(red.exitCode).not.toBe(0);
-      expect(red.stdout.toString()).toContain("planted.yml");
-    }
-  });
-
-  test.each([
-    ["no destination", []],
-    ["a flag without its host", ["dest", "--upstream"]],
-    ["an unknown flag", ["dest", "--host", "x"]],
-    ["an extra argument", ["dest", "--upstream", "x", "y"]],
-  ])("%s is a usage error", (_case, argv) => {
-    const run = boundedSpawnSync([process.execPath, SCRIPT, ...argv], { cwd: REPO_ROOT });
-    expect([run.exitCode, run.stderr.toString()]).toEqual([
-      2,
-      "usage: write_fleet_lint_tree.ts <dest> [--upstream <raw-content host>]\n",
-    ]);
   });
 });

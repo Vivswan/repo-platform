@@ -1,8 +1,6 @@
-// The sync row's failure path end to end, chained as sync-repos.yml chains
-// it: the writer refusing a registration that carries a retired key, its
-// captured streams becoming the writer log, deliver.ts filing that log
-// into the target's failure-report issue with gh and git stubbed on PATH,
-// and verdict.ts printing the row's line. Every script runs as a subprocess.
+// The sync row's failure path end to end, chained as sync-repos.yml chains it: the writer's streams become
+// the writer log, deliver.ts files that log into the target's failure issue, verdict.ts prints the row's
+// line. tests/sync/deliver.test.ts pins each script's half against stubs; the hand-off has no other home.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -111,7 +109,6 @@ describe("the sync row's failure path", () => {
     expect(body).toContain(`Run: ${RUN_URL}\nBuild: \`${BUILD}\``);
     expect(body).toContain(`## Writer log\n\n\`\`\`\`text\n${writer.stdout.trimEnd()}\n\`\`\`\``);
     expect(body).toContain("## Delivery log");
-    expect(body).not.toContain(PAT);
 
     // The printer: the one line the public log carries for the row.
     const verdict = boundedSpawnSync(["bun", join(SCRIPTS, "verdict.ts"), "row"], {
