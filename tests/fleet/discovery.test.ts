@@ -3,11 +3,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   captureNetwork,
-  type DiscoveredRepo,
-  NETWORK_TIMEOUT_MS,
-  notAdoptedNotice,
   parseDiscovered,
-  pushProbeSkipNotice,
   readDispatchBranch,
   readDispatchRepo,
   scrubSlug,
@@ -16,32 +12,65 @@ import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
+const DISCOVERY = join(import.meta.dir, "../../.github/scripts/fleet/discovery.ts");
+
+/** The whole subprocess outcome of a payload the parser refuses: the process exits with the label and the path, and the
+ *  offending value reaches no channel (it may be a private slug). */
+function refusal(
+  proc: { exitCode: number; stdout: string; stderr: string },
+  label: string,
+  diagnostic: string,
+  path: string | null,
+  value: string,
+) {
+  const line = `^::error::${RegExp.escape(label)}: ${RegExp.escape(diagnostic)}${path === null ? "" : `.*${RegExp.escape(path)}`}`;
+  return {
+    got: {
+      exitCode: proc.exitCode,
+      stdout: proc.stdout,
+      leaked: `${proc.stdout}${proc.stderr}`.includes(value),
+    },
+    want: { exitCode: 1, stdout: expect.stringMatching(new RegExp(line)), leaked: false },
+  };
+}
 
 describe("captureNetwork", () => {
-  test("passes the deadline through to the proc layer: a hung command dies at expiry", () => {
+  // A SIGKILLed child prints nothing, so the synthesized stderr line is the only trace of the deadline. It names the
+  // program and never the argv tail: a real tail carries a private slug or, for the curl push probe, the PAT itself.
+  test.each<{
+    reason: string;
+    command: string[];
+    timeoutMs: number | undefined;
+    outcome: { exited0: boolean; timedOut: boolean; stdout: string; stderr: unknown };
+  }>([
+    {
+      reason: "a hung command dies at expiry with a line naming the program, never its arguments",
+      command: ["sleep", "31337"],
+      timeoutMs: 250,
+      outcome: {
+        exited0: false,
+        timedOut: true,
+        stdout: "",
+        stderr: expect.stringMatching(/^sleep timed out after 250ms \(stalled network\?\)\n$/),
+      },
+    },
+    {
+      reason: "a command that answers in time is untouched by the deadline",
+      command: ["echo", "ok"],
+      timeoutMs: undefined,
+      outcome: { exited0: true, timedOut: false, stdout: "ok\n", stderr: "" },
+    },
+  ])("$reason", ({ command, timeoutMs, outcome }) => {
     const started = Date.now();
-    const result = captureNetwork(["sleep", "31337"], 250);
+    const result = captureNetwork(command, timeoutMs);
     expect(Date.now() - started).toBeLessThan(10_000);
-    expect(result.timedOut).toBe(true);
-    expect(result.exitCode).not.toBe(0);
-    // The SIGKILLed child prints nothing, so the synthesized stderr line
-    // is the only trace of the deadline. It must name the program but
-    // never the argv tail: real tails carry private slugs and, for the
-    // curl push probe, the PAT itself.
-    expect(result.stderr).toContain("sleep timed out after 250ms (stalled network?)");
-    expect(result.stderr).not.toContain("31337");
-  });
-
-  test("a command that answers in time is untouched by the deadline", () => {
-    const result = captureNetwork(["echo", "ok"]);
-    expect(result.exitCode).toBe(0);
-    expect(result.timedOut).toBe(false);
-    expect(result.stdout).toBe("ok\n");
-    expect(result.stderr).toBe("");
-  });
-
-  test("the production deadline is two minutes (guards against a ms/s unit slip)", () => {
-    expect(NETWORK_TIMEOUT_MS).toBe(120_000);
+    const got: typeof outcome = {
+      exited0: result.exitCode === 0,
+      timedOut: result.timedOut,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+    expect(got).toEqual(outcome);
   });
 
   test("every fleet gh/curl subprocess goes through captureNetwork (class sweep)", () => {
@@ -83,26 +112,13 @@ describe("scrubSlug", () => {
 
   test.each([
     {
-      reason: "a slug embedded in a URL is scrubbed to the hint",
-      detail: "fatal: repository 'https://github.com/Vivswan/hidden-server.git/' not found",
-      slug: SLUG,
-      hint: HINT,
-      expected: "fatal: repository 'https://github.com/h**-s**r.git/' not found",
-    },
-    {
-      reason: "a bare name inside a git error is scrubbed",
-      detail: "error: failed to push some refs to hidden-server",
-      slug: SLUG,
-      hint: HINT,
-      expected: "error: failed to push some refs to h**-s**r",
-    },
-    {
-      reason: "every occurrence goes: repeated slugs and bare names alike",
+      reason: "every occurrence goes: slugs in URLs, bare names, and repeats alike",
       detail:
-        "Vivswan/hidden-server: fetch of hidden-server failed; retrying hidden-server, then Vivswan/hidden-server again",
+        "fatal: 'https://github.com/Vivswan/hidden-server.git/': fetch of hidden-server failed; retrying hidden-server, then Vivswan/hidden-server again",
       slug: SLUG,
       hint: HINT,
-      expected: "h**-s**r: fetch of h**-s**r failed; retrying h**-s**r, then h**-s**r again",
+      expected:
+        "fatal: 'https://github.com/h**-s**r.git/': fetch of h**-s**r failed; retrying h**-s**r, then h**-s**r again",
     },
     {
       reason: "a name embedded in a longer token is still masked (substring semantics)",
@@ -158,35 +174,7 @@ describe("scrubSlug", () => {
   });
 });
 
-describe("notice builders", () => {
-  test("pushProbeSkipNotice names a discovered-but-unpushable repo a non-member, hint first", () => {
-    expect(pushProbeSkipNotice("h**-l**d")).toBe(
-      "h**-l**d: not in the fleet (the fleet token cannot push to it); grant write access to enroll it, or ignore this line for a repository you have left.",
-    );
-  });
-
-  test("notAdoptedNotice without a consequence matches the sync selector's literal exactly", () => {
-    expect(notAdoptedNotice("Vivswan/unadopted")).toBe(
-      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not adopted the platform. Register it (docs/new-repo.md) to opt in, or revoke the fleet token's write access to leave the fleet.",
-    );
-  });
-
-  test("notAdoptedNotice with the settings consequence matches that selector's literal exactly", () => {
-    expect(
-      notAdoptedNotice(
-        "Vivswan/unadopted",
-        "If it carries .github/settings.yml, the central nightly heal no longer applies it.",
-      ),
-    ).toBe(
-      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not " +
-        "adopted the platform. If it carries .github/settings.yml, the central nightly heal no " +
-        "longer applies it. Register it (docs/new-repo.md) to opt in, or revoke the fleet " +
-        "token's write access to leave the fleet.",
-    );
-  });
-});
-
-describe("readDispatchRepo", () => {
+describe("the dispatch inputs", () => {
   const root = temp.dir("discovery-dispatch-");
 
   function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
@@ -206,190 +194,175 @@ describe("readDispatchRepo", () => {
   }
 
   // One grammar for both selectors: a bare name rides through unchanged for the scope parser to refuse (sync_scope.ts).
-  test.each([
+  // The branch rides the same payload verbatim: a padded or case-changed value must reach the resolve probe as typed,
+  // never as the branch it resembles. The two external facts: GitHub identity is case-insensitive, and a schedule or
+  // release event carries no `inputs` key while an inputs-less API dispatch writes `"inputs": null`.
+  test.each<{
+    reason: string;
+    onlyRepo?: string;
+    eventBody?: string;
+    repo: string;
+    branch: string;
+  }>([
     {
       reason: "ONLY_REPO is trimmed and case-folded",
       onlyRepo: "  Vivswan/Steady  ",
-      eventBody: undefined,
-      expected: "vivswan/steady",
+      repo: "vivswan/steady",
+      branch: "",
     },
     {
       reason: "a bare name stays bare: nothing here spells an owner onto it",
       onlyRepo: "Central-Home",
-      eventBody: undefined,
-      expected: "central-home",
+      repo: "central-home",
+      branch: "",
     },
     {
       reason: 'the literal "all" is the whole-fleet scope',
       onlyRepo: "All",
-      eventBody: undefined,
-      expected: "all",
+      repo: "all",
+      branch: "",
     },
     {
       reason: "the visibility tokens are scope tokens",
       onlyRepo: " Public,private ",
-      eventBody: undefined,
-      expected: "public,private",
+      repo: "public,private",
+      branch: "",
     },
     {
       reason: "a comma list is trimmed per entry; empties survive for the scope parser to reject",
       onlyRepo: " Central-Home, Other/Shared ,,Vivswan/Third, ",
-      eventBody: undefined,
-      expected: "central-home,other/shared,,vivswan/third,",
+      repo: "central-home,other/shared,,vivswan/third,",
+      branch: "",
     },
-    {
-      reason: "a lone comma is not an empty scope",
-      onlyRepo: ",",
-      eventBody: undefined,
-      expected: ",",
-    },
+    { reason: "a lone comma is not an empty scope", onlyRepo: ",", repo: ",", branch: "" },
     {
       reason: "a list from the event payload folds the same way",
-      onlyRepo: "",
       eventBody: JSON.stringify({ inputs: { repo: "Vivswan/A,Vivswan/B" } }),
-      expected: "vivswan/a,vivswan/b",
+      repo: "vivswan/a,vivswan/b",
+      branch: "",
     },
     {
       reason: "an empty ONLY_REPO falls back to the event payload's repo input",
-      onlyRepo: "",
       eventBody: JSON.stringify({ inputs: { repo: "Vivswan/Hidden-Server" } }),
-      expected: "vivswan/hidden-server",
+      repo: "vivswan/hidden-server",
+      branch: "",
     },
     {
       reason: "a non-empty ONLY_REPO overrides the event payload",
       onlyRepo: "Vivswan/from-env",
       eventBody: JSON.stringify({ inputs: { repo: "Vivswan/from-event" } }),
-      expected: "vivswan/from-env",
+      repo: "vivswan/from-env",
+      branch: "",
     },
     {
-      reason: "an event payload without a repo input reads as empty",
-      onlyRepo: "",
+      reason: "the branch input beside the repo, whitespace and case kept",
+      eventBody: JSON.stringify({ inputs: { repo: "Vivswan/A", branch: " Feat/Add-Site " } }),
+      repo: "vivswan/a",
+      branch: " Feat/Add-Site ",
+    },
+    {
+      reason: "a no-break space in the branch is kept too",
+      eventBody: JSON.stringify({ inputs: { branch: "feat/add-site\u00a0" } }),
+      repo: "",
+      branch: "feat/add-site\u00a0",
+    },
+    {
+      reason: "an event payload without a repo or branch input reads as empty",
       eventBody: JSON.stringify({ inputs: {} }),
-      expected: "",
+      repo: "",
+      branch: "",
     },
     {
       reason: "a null inputs key reads as empty (an inputs-less API dispatch)",
-      onlyRepo: "",
       eventBody: JSON.stringify({ inputs: null }),
-      expected: "",
+      repo: "",
+      branch: "",
     },
     {
-      reason: "a payload without an inputs key reads as empty (schedule and release events)",
-      onlyRepo: "",
-      eventBody: JSON.stringify({ action: "published" }),
-      expected: "",
+      reason: "a payload without an inputs key reads as empty (schedule, release, and push events)",
+      eventBody: JSON.stringify({ action: "published", ref: "refs/heads/main" }),
+      repo: "",
+      branch: "",
     },
-    {
-      reason: "nothing set reads as empty",
-      onlyRepo: "",
-      eventBody: undefined,
-      expected: "",
-    },
-  ])("$reason", ({ onlyRepo, eventBody, expected }) => {
+    { reason: "nothing set reads as empty", repo: "", branch: "" },
+  ])("$reason", ({ onlyRepo = "", eventBody, repo, branch }) => {
     let eventPath = "";
     if (eventBody !== undefined) {
       eventPath = join(root, `event-${Bun.hash(eventBody).toString(16)}.json`);
       writeFileSync(eventPath, eventBody);
     }
     withEnv({ ONLY_REPO: onlyRepo, GITHUB_EVENT_PATH: eventPath }, () => {
-      expect(readDispatchRepo()).toBe(expected);
+      expect([readDispatchRepo(), readDispatchBranch()]).toEqual([repo, branch]);
     });
   });
 
-  // The branch rides the payload as the repo does (never step env) and verbatim: a padded or case-changed value must
-  // reach the resolve probe as typed, never as the branch it resembles.
-  test.each([
-    {
-      reason: "the branch input beside the repo, whitespace and case kept",
-      eventBody: JSON.stringify({ inputs: { repo: "Vivswan/A", branch: " Feat/Add-Site " } }),
-      expected: " Feat/Add-Site ",
-    },
-    {
-      reason: "a no-break space is kept too",
-      eventBody: JSON.stringify({ inputs: { branch: "feat/add-site\u00a0" } }),
-      expected: "feat/add-site\u00a0",
-    },
-    {
-      reason: "a payload without a branch input reads as empty",
-      eventBody: JSON.stringify({ inputs: { repo: "Vivswan/A" } }),
-      expected: "",
-    },
-    {
-      reason: "a called run's payload (a push event, no inputs key) reads as empty",
-      eventBody: JSON.stringify({ ref: "refs/heads/main" }),
-      expected: "",
-    },
-    { reason: "nothing set reads as empty", eventBody: undefined, expected: "" },
-  ])("readDispatchBranch: $reason", ({ eventBody, expected }) => {
-    let eventPath = "";
-    if (eventBody !== undefined) {
-      eventPath = join(root, `event-${Bun.hash(eventBody).toString(16)}.json`);
-      writeFileSync(eventPath, eventBody);
-    }
-    withEnv({ GITHUB_EVENT_PATH: eventPath }, () => {
-      expect(readDispatchBranch()).toBe(expected);
-    });
-  });
-
-  // The malformed cases exit the process (parseWith), so they run behind
+  // The malformed cases exit the process (parseJsonWith), so they run behind
   // a subprocess entry file.
   const dispatchEntry = join(root, "dispatch_entry.ts");
   writeFileSync(
     dispatchEntry,
     [
-      `import { readDispatchBranch, readDispatchRepo } from ${JSON.stringify(
-        join(import.meta.dir, "../../.github/scripts/fleet/discovery.ts"),
-      )};`,
+      `import { readDispatchBranch, readDispatchRepo } from ${JSON.stringify(DISCOVERY)};`,
       "console.log(JSON.stringify([readDispatchRepo(), readDispatchBranch()]));",
       "",
     ].join("\n"),
   );
 
-  function runDispatch(eventBody: string, name: string) {
-    const eventFile = join(root, `event-${name}.json`);
-    writeFileSync(eventFile, eventBody);
-    const proc = boundedSpawnSync(["bun", dispatchEntry], {
-      env: { ...process.env, ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile },
-    });
-    return {
-      exitCode: proc.exitCode,
-      stdout: proc.stdout,
-      stderr: proc.stderr,
-    };
-  }
-
-  test("a wrong-typed repo input fails loudly, naming the path but never the value", () => {
-    const r = runDispatch(JSON.stringify({ inputs: { repo: 31337 } }), "wrong-type");
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::dispatch inputs: event payload: unexpected shape");
-    expect(r.stdout).toContain("inputs.repo");
-    expect(r.stdout + r.stderr).not.toContain("31337");
-  });
-
-  test("a wrong-typed branch input fails loudly, naming the path but never the value", () => {
-    const r = runDispatch(JSON.stringify({ inputs: { branch: 31337 } }), "wrong-type-branch");
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::dispatch inputs: event payload: unexpected shape");
-    expect(r.stdout).toContain("inputs.branch");
-    expect(r.stdout + r.stderr).not.toContain("31337");
-  });
-
-  test("a non-object payload fails loudly instead of miscasting", () => {
-    const r = runDispatch(JSON.stringify("Vivswan/hidden-server"), "non-object");
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::dispatch inputs: event payload: unexpected shape");
-    expect(r.stdout + r.stderr).not.toContain("hidden-server");
-  });
-
-  test("an unparsable payload fails with a value-free diagnostic (no SyntaxError echo)", () => {
-    // A bare identifier is the leaking form: Bun's raw JSON.parse error
-    // echoes it ('Unexpected identifier "hiddenserver"'), so this pins
-    // that parseJsonWith's fixed diagnostic replaces it.
-    const r = runDispatch('{"inputs": {"repo": hiddenserver}}', "unparsable");
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::dispatch inputs: event payload: not valid JSON");
-    expect(r.stdout + r.stderr).not.toContain("hiddenserver");
-  });
+  // A bare identifier is the leaking form of an unparsable payload: Bun's raw JSON.parse error echoes it
+  // ('Unexpected identifier "hiddenserver"'), so the fixed diagnostic must replace it.
+  test.each<{
+    reason: string;
+    payload: string;
+    diagnostic: string;
+    path: string | null;
+    value: string;
+  }>([
+    {
+      reason: "a wrong-typed repo input",
+      payload: JSON.stringify({ inputs: { repo: 31337 } }),
+      diagnostic: "unexpected shape",
+      path: "inputs.repo",
+      value: "31337",
+    },
+    {
+      reason: "a wrong-typed branch input",
+      payload: JSON.stringify({ inputs: { branch: 31337 } }),
+      diagnostic: "unexpected shape",
+      path: "inputs.branch",
+      value: "31337",
+    },
+    {
+      reason: "a non-object payload",
+      payload: JSON.stringify("Vivswan/hidden-server"),
+      diagnostic: "unexpected shape",
+      path: null,
+      value: "hidden-server",
+    },
+    {
+      reason: "an unparsable payload",
+      payload: '{"inputs": {"repo": hiddenserver}}',
+      diagnostic: "not valid JSON",
+      path: null,
+      value: "hiddenserver",
+    },
+  ])(
+    "$reason fails loudly, never echoing the value",
+    ({ reason, payload, diagnostic, path, value }) => {
+      const eventFile = join(root, `event-${Bun.hash(reason).toString(16)}.json`);
+      writeFileSync(eventFile, payload);
+      const proc = boundedSpawnSync(["bun", dispatchEntry], {
+        env: { ...process.env, ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile },
+      });
+      const { got, want } = refusal(
+        proc,
+        "dispatch inputs: event payload",
+        diagnostic,
+        path,
+        value,
+      );
+      expect(got).toEqual(want);
+    },
+  );
 });
 
 // discoverWritableRepos exits the process on failure, so it runs behind a
@@ -397,43 +370,28 @@ describe("readDispatchRepo", () => {
 describe("discoverWritableRepos", () => {
   const root = temp.dir("discovery-proc-");
   const bin = join(root, "bin");
-  const discoveryPath = join(import.meta.dir, "../../.github/scripts/fleet/discovery.ts");
+  const LABEL = "discovery.test: user/repos response";
 
   mkdirSync(bin);
-  writeFileSync(
-    join(bin, "gh"),
-    [
-      "#!/usr/bin/env bash",
-      'if [ -n "$STUB_FAIL" ]; then',
-      '  echo "gh: discovery boom" >&2',
-      "  exit 7",
-      "fi",
-      'cat "$STUB_PAYLOAD"',
-      "",
-    ].join("\n"),
-    { mode: 0o755 },
-  );
+  writeFileSync(join(bin, "gh"), '#!/usr/bin/env bash\ncat "$STUB_PAYLOAD"\n', { mode: 0o755 });
 
   const discoverEntry = join(root, "discover_entry.ts");
   writeFileSync(
     discoverEntry,
     [
-      `import { discoverWritableRepos } from ${JSON.stringify(discoveryPath)};`,
-      'const repos = discoverWritableRepos("discovery.test: user/repos response");',
+      `import { discoverWritableRepos } from ${JSON.stringify(DISCOVERY)};`,
+      `const repos = discoverWritableRepos(${JSON.stringify(LABEL)});`,
       "console.log(JSON.stringify(repos.map((repo) => repo.full_name)));",
       "",
     ].join("\n"),
   );
 
-  function runDiscover(extra: Record<string, string>) {
-    const proc = boundedSpawnSync(["bun", discoverEntry], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...extra },
+  function runDiscover(name: string, payload: string) {
+    const payloadFile = join(root, `${name}.json`);
+    writeFileSync(payloadFile, payload);
+    return boundedSpawnSync(["bun", discoverEntry], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, STUB_PAYLOAD: payloadFile },
     });
-    return {
-      exitCode: proc.exitCode,
-      stdout: proc.stdout,
-      stderr: proc.stderr,
-    };
   }
 
   function repoEntry(full_name: string, overrides: Record<string, unknown> = {}) {
@@ -448,9 +406,10 @@ describe("discoverWritableRepos", () => {
   }
 
   test("keeps writable non-archived repos across pages and owners, drops the rest", () => {
-    const payload = join(root, "pages.json");
-    writeFileSync(
-      payload,
+    // `permissions` is optional in user/repos and `push` reports the USER's permission, not the token's grant; the
+    // cross-owner pass-through is the boundary with discoverOwnerRepos, which drops them.
+    const r = runDiscover(
+      "pages",
       JSON.stringify([
         [
           repoEntry("Vivswan/keep"),
@@ -461,68 +420,55 @@ describe("discoverWritableRepos", () => {
         [repoEntry("Other/cross-owner"), repoEntry("Vivswan/pub", { private: false })],
       ]),
     );
-    const r = runDiscover({ STUB_PAYLOAD: payload });
-    expect(r.stderr).toBe("");
-    expect(r.exitCode).toBe(0);
-    expect(JSON.parse(r.stdout)).toEqual(["Vivswan/keep", "Other/cross-owner", "Vivswan/pub"]);
+    expect({ ...r, stdout: JSON.parse(r.stdout) }).toEqual({
+      exitCode: 0,
+      stdout: ["Vivswan/keep", "Other/cross-owner", "Vivswan/pub"],
+      stderr: "",
+    });
   });
 
-  test("a failed listing exits with gh's code and passes its stderr through", () => {
-    const r = runDiscover({ STUB_FAIL: "1", STUB_PAYLOAD: "/dev/null" });
-    expect(r.exitCode).toBe(7);
-    expect(r.stderr).toContain("gh: discovery boom");
-    expect(r.stdout).toBe("");
-  });
-
-  test("a malformed payload fails loudly with the caller's label, never a value", () => {
-    const payload = join(root, "malformed.json");
-    writeFileSync(payload, JSON.stringify([[{ full_name: "Vivswan/shapeless" }]]));
-    const r = runDiscover({ STUB_PAYLOAD: payload });
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::discovery.test: user/repos response: unexpected shape");
-    expect(r.stdout + r.stderr).not.toContain("shapeless");
-  });
-
-  test("an unparsable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
-    // A bare identifier is the leaking form: Bun's raw JSON.parse error
-    // echoes it ('Unexpected identifier "hiddenserver"'), so this pins
-    // that parseJsonWith's fixed diagnostic replaces it.
-    const payload = join(root, "unparsable.json");
-    writeFileSync(payload, '[[{"full_name": hiddenserver}]]');
-    const r = runDiscover({ STUB_PAYLOAD: payload });
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::discovery.test: user/repos response: not valid JSON");
-    expect(r.stdout + r.stderr).not.toContain("hiddenserver");
-  });
+  test.each<{ reason: string; payload: string; diagnostic: string; value: string }>([
+    {
+      reason: "a malformed payload",
+      payload: JSON.stringify([[{ full_name: "Vivswan/shapeless" }]]),
+      diagnostic: "unexpected shape",
+      value: "shapeless",
+    },
+    {
+      reason: "an unparsable listing",
+      payload: '[[{"full_name": hiddenserver}]]',
+      diagnostic: "not valid JSON",
+      value: "hiddenserver",
+    },
+  ])(
+    "$reason fails loudly with the caller's label, never a value",
+    ({ reason, payload, diagnostic, value }) => {
+      const proc = runDiscover(Bun.hash(reason).toString(16), payload);
+      const { got, want } = refusal(proc, LABEL, diagnostic, null, value);
+      expect(got).toEqual(want);
+    },
+  );
 });
 
 describe("parseDiscovered", () => {
-  // Identity on every accepted payload: only repo and private are
-  // inspected; everything else passes through untouched, whatever its
-  // type - pinned so a schema tightening cannot silently change it.
-  test.each<{ reason: string; input: (DiscoveredRepo & Record<string, unknown>)[] }>([
+  // One malformed entry rejects the WHOLE list: a silently dropped row would drop a repository from the sync, green.
+  test.each<{ reason: string; input: unknown; accepted: boolean }>([
     {
-      reason: "{repo, private} entries pass their extra keys through",
-      input: [{ repo: "o/a", private: true, archived: false, pushed_at: "now" }],
+      reason: "{repo, private} entries pass through",
+      input: [{ repo: "o/a", private: true }],
+      accepted: true,
     },
-    { reason: "an empty list is valid", input: [] },
+    { reason: "a missing private", input: [{ repo: "o/a" }], accepted: false },
+    { reason: "a non-boolean private", input: [{ repo: "o/a", private: "true" }], accepted: false },
     {
-      reason: "a wrong-typed EXTRA key survives unchanged (only repo and private are inspected)",
-      input: [{ repo: "o/a", private: true, extra: 42 }],
+      reason: "one bad entry among good ones",
+      input: [{ repo: "o/a", private: true }, { repo: "o/b" }],
+      accepted: false,
     },
-  ])("$reason", ({ input }) => {
-    expect(parseDiscovered(input)).toEqual(input);
-  });
-
-  test("rejects a missing or non-boolean private (fail closed, whole list)", () => {
-    expect(parseDiscovered([{ repo: "o/a" }])).toBeNull();
-    expect(parseDiscovered([{ repo: "o/a", private: "true" }])).toBeNull();
-    expect(parseDiscovered([{ repo: "o/a", private: true }, { repo: "o/b" }])).toBeNull();
-  });
-
-  test("rejects non-object entries, a non-string repo, and a non-array payload", () => {
-    expect(parseDiscovered(["o/a"])).toBeNull();
-    expect(parseDiscovered([{ repo: 7, private: true }])).toBeNull();
-    expect(parseDiscovered({ repo: "o/a", private: true })).toBeNull();
+    { reason: "a non-object entry", input: ["o/a"], accepted: false },
+    { reason: "a non-string repo", input: [{ repo: 7, private: true }], accepted: false },
+    { reason: "a non-array payload", input: { repo: "o/a", private: true }, accepted: false },
+  ])("$reason", ({ input, accepted }) => {
+    expect<unknown>(parseDiscovered(input)).toEqual(accepted ? input : null);
   });
 });

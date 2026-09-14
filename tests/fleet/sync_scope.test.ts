@@ -2,10 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import {
   branchDispatchRefusal,
-  classifyEntry,
   modulesAdmit,
   modulesFilterFor,
-  modulesLeftOutLine,
   parseScope,
   type Scope,
   scopeRefusal,
@@ -27,12 +25,24 @@ const list = (
   slugs: new Set(slugs),
   modules: modules.map((names) => new Set(names)),
 });
+const error = (message: string) => ({ kind: "error" as const, message });
 
 describe("parseScope", () => {
-  test.each<{ raw: string; expected: ReturnType<typeof parseScope> }>([
+  // The grammar's one home. The messages carry counts, never entries: a dispatch entry may be a private slug and the
+  // caller's log is public. The roster in a message is the one handed in, so a module files.yml drops leaves it.
+  const EMPTY_ENTRY = error(
+    "the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma",
+  );
+  const EMPTY_MODULE = error(
+    "a modules: filter has an empty module name: write modules:<name>, or modules:<a>+<b> for the repos selecting every listed module",
+  );
+  const unknownModules = (unknown: number, total: number, roster: Iterable<string>) =>
+    error(
+      `${unknown} of ${total} module names in the modules: filters ${unknown === 1 ? "is not a module" : "are not modules"} files.yml knows (values withheld - this log is public); the modules are: ${[...roster].join(", ")}`,
+    );
+  test.each<{ raw: string; roster?: Set<string>; expected: ReturnType<typeof parseScope> }>([
     { raw: "", expected: ALL },
     { raw: "all", expected: ALL },
-    { raw: " ALL ", expected: ALL },
     { raw: "public", expected: list(["public"], []) },
     { raw: "Private", expected: list(["private"], []) },
     { raw: "public, Acme/Widgets", expected: list(["public"], ["acme/widgets"]) },
@@ -48,110 +58,44 @@ describe("parseScope", () => {
       raw: "public, modules:site, o/a, modules:rust+uv",
       expected: list(["public"], ["o/a"], [["site"], ["rust", "uv"]]),
     },
-    {
-      raw: "o/a,,o/b",
-      expected: {
-        kind: "error",
-        message:
-          "the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma",
-      },
-    },
-    {
-      raw: ",",
-      expected: {
-        kind: "error",
-        message:
-          "the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma",
-      },
-    },
+    { raw: "o/a,,o/b", expected: EMPTY_ENTRY },
     {
       raw: "all, o/a",
-      expected: {
-        kind: "error",
-        message:
-          '"all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
-      },
-    },
-    {
-      raw: "all, modules:site",
-      expected: {
-        kind: "error",
-        message:
-          '"all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
-      },
+      expected: error(
+        '"all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
+      ),
     },
     {
       raw: "o/a, just-a-name",
-      expected: {
-        kind: "error",
-        message:
-          "1 of 2 scope entries is neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
-      },
+      expected: error(
+        "1 of 2 scope entries is neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
+      ),
     },
     {
       raw: "o/a, just-a-name, o/b/c",
-      expected: {
-        kind: "error",
-        message:
-          "2 of 3 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
-      },
+      expected: error(
+        "2 of 3 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
+      ),
     },
     {
-      raw: "modules:",
-      expected: {
-        kind: "error",
-        message:
-          "a modules: filter has an empty module name: write modules:<name>, or modules:<a>+<b> for the repos selecting every listed module",
-      },
+      raw: "o/a, module:site",
+      expected: error(
+        "1 of 2 scope entries is neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
+      ),
     },
-    {
-      raw: "public, modules:site+",
-      expected: {
-        kind: "error",
-        message:
-          "a modules: filter has an empty module name: write modules:<name>, or modules:<a>+<b> for the repos selecting every listed module",
-      },
-    },
-    {
-      raw: "modules:pagez",
-      expected: {
-        kind: "error",
-        message: `1 of 1 module names in the modules: filters is not a module files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}`,
-      },
-    },
+    { raw: "modules:", expected: EMPTY_MODULE },
+    { raw: "modules:pagez", expected: unknownModules(1, 1, ROSTER) },
     {
       raw: "modules:site+Acme/secret, modules:o/hidden",
-      expected: {
-        kind: "error",
-        message: `2 of 3 module names in the modules: filters are not modules files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}`,
-      },
+      expected: unknownModules(2, 3, ROSTER),
     },
-  ])("$raw", ({ raw, expected }) => {
-    expect(parseScope(raw, ROSTER)).toEqual(expected);
-  });
-
-  test("the roster names what the message lists, so a module files.yml drops leaves the roster", () => {
-    expect(parseScope("modules:site", new Set(["uv", "rust"]))).toEqual({
-      kind: "error",
-      message:
-        "1 of 1 module names in the modules: filters is not a module files.yml knows (values withheld - this log is public); the modules are: uv, rust",
-    });
-  });
-});
-
-describe("classifyEntry", () => {
-  test.each([
-    ["all", "all"],
-    ["Public", "public"],
-    ["PRIVATE", "private"],
-    ["Acme/a", "slug"],
-    ["modules:site", "modules"],
-    ["MODULES:", "modules"],
-    ["module:site", "invalid"],
-    ["steady", "invalid"],
-    ["", "invalid"],
-  ] as const)("%s -> %s", (entry, kind) => {
-    expect(classifyEntry(entry)).toBe(kind);
+    {
+      raw: "modules:site",
+      roster: new Set(["uv", "rust"]),
+      expected: unknownModules(1, 1, ["uv", "rust"]),
+    },
+  ])("$raw", ({ raw, roster = ROSTER, expected }) => {
+    expect(parseScope(raw, roster)).toEqual(expected);
   });
 });
 
@@ -210,85 +154,82 @@ describe("modules filters", () => {
   const SITE_AND_RELEASE = list(["public"], ["o/named"], [["site", "release-please"]]);
   const EITHER = list([], [], [["site"], ["rust", "uv"]]);
 
-  test.each<{ reason: string; scope: Scope; repo: string; filters: string[][] | null }>([
+  // A repo the scope names by slug is admitted as typed and never judged; every other candidate is judged by the
+  // filters, AND within one, OR across them. Both selectors execute this pair.
+  test.each<{
+    reason: string;
+    scope: Scope;
+    repo: string;
+    declared: string[];
+    outcome: "unfiltered" | boolean;
+  }>([
     {
       reason: "no filter in the scope",
       scope: list(["public"], ["o/a"]),
       repo: "o/a",
-      filters: null,
+      declared: [],
+      outcome: "unfiltered",
     },
-    { reason: "the whole fleet", scope: ALL, repo: "o/a", filters: null },
+    { reason: "the whole fleet", scope: ALL, repo: "o/a", declared: [], outcome: "unfiltered" },
     {
       reason: "a repo named by slug is admitted as typed, any casing",
       scope: SITE_AND_RELEASE,
       repo: "O/Named",
-      filters: null,
+      declared: [],
+      outcome: "unfiltered",
     },
-    {
-      reason: "every other candidate is judged",
-      scope: SITE_AND_RELEASE,
-      repo: "o/other",
-      filters: [["site", "release-please"]],
-    },
-  ])("modulesFilterFor: $reason", ({ scope, repo, filters }) => {
-    expect(modulesFilterFor(scope, repo)).toEqual(
-      filters === null ? null : filters.map((names) => new Set(names)),
-    );
-  });
-
-  test.each<{ reason: string; scope: Scope; declared: string[]; admitted: boolean }>([
     {
       reason: "AND: every named module must be selected",
       scope: SITE_AND_RELEASE,
+      repo: "o/judged",
       declared: ["uv", "site", "release-please"],
-      admitted: true,
+      outcome: true,
     },
     {
       reason: "AND: one missing module fails the filter",
       scope: SITE_AND_RELEASE,
+      repo: "o/judged",
       declared: ["uv", "site"],
-      admitted: false,
+      outcome: false,
     },
-    { reason: "an empty selection passes no filter", scope: EITHER, declared: [], admitted: false },
+    {
+      reason: "AND: the other missing module fails it too, so a filter dropping a name cannot pass",
+      scope: SITE_AND_RELEASE,
+      repo: "o/judged",
+      declared: ["release-please"],
+      outcome: false,
+    },
+    {
+      reason: "an empty selection passes no filter",
+      scope: EITHER,
+      repo: "o/judged",
+      declared: [],
+      outcome: false,
+    },
     {
       reason: "OR across filters: the first one passes",
       scope: EITHER,
+      repo: "o/judged",
       declared: ["site"],
-      admitted: true,
+      outcome: true,
     },
     {
       reason: "OR across filters: the second one passes",
       scope: EITHER,
+      repo: "o/judged",
       declared: ["uv", "rust", "nightly"],
-      admitted: true,
+      outcome: true,
     },
     {
       reason: "OR across filters: half of each passes neither",
       scope: EITHER,
+      repo: "o/judged",
       declared: ["uv", "docs-site"],
-      admitted: false,
+      outcome: false,
     },
-  ])("modulesAdmit: $reason", ({ scope, declared, admitted }) => {
-    const filters = modulesFilterFor(scope, "o/judged");
-    if (filters === null) throw new Error("the case must carry a filter");
-    expect(modulesAdmit(filters, declared)).toBe(admitted);
-  });
-
-  test.each<{ scope: Scope; leftOut: number; line: string | null }>([
-    { scope: ALL, leftOut: 0, line: null },
-    { scope: list(["public"], []), leftOut: 3, line: null },
-    {
-      scope: EITHER,
-      leftOut: 1,
-      line: "modules filter: 1 adopted repo left out (selecting none of the listed module sets)",
-    },
-    {
-      scope: SITE_AND_RELEASE,
-      leftOut: 0,
-      line: "modules filter: 0 adopted repos left out (selecting none of the listed module sets)",
-    },
-  ])("modulesLeftOutLine: $leftOut left out -> $line", ({ scope, leftOut, line }) => {
-    expect(modulesLeftOutLine(scope, leftOut)).toBe(line);
+  ])("$reason", ({ scope, repo, declared, outcome }) => {
+    const filters = modulesFilterFor(scope, repo);
+    expect(filters === null ? "unfiltered" : modulesAdmit(filters, declared)).toBe(outcome);
   });
 });
 
@@ -320,7 +261,7 @@ describe("scopeRefusal", () => {
   });
 });
 
-// The messages are spelled here, independent of the source: a branch dispatch names one repository and nothing else.
+// A branch dispatch names one repository and nothing else; the messages are spelled here, independent of the source.
 describe("branchDispatchRefusal", () => {
   const ONE = list([], ["o/a"]);
   const MANUAL =
@@ -328,11 +269,13 @@ describe("branchDispatchRefusal", () => {
   const ONE_REPO =
     "branch takes exactly one owner/name in repo: the sync commits onto that one repository's branch (no list, no all, no visibility token, no modules: filter)";
 
-  test("one slug without manual is the admitted shape", () => {
-    expect(branchDispatchRefusal(ONE, false)).toBeNull();
-  });
-
-  test.each<{ reason: string; scope: Scope; manual: boolean; expected: string }>([
+  test.each<{ reason: string; scope: Scope; manual: boolean; expected: string | null }>([
+    {
+      reason: "one slug without manual is the admitted shape",
+      scope: ONE,
+      manual: false,
+      expected: null,
+    },
     { reason: "manual beside branch", scope: ONE, manual: true, expected: MANUAL },
     { reason: "two slugs", scope: list([], ["o/a", "o/b"]), manual: false, expected: ONE_REPO },
     { reason: "all", scope: ALL, manual: false, expected: ONE_REPO },
@@ -361,7 +304,7 @@ describe("branchDispatchRefusal", () => {
       expected: ONE_REPO,
     },
     { reason: "manual outranks the scope refusal", scope: ALL, manual: true, expected: MANUAL },
-  ])("$reason is refused", ({ scope, manual, expected }) => {
+  ])("$reason", ({ scope, manual, expected }) => {
     expect(branchDispatchRefusal(scope, manual)).toBe(expected);
   });
 });

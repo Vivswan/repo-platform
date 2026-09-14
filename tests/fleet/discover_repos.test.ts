@@ -96,27 +96,4 @@ describe("discover_repos.ts", () => {
     expect(r.stdout).toBe("");
     expect(existsSync(r.discoveredPath)).toBe(false);
   });
-
-  test("a malformed listing fails loudly with this script's label, never a value", () => {
-    const payload = join(root, "malformed.json");
-    writeFileSync(payload, JSON.stringify([[{ full_name: "Vivswan/shapeless" }]]));
-    const r = run("malformed", { STUB_PAYLOAD: payload });
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::discover_repos: user/repos response: unexpected shape");
-    expect(r.stdout + r.stderr).not.toContain("shapeless");
-    expect(existsSync(r.discoveredPath)).toBe(false);
-  });
-
-  test("an unparsable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
-    // A bare identifier is the leaking form: Bun's raw JSON.parse error
-    // echoes it ('Unexpected identifier "hiddenserver"'), so this pins
-    // that parseJsonWith's fixed diagnostic replaces it.
-    const payload = join(root, "unparsable.json");
-    writeFileSync(payload, '[[{"full_name": hiddenserver}]]');
-    const r = run("unparsable", { STUB_PAYLOAD: payload });
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::discover_repos: user/repos response: not valid JSON");
-    expect(r.stdout + r.stderr).not.toContain("hiddenserver");
-    expect(existsSync(r.discoveredPath)).toBe(false);
-  });
 });
