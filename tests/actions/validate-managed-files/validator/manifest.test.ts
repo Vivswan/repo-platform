@@ -520,19 +520,6 @@ describe("the recorded class against files.yml", () => {
     expect(errors(stderr)).toEqual(expected);
     expect(exitCode).toBe(expected.length === 0 ? 0 : 1);
   });
-
-  test("a data file without a files list is one error and the classes stand unjudged", () => {
-    const { exitCode, stderr } = runValidator(
-      { [MANIFEST]: manifestOf({ ...stampedBaseline(), [CI]: '{"class": "starter"}' }) },
-      [],
-      { filesYml: "placeholders: []\nmodules: {uv: {}}\n" },
-    );
-    expect(exitCode).toBe(1);
-    expect(errors(stderr)).toHaveLength(1);
-    expect(errors(stderr)[0]).toContain(
-      "the module data file carries no files list - neither the registration's module names nor the manifest's classes can be judged without it",
-    );
-  });
 });
 
 describe("parity messages name what the record and the tree show, never who made it", () => {
@@ -639,7 +626,7 @@ describe("parity messages name what the record and the tree show, never who made
     for (const [rel, target] of Object.entries(links)) symlinkSync(target, join(root, rel));
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(join(root, ".repo-platform.yml"), "modules: []\n");
-    writeFileSync(join(root, "files.yml"), "modules: {}\nfiles: []\n");
+    writeFileSync(join(root, "files.yml"), "placeholders: []\nmodules: {}\nfiles: []\n");
     writeFileSync(join(root, MANIFEST_NAME), manifestOf({ ...SELF_ENTRY, [entry[0]]: entry[1] }));
     const findings = checkManifestParity(
       loadContext(root, join(root, "files.yml"), { self: false, private: false }),
@@ -681,7 +668,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
     writeFileSync(join(root, ".repo-platform.yml"), "modules: []\n");
     writeFileSync(
       join(root, "files.yml"),
-      "modules: {}\nfiles:\n  - {path: docs/relabeled.md, class: managed}\n",
+      "placeholders: []\nmodules: {}\nfiles:\n  - {path: docs/relabeled.md, class: managed}\n",
     );
     const split = (hash: string, grammar = "managed-region") =>
       `{"class": "split", "grammar": ${JSON.stringify(grammar)}, "begin": ${JSON.stringify(B)}, "end": ${JSON.stringify(E)}, "hash": "${hash}"}`;

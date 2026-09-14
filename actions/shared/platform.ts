@@ -12,6 +12,9 @@ export const PLATFORM_SLUG = `${PLATFORM_OWNER}/${PLATFORM_NAME}`;
 export const REGISTRATION_PATH = `.${PLATFORM_NAME}.yml`;
 export const MANIFEST_NAME = `.github/${PLATFORM_NAME}-manifest.json`;
 
+/** Where the rendered settings document lands; files.yml's `render: settings` row declares the same path. */
+export const SETTINGS_PATH = ".github/settings.yml";
+
 /** The label both managed-region marker lines carry; grammar.ts wraps it in each comment syntax. */
 export const MANAGED_REGION_LABEL = `${PLATFORM_NAME.toUpperCase()} MANAGED`;
 

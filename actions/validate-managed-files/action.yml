@@ -53,7 +53,8 @@ runs:
         "${{ runner.temp }}/validate-managed-files-verdict.json"
         "${{ runner.temp }}/validate-managed-files-report.md"
 
-    # The tarball ships no node_modules, so the dependencies are installed here.
+    # The tarball ships no node_modules, so the dependencies are installed here: the action's own and the plan's,
+    # whose loader the validator reads files.yml through.
     # FILES_CONFIG is the files.yml at the delivery commit's root, two levels above this action.
     - name: Validate the checkout
       id: validate
@@ -69,6 +70,7 @@ runs:
         VERDICT_FILE: ${{ runner.temp }}/validate-managed-files-verdict.json
       run: |
         "$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"
+        "$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH/../plan"
         "$ACTION_BUN" "$ACTION_PATH/src/run.ts"
 
     # The ONE place the verdict is read and `integrity` is set, whatever
