@@ -319,13 +319,12 @@ describe("reusable-site.yml", () => {
     },
   );
 
-  test("every input is optional: sha, custom_domain, and config (empty = the registration)", () => {
-    expect(Object.keys(workflow.on.workflow_call.inputs).sort()).toEqual([
-      "config",
-      "custom_domain",
-      "sha",
-    ]);
-    for (const [name, input] of Object.entries(workflow.on.workflow_call.inputs)) {
+  test("sha is required with no default; custom_domain and config are optional (empty = the registration)", () => {
+    const { sha, ...optional } = workflow.on.workflow_call.inputs;
+    expect(sha).toMatchObject({ required: true });
+    expect(sha).not.toHaveProperty("default");
+    expect(Object.keys(optional).sort()).toEqual(["config", "custom_domain"]);
+    for (const [name, input] of Object.entries(optional)) {
       expect([name, input.required, input.default]).toEqual([name, false, ""]);
     }
   });

@@ -27,19 +27,19 @@ import { existingFile, writeFile } from "./target_files.ts";
 
 export { MANIFEST_NAME };
 
-/** A null hash is carried from a record another tool left unstamped; retire.ts then holds the path as foreign instead of removing it. */
+/** A record vouches for a write by its hash, so the manifest's own hash-null entry (manifest.ts renderManifest) and a record another tool left unstamped read as no record. */
 export type ManifestRecord =
-  | { class: "managed"; hash: string | null }
-  | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string | null }
+  | { class: "managed"; hash: string }
+  | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string }
   | { class: "starter" }
   | MirrorRecord
-  | { class: "link"; hash: string | null };
+  | { class: "link"; hash: string };
 /** Silent means copy, in the record as in the registration; a symlink's hash covers its link target, a copy's the bytes. */
 export type MirrorRecord =
-  | { class: "mirror"; hash: string | null }
-  | { class: "mirror"; kind: "symlink"; hash: string | null };
+  | { class: "mirror"; hash: string }
+  | { class: "mirror"; kind: "symlink"; hash: string };
 
-export function mirrorRecord(kind: MirrorKind, hash: string | null): MirrorRecord {
+export function mirrorRecord(kind: MirrorKind, hash: string): MirrorRecord {
   return kind === "symlink" ? { class: "mirror", kind, hash } : { class: "mirror", hash };
 }
 
@@ -55,13 +55,8 @@ export function readRecord(entry: ManifestEntryShape | undefined): ManifestRecor
   if (entry === undefined || !isRecordedClass(entry.class)) return null;
   if (strayFields(RECORD_FIELDS[entry.class], entry).length > 0) return null;
   if (entry.class === "starter") return { class: "starter" };
-  const hash =
-    entry.hash === null
-      ? null
-      : typeof entry.hash === "string" && HASH_RE.test(entry.hash)
-        ? entry.hash
-        : undefined;
-  if (hash === undefined) return null;
+  const hash = entry.hash;
+  if (typeof hash !== "string" || !HASH_RE.test(hash)) return null;
   switch (entry.class) {
     case "managed":
       return { class: "managed", hash };

@@ -8,10 +8,9 @@ on:
   workflow_call:
     inputs:
       sha:
-        description: The commit to build ("" = the event's own ref)
-        required: false
+        description: The commit to build
+        required: true
         type: string
-        default: ""
       custom_domain:
         description: Custom domain ("" = <owner>.github.io/<repo>); pass vars.CUSTOM_DOMAIN
         required: false

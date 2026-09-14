@@ -132,8 +132,9 @@ function loadVocabulary(filesConfig: string): Vocabulary {
   return { modules: new Set(Object.keys(modules)), files: declarations };
 }
 
-/** Selected modules are the registration's names files.yml knows (the writer's resolveModules); one declaration per
- *  path is live because the loader refuses two that can both hold (docs/sync.md, Selection). */
+/** A module files.yml does not know leaves the selection unknown (checks/registration.ts reports it; the plan and the
+ *  writer refuse it), never a narrower one. One declaration per path is live because the loader refuses two that can
+ *  both hold (docs/sync.md, Selection). */
 function liveClasses(
   vocabulary: Vocabulary,
   registration: { modules: unknown; except: unknown } | null,
@@ -142,8 +143,16 @@ function liveClasses(
   if ("problem" in vocabulary || !Array.isArray(registration?.modules)) return null;
   const strings = (value: unknown) =>
     Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  const modules = registration.modules;
+  if (
+    !modules.every(
+      (name): name is string => typeof name === "string" && vocabulary.modules.has(name),
+    )
+  ) {
+    return null;
+  }
   const selection: Selection = {
-    modules: strings(registration.modules).filter((name) => vocabulary.modules.has(name)),
+    modules,
     private: privateRepo,
     except: strings(registration.except),
   };

@@ -4,6 +4,9 @@ import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 
 export const RESYNC = `re-run the sync (dispatch sync-repos.yml in ${PLATFORM_NAME} with repo=<owner>/<name>), which replaces platform files whole`;
+/** The writer refuses a manifest record it cannot read before writing anything (sync.ts), so no resync restamps one. */
+export const REPAIR =
+  "the sync refuses a record it cannot read, so revert the entry (git history has the stamped original)";
 
 /** The manifest is itself a managed file, so every managed repository carries it. The guarantee is VISIBILITY, not
  *  tamper-proofing, and nothing lists the selection's paths against the keys.
@@ -38,20 +41,22 @@ export function checkManifestShape(ctx: Context): Finding[] {
     findings.push(
       error(
         `${MANIFEST_NAME}: entry '${key}' is not a repository path the sync writes (the path ${problem}) - ` +
-          "a hand edit; the sync ignores such a record and no class can be judged for it; delete the entry " +
-          `(git history has the stamped original) or ${RESYNC}`,
+          "a hand edit, and no class can be judged for it; delete the entry (git history has the stamped original)",
       ),
     );
   }
-  // No emitter writes a field outside the vocabulary, so one is a hand
-  // edit; the next sync drops it.
+  // No emitter writes a field outside the vocabulary, so one is a hand edit. The writer rewrites the manifest's own
+  // entry without reading it (sync.ts skips it), so a resync heals that one alone.
   for (const { path, fields } of unknownEntryFields(records)) {
+    const remedy =
+      path === MANIFEST_NAME
+        ? `revert the edit (git history has the stamped original) or ${RESYNC}`
+        : REPAIR;
     findings.push(
       error(
         `${MANIFEST_NAME}: entry '${path}' carries field(s) ${fields
           .map((field) => JSON.stringify(field))
-          .join(", ")} outside the manifest's vocabulary - no sync writes them; revert the ` +
-          `edit (git history has the stamped original) or ${RESYNC}`,
+          .join(", ")} outside the manifest's vocabulary - no sync writes them; ${remedy}`,
       ),
     );
   }

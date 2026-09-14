@@ -93,7 +93,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - Rule: no compatibility shims, dual code paths, or retired-shape handling outside a repo's own `migrations/` directory; repo-platform has none.
 - Why: a one-shot replacement with a loud PR note stays readable; a compat era accretes paths nobody removes.
-- How: replace the shape in one PR and say so in the PR body; a file the platform stops writing gets a `retired` entry in `files.yml` (with `moved_to` for a rename), and the sync carries the transition.
+- How: replace the shape in one PR and say so in the PR body; a file the platform stops writing leaves `files.yml`, and every target's next sync retires the recorded file ([sync.md](sync.md#retirement)); a transition the sync cannot carry by itself is one rung in `migrations/`, the only home for transitional code.
 - Enforced by: review.
 
 ## Short comments

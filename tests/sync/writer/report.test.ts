@@ -16,7 +16,7 @@ const QUIET: SyncOutcome = {
   private: false,
   written: [{ path: "ci.yml", class: "managed", change: "updated", detail: "" }],
   replaced: [],
-  retired: [{ path: "old.yml", outcome: "deleted", detail: "retired" }],
+  retired: [{ path: "old.yml", outcome: "deleted", detail: "no longer selected" }],
   notes: [],
   mirrors: [
     { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
@@ -49,10 +49,12 @@ describe("holdReasons", () => {
           path: "CONTRIBUTING.md",
           outcome: "region removed",
           detail:
-            "retired; repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it",
+            "no longer selected; repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it",
         },
       ],
-      notes: ["dropped unknown module `uv` (files.yml does not know it)"],
+      notes: [
+        "placeholder `{{description}}` has no value: set project.description in .repo-platform.yml",
+      ],
       mirrors: [
         {
           source: "L",
@@ -70,7 +72,7 @@ describe("holdReasons", () => {
       "retirement of r.yml held: the content differs from the last write",
       "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
       "mirror s/L replaced: a directory stood at the target",
-      "registration: dropped unknown module `uv` (files.yml does not know it)",
+      "registration: placeholder `{{description}}` has no value: set project.description in .repo-platform.yml",
     ]);
   });
 });
@@ -117,7 +119,7 @@ describe("renderReport", () => {
     const text = renderReport(buildReport(QUIET));
     expect(text).toContain(`| \`${BUILD}\` | \`bun\` | public |`);
     expect(text).toContain("| `ci.yml` | managed | updated |");
-    expect(text).toContain("| `old.yml` | deleted | retired |");
+    expect(text).toContain("| `old.yml` | deleted | no longer selected |");
     expect(text).toContain("| `LICENSE.md` | `skills/a/LICENSE.md` | written |  |");
     expect(text).not.toContain("### Replaced local edits");
     expect(text).not.toContain("### Registration notes");
@@ -185,7 +187,9 @@ describe("renderReport", () => {
     const text = renderReport(
       buildReport({
         ...QUIET,
-        notes: [`dropped unknown module \`${forged}\` (files.yml does not know it)`],
+        notes: [
+          `placeholder \`{{${forged}}}\` has no value: set project.description in .repo-platform.yml`,
+        ],
         mirrors: [
           { source: "LICENSE.md", target: `x/${forged}`, outcome: "replaced", detail: "d" },
         ],
@@ -201,11 +205,11 @@ describe("renderReport", () => {
       "### Review",
     ]);
     expect(lines).toContain(
-      "- dropped unknown module `bad ### Forged` (files.yml does not know it)",
+      "- placeholder `{{bad ### Forged}}` has no value: set project.description in .repo-platform.yml",
     );
     expect(lines).toContain("| `LICENSE.md` | `x/bad ### Forged` | replaced | d |");
     expect(lines).toContain(
-      "- registration: dropped unknown module `bad ### Forged` (files.yml does not know it)",
+      "- registration: placeholder `{{bad ### Forged}}` has no value: set project.description in .repo-platform.yml",
     );
   });
 
@@ -245,15 +249,19 @@ describe("renderReport", () => {
         ...QUIET,
         private: true,
         replaced: [{ path: "ci.yml", diff: "--- ci.yml\n+++ ci.yml\n@@\n-a\n+b" }],
-        notes: ["dropped unknown module `uv` (files.yml does not know it)"],
+        notes: [
+          "placeholder `{{description}}` has no value: set project.description in .repo-platform.yml",
+        ],
       }),
     );
     expect(text).toContain("| private |");
     expect(text).toContain("### Replaced local edits");
     expect(text).toContain("#### `ci.yml`\n\n```diff\n--- ci.yml\n+++ ci.yml\n@@\n-a\n+b\n```");
-    expect(text).toContain("### Registration notes\n\n- dropped unknown module `uv`");
     expect(text).toContain(
-      "Hold for review: **yes**\n\n- local edits replaced in ci.yml\n- registration: dropped",
+      "### Registration notes\n\n- placeholder `{{description}}` has no value",
+    );
+    expect(text).toContain(
+      "Hold for review: **yes**\n\n- local edits replaced in ci.yml\n- registration: placeholder",
     );
   });
 });

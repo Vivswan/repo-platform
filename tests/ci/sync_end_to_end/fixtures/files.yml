@@ -1,5 +1,5 @@
 # The end-to-end fixture's files.yml, paired with the seeded checkout in tests/ci/sync_end_to_end.test.ts:
-# each entry and retirement exists for one state that test asserts.
+# each entry exists for one state that test asserts.
 placeholders:
   - project_name
   - project_slug
@@ -105,12 +105,3 @@ files:
   - path: docs/NOTES.md
     class: managed
     when: {modules: [pages]}
-retired:
-  - path: .github/old-tool.yml
-  - path: .github/workflows/release.yml
-  - path: SECURITY.md
-    moved_to: .github/SECURITY.md
-  - path: .github/workflows/old-starter.yml
-  - path: OLD_NOTES.md
-    moved_to: docs/NOTES.md
-  - path: CONTRIBUTING.md

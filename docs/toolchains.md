@@ -43,7 +43,7 @@ To run one repo on a different version, override in a repo-owned workflow and le
 Rules that follow:
 
 - Never hand-edit the dotfile: it is managed, so the next sync overwrites it, with the change visible only in the sync PR. Keep deliberate divergence in the workflow inputs above.
-- Repo-owned starters (`auto-format.yml`, `copilot-setup-steps.yml`, the `checks.yml` examples) are written once and never resynced: starters written BEFORE the pin landed keep floating until the repo adds the version-file input by hand. New repositories carry it from the start.
+- Repo-owned starters (`auto-format.yml`, `copilot-setup-steps.yml`, the `checks.yml` examples) are written once and never resynced: a later change to a starter reaches an existing copy only by hand.
 - Once the dotfile pins bun, drop any `packageManager` field for it from `package.json`: setup-bun falls back to `packageManager`/`engines.bun` only when no version input or file matched, so a stale field is at best dead and at worst a second, disagreeing pin.
 
 ## Keeping the pins fresh

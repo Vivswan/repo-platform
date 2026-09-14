@@ -9,7 +9,7 @@ Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter wo
 
 The starter is written once and then repo-owned: fuzzers and their toolchains differ too much across repos for the platform to keep managing the file, so it carries the shared machinery and leaves the fuzz step itself to you. The module also adds `/.fuzz-failures/` to the managed region of the repository's `.gitignore`, so the failure directory a run leaves behind is never committed. Issue lifecycle, release gating, label renaming, and the action pin's history are shared with the nightly module: [Tracking issues](tracking-issues.md).
 
-Repo-owned also means a fix to the starter never reaches repos that already received it. The upload step sets `include-hidden-files: true` because `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default since v4.4, so without it the step finds no files and uploads nothing (`if-no-files-found: ignore` keeps that silent); repos that received the starter before that line existed add it themselves.
+Repo-owned also means a fix to the starter never reaches repos that already received it. The upload step sets `include-hidden-files: true` because `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default since v4.4, so without it the step finds no files and uploads nothing (`if-no-files-found: ignore` keeps that silent).
 
 ## Module parameter (registration key)
 
