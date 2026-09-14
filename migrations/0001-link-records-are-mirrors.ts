@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // The fleet's AGENTS.md symlinks became mirrors the fleet declares, and the writer refuses a manifest record of the
 // class that left; this rung restamps each `link` record as the symlink mirror record the mirror pass writes, hash kept.
+// stdout is the runner's (sync/migrate.ts): the manifest's path when it was written, nothing otherwise.
 //
 // Usage: bun migrations/0001-link-records-are-mirrors.ts <checkout>
 
@@ -50,9 +51,10 @@ function main(checkout: string | undefined): number {
   const { text, restamped } = restampLinkRecords(readFileSync(path, "utf-8"));
   if (restamped === 0) return 0;
   writeFileSync(path, text);
-  console.log(
+  console.error(
     `0001-link-records-are-mirrors: restamped ${restamped} link record(s) in ${MANIFEST}`,
   );
+  console.log(MANIFEST);
   return 0;
 }
 

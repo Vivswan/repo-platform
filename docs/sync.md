@@ -111,7 +111,7 @@ mirrors:
 | Key | Meaning |
 | --- | --- |
 | `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
-| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. A key is a typed one (`description`, `path`, `tracking_label`, `codeql_languages`) or a list some entry's `blocks` or a `declaring` clause reads; anything else is refused (the rule under the module data table). One key carries a placeholder default: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder (below). |
+| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. A key is a typed one (`description`, `path`, `tracking_label`, `codeql_languages`, `pin`) or a list some entry's `blocks` or a `declaring` clause reads; anything else is refused (the rule under the module data table). One key carries a placeholder default: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
 | `files[].class` | `managed`, `split`, or `starter` (below). |
 | `files[].source` | The source file, under `files/`, or an upstream ref `{repository, sha, path}` fetched at sync time ([Upstream refs](#upstream-refs)). Default: `files/<first when.modules entry, or base>/<path>`. |
@@ -146,6 +146,8 @@ The loader refuses, all problems at once:
 
 - a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
 
+- a `pin` whose `file` is not a clean path under `files/`, whose `repository` is not `owner/name`, or whose `tag` does not spell `{version}` exactly once
+
 - `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source`, `blocks`, `upstream`, or `replace`, or without `overlay`
 
 - a block list that is not a list of names (letters, digits, `_`, `-`)
@@ -170,7 +172,7 @@ An upstream ref is `{repository, sha, path}`: a file of a github.com repository 
 
 - The body is normalized (CRLF to LF, trailing spaces and tabs stripped, surrounding blank lines dropped), then rewritten by the entry's `replace`. As a source it is the entry's text; as a block it is headed by the entry's region (`files[].upstream` above).
 
-- Two syncs render the same bytes until [refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) moves the pin: weekly, every distinct `{repository, sha}` the data file spells moves to that repository's HEAD by one PR here, its body each fetched file's diff between the two commits; the next sync renders the change wherever the file lands.
+- Two syncs render the same bytes until [refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) moves the pin: weekly, its `commit` leg moves every distinct `{repository, sha}` the data file spells to that repository's HEAD by one PR on `automation/refresh-commit-pins`, its body each fetched file's diff between the two commits; the next sync renders the change wherever the file lands. The workflow's other leg moves the modules' release pins ([toolchains.md](toolchains.md#keeping-the-pins-fresh)) on a branch of their own.
 
 ## files.yml reference
 
@@ -214,8 +216,9 @@ A fleet mirror carries no `when`: every repository gets its targets, save one it
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
 | `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
+| `pin` | `{file, repository, tag}`: the module's version dotfile under `files/`, the github.com repository whose latest release it follows, and that repository's release tag with `{version}` where the version stands ([toolchains.md](toolchains.md#keeping-the-pins-fresh)) | the refresh workflow |
 
-- **Every many-of key is a list,** `codeql_languages` and the block lists alike: a key outside `description`, `path`, and `tracking_label` must hold a non-empty list of names, and one spelled as a single word is a loader error naming the module and key.
+- **Every many-of key is a list,** `codeql_languages` and the block lists alike: a key outside `description`, `path`, `tracking_label`, and `pin` must hold a non-empty list of names, and one spelled as a single word is a loader error naming the module and key.
 
 - **An untyped key no file entry's `blocks` and no `declaring` clause reads** is a loader error naming the module and key too: a typo'd or retired key is refused, never silently skipped.
 
@@ -361,13 +364,15 @@ Rows appear only for files present, save a `released` row, which reports a recor
 
 `migrations/` is the only home for transitional code ([fleet-guidelines.md](fleet-guidelines.md#no-backwards-compatibility-code)): the writer and the validator know the current shape alone, so a fleet transition the writer cannot carry by itself (a manifest record class that left, say) is one rung there.
 
-- **A rung** is one self-contained bun script, `migrations/<NNNN>-<what>.ts <checkout>`, numbered in the order it was written, idempotent (a checkout it has already crossed is a no-op), and never retired: a target that missed a round crosses every rung on its next sync.
+- **A rung** is one self-contained bun script, `migrations/<NNNN>-<what>.ts <checkout>`, numbered in the order it was written, idempotent (a checkout it has already crossed is a no-op), and never retired: a target that missed a round crosses every rung on its next sync. Its stdout is the checkout-relative paths it wrote, one per line, and nothing else; anything it has to say goes to stderr.
 
-- **The operator runs every rung** in the build's `migrations/` over the target checkout, in name order, before the writer reads it ([sync/migrate.ts](../.github/scripts/sync/migrate.ts)); nothing outside `migrations/` knows any rung.
+- **The operator runs every rung** in the build's `migrations/` over the target checkout, in name order, before the writer reads it ([sync/migrate.ts](../.github/scripts/sync/migrate.ts)); nothing outside `migrations/` knows any rung. The runner writes the union of the reported paths to `$RUNNER_TEMP/migrated.txt`, NUL-separated, once every rung has finished.
 
 - **A rung that exits nonzero fails the row:** the rungs after it and the writer do not run, nothing is delivered, and the failure is filed as the writer's with the rung's line in the log tail.
 
 - **A rung ships with the PR that changes the shape** and rides the same fleet-sync round (`fleet-sync:all`), with one test seen red on the old shape and a no-op control.
+
+- **A rung's edit is committed because the rung reported it:** the delivery stages the runner's list, the writer's paths, and the manifest, nothing else, so an edit at a path neither the rung printed nor the writer's report or the manifest names stays out of the commit.
 
 | Rung | Transition |
 | --- | --- |
@@ -517,9 +522,9 @@ The sync targets this repository like any other: its [.repo-platform.yml](../.re
 | row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/`, whose dependencies are installed there (`bun install --cwd build`) so its writer renders with its own versions |
 | row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | one listing of the owner's writable repositories (the same call discovery makes, no re-selection), the row's key recomputed over it and the one repository carrying it taken (no such repository: the step refuses, naming no repository); every form of the name is registered with the masker before anything else prints; a dispatched branch is probed with one `git ls-remote` and a branch the repository does not have refuses too; the name and its visibility ride `GITHUB_ENV` from here (the next run step's preamble spells them under `env:`, masked by then) |
 | row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text), at the dispatched branch when there is one; the token is stripped from the remote afterwards; `continue-on-error` |
-| row 4: migrate | the build's own [sync/migrate.ts](../.github/scripts/sync/migrate.ts), run from `build/` | every rung of the build's `migrations/` over the target, in name order ([Migrations](#migrations)); its log is `sync.log` until the writer's report replaces it; `continue-on-error`, and a failed rung skips the writer |
+| row 4: migrate | the build's own [sync/migrate.ts](../.github/scripts/sync/migrate.ts), run from `build/` | every rung of the build's `migrations/` over the target, in name order ([Migrations](#migrations)); the paths the rungs reported to `$RUNNER_TEMP/migrated.txt`; its log is `sync.log` until the writer's report replaces it; `continue-on-error`, and a failed rung skips the writer |
 | row 5: write | the build's own [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts), run from `build/` | the one writer step, so the commit the manifest records is the code that wrote the tree: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
-| row 6: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log`; on a branch dispatch the commit lands on the dispatched branch instead ([syncing a branch](#syncing-a-branch)) |
+| row 6: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform` staging the manifest, the paths the writer's summary says it changed, and the paths the rungs reported, each a literal pathspec (a `[` in a name is that character, not a class) forced past the target's own `.gitignore` (nothing else is staged, and a path git cannot find fails the row), pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log`; on a branch dispatch the commit lands on the dispatched branch instead ([syncing a branch](#syncing-a-branch)) |
 | row 7: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 
 The vocabulary, complete (`tests/sync/verdict.test.ts` pins it):
@@ -592,6 +597,7 @@ label added -> checks out the branch and the platform at `stable`
 | the writer holds (a replaced local edit, a registration note, a link in a managed file's place) | red, nothing pushed | the report with its Review section: a hold is a human's call, and the branch is a human's |
 | the sync changes a file under `.github/workflows/` | red, nothing pushed | the paths, and the operator's branch dispatch as the way: the repository token cannot create or update a workflow file |
 | a rung or the writer failed | red, nothing pushed | the log tail |
+| a written path git cannot stage | red, nothing pushed | no comment; the job log carries git's line naming the path |
 | the push refused (a commit reached the branch meanwhile, a rule the token cannot meet) | red | git's message; add the label again once the branch is where you want it |
 
 - **Same-repository branches only:** a fork's pull request skips the job at zero billed minutes (its token could not push), and so does any other label.
@@ -599,6 +605,8 @@ label added -> checks out the branch and the platform at `stable`
 - **The pushed head's checks wait for a human:** GitHub holds the `pull_request` run a repository-token push creates for approval, so approve it from the merge box (or push a commit of your own) to run them.
 
 - **The platform dispatches nothing:** a `workflow_dispatch` run of `ci.yml` would post `all-green` on the head while skipping the pull-request-only legs, and the `pr-title` module's check never posts on one, a weaker gate than the held run.
+
+- **What is committed:** the manifest, the paths the writer's report says it changed, and the paths the rungs reported, each a literal pathspec staged forced, so a path the repository's own `.gitignore` covers lands in the commit that names it and a `[` in a name stages that name alone.
 
 - **What the label covers:** toolchain pins, the rendered settings, the `.gitignore` and `AGENTS.md` regions, the manifest stamp, and the validator's drift findings on any file outside `.github/workflows/`. A change under `.github/workflows/` stays with the operator's branch dispatch.
 

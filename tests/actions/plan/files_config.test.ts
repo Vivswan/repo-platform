@@ -126,6 +126,16 @@ describe("parseFilesConfig", () => {
       "modules.a.path: ",
     ],
     [
+      "a pin whose tag does not spell the version once",
+      "files: []\nplaceholders: []\nmodules:\n  a: { pin: { file: files/a/.v, repository: o/a, tag: v1 } }",
+      "modules.a.pin.tag: does not spell the version as {version} once",
+    ],
+    [
+      "a pin whose file is outside files/",
+      "files: []\nplaceholders: []\nmodules:\n  a: { pin: { file: a/.v, repository: o/a, tag: 'v{version}' } }",
+      "modules.a.pin.file 'a/.v' must be a clean path under files/",
+    ],
+    [
       "a modules block that is not a mapping",
       "files: []\nplaceholders: []\nmodules: [bun]",
       "modules: ",

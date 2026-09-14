@@ -181,6 +181,27 @@ const settingsSchema = z.strictObject({
 /** A module name is one path segment of the files/ tree. */
 const moduleName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "not a module name");
 
+/** A module's version dotfile under files/, pinned to the latest release of a github.com repository; `tag` spells the
+ *  release tag with `{version}` where the version stands (`bun-v{version}`). The refresh workflow is the file's one writer. */
+export interface ModulePin {
+  file: string;
+  repository: string;
+  tag: string;
+}
+
+export const PIN_VERSION_TOKEN = "{version}";
+
+const pinSchema: z.ZodType<ModulePin> = z.strictObject({
+  file: z.string().min(1),
+  repository: refSchema.shape.repository,
+  tag: z
+    .string()
+    .refine(
+      (tag) => tag.split(PIN_VERSION_TOKEN).length === 2,
+      `does not spell the version as ${PIN_VERSION_TOKEN} once`,
+    ),
+});
+
 /** A tracking label's `key` names the registration's `labels` key and the `<key>_label` placeholder. */
 const moduleDataShape = z.looseObject({
   description: z.string().min(1).optional(),
@@ -194,6 +215,7 @@ const moduleDataShape = z.looseObject({
     })
     .optional(),
   path: z.string().min(1).optional(),
+  pin: pinSchema.optional(),
 });
 
 /** Every key outside the shape is a many-of key (a block list a file entry's `blocks` names), so one spelled as a word is refused
@@ -547,6 +569,12 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     for (const key of Object.keys(moduleData)) {
       if (Object.hasOwn(moduleDataShape.shape, key) || readKeys.has(key)) continue;
       problems.push(`modules.${module}.${key}: no file entry or settings layer reads it`);
+    }
+    const pin = moduleData.pin?.file;
+    if (pin !== undefined && (!pin.startsWith(SOURCE_PREFIX) || pathProblem(pin) !== null)) {
+      problems.push(
+        `modules.${module}.pin.file '${pin}' must be a clean path under ${SOURCE_PREFIX}`,
+      );
     }
   }
   for (let i = 0; i < files.length; i++) {
