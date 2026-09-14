@@ -74,20 +74,6 @@ jobs:
       count: ${{ steps.select.outputs.count }}
       matrix: ${{ steps.select.outputs.matrix }}
     steps:
-      # A narrowed token fails too: settings need Administration and Issues write, and
-      # on-missing-permission below fails an unreachable section.
-      - name: Require the fleet token
-        env:
-          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: |
-          if [ -z "$PAT" ]; then
-            echo "::error::settings apply cannot run: the REPO_PLATFORM_TOKEN secret is not set - GITHUB_TOKEN can never hold the Administration"\
-              "write that settings mutation needs. Create a fine-grained PAT for the fleet via"\
-              "https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write&actions=read&environments=write"\
-              "and store it with 'gh secret set REPO_PLATFORM_TOKEN --env fleet-operator' in this repository."
-            exit 1
-          fi
-
       # Exactly one, without a ref: it lands on the trigger commit the gate judges.
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,6 +84,11 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Require the fleet token
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bun .github/scripts/fleet/require_fleet_token.ts
 
       - name: Require a green commit
         env:
@@ -152,6 +143,11 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Require the fleet token
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bun .github/scripts/fleet/require_fleet_token.ts
 
       # The only step that sees the name in the clear: resolve_settings_target.ts masks the target
       # before anything else prints and hands it on as TARGET through GITHUB_ENV. It also asks newest
