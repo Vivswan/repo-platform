@@ -70,7 +70,7 @@ mirrors:
 | Key | Meaning |
 | --- | --- |
 | `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
-| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. Any key is allowed; `blocks` entries name one of these keys. One key carries a placeholder default: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder (below). |
+| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. A key is a typed one (`description`, `path`, `tracking_label`, `codeql_languages`) or a list some entry's `blocks` or a `declaring` clause reads; anything else is refused (the rule under the module data table). One key carries a placeholder default: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
 | `files[].class` | `managed`, `split`, or `starter` (below). |
 | `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. |
@@ -142,7 +142,7 @@ A fleet mirror carries no `when`: every repository gets its targets, save one it
 | `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
 
-Every many-of key is a list, `codeql_languages` and the block lists alike: a key outside `description`, `path`, and `tracking_label` must hold a non-empty list of names, and one spelled as a single word is a loader error naming the module and key.
+Every many-of key is a list, `codeql_languages` and the block lists alike: a key outside `description`, `path`, and `tracking_label` must hold a non-empty list of names, and one spelled as a single word is a loader error naming the module and key. So is an untyped key no file entry's `blocks` and no `declaring` clause reads: a typo'd or retired key is refused, never silently skipped.
 
 Placeholders in use beyond the project block: `fuzzer_label`, `fuzzer_label_color`, and `fuzzer_label_description` in `nightly-fuzz.yml`; `nightly_label`, `nightly_label_color`, and `nightly_label_description` in `nightly.yml`. No committed source names `site_label`: the site leg does not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
 

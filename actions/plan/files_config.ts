@@ -260,6 +260,15 @@ export interface CheckedFilesConfig {
   problems: string[];
 }
 
+/** The module-data keys a when clause reads through `declaring`. */
+function declaredKeys(when: WrittenWhen | null): string[] {
+  if (when === null) return [];
+  return LIST_KEYS.flatMap((key) => {
+    const list = when[key];
+    return list === undefined || Array.isArray(list) ? [] : [list.declaring];
+  });
+}
+
 /** Problems are returned so a reader with checks of its own (the writer's placeholder vocabulary) folds them into one report.
  *  Neither the files/ tree nor the placeholder vocabulary is consulted here, so every reader parses the same way. */
 export function checkFilesConfig(text: string, label = "files.yml"): CheckedFilesConfig {
@@ -351,6 +360,23 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     }
     return { ...base, class: "split", region: entry.region ?? "hash" };
   });
+  // The mirror of the derived-list rule: a many-of key no entry's blocks or when reads is a typo'd key (a retired spelling
+  // among them), refused here instead of silently dropping what the module meant to ship.
+  const readKeys = new Set(
+    data.files.flatMap((entry) => [
+      ...(entry.blocks === undefined ? [] : [entry.blocks]),
+      ...declaredKeys(entry.when ?? null),
+    ]),
+  );
+  for (const layer of data.settings?.layers ?? []) {
+    for (const key of declaredKeys(layer.when ?? null)) readKeys.add(key);
+  }
+  for (const [module, moduleData] of Object.entries(data.modules)) {
+    for (const key of Object.keys(moduleData)) {
+      if (Object.hasOwn(moduleDataShape.shape, key) || readKeys.has(key)) continue;
+      problems.push(`modules.${module}.${key}: no file entry or settings layer reads it`);
+    }
+  }
   for (let i = 0; i < files.length; i++) {
     for (let j = i + 1; j < files.length; j++) {
       if (files[i].path === files[j].path && !mutuallyExclusive(files[i].when, files[j].when)) {
