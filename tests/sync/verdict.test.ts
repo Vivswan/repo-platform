@@ -80,7 +80,7 @@ describe("verdict.ts", () => {
     });
   });
 
-  // A stale or unknown verdict file, a rows file off its shape, or a bad call must fail the row and print
+  // A missing or unknown verdict file, a rows file off its shape, or a bad call must fail the row and print
   // nothing: a line invented here would read as a delivery in the public log.
   test.each<{
     reason: string;

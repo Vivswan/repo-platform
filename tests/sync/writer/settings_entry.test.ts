@@ -336,8 +336,8 @@ describe("renderSettings", () => {
   });
 
   // The throw-versus-hold boundary: what the repository owns holds its row, what the fleet owns fails the run, since
-  // a hold would leave every target waiting on a fix only files/ can take. Each layer passes its own judgment; the
-  // fold is the first to refuse the conflicting pair.
+  // a hold would leave every target waiting on a fix only files/ can take. In the conflicting-pair row each layer
+  // passes its own judgment and the fold is the first to refuse.
   test.each<{
     reason: string;
     layers: Record<string, string>;

@@ -45,7 +45,7 @@ type Standing = { file: string } | { link: string } | { emptyDir: true };
 const file = (text: string): Standing => ({ file: text });
 const linkTo = (target: string): Standing => ({ link: target });
 
-/** Everything under root by kind: a file's text, a link's target, or an empty directory. */
+/** By kind, so a link and a file holding the link's target as text never compare equal. */
 function treeState(root: string): Record<string, Standing> {
   const state: Record<string, Standing> = {};
   const walk = (dir: string) => {

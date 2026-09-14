@@ -33,7 +33,7 @@ describe("migrate.ts", () => {
     const dir = rungs({
       "0002-second.ts": rung(0),
       "0001-first.ts": rung(0),
-      // Sorts before every rung: an unfiltered run would hand it to bun first and end there.
+      // Sorts before every rung: an unfiltered run would run it first and its line would show in stdout.
       "0000-README.md": "not a rung\n",
       "0003-fails.ts": rung(3),
       "0004-never.ts": rung(0),

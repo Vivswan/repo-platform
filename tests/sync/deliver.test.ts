@@ -239,8 +239,8 @@ describe("deliver.ts", () => {
     expect(result.sequence.some((line) => line.includes(" 9 "))).toBe(false);
   });
 
-  // The must() chain fails closed at each gh call with its own reason, nothing runs after it, and an answer gh gives
-  // off its shape is a failure too, never a crash.
+  // The must() chain fails closed at each gh call with its own reason, nothing runs after it, and a non-JSON answer
+  // from gh is a failure too, never a crash.
   test.each<{ reason: string; stub: Record<string, string>; failure: string; last: string }>([
     ...(
       [

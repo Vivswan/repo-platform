@@ -168,8 +168,8 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
   const MOVED =
     "the row's key names no repository in the owner's listing: the fleet moved since the plan job ran (a repository revoked or renamed mid-run); re-run the workflow";
 
-  // The runner masks by exact form, so every spelling maskForms registers is masked before the name is written,
-  // and the name leaves through GITHUB_ENV alone after one network call.
+  // The runner masks by exact form, so every spelling maskForms registers is masked before any name is written,
+  // and the name leaves through GITHUB_ENV alone.
   test.each([
     { visibility: "public", row: rows[1] },
     { visibility: "private", row: rows[0] },
