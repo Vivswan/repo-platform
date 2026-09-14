@@ -5,18 +5,7 @@ group: Start here
 
 # All-green convention
 
-Every repository in the fleet - repo-platform included - gates merges on a required status check named `all-green`: the check run of an ordinary CI job. [ci.yml](../.github/workflows/ci.yml)'s `all-green` job needs every gating job, runs on `if: always()`, and judges the results through [re-actors/alls-green](https://github.com/re-actors/alls-green), a third-party action pinned by sha like every other ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)):
-
-```yaml
-all-green:
-  needs: [checks, ci]        # every gating job - a managed repo's two caller jobs
-  if: always()               # a failed dependency must FAIL the gate, not skip it
-  steps:
-    - uses: re-actors/alls-green@<sha> # v1.3.0
-      with:
-        jobs: ${{ toJSON(needs) }}
-        allowed-skips: checks  # the one caller that skips by design: the schedule run, or a checks.yml whose every job skips
-```
+Every repository in the fleet - repo-platform included - gates merges on a required status check named `all-green`: the check run of an ordinary CI job. The job needs every gating job, runs on `if: always()`, and judges the results through [re-actors/alls-green](https://github.com/re-actors/alls-green), a third-party action pinned by sha like every other ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)). The managed skeleton's job is in [files/base/.github/workflows/ci.yml](../files/base/.github/workflows/ci.yml); repo-platform's own is in its [ci.yml](../.github/workflows/ci.yml).
 
 The judgment, whole: every needed result must be `success`, or `skipped` for a job named in `allowed-skips`. Anything else (`failure`, `cancelled`, a skip the list does not name) fails the gate, and the step summary lists every job with its result. The managed skeleton names `checks` alone, so a schedule night passes on `ci` and an all-skipped run cannot pass; repo-platform's own ci.yml names nothing, since none of its gating jobs may skip.
 

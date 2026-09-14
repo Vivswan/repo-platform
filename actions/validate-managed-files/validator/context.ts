@@ -1,13 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type FileEntry, FilesConfigError, parseFilesConfig } from "../../plan/files_config.ts";
+import { unknownModuleProblems } from "../../plan/registration.ts";
 import { type ManifestEntryShape, parseManifestFiles } from "../../shared/manifest.ts";
 import { MANIFEST_NAME, REGISTRATION_PATH } from "../../shared/platform.ts";
 import { pathProblem } from "../../shared/repo_path.ts";
-import { type Selection, selects, type When } from "../../shared/selection.ts";
+import { type Selection, selects } from "../../shared/selection.ts";
 import { isMapping } from "../../shared/values.ts";
 import { hasConflictMarker, isRegularFile, shapeOfYaml } from "./readers.ts";
-import { whenOf } from "./when_of.ts";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -48,15 +49,9 @@ export type Manifest =
       refused: readonly RefusedKey[];
     };
 
-export interface Declaration {
-  path: string;
-  class: string;
-  when: When | null;
-}
-
 /** The problem is reported once, by checks/registration.ts; every other reader leaves the data unjudged. */
 export type Vocabulary =
-  | { modules: ReadonlySet<string>; files: readonly Declaration[] }
+  | { modules: ReadonlySet<string>; files: readonly FileEntry[] }
   | { problem: string };
 
 /** `self` is the operator's own checkout, whose walk skips gitignored paths and the writer's sources; it is judged
@@ -97,40 +92,19 @@ function loadRegistration(root: string): { modules: unknown; except: unknown } |
     : { modules: null, except: null };
 }
 
+/** The plan's loader, so a `when` the validator judges live is one the plan accepted; a refused file is one problem
+ *  in the loader's words. */
 function loadVocabulary(filesConfig: string): Vocabulary {
   if (!isRegularFile(filesConfig)) {
     return { problem: `${filesConfig}: the module data file is missing` };
   }
-  let data: unknown;
   try {
-    data = shapeOfYaml(readFileSync(filesConfig, "utf-8"));
-  } catch {
-    return { problem: `${filesConfig}: the module data file does not parse as YAML` };
+    const config = parseFilesConfig(readFileSync(filesConfig, "utf-8"), filesConfig);
+    return { modules: new Set(Object.keys(config.modules)), files: config.files };
+  } catch (error) {
+    if (!(error instanceof FilesConfigError)) throw error;
+    return { problem: `${filesConfig}: ${error.problems.join("; ")}` };
   }
-  const modules = isMapping(data) ? data.modules : undefined;
-  if (!isMapping(modules)) {
-    return { problem: `${filesConfig}: the module data file carries no modules mapping` };
-  }
-  const files = isMapping(data) ? data.files : undefined;
-  if (!Array.isArray(files)) {
-    return { problem: `${filesConfig}: the module data file carries no files list` };
-  }
-  const declarations: Declaration[] = [];
-  for (const entry of files) {
-    if (!isMapping(entry) || typeof entry.path !== "string" || typeof entry.class !== "string") {
-      return {
-        problem: `${filesConfig}: the module data file carries a files entry without a string path and class`,
-      };
-    }
-    const when = whenOf(entry.when, modules);
-    if (when === undefined) {
-      return {
-        problem: `${filesConfig}: the module data file carries a files entry whose when clause is not the grammar's`,
-      };
-    }
-    declarations.push({ path: entry.path, class: entry.class, when });
-  }
-  return { modules: new Set(Object.keys(modules)), files: declarations };
 }
 
 /** A module files.yml does not know leaves the selection unknown (checks/registration.ts reports it; the plan and the
@@ -146,9 +120,8 @@ function liveClasses(
     Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
   const modules = registration.modules;
   if (
-    !modules.every(
-      (name): name is string => typeof name === "string" && vocabulary.modules.has(name),
-    )
+    !modules.every((name): name is string => typeof name === "string") ||
+    unknownModuleProblems(modules, [...vocabulary.modules]).length > 0
   ) {
     return null;
   }

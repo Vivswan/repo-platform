@@ -60,12 +60,13 @@ describe("the registration", () => {
     {
       reason: "the data file does not parse",
       opts: { filesYml: "modules: [\n" },
-      problem: "the module data file does not parse as YAML",
+      problem:
+        "YAML parse error: Flow sequence in block collection must be sufficiently indented and end with a ]",
     },
     {
-      reason: "the data file carries no modules mapping",
-      opts: { filesYml: "placeholders: []\nfiles: []\n" },
-      problem: "the module data file carries no modules mapping",
+      reason: "the data file carries no files list",
+      opts: { filesYml: "placeholders: []\nmodules: {uv: {}}\n" },
+      problem: "files: Invalid input: expected array, received undefined",
     },
   ])(
     "an unusable data file is one error and the names stand unjudged: $reason",

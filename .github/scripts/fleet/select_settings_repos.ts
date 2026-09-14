@@ -7,7 +7,7 @@
 
 import { appendFileSync } from "node:fs";
 import { declaredModules } from "../../../actions/plan/registration.ts";
-import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
+import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { addMask, env, error, fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
@@ -124,12 +124,12 @@ function probeAdoption(slug: string, display: string): ProbeResult<{ modules: st
   return { kind: "retry", detail: probe.stderr.replace(/\n+$/, "") };
 }
 
-// The apply reads each target's own .github/settings.yml. A hand-written one applied alone would delete every fleet
+// The apply reads each target's own rendered settings document. A hand-written one applied alone would delete every fleet
 // label it does not list, so it fails the plan (counted below: the log is public and the target may be private); a
 // missing one is a repository before its first sync PR, skipped with a notice.
 let handWritten = 0;
 function probeRendered(slug: string, display: string): ProbeResult<true> {
-  const probe = readRepoFile(slug, ".github/settings.yml");
+  const probe = readRepoFile(slug, SETTINGS_PATH);
   if (probe.exitCode === 0) {
     if (probe.stdout.split("\n", 1)[0] === RENDERED_HEADER) return { kind: "pass", value: true };
     handWritten++;
@@ -216,7 +216,7 @@ for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
 if (handWritten > 0) {
   error(
     `${handWritten} selected ${handWritten === 1 ? "target carries" : "targets carry"} a hand-written ` +
-      ".github/settings.yml (names withheld - a target may be private): the apply reads the rendered " +
+      `${SETTINGS_PATH} (names withheld - a target may be private): the apply reads the rendered ` +
       "file alone, so merge the sync PR that renders it, then re-run",
   );
   process.exit(1);

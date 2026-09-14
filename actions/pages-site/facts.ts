@@ -3,6 +3,7 @@
 //   an absent or malformed file       -> null or [], never a failed build
 //   a failed git read in the reader   -> still throws: a broken checkout is a build fault, not a missing fact
 
+import { SETTINGS_PATH } from "../shared/platform.ts";
 import { isMapping } from "../shared/values.ts";
 
 export interface ProjectFacts {
@@ -35,8 +36,6 @@ export interface FactsInput {
 type Identity = Pick<ProjectFacts, "description" | "homepage" | "topics">;
 
 export type FactsReader = (path: string) => string | null;
-
-const SETTINGS_FILE = ".github/settings.yml";
 
 const LICENSE_FILE = "LICENSE.md";
 const LICENSE_HEAD_LINES = 20;
@@ -142,7 +141,7 @@ function parseYamlRecord(text: string): Record<string, unknown> | null {
 
 /** Null for a missing block too: older tags predate the settings file. */
 function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null {
-  const text = read(SETTINGS_FILE);
+  const text = read(SETTINGS_PATH);
   if (text === null) return null;
   const settings = parseYamlRecord(text);
   return settings !== null && isMapping(settings.repository) ? settings.repository : null;

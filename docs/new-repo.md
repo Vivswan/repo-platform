@@ -93,7 +93,7 @@ The `ci` job runs the standard checks (typography, file-size ([the caps](fleet-g
 
 ### The managed files check
 
-The `validate-managed-files` job judges the repository against the platform's current shape, in one sticky PR comment plus the step summary, run by the [validate-managed-files](../actions/validate-managed-files/action.yml) action with the delivery commit's `files.yml` as its vocabulary and the plan job's resolved visibility as the repository's side of every `when`:
+The `validate-managed-files` job judges the repository against the platform's current shape, in one sticky PR comment plus the step summary, run by the [validate-managed-files](../actions/validate-managed-files/action.yml) action with the delivery commit's `files.yml` as its vocabulary, read through the plan's loader ([files_config.ts](../actions/plan/files_config.ts)) so a `when` it judges live is one the plan accepted, and the plan job's resolved visibility as the repository's side of every `when`:
 
 | Check | Blocks on |
 |---|---|
