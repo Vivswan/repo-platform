@@ -26,8 +26,8 @@ const temp = tempDirs();
 const REPO = "fixture-owner/site-repo";
 
 /** The hook's dist: one page linking into the docs mount relatively, so
- *  the link resolves under a project base and a custom domain alike; no
- *  index at all when `index` is null. */
+ *  the link resolves under the project base; no index at all when `index`
+ *  is null. */
 function website(repo: string, index: { marker: string; docsPath: string } | null): void {
   mkdirSync(join(repo, "dist", "assets"), { recursive: true });
   writeFileSync(join(repo, "dist", "assets", "app.js"), "console.log(1)\n");
@@ -59,7 +59,7 @@ function outputs(stdout: string): Record<string, string> {
 
 describe("the website and the docs together", () => {
   test(
-    "the website at the root, the docs versioned under the docs path (a tag without a landing page skipped), versions.json only there, CNAME with the domain",
+    "the website at the root, the docs versioned under the docs path (a tag without a landing page skipped), versions.json only there",
     () => {
       const workspace = temp.dir("pages-site-both-");
       website(workspace, { marker: "WEBSITE-ROOT", docsPath: "manual" });
@@ -73,7 +73,6 @@ describe("the website and the docs together", () => {
       const runner = runnerTemp(temp);
       const result = buildSite(workspace, REPO, runner, {
         SITE_DIR: "dist",
-        CUSTOM_DOMAIN: "docs.example.com",
         CONFIG: siteConfig({ site_title: "Site Docs", docs_path: "manual", link_rot_label: "rot" }),
       });
       expect(result.exitCode, describeRun(result)).toBe(0);
@@ -90,15 +89,15 @@ describe("the website and the docs together", () => {
           expect.stringContaining("The docs landing page."),
         ]);
       }
-      // The docs are built at the domain's root base, under the docs path.
-      expect(readSite(site, "manual/latest/index.html")).toContain('href="/manual/latest/');
+      expect(readSite(site, "manual/latest/index.html")).toContain(
+        'href="/site-repo/manual/latest/',
+      );
       expect(versionLabels(join(site, "manual"))).toEqual(["latest", "v1.0.0"]);
       expect(existsSync(join(site, "manual", "v0.9.0"))).toBe(false);
       expect(result.stdout).toContain(
         "::notice::docs version v0.9.0 skipped: docs/ has no landing page (README.md or index.md) at that tag",
       );
       expect(existsSync(join(site, "versions.json"))).toBe(false);
-      expect(readSite(site, "CNAME")).toBe("docs.example.com\n");
       expect(outputs(result.stdout)).toEqual({
         "publish": "true",
         "site-dir": site,
@@ -131,7 +130,6 @@ describe("the website and the docs together", () => {
       expect(readSite(runner.site, "index.html")).toContain("WEBSITE-ALONE");
       expect(existsSync(join(runner.site, "versions.json"))).toBe(false);
       expect(existsSync(join(runner.site, "latest"))).toBe(false);
-      expect(existsSync(join(runner.site, "CNAME"))).toBe(false);
       expect(outputs(result.stdout)).toEqual({
         "publish": "true",
         "site-dir": runner.site,

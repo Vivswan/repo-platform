@@ -44,6 +44,9 @@ const ACTION_DIR = import.meta.dir;
  *  and PR check read one path (docs/site.md). */
 export const DOCS_DIR = "docs";
 
+/** Newest version tags a docs mount serves (docs/site.md, "Versions"). */
+const MAX_VERSIONS = 5;
+
 function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
 }
@@ -145,8 +148,6 @@ interface Config extends SiteConfig {
   /** The site-build hook's dist, relative to the repository root; "" for
    *  no website. */
   siteDir: string;
-  maxVersions: number;
-  customDomain: string;
   repository: string;
   /** GITHUB_SERVER_URL without a trailing slash: every link the build
    *  emits (edit links, project facts) joins onto it. */
@@ -163,15 +164,7 @@ interface Config extends SiteConfig {
 function readConfig(): Config {
   const workspace = requireEnv("GITHUB_WORKSPACE");
   const repository = requireEnv("GITHUB_REPOSITORY");
-  const customDomain = env("CUSTOM_DOMAIN");
   const [owner, repo] = repository.split("/");
-  const origin =
-    customDomain !== "" ? `https://${customDomain}` : `https://${owner.toLowerCase()}.github.io`;
-  const rootBase = customDomain !== "" ? "/" : `/${repo}/`;
-  const maxVersionsRaw = env("MAX_VERSIONS", "5");
-  if (!/^\d+$/.test(maxVersionsRaw) || Number(maxVersionsRaw) < 1) {
-    throw new Error(`MAX_VERSIONS must be a positive integer (got '${maxVersionsRaw}')`);
-  }
   const defaultBranch = env("DEFAULT_BRANCH", "main");
   const serverUrl = env("GITHUB_SERVER_URL", "https://github.com").replace(/\/+$/, "");
   // realpath'd: a scratch base behind a symlink (macOS /tmp) gives the
@@ -184,12 +177,10 @@ function readConfig(): Config {
     scratch,
     site: join(scratch, "_site"),
     siteDir: env("SITE_DIR"),
-    maxVersions: Number(maxVersionsRaw),
-    customDomain,
     repository,
     serverUrl,
-    origin,
-    rootBase,
+    origin: `https://${owner.toLowerCase()}.github.io`,
+    rootBase: `/${repo}/`,
     defaultBranch,
     editBase: `${serverUrl}/${repository}/edit/${defaultBranch}/`,
   };
@@ -341,7 +332,7 @@ function buildVitepressTier(
   // workspace checkout, an extract dir) never reaches the root's
   // node_modules on the real runner layout, and a symlinked tree resolves
   // to its realpath and breaks the same way.
-  const srcDir = join(root, "docs");
+  const srcDir = join(root, DOCS_DIR);
   if (fromWorkspace) {
     const docsTree = join(cfg.workspace, DOCS_DIR);
     if (!existsSync(docsTree)) {
@@ -549,7 +540,7 @@ async function main(): Promise<void> {
   }
   const kept = versionTags(
     capture(["git", "-C", cfg.workspace, "tag", "--list", "v*"]).split("\n"),
-  ).slice(0, cfg.maxVersions);
+  ).slice(0, MAX_VERSIONS);
 
   mkdirSync(cfg.site, { recursive: true });
   const scopes: TierScope[] = [];
@@ -563,9 +554,6 @@ async function main(): Promise<void> {
     scopes.push({ rel: "", strict: true });
   }
 
-  if (cfg.customDomain !== "") {
-    writeExclusive(join(cfg.site, "CNAME"), `${cfg.customDomain}\n`, "the custom-domain CNAME");
-  }
   // After every mount is in place: a link from one mount into another has
   // no other judge, and the artifact is handed back only when all resolve.
   const checked = await checkSiteLinks(cfg.site, cfg.rootBase, scopes, cfg.origin);

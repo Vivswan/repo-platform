@@ -17,8 +17,6 @@ const ACTIONS: Record<string, Record<string, Input>> = {
     "site-dir": { required: false, default: "" },
     config: { required: false, default: "" },
     check: { required: false, default: "false" },
-    "custom-domain": { required: false, default: "" },
-    "max-versions": { required: false, default: "5" },
   },
   plan: {
     mode: { required: false, default: "default" },
@@ -30,7 +28,6 @@ const ACTIONS: Record<string, Record<string, Input>> = {
   "validate-commit-names": { title: { required: false, default: "" } },
   yamllint: {},
   "validate-managed-files": {
-    "github-token": { required: false, default: "${{ github.token }}" },
     private: { required: true },
   },
   "release-health": {
@@ -46,7 +43,6 @@ const ACTIONS: Record<string, Record<string, Input>> = {
     "label-color": { required: false },
     "label-description": { required: false },
     stream: { required: true },
-    token: { required: false, default: "${{ github.token }}" },
   },
   zizmor: { "upload-sarif": { required: false, default: "true" } },
 };

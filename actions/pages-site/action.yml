@@ -35,14 +35,6 @@ inputs:
     description: Build docs/ once as a strict PR check (no artifact) instead of assembling the site
     required: false
     default: "false"
-  custom-domain:
-    description: Custom domain ("" = <owner>.github.io/<repo>)
-    required: false
-    default: ""
-  max-versions:
-    description: How many newest version tags the docs serve
-    required: false
-    default: "5"
 
 outputs:
   publish:
@@ -98,8 +90,6 @@ runs:
         SITE_DIR: ${{ inputs.site-dir }}
         CHECK: ${{ inputs.check }}
         CONFIG: ${{ inputs.config != '' && inputs.config || steps.plan.outputs.config }}
-        MAX_VERSIONS: ${{ inputs.max-versions }}
-        CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/build.ts"'

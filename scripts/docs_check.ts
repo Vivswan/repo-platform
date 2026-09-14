@@ -52,8 +52,6 @@ function main(): number {
         CHECK: "true",
         SITE_DIR: "",
         CONFIG: siteConfig(),
-        MAX_VERSIONS: "5",
-        CUSTOM_DOMAIN: "",
         DEFAULT_BRANCH: "main",
       },
     });

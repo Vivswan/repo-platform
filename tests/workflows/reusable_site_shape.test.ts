@@ -38,7 +38,14 @@ const source = readFileSync(
   "utf8",
 );
 const workflow = parseYaml(source) as {
-  on: { workflow_call: { inputs: Record<string, { required?: boolean; default?: unknown }> } };
+  on: {
+    workflow_call: {
+      inputs: Record<
+        string,
+        { description?: string; required?: boolean; type?: string; default?: unknown }
+      >;
+    };
+  };
   concurrency?: unknown;
   jobs: Record<string, Job>;
 };
@@ -93,12 +100,7 @@ describe("reusable-site.yml", () => {
     });
     expect(steps[site]).toMatchObject({
       id: "site",
-      with: {
-        "site-dir": "${{ steps.hook.outputs.dist }}",
-        "config": "${{ inputs.config }}",
-        "custom-domain": "${{ inputs.custom_domain }}",
-        "max-versions": "${{ vars.PAGES_MAX_VERSIONS || '5' }}",
-      },
+      with: { "site-dir": "${{ steps.hook.outputs.dist }}" },
     });
     expect(steps[site]?.if).toBeUndefined();
     // The hook ran and named nothing: a notice, keyed on the hook's outcome
@@ -108,37 +110,31 @@ describe("reusable-site.yml", () => {
     expect(notice?.env).toEqual({ DIST: "${{ steps.hook.outputs.dist }}" });
   });
 
-  // The urls step's bash EXECUTED as the runner runs it, one whole output
-  // set per domain shape: the hook and the fleet action build against
-  // exactly these values.
-  const resolveUrls = (customDomain: string) => {
-    const run = steps.find((step) => step.id === "urls")?.run ?? "";
+  test("the urls step resolves the project-pages base path and the lowercase owner origin from the repository alone", () => {
+    const urls = steps.find((step) => step.id === "urls");
+    expect(urls?.env).toBeUndefined();
     const output = join(temp.dir("reusable-site-urls-"), "output");
     writeFileSync(output, "");
-    const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", run], {
-      encoding: "utf8",
-      env: {
-        PATH: process.env.PATH ?? "",
-        GITHUB_OUTPUT: output,
-        GITHUB_SERVER_URL: "https://github.com",
-        GITHUB_REPOSITORY: "Vivswan/Example-Repo",
-        CUSTOM_DOMAIN: customDomain,
+    const result = spawnSync(
+      "bash",
+      ["--noprofile", "--norc", "-eo", "pipefail", "-c", urls?.run ?? ""],
+      {
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH ?? "",
+          GITHUB_OUTPUT: output,
+          GITHUB_SERVER_URL: "https://github.com",
+          GITHUB_REPOSITORY: "Vivswan/Example-Repo",
+        },
       },
-    });
-    return { status: result.status, stdout: result.stdout, output: readFileSync(output, "utf8") };
-  };
-
-  const CUSTOM_DOMAIN_OUTPUT = [
-    "base_path=/",
-    "origin=https://docs.example.com",
-    "own_links=^https://docs\\.example\\.com([/?#]|$)",
-    "edit_links=^https://github\\.com/Vivswan/Example-Repo/edit/",
-    "",
-  ].join("\n");
-
-  test.each([
-    {
-      customDomain: "",
+    );
+    expect({
+      status: result.status,
+      stdout: result.stdout,
+      output: readFileSync(output, "utf8"),
+    }).toEqual({
+      status: 0,
+      stdout: "",
       output: [
         "base_path=/Example-Repo/",
         "origin=https://vivswan.github.io",
@@ -146,24 +142,8 @@ describe("reusable-site.yml", () => {
         "edit_links=^https://github\\.com/Vivswan/Example-Repo/edit/",
         "",
       ].join("\n"),
-    },
-    {
-      customDomain: "docs.example.com",
-      output: CUSTOM_DOMAIN_OUTPUT,
-    },
-    {
-      customDomain: "Docs.Example.com",
-      output: CUSTOM_DOMAIN_OUTPUT,
-    },
-  ])(
-    "the urls step, executed with CUSTOM_DOMAIN=$customDomain, resolves the base path and origin",
-    ({ customDomain, output }) => {
-      expect(steps.find((step) => step.id === "urls")?.env).toEqual({
-        CUSTOM_DOMAIN: "${{ inputs.custom_domain }}",
-      });
-      expect(resolveUrls(customDomain)).toEqual({ status: 0, stdout: "", output });
-    },
-  );
+    });
+  });
 
   test("configure, the ONE artifact upload, and the deploy gate on publish; nothing else uploads an artifact", () => {
     const configure = usesIndex("actions/configure-pages@");
@@ -319,13 +299,9 @@ describe("reusable-site.yml", () => {
     },
   );
 
-  test("sha is required with no default; custom_domain and config are optional (empty = the registration)", () => {
-    const { sha, ...optional } = workflow.on.workflow_call.inputs;
-    expect(sha).toMatchObject({ required: true });
-    expect(sha).not.toHaveProperty("default");
-    expect(Object.keys(optional).sort()).toEqual(["config", "custom_domain"]);
-    for (const [name, input] of Object.entries(optional)) {
-      expect([name, input.required, input.default]).toEqual([name, false, ""]);
-    }
+  test("sha, required with no default, is the one input: the site configuration always comes from the registration", () => {
+    expect(workflow.on.workflow_call.inputs).toEqual({
+      sha: { description: expect.any(String), required: true, type: "string" },
+    });
   });
 });
