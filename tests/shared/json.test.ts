@@ -70,7 +70,7 @@ describe("parseJsonWith", () => {
 });
 
 describe("hasDuplicateJsonKeys", () => {
-  // JSON.parse keeps the last duplicate silently: the ownership-manifest incident the module header names.
+  // JSON.parse keeps the last duplicate silently: the conflict-mangled manifest hazard the module's JSDoc names.
   const cases: [string, string, boolean][] = [
     [
       "a duplicated key in one object is caught (JSON.parse would keep only the last)",

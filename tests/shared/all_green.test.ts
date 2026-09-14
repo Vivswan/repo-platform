@@ -44,7 +44,8 @@ const ghFailing =
   });
 
 describe("allGreenFailure", () => {
-  // filter=latest is GitHub's: without it a re-run's stale check run is listed beside the fresh one.
+  // Pinned explicitly: GitHub's default is latest today, and `all` would list a re-run's stale check run beside the
+  // fresh one.
   test("queries the sha's all-green check runs by name with filter=latest", () => {
     const calls: string[][] = [];
     const gh = (command: string[]): RunResult => {

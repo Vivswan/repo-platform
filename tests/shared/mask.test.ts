@@ -62,7 +62,7 @@ describe("maskForms", () => {
   });
 
   test("the forms leave no spelling of the name in a log, the URL ones falling with the slug", () => {
-    // The model of the runner's masker is armed first: merged adjacent and nested matches, no false hit.
+    // The model of the runner's masker is armed first.
     for (const [log, values, masked] of [
       ["abcdEFGH", ["abcd", "EFGH"], "***"],
       ["abcdxEFGH", ["abcd", "EFGH"], "***x***"],

@@ -156,7 +156,8 @@ describe("the release parsers", () => {
 });
 
 describe("pinnedVersion", () => {
-  // A prerelease accepted here makes compareVersions NaN, which decideBump reads as a bump: every run would rewrite the pin.
+  // A prerelease accepted here makes compareVersions NaN on the patch, which decideBump reads as a bump: a lower stable
+  // patch is written over the pin and the downgrade abort never fires.
   test.each([
     ["2.9.5", "no trailing newline"],
     ["1.4.0-canary.1\n", "a prerelease"],

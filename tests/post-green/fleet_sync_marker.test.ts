@@ -39,7 +39,7 @@ describe("fleetSyncLabels", () => {
 describe("readDirective", () => {
   const KNOWN = fleetSyncLabels(loadLayer(FLEET_SYNC_OVERLAY).doc, "overlay");
 
-  // The executed list below proves the plain shapes end to end; these are the reads only the unit reaches.
+  // The executed list below proves the plain shapes end to end.
   test.each<{ reason: string; labels: string[]; expected: Directive }>([
     { reason: "labels of other kinds", labels: ["bug", "merge-when-green"], expected: NONE },
     {
@@ -210,7 +210,6 @@ describe("main", () => {
     });
   });
 
-  // A commit listed by two pull requests (a closed attempt, then the merged one) takes the one it is the merge of.
   test.each([
     {
       reason: "a pull request with the public label arms public",

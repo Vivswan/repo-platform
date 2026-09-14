@@ -103,8 +103,8 @@ const MESSAGES: [
     },
   ],
   [
-    // The scissors line opens with the configured marker, so a CR-aware split or a multiline regex would cut it and
-    // pass `fix: valid` that CI reads whole.
+    // The scissors line opens with the configured marker, so a CR-aware split or a multiline regex would find a cut
+    // inside the one line git sees.
     "a scissors line after a bare CR is not a line to git: the subject keeps it and CI refuses it",
     "fix: valid\rf ------------------------ >8 ------------------------\n",
     [SUBJECT_EMPTY, TYPE_EMPTY],
