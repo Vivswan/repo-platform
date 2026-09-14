@@ -15,8 +15,6 @@ const PROJECT = { name: "My Repo", slug: "myrepo", description: "Does things" };
 const PROJECT_YAML = "project: {name: My Repo, slug: myrepo, description: Does things}\n";
 
 describe("placeholderValues", () => {
-  // The project block names the project, the slug names the owner alone, and the visibility is the
-  // writer's flag; the copyright holder is the one project key with a default.
   test.each([
     {
       reason: "a set copyright holder, a public repository",

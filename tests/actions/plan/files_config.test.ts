@@ -264,7 +264,6 @@ describe("render, overlay, and the settings block", () => {
       ],
       override: "settings/override.yml",
     });
-    // A conditional rendered entry is covered by a starter with the same when.
     expect(
       problemsOf(
         doc([
