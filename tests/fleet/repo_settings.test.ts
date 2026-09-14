@@ -94,6 +94,7 @@ describe("the repo's own main-up-to-date ruleset", () => {
   test("the strict flag rides with the check listed again and no bypass actor, beside main's admin bypass", () => {
     const upToDate = readRulesets(OWN_OVERLAY).find((r) => r.name === "main-up-to-date");
     // A disabled ruleset, or a scope that misses the default branch, leaves every merge unprotected without a word from GitHub.
+    expect(upToDate?.target).toBe("branch");
     expect(upToDate?.enforcement).toBe("active");
     expect(upToDate?.conditions).toEqual({
       ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] },
