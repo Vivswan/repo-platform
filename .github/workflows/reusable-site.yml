@@ -87,6 +87,17 @@ jobs:
         if: steps.site.outputs.publish == 'true'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
+      # lychee reads .lycheeignore from its working directory alone (no flag
+      # names another path), and it runs in the site directory: a repository
+      # that keeps one at its root, listing the URL patterns an anonymous
+      # crawl cannot judge (bot walls, login redirects), has it copied there
+      # AFTER the upload, so the served site never carries the file.
+      - name: Stage the repository's .lycheeignore
+        if: github.event_name == 'schedule' && steps.site.outputs.publish == 'true' && steps.site.outputs.link-rot-label != '' && hashFiles('.lycheeignore') != ''
+        env:
+          SITE_DIR: ${{ steps.site.outputs.site-dir }}
+        run: cp .lycheeignore "$SITE_DIR/"
+
       # Nightly link rot over what shipped: external links only (internal
       # ones were fatal at assembly), on the schedule alone so a fixed link
       # closes the issue on the next clean night, never on a push. Green
