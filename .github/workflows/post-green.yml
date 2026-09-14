@@ -15,8 +15,8 @@ on:
       sha:
         description: >-
           The green main commit the calling run judged (github.sha there
-          - same run, so it IS the judged commit) - the commit every leg
-          here acts on.
+          - same run, so it IS the judged commit): the commit the mover,
+          directives, and settings legs act on (the sync reads the stable tag).
         required: true
         type: string
       before:
