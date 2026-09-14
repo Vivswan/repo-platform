@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
-// A change under these paths reaches the fleet only when a sync runs; a workflow or action change is live at `stable` on the next
-// green merge with no sync. So a pull request that touches them gets the public sync by default: the label is added, one sticky
-// comment says so, and a human removing it is final for that pull request (docs/all-green.md). Information only: every failure
-// is a warning and exit 0, and the job is outside all-green's needs.
+// A change under these paths reaches the fleet only when a sync runs; any other workflow or action change is live at `stable` on
+// the next green merge with no sync. So a pull request that touches them gets the public sync by default: the label is added, one
+// sticky comment says so, and a human removing it is final for that pull request (docs/all-green.md). Information only: every
+// failure is a warning and exit 0, and the job is outside all-green's needs.
 //
 // Usage: PR_NUMBER=<n> GITHUB_REPOSITORY=<owner/repo> bun .github/scripts/fleet/fleet_sync_default.ts
 
