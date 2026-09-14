@@ -8,7 +8,6 @@ import { loadAction, REPO_ROOT } from "../../shared/action_step";
 
 test("the fleet runs the knip this repository tests with", () => {
   const [run] = loadAction("actions/knip/action.yml").runs.steps;
-  const pinned = /knip@(\d+\.\d+\.\d+)/.exec(String(run.run))?.[1];
   const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
-  expect(pinned).toBe(pkg.devDependencies.knip);
+  expect(run.run).toBe(`npx --yes knip@${pkg.devDependencies.knip}`);
 });
