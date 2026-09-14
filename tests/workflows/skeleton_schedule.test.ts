@@ -46,8 +46,8 @@ test("every job of a scheduled skeleton excludes the schedule, runs on it in pub
         ),
       ]),
   );
-  // ci.yml's `ci`, `all-green`, and `site` run on a private repository's schedule too: skipping the gate would post
-  // a non-success all-green check run at main's head.
+  // ci.yml's `ci` and `all-green` run on a private repository's schedule too: skipping the gate would post a
+  // non-success all-green check run at main's head. `site` runs there because the schedule is the site rebuild.
   const unclaused = "names no schedule clause";
   expect(census).toEqual({
     "auto-assign.yml": { "auto-assign": "every event; the schedule in public repositories only" },
