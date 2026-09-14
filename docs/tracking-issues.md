@@ -5,42 +5,70 @@ group: Fleet operations
 
 # Tracking issues
 
-The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open GitHub issue per failure stream: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating). The [site](site.md) module's nightly link-rot check rides the same machinery under its `labels.site` registration key. The nightly [security scan](security-scans.md) of every public repository rides it too, under the fixed `security-nightly` label the settings baseline declares on every repository (no module, no answer). This page is the machinery the streams share; the module pages cover what each one runs.
+The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open GitHub issue per failure stream: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating).
+
+| Stream | Rides the machinery under |
+|---|---|
+| the [site](site.md) module's nightly link-rot check | its `labels.site` registration key |
+| the nightly [security scan](security-scans.md) of every public repository | the fixed `security-nightly` label the settings baseline declares on every repository (no module, no answer) |
+
+This page is the machinery the streams share; the module pages cover what each one runs.
 
 ## The action
 
-Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action. It assembles the body in TypeScript and hands it to the fleet's standard issue action, `peter-evans/create-issue-from-file` (sha-pinned), the way `marocchino/sticky-pull-request-comment` is the fleet's PR-comment mechanism: a red night refreshes the stream's open issue in place instead of commenting on it. It needs `gh` on the runner: GitHub-hosted runners preinstall it, self-hosted runners must provide it.
+Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action.
 
-Because the starters are repo-owned, the sync never rewrites them, so the `fuzz-issue` pin inside a starter stays whatever was last written. New repositories get `@stable`. A pin move or a breaking change to the action's inputs still needs a manual edit in each repo, announced loudly in the change's PR.
+- **How it files:** it assembles the body in TypeScript and hands it to the fleet's standard issue action, `peter-evans/create-issue-from-file` (sha-pinned), the way `marocchino/sticky-pull-request-comment` is the fleet's PR-comment mechanism: a red night refreshes the stream's open issue in place instead of commenting on it.
+- **Runner requirement:** it needs `gh` on the runner. GitHub-hosted runners preinstall it, self-hosted runners must provide it.
+
+**The pin inside a starter:** because the starters are repo-owned, the sync never rewrites them, so the `fuzz-issue` pin inside a starter stays whatever was last written. New repositories get `@stable`. A pin move or a breaking change to the action's inputs still needs a manual edit in each repo, announced loudly in the change's PR.
 
 ## The label is the stream
 
 Each stream is identified by a label, set as a registration key (`labels.fuzzer`, `labels.nightly`, `labels.site` in `.repo-platform.yml`) rather than a starter edit alone, because two more places must agree on it:
 
-- The report and resolve steps: both dedup and auto-close by the label.
-- The repository's settings labels: settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The rendered `.github/settings.yml` declares the label automatically - the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](settings.md)). A repository whose overlay opts out of label management (`labels: null`) owns its tracking labels instead.
+- **The report and resolve steps:** both dedup and auto-close by the label.
+
+- **The repository's settings labels:** settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close.
+
+  The rendered `.github/settings.yml` declares the label automatically: the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](settings.md)). A repository whose overlay opts out of label management (`labels: null`) owns its tracking labels instead.
 
 The registration grammar and fleet-ci's `plan` step enforce:
 
-- No label name the fleet layers already manage (the settings baseline, the release labels, the dependabot labels; GitHub label names are case-insensitive). Reusing one would let a green night close unrelated issues carrying it and make every settings apply fight over the label's color and description.
-- Every pair of selected stream labels must differ (`labels.nightly` vs `labels.fuzzer` vs `labels.site`): all streams dedup AND auto-close by label, so a shared label would let one stream's green night close another's active failure issue.
-- A repo whose label later becomes reserved fails its plan until the value in `.repo-platform.yml` changes (see [Renaming the label](#renaming-the-label)).
+- **No reserved name:** no label name the fleet layers already manage (the settings baseline, the release labels, the dependabot labels; GitHub label names are case-insensitive). Reusing one would let a green night close unrelated issues carrying it and make every settings apply fight over the label's color and description.
+
+- **Distinct streams:** every pair of selected stream labels must differ (`labels.nightly` vs `labels.fuzzer` vs `labels.site`). All streams dedup AND auto-close by label, so a shared label would let one stream's green night close another's active failure issue.
+
+- **A later reservation:** a repo whose label later becomes reserved fails its plan until the value in `.repo-platform.yml` changes (see [Renaming the label](#renaming-the-label)).
 
 ## Issue lifecycle
 
-- One open issue per label. A failing night refreshes the newest open issue carrying the label - title and body replaced with the night's report; earlier nights survive in the edit history and their run links - otherwise creates it. The label is created, or an existing one repainted, with the color and description the module data declares (`tracking_label` under `modules.<module>` in `files.yml`, the same source the settings layer reads).
-- A green night comments on and closes every open issue carrying the label (up to 100 a night), so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([all-green.md](all-green.md)).
-- A manual green dispatch also closes a fuzz or nightly issue (the site stream's link check runs on the nightly schedule alone, so its issue waits for the next clean night); the close comment links the run, so the provenance is visible.
-- Every filing adds the repository owner as an assignee - issues created with `GITHUB_TOKEN` fire no `issues: opened` event, so the managed auto-assign workflow cannot catch them - and removes nobody. GitHub drops a login it cannot assign (an org owner), so assignment never fails the filing; auto-assign's nightly sweep retries the same owner on any issue still unassigned (public repositories: the sweep skips in a private one, which pays for every job that runs).
+- **One open issue per label.** A failing night refreshes the newest open issue carrying the label (title and body replaced with the night's report; earlier nights survive in the edit history and their run links), otherwise creates it. The label is created, or an existing one repainted, with the color and description the module data declares (`tracking_label` under `modules.<module>` in `files.yml`, the same source the settings layer reads).
+
+- **A green night** comments on and closes every open issue carrying the label (up to 100 a night), so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([all-green.md](all-green.md)).
+
+- **A manual green dispatch** also closes a fuzz or nightly issue (the site stream's link check runs on the nightly schedule alone, so its issue waits for the next clean night); the close comment links the run, so the provenance is visible.
+
+- **Assignment.** Every filing adds the repository owner as an assignee (issues created with `GITHUB_TOKEN` fire no `issues: opened` event, so the managed auto-assign workflow cannot catch them) and removes nobody.
+
+- **An unassignable owner:** GitHub drops a login it cannot assign (an org owner), so assignment never fails the filing; auto-assign's nightly sweep retries the same owner on any issue still unassigned (public repositories: the sweep skips in a private one, which pays for every job that runs).
 
 ## Release gating
 
-With the release-please module also selected, an open tracking issue blocks releases twice over: the release PR's `release-pr` CI job fails early and visibly, and the release pipeline's authoritative pre-flight blocks the cut itself. fleet-ci's `plan` step outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open. The release PR's job blocks that PR on every refresh; the pipeline's pre-flight self-scopes to release-cut pushes, so ordinary main runs are never blocked.
+With the release-please module also selected, an open tracking issue blocks releases twice over:
+
+| Gate | What it does |
+|---|---|
+| the release PR's `release-pr` CI job | fails early and visibly; it blocks that PR on every refresh |
+| the release pipeline's authoritative pre-flight | blocks the cut itself; it self-scopes to release-cut pushes, so ordinary main runs are never blocked |
+
+**How the labels reach the gate:** fleet-ci's `plan` step outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open.
 
 To unblock:
 
-- Fix the failure and let the next green night close the issue, or hand-close it once fixed. Closing re-triggers nothing: re-run the release PR's failed `release-pr` job afterwards (the pre-flight reads issue state fresh at release time).
-- To ship despite the open issue, apply the `release-override` label to the release PR: it waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([all-green.md](all-green.md)).
+- **Fix the failure** and let the next green night close the issue, or hand-close it once fixed. Closing re-triggers nothing: re-run the release PR's failed `release-pr` job afterwards (the pre-flight reads issue state fresh at release time).
+
+- **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([all-green.md](all-green.md)).
 
 ## Renaming the label
 
@@ -53,4 +81,9 @@ The site stream is simpler: its leg is the managed ci.yml's and the plan action 
 
 ## Deselecting the module
 
-Deselecting removes the label declaration (remove the `labels.<key>` line with the module: a key for an unselected module fails the plan). For fuzzer and nightly, starters are never deleted by sync: the workflow keeps running - when you drop the module, also delete its workflow file (`.github/workflows/nightly-fuzz.yml` or `nightly.yml`), or keep the label declared in your own `.github/settings.local.yml` if you keep the workflow. Deselecting site needs no such step: the leg skips on the next run, and the repo-owned site-build hook stays where it is.
+Deselecting removes the label declaration (remove the `labels.<key>` line with the module: a key for an unselected module fails the plan).
+
+| Module | What else to do |
+|---|---|
+| fuzzer, nightly | starters are never deleted by sync, so the workflow keeps running: when you drop the module, also delete its workflow file (`.github/workflows/nightly-fuzz.yml` or `nightly.yml`), or keep the label declared in your own `.github/settings.local.yml` if you keep the workflow |
+| site | no such step: the leg skips on the next run, and the repo-owned site-build hook stays where it is |

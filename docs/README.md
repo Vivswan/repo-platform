@@ -40,21 +40,31 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 ### Start here
 
 1. [New repo](new-repo.md) - scaffold a repository, register it with the fleet, and receive its first sync PR.
+
 2. [Fleet guidelines](fleet-guidelines.md) - the conventions every managed repository follows, each with what enforces it.
+
 3. [All-green](all-green.md) - the required check: ci.yml's own gate job judging every needed result.
+
 4. [Settings](settings.md) - the six-layer settings merge and how applies run.
 
 ### Modules
 
 5. [Site](site.md) - one GitHub Pages site per repository: the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme.
+
 6. [Nightly](nightly.md) - a nightly CI stream for checks too slow for every PR.
+
 7. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
 
 ### Fleet operations
 
 8. [Sync](sync.md) - the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
+
 9. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
+
 10. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
+
 11. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking gate (fixable HIGH-or-CRITICAL vulnerabilities, any HIGH-or-CRITICAL misconfiguration), the expiring bypass file, and the nightly scan that files one tracking issue per public repository; semgrep on public repositories.
+
 12. [Build provenance](build-provenance.md) - why the `stable` delivery tag is trustworthy, and what residual trust remains.
+
 13. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
