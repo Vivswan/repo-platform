@@ -5,7 +5,7 @@ group: Fleet operations
 
 # Tracking issues
 
-The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open GitHub issue per failure stream: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating). The [site](site.md) module's nightly link-rot check rides the same machinery under its `labels.site` registration key. The fleet-wide nightly [security scan](security-scans.md) rides it too, under the fixed `security-nightly` label the settings baseline declares on every repository (no module, no answer). This page is the machinery the streams share; the module pages cover what each one runs.
+The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open GitHub issue per failure stream: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating). The [site](site.md) module's nightly link-rot check rides the same machinery under its `labels.site` registration key. The nightly [security scan](security-scans.md) of every public repository rides it too, under the fixed `security-nightly` label the settings baseline declares on every repository (no module, no answer). This page is the machinery the streams share; the module pages cover what each one runs.
 
 ## The action
 
@@ -31,7 +31,7 @@ The registration grammar and fleet-ci's `plan` job enforce:
 - One open issue per label. A failing night refreshes the newest open issue carrying the label - title and body replaced with the night's report; earlier nights survive in the edit history and their run links - otherwise creates it. The label is created, or an existing one repainted, with the color and description the module data declares (`tracking_label` under `modules.<module>` in `files.yml`, the same source the settings layer reads).
 - A green night comments on and closes every open issue carrying the label (up to 100 a night), so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([all-green.md](all-green.md)).
 - A manual green dispatch also closes a fuzz or nightly issue (the site stream's link check runs on the nightly schedule alone, so its issue waits for the next clean night); the close comment links the run, so the provenance is visible.
-- Every filing adds the repository owner as an assignee - issues created with `GITHUB_TOKEN` fire no `issues: opened` event, so the managed auto-assign workflow cannot catch them - and removes nobody. GitHub drops a login it cannot assign (an org owner), so assignment never fails the filing; auto-assign's nightly sweep retries the same owner on any issue still unassigned.
+- Every filing adds the repository owner as an assignee - issues created with `GITHUB_TOKEN` fire no `issues: opened` event, so the managed auto-assign workflow cannot catch them - and removes nobody. GitHub drops a login it cannot assign (an org owner), so assignment never fails the filing; auto-assign's nightly sweep retries the same owner on any issue still unassigned (public repositories: the sweep skips in a private one, which pays for every job that runs).
 
 ## Release gating
 
