@@ -494,7 +494,7 @@ The fleet's `validate-managed-files` check judges a repository as [check.ts](../
 
 - **Freshness informs and never fails:** the action compares the recorded commit with the `stable` tag in the platform checkout (git ancestry alone) and writes one line to the job summary and an annotation: up to date; `stable` moved N commits past it; or the commit is not on `stable`'s history. In both of the last two, a sync moves the judge once the delivered surface differs.
 
-- **The hygiene checks** (YAML, conflict markers, `release-as`) read no platform data and run from the action at `stable` ([new-repo.md](new-repo.md#the-managed-files-check)).
+- **The hygiene checks** (YAML, conflict markers, `release-as`) read no platform data and run from the action at `stable` ([new-repo.md](new-repo.md#the-managed-files-check)). Their walk skips `.git` and what the repository's own `.yamllint` `ignore:` list names (gitignore-style patterns, as yamllint reads them), so the scan and the yamllint step judge one tree.
 
 **Classes recorded:** `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror` (with `kind: symlink` for a link, hash of the target string); a fleet mirror is recorded as a repository mirror is. The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
 
@@ -527,9 +527,8 @@ The fleet's `validate-managed-files` check judges a repository as [check.ts](../
 The sync targets this repository like any other: its [.repo-platform.yml](../.repo-platform.yml) registers it, and the writer keeps its root copies of the files it ships (`.editorconfig`, the `.gitignore` region, `LICENSE.md`, the `AGENTS.md` region, the rendered `.github/settings.yml`, the links) by sync PR, recorded in its own manifest.
 
 - **Its `except`:** the paths whose file is this repository's own and cannot be the fleet's (its `ci.yml`, `dependabot.yml`, `.yamllint`, and the starters it does not take).
-- **Its CI** runs the [plan action](../actions/plan/action.yml) over the registration on every PR, as fleet CI does, and `bun run validate` judges the checkout as the fleet check does. A PR that changes `files/` stays green until this repository syncs itself.
-
-- **`bun run validate`** is [scripts/validate_self.ts](../scripts/validate_self.ts): it extracts the recorded commit with `git archive`, installs it, runs its `check.ts` over the checkout, removes the extract, then runs the hygiene checks in self mode (gitignored paths and the writer's sources under `files/` are not judged as YAML).
+- **Its CI** runs the [plan action](../actions/plan/action.yml) over the registration and then the [validate-managed-files action](../actions/validate-managed-files/action.yml) from the checkout, as fleet CI does: this checkout's action shell runs, the recorded commit's `check.ts` judges. A PR that changes `files/` stays green until this repository syncs itself.
+- **Its `.yamllint`** ignores `files`, so the writer's templates (placeholder tokens, not YAML) are outside the hygiene scan as they are outside yamllint.
 
 ## The operator
 

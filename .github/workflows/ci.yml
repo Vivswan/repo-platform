@@ -161,8 +161,7 @@ jobs:
           bun scripts/bootstrap.ts
           bun run typecheck
 
-  # The invariants are package.json's `invariants` script, so CI and `bun run check` run one list; `validate` installs
-  # the recorded commit's extract and runs its writer, so this job is networked.
+  # The invariants are package.json's `invariants` script, so CI and `bun run check` run one list.
   invariants:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -172,15 +171,38 @@ jobs:
         with:
           bun-version-file: files/bun/.bun-version
       - name: Install dependencies
-        run: |
-          bun install --frozen-lockfile --silent
-          bun install --frozen-lockfile --silent --cwd actions/validate-managed-files
+        run: bun install --frozen-lockfile --silent
       - name: Check the invariants
         run: bun run invariants
-      # The plan every fleet repository runs on its PRs: the registration against files.yml, failing closed.
+
+  # This repository judged as fleet CI judges every repository (fleet-ci.yml's plan and validate steps): the plan over
+  # the registration, then the action from this checkout, which reads the manifest's recorded commit and runs that
+  # commit's check.ts over the tree. A PR that changes files/ stays green until this repository syncs itself.
+  managed-files:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # Only for the sticky comment.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./actions/plan
+        id: plan
         with:
           private: ${{ github.event.repository.private }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The action DEFERS its failure so the findings comment posts first; the next step re-raises it, fail-closed:
+      # != 'success' re-raises on 'failure' AND on an output that resolved empty.
+      - uses: ./actions/validate-managed-files
+        id: validate
+        with:
+          private: ${{ steps.plan.outputs.private }}
+      - if: ${{ steps.validate.outputs.integrity != 'success' }}
+        run: |
+          echo "::error::validate-managed-files failed; see the findings on this PR (or the job summary) and the step log above."
+          exit 1
 
   script-tests:
     runs-on: ubuntu-latest
@@ -375,6 +397,7 @@ jobs:
       - commit-names
       - typecheck
       - invariants
+      - managed-files
       - script-tests
       - validate-skills
       - skills-discovery

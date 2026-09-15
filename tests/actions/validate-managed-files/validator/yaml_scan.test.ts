@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { tempDirs } from "../../../shared/temp_dir.ts";
-import { BASELINE, type RunValidatorOptions, validatorRunner } from "./fixtures";
+import { validatorRunner } from "./fixtures";
 
 const temp = tempDirs();
 const runValidator = validatorRunner(temp);
@@ -133,66 +133,174 @@ describe("conflict markers", () => {
   );
 });
 
-describe("the walk under --self", () => {
-  // The operator checkout carries gitignored working state (agent worktrees with in-progress rebases) that a
-  // --self walk must not fail on; managed repositories are plain trees where everything is content. The skip
-  // follows git's index, not the ignore patterns alone: a tracked file matching a pattern is still judged, which
-  // a check-ignore walk would skip in the operator's own checkout.
-  const IGNORED_TREE: Record<string, string> = {
-    ".gitignore": `${BASELINE[".gitignore"]}.claude/worktrees/\n`,
-    ".claude/worktrees/agent-x/broken.yml": "a: [1, 2\n",
-    ".claude/worktrees/agent-x/conflicted.md": `${"<".repeat(7)} ours\ntheirs\n${"=".repeat(7)}\n`,
-  };
-  const SIBLINGS: Record<string, string> = {
-    ".gitignore": `${BASELINE[".gitignore"]}vendor/generated.yml\n`,
-    "vendor/generated.yml": "a: [1, 2\n",
-    "vendor/checked.yml": "b: [1, 2\n",
-  };
+describe("the walk honours the repository's .yamllint ignore list", () => {
+  // yamllint skips what `ignore:` names, so a YAML-shaped file there (this repository's writer templates under files/,
+  // with their {{placeholder}} tokens) is not YAML to the repository; the scan reading it anyway was 16 findings on a
+  // clean tree. The matcher is a port of pathspec's GitIgnoreSpec, the library the pinned yamllint reads the list
+  // with, so each row below was checked against yamllint 1.38.0 itself; a row's expectation is that tool's answer.
+  // One walk feeds every check, so the conflict-marker scan skips the same paths.
+  const TEMPLATE =
+    "ci:\n  uses: {{github_username}}/repo-platform/.github/workflows/fleet-ci.yml@stable\n";
+  const BROKEN = "a: [1, 2\n";
+  const CONFLICTED = `${"<".repeat(7)} ours\ntheirs\n${"=".repeat(7)}\n`;
+  const ignore = (patterns: string) => `extends: default\n\nignore:\n${patterns}`;
 
-  test.each<{
-    reason: string;
-    tree: Record<string, string>;
-    args: string[];
-    opts: RunValidatorOptions;
-    errors: string[];
-  }>([
+  test.each<{ reason: string; tree: Record<string, string>; errors: string[] }>([
     {
-      reason: "--self skips gitignored paths in a git checkout",
-      tree: IGNORED_TREE,
-      args: ["--self"],
-      opts: { gitInit: true },
+      reason:
+        "a bare directory name is skipped at any depth; the same file outside it is a finding",
+      tree: {
+        ".yamllint": ignore("  - files\n"),
+        "files/base/ci.yml": TEMPLATE,
+        "packages/a/files/ci.yml": TEMPLATE,
+        "templates/ci.yml": TEMPLATE,
+      },
+      errors: ["templates/ci.yml"],
+    },
+    {
+      reason: "a glob, an anchored path, a directory-only pattern, and the string form",
+      tree: {
+        ".yamllint": ignore(" |\n  *.generated.yml\n  /vendor/generated.yml\n  build/\n"),
+        "deep/x.generated.yml": BROKEN,
+        "vendor/generated.yml": BROKEN,
+        "vendor/checked.yml": BROKEN,
+        "other/vendor/generated.yml": BROKEN,
+        "build/out.yml": BROKEN,
+        "src/build": CONFLICTED,
+      },
+      errors: ["other/vendor/generated.yml", "src/build", "vendor/checked.yml"],
+    },
+    {
+      reason: "a negation re-includes what an earlier pattern ignored",
+      tree: {
+        ".yamllint": ignore("  - fixtures\n  - '!fixtures/kept.yml'\n"),
+        "fixtures/dropped.yml": BROKEN,
+        "fixtures/kept.yml": BROKEN,
+      },
+      errors: ["fixtures/kept.yml"],
+    },
+    {
+      reason: "the conflict-marker scan skips the ignored paths too",
+      tree: {
+        ".yamllint": ignore("  - .worktrees\n"),
+        ".worktrees/agent/conflicted.md": CONFLICTED,
+        ".worktrees/agent/broken.yml": BROKEN,
+        "docs/conflicted.md": CONFLICTED,
+        "release-please-config.json": `${CONFLICTED}{"release-as": "1.0.0"}\n`,
+      },
+      errors: ["docs/conflicted.md", "release-please-config.json"],
+    },
+    {
+      reason:
+        "an ignored release-please-config.json is outside every check, its release-as pin included",
+      tree: {
+        ".yamllint": ignore("  - '*.json'\n"),
+        "release-please-config.json": '{"release-as": "1.0.0"}\n',
+      },
       errors: [],
     },
     {
-      reason: "--self on a plain tree (no git) still scans everything",
-      tree: IGNORED_TREE,
-      args: ["--self"],
-      opts: {},
-      errors: [".claude/worktrees/agent-x/broken.yml", ".claude/worktrees/agent-x/conflicted.md"],
+      reason:
+        "pathspec's shapes: a directory pattern after **, literal braces, a kept leading and escaped trailing space",
+      tree: {
+        ".yamllint": ignore("  - a/**/\n  - '*.{md,txt}'\n  - ' spaced'\n  - 'tail\\ '\n"),
+        "a/x.yml": BROKEN,
+        "notes.md": CONFLICTED,
+        "x.{md,txt}": CONFLICTED,
+        " spaced/y.yml": BROKEN,
+        "spaced/y.yml": BROKEN,
+        "tail /z.yml": BROKEN,
+        "tail/z.yml": BROKEN,
+      },
+      errors: ["notes.md", "spaced/y.yml", "tail/z.yml"],
     },
     {
-      reason: "a managed repository's walk ignores no paths even in a git checkout",
-      tree: IGNORED_TREE,
-      args: [],
-      opts: { gitInit: true },
-      errors: [".claude/worktrees/agent-x/broken.yml", ".claude/worktrees/agent-x/conflicted.md"],
+      reason: "pathspec's precedence: a later directory match does not override a file negation",
+      tree: {
+        ".yamllint": ignore("  - foo/\n  - '!foo/bar.yml'\n  - foo/\n"),
+        "foo/bar.yml": BROKEN,
+        "foo/baz.yml": BROKEN,
+      },
+      errors: ["foo/bar.yml"],
     },
     {
-      reason: "--self skips an ignored file while validating its siblings",
-      tree: SIBLINGS,
-      args: ["--self"],
-      opts: { gitInit: true },
-      errors: ["vendor/checked.yml"],
+      reason: "the list arrives through a merge key, as PyYAML reads it for yamllint",
+      tree: {
+        ".yamllint": "extends: default\n<<: {ignore: [files]}\n",
+        "files/base/ci.yml": TEMPLATE,
+      },
+      errors: [],
     },
     {
-      reason: "--self still validates a tracked file matching an ignore pattern",
-      tree: SIBLINGS,
-      args: ["--self"],
-      opts: { gitInit: true, gitAddForce: ["vendor/generated.yml"] },
-      errors: ["vendor/checked.yml", "vendor/generated.yml"],
+      reason: "a .yamllint without an ignore list skips nothing",
+      tree: {
+        ".yamllint.yaml": "extends: default\n",
+        "files/base/ci.yml": TEMPLATE,
+        "node_modules/pkg/broken.yml": BROKEN,
+      },
+      errors: ["files/base/ci.yml", "node_modules/pkg/broken.yml"],
     },
-  ])("$reason", ({ tree, args, opts, errors }) => {
-    const { exitCode, stderr } = runValidator(tree, args, opts);
+    {
+      reason:
+        "a class that swallows the directory probe's slash prunes nothing; the files decide one by one",
+      tree: {
+        ".yamllint": ignore("  - a[!b]\n"),
+        "a/broken.yml": BROKEN,
+        "ac/broken.yml": BROKEN,
+      },
+      errors: ["a/broken.yml"],
+    },
+    {
+      reason: "pathspec's classes: a literal ] leads a class, negated or not",
+      tree: {
+        ".yamllint": ignore("  - '[!]]a.yml'\n  - '[]b]c.yml'\n"),
+        "]a.yml": BROKEN,
+        "xa.yml": BROKEN,
+        "]c.yml": BROKEN,
+        "bc.yml": BROKEN,
+      },
+      errors: ["]a.yml"],
+    },
+    {
+      reason:
+        "pathspec's units: a space is a segment character, not a separator; ? is one code point",
+      tree: {
+        ".yamllint": ignore("  - '/** *'\n  - '*.yml'\n  - '!?.yml'\n"),
+        "a b.md": CONFLICTED,
+        "ab.md": CONFLICTED,
+        "sub/a b.md": CONFLICTED,
+        "\u{1F600}.yml": BROKEN,
+        "ab.yml": BROKEN,
+      },
+      errors: ["ab.md", "sub/a b.md", "\u{1F600}.yml"],
+    },
+  ])("$reason", ({ tree, errors }) => {
+    const { exitCode, stderr } = runValidator(tree);
     expect([exitCode, erroring(stderr).sort()]).toEqual([errors.length === 0 ? 0 : 1, errors]);
+  });
+
+  test.each([
+    { reason: "does not parse", config: "ignore: [files\n", message: "does not parse as YAML" },
+    {
+      reason: "carries a pattern yamllint refuses",
+      config: "ignore:\n  - 'a\\'\n",
+      message: "invalid ignore pattern",
+    },
+    {
+      reason: "lists a non-string",
+      config: "ignore:\n  - 1\n",
+      message: "ignore should contain file patterns",
+    },
+    {
+      reason: "sets ignore to a number",
+      config: "ignore: 42\n",
+      message: "ignore should contain file patterns",
+    },
+  ])("a .yamllint that $reason fails the run naming the file", ({ config, message }) => {
+    const { exitCode, stderr } = runValidator({ ".yamllint": config });
+    expect([exitCode === 0, stderr]).toEqual([
+      false,
+      expect.stringContaining(`.yamllint: ${message}`),
+    ]);
   });
 });

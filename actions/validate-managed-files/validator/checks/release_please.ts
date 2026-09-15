@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { isMapping } from "../../../shared/values.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
-import { hasConflictMarker, isRegularFile } from "../readers.ts";
+import { hasConflictMarker } from "../readers.ts";
 
 const CONFIG_PATH = "release-please-config.json";
 
@@ -15,9 +15,8 @@ const CONFIG_PATH = "release-please-config.json";
  *  Presence-gated, not module-gated: the file is a repo-owned starter, so
  *  it is the file, not the module selection, that can carry the pin. */
 export function checkReleasePlease(ctx: Context): Finding[] {
-  const path = join(ctx.root, CONFIG_PATH);
-  if (!isRegularFile(path)) return [];
-  const text = readFileSync(path, "utf-8");
+  if (!ctx.files.includes(CONFIG_PATH)) return [];
+  const text = readFileSync(join(ctx.root, CONFIG_PATH), "utf-8");
   // A conflict-marked config is the conflict-marker check's report; parsing
   // it here would only add a second, noisier diagnostic for the same damage.
   if (hasConflictMarker(text)) return [];
