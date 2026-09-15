@@ -136,9 +136,9 @@ describe("conflict markers", () => {
 describe("the walk honours the repository's .yamllint ignore list", () => {
   // yamllint skips what `ignore:` names, so a YAML-shaped file there (this repository's writer templates under files/,
   // with their {{placeholder}} tokens) is not YAML to the repository; the scan reading it anyway was 16 findings on a
-  // clean tree. The matcher is a port of pathspec's GitIgnoreSpec, the library yamllint reads the list with (a fresh
-  // install of the pinned yamllint resolves pathspec 1.1.1), so each row below was checked against that library; a
-  // row's expectation is its answer.
+  // clean tree. The matcher is a port of pathspec's GitIgnoreSpec, the library yamllint reads the list with, at the
+  // release the yamllint action pins beside yamllint; each row below was checked against that release, and a row's
+  // expectation is its answer.
   // One walk feeds every check, so the conflict-marker scan skips the same paths.
   const TEMPLATE =
     "ci:\n  uses: {{github_username}}/repo-platform/.github/workflows/fleet-ci.yml@stable\n";

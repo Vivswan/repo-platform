@@ -7,6 +7,10 @@ import { isRegularFile } from "./readers.ts";
 /** yamllint's config lookup, in its order. */
 const CONFIG_NAMES = [".yamllint", ".yamllint.yaml", ".yamllint.yml"];
 
+/** The pathspec release ported below; actions/yamllint/requirements.txt pins the same one, so the fleet's yamllint
+ *  and this scan match one way (tests/actions/yamllint_action.test.ts holds the two together). */
+export const PATHSPEC_VERSION = "1.1.1";
+
 /** `d` is set when the match ended at a directory boundary: the path is under a matched directory rather than the
  *  matched file itself (pathspec's ps_d group). */
 const DIR_MARK = "(?<d>/)";
@@ -23,8 +27,8 @@ interface Pattern {
 export type Skips = (rel: string, directory: boolean) => boolean;
 
 /** What yamllint skips is not YAML to the repository (a writer's templates with their placeholder tokens), so the scan
- *  skips it too. The patterns are read as the pinned yamllint reads them: pathspec's GitIgnoreSpec, ported below
- *  (its regex translation and its precedence: the last pattern matching the file itself decides, else the last
+ *  skips it too. The patterns are read as yamllint reads them: pathspec's GitIgnoreSpec at PATHSPEC_VERSION, ported
+ *  below (its regex translation and its precedence: the last pattern matching the file itself decides, else the last
  *  matching a parent directory). Only the config's own `ignore` key is read, never `ignore-from-file` or an extended
  *  file's. */
 export function yamllintIgnore(root: string): Skips {
