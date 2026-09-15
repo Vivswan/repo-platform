@@ -106,10 +106,15 @@ The website is one build of the judged commit: version navigation belongs to the
 |---|---|
 | `/` | the newest served version tag's docs (none served: the default branch's docs, the same content as `latest/`) |
 | `latest/` | the default branch's docs |
+| `stable/` | the newest served version tag's docs, under a name that survives releases; absent while no tag is served |
 | `vX.Y.Z/` | that tag's docs, one directory per served tag |
 | `versions.json` | the version index the theme's dropdown reads |
 
 - **Versions** are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../actions/pages-site/build.ts)).
+
+- **The dropdown** lists `latest`, then `stable` while a tag is served, then the tags newest first; the tier being read is the selected entry.
+
+- **A link that survives releases:** `/<mount>/stable/setup/` keeps resolving as tags come and go, where `/<mount>/v1.2.0/setup/` falls out of the served set after five more releases. `stable/` is its own build of the newest tag: the base URL is baked into every asset path, so the root's build cannot be copied there.
 
 - **Every deploy rebuilds every tier,** so a theme or pipeline change restyles the whole site on the next run.
 

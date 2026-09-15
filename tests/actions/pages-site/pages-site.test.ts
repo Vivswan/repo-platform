@@ -38,6 +38,9 @@ import {
   reservedRootEntries,
   type SiteConfig,
   siteLayout,
+  type Tier,
+  type VersionEntry,
+  versionsIndex,
   versionTags,
 } from "../../../actions/pages-site/lib.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
@@ -176,18 +179,39 @@ describe("planMount", () => {
   const docs: DocsMount = { kind: "docs", path: "/docs/", include: [] };
 
   // Root last is what lets copyInto judge reserved names against tiers already in place; without tags the root is
-  // a second build of HEAD, never a redirect stub.
-  test("with tags: latest, each tag, then the root from the newest; without tags: latest, then the root from HEAD", () => {
-    expect(planMount(docs, ["v2.0.0", "v1.0.0"])).toEqual([
-      { kind: "latest", ref: "HEAD", version: "latest", rel: "docs/latest/" },
-      { kind: "tag", ref: "v2.0.0", version: "v2.0.0", rel: "docs/v2.0.0/" },
-      { kind: "tag", ref: "v1.0.0", version: "v1.0.0", rel: "docs/v1.0.0/" },
-      { kind: "root", ref: "v2.0.0", version: "v2.0.0", rel: "docs/" },
-    ]);
-    expect(planMount(docs, [])).toEqual([
-      { kind: "latest", ref: "HEAD", version: "latest", rel: "docs/latest/" },
-      { kind: "root", ref: "HEAD", version: "latest", rel: "docs/" },
-    ]);
+  // a second build of HEAD, never a redirect stub, and there is no stable/: that name never points at an unreleased
+  // branch. The dropdown lists the named tiers in the plan's order, so a tier without its entry (or the reverse)
+  // fails here.
+  test.each<[reason: string, tags: string[], tiers: Tier[], index: VersionEntry[]]>([
+    [
+      "with tags: latest, stable from the newest, each tag, then the root from the newest",
+      ["v2.0.0", "v1.0.0"],
+      [
+        { kind: "latest", ref: "HEAD", version: "latest", rel: "docs/latest/" },
+        { kind: "stable", ref: "v2.0.0", version: "stable", rel: "docs/stable/" },
+        { kind: "tag", ref: "v2.0.0", version: "v2.0.0", rel: "docs/v2.0.0/" },
+        { kind: "tag", ref: "v1.0.0", version: "v1.0.0", rel: "docs/v1.0.0/" },
+        { kind: "root", ref: "v2.0.0", version: "v2.0.0", rel: "docs/" },
+      ],
+      [
+        { label: "latest", path: "latest/" },
+        { label: "stable", path: "stable/" },
+        { label: "v2.0.0", path: "v2.0.0/" },
+        { label: "v1.0.0", path: "v1.0.0/" },
+      ],
+    ],
+    [
+      "without tags: latest, then the root from HEAD, no stable",
+      [],
+      [
+        { kind: "latest", ref: "HEAD", version: "latest", rel: "docs/latest/" },
+        { kind: "root", ref: "HEAD", version: "latest", rel: "docs/" },
+      ],
+      [{ label: "latest", path: "latest/" }],
+    ],
+  ])("%s", (_reason, tags, tiers, index) => {
+    expect(planMount(docs, tags)).toEqual(tiers);
+    expect(versionsIndex(tags)).toEqual(index);
   });
 });
 
@@ -230,11 +254,11 @@ describe("assembly copies", () => {
     ).toThrow("collides with existing site content");
   });
 
-  // An impostor `latest/` from the root tier would shadow the real tier. The reserved set is exact: a stray extra
-  // name would refuse legitimate root-tier output.
+  // An impostor `latest/` or `stable/` from the root tier would shadow the real tier. The reserved set is exact: a
+  // stray extra name would refuse legitimate root-tier output.
   test("a root-tier build emitting a reserved layout name is refused; the reserved names are the layout's own plus the served tags", () => {
     const reserved = reservedRootEntries(["v1.0.0"]);
-    expect(reserved).toEqual(new Set(["latest", "versions.json", "v1.0.0"]));
+    expect(reserved).toEqual(new Set(["latest", "stable", "versions.json", "v1.0.0"]));
     const dest = temp.dir("dest-");
     expect(() =>
       copyInto(tree({ "latest/index.html": "impostor" }), dest, "the root tier", reserved),
@@ -428,18 +452,17 @@ describe("derive", () => {
 });
 
 describe("central theme guard", () => {
-  // The one owner of strict versus lenient: HEAD content must be fixable, history cannot be.
-  test("the dead-link strictness wiring is ARMED: HEAD tiers build strict, tags lenient", () => {
-    expect(
-      tierStrictLinks({ kind: "latest", ref: "HEAD", version: "latest", rel: "latest/" }),
-    ).toBe(true);
-    expect(tierStrictLinks({ kind: "single", ref: "HEAD", version: "", rel: "" })).toBe(true);
-    expect(tierStrictLinks({ kind: "tag", ref: "v1.0.0", version: "v1.0.0", rel: "v1.0.0/" })).toBe(
-      false,
-    );
-    expect(tierStrictLinks({ kind: "root", ref: "v1.0.0", version: "v1.0.0", rel: "" })).toBe(
-      false,
-    );
+  // The one owner of strict versus lenient: HEAD content must be fixable, history cannot be. The stable row guards
+  // the wiring against a kind-based rule (`kind !== "tag"`), which would fail every deploy on rot sealed in the tag
+  // stable/ serves.
+  test.each<[tier: Tier, strict: boolean]>([
+    [{ kind: "latest", ref: "HEAD", version: "latest", rel: "latest/" }, true],
+    [{ kind: "single", ref: "HEAD", version: "", rel: "" }, true],
+    [{ kind: "tag", ref: "v1.0.0", version: "v1.0.0", rel: "v1.0.0/" }, false],
+    [{ kind: "stable", ref: "v1.0.0", version: "stable", rel: "stable/" }, false],
+    [{ kind: "root", ref: "v1.0.0", version: "v1.0.0", rel: "" }, false],
+  ])("the dead-link strictness wiring is ARMED: %p builds strict = %p", (tier, strict) => {
+    expect(tierStrictLinks(tier)).toBe(strict);
   });
 
   // The build copies the central theme over a caller's .vitepress, so a repo-local one would be ignored silently.
