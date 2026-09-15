@@ -78,7 +78,8 @@ function readConfig(root: string): { name: string; entries: string[] } | null {
   return { name, entries: entries as string[] };
 }
 
-/** pathspec's pattern_to_regex: null for a no-op line, undefined for a pattern it refuses. A trailing space survives
+/** pathspec's pattern_to_regex: null for a no-op line (a blank, a comment, a lone slash, or a class with no closing
+ *  bracket, which git and pathspec 1.1 discard whole), undefined for a pattern it refuses. A trailing space survives
  *  only escaped. */
 function compile(line: string): Pattern | null | undefined {
   const pattern = line.endsWith("\\ ") ? line : line.trimEnd();
@@ -90,7 +91,7 @@ function compile(line: string): Pattern | null | undefined {
   if (normalized === undefined) return undefined;
   const source =
     typeof normalized === "string" ? normalized : translate(directoryPattern, normalized);
-  if (source === undefined) return undefined;
+  if (source === undefined || source === null) return source;
   try {
     return { regex: new RegExp(source, "u"), include };
   } catch {
@@ -117,7 +118,7 @@ function normalize(directoryPattern: boolean, segments: string[]): string[] | st
   return segments;
 }
 
-function translate(directoryPattern: boolean, segments: string[]): string | undefined {
+function translate(directoryPattern: boolean, segments: string[]): string | null | undefined {
   const parts: string[] = [];
   let needSlash = false;
   const end = segments.length - 1;
@@ -135,7 +136,7 @@ function translate(directoryPattern: boolean, segments: string[]): string | unde
     if (segment === "*") parts.push("[^/]+");
     else {
       const glob = segmentGlob(segment);
-      if (glob === undefined) return undefined;
+      if (glob === undefined || glob === null) return glob;
       parts.push(glob);
     }
     if (i === end) parts.push(DIR_MARK_OPT);
@@ -146,12 +147,11 @@ function translate(directoryPattern: boolean, segments: string[]): string | unde
 
 /** Only the syntax characters, since the `u` flag (one code point per `?` and class, as Python matches) refuses any
  *  other escape. */
-const literal = (char: string): string => char.replace(/[\\^$.*+?()[\]{}|/]/, "\\$&");
+const literal = (char: string): string => ("\\^$.*+?()[]{}|/".includes(char) ? `\\${char}` : char);
 
 /** One path segment's glob as a regex: `*` and `?` stay inside the segment, `[...]` is a class (`!` or `^` negates,
- *  a leading `]` is literal: Python reads it so, JavaScript needs it escaped), a backslash escapes the next character.
- *  undefined for a trailing backslash. */
-function segmentGlob(segment: string): string | undefined {
+ *  a leading `]` is literal: Python reads it so, JavaScript needs it escaped), a backslash escapes the next character. */
+function segmentGlob(segment: string): string | null | undefined {
   let regex = "";
   let escaped = false;
   let i = 0;
@@ -180,7 +180,7 @@ function segmentGlob(segment: string): string | undefined {
         expr += segment.slice(i, j).replaceAll("\\", "\\\\").replace(/^\]/, "\\]");
         regex += expr;
         i = j;
-      } else regex += "\\[";
+      } else return null;
     } else regex += literal(char);
   }
   return escaped ? undefined : regex;

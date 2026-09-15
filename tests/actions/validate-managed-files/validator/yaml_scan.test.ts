@@ -136,8 +136,9 @@ describe("conflict markers", () => {
 describe("the walk honours the repository's .yamllint ignore list", () => {
   // yamllint skips what `ignore:` names, so a YAML-shaped file there (this repository's writer templates under files/,
   // with their {{placeholder}} tokens) is not YAML to the repository; the scan reading it anyway was 16 findings on a
-  // clean tree. The matcher is a port of pathspec's GitIgnoreSpec, the library the pinned yamllint reads the list
-  // with, so each row below was checked against yamllint 1.38.0 itself; a row's expectation is that tool's answer.
+  // clean tree. The matcher is a port of pathspec's GitIgnoreSpec, the library yamllint reads the list with (a fresh
+  // install of the pinned yamllint resolves pathspec 1.1.1), so each row below was checked against that library; a
+  // row's expectation is its answer.
   // One walk feeds every check, so the conflict-marker scan skips the same paths.
   const TEMPLATE =
     "ci:\n  uses: {{github_username}}/repo-platform/.github/workflows/fleet-ci.yml@stable\n";
@@ -251,15 +252,18 @@ describe("the walk honours the repository's .yamllint ignore list", () => {
       errors: ["a/broken.yml"],
     },
     {
-      reason: "pathspec's classes: a literal ] leads a class, negated or not",
+      reason:
+        "pathspec's classes: a literal ] leads a class, negated or not; an unclosed class discards its pattern",
       tree: {
-        ".yamllint": ignore("  - '[!]]a.yml'\n  - '[]b]c.yml'\n"),
+        ".yamllint": ignore("  - '[!]]a.yml'\n  - '[]b]c.yml'\n  - '[abc.yml'\n  - files\n"),
         "]a.yml": BROKEN,
         "xa.yml": BROKEN,
         "]c.yml": BROKEN,
         "bc.yml": BROKEN,
+        "[abc.yml": BROKEN,
+        "files/base/ci.yml": TEMPLATE,
       },
-      errors: ["]a.yml"],
+      errors: ["[abc.yml", "]a.yml"],
     },
     {
       reason:
