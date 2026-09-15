@@ -81,8 +81,9 @@ describe("the versioned vitepress deploy", () => {
   });
 
   test("serves the root's content again under stable/: the same article and provenance, the dropdown marking stable", () => {
-    // stable/ is its own build of the newest tag (the base is baked into asset hrefs and chunk
-    // hashes), so the article text and the provenance line are the comparison, not the bytes.
+    // stable/ is its own build of the newest tag (its base sits in the client bundle, the site data,
+    // and the chunk hashes), so the article text and the provenance line are the comparison, not
+    // the bytes.
     // Carbon's hidden markdown hint spells the tier's base inside the article, so each compared
     // tier's base is normalized away; the latest tier is the control.
     const article = (tier: string, page: string) =>

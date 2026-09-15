@@ -218,7 +218,8 @@ function versionTiers(tags: string[]): VersionTier[] {
 }
 
 /** The root tier comes last, so assembly can check its top-level entries against the tier directories already in place.
- *  Every tier is its own real build, never a copy or a redirect: the base URL is baked into every asset href, and the root is what a site indexes. */
+ *  Every tier is its own real build, never a copy: a build's client bundle carries its own base, so it cannot be served under another prefix.
+ *  Never a redirect either: the root is what a site indexes. */
 export function planMount(mount: DocsMount, tags: string[]): Tier[] {
   const prefix = mountRel(mount.path);
   const newest = tags[0];

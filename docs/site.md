@@ -112,9 +112,11 @@ The website is one build of the judged commit: version navigation belongs to the
 
 - **Versions** are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../actions/pages-site/build.ts)).
 
-- **The dropdown** lists `latest`, then `stable` while a tag is served, then the tags newest first; the tier being read is the selected entry.
+- **The dropdown** appears once a tag is served and lists `latest`, `stable`, then the tags newest first; the tier being read is the selected entry.
 
-- **A link that survives releases:** `/<mount>/stable/setup/` keeps resolving as tags come and go, where `/<mount>/v1.2.0/setup/` falls out of the served set after five more releases. `stable/` is its own build of the newest tag: the base URL is baked into every asset path, so the root's build cannot be copied there.
+- **A link that survives releases:** `/<mount>/stable/setup/` keeps resolving as tags come and go, where `/<mount>/v1.2.0/setup/` falls out of the served set after five more releases.
+
+- **`stable/` is its own build** of the newest tag. A copy of the root's build carries the root's base in its client bundle, so its router cannot serve the `stable/` URLs.
 
 - **Every deploy rebuilds every tier,** so a theme or pipeline change restyles the whole site on the next run.
 
