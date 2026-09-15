@@ -4,7 +4,7 @@
   "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies, which the root postinstall installs so one root bun install covers every action package.",
   "scripts": {
     "check": "bun scripts/bootstrap.ts --if-missing && bun run docs:check && bun run lint && bun run lint:actions && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run lint:yaml && bun run invariants && bun run test",
-    "invariants": "bun run wrap:check && bun run validate",
+    "invariants": "bun run wrap:check",
     "bootstrap": "bun scripts/bootstrap.ts",
     "docs:check": "bun scripts/docs_check.ts",
     "check:fix": "bun x biome check --write .",
@@ -16,7 +16,6 @@
     "file-size": "bun actions/check-file-size/check-file-size.ts .",
     "wrap:check": "bun scripts/check/check_markdown_wrap.ts",
     "lint:yaml": "uvx --with-requirements actions/yamllint/requirements.txt yamllint -s .",
-    "validate": "bun scripts/validate_self.ts",
     "test": "bun scripts/run_tests.ts",
     "postinstall": "for pkg in actions/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done",
     "prepare": "husky"

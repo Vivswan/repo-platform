@@ -16,7 +16,7 @@ One version per toolchain, fleet-wide, spelled once: a version dotfile under `fi
 
 Modules without a pin: uv floats on its setup action's default, and rust ships no toolchain setup in CI, so rust version selection stays repository-owned.
 
-The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.txt` pins the yamllint the action installs, dependabot's pip entry for that directory bumps it, and this repository's `lint:yaml` script installs from the same file.
+The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.txt` pins the yamllint the action installs and the pathspec release its ignore list is matched with (the validate-managed-files scan ports that release), dependabot's pip entry for that directory bumps them, and this repository's `lint:yaml` script installs from the same file.
 
 ## How the pin reaches repositories
 

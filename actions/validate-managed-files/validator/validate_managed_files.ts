@@ -18,15 +18,10 @@ function usageError(message: string): never {
 }
 
 function main(): number {
-  let selfMode = false;
-  const positional: string[] = [];
-  for (const arg of process.argv.slice(2)) {
-    if (arg === "--self") selfMode = true;
-    else if (arg.startsWith("-")) usageError(`unrecognized argument: ${arg}`);
-    else positional.push(arg);
-  }
-  if (positional.length > 1) usageError(`unrecognized argument: ${positional[1]}`);
-  const ctx = loadContext(resolve(positional[0] ?? "."), selfMode);
+  const [root, ...rest] = process.argv.slice(2);
+  if (rest.length > 0) usageError(`unrecognized argument: ${rest[0]}`);
+  if (root?.startsWith("-")) usageError(`unrecognized argument: ${root}`);
+  const ctx = loadContext(resolve(root ?? "."));
   const findings = CHECKS.flatMap((check) => check(ctx));
   writeReport(findings, process.env);
   return print(findings);

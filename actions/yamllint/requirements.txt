@@ -1,1 +1,3 @@
 yamllint==1.38.0
+# The ignore-list matcher the validate-managed-files action ports (validator/yamllint_ignore.ts) follows this pathspec.
+pathspec==1.1.1

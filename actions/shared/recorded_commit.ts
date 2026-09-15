@@ -1,4 +1,4 @@
-// What the fleet action's read-commit step and this repository's `bun run validate` check out repo-platform at; the
+// What the fleet action's read-commit step checks out repo-platform at; the
 // writer reads the same field from its parsed records (sync/writer/manifest.ts recordedCommit) under its own stamp rule.
 // Every problem string is value-free, since the manifest is target-repository content and the action's log is public.
 //
