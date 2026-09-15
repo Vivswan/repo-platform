@@ -7,7 +7,8 @@ description: >-
   (config and theme live in this action, the repository carries only
   markdown), versioned from its plain vX.Y.Z tags - latest/ from HEAD, one
   directory per served tag (a tag whose tree has no docs/ is skipped with a
-  notice), the mount root serving the newest served version - at
+  notice), stable/ and the mount root both serving the newest served
+  version (stable/ only while one is served) - at
   /<docs_path>/ beside the website or at the root alone. Other roots of the
   repository (skills/, for one) render inside the docs through the include
   list. Once every part is in place the whole artifact's internal links

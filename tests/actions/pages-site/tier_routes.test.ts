@@ -8,8 +8,14 @@ interface Tier {
 
 /** A project-pages docs site with two tags: the root tier's base prefixes
  *  every other tier's. */
-const ROOT: Tier = { base: "/repo/", roots: ["/repo/latest/", "/repo/v2.0.0/", "/repo/v1.0.0/"] };
+const ROOT: Tier = {
+  base: "/repo/",
+  roots: ["/repo/latest/", "/repo/stable/", "/repo/v2.0.0/", "/repo/v1.0.0/"],
+};
 const LATEST: Tier = { base: "/repo/latest/", roots: ROOT.roots };
+/** The newest tag's content again under stable/: its own build, so the
+ *  root's pages are another tier's. */
+const STABLE: Tier = { base: "/repo/stable/", roots: ROOT.roots };
 /** A versioned site before its first tag: the root is built from HEAD and
  *  latest/ is the one version served. */
 const NO_TAGS: Tier = { base: "/repo/", roots: ["/repo/latest/"] };
@@ -38,6 +44,9 @@ const CASES: [string, Case][] = [
   ],
   ["a locale of the root tier", { tier: ROOT, to: "/repo/zh-cn/", outcome: "routed" }],
   ["latest from the root tier", { tier: ROOT, to: "/repo/latest/", outcome: "left" }],
+  ["stable from the root tier", { tier: ROOT, to: "/repo/stable/setup.html", outcome: "left" }],
+  ["a page of the stable tier", { tier: STABLE, to: "/repo/stable/setup.html", outcome: "routed" }],
+  ["the root tier from the stable tier", { tier: STABLE, to: "/repo/", outcome: "left" }],
   [
     "a deep link into a tag from the root tier",
     { tier: ROOT, to: "/repo/v2.0.0/guide/#top", outcome: "left" },

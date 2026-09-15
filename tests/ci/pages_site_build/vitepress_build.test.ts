@@ -51,29 +51,60 @@ describe("the versioned vitepress deploy", () => {
     latestAssets = readAssets(site, "latest/assets");
   }, TEST_TIMEOUT_MS);
 
-  test("lays out root = newest tag, latest = HEAD, one dir per tag, and the indexes", () => {
+  test("lays out root = newest tag, latest = HEAD, stable = newest tag, one dir per tag, and the indexes", () => {
     // docs/site.md's docs-only Layout row as the artifact tree, llms.txt included.
     const expected = [
       "index.html",
       "latest/index.html",
+      "stable/index.html",
       "v0.1.0/index.html",
       "v0.2.0/index.html",
       "versions.json",
       "llms.txt",
       "latest/llms.txt",
+      "stable/llms.txt",
     ];
     expect(expected.filter((rel) => !isFile(site, rel))).toEqual([]);
-    expect(versionLabels(site)).toEqual(["latest", "v0.2.0", "v0.1.0"]);
+    expect(versionLabels(site)).toEqual(["latest", "stable", "v0.2.0", "v0.1.0"]);
   });
 
-  test("isolates each tier's content: the HEAD edit in latest alone, the v0.2.0 line at the root", () => {
+  test("isolates each tier's content: the HEAD edit in latest alone, the v0.2.0 line at the root and under stable", () => {
     // Tag tiers build from their git trees, HEAD from the checkout; the layout case stays green
     // on a build that copies HEAD everywhere.
     expect(readSite(site, "latest/setup.html")).toContain("HEAD-only line");
     expect(readSite(site, "setup.html")).not.toContain("HEAD-only line");
+    expect(readSite(site, "stable/setup.html")).not.toContain("HEAD-only line");
     expect(readSite(site, "v0.2.0/setup.html")).not.toContain("HEAD-only line");
     expect(readSite(site, "guide/index.html")).toContain("Second version line");
+    expect(readSite(site, "stable/guide/index.html")).toContain("Second version line");
     expect(readSite(site, "v0.1.0/guide/index.html")).not.toContain("Second version line");
+  });
+
+  test("serves the root's content again under stable/: the same article and provenance, the dropdown marking stable", () => {
+    // stable/ is its own build of the newest tag (its base sits in the client bundle, the site data,
+    // and the chunk hashes), so the article text and the provenance line are the comparison, not
+    // the bytes.
+    // Carbon's hidden markdown hint spells the tier's base inside the article, so each compared
+    // tier's base is normalized away; the latest tier is the control.
+    const article = (tier: string, page: string) =>
+      texts(readSite(site, `${tier}${page}`), ".vp-doc").map((text) =>
+        text.replaceAll(`/fixture-repo/${tier}`, "/fixture-repo/"),
+      );
+    const provenance = (rel: string) => texts(readSite(site, rel), ".fleet-provenance a");
+    for (const page of ["setup.html", "guide/index.html"]) {
+      expect(article("stable/", page)).toEqual(article("", page));
+    }
+    expect(article("latest/", "setup.html").join()).toContain("HEAD-only line");
+    expect(article("stable/", "setup.html")).not.toEqual(article("latest/", "setup.html"));
+    expect(provenance("stable/index.html")).toEqual(provenance("index.html"));
+    expect(provenance("stable/index.html")[0]).toStartWith("Built from v0.2.0 at ");
+    const selected = (rel: string) =>
+      texts(readSite(site, rel), "select.docs-site-version-switcher option[selected]");
+    expect(["index.html", "stable/index.html", "latest/index.html"].map(selected)).toEqual([
+      ["v0.2.0"],
+      ["stable"],
+      ["latest"],
+    ]);
   });
 
   test("renders the zh-cn locale only in the tiers whose tree carries it, with the translations menu", () => {
@@ -91,14 +122,15 @@ describe("the versioned vitepress deploy", () => {
     // on the provenance key because the version dropdown lists every tier's label in every page.
     const tiers: [string, string, string][] = [
       ["latest/", "main", "latest"],
+      ["stable/", "v0.2.0", "stable"],
       ["v0.2.0/", "v0.2.0", "v0.2.0"],
       ["v0.1.0/", "v0.1.0", "v0.1.0"],
     ];
     for (const [rel, label, current] of tiers) {
       const page = readSite(site, `${rel}index.html`);
-      const labels = tiers
-        .map(([, other]) => other)
-        .filter((other) => page.includes(`\\"provenance\\":{\\"label\\":\\"${other}\\"`));
+      const labels = [...new Set(tiers.map(([, other]) => other))].filter((other) =>
+        page.includes(`\\"provenance\\":{\\"label\\":\\"${other}\\"`),
+      );
       expect([rel, labels]).toEqual([rel, [label]]);
       expect(texts(page, '.fleet-facts-items a[aria-current="true"]')).toEqual([current]);
       expect(page).toContain(`Built from ${label}`);
@@ -147,11 +179,20 @@ describe("the versioned vitepress deploy", () => {
     };
     expect(verdicts("", "/fixture-repo/")).toEqual({
       routed: ["/fixture-repo/setup.html"],
-      left: ["/fixture-repo/latest/", "/fixture-repo/v0.2.0/", "/fixture-repo/v0.1.0/"],
+      left: [
+        "/fixture-repo/latest/",
+        "/fixture-repo/stable/",
+        "/fixture-repo/v0.2.0/",
+        "/fixture-repo/v0.1.0/",
+      ],
     });
     expect(verdicts("latest/", "/fixture-repo/latest/")).toEqual({
       routed: ["/fixture-repo/latest/", "/fixture-repo/latest/setup.html"],
-      left: ["/fixture-repo/v0.2.0/", "/fixture-repo/v0.1.0/"],
+      left: ["/fixture-repo/stable/", "/fixture-repo/v0.2.0/", "/fixture-repo/v0.1.0/"],
+    });
+    expect(verdicts("stable/", "/fixture-repo/stable/")).toEqual({
+      routed: ["/fixture-repo/stable/", "/fixture-repo/stable/setup.html"],
+      left: ["/fixture-repo/latest/", "/fixture-repo/v0.2.0/", "/fixture-repo/v0.1.0/"],
     });
     expect(latestAssets).toContain("onBeforeRouteChange=");
   });
@@ -287,7 +328,13 @@ describe("link strictness", () => {
       const sealed: RunnerTemp = runnerTemp(temp);
       const lenient = buildSite(workspace, DOCS_REPO, sealed, DEPLOY_ENV);
       expect(lenient.exitCode, describeRun(lenient)).toBe(0);
-      expect(versionLabels(sealed.site)).toEqual(["latest", "v0.3.0", "v0.2.0", "v0.1.0"]);
+      expect(versionLabels(sealed.site)).toEqual([
+        "latest",
+        "stable",
+        "v0.3.0",
+        "v0.2.0",
+        "v0.1.0",
+      ]);
       appendDeadLink(workspace);
       const strict = buildSite(workspace, DOCS_REPO, runnerTemp(temp), DEPLOY_ENV);
       expect(strict.exitCode, describeRun(strict)).not.toBe(0);

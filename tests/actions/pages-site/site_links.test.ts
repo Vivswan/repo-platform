@@ -44,12 +44,13 @@ describe("seedPages", () => {
   // shortest first here.
   test("a page seeds only when the LONGEST tier prefix owning it is strict; a versioned root built from HEAD seeds too", () => {
     // A website at "/" (HEAD) over a versioned docs mount whose root is a
-    // tag build: the docs root's pages belong to the tag, its latest/ to
-    // HEAD, and the website's own pages to the website.
+    // tag build: the docs root's and stable/ pages belong to the tag, its
+    // latest/ to HEAD, and the website's own pages to the website.
     const tiers = [
       { rel: "", strict: true },
       { rel: "docs/", strict: false },
       { rel: "docs/v0.1.0/", strict: false },
+      { rel: "docs/stable/", strict: false },
       { rel: "docs/latest/", strict: true },
     ];
     expect(
@@ -62,6 +63,7 @@ describe("seedPages", () => {
           "docs/latest/index.html",
           "docs/latest/skills/alpha/index.html",
           "docs/v0.1.0/index.html",
+          "docs/stable/index.html",
         ],
         tiers,
       ),

@@ -399,7 +399,7 @@ export function copyInto(src: string, dest: string, what: string, reserved?: Set
     if (reserved?.has(entry)) {
       throw new Error(
         `${what} emits a top-level '${entry}', which the versioned layout reserves ` +
-          "(latest/, the version directories, versions.json) - rename that output",
+          "(latest/, stable/, the version directories, versions.json) - rename that output",
       );
     }
     const target = join(dest, entry);
@@ -464,7 +464,7 @@ function assembleDocs(cfg: Config, mount: DocsMount, kept: string[]): TierScope[
   );
   if (tags.length === 0) {
     console.log(
-      `::notice::no version tags to serve: ${mount.path} is built from the default branch head, like ${mount.path}latest/`,
+      `::notice::no version tags to serve: ${mount.path} is built from the default branch head, like ${mount.path}latest/, and ${mount.path}stable/ is absent`,
     );
   }
   return tiers.map((tier) => ({ rel: tier.rel, strict: tierStrictLinks(tier) }));

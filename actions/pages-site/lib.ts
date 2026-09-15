@@ -46,11 +46,12 @@ export interface Layout {
 }
 
 export interface Tier {
-  kind: "single" | "latest" | "tag" | "root";
+  kind: "single" | "latest" | "tag" | "stable" | "root";
   ref: string;
   /** The version identity handed to the build (DOCS_SITE_CURRENT): "" for
-   *  the check build, "latest", or the tag - the root tier carries the
-   *  newest served tag's identity, or "latest" while none serve. */
+   *  the check build, "latest", "stable", or the tag - the root tier
+   *  carries the newest served tag's identity, or "latest" while none
+   *  serve. */
   version: string;
   /** Artifact path relative to the site root, "" or "<dir>/.../". */
   rel: string;
@@ -195,27 +196,47 @@ export function mountRel(mountPath: string): string {
   return mountPath.slice(1);
 }
 
-/** The root tier comes last, so assembly can check its top-level entries against the tier directories already in place.
- *  The root is always a real build, never a redirect: it is the one copy a site indexes, and a redirect stub there leaves it nothing to index. */
-export function planMount(mount: DocsMount, tags: string[]): Tier[] {
-  const prefix = mountRel(mount.path);
-  const tiers: Tier[] = [
-    { kind: "latest", ref: "HEAD", version: "latest", rel: `${prefix}latest/` },
-  ];
-  for (const tag of tags) {
-    tiers.push({ kind: "tag", ref: tag, version: tag, rel: `${prefix}${tag}/` });
-  }
-  const newest = tags[0];
-  tiers.push(
-    newest === undefined
-      ? { kind: "root", ref: "HEAD", version: "latest", rel: prefix }
-      : { kind: "root", ref: newest, version: newest, rel: prefix },
-  );
-  return tiers;
+const LATEST = "latest";
+const STABLE = "stable";
+
+interface VersionTier {
+  kind: "latest" | "stable" | "tag";
+  /** The dropdown's label and the tier's directory name under the mount. */
+  label: string;
+  ref: string;
 }
 
+/** The one owner of which named tiers a mount serves, in the dropdown's order; planMount and versionsIndex derive from it, so a tier cannot exist without its entry or the reverse.
+ *  stable/ is the newest tag again under a name a link survives releases with, absent without a tag so it never names HEAD. */
+function versionTiers(tags: string[]): VersionTier[] {
+  const newest = tags[0];
+  return [
+    { kind: "latest", label: LATEST, ref: "HEAD" },
+    ...(newest === undefined ? [] : [{ kind: "stable" as const, label: STABLE, ref: newest }]),
+    ...tags.map((tag) => ({ kind: "tag" as const, label: tag, ref: tag })),
+  ];
+}
+
+/** The root tier comes last, so assembly can check its top-level entries against the tier directories already in place.
+ *  Every tier is its own real build, never a copy: a build's client bundle carries its own base, so it cannot be served under another prefix.
+ *  Never a redirect either: the root is what a site indexes. */
+export function planMount(mount: DocsMount, tags: string[]): Tier[] {
+  const prefix = mountRel(mount.path);
+  const newest = tags[0];
+  return [
+    ...versionTiers(tags).map(
+      ({ kind, label, ref }): Tier => ({ kind, ref, version: label, rel: `${prefix}${label}/` }),
+    ),
+    newest === undefined
+      ? { kind: "root", ref: "HEAD", version: LATEST, rel: prefix }
+      : { kind: "root", ref: newest, version: newest, rel: prefix },
+  ];
+}
+
+/** The fixed names are reserved whether or not the tier exists this deploy: a root build emitting stable/ before the
+ *  first tag would be served there and shadowed after it. */
 export function reservedRootEntries(tags: string[]): Set<string> {
-  return new Set(["latest", "versions.json", ...tags]);
+  return new Set([LATEST, STABLE, "versions.json", ...tags]);
 }
 
 export interface VersionEntry {
@@ -225,10 +246,7 @@ export interface VersionEntry {
 }
 
 export function versionsIndex(tags: string[]): VersionEntry[] {
-  return [
-    { label: "latest", path: "latest/" },
-    ...tags.map((tag) => ({ label: tag, path: `${tag}/` })),
-  ];
+  return versionTiers(tags).map(({ label }) => ({ label, path: `${label}/` }));
 }
 
 export function versionLinks(

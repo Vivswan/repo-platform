@@ -1,8 +1,8 @@
-// Every tier of a versioned site (latest/, each tag, the root) is its own
-// VitePress build under its own base, and the client router serves every
-// same-origin html link from THIS build's page map (vitepress's
-// dist/client/app/router.js, the window click listener; pathToFile in
-// utils.js keys the map by the path with THIS base's length sliced off).
+// Every tier of a versioned site is its own VitePress build under its own
+// base, and the client router serves every same-origin html link from THIS
+// build's page map (vitepress's dist/client/app/router.js, the window click
+// listener; pathToFile in utils.js keys the map by the path with THIS base's
+// length sliced off).
 // A link into another tier therefore rendered the SPA's 404, or, when the
 // two bases are the same length (latest/ and v2.0.0/), this tier's own page
 // at the other tier's URL, which the router then rewrote back: a reload in

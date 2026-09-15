@@ -95,10 +95,11 @@ describe("the layout a deploy lands", () => {
         ["manual/index.html", "The docs landing page."],
         ["manual/latest/index.html", "The docs landing page."],
         ["manual/latest/index.html", 'href="/site-repo/manual/latest/'],
+        ["manual/stable/index.html", "The docs landing page."],
         ["manual/v1.0.0/index.html", "The docs landing page."],
       ],
       absent: ["manual/v0.9.0", "versions.json"],
-      versions: ["manual", ["latest", "v1.0.0"]],
+      versions: ["manual", ["latest", "stable", "v1.0.0"]],
       stdout: [
         "::notice::docs version v0.9.0 skipped: docs/ has no landing page (README.md or index.md) at that tag",
         /internal links resolve \(\d+ links judged across \d+ current pages\)/,
