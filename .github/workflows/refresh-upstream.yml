@@ -19,6 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: fleet-operator
     timeout-minutes: 15
+    # bun install runs husky's prepare, which points the checkout's hooks at the developer pre-commit hook; the runner has
+    # no uv for its yaml lint, and the PR's own CI is this commit's gate.
+    env:
+      HUSKY: "0"
     strategy:
       fail-fast: false
       matrix:
