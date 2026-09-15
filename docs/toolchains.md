@@ -77,6 +77,6 @@ Each pinned module declares its pin in `files.yml` (`modules.<name>.pin`), data 
 
 2. **Write the dotfile** of each pin that moved. A bun bump also pins `@types/bun` to the same version in every package declaring it (`bun add --dev --exact`), which is why `.github/dependabot.yml` ignores that package; the types publish per bun release, so a run before they exist fails at the add and the next run retries.
 
-3. **Open or refresh a PR** on the `automation/refresh-release-pins` branch when anything moved; a bump across a major line leads the body with a callout. When nothing moved and that PR is still open, main already carries its pins, so the PR is closed and its branch deleted.
+3. **Open or refresh a PR** on the `automation/refresh-release-pins` branch when anything moved; a bump across a major line leads the body with a callout. The commit runs under `HUSKY=0`, so the developer pre-commit hook never judges it on the runner; the PR's CI is its gate. When nothing moved and that PR is still open, main already carries its pins, so the PR is closed and its branch deleted.
 
 Merging the PR moves the `stable` tag once its gate is green; the next sync rolls the pin out to the fleet.
