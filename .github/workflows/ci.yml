@@ -284,6 +284,13 @@ jobs:
       # the test fixtures read the action's yaml with the root's parser.
       - name: Install the pinned dependencies
         run: bun install --frozen-lockfile
+      # The site action's link-check step installs lychee on PATH for the steps after it; run over nothing, it
+      # leaves the same lychee the action runs, so the fixture with broken links is judged by it here too.
+      - name: Install the site action's lychee
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          lycheeVersion: v0.24.2
+          args: --offline --no-progress --version
       - name: Build the fixture site and assert the artifact
         run: bun run test tests/ci/pages_site_build
 

@@ -78,20 +78,26 @@ describe("reusable-site.yml", () => {
     expect(step("links")?.with).toEqual(expect.objectContaining({ token: "", fail: false }));
   });
 
-  // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml) and the nightly run the
-  // same action at the same version. The internal step's knobs are each silent when wrong: without --offline every
-  // external link is fetched on every build, without the fragment mode a missing anchor passes, without the index
-  // and fallback names a directory or extensionless link Pages serves reads as missing.
+  // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml), the nightly, and the
+  // install ci.yml's fixture job runs so the broken-link test is judged by it, all the same action at the same
+  // version. The internal step's knobs are each silent when wrong: without --offline every external link is fetched
+  // on every build, without the fragment mode a missing anchor passes, without the index and fallback names a
+  // directory or extensionless link Pages serves reads as missing.
   test("the assembly's internal link check runs the nightly's lychee, offline, over the artifact as Pages serves it", () => {
     const internal = stepNamed(
       loadAction("actions/pages-site/action.yml"),
       "Check the site's internal links",
     ) as Step;
+    const ci = parseYaml(
+      readFileSync(join(import.meta.dir, "../../.github/workflows/ci.yml"), "utf8"),
+    ) as { jobs: Record<string, { steps?: Step[] }> };
+    const fixtures = ci.jobs["pages-site-build"]?.steps?.find(
+      (candidate) => candidate.uses === internal.uses,
+    );
     const nightly = step("links");
-    expect({ uses: internal.uses, version: internal.with?.lycheeVersion }).toEqual({
-      uses: nightly?.uses,
-      version: nightly?.with?.lycheeVersion,
-    });
+    const pin = (of: Step | undefined) => ({ uses: of?.uses, version: of?.with?.lycheeVersion });
+    expect([pin(internal), pin(fixtures)]).toEqual([pin(nightly), pin(nightly)]);
+    expect(nightly?.with?.lycheeVersion).toMatch(/^v\d+\.\d+\.\d+$/);
     expect(internal.with?.args).toBe(
       "--offline --no-progress --include-fragments=anchor-only --index-files index.html " +
         "--fallback-extensions html,htm ${{ steps.assemble.outputs.link-check-args }}",

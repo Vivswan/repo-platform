@@ -125,7 +125,7 @@ const ENV = { SITE_DIR: "dist", CONFIG: siteConfig({ site_title: "Inc Docs", inc
 
 describe("include roots in the assembled site", () => {
   test(
-    "renders skills/ inside the docs mount per tier, titles and sources them from SKILL.md, and passes the cross-mount link gate",
+    "renders skills/ inside the docs mount per tier, titles and sources them from SKILL.md, and lists only HEAD's pages for the link check",
     () => {
       // Per-tier staging of a root absent at some refs, and the edit-link and blob-link bases
       // at the tier's ref, are whole-run facts with no unit home.

@@ -220,7 +220,9 @@ Where lychee reads a link differently from Pages:
 
 | Link | lychee | Pages |
 |---|---|---|
-| inside `<pre>`, `<code>`, or a `<script src>` | not read (verbatim elements); every other `href` and `src` is | served |
+| inside `<pre>`, `<code>`, or a `<script src>` | not read (verbatim elements) | served |
+| a `<meta http-equiv="refresh">` target | not read | followed |
+| a `<meta content>` URL (`og:image`) | not read | fetched by the consumer |
 | under a page's `<base href>` | resolved from the page's own path | resolved from the base |
 | protocol-relative (`//host/path`) | read as a file path, so it fails; spell the scheme | fetched over the page's scheme |
 | a page's URL with a trailing slash (`/setup/` for `setup.html`) | passes, through the extensionless fallback | 404 |
