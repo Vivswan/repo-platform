@@ -63,6 +63,7 @@ const IMAGES_MD =
   '<img src="./picture.svg" alt="">\n\n' +
   '<img src="./picture.svg">\n\n' +
   '<img src="./picture.svg" alt=" ">\n\n' +
+  '<button type="button"><img src="./picture.svg" alt="A button picture"></button>\n\n' +
   '<img src="./picture.svg" srcset="data:image/svg+xml,x" alt="A broken picture">';
 
 const DOCS_MD = `# Fixture\n\n${DIAGRAM}\n\n${IMAGES_MD}\n\n${CRUSH_TABLE}\n\n${WIDE_TABLE}\n`;
@@ -133,6 +134,20 @@ const PROBES = `(() => {
   };
   return true;
 })()`;
+
+/** The view's bar at a narrow viewport: every button inside the bar with its label inside the button (a bar that
+ *  cannot wrap shrinks its buttons under their labels instead). */
+const BAR_AT_280 = `new Promise((resolve) => requestAnimationFrame(() => {
+  const bar = document.querySelector(".fleet-mermaid-view-bar").getBoundingClientRect();
+  const buttons = [...document.querySelectorAll(".fleet-mermaid-view-bar > button")];
+  const boxes = buttons.map((b) => b.getBoundingClientRect());
+  resolve({
+    buttons: boxes.length,
+    allInside: boxes.every((b) => b.left >= bar.left - 0.5 && b.right <= bar.right + 0.5),
+    labelsFit: buttons.every((b) => b.scrollWidth <= b.clientWidth),
+    rows: new Set(boxes.map((b) => Math.round(b.top))).size,
+  });
+}))`;
 
 const WHEN_REDRAWN = (previous: string) => `new Promise((resolve) => {
   const redrawn = () => {
@@ -282,6 +297,20 @@ test(
         deltaX: 0,
         deltaY: -120,
       });
+      // A 280px viewport: the bar wraps onto a second row, so no button loses its label or the bar.
+      await tab.send("Emulation.setDeviceMetricsOverride", {
+        width: 280,
+        height: 600,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
+      expect(await tab.evaluate<Record<string, unknown>>(BAR_AT_280)).toEqual({
+        buttons: 4,
+        allInside: true,
+        labelsFit: true,
+        rows: 2,
+      });
+      await tab.send("Emulation.clearDeviceMetricsOverride");
       const wheeled = await tab.evaluate<number>("window.__probe.width()");
       expect(wheeled).toBeGreaterThan(reset);
 
@@ -413,6 +442,8 @@ interface Lightbox {
   /** What a click on the nav bar's title would hit: the lightbox, or the nav still above it. */
   atNavCorner: string;
   linkedAttached: boolean;
+  /** An image inside a native button belongs to that button, as a linked one belongs to its link. */
+  buttonAttached: boolean;
   /** On paper, with the lightbox open, whether the original image still shows. */
   printedOriginal: string;
   /** An image with an empty, missing, or blank alt has no name to be a button under: neither attached nor a button. */
@@ -438,6 +469,7 @@ const OPEN_LIGHTBOX = `new Promise((resolve) => {
         return document.elementFromPoint(title.left + 4, title.top + 4).className;
       })(),
       linkedAttached: document.querySelector(".vp-doc a img").classList.contains("medium-zoom-image"),
+      buttonAttached: document.querySelector(".vp-doc button img").classList.contains("medium-zoom-image"),
       printedOriginal: "",
       decorative: [
         document.querySelector('.vp-doc img[alt=""]'),
@@ -615,6 +647,7 @@ test(
           overlay: { color: lightbox.overlay.color, opacity: "1" },
           atNavCorner: "medium-zoom-overlay",
           linkedAttached: false,
+          buttonAttached: false,
           printedOriginal: "visible",
           decorative: [
             { attached: false, tabindex: null, role: null },

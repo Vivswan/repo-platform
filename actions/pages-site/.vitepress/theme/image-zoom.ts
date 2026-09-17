@@ -1,7 +1,7 @@
 // Every article image opens in medium-zoom's lightbox. The instance is made in the browser (mediumZoom binds document
 // listeners as it is created), once, and re-attached on each content update so the images of the new page are the
-// ones it holds: an image anywhere inside a link (a <picture> between them included) is left to its link, and one
-// without a word of alt has no name to be a button under. medium-zoom binds a click alone, so each attached image
+// ones it holds: an image anywhere inside a link or a button (a <picture> between them included) is left to it, and
+// one without a word of alt has no name to be a button under. medium-zoom binds a click alone, so each attached image
 // is also a focusable button that Enter and Space open, and its lightbox is not modal, so the page behind the overlay
 // goes inert while it is up.
 
@@ -9,7 +9,7 @@ import mediumZoom, { type Zoom } from "medium-zoom";
 import { onContentUpdated } from "vitepress";
 import { defineComponent } from "vue";
 
-const IMAGE_SELECTOR = ".vp-doc img:not(a img)";
+const IMAGE_SELECTOR = ".vp-doc img:not(a img, button img)";
 /** Carbon's root, everything on the page but what medium-zoom appends to <body>. */
 const PAGE_SELECTOR = ".Layout";
 
