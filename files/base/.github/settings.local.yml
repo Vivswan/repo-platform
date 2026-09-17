@@ -9,8 +9,7 @@
 repository:
   description: "{{description}}"
   # Declared even when empty: the apply manages only declared keys, so
-  # this keeps it healing out-of-band edits.
-  homepage: ""
+  # this keeps topics healing out-of-band edits.
   topics: ""
   private: {{private}}
 

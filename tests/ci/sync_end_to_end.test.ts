@@ -89,7 +89,6 @@ const OWN_OVERLAY = [
   "# Demo's OWN settings, applied by OwnerOrg/repo-platform",
   "repository:",
   "  description: A demo repository\r",
-  '  homepage: ""',
   "  topics: demo",
   "  private: false",
   "",
@@ -391,7 +390,6 @@ describe("sync.ts end to end", () => {
     expect(doc.repository).toEqual({
       has_wiki: false,
       description: "A demo repository",
-      homepage: "",
       topics: "demo",
       private: false,
       allow_merge_commit: false,

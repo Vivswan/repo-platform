@@ -291,7 +291,7 @@ A new managed repo touches nothing in repo-platform: there is no fleet list to e
 
 Repository settings are applied from repo-platform for every managed repository - the full model (six layers, merge dialect, apply semantics) is in [settings.md](settings.md). What the new repo sees:
 
-- **The first sync writes `.github/settings.local.yml` ONCE** as a repo-owned overlay (`description` from the registration's `project.description`, `homepage` and `topics` declared empty, `private` matching the repository's visibility) plus commented examples. Right after it comes the managed `.github/settings.yml`: the fleet layers, the selected modules' layers, and that overlay folded into one document. The rendered file is rewritten on every sync; the overlay never is.
+- **The first sync writes `.github/settings.local.yml` ONCE** as a repo-owned overlay (`description` from the registration's `project.description`, `topics` declared empty, `private` matching the repository's visibility; the homepage is unmanaged, so what is set on GitHub stays) plus commented examples. Right after it comes the managed `.github/settings.yml`: the fleet layers, the selected modules' layers, and that overlay folded into one document. The rendered file is rewritten on every sync; the overlay never is.
 
 - **Declare only the repo's OWN labels, rulesets, and overrides** in `.github/settings.local.yml`; [the merge dialect](settings.md#the-merge-dialect) says how they combine with the fleet layers, and the override layer's invariants win regardless.
 

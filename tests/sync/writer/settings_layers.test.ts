@@ -636,8 +636,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
     return ((main?.rules ?? []) as Record<string, unknown>[]).map((r) => r.type);
   };
 
-  const STARTER =
-    'repository:\n  description: "x"\n  homepage: ""\n  topics: ""\n  private: true\n';
+  const STARTER = 'repository:\n  description: "x"\n  topics: ""\n  private: true\n';
   const REPO_RULE = `${STARTER}rulesets:\n  - name: main\n    rules:\n      - type: copilot_code_review\n        parameters:\n          review_on_push: true\n`;
 
   test("the starter leaves it out of the emitted main ruleset; an overlay declaring it keeps it, BELOW the override", () => {
@@ -657,8 +656,8 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
 });
 
 describe("the managed repository block", () => {
-  // The baseline's repository block. Identity keys (description, homepage,
-  // topics, private) are absent on purpose: they live in the overlay, and
+  // The baseline's repository block. Identity keys (description, topics,
+  // private) are absent on purpose: they live in the overlay, and
   // an exact block proves the absence.
   const baselineRepository = {
     has_issues: true,
