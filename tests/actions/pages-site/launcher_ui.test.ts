@@ -475,3 +475,53 @@ describe("the mounted list", () => {
     app.unmount();
   });
 });
+
+describe("the mounted nav launcher", () => {
+  // The wiring between the theme's capturing shortcut listener and reka's dialog has no unit: the key that opens
+  // the dialog is stopped before anything else sees it, the dialog mounts after it, and the listener must go with
+  // the component, or a leaked one keeps taking the shortcut for a launcher that is gone.
+  test("the shortcut opens the dialog on its field as keyboard input, Escape closes it back onto the button, unmount drops the listeners", async () => {
+    const { vue } = await stubbed();
+    const [{ default: NavLauncher }, { keyboardInput }, { createApp }] = await Promise.all([
+      import(resolve(ACTION_DIR, ".vitepress/theme/nav-launcher.ts")),
+      import(resolve(ACTION_DIR, ".vitepress/theme/launcher.ts")),
+      domRenderer(),
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const app = createApp(NavLauncher);
+    app.mount(host);
+    await vue.nextTick();
+    const button = host.querySelector(".fleet-launcher-button") as HTMLButtonElement;
+    const dialog = () => document.querySelector(".fleet-launcher-dialog");
+    /** Whether the theme's listener took the key (it prevents the default of the key that opens the dialog). */
+    const press = async (target: EventTarget, key: string) => {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      await settle(vue);
+      return event.defaultPrevented;
+    };
+
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(await press(document.body, "/")).toBe(true);
+    const field = dialog()?.querySelector("input") ?? null;
+    expect([dialog() !== null, document.activeElement === field, keyboardInput.value]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(dialog()?.closest("section, .fleet-launcher-dialog")?.parentElement).not.toBe(host);
+    expect(dialog()?.querySelector("section")?.hasAttribute("data-keyboard")).toBe(true);
+
+    await press(field as EventTarget, "Escape");
+    expect([dialog(), document.activeElement === button]).toEqual([null, true]);
+
+    app.unmount();
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect([await press(document.body, "/"), dialog(), keyboardInput.value]).toEqual([
+      false,
+      null,
+      true,
+    ]);
+  });
+});
