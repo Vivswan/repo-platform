@@ -249,6 +249,7 @@ describe("the manifest's commit under the stamp rule", () => {
 });
 
 const CHECK = "actions/validate-managed-files/check.ts";
+const WRITER = ".github/scripts/sync/writer/sync.ts";
 
 /** Every file reached from `entry` through relative imports, named or side-effect, as paths relative to the repository root. */
 function importClosure(entry: string): string[] {
@@ -284,11 +285,14 @@ describe("the checker surface", () => {
     }
   });
 
-  test("is exactly the roots of check.ts's import closure, none of them empty", () => {
-    const closure = importClosure(CHECK);
-    expect(closure.length).toBeGreaterThan(1);
-    for (const path of closure) expect(existsSync(join(REPO_ROOT, path))).toBe(true);
-    const roots = closure.map((path) => [path, rootsOf(path)] as const);
+  test("is exactly check.ts's import closure minus the writer's, both ways", () => {
+    const check = importClosure(CHECK);
+    const writer = new Set(importClosure(WRITER));
+    const own = check.filter((path) => !writer.has(path));
+    expect(check).toContain(WRITER);
+    expect(own).toContain(CHECK);
+    for (const path of check) expect(existsSync(join(REPO_ROOT, path))).toBe(true);
+    const roots = own.map((path) => [path, rootsOf(path)] as const);
     expect(roots.filter(([, found]) => found.length !== 1)).toEqual([]);
     expect(new Set(roots.flatMap(([, found]) => found))).toEqual(new Set(CHECKER_SURFACE));
   });

@@ -465,7 +465,9 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 | commit C | N, with the checker different between C and N | wrote nothing | N |
 | commit C | N, with the checker byte-identical between C and N | wrote nothing | C; no sync PR opens |
 
-- **The checker surface** is `actions/validate-managed-files/check.ts`, `.github/scripts/sync/`, `.github/scripts/shared/`, `actions/plan/`, `actions/shared/`, and `actions/pages-site/.vitepress/conventions.ts`: the roots of check.ts's import closure (`CHECKER_SURFACE` in [sync/writer/judged_commit.ts](../.github/scripts/sync/writer/judged_commit.ts)). check.ts runs at the recorded commit; the action's other entries (its `src/` and `validator/`) run at `stable`, so a change to them reaches every repository the moment the tag moves and restamps nothing.
+- **The checker surface** is `actions/validate-managed-files/check.ts`: check.ts's import closure minus the writer's, the code that runs at the recorded commit and is not the writer's own (`CHECKER_SURFACE` in [sync/writer/judged_commit.ts](../.github/scripts/sync/writer/judged_commit.ts)). A writer change that matters writes a byte and moves the stamp on its own; one that writes nothing leaves the repository matching what C writes.
+
+- **Only check.ts runs at the recorded commit:** the action's `src/` and `validator/` run at `stable`, so a change to them reaches every repository the moment the tag moves and restamps nothing.
 
 - **Why not every platform change:** a docs-theme change under `actions/pages-site/` once restamped nine repositories with one-line manifest PRs (copilot-env #279, after repo-platform #356); under this rule that sync writes nothing, moves nothing, and opens no PR.
 
