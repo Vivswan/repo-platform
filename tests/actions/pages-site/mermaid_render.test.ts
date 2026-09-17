@@ -1,6 +1,8 @@
 // bun has no DOM, so the document holds only what the render pass touches.
 
 import { beforeEach, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { HUES, SHARED_TOKENS } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 
 class FakeElement {
@@ -127,6 +129,34 @@ Bun.plugin({
 const { renderAll } = await import(
   "../../../actions/pages-site/.vitepress/theme/mermaid-render.ts"
 );
+
+/** The static import graph from `entry`: each file's imports, relative ones walked, bare specifiers left as leaves. */
+function importGraph(entry: string, graph = new Map<string, string[]>()): Map<string, string[]> {
+  if (graph.has(entry)) return graph;
+  const source = readFileSync(entry, "utf8");
+  const imports = new Bun.Transpiler({ loader: "ts" })
+    .scanImports(source)
+    .map((found) => found.path);
+  graph.set(entry, imports);
+  for (const path of imports) {
+    if (path.startsWith(".")) importGraph(resolve(dirname(entry), path), graph);
+  }
+  return graph;
+}
+
+// bun runs every test file in one process, in an order that differs by platform. A package that reads `window` as it
+// loads (reka-ui, vueuse: `isClient` is a snapshot) and loads here, under a fake document with no window, keeps that
+// answer for a later file's happy-dom tests: launcher_ui.test.ts lost reka's dismiss layer that way while the view
+// still sat in the pass's imports. The graph is read from the source, so the pin holds whatever order the files run in.
+test("the render pass reaches no reka-ui or vueuse specifier", () => {
+  const graph = importGraph(
+    resolve(import.meta.dir, "../../../actions/pages-site/.vitepress/theme/mermaid-render.ts"),
+  );
+  const bare = [...graph.values()].flat().filter((path) => !path.startsWith("."));
+  // The control: the walk reached mermaid-zoom.ts, whose `vue` import is the state ref's.
+  expect(bare).toContain("vue");
+  expect(bare.filter((path) => /^(reka-ui|@vueuse\/)/.test(path))).toEqual([]);
+});
 
 function mount(source: string): FakeElement {
   const element = new FakeElement("div");
