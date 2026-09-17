@@ -50,7 +50,9 @@ const WIDE_TABLE = [
   `| ${Array.from({ length: 6 }, (_, i) => `\`src/sections/contract/plan-${i}.ts\``).join(" | ")} |`,
 ].join("\n");
 
-/** A 1600px picture in a 648px column, so the lightbox has room to grow; the linked one stays its link's. */
+/** A 1600px picture in a 648px column, so the lightbox has room to grow; the linked one stays its link's. The
+ *  broken one's only srcset candidate is a data URL that is not an image: deterministic, offline, and outside the
+ *  bundler's path resolution, which fails the build on a missing relative candidate. */
 const PICTURE_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">' +
   '<rect width="1600" height="1000" fill="#345"/><circle cx="800" cy="500" r="300" fill="#fc6"/></svg>\n';
@@ -59,7 +61,9 @@ const IMAGES_MD =
   '<a href="./other.html"><picture><img src="./picture.svg" alt="A linked picture"></picture></a>\n\n' +
   "![A second picture](picture.svg)\n\n" +
   '<img src="./picture.svg" alt="">\n\n' +
-  '<img src="./picture.svg">';
+  '<img src="./picture.svg">\n\n' +
+  '<img src="./picture.svg" alt=" ">\n\n' +
+  '<img src="./picture.svg" srcset="data:image/svg+xml,x" alt="A broken picture">';
 
 const DOCS_MD = `# Fixture\n\n${DIAGRAM}\n\n${IMAGES_MD}\n\n${CRUSH_TABLE}\n\n${WIDE_TABLE}\n`;
 /** A second page with no diagram, one history step away. */
@@ -143,15 +147,17 @@ const WHEN_REDRAWN = (previous: string) => `new Promise((resolve) => {
   }).observe(document, { subtree: true, childList: true });
 })`;
 
-/** Resolves once the page's h1 starts with `title` (its anchor follows): VitePress swapped the content in. */
-const WHEN_TITLED = (title: string) => `new Promise((resolve) => {
+/** Resolves once the page's h1 starts with `title` (its anchor follows): VitePress swapped the content in. `go`
+ *  runs after the observer is armed, for a history step the page must be watching before it starts. */
+const WHEN_TITLED = (title: string, go = "") => `new Promise((resolve) => {
   const titled = () => document.querySelector("h1")?.textContent.startsWith(${JSON.stringify(title)}) === true;
-  if (titled()) return resolve(true);
   new MutationObserver((_, observer) => {
     if (!titled()) return;
     observer.disconnect();
     resolve(true);
   }).observe(document, { subtree: true, childList: true, characterData: true });
+  ${go};
+  if (titled()) resolve(true);
 })`;
 
 interface Column {
@@ -391,7 +397,7 @@ interface Lightbox {
   linkedAttached: boolean;
   /** On paper, with the lightbox open, whether the original image still shows. */
   printedOriginal: string;
-  /** An image with an empty alt, or none, has no name to be a button under: neither attached nor a button. */
+  /** An image with an empty, missing, or blank alt has no name to be a button under: neither attached nor a button. */
   decorative: { attached: boolean; tabindex: string | null; role: string | null }[];
   /** The page behind the overlay is inert while the lightbox is up. */
   layoutInert: boolean;
@@ -418,6 +424,7 @@ const OPEN_LIGHTBOX = `new Promise((resolve) => {
       decorative: [
         document.querySelector('.vp-doc img[alt=""]'),
         document.querySelector(".vp-doc img:not([alt])"),
+        document.querySelector('.vp-doc img[alt=" "]'),
       ].map((img) => ({
         attached: img.classList.contains("medium-zoom-image"),
         tabindex: img.getAttribute("tabindex"),
@@ -468,6 +475,54 @@ const KEY_OPENED = `new Promise((resolve) => {
 
 const FOCUS_ON_IMAGE = `document.activeElement === document.querySelector(".vp-doc img")`;
 
+const WHEN_OVERLAY_GONE = `new Promise((resolve) => {
+  const state = () => ({
+    overlay: document.querySelector(".medium-zoom-overlay") !== null,
+    layoutInert: document.querySelector(".Layout").hasAttribute("inert"),
+  });
+  if (!state().overlay) return resolve(state());
+  new MutationObserver((_, observer) => {
+    if (state().overlay) return;
+    observer.disconnect();
+    resolve(state());
+  }).observe(document.body, { childList: true });
+})`;
+
+/** Clicks the first image and leaves for the other page inside the opening transition; resolves once the open
+ *  finishes on the (by then detached) image with the page's inert state, and whether the other page had indeed
+ *  landed by then (a slow page module would let the open finish first and prove nothing). */
+const RACE_OPEN_WITH_NAVIGATION = `new Promise((resolve) => {
+  const img = document.querySelector(".vp-doc img");
+  img.addEventListener("medium-zoom:opened", () => {
+    resolve({
+      inert: document.querySelector(".Layout").hasAttribute("inert"),
+      navigated: !img.isConnected && document.querySelector("h1").textContent.startsWith("Other"),
+    });
+  }, { once: true });
+  img.click();
+  document.querySelector('a[href*="other"]').click();
+})`;
+
+/** Resolves once medium-zoom has attached the page's images, which follows the render by a tick. */
+const WHEN_ATTACHED = `new Promise((resolve) => {
+  const attached = () => document.querySelector(".vp-doc img.medium-zoom-image") !== null;
+  if (attached()) return resolve(true);
+  new MutationObserver((_, observer) => {
+    if (!attached()) return;
+    observer.disconnect();
+    resolve(true);
+  }).observe(document, { subtree: true, attributes: true, attributeFilter: ["class"] });
+})`;
+
+/** Clicks the broken-srcset image and reports whether the page went inert for it (the open then never finishes). */
+const OPEN_BROKEN = `new Promise((resolve) => {
+  const img = document.querySelector(".vp-doc img[srcset]");
+  img.addEventListener("medium-zoom:open", () => {
+    setTimeout(() => resolve(document.querySelector(".Layout").hasAttribute("inert")), 700);
+  }, { once: true });
+  img.click();
+})`;
+
 /** A focus() aimed at the second image while the first is up: the inert page refuses it. */
 const FOCUS_SECOND_IMAGE = `(() => {
   const second = document.querySelectorAll(".vp-doc img:not(a img)")[1];
@@ -496,6 +551,8 @@ test(
   async () => {
     const tab = await openPage();
     try {
+      // The control: with no lightbox up the same probe finds something behind the (absent) overlay to focus.
+      expect(await tab.evaluate<boolean>(FOCUS_BEHIND_OVERLAY)).toBe(true);
       for (const motion of ["no-preference", "reduce"]) {
         const features = [{ name: "prefers-reduced-motion", value: motion }];
         await tab.send("Emulation.setEmulatedMedia", { features });
@@ -512,6 +569,7 @@ test(
           linkedAttached: false,
           printedOriginal: "visible",
           decorative: [
+            { attached: false, tabindex: null, role: null },
             { attached: false, tabindex: null, role: null },
             { attached: false, tabindex: null, role: null },
           ],
@@ -545,7 +603,8 @@ test(
         copyTabIndex: null,
         copyRole: null,
       });
-      // Another image behind the overlay takes no focus, and Enter there changes nothing, the focus return included.
+      // The second image, behind the overlay, refuses focus, so the Enter lands on the body and the pending focus
+      // return is untouched.
       expect(await tab.evaluate<boolean>(FOCUS_SECOND_IMAGE)).toBe(false);
       await tab.press("Enter", 13);
       await tab.press("Escape", 27);
@@ -557,6 +616,44 @@ test(
       });
       // medium-zoom hid the original while its copy was up, which drops focus to <body>.
       expect(await tab.evaluate<boolean>(FOCUS_ON_IMAGE)).toBe(true);
+
+      // Leaving the page inside a healthy open: the content update frees the page, then the open finishes over the
+      // new page and takes it back until Escape closes the lightbox.
+      await tab.send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+      });
+      expect(await tab.evaluate<Record<string, boolean>>(RACE_OPEN_WITH_NAVIGATION)).toEqual({
+        inert: true,
+        navigated: true,
+      });
+      await tab.press("Escape", 27);
+      expect(await tab.evaluate<Record<string, unknown>>(WHEN_OVERLAY_GONE)).toEqual({
+        overlay: false,
+        layoutInert: false,
+      });
+    } finally {
+      await tab.close();
+    }
+  },
+  SCENARIO_TIMEOUT_MS,
+);
+
+// medium-zoom waits for its high-resolution clone's load and never its error, so a srcset image whose chosen candidate
+// fails leaves it mid-open for good: every close returns early and the page it made inert would stay so. A fresh tab,
+// navigated by a link: a history step under that stuck open wedged headless Chrome's renderer in every probe.
+test(
+  "a lightbox stuck mid-open frees the page on the next content update",
+  async () => {
+    const tab = await openPage();
+    try {
+      await tab.evaluate(WHEN_ATTACHED);
+      expect(await tab.evaluate<boolean>(OPEN_BROKEN)).toBe(true);
+      await tab.evaluate(
+        WHEN_TITLED("Other", "document.querySelector('a[href*=\"other\"]').click()"),
+      );
+      expect(
+        await tab.evaluate<boolean>('document.querySelector(".Layout").hasAttribute("inert")'),
+      ).toBe(false);
     } finally {
       await tab.close();
     }

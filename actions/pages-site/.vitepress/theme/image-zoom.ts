@@ -1,15 +1,15 @@
 // Every article image opens in medium-zoom's lightbox. The instance is made in the browser (mediumZoom binds document
 // listeners as it is created), once, and re-attached on each content update so the images of the new page are the
 // ones it holds: an image anywhere inside a link (a <picture> between them included) is left to its link, and one
-// with an empty or missing alt has no name to be a button under. medium-zoom binds a click alone, so each attached
-// image is also a focusable button that Enter and Space open, and its lightbox is not modal, so the page behind the
-// overlay goes inert while it is up.
+// without a word of alt has no name to be a button under. medium-zoom binds a click alone, so each attached image
+// is also a focusable button that Enter and Space open, and its lightbox is not modal, so the page behind the overlay
+// goes inert while it is up.
 
 import mediumZoom, { type Zoom } from "medium-zoom";
 import { onContentUpdated } from "vitepress";
 import { defineComponent } from "vue";
 
-const IMAGE_SELECTOR = '.vp-doc img[alt]:not([alt=""]):not(a img)';
+const IMAGE_SELECTOR = ".vp-doc img:not(a img)";
 /** Carbon's root, everything on the page but what medium-zoom appends to <body>. */
 const PAGE_SELECTOR = ".Layout";
 
@@ -28,13 +28,10 @@ function unmakeButton(image: Element): void {
   image.removeAttribute("role");
 }
 
-/** A key that lands on an attached image while a lightbox is up is medium-zoom's to ignore, and the pending
- *  focus return stays with the image that is up. */
 function onKeydown(event: KeyboardEvent): void {
   if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();
-  if (zoom === undefined || zoom.getZoomedImage() !== null) return;
-  void zoom.open({ target: event.currentTarget as HTMLElement });
+  void zoom?.open({ target: event.currentTarget as HTMLElement });
 }
 
 function setPageInert(inert: boolean): void {
@@ -51,6 +48,12 @@ function onOpen(event: Event): void {
   setPageInert(true);
 }
 
+/** An open that finishes after a content update freed the page (a route change inside the transition) takes the
+ *  page back; the lightbox is still up over it, and Escape still closes it. */
+function onOpened(): void {
+  setPageInert(true);
+}
+
 /** The page comes back before focus does: an inert element cannot take it. */
 function onClosed(event: Event): void {
   const image = event.target as HTMLElement;
@@ -64,13 +67,23 @@ function attachImageZoom(): void {
   // A listener registered on the instance rides onto every image a later attach adds.
   zoom ??= mediumZoom({ background: "var(--vp-c-bg)", margin: 24 })
     .on("open", onOpen)
+    .on("opened", onOpened)
     .on("closed", onClosed);
   for (const image of zoom.getImages()) {
     unmakeButton(image);
     image.removeEventListener("keydown", onKeydown);
   }
   zoom.detach();
-  zoom.attach(IMAGE_SELECTOR);
+  // A srcset image whose chosen candidate never loads leaves medium-zoom mid-open for good, every close returning
+  // early with the page inert under it; the new page must not inherit that. A healthy open still in its transition
+  // takes the page back when it finishes (onOpened): its listeners stay on the image through the detach.
+  setPageInert(false);
+  // CSS cannot tell a blank alt from a word, so the name check is here.
+  zoom.attach(
+    [...document.querySelectorAll<HTMLImageElement>(IMAGE_SELECTOR)].filter(
+      (image) => image.alt.trim() !== "",
+    ),
+  );
   for (const image of zoom.getImages()) {
     makeButton(image);
     image.addEventListener("keydown", onKeydown);

@@ -139,7 +139,7 @@ The website is one build of the judged commit: version navigation belongs to the
 
 - **Diagrams:** a ```` ```mermaid ```` fence renders as a diagram in the site's colors in both appearance modes; the source stays as the fallback without JavaScript and beside a parse error. Its Zoom button (on hover, focus, or touch) opens the diagram at full size in a view that zooms by wheel, pinch, keys, or buttons, pans by drag or arrow keys, and closes on Escape.
 
-- **Images:** an image in the article opens in a lightbox on click, or on Enter once focused, enlarged to fit the viewport (a raster image no further than its natural size); Escape, a click, or scrolling away closes it. A linked image stays a link, and an image with an empty or missing alt stays put.
+- **Images:** an image in the article opens in a lightbox on click, or on Enter once focused, enlarged to fit the viewport (a raster image no further than its natural size); Escape, a click, or scrolling away closes it. A linked image stays a link, and an image without a word of alt stays put.
 
 - **Wide tables:** a top-level table wider than the doc column scrolls horizontally inside the column. An inline-code token in a cell stays whole up to half the column and wraps inside past that, so a long token never squeezes its neighbour to a column of single words.
 
