@@ -82,7 +82,6 @@ const OVERLAY = [
   "# my overlay",
   "repository:",
   "  description: Mine",
-  '  homepage: ""',
   '  topics: ""',
   "  private: false",
   "rulesets:",
@@ -162,7 +161,6 @@ describe("renderSettings", () => {
       has_wiki: false,
       // The overlay's identity keys ride through; the override beats the baseline's merge flag.
       description: "Mine",
-      homepage: "",
       topics: "",
       private: false,
       security_and_analysis: { secret_scanning: { status: "enabled" } },
@@ -212,7 +210,7 @@ describe("renderSettings", () => {
   test("the overlay beats the layers below the override and never the override: its null drops has_wiki, its ruleset policy and merge flag lose", () => {
     const { doc } = rendered({
       overlay: [
-        "repository: {description: Mine, homepage: '', topics: '', private: false, has_wiki: null, allow_merge_commit: true}",
+        "repository: {description: Mine, topics: '', private: false, has_wiki: null, allow_merge_commit: true}",
         'labels: [{name: bug, color: "000000", description: Restyled}]',
         "rulesets:",
         "  _undeclared: keep",
@@ -223,7 +221,6 @@ describe("renderSettings", () => {
     });
     expect(doc.repository).toEqual({
       description: "Mine",
-      homepage: "",
       topics: "",
       private: false,
       security_and_analysis: { secret_scanning: { status: "enabled" } },

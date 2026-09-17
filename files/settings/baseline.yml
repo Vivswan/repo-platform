@@ -1,6 +1,6 @@
 ---
 # Layer 1 of the settings merge (docs/settings.md): everything here is OVERRIDABLE by a repository's own .github/settings.local.yml.
-# Invariants a repository must not weaken live in files/settings/override.yml, which merges ABOVE the overlay; identity keys (description, homepage, topics, private) live only in the overlay.
+# Invariants a repository must not weaken live in files/settings/override.yml, which merges ABOVE the overlay; identity keys (description, topics, private) live only in the overlay.
 
 repository:
   has_issues: true
