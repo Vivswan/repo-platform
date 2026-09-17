@@ -141,7 +141,10 @@ export default defineComponent({
     const id = useId();
     const listId = `${id}-list`;
 
-    const list = shallowRef<{ highlightFirstItem(): void } | null>(null);
+    const list = shallowRef<{
+      highlightFirstItem(): void;
+      highlightedElement: HTMLElement | null;
+    } | null>(null);
     const input = shallowRef<{ $el: HTMLInputElement } | null>(null);
     const query = ref("");
     const unfolded = shallowRef<ReadonlySet<string>>(new Set());
@@ -173,9 +176,22 @@ export default defineComponent({
       if (query.value !== current || localeIndex.value !== locale) return;
       textHits.value = index ? textMatchGroup(index.search(current) as unknown as TextHit[]) : null;
       searching.value = false;
-      // The field highlighted the first row as the query was typed, when the list was still empty.
-      list.value?.highlightFirstItem();
     });
+
+    // reka moves the highlight on keys, hover, and real input events only, and the theme changes the rows under
+    // it (Escape writes the model, a query narrows to nothing, the text matches arrive late). After the DOM
+    // settles on any new row list (the same count with other rows included), a highlight that no longer names a
+    // connected row goes to the first row, or to nothing over an empty list.
+    watch(
+      rows,
+      (current) => {
+        const listbox = list.value;
+        if (listbox === null || listbox.highlightedElement?.isConnected) return;
+        listbox.highlightedElement = null;
+        if (current.length > 0) listbox.highlightFirstItem();
+      },
+      { flush: "post" },
+    );
 
     function toggleFold(key: string): void {
       const next = new Set(unfolded.value);
@@ -216,8 +232,8 @@ export default defineComponent({
 
     // Every option is the element itself (a link or the fold row), never reached through Tab. A press on an option
     // would move focus off the field and stall the arrow keys, so its default is stopped; the click still fires.
-    // Keyed by row: reka memoizes an item's element on its highlight state alone, so an unkeyed row reused under a
-    // narrowing query would keep the old href.
+    // Keyed by row: reka memoizes an item's element on its own state (highlight, selection, disabled, focusable),
+    // never on its attrs, so an unkeyed row reused under a narrowing query would keep the old href.
     const option = (row: LauncherRow): VNode => {
       const shared = { onMousedown: (event: MouseEvent) => event.preventDefault() };
       if (row.kind === "fold") {

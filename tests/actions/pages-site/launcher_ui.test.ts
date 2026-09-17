@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 import type {
   LauncherGroup,
@@ -29,11 +29,40 @@ const item = (
 
 const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 
+// The DOM exists before anything here imports the theme: reka-ui and vueuse bind `window` as they load (the
+// shortcut listener, the dialog's Escape). The SSR renders below do not read it.
+const { GlobalRegistrator } = await import(
+  resolve(ACTION_DIR, "node_modules/@happy-dom/global-registrator/lib/index.js")
+);
+GlobalRegistrator.register({ url: "https://owner.github.io/repo/" });
+afterAll(() => GlobalRegistrator.unregister());
+
+/** Vue's DOM renderer binds `document` as it loads, and another test file in this process may have loaded vue
+ *  before any DOM existed, so the renderer is re-imported here under the registered one; runtime-core, which
+ *  holds the component machinery, stays the shared instance. */
+async function domRenderer(): Promise<{
+  createApp(
+    root: object,
+    props?: Record<string, unknown>,
+  ): { mount(host: Element): void; unmount(): void };
+}> {
+  return import(
+    `${resolve(ACTION_DIR, "node_modules/@vue/runtime-dom/dist/runtime-dom.cjs.js")}?dom`
+  );
+}
+
+const settle = async (vue: { nextTick(): Promise<void> }) => {
+  for (let i = 0; i < 4; i++) await vue.nextTick();
+  await new Promise((done) => setTimeout(done, 5));
+};
+
 // Under bun the bare `vitepress` specifier resolves to the node entry, which has no useData, and the data loader runs only inside a VitePress build.
 // Virtual modules stand in for both, registered once (bun caches them); the node entry vitepress_renderer.ts imports by path stays untouched.
 //   "vitepress"                      -> useData over a shared locale ref each render sets
 //   .vitepress/theme/pages.data.ts   -> the page index list each test fills
+//   "@localSearchIndex"              -> one root-locale loader over the serialized index a test sets
 const pages: PageIndexEntry[] = [];
+let textIndex = "";
 async function loadStubs() {
   const vue = await import(resolve(ACTION_DIR, "node_modules/vue/index.mjs"));
   const localeIndex = vue.ref("root");
@@ -42,6 +71,10 @@ async function loadStubs() {
     setup(build) {
       build.module("vitepress", () => ({
         exports: { useData: () => ({ localeIndex }) },
+        loader: "object",
+      }));
+      build.module("@localSearchIndex", () => ({
+        exports: { default: { root: async () => ({ default: textIndex }) } },
         loader: "object",
       }));
       build.module(resolve(ACTION_DIR, ".vitepress/theme/pages.data.ts"), () => ({
@@ -349,5 +382,96 @@ describe("the rendered list", () => {
     expect(outline(empty)).toEqual([]);
     expect(groupStates(empty)).toEqual([]);
     expect(empty).toContain('role="combobox" aria-expanded="false"');
+  });
+});
+
+describe("the mounted list", () => {
+  // reka moves the highlight on keys and hover only, and the field's own first-row highlight runs on a real input
+  // event; the theme changes the rows under it (Escape writes the model, a query can match nothing), so without its
+  // own rule the field kept aria-activedescendant on a detached row and Enter did nothing until an arrow key.
+  test("a highlighted row that leaves the list hands the highlight to the first row, or to nothing over an empty list", async () => {
+    const { vue, localeIndex } = await stubbed();
+    localeIndex.value = "root";
+    // Two more pages, so the list after Escape below has as many rows as the nine heading rows before it: a rule
+    // watching the row count alone would sleep through that replacement.
+    pages.push(
+      ...["Alpha", "Beta"].map((title) => ({
+        url: `/repo/${title.toLowerCase()}.html`,
+        title,
+        dir: "",
+        locale: "root",
+        headers: [],
+      })),
+    );
+    const { default: FleetLauncher } = await import(
+      resolve(ACTION_DIR, ".vitepress/theme/launcher.ts")
+    );
+    const { createApp } = await domRenderer();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const app = createApp(FleetLauncher, { rows: "[]", mode: "panel" });
+    app.mount(host);
+    await vue.nextTick();
+    const field = host.querySelector("input") as HTMLInputElement;
+    const text = (row: Element) => row.textContent?.trim();
+    const type = async (query: string) => {
+      field.value = query;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      await settle(vue);
+    };
+    const key = async (name: string) => {
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+      await settle(vue);
+    };
+    const state = () => ({
+      query: field.value,
+      activedescendant: field.getAttribute("aria-activedescendant"),
+      highlighted: Array.from(host.querySelectorAll("[data-highlighted]"), text),
+    });
+
+    await type("long part");
+    expect(Array.from(host.querySelectorAll('[role="option"]'), text).slice(0, 2)).toEqual([
+      "Part 0Long",
+      "Part 1Long",
+    ]);
+    await key("ArrowDown");
+    expect(state().highlighted).toEqual(["Part 1Long"]);
+
+    // Escape: the query goes, the heading rows fold away, the first remaining row takes the highlight.
+    await key("Escape");
+    const options = host.querySelectorAll('[role="option"]');
+    const first = options[0] as HTMLElement;
+    expect(options).toHaveLength(9);
+    expect(state()).toEqual({ query: "", activedescendant: first.id, highlighted: [text(first)] });
+
+    // A query matching nothing: no row to point at.
+    await type("long");
+    expect(state().highlighted).toHaveLength(1);
+    await type("zzzz");
+    expect(state()).toEqual({ query: "zzzz", activedescendant: null, highlighted: [] });
+
+    // Text matches arrive after the list was empty: the first of them takes the highlight.
+    const { default: MiniSearch } = await import(
+      resolve(ACTION_DIR, "node_modules/minisearch/dist/es/index.js")
+    );
+    const index = new MiniSearch({
+      fields: ["title", "titles", "text"],
+      storeFields: ["title", "titles"],
+    });
+    index.add({
+      id: "/repo/setup.html#body",
+      title: "Body section",
+      titles: ["Setup"],
+      text: "quuxbody here",
+    });
+    textIndex = JSON.stringify(index);
+    await type("quuxbody");
+    await settle(vue);
+    expect(state()).toEqual({
+      query: "quuxbody",
+      activedescendant: (host.querySelector('[role="option"]') as HTMLElement).id,
+      highlighted: ["Body sectionSetup"],
+    });
+    app.unmount();
   });
 });

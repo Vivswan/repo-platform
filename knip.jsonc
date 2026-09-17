@@ -54,8 +54,15 @@
       "entry": ["build.ts", ".vitepress/**/*.data.ts"],
       "project": ["**/*.{ts,mts,vue}"],
       "includeEntryExports": false,
-      // @localSearchIndex is vitepress's virtual module; shiki and markdown-it are imported directly but arrive through vitepress.
-      "ignoreDependencies": ["@localSearchIndex", "shiki", "markdown-it"]
+      // @localSearchIndex is vitepress's virtual module; shiki and markdown-it are imported directly but arrive through
+      // vitepress; the launcher test mounts the theme under happy-dom, importing it by path from this package's node_modules.
+      "ignoreDependencies": [
+        "@localSearchIndex",
+        "shiki",
+        "markdown-it",
+        "happy-dom",
+        "@happy-dom/global-registrator"
+      ]
     }
   }
 }
