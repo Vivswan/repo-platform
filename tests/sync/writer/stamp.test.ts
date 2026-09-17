@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { cpSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import {
-  DELIVERED_SURFACE,
-  deliveredSurfaceChanged,
-} from "../../../.github/scripts/shared/delivered_surface.ts";
+  CHECKER_SURFACE,
+  checkerChanged,
+} from "../../../.github/scripts/sync/writer/judged_commit.ts";
 import { MANIFEST_NAME } from "../../../.github/scripts/sync/writer/manifest.ts";
 import { sha256 } from "../../../actions/shared/values.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
@@ -27,9 +27,13 @@ interface Platform {
   root: string;
   /** The e2e fixture tree as committed. */
   base: string;
-  /** A change outside the delivered surface (a docs file). */
+  /** A docs file: off the checker and written nowhere. */
   docs: string;
-  /** A byte changed under files/. */
+  /** A docs-site theme file under actions/: off the checker and written nowhere. */
+  theme: string;
+  /** A byte changed under the checker. */
+  checker: string;
+  /** A byte changed under files/, which the sync writes. */
   files: string;
   /** A dependency version moved: the lockfile alone. */
   lock: string;
@@ -41,21 +45,30 @@ function commit(root: string, message: string): string {
   return fixtureGit(root, ["rev-parse", "HEAD"]);
 }
 
-/** Four commits of a scratch platform: the fixture tree, a docs-only change, a source edit under files/, a lockfile bump. */
+function put(root: string, path: string, content: string): void {
+  mkdirSync(dirname(join(root, path)), { recursive: true });
+  writeFileSync(join(root, path), content);
+}
+
+/** Six commits of a scratch platform, one change each, in the order the fields list them. */
 function platform(): Platform {
   const root = temp.dir("stamp-platform-");
   cpSync(FIXTURES, root, { recursive: true });
-  writeFileSync(join(root, "bun.lock"), "lock v1\n");
+  put(root, "bun.lock", "lock v1\n");
+  put(root, "actions/validate-managed-files/check.ts", "// the checker\n");
   fixtureGit(root, ["init", "-q", "-b", "main"]);
   const base = commit(root, "base");
-  mkdirSync(join(root, "docs"));
-  writeFileSync(join(root, "docs/notes.md"), "notes\n");
+  put(root, "docs/notes.md", "notes\n");
   const docs = commit(root, "docs");
-  writeFileSync(join(root, "files/base/LICENSE.txt"), "a different license\n");
+  put(root, "actions/pages-site/theme/style.css", "body { color: teal }\n");
+  const theme = commit(root, "theme");
+  put(root, "actions/validate-managed-files/check.ts", "// the checker, changed\n");
+  const checker = commit(root, "checker");
+  put(root, "files/base/LICENSE.txt", "a different license\n");
   const files = commit(root, "files");
-  writeFileSync(join(root, "bun.lock"), "lock v2\n");
+  put(root, "bun.lock", "lock v2\n");
   const lock = commit(root, "lock");
-  return { root, base, docs, files, lock };
+  return { root, base, docs, theme, checker, files, lock };
 }
 
 function target(): string {
@@ -97,6 +110,17 @@ function recorded(targetDir: string): unknown {
   return manifest.files[MANIFEST_NAME].commit;
 }
 
+interface Second {
+  reason: string;
+  /** The commit the first sync records, then the build of the second. */
+  builds: (p: Platform) => [string, string];
+  /** A change to the target between the two syncs. */
+  between?: (targetDir: string) => void;
+  stamp: (p: Platform) => string;
+  /** Whether the second sync leaves every byte but the manifest as it stood just before it ran. */
+  treeKept: boolean;
+}
+
 describe("the manifest's commit under the stamp rule", () => {
   let p: Platform;
   beforeAll(() => {
@@ -111,37 +135,74 @@ describe("the manifest's commit under the stamp rule", () => {
     expect(recorded(t)).toBe(p.base);
   });
 
-  test("a build that left the delivered surface untouched keeps the recorded commit and changes no byte", () => {
+  test.each<Second>([
+    {
+      reason: "a build that changed only docs keeps the commit and changes no byte",
+      builds: (p) => [p.base, p.docs],
+      stamp: (p) => p.base,
+      treeKept: true,
+    },
+    {
+      reason: "a build that changed only the docs-site theme under actions/ keeps the commit",
+      builds: (p) => [p.base, p.theme],
+      stamp: (p) => p.base,
+      treeKept: true,
+    },
+    {
+      reason: "a build that changed the checker alone moves the commit though it wrote nothing",
+      builds: (p) => [p.theme, p.checker],
+      stamp: (p) => p.checker,
+      treeKept: true,
+    },
+    {
+      reason: "a build that changed a byte under files/ moves the commit to it",
+      builds: (p) => [p.checker, p.files],
+      stamp: (p) => p.files,
+      treeKept: false,
+    },
+    {
+      reason: "a build that moved the lockfile alone keeps the commit",
+      builds: (p) => [p.files, p.lock],
+      stamp: (p) => p.files,
+      treeKept: true,
+    },
+    {
+      reason:
+        "a local edit the sync replaces moves the commit though the platform wrote the same bytes",
+      builds: (p) => [p.base, p.docs],
+      between: (t) => writeFileSync(join(t, "LICENSE.md"), "edited locally\n"),
+      stamp: (p) => p.docs,
+      treeKept: false,
+    },
+    {
+      reason: "a record released by the registration moves the commit with no file written",
+      builds: (p) => [p.base, p.docs],
+      between: (t) =>
+        writeFileSync(
+          join(t, ".repo-platform.yml"),
+          REGISTRATION.replace("[CLAUDE.md", "[LICENSE.md, CLAUDE.md"),
+        ),
+      stamp: (p) => p.docs,
+      treeKept: true,
+    },
+  ])("$reason", ({ builds, between, stamp, treeKept }) => {
+    const [first, second] = builds(p);
     const t = target();
-    expect(sync(p.root, t, p.base).exitCode).toBe(0);
+    expect(sync(p.root, t, first).exitCode).toBe(0);
+    expect(recorded(t)).toBe(first);
+    between?.(t);
     const before = snapshotTree(t);
     // Control: the first sync wrote the tree, so the snapshot has the manifest in it.
     expect(before.has(MANIFEST_NAME)).toBe(true);
-    const run = sync(p.root, t, p.docs);
+    const run = sync(p.root, t, second);
     expect(run.stderr).toBe("");
     expect(run.exitCode).toBe(0);
-    expect(recorded(t)).toBe(p.base);
-    expect(snapshotTree(t)).toEqual(before);
-  });
-
-  test("a build that changed a byte under files/ moves the commit to it", () => {
-    const t = target();
-    expect(sync(p.root, t, p.base).exitCode).toBe(0);
-    expect(readFileSync(join(t, "LICENSE.md"), "utf-8")).not.toBe("a different license\n");
-    const run = sync(p.root, t, p.files);
-    expect(run.stderr).toBe("");
-    expect(run.exitCode).toBe(0);
-    expect(recorded(t)).toBe(p.files);
-    expect(readFileSync(join(t, "LICENSE.md"), "utf-8")).toBe("a different license\n");
-  });
-
-  test("a build that moved the lockfile alone moves the commit too", () => {
-    const t = target();
-    expect(sync(p.root, t, p.files).exitCode).toBe(0);
-    const run = sync(p.root, t, p.lock);
-    expect(run.stderr).toBe("");
-    expect(run.exitCode).toBe(0);
-    expect(recorded(t)).toBe(p.lock);
+    expect(recorded(t)).toBe(stamp(p));
+    const after = snapshotTree(t);
+    before.delete(MANIFEST_NAME);
+    after.delete(MANIFEST_NAME);
+    if (treeKept) expect(after).toEqual(before);
+    else expect(after).not.toEqual(before);
   });
 
   test("a shallow build checkout fetches the recorded commit before the diff", () => {
@@ -180,30 +241,71 @@ describe("the manifest's commit under the stamp rule", () => {
     expect(snapshotTree(t)).toEqual(before);
   });
 
-  test("deliveredSurfaceChanged answers from the platform checkout's git history", () => {
-    expect(deliveredSurfaceChanged(p.root, p.base, p.docs)).toBe(false);
-    expect(deliveredSurfaceChanged(p.root, p.base, p.files)).toBe(true);
-    expect(deliveredSurfaceChanged(p.root, p.docs, p.files)).toBe(true);
-    expect(deliveredSurfaceChanged(p.root, p.files, p.lock)).toBe(true);
+  test("checkerChanged reads the checker surface alone from the platform checkout's history", () => {
+    expect(checkerChanged(p.root, p.base, p.theme)).toBe(false);
+    expect(checkerChanged(p.root, p.theme, p.checker)).toBe(true);
+    expect(checkerChanged(p.root, p.checker, p.lock)).toBe(false);
   });
 });
 
-describe("the delivered surface", () => {
-  test("is the list docs/sync.md documents", () => {
+/** The action entries run from the action at `stable`; check.ts runs at the recorded commit and drives the writer. */
+const ACTION_ENTRIES = [
+  "actions/validate-managed-files/src/run.ts",
+  "actions/validate-managed-files/src/read_commit.ts",
+  "actions/validate-managed-files/src/report.ts",
+  "actions/validate-managed-files/validator/validate_managed_files.ts",
+];
+const CHECK = "actions/validate-managed-files/check.ts";
+const WRITER = ".github/scripts/sync/writer/sync.ts";
+
+/** Every file reached from `entry` through relative imports, named or side-effect, as paths relative to the repository root. */
+function importClosure(entry: string): string[] {
+  const seen = new Set<string>();
+  const visit = (path: string) => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    const source = readFileSync(join(REPO_ROOT, path), "utf-8");
+    for (const [, spec] of source.matchAll(/(?:from|import)\s+"(\.[^"]+)"/g)) {
+      visit(relative(REPO_ROOT, resolve(REPO_ROOT, dirname(path), spec)));
+    }
+  };
+  visit(entry);
+  return [...seen].sort();
+}
+
+const offSurface = (paths: string[]) =>
+  paths.filter((path) => !CHECKER_SURFACE.some((root) => path.startsWith(root)));
+
+describe("the checker surface", () => {
+  test("is the list docs/sync.md documents, and every path is a directory here", () => {
     const line = readFileSync(join(REPO_ROOT, "docs/sync.md"), "utf-8")
       .split("\n")
-      .find((l) => l.includes("`DELIVERED_SURFACE`"));
+      .find((l) => l.includes("`CHECKER_SURFACE`"));
     expect(line).toBeDefined();
     const spans = [...(line ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1]);
     // The paths are the code spans before the one naming the constant.
-    const named = spans.indexOf("DELIVERED_SURFACE");
+    const named = spans.indexOf("CHECKER_SURFACE");
     expect(named).toBeGreaterThan(0);
-    expect(spans.slice(0, named)).toEqual([...DELIVERED_SURFACE]);
+    expect(spans.slice(0, named)).toEqual([...CHECKER_SURFACE]);
+    for (const path of CHECKER_SURFACE) {
+      expect(lstatSync(join(REPO_ROOT, path)).isDirectory()).toBe(true);
+    }
   });
 
-  test("every path exists in this checkout as the kind its spelling says", () => {
-    for (const path of DELIVERED_SURFACE) {
-      expect(lstatSync(join(REPO_ROOT, path)).isDirectory()).toBe(path.endsWith("/"));
-    }
+  // The writer's own closure is the stamp rule's written-byte leg: a change there that matters writes a byte, which
+  // moves the stamp on its own.
+  test("covers the validator's import closure, the writer's aside", () => {
+    const actions = ACTION_ENTRIES.flatMap(importClosure);
+    const writer = new Set(importClosure(WRITER));
+    const check = importClosure(CHECK);
+    const own = check.filter((path) => !writer.has(path));
+    // Controls: the closures reach past their entries, every file in them exists, and the filter sees the writer,
+    // which check.ts imports from off the surface.
+    expect(actions.length).toBeGreaterThan(ACTION_ENTRIES.length);
+    expect(own).toContain(CHECK);
+    expect(offSurface(check)).toContain(WRITER);
+    for (const path of [...actions, ...check]) expect(existsSync(join(REPO_ROOT, path))).toBe(true);
+    expect(offSurface(actions)).toEqual([]);
+    expect(offSurface(own)).toEqual([]);
   });
 });

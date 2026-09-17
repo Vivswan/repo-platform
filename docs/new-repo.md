@@ -150,7 +150,7 @@ The `validate-managed-files` step judges the repository against what repo-platfo
 
 - **The report step always runs,** reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
 
-- **Freshness informs:** the job summary says whether `stable` has moved past the recorded commit; nothing fails for that, and a sync moves the commit once the delivered surface differs.
+- **Freshness informs:** the job summary says whether `stable` has moved past the recorded commit; nothing fails for that, and a sync moves the commit under the stamp rule ([sync.md](sync.md#the-manifest)).
 
 - **What it judges:** the tree against the commit its LAST sync recorded, so a platform change reddens nothing until the repository syncs, and a registration change on a PR is red until the sync writes the module's files onto the branch ([changing the module selection](#changing-the-module-selection)).
 
