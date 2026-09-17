@@ -10,37 +10,58 @@ import { defineComponent } from "vue";
 const IMAGE_SELECTOR = ".vp-doc img:not(a img)";
 
 let zoom: Zoom | undefined;
+/** The image a key opened, which takes focus back on close: medium-zoom hides the original while its copy is up,
+ *  and a hidden element drops focus to <body>. */
+let openedByKey: HTMLElement | null = null;
 
+function makeButton(image: Element): void {
+  image.setAttribute("tabindex", "0");
+  image.setAttribute("role", "button");
+}
+
+function unmakeButton(image: Element): void {
+  image.removeAttribute("tabindex");
+  image.removeAttribute("role");
+}
+
+/** Tab still reaches the images behind the overlay; a key there is medium-zoom's to ignore, and the pending
+ *  focus return stays with the image that is up. */
 function onKeydown(event: KeyboardEvent): void {
   if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();
-  const image = event.currentTarget as HTMLElement;
-  // medium-zoom hides the original while its copy is up, which drops focus to <body>.
-  image.addEventListener("medium-zoom:closed", () => image.focus(), { once: true });
-  void zoom?.open({ target: image });
+  if (zoom === undefined || zoom.getZoomedImage() !== null) return;
+  openedByKey = event.currentTarget as HTMLElement;
+  void zoom.open({ target: openedByKey });
 }
 
-/** The copy is a cloneNode of the original, button attributes included, but a click alone closes it. */
-function stripCopy(): void {
-  for (const copy of document.querySelectorAll(".medium-zoom-image--opened")) {
-    copy.removeAttribute("tabindex");
-    copy.removeAttribute("role");
+/** Fires before medium-zoom clones the original, so no copy (a srcset image gets a second one later) inherits the
+ *  button attributes; the original is hidden until close anyway. */
+function onOpen(event: Event): void {
+  unmakeButton(event.target as Element);
+}
+
+function onClosed(event: Event): void {
+  const image = event.target as HTMLElement;
+  makeButton(image);
+  if (openedByKey === image) {
+    image.focus();
+    openedByKey = null;
   }
 }
 
 function attachImageZoom(): void {
   // A listener registered on the instance rides onto every image a later attach adds.
-  zoom ??= mediumZoom({ background: "var(--vp-c-bg)", margin: 24 }).on("opened", stripCopy);
+  zoom ??= mediumZoom({ background: "var(--vp-c-bg)", margin: 24 })
+    .on("open", onOpen)
+    .on("closed", onClosed);
   for (const image of zoom.getImages()) {
-    image.removeAttribute("tabindex");
-    image.removeAttribute("role");
+    unmakeButton(image);
     image.removeEventListener("keydown", onKeydown);
   }
   zoom.detach();
   zoom.attach(IMAGE_SELECTOR);
   for (const image of zoom.getImages()) {
-    image.tabIndex = 0;
-    image.setAttribute("role", "button");
+    makeButton(image);
     image.addEventListener("keydown", onKeydown);
   }
 }

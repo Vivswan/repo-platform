@@ -56,7 +56,8 @@ const PICTURE_SVG =
   '<rect width="1600" height="1000" fill="#345"/><circle cx="800" cy="500" r="300" fill="#fc6"/></svg>\n';
 const IMAGES_MD =
   "![A picture](picture.svg)\n\n" +
-  '<a href="./other.html"><picture><img src="./picture.svg" alt="A linked picture"></picture></a>';
+  '<a href="./other.html"><picture><img src="./picture.svg" alt="A linked picture"></picture></a>\n\n' +
+  "![A second picture](picture.svg)";
 
 const DOCS_MD = `# Fixture\n\n${DIAGRAM}\n\n${IMAGES_MD}\n\n${CRUSH_TABLE}\n\n${WIDE_TABLE}\n`;
 /** A second page with no diagram, one history step away. */
@@ -421,19 +422,33 @@ const FOCUS_IMAGE = `(() => {
   return document.activeElement === img;
 })()`;
 
-/** Whether the lightbox finished opening within a second of the key press, and what the zoomed copy carries. The
+/** Whether the lightbox finished opening within a second of the key press, and what the original and its copy
+ *  carry. The
  *  body class medium-zoom sets a frame into the open is not that: an Escape before the transition ends is one the
  *  library drops. */
 const KEY_OPENED = `new Promise((resolve) => {
   const timer = setTimeout(() => resolve({ opened: false }), 1000);
   document.querySelector(".vp-doc img").addEventListener("medium-zoom:opened", () => {
     clearTimeout(timer);
+    const img = document.querySelector(".vp-doc img");
     const copy = document.querySelector(".medium-zoom-image--opened");
-    resolve({ opened: true, copyTabIndex: copy.getAttribute("tabindex"), copyRole: copy.getAttribute("role") });
+    resolve({
+      opened: true,
+      originalTabIndex: img.getAttribute("tabindex"),
+      copyTabIndex: copy.getAttribute("tabindex"),
+      copyRole: copy.getAttribute("role"),
+    });
   }, { once: true });
 })`;
 
 const FOCUS_ON_IMAGE = `document.activeElement === document.querySelector(".vp-doc img")`;
+
+/** Tab lands on the second image behind the overlay while the first is up. */
+const FOCUS_SECOND_IMAGE = `(() => {
+  const second = document.querySelectorAll(".vp-doc img:not(a img)")[1];
+  second.focus();
+  return document.activeElement === second;
+})()`;
 
 const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc :not(a) > img");
@@ -484,7 +499,17 @@ test(
       });
       const keyOpened = tab.evaluate<Record<string, unknown>>(KEY_OPENED);
       await tab.press("Enter", 13);
-      expect(await keyOpened).toEqual({ opened: true, copyTabIndex: null, copyRole: null });
+      // The original is what medium-zoom clones (a srcset image gets a second, later copy), so it carries no
+      // button attributes while it is hidden behind its copy.
+      expect(await keyOpened).toEqual({
+        opened: true,
+        originalTabIndex: null,
+        copyTabIndex: null,
+        copyRole: null,
+      });
+      // Enter on another image behind the overlay changes nothing, the focus return included.
+      expect(await tab.evaluate<boolean>(FOCUS_SECOND_IMAGE)).toBe(true);
+      await tab.press("Enter", 13);
       await tab.press("Escape", 27);
       expect(await tab.evaluate<Record<string, unknown>>(WHEN_LIGHTBOX_CLOSED)).toEqual({
         overlay: false,
