@@ -57,7 +57,8 @@ const PICTURE_SVG =
 const IMAGES_MD =
   "![A picture](picture.svg)\n\n" +
   '<a href="./other.html"><picture><img src="./picture.svg" alt="A linked picture"></picture></a>\n\n' +
-  "![A second picture](picture.svg)";
+  "![A second picture](picture.svg)\n\n" +
+  '<img src="./picture.svg" alt="">';
 
 const DOCS_MD = `# Fixture\n\n${DIAGRAM}\n\n${IMAGES_MD}\n\n${CRUSH_TABLE}\n\n${WIDE_TABLE}\n`;
 /** A second page with no diagram, one history step away. */
@@ -389,6 +390,10 @@ interface Lightbox {
   linkedAttached: boolean;
   /** On paper, with the lightbox open, whether the original image still shows. */
   printedOriginal: string;
+  /** A decorative image (empty alt) is neither attached nor a button. */
+  decorative: { attached: boolean; tabindex: string | null; role: string | null };
+  /** The page behind the overlay is inert while the lightbox is up. */
+  layoutInert: boolean;
 }
 
 /** Opens the first article image and measures once medium-zoom reports the open finished. */
@@ -409,12 +414,30 @@ const OPEN_LIGHTBOX = `new Promise((resolve) => {
       })(),
       linkedAttached: document.querySelector(".vp-doc a img").classList.contains("medium-zoom-image"),
       printedOriginal: "",
+      decorative: (() => {
+        const img = document.querySelector('.vp-doc img[alt=""]');
+        return {
+          attached: img.classList.contains("medium-zoom-image"),
+          tabindex: img.getAttribute("tabindex"),
+          role: img.getAttribute("role"),
+        };
+      })(),
+      layoutInert: document.querySelector(".Layout").hasAttribute("inert"),
     });
   }, { once: true });
   img.click();
 })`;
 
 const PRINTED_ORIGINAL = `getComputedStyle(document.querySelector(".vp-doc img")).visibility`;
+
+/** Whether any focusable behind the overlay (the skip link, the nav, the article's links and images) takes focus
+ *  while the lightbox is up: what a Tab would land on. A real Tab is not pressed: with the whole page inert it leaves
+ *  the document for the browser's own UI, and a headless page that lost focus stalls its transitions, so the close
+ *  the test presses next would never finish. */
+const FOCUS_BEHIND_OVERLAY = `[...document.querySelectorAll(".Layout a, .Layout button, .Layout [tabindex]")].some((el) => {
+  el.focus();
+  return document.activeElement === el;
+})`;
 
 const FOCUS_IMAGE = `(() => {
   const img = document.querySelector(".vp-doc img");
@@ -443,7 +466,7 @@ const KEY_OPENED = `new Promise((resolve) => {
 
 const FOCUS_ON_IMAGE = `document.activeElement === document.querySelector(".vp-doc img")`;
 
-/** Tab lands on the second image behind the overlay while the first is up. */
+/** A focus() aimed at the second image while the first is up: the inert page refuses it. */
 const FOCUS_SECOND_IMAGE = `(() => {
   const second = document.querySelectorAll(".vp-doc img:not(a img)")[1];
   second.focus();
@@ -458,6 +481,7 @@ const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
     overlay: document.querySelector(".medium-zoom-overlay") !== null,
     hidden: img.classList.contains("medium-zoom-image--hidden"),
     motion: matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduce" : "no-preference",
+    layoutInert: document.querySelector(".Layout").hasAttribute("inert"),
   });
   if (!closed().overlay) return resolve(closed());
   img.addEventListener("medium-zoom:closed", () => resolve(closed()), { once: true });
@@ -466,7 +490,7 @@ const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
 // medium-zoom finishes an open or close on transitionend, so a reduced-motion sheet that stops its transition
 // outright leaves the lightbox stuck open; the second pass runs under that preference.
 test(
-  "an article image opens in a lightbox over the nav by click or by Enter, larger than its inline box, a linked image does not, the original still prints, and Escape closes it, under reduced motion too",
+  "an article image opens in a lightbox over the nav by click or by Enter, larger than its inline box, with the page behind it inert; a linked or decorative image does not; the original still prints, and Escape closes it, under reduced motion too",
   async () => {
     const tab = await openPage();
     try {
@@ -485,7 +509,10 @@ test(
           atNavCorner: "medium-zoom-overlay",
           linkedAttached: false,
           printedOriginal: "visible",
+          decorative: { attached: false, tabindex: null, role: null },
+          layoutInert: true,
         });
+        expect(await tab.evaluate<boolean>(FOCUS_BEHIND_OVERLAY)).toBe(false);
         expect(lightbox.zoomed).toBeGreaterThan(lightbox.inline * 1.5);
         expect(lightbox.overlay.color).not.toBe("rgba(0, 0, 0, 0)");
         await tab.press("Escape", 27);
@@ -493,6 +520,7 @@ test(
           overlay: false,
           hidden: false,
           motion,
+          layoutInert: false,
         });
       }
       expect(await tab.evaluate<boolean>(FOCUS_IMAGE)).toBe(true);
@@ -510,14 +538,15 @@ test(
         copyTabIndex: null,
         copyRole: null,
       });
-      // Enter on another image behind the overlay changes nothing, the focus return included.
-      expect(await tab.evaluate<boolean>(FOCUS_SECOND_IMAGE)).toBe(true);
+      // Another image behind the overlay takes no focus, and Enter there changes nothing, the focus return included.
+      expect(await tab.evaluate<boolean>(FOCUS_SECOND_IMAGE)).toBe(false);
       await tab.press("Enter", 13);
       await tab.press("Escape", 27);
       expect(await tab.evaluate<Record<string, unknown>>(WHEN_LIGHTBOX_CLOSED)).toEqual({
         overlay: false,
         hidden: false,
         motion: "reduce",
+        layoutInert: false,
       });
       // medium-zoom hid the original while its copy was up, which drops focus to <body>.
       expect(await tab.evaluate<boolean>(FOCUS_ON_IMAGE)).toBe(true);
