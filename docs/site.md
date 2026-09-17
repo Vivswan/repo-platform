@@ -108,7 +108,7 @@ The website is one build of the judged commit: version navigation belongs to the
 | `latest/` | the default branch's docs |
 | `stable/` | the newest served version tag's docs, under a name that survives releases; absent while no tag is served |
 | `vX.Y.Z/` | that tag's docs, one directory per served tag |
-| `versions.json` | the version index the theme's dropdown reads |
+| `versions.json` | the index of served tiers (label and path each), written by the build for anything outside the site that needs the list; the theme's menu is built from the same data at build time |
 
 - **Versions** are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../actions/pages-site/build.ts)).
 
