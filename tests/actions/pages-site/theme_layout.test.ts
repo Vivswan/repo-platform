@@ -415,6 +415,26 @@ const OPEN_LIGHTBOX = `new Promise((resolve) => {
 
 const PRINTED_ORIGINAL = `getComputedStyle(document.querySelector(".vp-doc img")).visibility`;
 
+const FOCUS_IMAGE = `(() => {
+  const img = document.querySelector(".vp-doc img");
+  img.focus();
+  return document.activeElement === img;
+})()`;
+
+/** Whether the lightbox finished opening within a second of the key press, and what the zoomed copy carries. The
+ *  body class medium-zoom sets a frame into the open is not that: an Escape before the transition ends is one the
+ *  library drops. */
+const KEY_OPENED = `new Promise((resolve) => {
+  const timer = setTimeout(() => resolve({ opened: false }), 1000);
+  document.querySelector(".vp-doc img").addEventListener("medium-zoom:opened", () => {
+    clearTimeout(timer);
+    const copy = document.querySelector(".medium-zoom-image--opened");
+    resolve({ opened: true, copyTabIndex: copy.getAttribute("tabindex"), copyRole: copy.getAttribute("role") });
+  }, { once: true });
+})`;
+
+const FOCUS_ON_IMAGE = `document.activeElement === document.querySelector(".vp-doc img")`;
+
 const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc :not(a) > img");
   const closed = () => ({
@@ -428,7 +448,7 @@ const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
 // medium-zoom finishes an open or close on transitionend, so a reduced-motion sheet that stops its transition
 // outright leaves the lightbox stuck open; the second pass runs under that preference.
 test(
-  "an article image opens in a lightbox over the nav, larger than its inline box, a linked image does not, the original still prints, and Escape closes it, under reduced motion too",
+  "an article image opens in a lightbox over the nav by click or by Enter, larger than its inline box, a linked image does not, the original still prints, and Escape closes it, under reduced motion too",
   async () => {
     const tab = await openPage();
     try {
@@ -457,6 +477,21 @@ test(
           hidden: false,
         });
       }
+      expect(await tab.evaluate<boolean>(FOCUS_IMAGE)).toBe(true);
+      expect(await tab.accessibleNode(".vp-doc img")).toEqual({
+        role: "button",
+        name: "A picture",
+      });
+      const keyOpened = tab.evaluate<Record<string, unknown>>(KEY_OPENED);
+      await tab.press("Enter", 13);
+      expect(await keyOpened).toEqual({ opened: true, copyTabIndex: null, copyRole: null });
+      await tab.press("Escape", 27);
+      expect(await tab.evaluate<Record<string, unknown>>(WHEN_LIGHTBOX_CLOSED)).toEqual({
+        overlay: false,
+        hidden: false,
+      });
+      // medium-zoom hid the original while its copy was up, which drops focus to <body>.
+      expect(await tab.evaluate<boolean>(FOCUS_ON_IMAGE)).toBe(true);
     } finally {
       await tab.close();
     }
