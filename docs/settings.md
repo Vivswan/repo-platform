@@ -221,7 +221,7 @@ Stateless, declared-keys-only, upsert-by-name - on the RENDERED document:
 
 - **Topics set only in the GitHub UI** are cleared by the first apply after the render lands - put values you want to keep in the overlay.
 
-- **The homepage is unmanaged:** the starter seeds no `homepage` key, so the apply never touches the field and a homepage set on GitHub stays. To have the apply manage it, add `homepage:` to the overlay by hand like any other repository field. The `0002-homepage-unmanaged` rung ([sync.md](sync.md#migrations)) deleted the seeded key from existing overlays where it was empty or named the repository's own GitHub address.
+- **The homepage is unmanaged:** the starter seeds no `homepage` key, so the apply never touches the field and a homepage set on GitHub stays. To have the apply manage a real website, add `homepage:` to the overlay by hand. The `0002-homepage-unmanaged` rung ([sync.md](sync.md#migrations)) deletes an empty or own-address `homepage` key on every sync, so the overlay cannot declare-and-clear the homepage.
 
 - **Visibility** is managed like any other declared field: the starter seeds `private:` (false included), so the nightly heal reverts an out-of-band flip in either direction. To change visibility on purpose, edit `private:` in the overlay; the visibility-gated layers follow the declared value in the same render.
 

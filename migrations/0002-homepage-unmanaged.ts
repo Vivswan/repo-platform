@@ -38,51 +38,66 @@ export function repositoryOf(originUrl: string): string | null {
 export function isOwnAddress(value: string, repository: string): boolean {
   const [owner, repo] = repository.split("/", 2);
   return new RegExp(
-    `^https://github\\.com/${escaped(owner)}/${escaped(repo)}(?:\\.git|/)?$`,
+    `^https://github\\.com/${escaped(owner)}/${escaped(repo)}(?:\\.git)?/?$`,
     "i",
   ).test(value.trim());
 }
 
 type Overlay = { repository?: { homepage?: unknown } | null };
 
-/** A copy with no shared references: an alias of a whole block resolves to the SAME object, and deleting the homepage
- *  from a shared one would delete it from every alias too. Not a JSON round trip, which reads `.nan` as null and
- *  would hide a change between the two. A cycle, or a value that is not a plain object or array (a `!!set`, a
- *  `!!omap`, a `!!binary`), throws: the comparison below cannot see inside it. */
-function plain(value: unknown, ancestors: unknown[] = []): unknown {
-  if (typeof value !== "object" || value === null) return value;
-  if (ancestors.includes(value)) throw new RangeError("cyclic document");
-  const proto = Object.getPrototypeOf(value);
-  if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) {
-    throw new TypeError("not a plain document");
-  }
-  const inner = [...ancestors, value];
-  if (Array.isArray(value)) return value.map((item) => plain(item, inner));
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-      key,
-      plain(item, inner),
-    ]),
-  );
-}
-
-/** Null when the text does not read as one plain document: a syntax error, an alias its anchor no longer precedes
- *  (which the parser reports only when the value is read), or a cyclic alias. An empty or comments-only file reads
- *  as `{}`, as the settings loader reads it. */
+/** Null when the text does not read as one document: a syntax error, or an alias its anchor no longer precedes,
+ *  which the parser reports only when the value is read. An empty or comments-only file reads as `{}`, as the
+ *  settings loader reads it. */
 function readOverlay(text: string): { doc: Document; js: Overlay } | null {
   const doc = parseDocument(text);
   if (doc.errors.length > 0) return null;
   try {
-    return { doc, js: (plain(doc.toJS()) ?? {}) as Overlay };
+    return { doc, js: (doc.toJS() ?? {}) as Overlay };
   } catch {
     return null;
   }
 }
 
-/** The value is judged resolved (an alias reads as what it names), and the repository is consulted only for a value
- *  that could be its address. YAML has more ways to spell a pair than a line cut can honour (flow separators,
- *  explicit keys, anchors, merge keys), so the edited text must read as the original minus that one key or the edit
- *  is refused. */
+/** Strict structural equality over what the yaml library resolves (`!!omap` a Map, `!!set` a Set, `!!binary` a
+ *  Uint8Array, a timestamp a Date), entries in insertion order: Bun.deepEquals matches Set members and Map keys
+ *  loosely, so two members differing only in a deleted homepage both matched one expected member. A pair once
+ *  entered is taken as equal thereafter, which closes cycles and keeps a shared subtree at one comparison; a false
+ *  ends the whole comparison, so no memo is ever consulted after one. */
+export function sameDocument(
+  a: unknown,
+  b: unknown,
+  seen: WeakMap<object, WeakSet<object>> = new WeakMap(),
+): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  const partners = seen.get(a) ?? new WeakSet();
+  if (partners.has(b)) return true;
+  partners.add(b);
+  seen.set(a, partners);
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+  if (a instanceof Date) return b instanceof Date && Object.is(a.getTime(), b.getTime());
+  const pairs = (x: object): [unknown, unknown][] | null => {
+    if (x instanceof Map) return [...x.entries()];
+    if (x instanceof Set) return [...x].map((member) => [member, null]);
+    if (x instanceof Uint8Array || Array.isArray(x)) return [...x.entries()];
+    const proto = Object.getPrototypeOf(x);
+    return proto === Object.prototype || proto === null ? Object.entries(x) : null;
+  };
+  const left = pairs(a);
+  const right = pairs(b);
+  if (left === null || right === null) return false;
+  return (
+    left.length === right.length &&
+    left.every(
+      ([key, value], index) =>
+        sameDocument(key, right[index][0], seen) && sameDocument(value, right[index][1], seen),
+    )
+  );
+}
+
+/** The value is judged resolved (an alias reads as what it names). Every non-empty string value asks the checkout
+ *  which repository this is, so a real website in a checkout without a GitHub origin is refused, not kept. One judge
+ *  decides whether the cut took exactly the pair: the edited text must read as the original minus that one key. */
 export function judgeOverlay(text: string, repository: () => string | null): Judgment {
   const read = readOverlay(text);
   if (read === null) return { verdict: "absent" };
@@ -114,16 +129,11 @@ export function judgeOverlay(text: string, repository: () => string | null): Jud
   const lineStart = text.lastIndexOf("\n", keyRange[0] - 1) + 1;
   const newline = text.indexOf("\n", Math.max(valueEnd - 1, lineStart));
   const lineEnd = newline === -1 ? text.length : newline + 1;
-  const alone =
-    text.indexOf("\n", lineStart) === newline &&
-    text.slice(lineStart, keyRange[0]).trim() === "" &&
-    /^[ \t]*(?:#.*)?\r?\n?$/.test(text.slice(valueEnd, lineEnd));
-  if (!alone) return { verdict: "refused", reason: "its homepage line holds other content too" };
   const edited = text.slice(0, lineStart) + text.slice(lineEnd);
-  const expected = plain(before) as Overlay;
-  delete expected.repository?.homepage;
+  const expected = { ...before, repository: { ...before.repository } };
+  delete expected.repository.homepage;
   const after = readOverlay(edited);
-  if (after === null || !Bun.deepEquals(after.js, expected, true)) {
+  if (after === null || !sameDocument(after.js, expected)) {
     return {
       verdict: "refused",
       reason: "removing its homepage line would change more than the homepage",

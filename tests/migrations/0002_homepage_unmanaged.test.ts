@@ -68,6 +68,10 @@ describe("0002-homepage-unmanaged", () => {
       reason: "the own address as a clone URL",
       line: "  homepage: https://github.com/OwnerOrg/Demo.git",
     },
+    {
+      reason: "the own address as a clone URL with a trailing slash",
+      line: "  homepage: https://github.com/OwnerOrg/Demo.git/",
+    },
   ])("deletes the homepage key carrying $reason and reports the overlay path", ({ line }) => {
     const root = checkout(overlayWith(line));
     // Control: as seeded, the rendered document would carry the key and the apply would clear the live value.
@@ -80,20 +84,48 @@ describe("0002-homepage-unmanaged", () => {
     expect(readFileSync(join(root, OVERLAY), "utf-8")).toBe(MIGRATED);
   });
 
-  // The settings loader resolves aliases, so `*empty` cleared the homepage exactly as `""` did.
-  test("an alias of an empty value is judged resolved, and only its own line goes", () => {
-    const aliased = [
-      "repository:",
-      '  description: &empty ""',
-      "  homepage: *empty",
-      "  private: false",
-      "",
-    ].join("\n");
-    const root = checkout(aliased);
+  // The settings loader resolves aliases, so `*empty` cleared the homepage exactly as `""` did; a folded value spans
+  // two lines and both go; a cycle or a `!!binary` elsewhere in the document is no reason to leave the key behind.
+  test.each<{ reason: string; overlay: string; cut: string }>([
+    {
+      reason: "an alias of an empty value",
+      overlay: 'repository:\n  description: &empty ""\n  homepage: *empty\n  private: false\n',
+      cut: "  homepage: *empty\n",
+    },
+    {
+      reason: "a block scalar spelling the own address",
+      overlay:
+        "repository:\n  homepage: >-\n    https://github.com/OwnerOrg/Demo\n  private: false\n",
+      cut: "  homepage: >-\n    https://github.com/OwnerOrg/Demo\n",
+    },
+    {
+      reason: "an unrelated cycle beside it",
+      overlay: 'repository:\n  homepage: ""\n  private: false\nx: &a\n  y: *a\n',
+      cut: '  homepage: ""\n',
+    },
+    {
+      reason: "a binary value beside it",
+      overlay: 'repository:\n  homepage: ""\n  private: false\nicon: !!binary R0lGODlh\n',
+      cut: '  homepage: ""\n',
+    },
+    {
+      reason: "a deeply nested set beside it, which a member-by-member comparison must not double",
+      overlay: `repository:\n  homepage: ""\n  private: false\nnest: ${"!!set { ? ".repeat(40)}end${" }".repeat(40)}\n`,
+      cut: '  homepage: ""\n',
+    },
+    {
+      reason:
+        "a chain of shared anchors beside it, which a comparison without a memo would walk exponentially",
+      overlay: `repository:\n  homepage: ""\n  private: false\nx: ${Array.from(
+        { length: 40 },
+        (_, i) => 39 - i,
+      ).reduce((inner, i) => `&a${i} [${inner}${i < 39 ? `, *a${i + 1}` : ""}]`, "*a0")}\n`,
+      cut: '  homepage: ""\n',
+    },
+  ])("deletes the key for $reason and nothing else", ({ overlay, cut }) => {
+    const root = checkout(overlay);
     expect(run(root)).toEqual({ exitCode: 0, stdout: `${OVERLAY}\n`, stderr: "" });
-    expect(readFileSync(join(root, OVERLAY), "utf-8")).toBe(
-      aliased.replace("  homepage: *empty\n", ""),
-    );
+    expect(readFileSync(join(root, OVERLAY), "utf-8")).toBe(overlay.replace(cut, ""));
   });
 
   // The repository chose a website, or another repository's address: the line is its own, and the sync PR's diff
@@ -110,19 +142,12 @@ describe("0002-homepage-unmanaged", () => {
   });
 
   // The rung runs before the writer seeds the starter, so a repository's first sync has no overlay yet; an emptied
-  // overlay reads as no document at all, which the settings loader takes as `{}`; a document that cannot be read
-  // plainly (a cyclic alias, a `!!omap` holding an alias of the block) is left whole for the writer to refuse. Neither an absent key nor an empty value needs
-  // the repository, so a checkout without a usable origin crosses these too.
+  // overlay reads as no document at all, which the settings loader takes as `{}`. Neither an absent key nor an
+  // empty value needs the repository, so a checkout without a usable origin crosses these too.
   test.each<{ reason: string; overlay: string | null }>([
     { reason: "no overlay", overlay: null },
     { reason: "an overlay without the key", overlay: MIGRATED },
     { reason: "an overlay holding only a comment", overlay: "# nothing of our own yet\n" },
-    { reason: "a cyclic alias", overlay: 'repository: &r\n  homepage: ""\n  self: *r\n' },
-    {
-      reason: "a collection the comparison cannot see inside",
-      overlay:
-        '%YAML 1.1\n---\nrepository: &r\n  homepage: ""\n  private: false\ncopy: !!omap\n  - saved: *r\n',
-    },
     { reason: "a bare non-finite number", overlay: ".nan\n" },
   ])("$reason is a no-op", ({ overlay }) => {
     const root = checkout(overlay, null);
@@ -131,16 +156,16 @@ describe("0002-homepage-unmanaged", () => {
     else expect(readFileSync(join(root, OVERLAY), "utf-8")).toBe(overlay);
   });
 
-  // A line cut honours only the starter's shape; another spelling of the pair loses a flow separator, half an
-  // explicit key, an alias's anchor, or keeps the value through a merge key, so the edited text must read as the
-  // original minus the one key or the row fails with the owner's bytes untouched.
-  const OTHER = "its homepage line holds other content too";
+  // One judge: the edited text must read as the original minus the one key. These spellings lose a flow separator
+  // or half an explicit key with the line, lose the key twice through an alias of the block or a cycle through it,
+  // keep supplying the value through a merge key, or leave an alias unresolvable; each fails the row with the
+  // owner's bytes untouched.
   const MORE = "removing its homepage line would change more than the homepage";
   test.each<{ reason: string; overlay: string; said: string }>([
     {
       reason: "a flow mapping on one line",
       overlay: 'repository: {homepage: "", description: Keep, private: false}\n',
-      said: OTHER,
+      said: MORE,
     },
     {
       reason: "a flow mapping with the separator on the next line",
@@ -150,18 +175,12 @@ describe("0002-homepage-unmanaged", () => {
     {
       reason: "an explicit key spread over lines, its anchor on the key",
       overlay: 'repository:\n  ? &field\n    homepage\n  : ""\n  description: *field\n',
-      said: OTHER,
+      said: MORE,
     },
     {
       reason: "an explicit key with no value, its anchor on the key",
       overlay: "repository:\n  ? &field\n    homepage\n  description: *field\n  private: false\n",
       said: MORE,
-    },
-    {
-      reason: "a block scalar value",
-      overlay:
-        "repository:\n  homepage: >-\n    https://github.com/OwnerOrg/Demo\n  private: false\n",
-      said: OTHER,
     },
     {
       reason: "an anchored value another key aliases",
@@ -176,6 +195,29 @@ describe("0002-homepage-unmanaged", () => {
     {
       reason: "an alias of the whole repository block, which would lose the key too",
       overlay: 'repository: &r\n  homepage: ""\n  private: false\nactions: *r\n',
+      said: MORE,
+    },
+    {
+      reason: "a cycle through the repository block",
+      overlay: 'repository: &r\n  homepage: ""\n  self: *r\n',
+      said: MORE,
+    },
+    {
+      reason: "a `!!set` holding an alias of the block beside its homepage-less twin",
+      overlay:
+        'repository: &r\n  homepage: ""\n  private: false\ncopy: !!set\n  ? *r\n  ? {private: false}\n',
+      said: MORE,
+    },
+    {
+      reason: "a timestamp a merge key would replace",
+      overlay:
+        '%YAML 1.1\n---\nrepository: {\n  <<: {updated: 2020-01-01},\n  homepage: "", updated: 2021-01-01,\n  private: false\n}\n',
+      said: MORE,
+    },
+    {
+      reason: "an `!!omap` holding an alias of the block",
+      overlay:
+        '%YAML 1.1\n---\nrepository: &r\n  homepage: ""\n  private: false\ncopy: !!omap\n  - saved: *r\n',
       said: MORE,
     },
     {
