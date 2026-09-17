@@ -23,6 +23,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.11",
     "@types/bun": "1.4.2",
+    "colorjs.io": "0.7.1",
     "husky": "^9.1.7",
     "knip": "6.35.1",
     "typescript": "^7.0.2"
