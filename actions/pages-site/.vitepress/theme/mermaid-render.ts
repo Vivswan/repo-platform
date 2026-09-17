@@ -4,6 +4,7 @@
 
 import { MERMAID_CLASS, MERMAID_SOURCE_CLASS } from "../mermaid.ts";
 import { mermaidThemeVariables } from "./mermaid-theme.ts";
+import { attachZoom, closeZoomOutside, detachZoom } from "./mermaid-zoom.ts";
 import { HUES } from "./tokens.ts";
 
 type Mermaid = typeof import("mermaid")["default"];
@@ -41,6 +42,7 @@ function firstLine(error: unknown): string {
 
 function fail(mount: HTMLElement, error: unknown): void {
   directChild(mount, MERMAID_DIAGRAM_CLASS)?.remove();
+  detachZoom(mount);
   ensureChild(mount, "p", MERMAID_ERROR_CLASS).textContent =
     `The diagram did not render: ${firstLine(error)}`;
   mount.dataset.state = "error";
@@ -70,6 +72,7 @@ function faceOrDeadline(font: string, text: string): Promise<void> {
 export async function renderAll(dark: boolean): Promise<void> {
   const run = ++generation;
   const mounts = [...document.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS}`)];
+  closeZoomOutside(mounts);
   if (mounts.length === 0) return;
   const sources = mounts.map(
     (mount) => directChild(mount, MERMAID_SOURCE_CLASS)?.textContent ?? "",
@@ -110,6 +113,7 @@ export async function renderAll(dark: boolean): Promise<void> {
       diagram.innerHTML = svg;
       bindFunctions?.(diagram);
       directChild(mount, MERMAID_ERROR_CLASS)?.remove();
+      attachZoom(mount, diagram);
       mount.dataset.state = "rendered";
     } catch (error) {
       if (run !== generation) return;

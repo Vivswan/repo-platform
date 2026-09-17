@@ -143,15 +143,20 @@
     line-height: 1.5;
     transition: none;
   }
-  /* In a table cell the percentage cap resolves to nothing while the column
-   * is being sized (the token would wrap at any width), so cells carry no
-   * cap: a token contributes its whole width to the column. Inside the
-   * scroll wrapper it never wraps at all; the wrapper scrolls instead. */
+  /* A percentage cap resolves to nothing while a table column is sized, so
+   * a bare cell's token has no cap and counts whole. In the scroll wrapper
+   * the cap is a share of the wrapper (tables.css makes it the size
+   * container): a token counted whole at any width left the prose column
+   * beside it its longest word once the table overflowed.
+   *   token up to the cap  -> counts whole (max-content: the column is sized from the token, never the reverse)
+   *   token past the cap   -> wraps inside at the cap's width */
   :is(th, td) code {
     max-width: none;
   }
   .vp-table :is(th, td) code {
-    white-space: nowrap;
+    width: max-content;
+    max-width: 50cqi;
+    overflow-wrap: anywhere;
   }
   :not(pre, h1, h2, h3, h4, h5, h6) > code {
     font-size: 0.88em;

@@ -92,8 +92,11 @@
       }
       :is(th, td) {
         overflow-wrap: anywhere;
-        /* the inline-code rule's own break-word would outrank the inherited value */
+        /* the inline-code rule's own break-word would outrank the inherited value, and its
+         * max-content width would hold a token's column open to the screen cap */
         code {
+          width: auto;
+          max-width: none;
           white-space: normal;
           overflow-wrap: anywhere;
         }
@@ -116,6 +119,24 @@
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
+    & > .fleet-mermaid-zoom {
+      display: none;
+    }
+  }
+  /* [open] matches mermaid.css's flex rule, so the later sheet wins the tie. */
+  .fleet-mermaid-view[open],
+  .medium-zoom-overlay,
+  .medium-zoom-image--opened {
+    display: none;
+  }
+  /* The view's scroll lock would print a long article clipped to one page. */
+  html:has(.fleet-mermaid-view[open]) {
+    overflow: visible;
+  }
+  /* medium-zoom hides the original while its copy is up; on paper the original is the one that
+   * shows. Its rule lands in a runtime style tag after this sheet, so the type selector wins. */
+  img.medium-zoom-image--hidden {
+    visibility: visible;
   }
   html.dark .fleet-mermaid[data-state="rendered"] {
     & > .fleet-mermaid-diagram {
