@@ -29,5 +29,12 @@
   .VPDocFooter .pager-link .pager-icon {
     transform: none !important;
   }
+  /* medium-zoom finishes an open or close on transitionend, which never
+   * fires for a transition of none, so the lightbox would stick open;
+   * its own !important rule arrives in a runtime style tag, so the
+   * type selector outranks it */
+  img.medium-zoom-image {
+    transition-duration: 1ms !important;
+  }
 }
 /* biome-ignore-end lint/complexity/noImportantStyles: the reduced-motion block ends here */

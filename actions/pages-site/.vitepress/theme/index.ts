@@ -23,9 +23,11 @@ import "./landing.css";
 import "./facts.css";
 import "./not-found.css";
 import "./launcher.css";
+import "./image-zoom.css";
 import "./print.css";
 import "./motion.css";
 import FactsPanel from "./facts-panel.ts";
+import ImageZoom from "./image-zoom.ts";
 import FleetLauncher from "./launcher.ts";
 import MermaidDiagrams from "./mermaid.ts";
 import NavLauncher from "./nav-launcher.ts";
@@ -34,9 +36,9 @@ import { tierRouteGuard } from "./tier-routes.ts";
 
 export default {
   ...VPCarbon,
-  // The diagram component sits beside carbon's Layout, not in a slot: the
-  // doc slots skip `layout: page` and `home`, and `layout: false` skips
-  // every slot, while a sibling runs on every page.
+  // The diagram and image components sit beside carbon's Layout, not in a
+  // slot: the doc slots skip `layout: page` and `home`, and `layout: false`
+  // skips every slot, while a sibling runs on every page.
   Layout: () => [
     h(VPCarbon.Layout!, null, {
       "nav-bar-content-before": () => h(NavLauncher),
@@ -44,6 +46,7 @@ export default {
       "doc-after": () => h(Provenance),
     }),
     h(MermaidDiagrams),
+    h(ImageZoom),
   ],
   async enhanceApp(ctx) {
     await VPCarbon.enhanceApp?.(ctx);

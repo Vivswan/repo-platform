@@ -1,7 +1,8 @@
 // The theme's layout in a real browser over a built site (the harness is headless_chrome.ts): the diagram view a
-// reader opens from a rendered mermaid mount, and the width a prose cell keeps beside a long inline-code cell.
-// Both are browser facts no unit render can show: the view's natural size against the scaled-down column copy,
-// focus and scroll lock across a native dialog, and the table's auto layout distributing a scroll wrapper's width.
+// reader opens from a rendered mermaid mount, the lightbox an article image opens, and the width a prose cell keeps
+// beside a long inline-code cell. All are browser facts no unit render can show: the view's natural size against the
+// scaled-down column copy, focus and scroll lock across a native dialog, a lightbox finishing under reduced motion,
+// and the table's auto layout distributing a scroll wrapper's width.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -49,7 +50,15 @@ const WIDE_TABLE = [
   `| ${Array.from({ length: 6 }, (_, i) => `\`src/sections/contract/plan-${i}.ts\``).join(" | ")} |`,
 ].join("\n");
 
-const DOCS_MD = `# Fixture\n\n${DIAGRAM}\n\n${CRUSH_TABLE}\n\n${WIDE_TABLE}\n`;
+/** A 1600px picture in a 648px column, so the lightbox has room to grow; the linked one stays its link's. */
+const PICTURE_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">' +
+  '<rect width="1600" height="1000" fill="#345"/><circle cx="800" cy="500" r="300" fill="#fc6"/></svg>\n';
+const IMAGES_MD =
+  "![A picture](picture.svg)\n\n" +
+  '<a href="./other.html"><picture><img src="./picture.svg" alt="A linked picture"></picture></a>';
+
+const DOCS_MD = `# Fixture\n\n${DIAGRAM}\n\n${IMAGES_MD}\n\n${CRUSH_TABLE}\n\n${WIDE_TABLE}\n`;
 /** A second page with no diagram, one history step away. */
 const OTHER_MD = "# Other\n\nNo diagram here.\n";
 
@@ -63,19 +72,22 @@ const WHEN_RENDERED = `new Promise((resolve) => {
   }).observe(document, { subtree: true, attributes: true, attributeFilter: ["data-state"] });
 })`;
 
-/** Page-side probes shared by the steps of the view test. */
+/** Page-side probes shared by the steps of the view test. Panzoom writes its transform on the next animation frame,
+ *  so every measurement waits one out. */
 const PROBES = `(() => {
   const round = (n) => Math.round(n * 10) / 10;
+  const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const view = () => document.querySelector("dialog.fleet-mermaid-view");
   const viewSvg = () => view().querySelector("svg");
   const columnSvg = () => document.querySelector(".fleet-mermaid > .fleet-mermaid-diagram > svg");
   const bar = (text) => [...view().querySelectorAll("button")].find((b) => b.textContent === text);
   window.__probe = {
-    open() {
+    async open() {
       const button = document.querySelector(".fleet-mermaid > button.fleet-mermaid-zoom");
       const column = columnSvg().getBoundingClientRect().width;
       button.focus();
       button.click();
+      await frame();
       const rect = viewSvg().getBoundingClientRect();
       const viewBox = viewSvg().getAttribute("viewBox").split(/[\\s,]+/).map(Number);
       const stage = view().querySelector(".fleet-mermaid-view-stage").getBoundingClientRect();
@@ -90,9 +102,9 @@ const PROBES = `(() => {
         stage: { x: stage.left, y: stage.top, width: stage.width, height: stage.height },
       };
     },
-    width() { return round(viewSvg().getBoundingClientRect().width); },
-    corner() { const r = viewSvg().getBoundingClientRect(); return [round(r.left), round(r.top)]; },
-    press(text) { bar(text).click(); return round(viewSvg().getBoundingClientRect().width); },
+    async width() { await frame(); return round(viewSvg().getBoundingClientRect().width); },
+    async corner() { await frame(); const r = viewSvg().getBoundingClientRect(); return [round(r.left), round(r.top)]; },
+    async press(text) { bar(text).click(); return window.__probe.width(); },
     pageWheel() {
       const stage = view().querySelector(".fleet-mermaid-view-stage");
       const rect = stage.getBoundingClientRect();
@@ -100,7 +112,7 @@ const PROBES = `(() => {
         deltaY: -1, deltaMode: WheelEvent.DOM_DELTA_PAGE, cancelable: true, bubbles: true,
         clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2,
       }));
-      return round(viewSvg().getBoundingClientRect().width);
+      return window.__probe.width();
     },
     focusStage() { view().querySelector(".fleet-mermaid-view-stage").focus(); return document.activeElement.className; },
     ids() { return { column: columnSvg().id, view: viewSvg().id, open: view().open }; },
@@ -180,6 +192,7 @@ beforeAll(async () => {
   mkdirSync(join(workspace, "docs"));
   writeFileSync(join(workspace, "docs", "README.md"), DOCS_MD);
   writeFileSync(join(workspace, "docs", "other.md"), OTHER_MD);
+  writeFileSync(join(workspace, "docs", "picture.svg"), PICTURE_SVG);
   writeFileSync(join(workspace, "README.md"), "# fixture\n");
   initRepo(workspace);
   commitAll(workspace, "fixture");
@@ -284,9 +297,9 @@ test(
       const after = await tab.evaluate<[number, number]>("window.__probe.corner()");
       expect([after[0] - before[0], after[1] - before[1]]).toEqual([100, 50]);
 
-      // A page-unit wheel (one notch is a page) zooms at least as far as a 120px pixel-unit one did.
+      // A notch is a notch: a page-unit wheel zooms exactly as far as the 120px pixel-unit one did.
       const pageWheeled = await tab.evaluate<number>("window.__probe.pageWheel()");
-      expect(pageWheeled / wheeled).toBeGreaterThanOrEqual(wheeled / reset);
+      expect(pageWheeled / wheeled).toBeCloseTo(wheeled / reset, 2);
 
       // Without a pointer the stage takes focus and the arrows scroll it (right reveals the right side, so the
       // copy shifts left); minus zooms out. ARIA lets no name onto a generic element, so the stage's key
@@ -358,6 +371,92 @@ test(
         open: false,
         locked: "visible",
       });
+    } finally {
+      await tab.close();
+    }
+  },
+  SCENARIO_TIMEOUT_MS,
+);
+
+interface Lightbox {
+  inline: number;
+  zoomed: number;
+  opened: boolean;
+  overlay: { color: string; opacity: string };
+  /** What a click on the nav bar's title would hit: the lightbox, or the nav still above it. */
+  atNavCorner: string;
+  linkedAttached: boolean;
+  /** On paper, with the lightbox open, whether the original image still shows. */
+  printedOriginal: string;
+}
+
+/** Opens the first article image and measures once medium-zoom reports the open finished. */
+const OPEN_LIGHTBOX = `new Promise((resolve) => {
+  const img = document.querySelector(".vp-doc :not(a) > img");
+  const inline = img.getBoundingClientRect().width;
+  img.addEventListener("medium-zoom:opened", () => {
+    const zoomed = document.querySelector(".medium-zoom-image--opened");
+    const overlay = getComputedStyle(document.querySelector(".medium-zoom-overlay"));
+    resolve({
+      inline: Math.round(inline),
+      zoomed: Math.round(zoomed.getBoundingClientRect().width),
+      opened: document.body.classList.contains("medium-zoom--opened"),
+      overlay: { color: overlay.backgroundColor, opacity: overlay.opacity },
+      atNavCorner: (() => {
+        const title = document.querySelector(".VPNavBarTitle a").getBoundingClientRect();
+        return document.elementFromPoint(title.left + 4, title.top + 4).className;
+      })(),
+      linkedAttached: document.querySelector(".vp-doc a img").classList.contains("medium-zoom-image"),
+      printedOriginal: "",
+    });
+  }, { once: true });
+  img.click();
+})`;
+
+const PRINTED_ORIGINAL = `getComputedStyle(document.querySelector(".vp-doc img")).visibility`;
+
+const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
+  const img = document.querySelector(".vp-doc :not(a) > img");
+  const closed = () => ({
+    overlay: document.querySelector(".medium-zoom-overlay") !== null,
+    hidden: img.classList.contains("medium-zoom-image--hidden"),
+  });
+  if (!closed().overlay) return resolve(closed());
+  img.addEventListener("medium-zoom:closed", () => resolve(closed()), { once: true });
+})`;
+
+// medium-zoom finishes an open or close on transitionend, so a reduced-motion sheet that stops its transition
+// outright leaves the lightbox stuck open; the second pass runs under that preference.
+test(
+  "an article image opens in a lightbox over the nav, larger than its inline box, a linked image does not, the original still prints, and Escape closes it, under reduced motion too",
+  async () => {
+    const tab = await openPage();
+    try {
+      for (const motion of ["no-preference", "reduce"]) {
+        await tab.send("Emulation.setEmulatedMedia", {
+          features: [{ name: "prefers-reduced-motion", value: motion }],
+        });
+        const lightbox = await tab.evaluate<Lightbox>(OPEN_LIGHTBOX);
+        await tab.send("Emulation.setEmulatedMedia", { media: "print" });
+        lightbox.printedOriginal = await tab.evaluate<string>(PRINTED_ORIGINAL);
+        await tab.send("Emulation.setEmulatedMedia", { media: "" });
+        expect(lightbox).toEqual({
+          inline: lightbox.inline,
+          zoomed: lightbox.zoomed,
+          opened: true,
+          overlay: { color: lightbox.overlay.color, opacity: "1" },
+          atNavCorner: "medium-zoom-overlay",
+          linkedAttached: false,
+          printedOriginal: "visible",
+        });
+        expect(lightbox.zoomed).toBeGreaterThan(lightbox.inline * 1.5);
+        expect(lightbox.overlay.color).not.toBe("rgba(0, 0, 0, 0)");
+        await tab.press("Escape", 27);
+        expect(await tab.evaluate<Record<string, unknown>>(WHEN_LIGHTBOX_CLOSED)).toEqual({
+          overlay: false,
+          hidden: false,
+        });
+      }
     } finally {
       await tab.close();
     }

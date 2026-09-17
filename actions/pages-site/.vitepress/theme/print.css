@@ -124,8 +124,15 @@
     }
   }
   /* [open] matches mermaid.css's flex rule, so the later sheet wins the tie. */
-  .fleet-mermaid-view[open] {
+  .fleet-mermaid-view[open],
+  .medium-zoom-overlay,
+  .medium-zoom-image--opened {
     display: none;
+  }
+  /* medium-zoom hides the original while its copy is up; on paper the original is the one that
+   * shows. Its rule lands in a runtime style tag after this sheet, so the type selector wins. */
+  img.medium-zoom-image--hidden {
+    visibility: visible;
   }
   html.dark .fleet-mermaid[data-state="rendered"] {
     & > .fleet-mermaid-diagram {

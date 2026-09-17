@@ -92,8 +92,9 @@
 
 /* ---------- the full-size view ---------- */
 
-/* mermaid-zoom.ts writes the canvas transform; the page holds still while
- * the view is open, as it does for the launcher's dialog. */
+/* Panzoom (mermaid-zoom.ts) owns the canvas transform and the stage's
+ * cursor, overflow and touch-action; the page holds still while the view
+ * is open, as it does for the launcher's dialog. */
 .fleet-mermaid-view {
   width: 100vw;
   height: 100dvh;
@@ -138,12 +139,6 @@
     position: relative;
     flex: 1;
     min-height: 0;
-    overflow: hidden;
-    touch-action: none;
-    cursor: grab;
-    &:active {
-      cursor: grabbing;
-    }
     &:focus-visible {
       outline: 2px solid var(--fleet-hue);
       outline-offset: -2px;
@@ -153,7 +148,6 @@
     position: absolute;
     top: 0;
     left: 0;
-    transform-origin: 0 0;
     & > svg {
       display: block;
       max-width: none;

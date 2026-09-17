@@ -1,0 +1,13 @@
+/* The image lightbox (image-zoom.ts, medium-zoom): its overlay and the
+ * zoomed copy sit on <body>, so they stack above carbon's highest layer,
+ * which is the sidebar on a phone and the nav from 960px up (the sidebar
+ * token drops below the nav there). The overlay's ground is the page's;
+ * medium-zoom sets it inline from the token. Reduced motion is in
+ * motion.css, print in print.css. */
+
+.medium-zoom-overlay {
+  z-index: calc(max(var(--vp-z-index-sidebar), var(--vp-z-index-nav)) + 1);
+}
+.medium-zoom-image--opened {
+  z-index: calc(max(var(--vp-z-index-sidebar), var(--vp-z-index-nav)) + 2);
+}
