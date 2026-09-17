@@ -199,6 +199,22 @@ export class Tab {
     }
   }
 
+  /** The role and name assistive technology receives for the first element `selector` matches. */
+  async accessibleNode(selector: string): Promise<{ role: string; name: string }> {
+    const { root } = (await this.send("DOM.getDocument", { depth: 0 })) as {
+      root: { nodeId: number };
+    };
+    const { nodeId } = (await this.send("DOM.querySelector", {
+      nodeId: root.nodeId,
+      selector,
+    })) as { nodeId: number };
+    const { nodes } = (await this.send("Accessibility.getPartialAXTree", {
+      nodeId,
+      fetchRelatives: false,
+    })) as { nodes: { role?: { value: string }; name?: { value: string } }[] };
+    return { role: nodes[0]?.role?.value ?? "", name: nodes[0]?.name?.value ?? "" };
+  }
+
   close(): Promise<Record<string, unknown>> {
     return this.chrome.send("Target.closeTarget", { targetId: this.targetId });
   }

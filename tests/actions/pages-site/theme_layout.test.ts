@@ -289,10 +289,14 @@ test(
       expect(pageWheeled / wheeled).toBeGreaterThanOrEqual(wheeled / reset);
 
       // Without a pointer the stage takes focus and the arrows scroll it (right reveals the right side, so the
-      // copy shifts left); minus zooms out.
+      // copy shifts left); minus zooms out. ARIA lets no name onto a generic element, so the stage's key
+      // instructions reach assistive technology only under a role that takes one.
       expect(await tab.evaluate<string>("window.__probe.focusStage()")).toBe(
         "fleet-mermaid-view-stage",
       );
+      const stageNode = await tab.accessibleNode(".fleet-mermaid-view-stage");
+      expect(stageNode.role).not.toBe("generic");
+      expect(stageNode.name).toMatch(/arrow keys/);
       const beforeKeys = await tab.evaluate<[number, number]>("window.__probe.corner()");
       await tab.press("ArrowRight", 39);
       const afterKeys = await tab.evaluate<[number, number]>("window.__probe.corner()");

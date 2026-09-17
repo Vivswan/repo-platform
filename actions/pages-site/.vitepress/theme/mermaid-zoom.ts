@@ -177,6 +177,8 @@ function build(): View {
   const stage = document.createElement("div");
   stage.className = `${VIEW_CLASS}-stage`;
   stage.tabIndex = 0;
+  // A generic element takes no accessible name, so the key instructions ride on a role that does.
+  stage.setAttribute("role", "group");
   stage.setAttribute("aria-label", "Diagram: arrow keys pan, plus and minus zoom, 0 resets");
   const canvas = document.createElement("div");
   canvas.className = `${VIEW_CLASS}-canvas`;
