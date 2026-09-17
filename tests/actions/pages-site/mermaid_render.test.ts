@@ -148,7 +148,7 @@ function importGraph(entry: string, graph = new Map<string, string[]>()): Map<st
 // loads (reka-ui, vueuse: `isClient` is a snapshot) and loads here, under a fake document with no window, keeps that
 // answer for a later file's happy-dom tests: launcher_ui.test.ts lost reka's dismiss layer that way while the view
 // still sat in the pass's imports. The graph is read from the source, so the pin holds whatever order the files run in.
-test("the render pass reaches no package that reads window as it loads", () => {
+test("the render pass reaches no reka-ui or vueuse specifier", () => {
   const graph = importGraph(
     resolve(import.meta.dir, "../../../actions/pages-site/.vitepress/theme/mermaid-render.ts"),
   );

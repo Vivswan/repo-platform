@@ -385,7 +385,6 @@ test(
       expect(flipped.column).not.toBe(ids.column);
       expect(await tab.evaluate<number>("window.__probe.width()")).toBe(beforeFlip);
 
-      // On paper with the view open: the view is gone.
       await tab.send("Emulation.setEmulatedMedia", { media: "print" });
       expect(await tab.evaluate<string>(VIEW_ON_PAPER)).toBe("none");
       await tab.send("Emulation.setEmulatedMedia", { media: "" });
