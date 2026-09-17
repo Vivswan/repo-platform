@@ -112,7 +112,7 @@ The website is one build of the judged commit: version navigation belongs to the
 
 - **Versions** are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../actions/pages-site/build.ts)).
 
-- **The dropdown** appears once a tag is served and lists `latest`, `stable`, then the tags newest first; the tier being read is the selected entry.
+- **The version menu** (VitePress's nav dropdown) appears once a tag is served and lists `latest`, `stable`, then the tags newest first; the tier being read names the menu.
 
 - **A link that survives releases:** `/<mount>/stable/setup/` keeps resolving as tags come and go, where `/<mount>/v1.2.0/setup/` falls out of the served set after five more releases.
 

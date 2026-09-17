@@ -3,7 +3,8 @@
 //   DOCS_SITE_SRC                the docs tree to render
 //   DOCS_SITE_TITLE              site title
 //   DOCS_SITE_BASE               URL base path for this tier
-//   DOCS_SITE_VERSIONS           JSON [{label, link}] for the version dropdown
+//   DOCS_SITE_ORIGIN             the site's origin (https://owner.github.io): the version menu's links are absolute
+//   DOCS_SITE_VERSIONS           JSON [{label, link}] for the version menu
 //   DOCS_SITE_CURRENT            this tier's version label
 //   DOCS_SITE_FACTS              JSON ProjectFacts (facts.ts)
 //   DOCS_SITE_INCLUDES           JSON IncludeRoot[] (conventions.ts), the other roots staged inside the docs tree
@@ -33,12 +34,13 @@ import { isLandingFile, sourcePathOf } from "./source-path.ts";
 import { tableWrapRule } from "./table-wrap.ts";
 import { headersRule } from "./theme/page-index.ts";
 import { tokensCssPlugin } from "./theme/tokens-css.ts";
+import { type VersionLink, versionNav } from "./version-nav.ts";
 
-/** Carbon's theme config plus the fleet keys the version switcher and the
+/** Carbon's theme config plus the fleet keys the tier guard and the
  *  facts surfaces read. Optional, so carbon's own baseConfig (typed
  *  against plain ThemeConfig) stays assignable in `extends`. */
 interface FleetThemeConfig extends ThemeConfig {
-  docsSiteVersions?: { label: string; link: string }[];
+  docsSiteVersions?: VersionLink[];
   docsSiteCurrent?: string;
   docsSiteFacts?: ProjectFacts;
 }
@@ -57,13 +59,12 @@ const includes = JSON.parse(process.env.DOCS_SITE_INCLUDES || "[]") as IncludeRo
 const indexPages = includeIndexPages(files, includes);
 const includePages = new Set(indexPages);
 const rewrites = deriveRewrites(files, indexPages);
-const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
-  label: string;
-  link: string;
-}[];
+const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as VersionLink[];
+const current = process.env.DOCS_SITE_CURRENT || "";
 const facts = JSON.parse(required("DOCS_SITE_FACTS")) as ProjectFacts;
 const title = required("DOCS_SITE_TITLE");
 const base = process.env.DOCS_SITE_BASE || "/";
+const origin = required("DOCS_SITE_ORIGIN");
 const editBase = process.env.DOCS_SITE_EDIT_BASE || "";
 // An icon link only for an icon the docs tree ships (VitePress serves
 // public/ at the base): a link to a missing file would be a 404 on every
@@ -217,7 +218,7 @@ export default async () => {
       return code.replace("<html", `<html data-fleet-hue="${facts.hue}"`);
     },
     themeConfig: {
-      nav: [],
+      nav: versionNav(versions, current, origin),
       sidebar,
       search: { provider: "local" },
       outline: "deep",
@@ -236,7 +237,7 @@ export default async () => {
       // the edit base ends at the repository root.
       ...(editBase ? { editLink: { pattern: `${editBase}:path`, text: "Edit this page" } } : {}),
       docsSiteVersions: versions,
-      docsSiteCurrent: process.env.DOCS_SITE_CURRENT || "",
+      docsSiteCurrent: current,
       docsSiteFacts: facts,
     },
   });

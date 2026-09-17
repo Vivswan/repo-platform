@@ -1,6 +1,6 @@
 /* The nav bar and the local nav (narrow viewports) over carbon: the
  * appearance switch inline at every width, the title column on the frame's
- * edge, the version select, and the outline sheet's 44px controls. */
+ * edge, the menus' material, and the outline sheet's 44px controls. */
 
 .VPNav .VPNavBar {
   box-shadow: inset 0 -1px var(--vp-c-divider);
@@ -41,8 +41,8 @@
  * opens, click toggles back), and below 768px in the hamburger's screen,
  * two taps again. The bar has room for the switch at every width, so it
  * sits inline; the flyout and the screen keep only what else they hold
- * (nav items, translations, social links), and the hamburger goes with a
- * screen that would be empty. */
+ * (nav items, the version menu among them, translations, social links),
+ * and the hamburger goes with a screen that would be empty. */
 
 .VPNav {
   .VPNavBar .content-body > .appearance {
@@ -154,6 +154,12 @@
   padding: 4px 12px 2px;
   line-height: 1.5;
 }
+/* Carbon's menu links never pass `noIcon` on, so the version menu's absolute
+ * URLs would carry the external-link glyph. */
+.VPMenu .VPMenuLink .link::after,
+.VPNavScreen .VPNavScreenMenuGroupLink::after {
+  content: none;
+}
 .VPNavBar .DocSearch-Button {
   border-radius: var(--fleet-radius-md);
   border-color: var(--vp-c-border);
@@ -199,43 +205,6 @@
   }
 }
 
-/* The version select: a nav tool with the flyouts' material. The chevron
- * is a data URI, so the stroke is written per mode instead of reading a
- * token. */
-.VPNavBar .docs-site-version-switcher {
-  appearance: none;
-  -webkit-appearance: none;
-  height: 40px;
-  margin: 0;
-  padding: 0 28px 0 10px;
-  border: 1px solid transparent;
-  border-radius: var(--fleet-radius-md);
-  background-color: transparent;
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 14px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23737b89' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  color: var(--vp-c-text-1);
-  font: inherit;
-  font-size: 15px;
-  cursor: pointer;
-  transition: background-color var(--fleet-transition);
-  &:hover {
-    background-color: var(--color-action-list-item-default-hover-bg);
-  }
-  /* biome-ignore lint/style/noDescendingSpecificity: biome ranks this nested rule against the title's &:focus-visible above; flattened, the two select different elements */
-  &:focus-visible {
-    outline: 2px solid var(--fleet-hue);
-    outline-offset: 0;
-  }
-  option {
-    background: var(--vp-c-bg-elv);
-    color: var(--vp-c-text-1);
-  }
-}
-.dark .VPNavBar .docs-site-version-switcher {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2380889a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-}
 .VPLocalNav {
   border-bottom-color: var(--vp-c-divider);
   .menu {
