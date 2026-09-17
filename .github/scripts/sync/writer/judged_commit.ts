@@ -5,12 +5,19 @@ import { gitAnswersYes, gitResolvedCommit } from "../../shared/git_yes_no.ts";
 import { lastLine } from "../../shared/lines.ts";
 import { capture } from "../../shared/proc.ts";
 
-/** The code that runs at a repository's recorded commit and is not the writer's own: check.ts's import closure minus
- *  sync.ts's, relative to the platform root (a directory would end in a slash). The writer's closure is left out because
- *  a writer change that matters writes a byte, which moves the stamp on its own, and one that writes nothing leaves the
- *  repository matching what the recorded commit writes. The action's other entries run at `stable` and restamp
- *  nothing. docs/sync.md names the same paths; tests/sync/writer/stamp.test.ts pins the two and the closure. */
-export const CHECKER_SURFACE = ["actions/validate-managed-files/check.ts"] as const;
+/** The roots of check.ts's import closure, relative to the platform root; a directory ends in a slash. That is exactly
+ *  the code that runs at a repository's recorded commit, the writer included: a change there can turn C's verdict away
+ *  from N's with no byte written (N's registration parser accepts a value C's rejects, so C's check stays red and no sync
+ *  PR would move the stamp). The action's other entries run at `stable` and restamp nothing. docs/sync.md names the same
+ *  roots; tests/sync/writer/stamp.test.ts pins the two and the closure. */
+export const CHECKER_SURFACE = [
+  "actions/validate-managed-files/check.ts",
+  ".github/scripts/sync/",
+  ".github/scripts/shared/",
+  "actions/plan/",
+  "actions/shared/",
+  "actions/pages-site/.vitepress/conventions.ts",
+] as const;
 
 /** Whether the checker differs between two commits of the platform checkout at `root`. The operator's build checkout is
  *  one commit deep, so `from` is fetched by sha first when the checkout lacks it. */
