@@ -39,7 +39,7 @@ jobs:
 
       # The owner is lowercased: Pages serves <owner>.github.io in lowercase and lychee reports hosts
       # that way, so the own-site exclude matches. The two excludes are regexes, hence the escaped
-      # dots (the assembly's ownSitePattern escapes the same way).
+      # dots (the assembly's own-origin remap in actions/pages-site/build.ts escapes the same way).
       - name: Resolve the site URLs
         id: urls
         run: |
@@ -136,6 +136,8 @@ jobs:
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           workingDirectory: ${{ steps.site.outputs.site-dir }}
+          # The lychee the assembly's internal check ran (actions/pages-site/action.yml): one version judges a site.
+          lycheeVersion: v0.24.2
           # Anonymous on purpose: given a token, lychee answers a 404 on a
           # github.com URL by asking the API, which calls a private repository
           # alive whatever the path. A deleted deep link into this repository

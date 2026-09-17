@@ -42,7 +42,7 @@ outputs:
     description: '"true" when a site was assembled and site-dir is ready to upload, "false" when there was nothing to publish (empty in check mode)'
     value: ${{ steps.assemble.outputs.publish }}
   site-dir:
-    description: The assembled _site directory to upload as the Pages artifact (empty when publish is false or in check mode)
+    description: The assembled site directory to upload as the Pages artifact (empty when publish is false or in check mode)
     value: ${{ steps.assemble.outputs.site-dir }}
   link-rot-label:
     description: The nightly external-link check's tracking label from the configuration ("" disables the check)
@@ -94,3 +94,23 @@ runs:
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/build.ts"'
+
+    # Every same-site link of a page built from HEAD must resolve in the
+    # artifact as Pages serves it (docs/site.md, "The docs PR check"): the
+    # same lychee as reusable-site.yml's nightly link-rot step, offline.
+    # It runs in the build's scratch directory, which holds no lychee.toml
+    # or .lycheeignore of the caller's, so neither reconfigures the check.
+    - name: Check the site's internal links
+      if: steps.assemble.outputs.link-check-args != ''
+      uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+      with:
+        lycheeVersion: v0.24.2
+        workingDirectory: ${{ runner.temp }}/pages-site
+        args: >-
+          --offline
+          --no-progress
+          --include-fragments=anchor-only
+          --index-files index.html
+          --fallback-extensions html,htm
+          ${{ steps.assemble.outputs.link-check-args }}
+        output: ${{ runner.temp }}/pages-site/link-check.md

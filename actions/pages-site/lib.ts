@@ -261,3 +261,22 @@ export function versionLinks(
 export function urlBase(rootBase: string, rel: string): string {
   return rootBase + rel;
 }
+
+export interface TierScope {
+  /** Artifact path relative to the site root, "" or "<dir>/.../". */
+  rel: string;
+  /** Built from HEAD: its links are the author's to fix today. */
+  strict: boolean;
+}
+
+/** The pages the link check reads: those of the strict tiers. A page belongs to the tier whose rel is the longest prefix of
+ *  its path, since tiers nest (a mount's root rel prefixes its latest/ and tag directories). History is a target, never an
+ *  input: its rot cannot be fixed (tierStrictLinks in build.ts draws the same line). */
+export function seedPages(pages: string[], tiers: TierScope[]): string[] {
+  return pages.filter((page) => {
+    const owner = tiers
+      .filter((tier) => page.startsWith(tier.rel))
+      .sort((a, b) => b.rel.length - a.rel.length)[0];
+    return owner?.strict === true;
+  });
+}

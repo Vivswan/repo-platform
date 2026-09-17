@@ -10,12 +10,14 @@ import { tempDirs } from "../../shared/temp_dir.ts";
 import {
   buildSite,
   commitAll,
+  deployLinkCheckArgs,
   describeRun,
   expectRefusedBeforeBuild,
   initRepo,
   isFile,
   outputs,
   present,
+  type RunnerTemp,
   readSite,
   runnerTemp,
   SITE_TITLE,
@@ -70,7 +72,7 @@ describe("the layout a deploy lands", () => {
     /** The docs mount's versions.json labels, where a mount was laid out. */
     versions: [string, string[]] | null;
     stdout: (string | RegExp)[];
-    outputs: (site: string) => Record<string, string>;
+    outputs: (runner: RunnerTemp) => Record<string, string>;
   }>([
     {
       layout:
@@ -102,12 +104,12 @@ describe("the layout a deploy lands", () => {
       versions: ["manual", ["latest", "stable", "v1.0.0"]],
       stdout: [
         "::notice::docs version v0.9.0 skipped: docs/ has no landing page (README.md or index.md) at that tag",
-        /internal links resolve \(\d+ links judged across \d+ current pages\)/,
       ],
-      outputs: (site) => ({
+      outputs: (runner) => ({
         ...NO_LINK_ROT,
         "publish": "true",
-        "site-dir": site,
+        "site-dir": runner.site,
+        "link-check-args": deployLinkCheckArgs(runner, REPO),
         "link-rot-label": "rot",
         "site-title": "Site Docs",
       }),
@@ -129,10 +131,11 @@ describe("the layout a deploy lands", () => {
       absent: ["versions.json", "latest"],
       versions: null,
       stdout: [],
-      outputs: (site) => ({
+      outputs: (runner) => ({
         ...NO_LINK_ROT,
         "publish": "true",
-        "site-dir": site,
+        "site-dir": runner.site,
+        "link-check-args": deployLinkCheckArgs(runner, REPO),
         "site-title": SITE_TITLE,
       }),
     },
@@ -155,6 +158,7 @@ describe("the layout a deploy lands", () => {
         ...NO_LINK_ROT,
         "publish": "false",
         "site-dir": "",
+        "link-check-args": "",
         "site-title": SITE_TITLE,
       }),
     },
@@ -163,7 +167,7 @@ describe("the layout a deploy lands", () => {
     (row) => {
       const workspace = temp.dir("pages-site-layout-");
       row.fixture(workspace);
-      const runner = runnerTemp(temp);
+      const runner = runnerTemp(temp, REPO);
       const result = buildSite(workspace, REPO, runner, row.env);
       expect(result.exitCode, describeRun(result)).toBe(0);
       const site = runner.site;
@@ -176,7 +180,7 @@ describe("the layout a deploy lands", () => {
         expect(versionLabels(join(site, row.versions[0]))).toEqual(row.versions[1]);
       }
       for (const line of row.stdout) expect(result.stdout).toMatch(line);
-      expect(outputs(result.stdout)).toEqual(row.outputs(site));
+      expect(outputs(result.stdout)).toEqual(row.outputs(runner));
     },
     TEST_TIMEOUT_MS,
   );
@@ -218,7 +222,7 @@ describe("a refused layout", () => {
     ({ fixture, env, message }) => {
       const workspace = temp.dir("pages-site-refused-");
       fixture(workspace);
-      expectRefusedBeforeBuild(buildSite(workspace, REPO, runnerTemp(temp), env), message);
+      expectRefusedBeforeBuild(buildSite(workspace, REPO, runnerTemp(temp, REPO), env), message);
     },
     TEST_TIMEOUT_MS,
   );

@@ -42,7 +42,7 @@ describe("the versioned vitepress deploy", () => {
   beforeAll(() => {
     const workspace = temp.dir("pages-site-fixture-");
     docsFixture(workspace);
-    const runner = runnerTemp(temp);
+    const runner = runnerTemp(temp, DOCS_REPO);
     const result = buildSite(workspace, DOCS_REPO, runner, DEPLOY_ENV);
     if (result.exitCode !== 0)
       throw new Error(`the versioned build failed: ${describeRun(result)}`);
@@ -296,7 +296,7 @@ describe("the versioned vitepress deploy", () => {
       initRepo(workspace);
       commitAll(workspace, "docs with a favicon");
       fixtureGit(workspace, ["tag", "v1.0.0"]);
-      const runner = runnerTemp(temp);
+      const runner = runnerTemp(temp, "fixture-owner/favicon-repo");
       const result = buildSite(workspace, "fixture-owner/favicon-repo", runner, {});
       expect(result.exitCode, describeRun(result)).toBe(0);
       expect(readSite(runner.site, "index.html")).toContain("favicon landing page");
@@ -325,7 +325,7 @@ describe("link strictness", () => {
       commitAll(workspace, "seal a dead link into history");
       fixtureGit(workspace, ["tag", "v0.3.0"]);
       revertHead(workspace);
-      const sealed: RunnerTemp = runnerTemp(temp);
+      const sealed: RunnerTemp = runnerTemp(temp, DOCS_REPO);
       const lenient = buildSite(workspace, DOCS_REPO, sealed, DEPLOY_ENV);
       expect(lenient.exitCode, describeRun(lenient)).toBe(0);
       expect(versionLabels(sealed.site)).toEqual([
@@ -336,9 +336,9 @@ describe("link strictness", () => {
         "v0.1.0",
       ]);
       appendDeadLink(workspace);
-      const strict = buildSite(workspace, DOCS_REPO, runnerTemp(temp), DEPLOY_ENV);
+      const strict = buildSite(workspace, DOCS_REPO, runnerTemp(temp, DOCS_REPO), DEPLOY_ENV);
       expect(strict.exitCode, describeRun(strict)).not.toBe(0);
-      const check = buildSite(workspace, DOCS_REPO, runnerTemp(temp), { CHECK: "true" });
+      const check = buildSite(workspace, DOCS_REPO, runnerTemp(temp, DOCS_REPO), { CHECK: "true" });
       expect(check.exitCode, describeRun(check)).not.toBe(0);
     },
     TEST_TIMEOUT_MS,

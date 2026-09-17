@@ -8,7 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   type DocsConfig,
   isLocaleDir,
@@ -37,6 +37,7 @@ import {
   planMount,
   reservedRootEntries,
   type SiteConfig,
+  seedPages,
   siteLayout,
   type Tier,
   type VersionEntry,
@@ -212,6 +213,52 @@ describe("planMount", () => {
   ])("%s", (_reason, tags, tiers, index) => {
     expect(planMount(docs, tags)).toEqual(tiers);
     expect(versionsIndex(tags)).toEqual(index);
+  });
+});
+
+describe("seedPages", () => {
+  // Without the longest-prefix rule the docs root's pages (a tag build) would be judged strictly, or, with the tiers
+  // in another order, HEAD's pages would be skipped; declaration order is not the rule, so the tiers are listed
+  // shortest first here.
+  test("a page seeds only when the LONGEST tier prefix owning it is strict; a versioned root built from HEAD seeds too", () => {
+    // A website at "/" (HEAD) over a versioned docs mount whose root is a
+    // tag build: the docs root's and stable/ pages belong to the tag, its
+    // latest/ to HEAD, and the website's own pages to the website.
+    const tiers = [
+      { rel: "", strict: true },
+      { rel: "docs/", strict: false },
+      { rel: "docs/v0.1.0/", strict: false },
+      { rel: "docs/stable/", strict: false },
+      { rel: "docs/latest/", strict: true },
+    ];
+    expect(
+      seedPages(
+        [
+          "index.html",
+          "about.html",
+          "docs/index.html",
+          "docs/setup.html",
+          "docs/latest/index.html",
+          "docs/latest/skills/alpha/index.html",
+          "docs/v0.1.0/index.html",
+          "docs/stable/index.html",
+        ],
+        tiers,
+      ),
+    ).toEqual([
+      "index.html",
+      "about.html",
+      "docs/latest/index.html",
+      "docs/latest/skills/alpha/index.html",
+    ]);
+    const headRoot = [
+      { rel: "latest/", strict: true },
+      { rel: "", strict: true },
+    ];
+    expect(seedPages(["index.html", "latest/index.html"], headRoot)).toEqual([
+      "index.html",
+      "latest/index.html",
+    ]);
   });
 });
 
@@ -600,7 +647,10 @@ describe("check build", () => {
         expect(existsSync(page)).toBe(false);
       } else {
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain("docs build check passed");
+        // The link check is the action's next step; the build hands it the dist as its own served root.
+        expect(result.stdout).toContain(
+          `(output) link-check-args=--root-dir '${join(buildDir, ".vitepress", "dist")}' --files-from '${dirname(buildDir)}/link-check-inputs.txt'`,
+        );
         expect(readFileSync(page, "utf-8")).toContain("<p>Plain text here.</p>");
         // The token layer reaches the bundle only through the virtual module config.mts serves.
         const assets = join(buildDir, ".vitepress", "dist", "assets");

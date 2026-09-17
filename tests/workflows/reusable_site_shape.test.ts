@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { buildBody, failureDirs } from "../../actions/fuzz-issue/fuzz-issue.ts";
+import { loadAction, stepNamed } from "../shared/action_step";
 import { argvStub } from "../shared/argv_stub";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -34,7 +35,7 @@ const steps = workflow.jobs.site?.steps ?? [];
 const step = (id: string) => steps.find((candidate) => candidate.id === id);
 
 describe("reusable-site.yml", () => {
-  // The escaped-dot patterns must match the assembly's ownSitePattern (actions/pages-site), and the lowercase host is
+  // The escaped-dot patterns must match the assembly's own-origin remap (actions/pages-site/build.ts), and the lowercase host is
   // lychee's reporting convention: a link to the own site in another case would be reported as external.
   test("the urls step, executed, resolves the project-pages base path and the lowercase owner origin", () => {
     const urls = step("urls");
@@ -75,6 +76,26 @@ describe("reusable-site.yml", () => {
   // repository's link alive, so the link-rot issue is closed wrongly; with fail unset a finding fails the deploy that shipped.
   test("lychee runs with no token and never fails the deploy", () => {
     expect(step("links")?.with).toEqual(expect.objectContaining({ token: "", fail: false }));
+  });
+
+  // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml) and the nightly run the
+  // same action at the same version. The internal step's knobs are each silent when wrong: without --offline every
+  // external link is fetched on every build, without the fragment mode a missing anchor passes, without the index
+  // and fallback names a directory or extensionless link Pages serves reads as missing.
+  test("the assembly's internal link check runs the nightly's lychee, offline, over the artifact as Pages serves it", () => {
+    const internal = stepNamed(
+      loadAction("actions/pages-site/action.yml"),
+      "Check the site's internal links",
+    ) as Step;
+    const nightly = step("links");
+    expect({ uses: internal.uses, version: internal.with?.lycheeVersion }).toEqual({
+      uses: nightly?.uses,
+      version: nightly?.with?.lycheeVersion,
+    });
+    expect(internal.with?.args).toBe(
+      "--offline --no-progress --include-fragments=anchor-only --index-files index.html " +
+        "--fallback-extensions html,htm ${{ steps.assemble.outputs.link-check-args }}",
+    );
   });
 
   // lychee's markdown report as the action writes it (lychee 0.24.2 over a fixture site, the run link appended by

@@ -203,15 +203,27 @@ fleet-ci.yml's `docs-check` job builds `docs/` strictly on every pull request of
 
 - **The landing page:** a `docs/` without `docs/README.md` fails it, naming the missing landing page.
 
-**Internal links** are checked across the whole assembled site, served the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`.
+**Internal links** are checked across the whole assembled site by [lychee](https://github.com/lycheeverse/lychee), run offline by the same [lychee-action](https://github.com/lycheeverse/lychee-action) step and version as the nightly link-rot check, over the artifact laid out the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`.
 
-Every same-site link on a page built from the default branch must resolve, wherever the target lives (a website page into the docs, a docs page to a staged skill, a `#fragment` naming a heading, an emitted asset, a link spelled with the site's own URL). A broken one fails with a `page -> link (reason)` list:
+Every same-site link on a page built from the default branch must resolve, wherever the target lives (a website page into the docs, a docs page to a staged skill, a `#fragment` naming a heading, an emitted asset, a link spelled with the site's own URL).
+
+A broken one fails the step with lychee's report, in the log and the job summary: one section per page, every failing link with its line and column and lychee's reason.
 
 ```text
-broken internal links (page -> link):
-  /repo/docs/latest/index.html -> /repo/docs/latest/skills/alpha/#nope (no element with id 'nope' on that page)
-  /repo/index.html -> /repo/docs/skills/missing/ (status 404)
+### Errors in /home/runner/work/_temp/pages-site/served/repo/index.html
+
+* [ERROR] <file:///home/runner/work/_temp/pages-site/served/repo/docs/skills/missing> (at 12:10) | File not found. Check if file exists and path is correct
+* [ERROR] <file:///home/runner/work/_temp/pages-site/served/repo/docs/latest/skills/alpha#nope> (at 14:22) | Cannot find fragment
 ```
+
+Where lychee reads a link differently from Pages:
+
+| Link | lychee | Pages |
+|---|---|---|
+| inside `<pre>`, `<code>`, or a `<script src>` | not read (verbatim elements); every other `href` and `src` is | served |
+| under a page's `<base href>` | resolved from the page's own path | resolved from the base |
+| protocol-relative (`//host/path`) | read as a file path, so it fails; spell the scheme | fetched over the page's scheme |
+| a page's URL with a trailing slash (`/setup/` for `setup.html`) | passes, through the extensionless fallback | 404 |
 
 ## Link rot
 
