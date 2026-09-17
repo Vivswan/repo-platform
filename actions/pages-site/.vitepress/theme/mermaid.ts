@@ -1,8 +1,9 @@
 // Browser APIs stay inside the callbacks, so the server render touches nothing.
 
 import { onContentUpdated, useData } from "vitepress";
-import { defineComponent, watch } from "vue";
+import { defineComponent, h, watch } from "vue";
 import { renderAll } from "./mermaid-render.ts";
+import MermaidZoomView from "./mermaid-zoom.ts";
 
 export default defineComponent({
   name: "MermaidDiagrams",
@@ -10,6 +11,6 @@ export default defineComponent({
     const { isDark } = useData();
     onContentUpdated(() => void renderAll(isDark.value));
     watch(isDark, (dark) => void renderAll(dark));
-    return () => null;
+    return () => h(MermaidZoomView);
   },
 });

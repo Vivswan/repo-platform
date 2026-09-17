@@ -1,7 +1,7 @@
 // The theme's layout in a real browser over a built site (the harness is headless_chrome.ts): the diagram view a
 // reader opens from a rendered mermaid mount, the lightbox an article image opens, and the width a prose cell keeps
 // beside a long inline-code cell. All are browser facts no unit render can show: the view's natural size against the
-// scaled-down column copy, focus and scroll lock across a native dialog, a lightbox finishing under reduced motion,
+// scaled-down column copy, focus and scroll lock across a modal dialog, a lightbox finishing under reduced motion,
 // and the table's auto layout distributing a scroll wrapper's width.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -85,7 +85,8 @@ const WHEN_RENDERED = `new Promise((resolve) => {
 const PROBES = `(() => {
   const round = (n) => Math.round(n * 10) / 10;
   const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  const view = () => document.querySelector("dialog.fleet-mermaid-view");
+  const view = () => document.querySelector(".fleet-mermaid-view");
+  const isOpen = () => document.querySelector('.fleet-mermaid-view[data-state="open"]') !== null;
   const viewSvg = () => view().querySelector("svg");
   const columnSvg = () => document.querySelector(".fleet-mermaid > .fleet-mermaid-diagram > svg");
   const bar = (text) => [...view().querySelectorAll("button")].find((b) => b.textContent === text);
@@ -101,11 +102,11 @@ const PROBES = `(() => {
       const stage = view().querySelector(".fleet-mermaid-view-stage").getBoundingClientRect();
       return {
         label: button.getAttribute("aria-label"),
-        open: view().open,
+        open: isOpen(),
         column: round(column),
         natural: round(rect.width),
         viewBox: viewBox[2],
-        locked: getComputedStyle(document.documentElement).overflow,
+        locked: getComputedStyle(document.body).overflow,
         focusInside: view().contains(document.activeElement),
         stage: { x: stage.left, y: stage.top, width: stage.width, height: stage.height },
       };
@@ -123,12 +124,12 @@ const PROBES = `(() => {
       return window.__probe.width();
     },
     focusStage() { view().querySelector(".fleet-mermaid-view-stage").focus(); return document.activeElement.className; },
-    ids() { return { column: columnSvg().id, view: viewSvg().id, open: view().open }; },
+    ids() { return { column: columnSvg().id, view: viewSvg().id, open: isOpen() }; },
     closed() {
       return {
-        open: view().open,
+        open: isOpen(),
         focusOnOpener: document.activeElement === document.querySelector(".fleet-mermaid-zoom"),
-        locked: getComputedStyle(document.documentElement).overflow,
+        locked: getComputedStyle(document.body).overflow,
       };
     },
   };
@@ -149,10 +150,7 @@ const BAR_AT_280 = `new Promise((resolve) => requestAnimationFrame(() => {
   });
 }))`;
 
-const VIEW_ON_PAPER = `({
-  view: getComputedStyle(document.querySelector(".fleet-mermaid-view")).display,
-  rootOverflow: getComputedStyle(document.documentElement).overflow,
-})`;
+const VIEW_ON_PAPER = `getComputedStyle(document.querySelector(".fleet-mermaid-view")).display`;
 
 const WHEN_REDRAWN = (previous: string) => `new Promise((resolve) => {
   const redrawn = () => {
@@ -258,7 +256,7 @@ async function openPage(followSystem: "light" | null = null): Promise<Tab> {
 }
 
 // A synthetic click on the button is the reader's; the wheel, the drag, and Escape go through the browser's input
-// path, which is what decides whether the stage's listener, the pointer capture, and the dialog's cancel see them.
+// path, which is what decides whether the stage's listener, the pointer capture, and reka's Escape layer see them.
 test(
   "the zoom button opens the diagram at its natural size in a modal view that zooms and pans by wheel, drag, and keys, follows a theme flip, and hands focus back on Escape",
   async () => {
@@ -357,6 +355,11 @@ test(
       const stageNode = await tab.accessibleNode(".fleet-mermaid-view-stage");
       expect(stageNode.role).not.toBe("generic");
       expect(stageNode.name).toMatch(/arrow keys/);
+      // The view's own name comes through reka's hidden title, not an aria-label on the content.
+      expect(await tab.accessibleNode(".fleet-mermaid-view")).toEqual({
+        role: "dialog",
+        name: "Diagram at full size",
+      });
       const beforeKeys = await tab.evaluate<[number, number]>("window.__probe.corner()");
       await tab.press("ArrowRight", 39);
       const afterKeys = await tab.evaluate<[number, number]>("window.__probe.corner()");
@@ -382,13 +385,9 @@ test(
       expect(flipped.column).not.toBe(ids.column);
       expect(await tab.evaluate<number>("window.__probe.width()")).toBe(beforeFlip);
 
-      // On paper with the view open: the view is gone and the root scrolls again, so a long article paginates
-      // instead of printing clipped to one page.
+      // On paper with the view open: the view is gone.
       await tab.send("Emulation.setEmulatedMedia", { media: "print" });
-      expect(await tab.evaluate<Record<string, string>>(VIEW_ON_PAPER)).toEqual({
-        view: "none",
-        rootOverflow: "visible",
-      });
+      expect(await tab.evaluate<string>(VIEW_ON_PAPER)).toBe("none");
       await tab.send("Emulation.setEmulatedMedia", { media: "" });
 
       await tab.press("Escape", 27);
