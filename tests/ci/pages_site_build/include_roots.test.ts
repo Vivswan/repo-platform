@@ -7,14 +7,19 @@ import { dirname, join } from "node:path";
 import { fixtureGit } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 import {
+  type BuildResult,
   buildSite,
   commitAll,
   describeRun,
   expectRefusedBeforeBuild,
   initRepo,
   isFile,
+  outputs,
+  pinnedLychee,
+  type RunnerTemp,
   readAssets,
   readSite,
+  runLinkCheck,
   runnerTemp,
   siteConfig,
   TEST_TIMEOUT_MS,
@@ -120,13 +125,13 @@ const ENV = { SITE_DIR: "dist", CONFIG: siteConfig({ site_title: "Inc Docs", inc
 
 describe("include roots in the assembled site", () => {
   test(
-    "renders skills/ inside the docs mount per tier, titles and sources them from SKILL.md, and passes the cross-mount link gate",
+    "renders skills/ inside the docs mount per tier, titles and sources them from SKILL.md, and lists only HEAD's pages for the link check",
     () => {
       // Per-tier staging of a root absent at some refs, and the edit-link and blob-link bases
       // at the tier's ref, are whole-run facts with no unit home.
       const workspace = temp.dir("pages-site-include-");
       includeFixture(workspace);
-      const runner = runnerTemp(temp);
+      const runner = runnerTemp(temp, REPO);
       const result = buildSite(workspace, REPO, runner, ENV);
       expect(result.exitCode, describeRun(result)).toBe(0);
       const site = runner.site;
@@ -210,36 +215,95 @@ describe("include roots in the assembled site", () => {
       const assets = readAssets(site, "docs/latest/assets");
       expect(assets).toContain('"url":"/inc-repo/docs/latest/skills/beta/"');
       expect(assets).not.toContain("skills/beta/SKILL.html");
-      expect(result.stdout).toMatch(
-        /internal links resolve \(\d+ links judged across \d+ current pages\)/,
-      );
+
+      // The link check's inputs are the pages built from HEAD, the website's and latest/'s, and never a tag tier's
+      // (the docs root and stable/ serve v0.1.0 here): a sealed dead link in history must not fail the deploy.
+      const listed = linkCheckInputs(runner);
+      expect(listed.filter((rel) => !rel.startsWith("docs/latest/"))).toEqual(["index.html"]);
+      expect(listed).toContain("docs/latest/skills/alpha/index.html");
+      for (const rel of ["docs/index.html", "docs/stable/index.html", "docs/v0.1.0/index.html"]) {
+        expect(isFile(site, rel), rel).toBe(true);
+        expect(listed).not.toContain(rel);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+/** The pages the build listed for lychee, relative to the site. */
+function linkCheckInputs(runner: RunnerTemp): string[] {
+  const scratch = dirname(dirname(runner.site));
+  return readFileSync(join(scratch, "link-check-inputs.txt"), "utf-8")
+    .trimEnd()
+    .split("\n")
+    .map((line) => line.slice(runner.site.length + 1));
+}
+
+describe("broken links across the mounts", () => {
+  // A link from the website half into the docs mount has no judge but the check over the assembled artifact. The
+  // build hands lychee its arguments and the action's next step runs it, so the failing run is reproduced here with
+  // the step's own args, when the pinned lychee is on PATH.
+  const lychee = pinnedLychee();
+  let built: { runner: RunnerTemp; result: BuildResult } | null = null;
+  const broken = () => {
+    if (built !== null) return built;
+    const workspace = temp.dir("pages-site-include-broken-");
+    includeFixture(workspace);
+    website(workspace, '<a href="/inc-repo/docs/skills/missing/">gone</a>');
+    // A page named with a glob metacharacter: lychee would read its raw path as a pattern and skip it silently.
+    writeFileSync(
+      join(workspace, "dist", "[guide].html"),
+      '<a href="/inc-repo/docs/skills/also-missing/">gone too</a>',
+    );
+    const readme = join(workspace, "docs", "README.md");
+    writeFileSync(readme, `${readFileSync(readme, "utf-8")}\nAnd [nothing](skills/alpha/#nope).\n`);
+    commitAll(workspace, "break two links");
+    const runner = runnerTemp(temp, REPO);
+    built = { runner, result: buildSite(workspace, REPO, runner, ENV) };
+    return built;
+  };
+
+  test(
+    "the assembly itself passes and lists every linking page for the check, a glob-named one as the pattern matching it alone",
+    () => {
+      const { runner, result } = broken();
+      expect(result.exitCode, describeRun(result)).toBe(0);
+      const listed = linkCheckInputs(runner);
+      expect(listed).toContain("index.html");
+      expect(listed).toContain("docs/latest/index.html");
+      expect(listed).toContain("[[]guide[]].html");
     },
     TEST_TIMEOUT_MS,
   );
 
-  test(
-    "fails the assembly on a website link into a missing docs page and on a docs link to a missing anchor, naming both",
+  test.skipIf(lychee === null)(
+    "lychee, run as the step runs it, fails on the website's links into missing docs pages (the glob-named page's included) and the docs' link to a missing anchor, naming each",
     () => {
-      // A link from the website half into the docs mount has no judge but the assembled-site
-      // gate; site_links.test.ts pins the checker over one tree.
-      const workspace = temp.dir("pages-site-include-broken-");
-      includeFixture(workspace);
-      website(workspace, '<a href="/inc-repo/docs/skills/missing/">gone</a>');
-      const readme = join(workspace, "docs", "README.md");
-      writeFileSync(
-        readme,
-        `${readFileSync(readme, "utf-8")}\nAnd [nothing](skills/alpha/#nope).\n`,
+      const { runner, result } = broken();
+      const check = runLinkCheck(
+        lychee ?? "",
+        outputs(result.stdout)["link-check-args"],
+        dirname(dirname(runner.site)),
       );
-      commitAll(workspace, "break two links");
-      const result = buildSite(workspace, REPO, runnerTemp(temp), ENV);
-      expect(result.exitCode, describeRun(result)).not.toBe(0);
-      expect(result.stdout).toContain(
-        "  /inc-repo/index.html -> /inc-repo/docs/skills/missing/ (status 404)",
+      expect(check.exitCode, describeRun(check)).toBe(2);
+      const site = runner.site;
+      expect(check.stdout).toContain(`### Errors in ${site}/index.html`);
+      expect(check.stdout).toMatch(
+        new RegExp(
+          `^\\* \\[ERROR\\] <file://${site}/docs/skills/missing> \\(at \\d+:\\d+\\) \\| File not found\\. Check if file exists and path is correct$`,
+          "m",
+        ),
       );
-      expect(result.stdout).toContain(
-        "  /inc-repo/docs/latest/index.html -> /inc-repo/docs/latest/skills/alpha/#nope (no element with id 'nope' on that page)",
+      expect(check.stdout).toContain(`### Errors in ${site}/docs/latest/index.html`);
+      expect(check.stdout).toMatch(
+        new RegExp(
+          `^\\* \\[ERROR\\] <file://${site}/docs/latest/skills/alpha#nope> \\(at \\d+:\\d+\\) \\| Cannot find fragment$`,
+          "m",
+        ),
       );
-      expect(result.stderr).toContain("::error::2 broken internal links in the current content");
+      expect(check.stdout).toContain(`### Errors in ${site}/[guide].html`);
+      expect(check.stdout).toContain(`<file://${site}/docs/skills/also-missing>`);
+      expect(check.stdout.match(/^\* \[ERROR\]/gm)).toHaveLength(3);
     },
     TEST_TIMEOUT_MS,
   );
@@ -315,7 +379,7 @@ describe("include root staging refusals", () => {
       const workspace = temp.dir("pages-site-include-refusal-");
       refusalFixture(workspace, mutate);
       const env = { CHECK: "true", CONFIG: siteConfig({ include }) };
-      expectRefusedBeforeBuild(buildSite(workspace, REPO, runnerTemp(temp), env), message);
+      expectRefusedBeforeBuild(buildSite(workspace, REPO, runnerTemp(temp, REPO), env), message);
     },
     TEST_TIMEOUT_MS,
   );
@@ -346,14 +410,16 @@ describe("nested include mounts", () => {
       // as the skills mount's collision at exit 1, before any vitepress run.
       const workspace = temp.dir("pages-site-include-nested-");
       nestedFixture(workspace);
-      const runner = runnerTemp(temp);
+      const runner = runnerTemp(temp, REPO);
       const env = { CHECK: "true", CONFIG: siteConfig({ include: NESTED_INCLUDE }) };
       const result = buildSite(workspace, REPO, runner, env);
       expect(result.exitCode, describeRun(result)).toBe(0);
-      expect(result.stdout).toMatch(
-        /docs build check passed \(\d+ links judged across \d+ pages\)/,
+      // The check builds at "/": the dist is its own served root, and no own-origin link is remapped into it.
+      const scratch = dirname(dirname(runner.site));
+      const dist = join(scratch, "build-0", ".vitepress", "dist");
+      expect(outputs(result.stdout)["link-check-args"]).toBe(
+        `--root-dir '${dist}' --files-from '${join(scratch, "link-check-inputs.txt")}'`,
       );
-      const dist = join(dirname(runner.site), "build-0", ".vitepress", "dist");
       const skill = readSite(dist, "skills/alpha/index.html");
       const agent = readSite(dist, "skills/agents/one/index.html");
       expect(select(skill, ".vp-doc a").map((a) => a.attrs.href)).toContain("./../agents/one/");

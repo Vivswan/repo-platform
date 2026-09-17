@@ -16,7 +16,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fill, loadAction, stepNamed } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
@@ -57,15 +58,65 @@ export interface RunnerTemp {
    *  base sees the build root under two spellings, on which vitepress's
    *  path-keyed route resolution reports every internal link dead. */
   alias: string;
-  /** The assembled artifact, under the real path. */
+  /** The assembled artifact, under the real path: the build's scratch
+   *  directory, then the served root, then the repository's base path. */
   site: string;
 }
 
-export function runnerTemp(temp: TempDirs): RunnerTemp {
+export function runnerTemp(temp: TempDirs, repository: string): RunnerTemp {
   const real = temp.dir("pages-site-temp-");
   const alias = join(temp.dir("pages-site-alias-"), "alias");
   symlinkSync(real, alias);
-  return { alias, site: join(realpathSync(real), "pages-site", "_site") };
+  const repo = repository.split("/")[1];
+  return { alias, site: join(realpathSync(real), "pages-site", "served", repo) };
+}
+
+/** The `link-check-args` output a deploy of `repository` emits for `runner`'s layout: the artifact's root, the page
+ *  list in the scratch directory, and the site's own links remapped into the artifact. */
+export function deployLinkCheckArgs(runner: RunnerTemp, repository: string): string {
+  const [owner, repo] = repository.split("/");
+  const scratch = dirname(dirname(runner.site));
+  return (
+    `--root-dir '${dirname(runner.site)}' --files-from '${join(scratch, "link-check-inputs.txt")}' ` +
+    `--remap '^https://${owner.toLowerCase()}\\.github\\.io/${repo}([/?#]|$) file://${runner.site}$1'`
+  );
+}
+
+const LINK_CHECK_STEP = stepNamed(
+  loadAction("actions/pages-site/action.yml"),
+  "Check the site's internal links",
+) as { with: { args: string; lycheeVersion: string } };
+
+/** The lychee the action's link-check step pins, when it is on PATH; null, and the live run is skipped loudly. A
+ *  lychee that cannot print its version is broken, not absent. */
+export function pinnedLychee(): string | null {
+  const pinned = `lychee ${LINK_CHECK_STEP.with.lycheeVersion.replace(/^v/, "")}`;
+  const path = Bun.which("lychee");
+  if (path === null) {
+    console.warn(
+      `${pinned} is not on PATH: the live link check is skipped here and runs in the action`,
+    );
+    return null;
+  }
+  const version = boundedSpawnSync([path, "--version"]);
+  if (version.exitCode !== 0) {
+    throw new Error(`${path} --version exited ${version.exitCode}:\n${version.stderr}`);
+  }
+  const printed = version.stdout.trim();
+  if (printed === pinned) return path;
+  console.warn(
+    `${path} is ${printed}, not ${pinned}: the live link check is skipped here and runs in the action`,
+  );
+  return null;
+}
+
+/** The step's lychee run the way lychee-action's entrypoint runs it (bash evals the args string), the markdown
+ *  report on stdout. */
+export function runLinkCheck(lychee: string, linkCheckArgs: string, cwd: string): BuildResult {
+  const args = fill(LINK_CHECK_STEP.with.args, {
+    "${{ steps.assemble.outputs.link-check-args }}": linkCheckArgs,
+  });
+  return boundedSpawnSync(["bash", "-c", `'${lychee}' --format markdown ${args}`], { cwd });
 }
 
 export interface BuildResult {

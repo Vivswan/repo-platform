@@ -28,15 +28,16 @@ import {
   planMount,
   reservedRootEntries,
   type SiteConfig,
+  seedPages,
   siteLayout,
   type Tier,
+  type TierScope,
   urlBase,
   validateRelPath,
   versionLinks,
   versionsIndex,
   versionTags,
 } from "./lib.ts";
-import { checkSiteLinks, type TierScope } from "./site_links.ts";
 
 const ACTION_DIR = import.meta.dir;
 
@@ -144,6 +145,10 @@ export function assertCentralTheme(docsTree: string): void {
 interface Config extends SiteConfig {
   workspace: string;
   scratch: string;
+  /** The directory the artifact sits in at its base path, the way Pages
+   *  serves it: lychee's --root-dir, so an absolute link resolves as the
+   *  browser resolves it. */
+  served: string;
   site: string;
   /** The site-build hook's dist, relative to the repository root; "" for
    *  no website. */
@@ -171,11 +176,13 @@ function readConfig(): Config {
   // build two spellings of one directory, and path-keyed route resolution
   // inside vitepress falls apart on the mismatch.
   const scratch = join(realpathSync(env("RUNNER_TEMP", tmpdir())), "pages-site");
+  const served = join(scratch, "served");
   return {
     ...parseSiteConfig(requireEnv("CONFIG")),
     workspace,
     scratch,
-    site: join(scratch, "_site"),
+    served,
+    site: join(served, repo),
     siteDir: env("SITE_DIR"),
     repository,
     serverUrl,
@@ -471,10 +478,65 @@ function assembleDocs(cfg: Config, mount: DocsMount, kept: string[]): TierScope[
   return tiers.map((tier) => ({ rel: tier.rel, strict: tierStrictLinks(tier) }));
 }
 
+/** Pages serves `.htm` as well as `.html`. */
+function walkHtml(dir: string, prefix = ""): string[] {
+  const pages: string[] = [];
+  for (const name of readdirSync(join(dir, prefix)).sort()) {
+    const rel = prefix === "" ? name : `${prefix}/${name}`;
+    if (statSync(join(dir, rel)).isDirectory()) {
+      pages.push(...walkHtml(dir, rel));
+    } else if (/\.html?$/i.test(name)) {
+      pages.push(rel);
+    }
+  }
+  return pages;
+}
+
+/** Quoted for lychee-action, which evals its args in bash. */
+function quoted(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The arguments the action's link-check step (action.yml) hands lychee on top of its own: the pages built from HEAD as
+ *  the inputs, resolved under the served root. `origin` is the deployed site's (`https://owner.github.io`): a link spelled
+ *  with it under the base is the site's own and is remapped into the artifact. Null when the layout is not the deployed
+ *  one (the docs PR check builds one mount at "/"), so such links stay external. */
+function linkCheckArgs(
+  cfg: Config,
+  layout: {
+    served: string;
+    site: string;
+    rootBase: string;
+    tiers: TierScope[];
+    origin: string | null;
+  },
+): string {
+  const pages = seedPages(walkHtml(layout.site), layout.tiers);
+  if (pages.length === 0) {
+    throw new Error(
+      `${layout.site} holds no page built from HEAD - the layout always has one, so nothing would be checked`,
+    );
+  }
+  // lychee reads an input carrying [, ], * or ? as a glob, so such a page is spelled as the pattern matching it alone.
+  const literal = (path: string) => path.replace(/[[\]*?]/g, "[$&]");
+  const inputs = join(cfg.scratch, "link-check-inputs.txt");
+  writeFileSync(inputs, `${pages.map((page) => literal(join(layout.site, page))).join("\n")}\n`);
+  const args = [`--root-dir ${quoted(layout.served)}`, `--files-from ${quoted(inputs)}`];
+  if (layout.origin !== null) {
+    // The delimiter after the base is captured and carried into the file URL (Rust regex has no lookahead), so a
+    // sibling site on the same origin stays external.
+    const own = `${new URL(layout.origin).origin}${layout.rootBase.slice(0, -1)}`;
+    const pattern = `^${own.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([/?#]|$)`;
+    args.push(`--remap ${quoted(`${pattern} ${Bun.pathToFileURL(layout.site).href}$1`)}`);
+  }
+  return args.join(" ");
+}
+
 /** The outputs every deploy run publishes, whatever it assembled. */
-function setSiteOutputs(cfg: Config, site: string | null): void {
+function setSiteOutputs(cfg: Config, site: string | null, linkCheck: string): void {
   setOutput("publish", site === null ? "false" : "true");
   setOutput("site-dir", site ?? "");
+  setOutput("link-check-args", linkCheck);
   setOutput("link-rot-label", cfg.linkRotLabel);
   setOutput("link-rot-color", cfg.linkRotColor);
   setOutput("link-rot-description", cfg.linkRotDescription);
@@ -503,9 +565,10 @@ async function main(): Promise<void> {
     const { dist } = buildVitepressTier(cfg, tier, [], cfg.docs.include, { base: "/" });
     // No origin: this build sits at "/", not at the deployed layout, so a
     // link spelled with the site's own origin stays external here.
-    const checked = await checkSiteLinks(dist, "/", [{ rel: "", strict: true }], null);
-    console.log(
-      `docs build check passed (${checked.judged} links judged across ${checked.pages} pages)`,
+    const tiers = [{ rel: "", strict: true }];
+    setOutput(
+      "link-check-args",
+      linkCheckArgs(cfg, { served: dist, site: dist, rootBase: "/", tiers, origin: null }),
     );
     return;
   }
@@ -521,7 +584,7 @@ async function main(): Promise<void> {
         ? "the docs half is off (site.path: null)"
         : `the repository has no ${DOCS_DIR}/`;
     console.log(`::notice::nothing to publish: the site-build hook named no directory and ${why}`);
-    setSiteOutputs(cfg, null);
+    setSiteOutputs(cfg, null, "");
     return;
   }
   // The hook's dist is judged before any docs tier builds: a refused
@@ -556,12 +619,9 @@ async function main(): Promise<void> {
   }
 
   // After every mount is in place: a link from one mount into another has
-  // no other judge, and the artifact is handed back only when all resolve.
-  const checked = await checkSiteLinks(cfg.site, cfg.rootBase, scopes, cfg.origin);
-  console.log(
-    `internal links resolve (${checked.judged} links judged across ${checked.pages} current pages)`,
-  );
-  setSiteOutputs(cfg, cfg.site);
+  // no other judge than the check over the whole artifact.
+  const { served, site, rootBase, origin } = cfg;
+  setSiteOutputs(cfg, site, linkCheckArgs(cfg, { served, site, rootBase, tiers: scopes, origin }));
   console.log(`assembled ${cfg.site}`);
 }
 

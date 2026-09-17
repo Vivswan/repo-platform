@@ -3,6 +3,7 @@
 // per mode and ground, the print sheet included.
 
 import { expect, test } from "bun:test";
+import Color from "colorjs.io";
 import { mermaidThemeVariables } from "../../../actions/pages-site/.vitepress/theme/mermaid-theme.ts";
 import {
   HUES,
@@ -22,19 +23,6 @@ const ALERT_GROUND = "--vp-c-bg-soft";
 const HEX = /^#[0-9a-f]{6}$/i;
 const SCREEN_MODES: ScreenMode[] = ["light", "dark"];
 
-function luminance(hex: string): number {
-  const [r, g, b] = [1, 3, 5].map((offset) => {
-    const channel = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
-    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function contrast(a: string, b: string): number {
-  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (light + 0.05) / (dark + 0.05);
-}
-
 function failures(declared: Map<string, string>, pairs: [string, string][]): string[] {
   return pairs.flatMap(([text, ground]) => {
     const fg = declared.get(text);
@@ -42,9 +30,8 @@ function failures(declared: Map<string, string>, pairs: [string, string][]): str
     if (fg === undefined || bg === undefined || !HEX.test(fg) || !HEX.test(bg)) {
       return [`${text} (${fg}) or ${ground} (${bg}) is not declared as a six-digit hex`];
     }
-    return contrast(fg, bg) < AA_SMALL_TEXT
-      ? [`${text} ${fg} on ${ground} ${bg}: ${contrast(fg, bg).toFixed(2)}:1`]
-      : [];
+    const ratio = Color.contrast(bg, fg, "WCAG21");
+    return ratio < AA_SMALL_TEXT ? [`${text} ${fg} on ${ground} ${bg}: ${ratio.toFixed(2)}:1`] : [];
   });
 }
 
@@ -86,20 +73,11 @@ test.each([
 
 // The hue band is a hover tint on the page ground (pager links, the launcher's rows), so the ink under it must clear AA on the composite.
 // The tertiary ink does not, which is why a hovered pager label lifts to the secondary ink.
-const RGBA = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*(0?\.\d+)\)$/;
-
-function channels(hex: string): number[] {
-  return [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
-}
-
-function tinted(band: string, ground: string): string {
-  const match = RGBA.exec(band);
-  if (match === null) throw new Error(`the hue band is not an rgba(): ${band}`);
-  const alpha = Number(match[4]);
-  return `#${channels(ground)
-    .map((channel, i) => Math.round(Number(match[i + 1]) * alpha + channel * (1 - alpha)))
-    .map((channel) => channel.toString(16).padStart(2, "0"))
-    .join("")}`;
+function tinted(band: string, ground: string): Color {
+  const tint = new Color(band);
+  const alpha = tint.alpha;
+  tint.alpha = 1;
+  return Color.mix(ground, tint, alpha, { space: "srgb" });
 }
 
 test.each(SCREEN_MODES)(
@@ -114,8 +92,10 @@ test.each(SCREEN_MODES)(
     }
     expect(HUES).toHaveLength(6);
     const bands = HUES.map((hue) => tinted(hue[mode].band, ground));
-    expect(bands.filter((tint) => contrast(secondary, tint) < AA_SMALL_TEXT)).toEqual([]);
-    expect(bands.filter((tint) => contrast(tertiary, tint) < AA_SMALL_TEXT)).toEqual(bands);
+    const aa = (ink: string) =>
+      bands.filter((tint) => Color.contrast(tint, ink, "WCAG21") < AA_SMALL_TEXT);
+    expect(aa(secondary)).toEqual([]);
+    expect(aa(tertiary)).toEqual(bands);
   },
 );
 
