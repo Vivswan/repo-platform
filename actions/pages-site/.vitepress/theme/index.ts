@@ -31,7 +31,6 @@ import MermaidDiagrams from "./mermaid.ts";
 import NavLauncher from "./nav-launcher.ts";
 import Provenance from "./provenance.ts";
 import { tierRouteGuard } from "./tier-routes.ts";
-import VersionSwitcher from "./version-switcher.ts";
 
 export default {
   ...VPCarbon,
@@ -41,7 +40,6 @@ export default {
   Layout: () => [
     h(VPCarbon.Layout!, null, {
       "nav-bar-content-before": () => h(NavLauncher),
-      "nav-bar-content-menu-after": () => h(VersionSwitcher),
       "aside-top": () => h(FactsPanel),
       "doc-after": () => h(Provenance),
     }),

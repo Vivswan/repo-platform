@@ -375,6 +375,7 @@ function buildVitepressTier(
       DOCS_SITE_SRC: srcDir,
       DOCS_SITE_TITLE: cfg.siteTitle,
       DOCS_SITE_BASE: opts.base ?? urlBase(cfg.rootBase, tier.rel),
+      DOCS_SITE_ORIGIN: cfg.origin,
       DOCS_SITE_VERSIONS: JSON.stringify(versions),
       DOCS_SITE_CURRENT: tier.version,
       DOCS_SITE_INCLUDES: JSON.stringify(staged),

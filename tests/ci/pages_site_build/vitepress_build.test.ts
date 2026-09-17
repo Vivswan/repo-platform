@@ -80,7 +80,7 @@ describe("the versioned vitepress deploy", () => {
     expect(readSite(site, "v0.1.0/guide/index.html")).not.toContain("Second version line");
   });
 
-  test("serves the root's content again under stable/: the same article and provenance, the dropdown marking stable", () => {
+  test("serves the root's content again under stable/: the same article and provenance, the version menu marking stable", () => {
     // stable/ is its own build of the newest tag (its base sits in the client bundle, the site data,
     // and the chunk hashes), so the article text and the provenance line are the comparison, not
     // the bytes.
@@ -98,13 +98,33 @@ describe("the versioned vitepress deploy", () => {
     expect(article("stable/", "setup.html")).not.toEqual(article("latest/", "setup.html"));
     expect(provenance("stable/index.html")).toEqual(provenance("index.html"));
     expect(provenance("stable/index.html")[0]).toStartWith("Built from v0.2.0 at ");
-    const selected = (rel: string) =>
-      texts(readSite(site, rel), "select.docs-site-version-switcher option[selected]");
-    expect(["index.html", "stable/index.html", "latest/index.html"].map(selected)).toEqual([
-      ["v0.2.0"],
-      ["stable"],
-      ["latest"],
+    // The version menu's items are VitePress nav links: absolute at the site's origin (VPLink would prefix
+    // this tier's base onto a root-relative href) and targeted (the router hands a targeted link to the
+    // browser); the tier being read is the active entry.
+    const menu = (rel: string) =>
+      select(readSite(site, rel), ".VPNavBarMenuGroup .VPMenuLink a").map((a) => ({
+        href: a.attrs.href,
+        target: a.attrs.target,
+        text: a.text.trim(),
+        active: a.attrs.class.split(" ").includes("active"),
+      }));
+    const tier = (label: string, active = false) => ({
+      href: `https://fixture-owner.github.io/fixture-repo/${label}/`,
+      target: "_self",
+      text: label,
+      active,
+    });
+    expect(menu("stable/index.html")).toEqual([
+      tier("latest"),
+      tier("stable", true),
+      tier("v0.2.0"),
+      tier("v0.1.0"),
     ]);
+    const active = (rel: string) =>
+      menu(rel)
+        .filter((item) => item.active)
+        .map((item) => item.text);
+    expect(["index.html", "latest/index.html"].map(active)).toEqual([["v0.2.0"], ["latest"]]);
   });
 
   test("renders the zh-cn locale only in the tiers whose tree carries it, with the translations menu", () => {
@@ -164,8 +184,8 @@ describe("the versioned vitepress deploy", () => {
     // SPA's 404 until a reload.
     const verdicts = (rel: string, base: string) => {
       const html = readSite(site, `${rel}index.html`);
-      const roots = select(html, "select.docs-site-version-switcher option").map(
-        (o) => o.attrs.value,
+      const roots = select(html, ".VPNavBarMenuGroup .VPMenuLink a").map(
+        (a) => new URL(a.attrs.href).pathname,
       );
       const left: string[] = [];
       const guard = tierRouteGuard(base, roots, { here: () => base, leave: (to) => left.push(to) });
