@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { buildBody, failureDirs } from "../../actions/fuzz-issue/fuzz-issue.ts";
+import { argvStub } from "../shared/argv_stub";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -191,4 +192,91 @@ describe("reusable-site.yml", () => {
       expect(readVerdict(exitCode)).toEqual(verdict);
     },
   );
+
+  // GitHub reserves Pages-site creation to a token other than the job's, whatever `pages: write` grants, so the deploy
+  // can only ask (a repository that selected the module before the settings apply ran saw configure-pages fail on the
+  // 404). The check EXECUTED with gh stubbed to answer as `gh api --include` does (status line, CRLF headers, one JSON
+  // body line, exit 1 off 2xx): the request it sends, and the whole outcome per status.
+  const askPages = (status: string, body: string) => {
+    const root = temp.dir("reusable-site-pages-");
+    const gh = argvStub(root, "gh", [
+      'printf \'HTTP/2.0 %s\\nContent-Type: application/json; charset=utf-8\\r\\n\\r\\n%s\' "$GH_STATUS" "$GH_BODY"',
+    ]);
+    const output = join(root, "output");
+    writeFileSync(output, "");
+    const result = spawnSync(
+      "bash",
+      ["--noprofile", "--norc", "-eo", "pipefail", "-c", step("pages")?.run ?? ""],
+      {
+        encoding: "utf8",
+        env: {
+          PATH: `${gh.bin}:${process.env.PATH ?? ""}`,
+          GH_STATUS: status,
+          GH_BODY: body,
+          STUB_EXIT: status.startsWith("2") ? "0" : "1",
+          GITHUB_OUTPUT: output,
+          GITHUB_REPOSITORY: "o/r",
+        },
+      },
+    );
+    expect(gh.calls()).toEqual([["gh", "api", "--include", "repos/o/r/pages"]]);
+    return { status: result.status, stdout: result.stdout, output: readFileSync(output, "utf8") };
+  };
+
+  test.each([
+    {
+      status: "200 OK",
+      body: '{"url":"https://api.github.com/repos/o/r/pages","status":"built"}',
+      outcome: { status: 0, stdout: "", output: "exists=true\n" },
+    },
+    {
+      status: "404 Not Found",
+      body: '{"message":"Not Found","status":"404"}',
+      outcome: {
+        status: 0,
+        stdout:
+          "::warning::no Pages site yet: repo-platform's settings apply creates it on its next run (daily), and the nightly rebuild deploys; nothing to do here.\n",
+        output: "exists=false\n",
+      },
+    },
+    {
+      status: "500 Internal Server Error",
+      body: '{"message":"Server Error"}',
+      outcome: {
+        status: 1,
+        stdout: '::error::reading the Pages site answered HTTP 500: {"message":"Server Error"}\n',
+        output: "",
+      },
+    },
+  ])(
+    "the Pages check, executed against HTTP $status, deploys, skips, or fails",
+    ({ status, body, outcome }) => {
+      expect(askPages(status, body)).toEqual(outcome);
+    },
+  );
+
+  // A Pages step gated on the assembly's `publish` alone runs against an absent site and fails the first deploy again,
+  // silent until the next repository selects the module; a check placed after configure-pages reads as an unset output
+  // there, and every deploy skips. Exact gates: a skipped check reads as false downstream too.
+  test("the Pages steps and the link check run on the check's verdict alone, asked first", () => {
+    const gate = "steps.pages.outputs.exists == 'true'";
+    const at = (action: string) =>
+      steps.findIndex((candidate) => (candidate.uses ?? "").startsWith(`actions/${action}@`));
+    const check = steps.findIndex((candidate) => candidate.id === "pages");
+    expect(check).toBeGreaterThanOrEqual(0);
+    expect(check).toBeLessThan(at("configure-pages"));
+    expect({
+      check: steps[check].if,
+      configure: steps[at("configure-pages")].if,
+      upload: steps[at("upload-pages-artifact")].if,
+      deploy: steps[at("deploy-pages")].if,
+      links: step("links")?.if,
+    }).toEqual({
+      check: "steps.site.outputs.publish == 'true'",
+      configure: gate,
+      upload: gate,
+      deploy: gate,
+      links: `github.event_name == 'schedule' && ${gate} && steps.site.outputs.link-rot-label != ''`,
+    });
+  });
 });

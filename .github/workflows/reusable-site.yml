@@ -75,16 +75,41 @@ jobs:
         with:
           site-dir: ${{ steps.hook.outputs.dist }}
 
-      - if: steps.site.outputs.publish == 'true'
+      # A repository's first deploy after selecting the module can run before the settings apply that creates its
+      # Pages site (files/site/settings.yml), and the job token cannot create one: GitHub reserves that to another
+      # token whatever `pages: write` grants. So the deploy asks, and waits for the apply on the one known answer.
+      #   200 -> exists=true    404 -> exists=false and a warning    anything else -> the step fails
+      - name: Ask whether the Pages site exists
+        id: pages
+        if: steps.site.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          response=$(gh api --include "repos/$GITHUB_REPOSITORY/pages") || true
+          status=$(sed -n '1s#^HTTP/[0-9.]* \([0-9]\{3\}\) .*#\1#p' <<<"$response")
+          case "$status" in
+            200) echo "exists=true" >>"$GITHUB_OUTPUT" ;;
+            404)
+              echo "exists=false" >>"$GITHUB_OUTPUT"
+              echo "::warning::no Pages site yet: repo-platform's settings apply creates it on its next run (daily), and the nightly rebuild deploys; nothing to do here."
+              ;;
+            *)
+              body=$(tail -n 1 <<<"$response" | tr -d '\r')
+              echo "::error::reading the Pages site answered HTTP ${status:-nothing}${body:+: $body}"
+              exit 1
+              ;;
+          esac
+
+      - if: steps.pages.outputs.exists == 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
-      - if: steps.site.outputs.publish == 'true'
+      - if: steps.pages.outputs.exists == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ${{ steps.site.outputs.site-dir }}
 
       - id: deployment
-        if: steps.site.outputs.publish == 'true'
+        if: steps.pages.outputs.exists == 'true'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
       # lychee reads .lycheeignore from its working directory alone (no flag
@@ -93,7 +118,7 @@ jobs:
       # crawl cannot judge (bot walls, login redirects), has it copied there
       # AFTER the upload, so the served site never carries the file.
       - name: Stage the repository's .lycheeignore
-        if: github.event_name == 'schedule' && steps.site.outputs.publish == 'true' && steps.site.outputs.link-rot-label != '' && hashFiles('.lycheeignore') != ''
+        if: github.event_name == 'schedule' && steps.pages.outputs.exists == 'true' && steps.site.outputs.link-rot-label != '' && hashFiles('.lycheeignore') != ''
         env:
           SITE_DIR: ${{ steps.site.outputs.site-dir }}
         run: cp .lycheeignore "$SITE_DIR/"
@@ -106,7 +131,7 @@ jobs:
       # the step when lychee extracted no link at all (excluded ones count).
       - name: Check external links
         id: links
-        if: github.event_name == 'schedule' && steps.site.outputs.publish == 'true' && steps.site.outputs.link-rot-label != ''
+        if: github.event_name == 'schedule' && steps.pages.outputs.exists == 'true' && steps.site.outputs.link-rot-label != ''
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           workingDirectory: ${{ steps.site.outputs.site-dir }}
