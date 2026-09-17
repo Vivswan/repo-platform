@@ -383,6 +383,7 @@ Rows appear only for files present, save a `released` row, which reports a recor
 | Rung | Transition |
 | --- | --- |
 | `0001-link-records-are-mirrors` | a `link` manifest record becomes `{"class": "mirror", "kind": "symlink"}` with its hash kept, the fleet's `AGENTS.md` symlinks having become mirrors the fleet declares |
+| `0002-homepage-unmanaged` | the overlay's `homepage` key is deleted when its value is empty or the repository's own GitHub address (read from the checkout's `origin`), the platform having stopped managing the homepage ([settings.md](settings.md#apply-semantics)); any other value stays |
 
 ## Mirrors
 

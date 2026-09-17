@@ -4,8 +4,6 @@
 
 repository:
   description: Standards files, CI, and settings for Vivswan's repositories, pushed from one place
-  # Declared empty so the apply owns the field and clears an out-of-band value.
-  homepage: ""
   topics: github-actions, reusable-workflows, standards
   # Declared so the apply heals an out-of-band flip to private.
   private: false

@@ -13,7 +13,7 @@ Every managed repository carries a rendered `.github/settings.yml`: a managed fi
 | 2 | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | `security_and_analysis` and the `main` ruleset's `code_quality` and `copilot_code_review` rules for public repos; the `settings-as-code-report` marker label for private ones |
 | 3 | Module layer | `files/<module>/settings.yml` | what selecting that module adds: a toolchain module's dependabot label, release-please's four labels and its `release-tags` ruleset, [pr-title's ruleset](#the-pr-title-ruleset) |
 | 4 | CodeQL layer | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml) | the `code_scanning` rule for public repos with a CodeQL toolchain: GitHub rejects it on private repos, and a repo with no CodeQL run would block every merge on it |
-| 5 | Repo overlay | the repo's own `.github/settings.local.yml` | identity keys (`description`, `homepage`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides |
+| 5 | Repo overlay | the repo's own `.github/settings.local.yml` | identity keys (`description`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides |
 | 6 | Fleet override | [files/settings/override.yml](../files/settings/override.yml) | the invariants no repo may weaken: the squash-only merge policy (the PR title as the squash subject, a blank squash body), `allow_auto_merge`, `enable_vulnerability_alerts`, the `main` and `non-bypassable` protection rulesets, and the rulesets' `_undeclared: delete` policy |
 
 Every layer is a plain settings-as-code YAML document a human can read on its own; no settings content derives from code. The mechanics:
@@ -217,9 +217,11 @@ Stateless, declared-keys-only, upsert-by-name - on the RENDERED document:
 
 - **`rules: null`** in the overlay is the one way to remove inherited rules wholesale: it drops what the LOWER layers contributed but cannot touch the override layer's rules, so the fleet's mandatory protection survives it either way.
 
-- **Repository fields, topics, and security toggles** are applied only when declared; omitting a key leaves the live value alone. The overlay starter therefore seeds `homepage:` and `topics:` unconditionally, like `private:`: an empty value declares-and-clears (empty topics normalize to no topics) instead of leaving the field unmanaged.
+- **Repository fields, topics, and security toggles** are applied only when declared; omitting a key leaves the live value alone. The overlay starter therefore seeds `topics:` unconditionally, like `private:`: an empty value declares-and-clears (empty topics normalize to no topics) instead of leaving the field unmanaged.
 
-- **A homepage or topics set only in the GitHub UI** is cleared by the first apply after the render lands - put values you want to keep in the overlay.
+- **Topics set only in the GitHub UI** are cleared by the first apply after the render lands - put values you want to keep in the overlay.
+
+- **The homepage is unmanaged:** the starter seeds no `homepage` key, so the apply never touches the field and a homepage set on GitHub stays. To have the apply manage it, add `homepage:` to the overlay by hand like any other repository field. The `0002-homepage-unmanaged` rung ([sync.md](sync.md#migrations)) deleted the seeded key from existing overlays where it was empty or named the repository's own GitHub address.
 
 - **Visibility** is managed like any other declared field: the starter seeds `private:` (false included), so the nightly heal reverts an out-of-band flip in either direction. To change visibility on purpose, edit `private:` in the overlay; the visibility-gated layers follow the declared value in the same render.
 
@@ -273,7 +275,7 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 
 ## The starter and the rendered file
 
-**The starter:** every repository receives `.github/settings.local.yml` once (the one starter under [files/base/.github/](../files/base/.github/)): the four identity keys (`description` from the registration, `homepage` and `topics` declared empty, `private` from the writer's `--private` flag), plus commented examples for local labels and rulesets. It is repo-owned from then on (a starter: written only when absent).
+**The starter:** every repository receives `.github/settings.local.yml` once (the one starter under [files/base/.github/](../files/base/.github/)): the three identity keys (`description` from the registration, `topics` declared empty, `private` from the writer's `--private` flag), plus commented examples for local labels and rulesets. It is repo-owned from then on (a starter: written only when absent).
 
 **The rendered file** `.github/settings.yml` is written right after it, on every sync. It takes the managed rules ([sync.md](sync.md#classes)):
 
