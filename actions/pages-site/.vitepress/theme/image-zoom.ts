@@ -59,12 +59,13 @@ function onOpened(): void {
   setPageInert(true);
 }
 
-/** The page comes back before focus does: an inert element cannot take it. */
+/** The page comes back before focus does: an inert element cannot take it. A scroll past medium-zoom's offset is
+ *  one way to close, so the focus return leaves the scroll where the reader put it. */
 function onClosed(event: Event): void {
   const image = event.target as HTMLElement;
   setPageInert(false);
   makeButton(image);
-  if (focusedAtOpen === image) image.focus();
+  if (focusedAtOpen === image) image.focus({ preventScroll: true });
   focusedAtOpen = null;
 }
 

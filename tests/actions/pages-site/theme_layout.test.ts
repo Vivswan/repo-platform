@@ -525,6 +525,21 @@ const KEY_OPENED = `new Promise((resolve) => {
 
 const FOCUS_ON_IMAGE = `document.activeElement === document.querySelector(".vp-doc img")`;
 
+/** Opens the first image by a click and closes it the way a reader scrolling on does: a scroll past medium-zoom's
+ *  offset with the image left above the viewport. Resolves at `closed` with where the scroll ended up. */
+const SCROLL_CLOSE = `new Promise((resolve) => {
+  const img = document.querySelector(".vp-doc img");
+  img.addEventListener("medium-zoom:opened", () => {
+    const target = Math.round(img.getBoundingClientRect().bottom + window.scrollY + 300);
+    img.addEventListener("medium-zoom:closed", () => {
+      requestAnimationFrame(() => resolve({ target, scrollY: Math.round(window.scrollY), focused: document.activeElement === img }));
+    }, { once: true });
+    window.scrollTo(0, target);
+  }, { once: true });
+  img.focus();
+  img.click();
+})`;
+
 const WHEN_OVERLAY_GONE = `new Promise((resolve) => {
   const state = () => ({
     overlay: document.querySelector(".medium-zoom-overlay") !== null,
@@ -571,9 +586,10 @@ const LEAVE_OPEN_LIGHTBOX = `new Promise((resolve) => {
   const inert = () => document.querySelector(".Layout").hasAttribute("inert");
   img.addEventListener("medium-zoom:opened", () => {
     img.addEventListener("medium-zoom:close", () => {
-      // The content update that started this close runs to its end first; the fade lasts 300ms.
+      // medium-zoom fires this inside detach(), mid content update; the inert decision lands in the same task, so
+      // the next task sees it, well inside the 300ms fade.
       let inertDuringFade = null;
-      setTimeout(() => { inertDuringFade = inert(); }, 60);
+      setTimeout(() => { inertDuringFade = inert(); }, 0);
       img.addEventListener("medium-zoom:closed", () => {
         resolve({
           inertDuringFade,
@@ -711,6 +727,30 @@ test(
       expect(await tab.evaluate<Record<string, unknown>>(WHEN_OVERLAY_GONE)).toEqual({
         overlay: false,
         layoutInert: false,
+      });
+    } finally {
+      await tab.close();
+    }
+  },
+  SCENARIO_TIMEOUT_MS,
+);
+
+// A scroll past medium-zoom's offset closes the lightbox; the focus return must not scroll the image back into view
+// and undo the reader's scroll. Its own tab: the lightbox test's later route-change scenario wedged headless Chrome
+// when this ran before it in the same tab.
+test(
+  "a lightbox closed by scrolling away hands focus back without scrolling the image into view",
+  async () => {
+    const tab = await openPage();
+    try {
+      await tab.evaluate(WHEN_ATTACHED);
+      const scrolled = await tab.evaluate<{ target: number; scrollY: number; focused: boolean }>(
+        SCROLL_CLOSE,
+      );
+      expect(scrolled).toEqual({
+        target: scrolled.target,
+        scrollY: scrolled.target,
+        focused: true,
       });
     } finally {
       await tab.close();
