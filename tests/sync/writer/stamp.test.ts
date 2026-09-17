@@ -1,9 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
 import {
-  CHECKER_SURFACE,
+  appendFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import {
+  CHECK_ENTRY,
   checkerChanged,
+  checkerSurface,
 } from "../../../.github/scripts/sync/writer/judged_commit.ts";
 import { MANIFEST_NAME } from "../../../.github/scripts/sync/writer/manifest.ts";
 import { sha256 } from "../../../actions/shared/values.ts";
@@ -55,14 +63,14 @@ function platform(): Platform {
   const root = temp.dir("stamp-platform-");
   cpSync(FIXTURES, root, { recursive: true });
   put(root, "bun.lock", "lock v1\n");
-  put(root, "actions/validate-managed-files/check.ts", "// the checker\n");
+  put(root, CHECK_ENTRY, "// the checker\n");
   fixtureGit(root, ["init", "-q", "-b", "main"]);
   const base = commit(root, "base");
   put(root, "docs/notes.md", "notes\n");
   const docs = commit(root, "docs");
   put(root, "actions/pages-site/theme/style.css", "body { color: teal }\n");
   const theme = commit(root, "theme");
-  put(root, "actions/validate-managed-files/check.ts", "// the checker, changed\n");
+  put(root, CHECK_ENTRY, "// the checker, changed\n");
   const checker = commit(root, "checker");
   put(root, "files/base/LICENSE.txt", "a different license\n");
   const files = commit(root, "files");
@@ -251,48 +259,37 @@ describe("the manifest's commit under the stamp rule", () => {
   });
 });
 
-const CHECK = "actions/validate-managed-files/check.ts";
-
-/** Every file reached from `entry` through relative imports, named or side-effect, as paths relative to the repository root. */
-function importClosure(entry: string): string[] {
-  const seen = new Set<string>();
-  const visit = (path: string) => {
-    if (seen.has(path)) return;
-    seen.add(path);
-    const source = readFileSync(join(REPO_ROOT, path), "utf-8");
-    for (const [, spec] of source.matchAll(/(?:from|import)\s+"(\.[^"]+)"/g)) {
-      visit(relative(REPO_ROOT, resolve(REPO_ROOT, dirname(path), spec)));
-    }
-  };
-  visit(entry);
-  return [...seen].sort();
-}
-
-const rootsOf = (path: string) =>
-  CHECKER_SURFACE.filter((root) => (root.endsWith("/") ? path.startsWith(root) : path === root));
+/** The stable-run action entry and an operator script: neither is check.ts's, so neither restamps. */
+const OFF_SURFACE = [
+  "actions/validate-managed-files/src/run.ts",
+  ".github/scripts/sync/deliver.ts",
+];
 
 describe("the checker surface", () => {
-  test("is the list docs/sync.md documents, each path the kind its spelling says", () => {
-    const line = readFileSync(join(REPO_ROOT, "docs/sync.md"), "utf-8")
-      .split("\n")
-      .find((l) => l.includes("`CHECKER_SURFACE`"));
-    expect(line).toBeDefined();
-    const spans = [...(line ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-    // The paths are the code spans before the one naming the constant.
-    const named = spans.indexOf("CHECKER_SURFACE");
-    expect(named).toBeGreaterThan(0);
-    expect(spans.slice(0, named)).toEqual([...CHECKER_SURFACE]);
-    for (const path of CHECKER_SURFACE) {
-      expect(lstatSync(join(REPO_ROOT, path)).isDirectory()).toBe(path.endsWith("/"));
+  test("is check.ts's import closure: the writer in, the stable-run and operator files out", () => {
+    const surface = checkerSurface(REPO_ROOT);
+    for (const path of surface) expect(existsSync(join(REPO_ROOT, path))).toBe(true);
+    expect(surface).toContain(CHECK_ENTRY);
+    expect(surface).toContain(".github/scripts/sync/writer/sync.ts");
+    expect(surface).toContain("actions/pages-site/.vitepress/conventions.ts");
+    for (const path of OFF_SURFACE) {
+      expect(existsSync(join(REPO_ROOT, path))).toBe(true);
+      expect(surface).not.toContain(path);
     }
   });
 
-  test("is exactly the roots of check.ts's import closure, one per file and none empty", () => {
-    const closure = importClosure(CHECK);
-    expect(closure.length).toBeGreaterThan(1);
-    for (const path of closure) expect(existsSync(join(REPO_ROOT, path))).toBe(true);
-    const roots = closure.map((path) => [path, rootsOf(path)] as const);
-    expect(roots.filter(([, found]) => found.length !== 1)).toEqual([]);
-    expect(new Set(roots.flatMap(([, found]) => found))).toEqual(new Set(CHECKER_SURFACE));
+  test("follows a new import in check.ts", () => {
+    const copy = temp.dir("stamp-closure-");
+    const surface = checkerSurface(REPO_ROOT);
+    for (const path of surface) {
+      mkdirSync(dirname(join(copy, path)), { recursive: true });
+      cpSync(join(REPO_ROOT, path), join(copy, path));
+    }
+    // Control: the copy reproduces the surface before the import is added.
+    expect(checkerSurface(copy)).toEqual(surface);
+    const added = "actions/validate-managed-files/added.ts";
+    writeFileSync(join(copy, added), "export const added = 1;\n");
+    appendFileSync(join(copy, CHECK_ENTRY), 'import "./added.ts";\n');
+    expect(checkerSurface(copy)).toEqual([...surface, added].sort());
   });
 });

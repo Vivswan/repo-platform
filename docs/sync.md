@@ -465,9 +465,9 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 | commit C | N, with the checker different between C and N | wrote nothing | N |
 | commit C | N, with the checker byte-identical between C and N | wrote nothing | C; no sync PR opens |
 
-- **The checker surface** is `actions/validate-managed-files/check.ts`, `.github/scripts/sync/`, `.github/scripts/shared/`, `actions/plan/`, `actions/shared/`, and `actions/pages-site/.vitepress/conventions.ts`: the roots of check.ts's import closure (`CHECKER_SURFACE` in [sync/writer/judged_commit.ts](../.github/scripts/sync/writer/judged_commit.ts)), exactly the code that runs at the recorded commit. A change there can turn C's verdict away from N's with no byte written: N's registration parser accepts a `site.path` C's rejects, so C's check would stay red with no sync PR to move the stamp.
+- **The checker surface** is the set of files check.ts imports, derived from the import graph at sync time (`checkerSurface` in [sync/writer/judged_commit.ts](../.github/scripts/sync/writer/judged_commit.ts)): exactly the code that runs at the recorded commit, the writer included. A change there can turn C's verdict away from N's with no byte written: N's registration parser accepts a `site.path` C's rejects, so C's check would stay red with no sync PR to move the stamp.
 
-- **What runs at `stable` never restamps:** the action's `src/` and `validator/` reach every repository the moment the tag moves, and a theme file outside `conventions.ts` is off the surface too.
+- **Never on the surface:** the operator scripts, the action's stable-run `src/` and `validator/` files (they reach every repository the moment the tag moves), and the docs-site theme.
 
 - **Why not every platform change:** a docs-theme change under `actions/pages-site/` once restamped nine repositories with one-line manifest PRs (copilot-env #279, after repo-platform #356); under this rule that sync writes nothing, moves nothing, and opens no PR.
 
