@@ -3,7 +3,7 @@
 import { onContentUpdated, useData } from "vitepress";
 import { defineComponent, h, watch } from "vue";
 import { renderAll } from "./mermaid-render.ts";
-import MermaidZoomView from "./mermaid-zoom.ts";
+import MermaidZoomView from "./mermaid-zoom-view.ts";
 
 export default defineComponent({
   name: "MermaidDiagrams",
