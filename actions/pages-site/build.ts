@@ -516,8 +516,10 @@ function linkCheckArgs(
       `${layout.site} holds no page built from HEAD - the layout always has one, so nothing would be checked`,
     );
   }
+  // lychee reads an input carrying [, ], * or ? as a glob, so such a page is spelled as the pattern matching it alone.
+  const literal = (path: string) => path.replace(/[[\]*?]/g, "[$&]");
   const inputs = join(cfg.scratch, "link-check-inputs.txt");
-  writeFileSync(inputs, `${pages.map((page) => join(layout.site, page)).join("\n")}\n`);
+  writeFileSync(inputs, `${pages.map((page) => literal(join(layout.site, page))).join("\n")}\n`);
   const args = [`--root-dir ${quoted(layout.served)}`, `--files-from ${quoted(inputs)}`];
   if (layout.origin !== null) {
     // The delimiter after the base is captured and carried into the file URL (Rust regex has no lookahead), so a

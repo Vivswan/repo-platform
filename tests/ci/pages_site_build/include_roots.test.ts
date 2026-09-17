@@ -250,6 +250,11 @@ describe("broken links across the mounts", () => {
     const workspace = temp.dir("pages-site-include-broken-");
     includeFixture(workspace);
     website(workspace, '<a href="/inc-repo/docs/skills/missing/">gone</a>');
+    // A page named with a glob metacharacter: lychee would read its raw path as a pattern and skip it silently.
+    writeFileSync(
+      join(workspace, "dist", "[guide].html"),
+      '<a href="/inc-repo/docs/skills/also-missing/">gone too</a>',
+    );
     const readme = join(workspace, "docs", "README.md");
     writeFileSync(readme, `${readFileSync(readme, "utf-8")}\nAnd [nothing](skills/alpha/#nope).\n`);
     commitAll(workspace, "break two links");
@@ -259,19 +264,20 @@ describe("broken links across the mounts", () => {
   };
 
   test(
-    "the assembly itself passes and lists both linking pages for the check",
+    "the assembly itself passes and lists every linking page for the check, a glob-named one as the pattern matching it alone",
     () => {
       const { runner, result } = broken();
       expect(result.exitCode, describeRun(result)).toBe(0);
       const listed = linkCheckInputs(runner);
       expect(listed).toContain("index.html");
       expect(listed).toContain("docs/latest/index.html");
+      expect(listed).toContain("[[]guide[]].html");
     },
     TEST_TIMEOUT_MS,
   );
 
   test.skipIf(lychee === null)(
-    "lychee, run as the step runs it, fails on the website's link into a missing docs page and the docs' link to a missing anchor, naming both",
+    "lychee, run as the step runs it, fails on the website's links into missing docs pages (the glob-named page's included) and the docs' link to a missing anchor, naming each",
     () => {
       const { runner, result } = broken();
       const check = runLinkCheck(
@@ -295,7 +301,9 @@ describe("broken links across the mounts", () => {
           "m",
         ),
       );
-      expect(check.stdout.match(/^\* \[ERROR\]/gm)).toHaveLength(2);
+      expect(check.stdout).toContain(`### Errors in ${site}/[guide].html`);
+      expect(check.stdout).toContain(`<file://${site}/docs/skills/also-missing>`);
+      expect(check.stdout.match(/^\* \[ERROR\]/gm)).toHaveLength(3);
     },
     TEST_TIMEOUT_MS,
   );
