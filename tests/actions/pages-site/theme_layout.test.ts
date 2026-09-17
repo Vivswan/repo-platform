@@ -151,13 +151,17 @@ const WHEN_REDRAWN = (previous: string) => `new Promise((resolve) => {
  *  runs after the observer is armed, for a history step the page must be watching before it starts. */
 const WHEN_TITLED = (title: string, go = "") => `new Promise((resolve) => {
   const titled = () => document.querySelector("h1")?.textContent.startsWith(${JSON.stringify(title)}) === true;
-  new MutationObserver((_, observer) => {
+  const observer = new MutationObserver(() => {
     if (!titled()) return;
     observer.disconnect();
     resolve(true);
-  }).observe(document, { subtree: true, childList: true, characterData: true });
+  });
+  observer.observe(document, { subtree: true, childList: true, characterData: true });
   ${go};
-  if (titled()) resolve(true);
+  if (titled()) {
+    observer.disconnect();
+    resolve(true);
+  }
 })`;
 
 interface Column {
@@ -380,6 +384,20 @@ test(
         open: false,
         locked: "visible",
       });
+
+      // A finished lightbox left through history: the content update starts medium-zoom's fading close, and the
+      // page stays inert under the fade until the close lands. The fade is the 300ms one: under reduced motion it is
+      // 1ms and the sample would land after the close.
+      await tab.send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+      });
+      await tab.evaluate(WHEN_TITLED("Fixture", "history.back()"));
+      await tab.evaluate(WHEN_ATTACHED);
+      expect(await tab.evaluate<Record<string, boolean>>(LEAVE_OPEN_LIGHTBOX)).toEqual({
+        inertDuringFade: true,
+        inertAfterClose: false,
+        overlayAfterClose: false,
+      });
     } finally {
       await tab.close();
     }
@@ -514,11 +532,41 @@ const WHEN_ATTACHED = `new Promise((resolve) => {
   }).observe(document, { subtree: true, attributes: true, attributeFilter: ["class"] });
 })`;
 
-/** Clicks the broken-srcset image and reports whether the page went inert for it (the open then never finishes). */
+/** Opens the first image, waits for the open to finish, then leaves by Forward; reads inert while the close fades and
+ *  again once medium-zoom reports it closed. */
+const LEAVE_OPEN_LIGHTBOX = `new Promise((resolve) => {
+  const img = document.querySelector(".vp-doc img");
+  const inert = () => document.querySelector(".Layout").hasAttribute("inert");
+  img.addEventListener("medium-zoom:opened", () => {
+    img.addEventListener("medium-zoom:close", () => {
+      // The content update that started this close runs to its end first; the fade lasts 300ms.
+      let inertDuringFade = null;
+      setTimeout(() => { inertDuringFade = inert(); }, 60);
+      img.addEventListener("medium-zoom:closed", () => {
+        resolve({
+          inertDuringFade,
+          inertAfterClose: inert(),
+          overlayAfterClose: document.querySelector(".medium-zoom-overlay") !== null,
+        });
+      }, { once: true });
+    }, { once: true });
+    history.forward();
+  }, { once: true });
+  img.click();
+})`;
+
+/** Clicks the broken-srcset image and, well past the 300ms transition, reports the stuck state: the page inert, the
+ *  overlay up, and the open never finished. */
 const OPEN_BROKEN = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc img[srcset]");
+  let opened = false;
+  img.addEventListener("medium-zoom:opened", () => { opened = true; }, { once: true });
   img.addEventListener("medium-zoom:open", () => {
-    setTimeout(() => resolve(document.querySelector(".Layout").hasAttribute("inert")), 700);
+    setTimeout(() => resolve({
+      inert: document.querySelector(".Layout").hasAttribute("inert"),
+      overlay: document.querySelector(".medium-zoom-overlay") !== null,
+      opened,
+    }), 700);
   }, { once: true });
   img.click();
 })`;
@@ -639,17 +687,18 @@ test(
 );
 
 // medium-zoom waits for its high-resolution clone's load and never its error, so a srcset image whose chosen candidate
-// fails leaves it mid-open for good: every close returns early and the page it made inert would stay so. A fresh tab,
-// navigated by a link: a history step under that stuck open wedged headless Chrome's renderer in every probe, while
-// headed Chrome (the same build, driven over the same protocol) took Back and Forward under both the stuck and a
-// healthy open, inert on or off, and each time rendered the target page with its root no longer inert.
+// fails leaves it mid-open for good. Navigation by link: headless Chrome wedges on a history step under that open.
 test(
   "a lightbox stuck mid-open frees the page on the next content update",
   async () => {
     const tab = await openPage();
     try {
       await tab.evaluate(WHEN_ATTACHED);
-      expect(await tab.evaluate<boolean>(OPEN_BROKEN)).toBe(true);
+      expect(await tab.evaluate<Record<string, boolean>>(OPEN_BROKEN)).toEqual({
+        inert: true,
+        overlay: true,
+        opened: false,
+      });
       await tab.evaluate(
         WHEN_TITLED("Other", "document.querySelector('a[href*=\"other\"]').click()"),
       );

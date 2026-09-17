@@ -17,6 +17,9 @@ let zoom: Zoom | undefined;
 /** The image that had focus as its lightbox opened (a key opened it, or a click on the focusable image), which takes
  *  focus back on close: medium-zoom hides the original while its copy is up, and a hidden element drops focus. */
 let focusedAtOpen: HTMLElement | null = null;
+/** Whether the current open finished: medium-zoom never finishes one whose srcset candidate fails to load, and
+ *  such an open never closes either. */
+let openFinished = false;
 
 function makeButton(image: Element): void {
   image.setAttribute("tabindex", "0");
@@ -44,6 +47,7 @@ function setPageInert(inert: boolean): void {
 function onOpen(event: Event): void {
   const image = event.target as HTMLElement;
   focusedAtOpen = document.activeElement === image ? image : null;
+  openFinished = false;
   unmakeButton(image);
   setPageInert(true);
 }
@@ -51,6 +55,7 @@ function onOpen(event: Event): void {
 /** An open that finishes after a content update freed the page (a route change inside the transition) takes the
  *  page back; the lightbox is still up over it, and Escape still closes it. */
 function onOpened(): void {
+  openFinished = true;
   setPageInert(true);
 }
 
@@ -74,10 +79,10 @@ function attachImageZoom(): void {
     image.removeEventListener("keydown", onKeydown);
   }
   zoom.detach();
-  // A srcset image whose chosen candidate never loads leaves medium-zoom mid-open for good, every close returning
-  // early with the page inert under it; the new page must not inherit that. A healthy open still in its transition
-  // takes the page back when it finishes (onOpened): its listeners stay on the image through the detach.
-  setPageInert(false);
+  // A stuck open (its candidate never loaded) never closes, so the page it made inert is freed here; a finished one
+  // is closing now, its fade over the page, and onClosed frees it. One still in its transition takes the page back
+  // when it finishes (onOpened): medium-zoom's detach leaves the listeners on the image.
+  if (!openFinished) setPageInert(false);
   // CSS cannot tell a blank alt from a word, so the name check is here.
   zoom.attach(
     [...document.querySelectorAll<HTMLImageElement>(IMAGE_SELECTOR)].filter(
