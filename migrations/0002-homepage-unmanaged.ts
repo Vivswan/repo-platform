@@ -9,6 +9,7 @@
 
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { type Document, isMap, isNode, isScalar, parseDocument } from "yaml";
 import { capture } from "../.github/scripts/shared/proc.ts";
 
@@ -58,43 +59,6 @@ function readOverlay(text: string): { doc: Document; js: Overlay } | null {
   }
 }
 
-/** Strict structural equality over what the yaml library resolves (`!!omap` a Map, `!!set` a Set, `!!binary` a
- *  Uint8Array, a timestamp a Date), entries in insertion order: Bun.deepEquals matches Set members and Map keys
- *  loosely, so two members differing only in a deleted homepage both matched one expected member. A pair once
- *  entered is taken as equal thereafter, which closes cycles and keeps a shared subtree at one comparison; a false
- *  ends the whole comparison, so no memo is ever consulted after one. */
-export function sameDocument(
-  a: unknown,
-  b: unknown,
-  seen: WeakMap<object, WeakSet<object>> = new WeakMap(),
-): boolean {
-  if (Object.is(a, b)) return true;
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  const partners = seen.get(a) ?? new WeakSet();
-  if (partners.has(b)) return true;
-  partners.add(b);
-  seen.set(a, partners);
-  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
-  if (a instanceof Date) return b instanceof Date && Object.is(a.getTime(), b.getTime());
-  const pairs = (x: object): [unknown, unknown][] | null => {
-    if (x instanceof Map) return [...x.entries()];
-    if (x instanceof Set) return [...x].map((member) => [member, null]);
-    if (x instanceof Uint8Array || Array.isArray(x)) return [...x.entries()];
-    const proto = Object.getPrototypeOf(x);
-    return proto === Object.prototype || proto === null ? Object.entries(x) : null;
-  };
-  const left = pairs(a);
-  const right = pairs(b);
-  if (left === null || right === null) return false;
-  return (
-    left.length === right.length &&
-    left.every(
-      ([key, value], index) =>
-        sameDocument(key, right[index][0], seen) && sameDocument(value, right[index][1], seen),
-    )
-  );
-}
-
 /** The value is judged resolved (an alias reads as what it names). Every non-empty string value asks the checkout
  *  which repository this is, so a real website in a checkout without a GitHub origin is refused, not kept. One judge
  *  decides whether the cut took exactly the pair: the edited text must read as the original minus that one key. */
@@ -133,7 +97,7 @@ export function judgeOverlay(text: string, repository: () => string | null): Jud
   const expected = { ...before, repository: { ...before.repository } };
   delete expected.repository.homepage;
   const after = readOverlay(edited);
-  if (after === null || !sameDocument(after.js, expected)) {
+  if (after === null || !isDeepStrictEqual(after.js, expected)) {
     return {
       verdict: "refused",
       reason: "removing its homepage line would change more than the homepage",

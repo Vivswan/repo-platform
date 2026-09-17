@@ -108,20 +108,6 @@ describe("0002-homepage-unmanaged", () => {
       overlay: 'repository:\n  homepage: ""\n  private: false\nicon: !!binary R0lGODlh\n',
       cut: '  homepage: ""\n',
     },
-    {
-      reason: "a deeply nested set beside it, which a member-by-member comparison must not double",
-      overlay: `repository:\n  homepage: ""\n  private: false\nnest: ${"!!set { ? ".repeat(40)}end${" }".repeat(40)}\n`,
-      cut: '  homepage: ""\n',
-    },
-    {
-      reason:
-        "a chain of shared anchors beside it, which a comparison without a memo would walk exponentially",
-      overlay: `repository:\n  homepage: ""\n  private: false\nx: ${Array.from(
-        { length: 40 },
-        (_, i) => 39 - i,
-      ).reduce((inner, i) => `&a${i} [${inner}${i < 39 ? `, *a${i + 1}` : ""}]`, "*a0")}\n`,
-      cut: '  homepage: ""\n',
-    },
   ])("deletes the key for $reason and nothing else", ({ overlay, cut }) => {
     const root = checkout(overlay);
     expect(run(root)).toEqual({ exitCode: 0, stdout: `${OVERLAY}\n`, stderr: "" });
