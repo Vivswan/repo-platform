@@ -141,7 +141,7 @@ The website is one build of the judged commit: version navigation belongs to the
 
 - **Images:** an image in the article opens in a lightbox on click, or on Enter once focused, enlarged to fit the viewport (a raster image no further than its natural size); Escape, a click, or scrolling away closes it. An image inside a link or a button belongs to it, and an image without a word of alt stays put.
 
-- **Wide tables:** a top-level table wider than the doc column scrolls horizontally inside the column. An inline-code token in a cell stays whole up to half the column and wraps inside past that, so a long token never squeezes its neighbour to a column of single words.
+- **Wide tables:** a top-level table wider than the doc column scrolls horizontally inside the column. An inline-code token in a cell stays whole up to half the column and wraps inside past that, so one long token no longer squeezes its neighbour to a column of single words; two long tokens in one row beside prose still can.
 
 - **Translations** go in `docs/<lang>/` (`zh-cn/`, `ja/`) mirroring the root tree: detected directories become locales with the language switcher, the root tree is the default locale, and a tagged version serves its own translations.
 

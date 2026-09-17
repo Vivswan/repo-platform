@@ -149,6 +149,11 @@ const BAR_AT_280 = `new Promise((resolve) => requestAnimationFrame(() => {
   });
 }))`;
 
+const VIEW_ON_PAPER = `({
+  view: getComputedStyle(document.querySelector(".fleet-mermaid-view")).display,
+  rootOverflow: getComputedStyle(document.documentElement).overflow,
+})`;
+
 const WHEN_REDRAWN = (previous: string) => `new Promise((resolve) => {
   const redrawn = () => {
     const svg = document.querySelector(".fleet-mermaid > .fleet-mermaid-diagram > svg");
@@ -376,6 +381,15 @@ test(
       expect(flipped).toEqual({ column: flipped.column, view: flipped.column, open: true });
       expect(flipped.column).not.toBe(ids.column);
       expect(await tab.evaluate<number>("window.__probe.width()")).toBe(beforeFlip);
+
+      // On paper with the view open: the view is gone and the root scrolls again, so a long article paginates
+      // instead of printing clipped to one page.
+      await tab.send("Emulation.setEmulatedMedia", { media: "print" });
+      expect(await tab.evaluate<Record<string, string>>(VIEW_ON_PAPER)).toEqual({
+        view: "none",
+        rootOverflow: "visible",
+      });
+      await tab.send("Emulation.setEmulatedMedia", { media: "" });
 
       await tab.press("Escape", 27);
       expect(await tab.evaluate<Record<string, unknown>>("window.__probe.closed()")).toEqual({
