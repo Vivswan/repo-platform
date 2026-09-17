@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-// A change on the delivered surface (shared/delivered_surface.ts) moves what a sync delivers, and only a sync carries it; a change
+// A change on the delivered surface (DELIVERED_SURFACE below) moves what a sync delivers, and only a sync carries it; a change
 // off the surface is live at `stable` on the next green merge with no sync. So a pull request that touches it gets the public sync
 // by default: the label is added, one sticky comment says so, and a human removing it is final for that pull request
 // (docs/all-green.md). Information only: every failure is a warning and exit 0, and the job is outside all-green's needs.
@@ -16,11 +16,26 @@ import {
   fleetSyncLabels,
   readDirective,
 } from "../post-green/fleet_sync_marker.ts";
-import { DELIVERED_SURFACE } from "../shared/delivered_surface.ts";
 import { notice, requireEnv, warning } from "../shared/gha.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
 import { loadLayer } from "../sync/writer/settings_layers.ts";
 import { captureNetwork } from "./discovery.ts";
+
+/** The writer's data, its import closure, and its dependency versions, relative to the platform root; a directory ends in
+ *  a slash. docs/all-green.md lists the same paths, and a test pins the two. bun.lock is on it because the settings library's
+ *  version decides the rendered settings.yml's key order; package.json because its postinstall decides which action-local
+ *  dependencies the writer resolves. Whether a sync then moves a repository's judge is the writer's own stamp rule
+ *  (sync/writer/judged_commit.ts). */
+export const DELIVERED_SURFACE = [
+  "files.yml",
+  "files/",
+  "actions/",
+  ".github/scripts/sync/",
+  ".github/scripts/shared/",
+  "migrations/",
+  "bun.lock",
+  "package.json",
+] as const;
 
 export function deliveredBySync(path: string): boolean {
   return DELIVERED_SURFACE.some((root) =>
