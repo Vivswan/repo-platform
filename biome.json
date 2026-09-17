@@ -172,7 +172,7 @@
         "tests/**",
         "actions/**",
         "!scripts/run_tests.ts",
-        "!tests/actions/pages-site/mermaid_labels.test.ts",
+        "!tests/actions/pages-site/headless_chrome.ts",
         "!tests/shared/upstream_server.ts",
         "!actions/release-health/release-health.ts"
       ],

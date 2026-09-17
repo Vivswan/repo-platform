@@ -137,9 +137,9 @@ The website is one build of the judged commit: version navigation belongs to the
 
 - **Links** are written as they read on GitHub: a link inside `docs/` (or into another staged root, below) becomes the page's route, a link to any other repository file becomes that file on GitHub at the version being read, and absolute URLs pass through. Heading anchors are GitHub's. Dead internal links fail the build; that failure is the point ([the PR check](#the-docs-pr-check)).
 
-- **Diagrams:** a ```` ```mermaid ```` fence renders as a diagram in the site's colors in both appearance modes; the source stays as the fallback without JavaScript and beside a parse error.
+- **Diagrams:** a ```` ```mermaid ```` fence renders as a diagram in the site's colors in both appearance modes; the source stays as the fallback without JavaScript and beside a parse error. Its Zoom button (on hover, focus, or touch) opens the diagram at full size in a view that zooms by wheel, pinch, or buttons, pans by drag, and closes on Escape.
 
-- **Wide tables:** a top-level table wider than the doc column scrolls horizontally inside the column.
+- **Wide tables:** a top-level table wider than the doc column scrolls horizontally inside the column. An inline-code token in a cell stays whole up to half the column and wraps inside past that, so a long token never squeezes its neighbour to a column of single words.
 
 - **Translations** go in `docs/<lang>/` (`zh-cn/`, `ja/`) mirroring the root tree: detected directories become locales with the language switcher, the root tree is the default locale, and a tagged version serves its own translations.
 

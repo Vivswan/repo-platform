@@ -9,8 +9,14 @@ class FakeElement {
   className = "";
   innerHTML = "";
   textContent = "";
+  type = "";
   dataset: Record<string, string> = {};
+  attributes: Record<string, string> = {};
   constructor(readonly tag: string) {}
+  setAttribute(name: string, value: string): void {
+    this.attributes[name] = value;
+  }
+  addEventListener(): void {}
   append(child: FakeElement): void {
     child.parent = this;
     this.children.push(child);
@@ -25,9 +31,11 @@ class FakeElement {
     if (match === null) throw new Error(`unsupported selector ${selector}`);
     return this.children.find((child) => child.className.split(" ").includes(match[1])) ?? null;
   }
+  /** A button carries its label, the one attribute the pass sets. */
   get shape(): string {
     const content = this.tag === "div" && this.innerHTML !== "" ? this.innerHTML : this.textContent;
-    return `${this.tag}.${this.className}:${content}`;
+    const label = this.tag === "button" ? `[${this.attributes["aria-label"]}]` : "";
+    return `${this.tag}.${this.className}${label}:${content}`;
   }
 }
 
@@ -183,10 +191,12 @@ test("no mount never loads mermaid or a face; a failed load is every mount's err
   expect(shapes(first)).toEqual([
     "pre.fleet-mermaid-source:graph LR",
     'div.fleet-mermaid-diagram:<svg data-render="3">graph LR</svg>',
+    "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
   ]);
   expect(shapes(second)).toEqual([
     "pre.fleet-mermaid-source:graph TD",
     'div.fleet-mermaid-diagram:<svg data-render="4">graph TD</svg>',
+    "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
   ]);
   expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
 });
@@ -200,6 +210,7 @@ test("renders each mount in the mode's theme and hue, keeps a broken one's sourc
   expect(shapes(good)).toEqual([
     "pre.fleet-mermaid-source:graph LR\n  A --> B",
     'div.fleet-mermaid-diagram:<svg data-render="1">graph LR\n  A --> B</svg>',
+    "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
   ]);
   expect(good.dataset.state).toBe("rendered");
   expect(shapes(bad)).toEqual([
@@ -234,10 +245,12 @@ test("a re-render replaces the diagram or the error in place under new ids, so t
   expect(shapes(good)).toEqual([
     "pre.fleet-mermaid-source:graph LR\n  A --> B",
     'div.fleet-mermaid-diagram:<svg data-render="3">graph LR\n  A --> B</svg>',
+    "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
   ]);
   expect(shapes(bad)).toEqual([
     "pre.fleet-mermaid-source:graph LR\n  A --> C",
     'div.fleet-mermaid-diagram:<svg data-render="4">graph LR\n  A --> C</svg>',
+    "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
   ]);
   expect(bad.dataset.state).toBe("rendered");
   good.children[0].textContent = "graph LR\n  B -->";
@@ -263,10 +276,12 @@ test("initializes and draws only once the theme's mono face has loaded for every
     [
       "pre.fleet-mermaid-source:graph LR\n  A --> B",
       `div.fleet-mermaid-diagram:<svg data-render="${a}">graph LR\n  A --> B</svg>`,
+      "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
     ],
     [
       "pre.fleet-mermaid-source:graph TD",
       `div.fleet-mermaid-diagram:<svg data-render="${b}">graph TD</svg>`,
+      "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
     ],
     "rendered",
     "rendered",
@@ -338,6 +353,7 @@ test("a run overtaken before it draws never initializes or renders; one overtake
   expect(shapes(element)).toEqual([
     "pre.fleet-mermaid-source:graph LR",
     'div.fleet-mermaid-diagram:<svg data-render="1">graph LR</svg>',
+    "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
   ]);
 
   nextPhase();
@@ -351,12 +367,14 @@ test("a run overtaken before it draws never initializes or renders; one overtake
   expect(shapes(element)).toEqual([
     "pre.fleet-mermaid-source:graph LR",
     'div.fleet-mermaid-diagram:<svg data-render="3">graph LR</svg>',
+    "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
   ]);
   stub.held[0].resolve();
   await staleHeld;
   expect(shapes(element)).toEqual([
     "pre.fleet-mermaid-source:graph LR",
     'div.fleet-mermaid-diagram:<svg data-render="3">graph LR</svg>',
+    "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
   ]);
   const staleFailing = renderAll(true);
   await heldRenders(3);
@@ -369,6 +387,7 @@ test("a run overtaken before it draws never initializes or renders; one overtake
   expect(shapes(element)).toEqual([
     "pre.fleet-mermaid-source:graph LR",
     'div.fleet-mermaid-diagram:<svg data-render="5">graph LR</svg>',
+    "button.fleet-mermaid-zoom[Zoom the diagram]:Zoom",
   ]);
   expect(element.dataset.state).toBe("rendered");
   expect(darkModes()).toEqual([true, false, true, false]);

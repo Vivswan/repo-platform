@@ -5,12 +5,14 @@
 /* Carbon scrolls the table itself below 768px, which leaves the off-screen
  * cells setting the row heights; the wrapper scrolls instead, at every
  * width. What makes a table wider is its columns' natural widths: an
- * inline-code token counts whole up to the inline-code cap, prose as its
+ * inline-code token counts whole up to the inline-code cap (prose.css
+ * sets it in cqi, so the wrapper is the size container), prose as its
  * longest word. The scroll cue is an edge shadow only where content lies
  * past it: two ground-colored layers scroll with the content and cover the
  * fixed shadow layers at the ends. */
 
 .vp-doc .vp-table {
+  container-type: inline-size;
   overflow-x: auto;
   max-width: 100%;
   margin: 8px 0 1.5em;
