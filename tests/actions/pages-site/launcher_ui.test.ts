@@ -29,8 +29,11 @@ const item = (
 
 const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 
-// The DOM exists before anything here imports the theme: reka-ui and vueuse bind `window` as they load (the
-// shortcut listener, the dialog's Escape). The SSR renders below do not read it.
+// One DOM for this file's tests, registered before anything here imports the theme (reka-ui and vueuse bind `window`
+// as they load) and unregistered after, so happy-dom's window (its fetch among the globals it takes over) never
+// reaches another file's tests. Not a bun preload: process-wide, it broke the loopback-http fixtures of
+// tests/sync/writer/upstream.test.ts (an https window refuses them as mixed content), and it still met the partial
+// fake document mermaid_render.test.ts installs whenever that file loaded first.
 const { GlobalRegistrator } = await import(
   resolve(ACTION_DIR, "node_modules/@happy-dom/global-registrator/lib/index.js")
 );
@@ -38,8 +41,10 @@ GlobalRegistrator.register({ url: "https://owner.github.io/repo/" });
 afterAll(() => GlobalRegistrator.unregister());
 
 /** Vue's DOM renderer binds `document` as it loads, and another test file in this process may have loaded vue
- *  before any DOM existed, so the renderer is re-imported here under the registered one; runtime-core, which
- *  holds the component machinery, stays the shared instance. */
+ *  before this DOM existed (CI once had it bound to mermaid_render.test.ts's partial fake), so the renderer is
+ *  re-imported here under this DOM; runtime-core, which holds the component and directive machinery, stays the
+ *  shared instance. The second copy has its own vShow and Transition symbols, so a test here must never read a
+ *  hidden-but-mounted element's display: reka's dialog unmounts when closed, and nothing here keeps one hidden. */
 async function domRenderer(): Promise<{
   createApp(
     root: object,
@@ -386,9 +391,9 @@ describe("the rendered list", () => {
 });
 
 describe("the mounted list", () => {
-  // reka moves the highlight on keys and hover only, and the field's own first-row highlight runs on a real input
-  // event; the theme changes the rows under it (Escape writes the model, a query can match nothing), so without its
-  // own rule the field kept aria-activedescendant on a detached row and Enter did nothing until an arrow key.
+  // reka does not watch the theme's row membership: the theme changes the rows under the highlight (Escape writes
+  // the model, a query can match nothing, text matches arrive late), so without its own rule the field kept
+  // aria-activedescendant on a detached row and Enter did nothing until an arrow key.
   test("a highlighted row that leaves the list hands the highlight to the first row, or to nothing over an empty list", async () => {
     const { vue, localeIndex } = await stubbed();
     localeIndex.value = "root";
@@ -410,69 +415,78 @@ describe("the mounted list", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const app = createApp(FleetLauncher, { rows: "[]", mode: "panel" });
-    app.mount(host);
-    await vue.nextTick();
-    const field = host.querySelector("input") as HTMLInputElement;
-    const text = (row: Element) => row.textContent?.trim();
-    const type = async (query: string) => {
-      field.value = query;
-      field.dispatchEvent(new Event("input", { bubbles: true }));
+    try {
+      app.mount(host);
+      await vue.nextTick();
+      const field = host.querySelector("input") as HTMLInputElement;
+      const text = (row: Element) => row.textContent?.trim();
+      const type = async (query: string) => {
+        field.value = query;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        await settle(vue);
+      };
+      const key = async (name: string) => {
+        field.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+        await settle(vue);
+      };
+      const state = () => ({
+        query: field.value,
+        activedescendant: field.getAttribute("aria-activedescendant"),
+        highlighted: Array.from(host.querySelectorAll("[data-highlighted]"), text),
+      });
+
+      await type("long part");
+      expect(Array.from(host.querySelectorAll('[role="option"]'), text).slice(0, 2)).toEqual([
+        "Part 0Long",
+        "Part 1Long",
+      ]);
+      await key("ArrowDown");
+      expect(state().highlighted).toEqual(["Part 1Long"]);
+
+      // Escape: the query goes, the heading rows fold away, the first remaining row takes the highlight.
+      await key("Escape");
+      const options = host.querySelectorAll('[role="option"]');
+      const first = options[0] as HTMLElement;
+      expect(options).toHaveLength(9);
+      expect(state()).toEqual({
+        query: "",
+        activedescendant: first.id,
+        highlighted: [text(first)],
+      });
+
+      // A query matching nothing: no row to point at.
+      await type("long");
+      expect(state().highlighted).toHaveLength(1);
+      await type("zzzz");
+      expect(state()).toEqual({ query: "zzzz", activedescendant: null, highlighted: [] });
+
+      // Text matches arrive after the list was empty: the first of them takes the highlight.
+      const { default: MiniSearch } = await import(
+        resolve(ACTION_DIR, "node_modules/minisearch/dist/es/index.js")
+      );
+      const index = new MiniSearch({
+        fields: ["title", "titles", "text"],
+        storeFields: ["title", "titles"],
+      });
+      index.add({
+        id: "/repo/setup.html#body",
+        title: "Body section",
+        titles: ["Setup"],
+        text: "quuxbody here",
+      });
+      textIndex = JSON.stringify(index);
+      await type("quuxbody");
       await settle(vue);
-    };
-    const key = async (name: string) => {
-      field.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
-      await settle(vue);
-    };
-    const state = () => ({
-      query: field.value,
-      activedescendant: field.getAttribute("aria-activedescendant"),
-      highlighted: Array.from(host.querySelectorAll("[data-highlighted]"), text),
-    });
-
-    await type("long part");
-    expect(Array.from(host.querySelectorAll('[role="option"]'), text).slice(0, 2)).toEqual([
-      "Part 0Long",
-      "Part 1Long",
-    ]);
-    await key("ArrowDown");
-    expect(state().highlighted).toEqual(["Part 1Long"]);
-
-    // Escape: the query goes, the heading rows fold away, the first remaining row takes the highlight.
-    await key("Escape");
-    const options = host.querySelectorAll('[role="option"]');
-    const first = options[0] as HTMLElement;
-    expect(options).toHaveLength(9);
-    expect(state()).toEqual({ query: "", activedescendant: first.id, highlighted: [text(first)] });
-
-    // A query matching nothing: no row to point at.
-    await type("long");
-    expect(state().highlighted).toHaveLength(1);
-    await type("zzzz");
-    expect(state()).toEqual({ query: "zzzz", activedescendant: null, highlighted: [] });
-
-    // Text matches arrive after the list was empty: the first of them takes the highlight.
-    const { default: MiniSearch } = await import(
-      resolve(ACTION_DIR, "node_modules/minisearch/dist/es/index.js")
-    );
-    const index = new MiniSearch({
-      fields: ["title", "titles", "text"],
-      storeFields: ["title", "titles"],
-    });
-    index.add({
-      id: "/repo/setup.html#body",
-      title: "Body section",
-      titles: ["Setup"],
-      text: "quuxbody here",
-    });
-    textIndex = JSON.stringify(index);
-    await type("quuxbody");
-    await settle(vue);
-    expect(state()).toEqual({
-      query: "quuxbody",
-      activedescendant: (host.querySelector('[role="option"]') as HTMLElement).id,
-      highlighted: ["Body sectionSetup"],
-    });
-    app.unmount();
+      expect(state()).toEqual({
+        query: "quuxbody",
+        activedescendant: (host.querySelector('[role="option"]') as HTMLElement).id,
+        highlighted: ["Body sectionSetup"],
+      });
+    } finally {
+      app.unmount();
+      host.remove();
+      pages.splice(-2);
+    }
   });
 });
 
@@ -490,38 +504,75 @@ describe("the mounted nav launcher", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const app = createApp(NavLauncher);
-    app.mount(host);
-    await vue.nextTick();
-    const button = host.querySelector(".fleet-launcher-button") as HTMLButtonElement;
-    const dialog = () => document.querySelector(".fleet-launcher-dialog");
-    /** Whether the theme's listener took the key (it prevents the default of the key that opens the dialog). */
-    const press = async (target: EventTarget, key: string) => {
-      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
-      target.dispatchEvent(event);
-      await settle(vue);
-      return event.defaultPrevented;
-    };
+    let mounted = true;
+    try {
+      app.mount(host);
+      await vue.nextTick();
+      const button = host.querySelector(".fleet-launcher-button") as HTMLButtonElement;
+      const dialog = () => document.querySelector(".fleet-launcher-dialog");
+      /** Whether the theme's listener took the key (it prevents the default of the key that opens the dialog). */
+      const press = async (target: EventTarget, key: string) => {
+        const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+        target.dispatchEvent(event);
+        await settle(vue);
+        return event.defaultPrevented;
+      };
+      const pointer = async () => {
+        document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        await settle(vue);
+      };
+      /** The observable state, in plain values (a live element in a failed expectation prints its whole tree). */
+      const state = () => ({
+        open: dialog() !== null,
+        portaled: dialog() !== null && !host.contains(dialog() as Node),
+        fieldFocused: dialog()?.querySelector("input") === document.activeElement,
+        keyboardRing: dialog()?.querySelector("section")?.hasAttribute("data-keyboard") ?? null,
+        buttonFocused: document.activeElement === button,
+        keyboard: keyboardInput.value,
+      });
 
-    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    expect(await press(document.body, "/")).toBe(true);
-    const field = dialog()?.querySelector("input") ?? null;
-    expect([dialog() !== null, document.activeElement === field, keyboardInput.value]).toEqual([
-      true,
-      true,
-      true,
-    ]);
-    expect(dialog()?.closest("section, .fleet-launcher-dialog")?.parentElement).not.toBe(host);
-    expect(dialog()?.querySelector("section")?.hasAttribute("data-keyboard")).toBe(true);
+      await pointer();
+      expect(await press(document.body, "/")).toBe(true);
+      expect(state()).toEqual({
+        open: true,
+        portaled: true,
+        fieldFocused: true,
+        keyboardRing: true,
+        buttonFocused: false,
+        keyboard: true,
+      });
 
-    await press(field as EventTarget, "Escape");
-    expect([dialog(), document.activeElement === button]).toEqual([null, true]);
+      // A pointer outside closes the dialog (reka's layer) and clears the flag; a repeat press reopens it with the
+      // flag set: the positive control for the teardown below.
+      await pointer();
+      expect(state()).toEqual({
+        open: false,
+        portaled: false,
+        fieldFocused: false,
+        keyboardRing: null,
+        buttonFocused: true,
+        keyboard: false,
+      });
+      expect([await press(document.body, "/"), state().open, state().keyboard]).toEqual([
+        true,
+        true,
+        true,
+      ]);
 
-    app.unmount();
-    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    expect([await press(document.body, "/"), dialog(), keyboardInput.value]).toEqual([
-      false,
-      null,
-      true,
-    ]);
+      await press(dialog()?.querySelector("input") as EventTarget, "Escape");
+      expect([state().open, state().buttonFocused]).toEqual([false, true]);
+
+      app.unmount();
+      mounted = false;
+      await pointer();
+      expect([await press(document.body, "/"), state().open, state().keyboard]).toEqual([
+        false,
+        false,
+        true,
+      ]);
+    } finally {
+      if (mounted) app.unmount();
+      host.remove();
+    }
   });
 });

@@ -178,10 +178,10 @@ export default defineComponent({
       searching.value = false;
     });
 
-    // reka moves the highlight on keys, hover, and real input events only, and the theme changes the rows under
-    // it (Escape writes the model, a query narrows to nothing, the text matches arrive late). After the DOM
-    // settles on any new row list (the same count with other rows included), a highlight that no longer names a
-    // connected row goes to the first row, or to nothing over an empty list.
+    // reka does not watch the theme's row membership, and the theme changes the rows under the highlight (Escape
+    // writes the model, a query narrows to nothing, the text matches arrive late). After the DOM settles on any
+    // new row list (the same count with other rows included), a highlight naming no connected row goes to the
+    // first row, or to nothing over an empty list.
     watch(
       rows,
       (current) => {
