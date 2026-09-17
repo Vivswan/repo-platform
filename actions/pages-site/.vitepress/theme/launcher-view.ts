@@ -49,19 +49,6 @@ export function foldLabel(group: LauncherGroup, open: boolean): string {
   return `${verb} ${headings} ${headings === 1 ? "heading" : "headings"} on ${group.title}`;
 }
 
-export function moveHighlight(current: number, delta: 1 | -1, count: number): number {
-  if (count === 0) return -1;
-  if (current < 0) return delta === 1 ? 0 : count - 1;
-  return (current + delta + count) % count;
-}
-
-export function clampHighlight(current: number, count: number): number {
-  return current >= count ? count - 1 : current;
-}
-
-export type KeyIntent = "down" | "up" | "open" | "clear";
-
-/** The keyboard state the launcher's key tests read. */
 export interface KeyState {
   key: string;
   isComposing: boolean;
@@ -70,26 +57,6 @@ export interface KeyState {
   metaKey: boolean;
   shiftKey: boolean;
 }
-
-/** An arrow with any modifier held stays the field's (Shift+Arrow selects, Cmd+Arrow jumps the caret), as does every
- *  key during IME composition, where Enter accepts the candidate. */
-export function keyIntent(event: KeyState): KeyIntent | null {
-  if (event.isComposing) return null;
-  const chord = event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
-  switch (event.key) {
-    case "ArrowDown":
-      return chord ? null : "down";
-    case "ArrowUp":
-      return chord ? null : "up";
-    case "Enter":
-      return "open";
-    case "Escape":
-      return "clear";
-    default:
-      return null;
-  }
-}
-
 export type HotkeyIntent = "open" | "swallow";
 
 /** "swallow" for the launcher's keys during IME composition, where Ctrl K converts the candidate: the launcher stays
@@ -101,11 +68,6 @@ export function hotkeyIntent(event: KeyState, editing: boolean): HotkeyIntent | 
     (event.key === "/" && !editing);
   if (!launcherKey) return null;
   return event.isComposing ? "swallow" : "open";
-}
-
-/** An empty query is browsing, not aiming, so nothing is highlighted until a query has rows to open. */
-export function initialHighlight(query: string, count: number): number {
-  return query.trim() !== "" && count > 0 ? 0 : -1;
 }
 
 /** One hit of VitePress's local search index: `id` is the page URL plus

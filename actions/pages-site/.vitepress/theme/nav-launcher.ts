@@ -1,23 +1,26 @@
 // launcher.css hides the button while a landing panel is on the page, so a landing page without a curated table keeps
-// its search. The keyboard shortcut (Cmd K, Ctrl K, and `/` outside a field) is a capturing window listener that stops
-// carbon's own search hotkeys; the same listener, with a pointerdown twin, keeps the page's input modality for the
-// launcher's focus ring.
+// its search. The keyboard shortcut (Cmd K, Ctrl K, and `/` outside a field) is a capturing window listener that
+// stops carbon's own search hotkeys; the same listener, with a pointerdown twin, keeps the page's input modality for
+// the launcher's focus ring.
 
+import { useEventListener } from "@vueuse/core";
 import {
-  defineComponent,
-  h,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  shallowRef,
-  type VNode,
-} from "vue";
+  DialogClose,
+  DialogContent,
+  DialogOverlay,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+  DialogTrigger,
+  VisuallyHidden,
+} from "reka-ui";
+import { defineComponent, h, onMounted, ref, type VNode } from "vue";
 import FleetLauncher, { keyboardInput, searchIcon, shortcutKeys } from "./launcher.ts";
 import { hotkeyIntent, modifierLabel } from "./launcher-view.ts";
 
 const PANEL_FIELD = ".fleet-launcher-mode-panel .fleet-launcher-input";
 const DIALOG_FIELD = ".fleet-launcher-dialog .fleet-launcher-input";
+const LABEL = "Search the docs";
 
 function isEditing(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement | null;
@@ -56,35 +59,17 @@ export default defineComponent({
   name: "NavLauncher",
   setup() {
     const opened = ref(false);
-    const dialog = shallowRef<HTMLDialogElement | null>(null);
-    const button = shallowRef<HTMLButtonElement | null>(null);
     const modifier = ref<"Cmd" | "Ctrl">("Cmd");
 
-    async function show(): Promise<void> {
+    function show(): void {
       const panel = document.querySelector<HTMLInputElement>(PANEL_FIELD);
       if (panel !== null) {
         aim(panel);
         panel.scrollIntoView({ block: "center" });
         return;
       }
-      if (!opened.value) {
-        opened.value = true;
-        await nextTick();
-      }
-      const element = dialog.value;
-      if (element === null) return;
-      if (!element.open) element.showModal();
-      aim(element.querySelector<HTMLInputElement>(DIALOG_FIELD));
-    }
-
-    // Focus goes back to the button on every close, not only the ones the
-    // browser restores itself: opened by the shortcut, the dialog had taken
-    // focus from the body, and Escape or the backdrop would leave it there.
-    function close(): void {
-      const element = dialog.value;
-      if (element?.open) element.close();
-      opened.value = false;
-      button.value?.focus();
+      if (opened.value) aim(document.querySelector<HTMLInputElement>(DIALOG_FIELD));
+      else opened.value = true;
     }
 
     function onKeydown(event: KeyboardEvent): void {
@@ -96,74 +81,67 @@ export default defineComponent({
       event.stopImmediatePropagation();
       if (intent === "swallow") return;
       event.preventDefault();
-      void show();
+      show();
     }
 
-    function onPointerdown(): void {
-      keyboardInput.value = false;
-    }
+    useEventListener("keydown", onKeydown, { capture: true });
+    useEventListener(
+      "pointerdown",
+      () => {
+        keyboardInput.value = false;
+      },
+      { capture: true },
+    );
 
     onMounted(() => {
       modifier.value = modifierLabel(navigator.platform);
-      window.addEventListener("keydown", onKeydown, true);
-      window.addEventListener("pointerdown", onPointerdown, true);
-    });
-    onBeforeUnmount(() => {
-      window.removeEventListener("keydown", onKeydown, true);
-      window.removeEventListener("pointerdown", onPointerdown, true);
     });
 
-    return () => {
-      return [
-        h(
-          "button",
-          {
-            ref: button,
-            type: "button",
-            class: "fleet-launcher-button",
-            "aria-label": "Search the docs",
-            "aria-haspopup": "dialog",
-            onClick: () => void show(),
+    return () =>
+      h(
+        DialogRoot,
+        {
+          open: opened.value,
+          "onUpdate:open": (value: boolean) => {
+            opened.value = value;
           },
-          [
-            searchIcon(18),
-            h("span", { class: "fleet-launcher-button-text" }, "Search"),
-            shortcutKeys(modifier.value),
-          ],
-        ),
-        opened.value
-          ? h(
-              "dialog",
-              {
-                ref: dialog,
-                class: "fleet-launcher-dialog",
-                "aria-label": "Search the docs",
-                onClose: close,
-                // A click that reaches the dialog itself landed on the
-                // backdrop; clicks inside land on the launcher's elements.
-                onClick: (event: MouseEvent) => {
-                  if (event.target === dialog.value) close();
-                },
-              },
-              // After the launcher in the DOM, so Tab from the field
-              // reaches it (the rows are out of the Tab order); the CSS
-              // seats it over the field's right end.
-              [
-                h(FleetLauncher, { rows: "[]", mode: "dialog", onClose: close }),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "fleet-launcher-close",
-                    "aria-label": "Close search",
-                    onClick: close,
+        },
+        () => [
+          h(DialogTrigger, { asChild: true }, () =>
+            h("button", { type: "button", class: "fleet-launcher-button", "aria-label": LABEL }, [
+              searchIcon(18),
+              h("span", { class: "fleet-launcher-button-text" }, "Search"),
+              shortcutKeys(modifier.value),
+            ]),
+          ),
+          h(DialogPortal, null, () => [
+            h(DialogOverlay, { class: "fleet-launcher-backdrop" }),
+            // No description: the title says it all, and reka's dev warning reads the attribute's absence.
+            h(
+              DialogContent,
+              { class: "fleet-launcher-dialog", "aria-describedby": undefined },
+              // The Close button after the launcher in the DOM, so Tab from the field reaches it (the rows are out
+              // of the Tab order); the CSS seats it over the field's right end.
+              () => [
+                h(VisuallyHidden, null, () => h(DialogTitle, null, () => LABEL)),
+                h(FleetLauncher, {
+                  rows: "[]",
+                  mode: "dialog",
+                  onClose: () => {
+                    opened.value = false;
                   },
-                  closeIcon(),
+                }),
+                h(DialogClose, { asChild: true }, () =>
+                  h(
+                    "button",
+                    { type: "button", class: "fleet-launcher-close", "aria-label": "Close search" },
+                    closeIcon(),
+                  ),
                 ),
               ],
-            )
-          : null,
-      ];
-    };
+            ),
+          ]),
+        ],
+      );
   },
 });
