@@ -640,7 +640,9 @@ test(
 
 // medium-zoom waits for its high-resolution clone's load and never its error, so a srcset image whose chosen candidate
 // fails leaves it mid-open for good: every close returns early and the page it made inert would stay so. A fresh tab,
-// navigated by a link: a history step under that stuck open wedged headless Chrome's renderer in every probe.
+// navigated by a link: a history step under that stuck open wedged headless Chrome's renderer in every probe, while
+// headed Chrome (the same build, driven over the same protocol) took Back and Forward under both the stuck and a
+// healthy open, inert on or off, and each time rendered the target page with its root no longer inert.
 test(
   "a lightbox stuck mid-open frees the page on the next content update",
   async () => {
