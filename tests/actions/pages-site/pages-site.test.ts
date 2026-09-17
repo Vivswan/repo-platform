@@ -615,6 +615,8 @@ describe("check build", () => {
           GITHUB_WORKSPACE: join(root, "ws"),
           GITHUB_REPOSITORY: "o/r",
           RUNNER_TEMP: join(root, "runner-temp"),
+          // Empty, so the outputs print instead of landing in the runner's real file.
+          GITHUB_OUTPUT: "",
           CHECK: "true",
           SITE_DIR: "",
           CONFIG: `{"site_title": "t", "docs_path": ${docsPath}, "include": [], "link_rot_label": "", "link_rot_color": "", "link_rot_description": ""}`,

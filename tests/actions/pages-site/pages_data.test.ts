@@ -113,6 +113,8 @@ describe("the page index under the action's build topology", () => {
           GITHUB_WORKSPACE: ws,
           GITHUB_REPOSITORY: "o/r",
           RUNNER_TEMP: join(root, "runner-temp"),
+          // Empty, so the outputs print instead of landing in the runner's real file.
+          GITHUB_OUTPUT: "",
           CHECK: "true",
           SITE_DIR: "",
           CONFIG:
