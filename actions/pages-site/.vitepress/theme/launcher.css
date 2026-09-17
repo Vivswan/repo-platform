@@ -32,8 +32,6 @@
   font-size: 17px;
   line-height: 1.6;
   text-align: left;
-  /* the dialog mounts under carbon's nav bar, which sets nowrap */
-  white-space: normal;
 }
 /* The panel and the dialog rise on the one motion token (its duration and
  * curve are the animation's), so both read as the same entrance. */
@@ -265,7 +263,7 @@
 /* One search field on screen at a time: the button hides while its dialog
  * is open (the dialog's own field replaces it) and is back, and focusable
  * again, the moment the dialog closes and focus returns to it. */
-.VPNavBar:has(.fleet-launcher-dialog[open]) .fleet-launcher-button {
+.VPNavBar .fleet-launcher-button[data-state="open"] {
   visibility: hidden;
 }
 
@@ -341,35 +339,36 @@
 
 /* ---------- the dialog ---------- */
 
+/* Both sit in the top layer's place, above the nav (30) and the sidebar (60).
+ * reka-ui owns the scroll lock while the dialog is open; the list keeps its
+ * own overscroll so a flick at its end does not reach the page either. */
+.fleet-launcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--vp-backdrop-bg-color);
+}
 /* A flex column, so the list takes what the field and the status line
  * leave, in dynamic viewport units: on a phone the browser toolbar
  * would otherwise cover the list's last rows. */
 .fleet-launcher-dialog {
+  position: fixed;
+  top: 10dvh;
+  left: 0;
+  right: 0;
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
   width: min(720px, 90vw);
-  max-width: none;
   max-height: min(80dvh, 624px);
-  margin: 10dvh auto auto;
-  padding: 0;
+  margin: 0 auto;
   border: 1px solid var(--vp-c-border);
   border-radius: var(--fleet-radius-lg);
   background: var(--vp-c-bg-soft);
   color: var(--vp-c-text-1);
   box-shadow: var(--vp-shadow-4);
   overflow: hidden;
-}
-.fleet-launcher-dialog::backdrop {
-  background: var(--vp-backdrop-bg-color);
-}
-.fleet-launcher-dialog[open] {
-  display: flex;
-  flex-direction: column;
   animation: fleet-launcher-rise var(--fleet-transition) both;
-}
-/* A modal dialog does not stop the page behind it from scrolling; the
- * page holds still while one is open, and the list keeps its own
- * overscroll so a flick at its end does not reach the page either. */
-html:has(.fleet-launcher-dialog[open]) {
-  overflow: hidden;
 }
 .fleet-launcher-dialog .fleet-launcher {
   display: flex;
@@ -466,8 +465,8 @@ html:has(.fleet-launcher-dialog[open]) {
     display: none;
   }
   .fleet-launcher-dialog {
+    top: 6dvh;
     max-height: 88dvh;
-    margin-top: 6dvh;
   }
   .fleet-launcher-dialog .fleet-launcher-field {
     padding-right: 56px;
@@ -480,7 +479,7 @@ html:has(.fleet-launcher-dialog[open]) {
 
 @media (prefers-reduced-motion: reduce) {
   .fleet-launcher-mode-panel,
-  .fleet-launcher-dialog[open] {
+  .fleet-launcher-dialog {
     animation: none;
   }
   .fleet-launcher-field,
@@ -500,13 +499,13 @@ html:has(.fleet-launcher-dialog[open]) {
 /* Last, so the hue wins over every metric rule above, the narrow-viewport
  * ones included. The tint alone reads under 1.4:1 against the row; the
  * inset ring is the indicator that clears 3:1. */
-.fleet-launcher-link[aria-selected="true"],
-.fleet-launcher-fold[aria-selected="true"] {
+.fleet-launcher-link[data-highlighted],
+.fleet-launcher-fold[data-highlighted] {
   background: var(--fleet-hue-band);
   outline: 2px solid var(--fleet-hue);
   outline-offset: -2px;
 }
-.fleet-launcher-link[aria-selected="true"] .fleet-launcher-target {
+.fleet-launcher-link[data-highlighted] .fleet-launcher-target {
   color: var(--fleet-hue);
 }
 

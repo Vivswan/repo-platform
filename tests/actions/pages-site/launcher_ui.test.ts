@@ -6,19 +6,14 @@ import type {
   PageIndexEntry,
 } from "../../../actions/pages-site/.vitepress/theme/launcher-model.ts";
 import {
-  clampHighlight,
   decodeEntities,
   flatRows,
   foldLabel,
   type HotkeyIntent,
   hotkeyIntent,
-  initialHighlight,
-  type KeyIntent,
   type KeyState,
-  keyIntent,
   type LauncherRow,
   modifierLabel,
-  moveHighlight,
   shownGroups,
   TEXT_MATCHES_CAP,
   type TextHit,
@@ -142,58 +137,6 @@ describe("foldLabel", () => {
   });
 });
 
-describe("the highlight", () => {
-  // A typed query lands on its first row so Enter opens it; a highlight past the surviving rows clamps to the last one.
-  // Either drifting (start at -1, or keep a stale index) leaves Enter a no-op with the list still rendered.
-  test("starts at the first row of a nonblank query and clamps to the rows that survive a filter", () => {
-    expect(
-      [
-        ["release", 4],
-        ["   ", 4],
-        ["", 4],
-        ["release", 0],
-      ].map(([query, count]) => [query, count, initialHighlight(String(query), Number(count))]),
-    ).toEqual([
-      ["release", 4, 0],
-      ["   ", 4, -1],
-      ["", 4, -1],
-      ["release", 0, -1],
-    ]);
-    expect(
-      [
-        [10, 1],
-        [3, 3],
-        [1, 3],
-        [-1, 3],
-        [0, 0],
-        [-1, 0],
-      ].map(([current, count]) => [current, count, clampHighlight(current, count)]),
-    ).toEqual([
-      [10, 1, 0],
-      [3, 3, 2],
-      [1, 3, 1],
-      [-1, 3, -1],
-      [0, 0, -1],
-      [-1, 0, -1],
-    ]);
-  });
-
-  // The listbox contract: wrap both ways, and -1 (nothing highlighted) over an empty list.
-  test.each<[number, 1 | -1, number, number]>([
-    [-1, 1, 3, 0],
-    [-1, -1, 3, 2],
-    [0, 1, 3, 1],
-    [2, 1, 3, 0],
-    [0, -1, 3, 2],
-    [1, -1, 3, 0],
-    [0, 1, 1, 0],
-    [-1, 1, 0, -1],
-    [2, -1, 0, -1],
-  ])("from %d by %d over %d rows lands on %d", (current, delta, count, expected) => {
-    expect(moveHighlight(current, delta, count)).toBe(expected);
-  });
-});
-
 describe("textMatchGroup", () => {
   const hit = (id: string, title: string, titles: string[]): TextHit => ({ id, title, titles });
 
@@ -256,28 +199,6 @@ const key = (key: string, held: Partial<KeyState> = {}): KeyState => ({
   ...held,
 });
 
-describe("keyIntent", () => {
-  // Browser facts: Enter accepts the IME candidate during composition; Shift+Arrow selects text, so neither moves the highlight.
-  test.each<[KeyState, KeyIntent | null]>([
-    [key("ArrowDown"), "down"],
-    [key("ArrowUp"), "up"],
-    [key("Enter"), "open"],
-    [key("Escape"), "clear"],
-    [key("Enter", { isComposing: true }), null],
-    [key("ArrowDown", { isComposing: true }), null],
-    [key("ArrowUp", { shiftKey: true }), null],
-    [key("ArrowUp", { metaKey: true }), null],
-    [key("ArrowDown", { altKey: true }), null],
-    [key("ArrowDown", { ctrlKey: true }), null],
-    [key("Enter", { metaKey: true }), "open"],
-    [key("Home"), null],
-    [key("End"), null],
-    [key("a"), null],
-  ])("%j means %p", (event, intent) => {
-    expect(keyIntent(event)).toBe(intent);
-  });
-});
-
 describe("hotkeyIntent", () => {
   // `/` is the default theme's search hotkey too and must stay out of an editable field; a shortcut mid-composition is swallowed, not opened.
   test.each<[KeyState, boolean, HotkeyIntent | null]>([
@@ -336,18 +257,42 @@ describe("the rendered list", () => {
     page("/repo/guide/intro.html", "Intro", "guide", 1),
   );
 
+  // reka-ui's ListboxItem shape over the theme's own elements: the id and tabindex are reka's, the class, href and
+  // target ours; a fold row is the same option over a div.
   function outline(html: string): string[] {
-    const OPTION_RE =
-      /<a class="fleet-launcher-link" role="option" id="v-\d+-row-(\d+)" aria-selected="false" tabindex="-1" href="([^"]*)"|<div class="fleet-launcher-fold" role="option" id="v-\d+-row-(\d+)" aria-selected="false">([^<]*)</g;
-    return [...html.matchAll(OPTION_RE)].map(([, index, href, foldIndex, fold]) =>
-      fold === undefined ? `${index} ${href}` : `${foldIndex} fold: ${fold}`,
+    const option =
+      'data-reka-collection-item id="reka-listbox-item-v-\\d+" role="option" tabindex="-1" aria-selected="false"';
+    const OPTION_RE = new RegExp(
+      `<a class="fleet-launcher-link" href="([^"]*)"(?: target="[^"]*")? ${option}|<div class="fleet-launcher-fold" ${option} data-state="unchecked"><!--\\[-->([^<]*)<`,
+      "g",
+    );
+    return [...html.matchAll(OPTION_RE)].map(([, href, fold]) =>
+      fold === undefined ? href : `fold: ${fold}`,
     );
   }
 
   function groupStates(html: string): (string | null)[] {
     const GROUP_RE =
-      /<div class="fleet-launcher-group" role="group" aria-labelledby="v-\d+-group-\d+"( aria-expanded="(true|false)")?>/g;
-    return [...html.matchAll(GROUP_RE)].map(([, , expanded]) => expanded ?? null);
+      /<div role="group" aria-labelledby="(reka-listbox-group-v-\d+)" class="fleet-launcher-group"( aria-expanded="(true|false)")?>/g;
+    return [...html.matchAll(GROUP_RE)].map(([, , , expanded]) => expanded ?? null);
+  }
+
+  /** The combobox pattern's wiring, as rendered: the field controls the listbox, each group is labelled by its own
+   *  title. */
+  function ariaWiring(html: string): { controls: string; groups: [string, string][] } {
+    const controls = html.match(/ role="combobox"[^>]* aria-controls="([^"]+)"/)?.[1] ?? "";
+    const listbox = html.match(
+      /<div class="fleet-launcher-list" id="([^"]+)"[^>]* role="listbox"/,
+    )?.[1];
+    const GROUP_TITLE_RE =
+      /<div role="group" aria-labelledby="([^"]+)" class="fleet-launcher-group"[^>]*><!--\[--><div id="([^"]+)" class="fleet-launcher-group-title">/g;
+    return {
+      controls: controls === listbox ? "the listbox" : `${controls} vs ${listbox}`,
+      groups: [...html.matchAll(GROUP_TITLE_RE)].map(([, labelledby, title]) => [
+        labelledby,
+        title,
+      ]),
+    };
   }
 
   let stage: Promise<(rows: string, locale: string) => Promise<string>> | undefined;
@@ -369,8 +314,10 @@ describe("the rendered list", () => {
   }
 
   // Assistive-tech facts: list or button markup inside a listbox is demoted to presentation, so every
-  // option is one element; a curated row's target reaches its own anchor alone.
-  test("fold rows follow a page group's page row and replace a dir group's rows; options and group states follow document order; an empty locale is an empty listbox", async () => {
+  // option is one element (reka's option over the theme's link or fold div, out of the Tab order); an ARIA
+  // reference to a wrong id is silently nothing, so the wiring between the input, the listbox, and the group
+  // titles is pinned at the rendered boundary. A curated row's target reaches its own anchor alone.
+  test("renders the rows as reka-ui listbox options in document order, the groups labelled by their titles, the input controlling the list; an empty locale is an empty listbox", async () => {
     const rows = JSON.stringify([
       { label: "Manual", href: "/repo/manual/", note: null, target: "_self" },
       { label: "Set things up", href: "./setup.html", note: null },
@@ -378,19 +325,23 @@ describe("the rendered list", () => {
     const html = await render(rows, "root");
 
     expect(outline(html)).toEqual([
-      "0 /repo/manual/",
-      "1 /repo/setup.html",
-      "2 /repo/setup.html#part-0",
-      "3 /repo/long.html",
-      "4 fold: Show 9 headings on Long",
-      "5 fold: Show 9 pages in api/",
-      "6 /repo/guide/intro.html",
-      "7 /repo/guide/intro.html#part-0",
+      "/repo/manual/",
+      "/repo/setup.html",
+      "/repo/setup.html#part-0",
+      "/repo/long.html",
+      "fold: Show 9 headings on Long",
+      "fold: Show 9 pages in api/",
+      "/repo/guide/intro.html",
+      "/repo/guide/intro.html#part-0",
     ]);
     expect(groupStates(html)).toEqual([null, null, "false", "false", null]);
     expect(html).not.toMatch(/<(li|ol|ul|button)\b/);
     expect(html.match(/role="option"/g)).toHaveLength(8);
     expect(html).toContain('role="combobox" aria-expanded="true"');
+    const wiring = ariaWiring(html);
+    expect(wiring.controls).toBe("the listbox");
+    expect(wiring.groups).toHaveLength(5);
+    expect(wiring.groups.filter(([labelledby, title]) => labelledby !== title)).toEqual([]);
     expect(html).toContain('href="/repo/manual/" target="_self"');
     expect(html).not.toMatch(/href="\/repo\/setup\.html"[^>]*target=/);
 
@@ -398,144 +349,5 @@ describe("the rendered list", () => {
     expect(outline(empty)).toEqual([]);
     expect(groupStates(empty)).toEqual([]);
     expect(empty).toContain('role="combobox" aria-expanded="false"');
-  });
-});
-
-describe("the input modality behind the field's focus ring", () => {
-  interface Node {
-    tag: string;
-    props: Record<string, unknown>;
-    children: Node[];
-    parent: Node | null;
-    open: boolean;
-    focus(): void;
-    select(): void;
-    scrollIntoView(): void;
-    showModal(): void;
-    close(): void;
-    querySelector(): Node | null;
-  }
-  const descendants = (node: Node): Node[] => [node, ...node.children.flatMap(descendants)];
-  let focused: Node | null = null;
-  const element = (tag: string): Node => ({
-    tag,
-    props: {},
-    children: [],
-    parent: null,
-    open: false,
-    focus() {
-      focused = this;
-    },
-    select() {},
-    scrollIntoView() {},
-    showModal() {
-      this.open = true;
-    },
-    close() {
-      this.open = false;
-    },
-    querySelector() {
-      return descendants(this).find((node) => node.tag === "input") ?? null;
-    },
-  });
-  const detach = (node: Node): void => {
-    if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1);
-    node.parent = null;
-  };
-
-  const keydown = (key: string, held: Partial<KeyState> = {}): Event =>
-    Object.assign(new Event("keydown", { cancelable: true }), {
-      key,
-      isComposing: false,
-      altKey: false,
-      ctrlKey: false,
-      metaKey: false,
-      shiftKey: false,
-      ...held,
-    });
-
-  // The modality is wiring: the shortcut owner's capturing listener stops
-  // the key that mounts the dialog, and the dialog mounts after it, so no
-  // pure helper can pin that the ring still follows it.
-  test("the shortcut that opens the dialog counts as keyboard input and closing it returns focus to the button; a pointer clears the flag; unmount drops the listeners", async () => {
-    const { vue } = await stubbed();
-    const { default: NavLauncher } = await import(
-      resolve(ACTION_DIR, ".vitepress/theme/nav-launcher.ts")
-    );
-    const renderer = vue.createRenderer({
-      createElement: element,
-      createText: () => element("#text"),
-      createComment: () => element("#comment"),
-      setText() {},
-      setElementText() {},
-      patchProp(node: Node, key: string, _old: unknown, value: unknown) {
-        node.props[key] = value;
-      },
-      insert(node: Node, parent: Node, before: Node | null) {
-        detach(node);
-        node.parent = parent;
-        const at = before ? parent.children.indexOf(before) : -1;
-        if (at < 0) parent.children.push(node);
-        else parent.children.splice(at, 0, node);
-      },
-      remove: detach,
-      parentNode: (node: Node) => node.parent,
-      nextSibling: (node: Node) =>
-        node.parent?.children[node.parent.children.indexOf(node) + 1] ?? null,
-    });
-
-    const listeners = new Set<EventListenerOrEventListenerObject>();
-    const win = new EventTarget();
-    const add = win.addEventListener.bind(win);
-    const drop = win.removeEventListener.bind(win);
-    win.addEventListener = (type, fn, options) => {
-      if (fn) listeners.add(fn);
-      add(type, fn, options);
-    };
-    win.removeEventListener = (type, fn, options) => {
-      if (fn) listeners.delete(fn);
-      drop(type, fn, options);
-    };
-    const globals = {
-      window: win,
-      document: { querySelector: () => null },
-      location: { search: "" },
-    };
-    Object.assign(globalThis, globals);
-    try {
-      const host = element("root");
-      const app = renderer.createApp({ render: () => vue.h(NavLauncher) });
-      app.mount(host);
-      const section = () => descendants(host).find((node) => node.tag === "section");
-      const keyboard = () => section()?.props["data-keyboard"];
-
-      win.dispatchEvent(new Event("pointerdown"));
-      win.dispatchEvent(keydown("/"));
-      await vue.nextTick();
-      await vue.nextTick();
-      const dialog = section()?.parent as Node;
-      expect([dialog.open, keyboard(), focused?.tag]).toEqual([true, "", "input"]);
-
-      // The modality checks run while the dialog is still mounted: with
-      // the section gone, keyboard() is undefined whatever the flag says.
-      win.dispatchEvent(new Event("pointerdown"));
-      await vue.nextTick();
-      expect([section() !== undefined, keyboard()]).toEqual([true, undefined]);
-
-      win.dispatchEvent(keydown("k", { metaKey: true }));
-      await vue.nextTick();
-      expect(keyboard()).toBe("");
-
-      // Escape's native cancel lands here as the dialog's close event.
-      (dialog.props.onClose as () => void)();
-      await vue.nextTick();
-      expect([section(), focused?.props.class]).toEqual([undefined, "fleet-launcher-button"]);
-
-      expect(listeners.size).toBe(2);
-      app.unmount();
-      expect(listeners.size).toBe(0);
-    } finally {
-      for (const name of Object.keys(globals)) delete (globalThis as Record<string, unknown>)[name];
-    }
   });
 });

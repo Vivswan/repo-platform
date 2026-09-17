@@ -10,6 +10,8 @@
   .VPSkipLink,
   .fleet-launcher,
   .fleet-launcher-button,
+  .fleet-launcher-dialog,
+  .fleet-launcher-backdrop,
   .VPDoc .content-top,
   .VPDocFooter,
   .vp-doc [class*="language-"] > button.copy,
