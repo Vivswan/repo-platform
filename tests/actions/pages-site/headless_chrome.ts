@@ -184,8 +184,9 @@ export class Tab {
     return result.value;
   }
 
-  /** One key press as the browser sees it (a synthetic KeyboardEvent never reaches a dialog's cancel). */
-  async press(key: string, code: number): Promise<void> {
+  /** One key press as the browser sees it (a synthetic KeyboardEvent never reaches a dialog's cancel);
+   *  `modifiers` is the protocol's bit set (1 Alt, 2 Ctrl, 4 Meta, 8 Shift). */
+  async press(key: string, code: number, modifiers = 0): Promise<void> {
     for (const type of ["keyDown", "keyUp"]) {
       await this.send("Input.dispatchKeyEvent", {
         type,
@@ -193,6 +194,7 @@ export class Tab {
         code: key,
         windowsVirtualKeyCode: code,
         nativeVirtualKeyCode: code,
+        modifiers,
       });
     }
   }

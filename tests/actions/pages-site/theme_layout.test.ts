@@ -93,6 +93,16 @@ const PROBES = `(() => {
     width() { return round(viewSvg().getBoundingClientRect().width); },
     corner() { const r = viewSvg().getBoundingClientRect(); return [round(r.left), round(r.top)]; },
     press(text) { bar(text).click(); return round(viewSvg().getBoundingClientRect().width); },
+    pageWheel() {
+      const stage = view().querySelector(".fleet-mermaid-view-stage");
+      const rect = stage.getBoundingClientRect();
+      stage.dispatchEvent(new WheelEvent("wheel", {
+        deltaY: -1, deltaMode: WheelEvent.DOM_DELTA_PAGE, cancelable: true, bubbles: true,
+        clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2,
+      }));
+      return round(viewSvg().getBoundingClientRect().width);
+    },
+    focusStage() { view().querySelector(".fleet-mermaid-view-stage").focus(); return document.activeElement.className; },
     ids() { return { column: columnSvg().id, view: viewSvg().id, open: view().open }; },
     closed() {
       return {
@@ -204,7 +214,7 @@ async function openPage(followSystem: "light" | null = null): Promise<Tab> {
 // A synthetic click on the button is the reader's; the wheel, the drag, and Escape go through the browser's input
 // path, which is what decides whether the stage's listener, the pointer capture, and the dialog's cancel see them.
 test(
-  "the zoom button opens the diagram at its natural size in a modal view that zooms, pans, follows a theme flip, and hands focus back on Escape",
+  "the zoom button opens the diagram at its natural size in a modal view that zooms and pans by wheel, drag, and keys, follows a theme flip, and hands focus back on Escape",
   async () => {
     const tab = await openPage("light");
     try {
@@ -274,9 +284,31 @@ test(
       const after = await tab.evaluate<[number, number]>("window.__probe.corner()");
       expect([after[0] - before[0], after[1] - before[1]]).toEqual([100, 50]);
 
+      // A page-unit wheel (one notch is a page) zooms at least as far as a 120px pixel-unit one did.
+      const pageWheeled = await tab.evaluate<number>("window.__probe.pageWheel()");
+      expect(pageWheeled / wheeled).toBeGreaterThanOrEqual(wheeled / reset);
+
+      // Without a pointer the stage takes focus and the arrows scroll it (right reveals the right side, so the
+      // copy shifts left); minus zooms out.
+      expect(await tab.evaluate<string>("window.__probe.focusStage()")).toBe(
+        "fleet-mermaid-view-stage",
+      );
+      const beforeKeys = await tab.evaluate<[number, number]>("window.__probe.corner()");
+      await tab.press("ArrowRight", 39);
+      const afterKeys = await tab.evaluate<[number, number]>("window.__probe.corner()");
+      expect(afterKeys[0]).toBeLessThan(beforeKeys[0]);
+      expect(afterKeys[1]).toBe(beforeKeys[1]);
+      await tab.press("-", 189);
+      expect(await tab.evaluate<number>("window.__probe.width()")).toBeLessThan(pageWheeled);
+      // A chord stays the browser's (Alt+ArrowLeft is Back), so it moves nothing.
+      const beforeChord = await tab.evaluate<[number, number]>("window.__probe.corner()");
+      await tab.press("ArrowLeft", 37, 1);
+      expect(await tab.evaluate<[number, number]>("window.__probe.corner()")).toEqual(beforeChord);
+
       // The system appearance flipping under an open view: the pass redraws the mount, and the view follows.
       const ids = await tab.evaluate<{ column: string; view: string }>("window.__probe.ids()");
       expect(ids.view).toBe(ids.column);
+      const beforeFlip = await tab.evaluate<number>("window.__probe.width()");
       await preferScheme(tab, "dark");
       await tab.evaluate(WHEN_REDRAWN(ids.column));
       const flipped = await tab.evaluate<{ column: string; view: string; open: boolean }>(
@@ -284,7 +316,7 @@ test(
       );
       expect(flipped).toEqual({ column: flipped.column, view: flipped.column, open: true });
       expect(flipped.column).not.toBe(ids.column);
-      expect(await tab.evaluate<number>("window.__probe.width()")).toBe(wheeled);
+      expect(await tab.evaluate<number>("window.__probe.width()")).toBe(beforeFlip);
 
       await tab.press("Escape", 27);
       expect(await tab.evaluate<Record<string, unknown>>("window.__probe.closed()")).toEqual({

@@ -144,6 +144,10 @@
     &:active {
       cursor: grabbing;
     }
+    &:focus-visible {
+      outline: 2px solid var(--fleet-hue);
+      outline-offset: -2px;
+    }
   }
   .fleet-mermaid-view-canvas {
     position: absolute;

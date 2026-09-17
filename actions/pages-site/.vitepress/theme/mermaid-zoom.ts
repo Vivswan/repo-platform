@@ -11,6 +11,8 @@ const SCALE_MAX = 8;
 const STEP = 1.25;
 /** Wheel pixels per e-fold of scale: a 120px notch is about x1.5. */
 const WHEEL_PIXELS = 300;
+const LINE_PIXELS = 16;
+const KEY_PAN_PIXELS = 40;
 
 interface Point {
   x: number;
@@ -92,6 +94,48 @@ function place(current: View): void {
   apply(current);
 }
 
+function wheelUnit(deltaMode: number, pageHeight: number): number {
+  if (deltaMode === WheelEvent.DOM_DELTA_LINE) return LINE_PIXELS;
+  if (deltaMode === WheelEvent.DOM_DELTA_PAGE) return pageHeight;
+  return 1;
+}
+
+/** A chord (Alt, Ctrl, Meta) stays the browser's: Alt+ArrowLeft is Back. */
+function onKey(current: View, event: KeyboardEvent): boolean {
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
+  const pan = (x: number, y: number) => {
+    current.x += x;
+    current.y += y;
+    apply(current);
+  };
+  switch (event.key) {
+    case "ArrowLeft":
+      pan(KEY_PAN_PIXELS, 0);
+      return true;
+    case "ArrowRight":
+      pan(-KEY_PAN_PIXELS, 0);
+      return true;
+    case "ArrowUp":
+      pan(0, KEY_PAN_PIXELS);
+      return true;
+    case "ArrowDown":
+      pan(0, -KEY_PAN_PIXELS);
+      return true;
+    case "+":
+    case "=":
+      zoomAt(current, STEP, stageCenter(current));
+      return true;
+    case "-":
+      zoomAt(current, 1 / STEP, stageCenter(current));
+      return true;
+    case "0":
+      place(current);
+      return true;
+    default:
+      return false;
+  }
+}
+
 function control(text: string, onClick: () => void): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -132,6 +176,8 @@ function build(): View {
   bar.className = `${VIEW_CLASS}-bar`;
   const stage = document.createElement("div");
   stage.className = `${VIEW_CLASS}-stage`;
+  stage.tabIndex = 0;
+  stage.setAttribute("aria-label", "Diagram: arrow keys pan, plus and minus zoom, 0 resets");
   const canvas = document.createElement("div");
   canvas.className = `${VIEW_CLASS}-canvas`;
   stage.append(canvas);
@@ -164,8 +210,7 @@ function build(): View {
     (event) => {
       event.preventDefault();
       const rect = stage.getBoundingClientRect();
-      const pixels =
-        event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16 : event.deltaY;
+      const pixels = event.deltaY * wheelUnit(event.deltaMode, rect.height);
       zoomAt(current, Math.exp(-pixels / WHEEL_PIXELS), {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
@@ -173,6 +218,9 @@ function build(): View {
     },
     { passive: false },
   );
+  stage.addEventListener("keydown", (event) => {
+    if (onKey(current, event)) event.preventDefault();
+  });
   stage.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     stage.setPointerCapture(event.pointerId);
