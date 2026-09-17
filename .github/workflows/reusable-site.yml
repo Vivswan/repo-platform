@@ -94,7 +94,8 @@ jobs:
               echo "::warning::no Pages site yet: repo-platform's settings apply creates it on its next run (daily), and the nightly rebuild deploys; nothing to do here."
               ;;
             *)
-              body=$(tail -n 1 <<<"$response" | tr -d '\r')
+              body=$(sed '1,/^\r\{0,1\}$/d' <<<"$response" | tr -d '\r' | tr -s '\n ' ' ')
+              body=${body% }
               echo "::error::reading the Pages site answered HTTP ${status:-nothing}${body:+: $body}"
               exit 1
               ;;

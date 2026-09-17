@@ -195,8 +195,9 @@ describe("reusable-site.yml", () => {
 
   // GitHub reserves Pages-site creation to a token other than the job's, whatever `pages: write` grants, so the deploy
   // can only ask (a repository that selected the module before the settings apply ran saw configure-pages fail on the
-  // 404). The check EXECUTED with gh stubbed to answer as `gh api --include` does (status line, CRLF headers, one JSON
-  // body line, exit 1 off 2xx): the request it sends, and the whole outcome per status.
+  // 404). The check EXECUTED with gh stubbed to answer as `gh api --include` does (status line, CRLF headers, the JSON
+  // body, exit 1 off 2xx): the request it sends, and the whole outcome per status. The 500 body spans five lines, the
+  // shape a pretty-printed JSON error takes, so the error line must carry all of it and not its last line alone.
   const askPages = (status: string, body: string) => {
     const root = temp.dir("reusable-site-pages-");
     const gh = argvStub(root, "gh", [
@@ -241,10 +242,17 @@ describe("reusable-site.yml", () => {
     },
     {
       status: "500 Internal Server Error",
-      body: '{"message":"Server Error"}',
+      body: [
+        "{",
+        '  "message": "Server Error",',
+        '  "documentation_url": "https://docs.github.com/rest",',
+        '  "status": "500"',
+        "}",
+      ].join("\n"),
       outcome: {
         status: 1,
-        stdout: '::error::reading the Pages site answered HTTP 500: {"message":"Server Error"}\n',
+        stdout:
+          '::error::reading the Pages site answered HTTP 500: { "message": "Server Error", "documentation_url": "https://docs.github.com/rest", "status": "500" }\n',
         output: "",
       },
     },
