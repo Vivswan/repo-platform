@@ -58,7 +58,8 @@ const IMAGES_MD =
   "![A picture](picture.svg)\n\n" +
   '<a href="./other.html"><picture><img src="./picture.svg" alt="A linked picture"></picture></a>\n\n' +
   "![A second picture](picture.svg)\n\n" +
-  '<img src="./picture.svg" alt="">';
+  '<img src="./picture.svg" alt="">\n\n' +
+  '<img src="./picture.svg">';
 
 const DOCS_MD = `# Fixture\n\n${DIAGRAM}\n\n${IMAGES_MD}\n\n${CRUSH_TABLE}\n\n${WIDE_TABLE}\n`;
 /** A second page with no diagram, one history step away. */
@@ -390,8 +391,8 @@ interface Lightbox {
   linkedAttached: boolean;
   /** On paper, with the lightbox open, whether the original image still shows. */
   printedOriginal: string;
-  /** A decorative image (empty alt) is neither attached nor a button. */
-  decorative: { attached: boolean; tabindex: string | null; role: string | null };
+  /** An image with an empty alt, or none, has no name to be a button under: neither attached nor a button. */
+  decorative: { attached: boolean; tabindex: string | null; role: string | null }[];
   /** The page behind the overlay is inert while the lightbox is up. */
   layoutInert: boolean;
 }
@@ -414,17 +415,18 @@ const OPEN_LIGHTBOX = `new Promise((resolve) => {
       })(),
       linkedAttached: document.querySelector(".vp-doc a img").classList.contains("medium-zoom-image"),
       printedOriginal: "",
-      decorative: (() => {
-        const img = document.querySelector('.vp-doc img[alt=""]');
-        return {
-          attached: img.classList.contains("medium-zoom-image"),
-          tabindex: img.getAttribute("tabindex"),
-          role: img.getAttribute("role"),
-        };
-      })(),
+      decorative: [
+        document.querySelector('.vp-doc img[alt=""]'),
+        document.querySelector(".vp-doc img:not([alt])"),
+      ].map((img) => ({
+        attached: img.classList.contains("medium-zoom-image"),
+        tabindex: img.getAttribute("tabindex"),
+        role: img.getAttribute("role"),
+      })),
       layoutInert: document.querySelector(".Layout").hasAttribute("inert"),
     });
   }, { once: true });
+  img.focus();
   img.click();
 })`;
 
@@ -490,7 +492,7 @@ const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
 // medium-zoom finishes an open or close on transitionend, so a reduced-motion sheet that stops its transition
 // outright leaves the lightbox stuck open; the second pass runs under that preference.
 test(
-  "an article image opens in a lightbox over the nav by click or by Enter, larger than its inline box, with the page behind it inert; a linked or decorative image does not; the original still prints, and Escape closes it, under reduced motion too",
+  "an article image opens by click or Enter in a lightbox over the nav, larger than inline, page inert, focus back after; a linked or unnamed image does not; the original prints; Escape closes it, under reduced motion too",
   async () => {
     const tab = await openPage();
     try {
@@ -509,7 +511,10 @@ test(
           atNavCorner: "medium-zoom-overlay",
           linkedAttached: false,
           printedOriginal: "visible",
-          decorative: { attached: false, tabindex: null, role: null },
+          decorative: [
+            { attached: false, tabindex: null, role: null },
+            { attached: false, tabindex: null, role: null },
+          ],
           layoutInert: true,
         });
         expect(await tab.evaluate<boolean>(FOCUS_BEHIND_OVERLAY)).toBe(false);
@@ -522,6 +527,8 @@ test(
           motion,
           layoutInert: false,
         });
+        // The probe focused then clicked, a pointer's order on a focusable image; the close hands focus back.
+        expect(await tab.evaluate<boolean>(FOCUS_ON_IMAGE)).toBe(true);
       }
       expect(await tab.evaluate<boolean>(FOCUS_IMAGE)).toBe(true);
       expect(await tab.accessibleNode(".vp-doc img")).toEqual({

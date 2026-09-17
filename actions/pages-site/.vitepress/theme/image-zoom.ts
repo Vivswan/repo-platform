@@ -1,21 +1,22 @@
 // Every article image opens in medium-zoom's lightbox. The instance is made in the browser (mediumZoom binds document
 // listeners as it is created), once, and re-attached on each content update so the images of the new page are the
 // ones it holds: an image anywhere inside a link (a <picture> between them included) is left to its link, and one
-// with an empty alt is decorative. medium-zoom binds a click alone, so each attached image is also a focusable button
-// that Enter and Space open, and its lightbox is not modal, so the page behind the overlay goes inert while it is up.
+// with an empty or missing alt has no name to be a button under. medium-zoom binds a click alone, so each attached
+// image is also a focusable button that Enter and Space open, and its lightbox is not modal, so the page behind the
+// overlay goes inert while it is up.
 
 import mediumZoom, { type Zoom } from "medium-zoom";
 import { onContentUpdated } from "vitepress";
 import { defineComponent } from "vue";
 
-const IMAGE_SELECTOR = '.vp-doc img:not(a img):not([alt=""])';
+const IMAGE_SELECTOR = '.vp-doc img[alt]:not([alt=""]):not(a img)';
 /** Carbon's root, everything on the page but what medium-zoom appends to <body>. */
 const PAGE_SELECTOR = ".Layout";
 
 let zoom: Zoom | undefined;
-/** The image a key opened, which takes focus back on close: medium-zoom hides the original while its copy is up,
- *  and a hidden element drops focus to <body>. */
-let openedByKey: HTMLElement | null = null;
+/** The image that had focus as its lightbox opened (a key opened it, or a click on the focusable image), which takes
+ *  focus back on close: medium-zoom hides the original while its copy is up, and a hidden element drops focus. */
+let focusedAtOpen: HTMLElement | null = null;
 
 function makeButton(image: Element): void {
   image.setAttribute("tabindex", "0");
@@ -33,8 +34,7 @@ function onKeydown(event: KeyboardEvent): void {
   if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();
   if (zoom === undefined || zoom.getZoomedImage() !== null) return;
-  openedByKey = event.currentTarget as HTMLElement;
-  void zoom.open({ target: openedByKey });
+  void zoom.open({ target: event.currentTarget as HTMLElement });
 }
 
 function setPageInert(inert: boolean): void {
@@ -45,7 +45,9 @@ function setPageInert(inert: boolean): void {
 /** Fires before medium-zoom clones the original, so no copy (a srcset image gets a second one later) inherits the
  *  button attributes; the original is hidden until close anyway. */
 function onOpen(event: Event): void {
-  unmakeButton(event.target as Element);
+  const image = event.target as HTMLElement;
+  focusedAtOpen = document.activeElement === image ? image : null;
+  unmakeButton(image);
   setPageInert(true);
 }
 
@@ -54,10 +56,8 @@ function onClosed(event: Event): void {
   const image = event.target as HTMLElement;
   setPageInert(false);
   makeButton(image);
-  if (openedByKey === image) {
-    image.focus();
-    openedByKey = null;
-  }
+  if (focusedAtOpen === image) image.focus();
+  focusedAtOpen = null;
 }
 
 function attachImageZoom(): void {
