@@ -248,15 +248,7 @@ describe("the manifest's commit under the stamp rule", () => {
   });
 });
 
-/** The action entries run from the action at `stable`; check.ts runs at the recorded commit and drives the writer. */
-const ACTION_ENTRIES = [
-  "actions/validate-managed-files/src/run.ts",
-  "actions/validate-managed-files/src/read_commit.ts",
-  "actions/validate-managed-files/src/report.ts",
-  "actions/validate-managed-files/validator/validate_managed_files.ts",
-];
 const CHECK = "actions/validate-managed-files/check.ts";
-const WRITER = ".github/scripts/sync/writer/sync.ts";
 
 /** Every file reached from `entry` through relative imports, named or side-effect, as paths relative to the repository root. */
 function importClosure(entry: string): string[] {
@@ -273,11 +265,11 @@ function importClosure(entry: string): string[] {
   return [...seen].sort();
 }
 
-const offSurface = (paths: string[]) =>
-  paths.filter((path) => !CHECKER_SURFACE.some((root) => path.startsWith(root)));
+const rootsOf = (path: string) =>
+  CHECKER_SURFACE.filter((root) => (root.endsWith("/") ? path.startsWith(root) : path === root));
 
 describe("the checker surface", () => {
-  test("is the list docs/sync.md documents, and every path is a directory here", () => {
+  test("is the list docs/sync.md documents, each path the kind its spelling says", () => {
     const line = readFileSync(join(REPO_ROOT, "docs/sync.md"), "utf-8")
       .split("\n")
       .find((l) => l.includes("`CHECKER_SURFACE`"));
@@ -288,24 +280,16 @@ describe("the checker surface", () => {
     expect(named).toBeGreaterThan(0);
     expect(spans.slice(0, named)).toEqual([...CHECKER_SURFACE]);
     for (const path of CHECKER_SURFACE) {
-      expect(lstatSync(join(REPO_ROOT, path)).isDirectory()).toBe(true);
+      expect(lstatSync(join(REPO_ROOT, path)).isDirectory()).toBe(path.endsWith("/"));
     }
   });
 
-  // The writer's own closure is the stamp rule's written-byte leg: a change there that matters writes a byte, which
-  // moves the stamp on its own.
-  test("covers the validator's import closure, the writer's aside", () => {
-    const actions = ACTION_ENTRIES.flatMap(importClosure);
-    const writer = new Set(importClosure(WRITER));
-    const check = importClosure(CHECK);
-    const own = check.filter((path) => !writer.has(path));
-    // Controls: the closures reach past their entries, every file in them exists, and the filter sees the writer,
-    // which check.ts imports from off the surface.
-    expect(actions.length).toBeGreaterThan(ACTION_ENTRIES.length);
-    expect(own).toContain(CHECK);
-    expect(offSurface(check)).toContain(WRITER);
-    for (const path of [...actions, ...check]) expect(existsSync(join(REPO_ROOT, path))).toBe(true);
-    expect(offSurface(actions)).toEqual([]);
-    expect(offSurface(own)).toEqual([]);
+  test("is exactly the roots of check.ts's import closure, none of them empty", () => {
+    const closure = importClosure(CHECK);
+    expect(closure.length).toBeGreaterThan(1);
+    for (const path of closure) expect(existsSync(join(REPO_ROOT, path))).toBe(true);
+    const roots = closure.map((path) => [path, rootsOf(path)] as const);
+    expect(roots.filter(([, found]) => found.length !== 1)).toEqual([]);
+    expect(new Set(roots.flatMap(([, found]) => found))).toEqual(new Set(CHECKER_SURFACE));
   });
 });

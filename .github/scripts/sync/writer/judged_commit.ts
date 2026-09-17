@@ -5,10 +5,18 @@ import { gitAnswersYes, gitResolvedCommit } from "../../shared/git_yes_no.ts";
 import { lastLine } from "../../shared/lines.ts";
 import { capture } from "../../shared/proc.ts";
 
-/** The checker's own code and its shared imports, relative to the platform root; a directory ends in a slash. The
- *  writer it runs is not here: a writer change that matters writes a byte, and the stamp moves for that. docs/sync.md
- *  names the same paths, and tests/sync/writer/stamp.test.ts pins the two and the checker's import closure. */
-export const CHECKER_SURFACE = ["actions/validate-managed-files/", "actions/shared/"] as const;
+/** The roots of check.ts's import closure, relative to the platform root; a directory ends in a slash. That closure is the
+ *  checker a repository runs at its recorded commit; the action's other entries run at `stable`, so their changes reach
+ *  every repository with no restamp. docs/sync.md names the same roots, and tests/sync/writer/stamp.test.ts pins the
+ *  two and the closure. */
+export const CHECKER_SURFACE = [
+  "actions/validate-managed-files/check.ts",
+  ".github/scripts/sync/",
+  ".github/scripts/shared/",
+  "actions/plan/",
+  "actions/shared/",
+  "actions/pages-site/.vitepress/conventions.ts",
+] as const;
 
 /** Whether the checker differs between two commits of the platform checkout at `root`. The operator's build checkout is
  *  one commit deep, so `from` is fetched by sha first when the checkout lacks it. */
