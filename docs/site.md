@@ -37,7 +37,8 @@ The called workflow is one job, in this order:
 | urls | always | computes the base path `/<repo>/` and the origin `https://<owner>.github.io` |
 | hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
 | pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes `versions.json` under the docs mount |
-| configure, upload, deploy | something was built | the one Pages artifact, deployed to the `github-pages` environment |
+| pages | something was built | asks GitHub whether the Pages site exists; absent, the deploy skips with a warning ([below](#pages-enablement)) |
+| configure, upload, deploy | the Pages site exists | the one Pages artifact, deployed to the `github-pages` environment |
 | link rot | the schedule alone, after a deploy | checks the site's external links with lychee and files the tracking issue ([below](#link-rot)) |
 
 A repository with neither a hook output nor a `docs/` directory ends green with a notice (`nothing to publish`) and no deploy.
@@ -244,7 +245,10 @@ Keep it to hosts that are alive in a browser and reject automated clients, each 
 
 ## Pages enablement
 
-Nothing to do: the module's settings layer enables Pages with Actions-workflow builds on the next fleet settings apply ([settings.md](settings.md)). Only a deploy that must run before that apply needs the manual toggle: Settings -> Pages -> Source: GitHub Actions.
+Nothing to do: the module's settings layer creates the Pages site with Actions-workflow builds on the next fleet settings apply ([settings.md](settings.md)), which runs daily.
+
+- **A deploy before that apply** skips its Pages steps and ends green with one warning (`no Pages site yet`): the job token can read the site but never create one. No manual toggle is needed, and no red run needs a rerun.
+- **The nightly rebuild** deploys once the site exists; the next main push does the same.
 
 **The `github-pages` environment needs no protection rule:** deploys never run on tag refs, and a required-reviewers rule there parks every deploy "waiting for review" with the later runs queued behind it on the `pages` lane. The settings apply does not manage environments, so remove such a rule by hand (Settings -> Environments -> github-pages).
 
