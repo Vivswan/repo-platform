@@ -450,11 +450,14 @@ const FOCUS_SECOND_IMAGE = `(() => {
   return document.activeElement === second;
 })()`;
 
+/** Reports the motion preference the close ran under: Chromium replaces the whole emulated feature set on every
+ *  setEmulatedMedia call, so a media switch that names no features drops the preference silently. */
 const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc :not(a) > img");
   const closed = () => ({
     overlay: document.querySelector(".medium-zoom-overlay") !== null,
     hidden: img.classList.contains("medium-zoom-image--hidden"),
+    motion: matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduce" : "no-preference",
   });
   if (!closed().overlay) return resolve(closed());
   img.addEventListener("medium-zoom:closed", () => resolve(closed()), { once: true });
@@ -468,13 +471,12 @@ test(
     const tab = await openPage();
     try {
       for (const motion of ["no-preference", "reduce"]) {
-        await tab.send("Emulation.setEmulatedMedia", {
-          features: [{ name: "prefers-reduced-motion", value: motion }],
-        });
+        const features = [{ name: "prefers-reduced-motion", value: motion }];
+        await tab.send("Emulation.setEmulatedMedia", { features });
         const lightbox = await tab.evaluate<Lightbox>(OPEN_LIGHTBOX);
-        await tab.send("Emulation.setEmulatedMedia", { media: "print" });
+        await tab.send("Emulation.setEmulatedMedia", { media: "print", features });
         lightbox.printedOriginal = await tab.evaluate<string>(PRINTED_ORIGINAL);
-        await tab.send("Emulation.setEmulatedMedia", { media: "" });
+        await tab.send("Emulation.setEmulatedMedia", { media: "", features });
         expect(lightbox).toEqual({
           inline: lightbox.inline,
           zoomed: lightbox.zoomed,
@@ -490,6 +492,7 @@ test(
         expect(await tab.evaluate<Record<string, unknown>>(WHEN_LIGHTBOX_CLOSED)).toEqual({
           overlay: false,
           hidden: false,
+          motion,
         });
       }
       expect(await tab.evaluate<boolean>(FOCUS_IMAGE)).toBe(true);
@@ -514,6 +517,7 @@ test(
       expect(await tab.evaluate<Record<string, unknown>>(WHEN_LIGHTBOX_CLOSED)).toEqual({
         overlay: false,
         hidden: false,
+        motion: "reduce",
       });
       // medium-zoom hid the original while its copy was up, which drops focus to <body>.
       expect(await tab.evaluate<boolean>(FOCUS_ON_IMAGE)).toBe(true);

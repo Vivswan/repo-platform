@@ -136,7 +136,9 @@ function build(): View {
     control("Reset", () => place(current)),
     control("Close", () => dialog.close()),
   );
-  // Focus goes back to the opener on every close: a modal took it, and Escape would leave it on <body>.
+  // Escape and Close hand focus back to the opener: a modal took it, and the browser would leave it on <body>.
+  // A close because the mount failed or left the page has no button to focus (focus() on a detached element is
+  // a no-op), so the browser's own restore stands there.
   dialog.addEventListener("close", () => {
     current.shown?.opener.focus();
     current.shown = null;
