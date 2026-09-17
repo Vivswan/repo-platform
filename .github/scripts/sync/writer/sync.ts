@@ -14,11 +14,11 @@ import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import { pathProblem } from "../../../../actions/shared/repo_path.ts";
 import type { Selection } from "../../../../actions/shared/selection.ts";
 import { sha256 } from "../../../../actions/shared/values.ts";
-import { deliveredSurfaceChanged } from "../../shared/delivered_surface.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
 import { loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
 import { parseFlags } from "./flags.ts";
+import { checkerChanged, judgedCommit } from "./judged_commit.ts";
 import {
   MANIFEST_NAME,
   type ManifestRecord,
@@ -27,9 +27,10 @@ import {
   readRecords,
   recordedCommit,
   regionMarkers,
+  renderManifest,
   writeManifest,
 } from "./manifest.ts";
-import { applyMirrors, blockedAncestor, MirrorFailure } from "./mirrors.ts";
+import { applyMirrors, blockedAncestor, MirrorFailure, type MirrorRow } from "./mirrors.ts";
 import type { PlaceholderName, PlaceholderValues } from "./placeholders.ts";
 import {
   PLACEHOLDER_SOURCE,
@@ -49,7 +50,14 @@ import {
 import { keepReason, type RetireRow, release, retire } from "./retire.ts";
 import { selectModules } from "./select.ts";
 import { renderSettings } from "./settings_entry.ts";
-import { type Found, occupant, probe, removeFile, writeFile } from "./target_files.ts";
+import {
+  existingFile,
+  type Found,
+  occupant,
+  probe,
+  removeFile,
+  writeFile,
+} from "./target_files.ts";
 import { fetchUpstream, RAW_HOST, type UpstreamBodies } from "./upstream.ts";
 import { type WriteOutcome, writeManaged } from "./write_managed.ts";
 import { writeSplit } from "./write_split.ts";
@@ -202,14 +210,22 @@ function writeEntry(
   return { outcome, record: rendered.record, content: rendered.content };
 }
 
-/** The commit the manifest names from here on: the recorded one while the delivered surface is the same at this build,
- *  else this build. The repository is judged against that commit (actions/validate-managed-files/check.ts), so it moves
- *  only when the delivered surface moved. `files.yml` sits at the platform root, which is the checkout the diff reads. */
-function judgedCommit(options: SyncOptions, records: Records): string {
-  const recorded = recordedCommit(records);
-  if (recorded === null || recorded === options.build) return options.build;
-  const platform = dirname(resolve(options.files));
-  return deliveredSurfaceChanged(platform, recorded, options.build) ? options.build : recorded;
+/** Whether this run left a tracked byte different. The manifest counts: a released or dropped record rewrites it with
+ *  no file write, and a hand edit is written back over. Compared as bytes: a decode would read a malformed sequence as
+ *  the replacement character the rewrite then stores. */
+function wroteChange(
+  rows: WrittenRow[],
+  retired: RetireRow[],
+  mirrors: MirrorRow[],
+  manifest: { before: Buffer | null; after: string },
+): boolean {
+  const manifestKept = manifest.before?.equals(Buffer.from(manifest.after, "utf-8")) ?? false;
+  return (
+    rows.some((row) => row.change !== "unchanged" && row.change !== "held") ||
+    retired.some((row) => row.outcome === "deleted" || row.outcome === "region removed") ||
+    mirrors.some((row) => row.outcome !== "current") ||
+    !manifestKept
+  );
 }
 
 export async function runSync(options: SyncOptions): Promise<SyncReport> {
@@ -226,7 +242,14 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
   };
   const { records, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
-  const commit = judgedCommit(options, records);
+  const manifestBefore = existingFile(options.target, MANIFEST_NAME);
+  const recorded = recordedCommit(records);
+  // Read before the writes: a recorded commit the checkout cannot fetch fails the run before a byte moves. `files.yml`
+  // sits at the platform root, which is the checkout the diff reads.
+  const checkerMoved =
+    recorded !== null &&
+    recorded !== options.build &&
+    checkerChanged(dirname(resolve(options.files)), recorded, options.build);
 
   const selection: Selection = {
     modules: selected,
@@ -390,7 +413,17 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
         "the source's content)",
     );
   }
-  writeManifest(options.target, Object.fromEntries(next), commit);
+  const manifest = Object.fromEntries(next);
+  const commit = judgedCommit({
+    recorded,
+    build: options.build,
+    checkerMoved,
+    wroteChange: wroteChange(rows, retired, mirrors.rows, {
+      before: manifestBefore,
+      after: renderManifest(manifest, recorded ?? options.build),
+    }),
+  });
+  writeManifest(options.target, manifest, commit);
   return buildReport({
     build: options.build,
     modules: selected,

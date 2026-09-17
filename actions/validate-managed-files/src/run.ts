@@ -78,10 +78,10 @@ function reportFreshness(commit: string, short: string): void {
     if (count !== null && succeeded(count.exit)) {
       line =
         `${DELIVERY_REF} moved ${count.stdout.trim()} commits past the synced commit (${short} -> ${tip.slice(0, 12)}). ` +
-        "A sync moves this repository's judge once the delivered surface differs. Nothing here fails for that.";
+        "A sync moves this repository's judge once it writes a change or the checker differs. Nothing here fails for that.";
       notice(line);
     } else if (ancestor.exit.kind === "exited" && ancestor.exit.code === 1) {
-      line = `The synced commit (${short}) is not on ${DELIVERY_REF}'s history. A sync re-stamps it once the delivered surface differs.`;
+      line = `The synced commit (${short}) is not on ${DELIVERY_REF}'s history. A sync re-stamps it once it writes a change or the checker differs.`;
       warning(line);
     } else {
       line = `Freshness is unknown: git could not answer (${failureDetail(count ?? ancestor)}).`;

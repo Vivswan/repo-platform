@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   BOT_LOGIN,
+  DELIVERED_SURFACE,
   deliveredBySync,
   type LabelEvent,
   type LabelHistory,
@@ -99,6 +100,25 @@ describe("deliveredBySync", () => {
     ["filesystem/x.ts", false],
   ])("%s -> %p", (path, expected) => {
     expect(deliveredBySync(path)).toBe(expected);
+  });
+});
+
+describe("the delivered surface", () => {
+  const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+
+  test("is the list docs/all-green.md documents, each path the kind its spelling says", () => {
+    const line = readFileSync(join(REPO_ROOT, "docs/all-green.md"), "utf-8")
+      .split("\n")
+      .find((l) => l.includes("`DELIVERED_SURFACE`"));
+    expect(line).toBeDefined();
+    const spans = [...(line ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    // The paths are the code spans before the one naming the constant.
+    const named = spans.indexOf("DELIVERED_SURFACE");
+    expect(named).toBeGreaterThan(0);
+    expect(spans.slice(0, named)).toEqual([...DELIVERED_SURFACE]);
+    for (const path of DELIVERED_SURFACE) {
+      expect(lstatSync(join(REPO_ROOT, path)).isDirectory()).toBe(path.endsWith("/"));
+    }
   });
 });
 

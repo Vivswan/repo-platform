@@ -455,18 +455,23 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "c07568b70e1f4b0a9d2c3e4f5a6b7c8d9e0f1a2b"}
 ```
 
-- **The stamp rule,** decided before anything is written (`judgedCommit` in [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts)):
+- **The stamp rule** (`judgedCommit` in [sync/writer/judged_commit.ts](../.github/scripts/sync/writer/judged_commit.ts)): the entry moves to the build when the sync wrote a change or the checker changed, and stays otherwise. The manifest is written last, so the decision reads the run's own outcome.
 
-| The manifest names | The build is | The entry after the sync |
-| --- | --- | --- |
-| no commit the writer can read (a manifest from before the field, or a hand edit) | any | the build |
-| commit C | C | C |
-| commit C | N, with the delivered surface byte-identical between C and N | C; when nothing else changed, no sync PR opens |
-| commit C | N, with the delivered surface different | N |
+| The manifest names | The build is | The sync | The entry after the sync |
+| --- | --- | --- | --- |
+| no commit the writer can read (a manifest from before the field, or a hand edit) | any | any | the build |
+| commit C | C | any | C |
+| commit C | N | wrote at least one byte differently: a managed, split, starter, or mirror write, a retirement, a replaced local edit, or a manifest record moved | N |
+| commit C | N, with the checker different between C and N | wrote nothing | N |
+| commit C | N, with the checker byte-identical between C and N | wrote nothing | C; no sync PR opens |
 
-- **The delivered surface** is `files.yml`, `files/`, `actions/`, `.github/scripts/sync/`, `.github/scripts/shared/`, `migrations/`, `bun.lock`, and `package.json`: the writer's data, its import closure, and its dependency versions, the paths that decide what a sync writes (`DELIVERED_SURFACE` in [shared/delivered_surface.ts](../.github/scripts/shared/delivered_surface.ts)). The lockfile and the manifest are on it because a dependency's version, or which action-local dependencies the postinstall installs, can change a rendered byte.
+- **The checker surface** is the set of files check.ts imports, derived from the import graph at sync time (`checkerSurface` in [sync/writer/judged_commit.ts](../.github/scripts/sync/writer/judged_commit.ts)): exactly the code that runs at the recorded commit, the writer included. A change there can turn C's verdict away from N's with no byte written: N's registration parser accepts a `site.path` C's rejects, so C's check would stay red with no sync PR to move the stamp.
 
-- **The diff runs in the build checkout** under `build/`, which is one commit deep, so the writer fetches C by sha first; a C the remote cannot serve fails the run.
+- **Never on the surface:** the operator scripts, the action's stable-run `src/` and `validator/` files (they reach every repository the moment the tag moves), and the docs-site theme.
+
+- **Why not every platform change:** a docs-theme change under `actions/pages-site/` once restamped nine repositories with one-line manifest PRs (copilot-env #279, after repo-platform #356); under this rule that sync writes nothing, moves nothing, and opens no PR.
+
+- **The diff runs in the build checkout** under `build/`, which is one commit deep, so the writer fetches C by sha first, before anything is written; a C the remote cannot serve fails the run.
 
 - **The delivery commit** is also named in full by the PR body and by its first 12 characters by the sync commit's subject.
 
@@ -492,7 +497,7 @@ The fleet's `validate-managed-files` check judges a repository as [check.ts](../
 | `check.ts` exit 1 or 2 with no output, any other exit, a signal, or the deadline | not judged: `ended without a verdict`, with the detail |
 | `check.ts` exit 0 | clean, unless a hygiene check finds something |
 
-- **Freshness informs and never fails:** the action compares the recorded commit with the `stable` tag in the platform checkout (git ancestry alone) and writes one line to the job summary and an annotation: up to date; `stable` moved N commits past it; or the commit is not on `stable`'s history. In both of the last two, a sync moves the judge once the delivered surface differs.
+- **Freshness informs and never fails:** the action compares the recorded commit with the `stable` tag in the platform checkout (git ancestry alone) and writes one line to the job summary and an annotation: up to date; `stable` moved N commits past it; or the commit is not on `stable`'s history. In both of the last two, a sync moves the judge under [the stamp rule](#the-manifest).
 
 - **The hygiene checks** (YAML, conflict markers, `release-as`) read no platform data and run from the action at `stable` ([new-repo.md](new-repo.md#the-managed-files-check)). Their walk skips `.git` and what the repository's own `.yamllint` `ignore:` list names (gitignore-style patterns, as yamllint reads them), so the scan and the yamllint step judge one tree.
 

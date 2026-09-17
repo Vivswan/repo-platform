@@ -90,7 +90,7 @@ The sync also requires `files.yml` at the commit's root, since a commit without 
 
 **The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run), named in full in the PR body and by its first 12 characters in the sync commit's subject.
 
-**The manifest's own entry** records the commit the repository is judged against: the build when the delivered surface changed since the recorded commit, else the recorded commit, so it moves only when the delivered surface moved ([sync.md](sync.md#the-manifest)).
+**The manifest's own entry** records the commit the repository is judged against; a sync moves it under the stamp rule ([sync.md](sync.md#the-manifest)).
 
 **Every fleet repository is judged at that recorded commit:** the validate-managed-files action checks out repo-platform at it and runs that commit's `check.ts`, so a `stable` move reddens nothing until the repository syncs ([sync.md](sync.md#judged-at-the-synced-commit)).
 

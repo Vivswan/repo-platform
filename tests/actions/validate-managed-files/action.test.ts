@@ -443,7 +443,7 @@ describe("freshness against the stable tag informs and never fails", () => {
           commit,
           line:
             `stable moved 2 commits past the synced commit (${commit.slice(0, 12)} -> ${tip.slice(0, 12)}). ` +
-            "A sync moves this repository's judge once the delivered surface differs. Nothing here fails for that.",
+            "A sync moves this repository's judge once it writes a change or the checker differs. Nothing here fails for that.",
         };
       },
       env: { CHECK_EXIT: "1", CHECK_STDOUT: DIFF },
@@ -459,7 +459,7 @@ describe("freshness against the stable tag informs and never fails", () => {
         const commit = advance(dir, "side");
         return {
           commit,
-          line: `The synced commit (${commit.slice(0, 12)}) is not on stable's history. A sync re-stamps it once the delivered surface differs.`,
+          line: `The synced commit (${commit.slice(0, 12)}) is not on stable's history. A sync re-stamps it once it writes a change or the checker differs.`,
         };
       },
       env: {},

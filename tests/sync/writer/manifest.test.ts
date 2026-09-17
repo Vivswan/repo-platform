@@ -197,8 +197,8 @@ describe("readRecords", () => {
 });
 
 describe("recordedCommit", () => {
-  // The commit sync.ts's judgedCommit keeps while the delivered surface is unchanged; a stamp the writer cannot read
-  // (a manifest from before the field, a hand edit) is null, and judgedCommit takes the build.
+  // The commit the stamp rule (judged_commit.ts) keeps while the sync writes nothing and the checker is unchanged; a
+  // stamp the writer cannot read (a manifest from before the field, a hand edit) is null, and the rule takes the build.
   test.each([
     ["no manifest", {}, null],
     ["a self entry before the field", { [MANIFEST_NAME]: { class: "managed", hash: null } }, null],

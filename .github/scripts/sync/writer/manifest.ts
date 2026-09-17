@@ -108,7 +108,7 @@ const COMMENT =
 const COMMIT_RE = /^[0-9a-f]{40}$/;
 
 /** The commit the manifest's own entry names, null when it names none the writer can read (a manifest from before
- *  the field, or a hand edit): the stamp rule in sync.ts then takes the build. */
+ *  the field, or a hand edit): the stamp rule (judged_commit.ts) then takes the build. */
 export function recordedCommit(records: Records): string | null {
   const commit = records[MANIFEST_NAME]?.commit;
   return typeof commit === "string" && COMMIT_RE.test(commit) ? commit : null;
