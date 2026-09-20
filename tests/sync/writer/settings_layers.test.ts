@@ -98,6 +98,37 @@ describe("the managed labels", () => {
   });
 });
 
+describe("the Actions grant", () => {
+  type Step = { uses?: string; with?: Record<string, unknown> };
+  const RELEASE_WORKFLOW = join(REPO_ROOT, ".github/workflows/fleet-release.yml");
+  const releasePleaseSteps = (): Step[] =>
+    Object.values(
+      (
+        parseYaml(readFileSync(RELEASE_WORKFLOW, "utf-8")) as {
+          jobs: Record<string, { steps: Step[] }>;
+        }
+      ).jobs,
+    )
+      .flatMap((job) => job.steps)
+      .filter((step) => step.uses?.startsWith("googleapis/release-please-action@"));
+
+  // Cross-file with fleet-release.yml: the propose step opens the release PR with github.token, which GitHub refuses
+  // unless the repository grants Actions the flag, so the module that arms the leg must grant it.
+  test("the release leg proposes its PR with github.token, so selecting release-please grants the flag", () => {
+    const proposing = releasePleaseSteps().filter(
+      (step) => step.with?.["skip-github-pull-request"] !== true,
+    );
+    expect(proposing.map((step) => step.with?.token)).toEqual(["${{ github.token }}"]);
+    expect(fleetFold(selection({ modules: ["release-please"] })).actions).toEqual({
+      can_approve_pull_request_reviews: true,
+    });
+  });
+
+  test("a selection without release-please declares no Actions section, so the live setting stays as it is", () => {
+    expect(fleetFold(selection({ modules: ["bun", "pr-title"] })).actions).toBeUndefined();
+  });
+});
+
 describe("the managed rulesets", () => {
   const CODEQL_MODULES = ["bun", "deno", "uv"];
   const codeQuality = { type: "code_quality", parameters: { severity: "warnings" } };

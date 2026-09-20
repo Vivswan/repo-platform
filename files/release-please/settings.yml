@@ -3,6 +3,11 @@
 # merge, docs/settings.md): merged for every repository that selects the
 # module.
 
+# fleet-release.yml opens the release PR with the plain github.token, which GitHub refuses unless the repository grants
+# Actions this; without it the release job is red on every green push.
+actions:
+  can_approve_pull_request_reviews: true
+
 labels:
   # release-please manages these two on release PRs; declaring them keeps
   # the label sync from deleting what it recreates.
