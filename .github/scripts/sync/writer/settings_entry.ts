@@ -111,8 +111,9 @@ function layeringDirective(overlay: Layer, overlayPath: string): string | null {
 }
 
 /** The hold a tracking label earns when an overlay label already claims
- *  one of its names, or null: the union would replace the overlay's whole
- *  entry with the tracking tuple. Every fleet layer's names are reserved
+ *  one of its names, or null: the union would merge the tracking tuple over
+ *  the overlay's entry, the tuple's fields winning, and the repository and
+ *  the platform would fight over one name. Every fleet layer's names are reserved
  *  before the plan names a tracking label, so the overlay is the only
  *  carrier left. */
 function trackingCollision(overlay: Layer, tracking: Label[], overlayPath: string): string | null {
