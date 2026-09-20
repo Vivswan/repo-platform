@@ -387,7 +387,8 @@ describe("renderSettings", () => {
 
   // Determinism: a render that varied would open a sync PR on every run for every repository.
   test("two renders of the same inputs are byte-identical, the library's own merged-file bytes", () => {
-    const long = "word ".repeat(24).trim();
+    // Under GitHub's 100-character description cap, which the library enforces at parse.
+    const long = "word ".repeat(19).trim();
     const overrides = {
       overlay: `${OVERLAY}labels:\n  - {name: wide, color: "000000", description: ${long}}\n`,
     };
@@ -493,7 +494,7 @@ describe("renderSettings", () => {
     },
     {
       // The library pairs a renaming label by BOTH its names, so the tracking
-      // layer would replace the whole entry and the rename would vanish.
+      // tuple would merge over the renaming entry and carry its rename along.
       reason: "an overlay label renaming into a tracking label's name",
       overrides: {
         modules: ["bun", "fuzzer"],

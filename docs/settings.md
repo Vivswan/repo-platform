@@ -34,7 +34,7 @@ Every layer is a plain settings-as-code YAML document a human can read on its ow
 
 ## The merge dialect
 
-The fold is [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code)'s own `mode: merge`, run as its npm library (`@vivswan/github-settings-as-code`, on its `next` channel in `package.json`, the version in `bun.lock`) from [sync/writer/settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts).
+The fold is [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code)'s own `mode: render`, run as its npm library (`@vivswan/github-settings-as-code`, on its `next` channel in `package.json`, the version in `bun.lock`) from [sync/writer/settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts).
 
 The render and the apply read one dialect, spelled out in the library's [layering guide](https://github.com/Vivswan/github-settings-as-code/blob/main/docs/operate/layering.md). What the fleet relies on:
 
@@ -42,13 +42,13 @@ The render and the apply read one dialect, spelled out in the library's [layerin
 
 - **An explicit `null` on a mapping key opts it out:** it deletes what the layers BELOW declared, so a repo cannot null away an override (layer 6 puts it straight back).
 
-- **A null that meets nothing below** stays as written with the apply's meaning (`pages: null` disables Pages), and a null inside an entry that replaces wholesale (a label's field, a `branches` entry) is copied as written and judged by the apply's validation.
+- **A null that meets nothing below** stays as written with the apply's meaning (`pages: null` disables Pages); inside a keyed entry (a label's field) it deletes the lower layers' value, and one that meets nothing stays and is judged against the field's schema by the fold's final validation. Inside a plain list (a `branches` entry) it is copied as written and judged by the apply's validation.
 
 - **`labels` and `rulesets` are NAME-KEYED UNIONS:** both sides' entries are kept, so a plain array-replace can never freeze the fleet roster the moment a repo declares one extra label. Label names match case-insensitively (GitHub deduplicates them that way); ruleset names match exactly.
 
-- **Same-name entries:** a same-name LABEL is replaced wholesale by the higher layer; a same-name RULESET merges key by key, and its `rules` pair by `type`: a same-type rule replaces in place, new types append. That is what lets the CodeQL layer (layer 4) add `code_scanning` to the `main` ruleset the override (layer 6) declares, and why only the override's rules are safe from a lower layer's same-type replacement.
+- **Same-name entries merge field by field, the higher layer's fields winning:** a same-name LABEL keeps the lower fields the higher one leaves unsaid; a same-name RULESET merges key by key, its `rules` pair by `type` and merge their parameters, new types append. That is what lets the CodeQL layer (layer 4) add `code_scanning` to the `main` ruleset the override (layer 6) declares.
 
-- **Every other list, and every scalar, replaces wholesale.**
+- **Every keyed list section unions by its key; every plain list (`branches`, `environments`, `topics`) and every scalar replaces wholesale.**
 
 - **Every layer is validated on its own** before it may contribute, and the folded document once more as the apply will read it, so the render can never complete a broken layer into a valid document.
 
@@ -242,7 +242,7 @@ The two protection rulesets live in [files/settings/override.yml](../files/setti
 
 A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](https://github.com/Vivswan/repo-platform/blob/main/files/pr-title/.github/workflows/pr-title.yml) workflow's own `pr-title` check (Actions-pinned, like `all-green`) on repos selecting the pr-title module. The module's layer ([files/pr-title/settings.yml](../files/pr-title/settings.yml)) carries the whole ruleset, so selecting the module declares it and deselecting drops it from the render.
 
-**Why a separate ruleset** rather than a rule in `main`: a `required_status_checks` rule merged into `main` from a lower layer would be replaced by the override's own rule of that type; active rulesets on one branch union their required checks.
+**Why a separate ruleset** rather than a rule in `main`: a `required_status_checks` rule merged into `main` from a lower layer meets the override's rule of that type, whose `required_status_checks` array is a plain list and replaces the lower one, so the lower check is lost; active rulesets on one branch union their required checks.
 
 **Selecting:** the workflow and the ruleset ride one sync PR, so selecting the module never requires a check nothing creates.
 

@@ -381,11 +381,11 @@ describe("foldSettings", () => {
       message: "here has malformed section entries: labels[0].name: Invalid input: expected string",
     },
     {
-      // A label entry replaces wholesale, so a null field inside it is a
-      // value the apply would read, and the library refuses it where written.
-      reason: "a null inside a replaced entry (not an opt-out)",
+      // Under `deep` a null inside an entry deletes what lies below; over nothing it stays as written, and the
+      // fold's final validation refuses the rendered document, naming the fold, not the layer.
+      reason: "a null inside an entry that meets nothing below",
       layer: layer("here", "labels: [{name: bug, color: d73a4a, description: null}]\n"),
-      message: "here has malformed section entries: labels[0].description",
+      message: "f has malformed section entries: labels.entries[0].description",
     },
     {
       reason: "a null on a section the apply does not know",
@@ -434,7 +434,7 @@ describe("foldSettings", () => {
 
   // The one pin of the merge dialect against the library: a semantic change in a bump would otherwise reach the
   // fleet as a rendered diff nobody reads as a dialect change.
-  test("the dialect the fleet relies on: higher wins, null opts out below and stays over nothing, name-keyed unions, rules append by type, and the override beats the overlay on every axis", () => {
+  test("the dialect the fleet relies on: higher wins, null opts out below and stays over nothing, name-keyed unions merging field by field, rules append by type, and the override beats the overlay on every axis", () => {
     const folded = foldSettings(
       [
         layer(
@@ -442,10 +442,10 @@ describe("foldSettings", () => {
           [
             "repository: {has_issues: true, has_wiki: false}",
             "labels:",
-            "  - {name: bug, color: d73a4a}",
+            "  - {name: bug, color: d73a4a, description: base text}",
             "  - {name: dependencies, color: '0366d6'}",
             "rulesets:",
-            "  - {name: main, target: branch, rules: [{type: deletion}, {type: required_status_checks}]}",
+            "  - {name: main, target: branch, rules: [{type: deletion}, {type: required_status_checks, parameters: {do_not_enforce_on_create: true}}]}",
             "",
           ].join("\n"),
         ),
@@ -486,7 +486,8 @@ describe("foldSettings", () => {
         },
         labels: {
           entries: [
-            { name: "Bug", color: "000000" },
+            // The higher spelling and color win; the lower description the higher entry left unsaid survives.
+            { name: "Bug", color: "000000", description: "base text" },
             { name: "dependencies", color: "0366d6" },
             { name: "extra", color: "ffffff" },
           ],
@@ -502,7 +503,10 @@ describe("foldSettings", () => {
                 { type: "deletion" },
                 {
                   type: "required_status_checks",
-                  parameters: { strict_required_status_checks_policy: true },
+                  parameters: {
+                    do_not_enforce_on_create: true,
+                    strict_required_status_checks_policy: true,
+                  },
                 },
                 { type: "non_fast_forward" },
                 { type: "required_linear_history" },

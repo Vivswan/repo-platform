@@ -127,7 +127,7 @@ export function sectionEntries(doc: unknown, section: string): Record<string, un
   return entries.filter(isMapping);
 }
 
-/** Every layer folded low to high, the library's own `mode: merge`
+/** Every layer folded low to high, the library's own `mode: render`
  *  (docs/settings.md, "The merge dialect"): the ONE judgment of a layer,
  *  each seen as the fold leaves it and then the fold as the document the
  *  apply will read, so a layer built in code (the tracking labels) meets
@@ -137,7 +137,7 @@ export function foldSettings(
   layers: readonly Layer[],
   where: string,
 ): { settings: SettingsDoc; yaml: string } | { refused: string } {
-  const merged = mergeSettings(layers, { source: where, layering: "merge", io: silentIo() });
+  const merged = mergeSettings(layers, { source: where, layering: "deep", io: silentIo() });
   if (merged.isErr()) return { refused: describeProblem(merged.error) };
   return { settings: merged.value.settings, yaml: merged.value.yaml };
 }
