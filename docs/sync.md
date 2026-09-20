@@ -91,11 +91,13 @@ files:
     region: hash
     blocks: gitignore_sources
     replace: {"[\r]": "?"}
-    always: [Windows, macOS, Linux]
+    always: [Windows, macOS, Linux, VSCode, JetBrains]
     sources:
       Windows: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Windows.gitignore}
       macOS: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/macOS.gitignore}
       Linux: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Linux.gitignore}
+      VSCode: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/VisualStudioCode.gitignore}
+      JetBrains: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/JetBrains.gitignore}
       Node: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Node.gitignore}
       bun: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: bun.gitignore}
       fuzzer: files/fuzzer/fuzzer.gitignore
@@ -207,7 +209,7 @@ A fleet mirror carries no `when`: every repository gets its targets, save one it
 
 | `blocks` key | Entry | Block sources |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` (split) | github/gitignore templates at one pinned sha, fetched by every sync (`Global/Windows.gitignore`, `Global/macOS.gitignore`, `Global/Linux.gitignore` on every repository through `always`; the Node template both JavaScript toolchains list lands once); the fuzzer's failure directory from `files/fuzzer/fuzzer.gitignore` |
+| `gitignore_sources` | `.gitignore` (split) | github/gitignore templates at one pinned sha, fetched by every sync (the OS templates `Global/Windows.gitignore`, `Global/macOS.gitignore`, `Global/Linux.gitignore` and the editor templates `Global/VisualStudioCode.gitignore`, `Global/JetBrains.gitignore` on every repository through `always`; the Node template both JavaScript toolchains list lands once); the fuzzer's failure directory from `files/fuzzer/fuzzer.gitignore` |
 | `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.<ecosystem>.yml`, appended at the anchor line that ends the source |
 | `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.toolchain.md`, the module's Toolchain bullets, appended after the region body |
 | `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
