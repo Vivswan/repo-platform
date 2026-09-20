@@ -8,6 +8,21 @@
 .codex/worktrees/
 .worktrees/
 .claude/settings.local.json
+CLAUDE.local.md
+
+## Secrets (repo-platform)
+# The dotenv lines are the three github/gitignore's Node.gitignore carries, so a repository taking that template sees
+# one rule, not two.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+## Scratch (repo-platform)
+*.tmp
 
 ## CI workspace paths (repo-platform)
 /.repo-platform-judge/

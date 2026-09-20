@@ -1,6 +1,7 @@
-// The platform-authored gitignore sections, judged by git itself: only paths a fleet step creates inside every
-// checked-out workspace are listed, root-anchored so a nested source folder of the same name is not swallowed, and the
-// fuzz failure directory rides the fuzzer module alone because only its starter produces it.
+// The platform-authored gitignore sections, judged by git itself: the workspace paths a fleet step creates are
+// root-anchored so a nested source folder of the same name is not swallowed, the secrets and scratch rules are not
+// so a nested service's are, and the fuzz failure directory rides the fuzzer module alone because only its starter
+// produces it.
 
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -22,7 +23,7 @@ const FUZZER = readFileSync(join(FILES, "fuzzer/fuzzer.gitignore"), "utf-8");
 const ROOT_GITIGNORE = readFileSync(join(REPO_ROOT, ".gitignore"), "utf-8");
 const CI_WORKSPACE_SECTION = "## CI workspace paths (repo-platform)";
 
-test("every repository takes the three github/gitignore OS templates, in this order, before any module block", () => {
+test("every repository takes the github/gitignore OS and editor templates, in this order, before any module block", () => {
   const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
   const gitignore = config.files.find((entry) => entry.path === ".gitignore") as Extract<
     FileEntry,
@@ -30,11 +31,13 @@ test("every repository takes the three github/gitignore OS templates, in this or
   >;
   const ref = (path: string) => ({ repository: "github/gitignore", path });
   expect(gitignore).toMatchObject({
-    always: ["Windows", "macOS", "Linux"],
+    always: ["Windows", "macOS", "Linux", "VSCode", "JetBrains"],
     sources: {
       Windows: ref("Global/Windows.gitignore"),
       macOS: ref("Global/macOS.gitignore"),
       Linux: ref("Global/Linux.gitignore"),
+      VSCode: ref("Global/VisualStudioCode.gitignore"),
+      JetBrains: ref("Global/JetBrains.gitignore"),
     },
   });
 });
@@ -67,6 +70,10 @@ test.each<[string, string, "dir" | "file", boolean]>([
   ["base", "assets/logo.png", "file", false],
   ["base", "scan/results.sarif", "file", false],
   ["base", ".claude/worktrees/x", "dir", true],
+  ["base", "services/api/.env.production", "file", true],
+  ["base", "services/api/.env.example", "file", false],
+  ["base", "certs/server.pem", "file", true],
+  ["base", "build/scratch.tmp", "file", true],
   ["fuzzer", ".fuzz-failures", "dir", true],
   ["fuzzer", ".fuzz-failures", "file", false],
   ["fuzzer", "crate/.fuzz-failures", "dir", false],
