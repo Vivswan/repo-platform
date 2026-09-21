@@ -423,7 +423,13 @@ describe("foldSettings", () => {
       settings: {
         rulesets: {
           entries: [
-            { name: "main", target: "branch", rules: [{ type: "required_linear_history" }] },
+            // The fold fills a ruleset's `enforcement: active` default, as it fills `_undeclared`.
+            {
+              name: "main",
+              target: "branch",
+              enforcement: "active",
+              rules: [{ type: "required_linear_history" }],
+            },
           ],
           _undeclared: "keep",
         },
@@ -512,7 +518,7 @@ describe("foldSettings", () => {
                 { type: "required_linear_history" },
               ],
             },
-            { name: "tags", target: "tag", rules: [{ type: "update" }] },
+            { name: "tags", target: "tag", enforcement: "active", rules: [{ type: "update" }] },
           ],
           _undeclared: "keep",
         },
@@ -725,5 +731,44 @@ describe("the managed repository block", () => {
     },
   ])("$reason", ({ selection: s, repository }) => {
     expect(fleetFold(s).repository).toEqual(repository);
+  });
+});
+
+describe("the github-pages environment", () => {
+  const SITE_WORKFLOW = join(REPO_ROOT, ".github/workflows/reusable-site.yml");
+  const deployEnvironments = (): string[] =>
+    Object.values(
+      (
+        parseYaml(readFileSync(SITE_WORKFLOW, "utf-8")) as {
+          jobs: Record<string, { environment?: { name: string } }>;
+        }
+      ).jobs,
+    ).flatMap((job) => (job.environment ? [job.environment.name] : []));
+
+  // Cross-file with reusable-site.yml: the deploy job runs inside this environment, where a hand-added
+  // required-reviewers rule parks every deploy, so the module that arms the leg declares the environment reviewer-free.
+  const GITHUB_PAGES = {
+    name: "github-pages",
+    reviewers: [],
+    wait_timer: 0,
+    prevent_self_review: false,
+  };
+
+  test("the site leg deploys into github-pages, so selecting site declares it with no reviewers", () => {
+    expect(deployEnvironments()).toEqual(["github-pages"]);
+    expect(fleetFold(selection({ modules: ["site"] })).environments).toEqual([GITHUB_PAGES]);
+  });
+
+  // The library once replaced `environments` wholesale across layers, so a repository declaring its own environment
+  // dropped the fleet's; the fold now unions them by name, and the declaration survives the overlay.
+  test("a repository overlay declaring its own environment keeps github-pages beside it", () => {
+    const overlay = readLayer("environments:\n  - name: mine\n    wait_timer: 5\n", "overlay");
+    const folded = foldSettings([...fleetLayers(selection({ modules: ["site"] })), overlay], "f");
+    if ("refused" in folded) throw new Error(folded.refused);
+    expect(folded.settings.environments).toEqual([GITHUB_PAGES, { name: "mine", wait_timer: 5 }]);
+  });
+
+  test("a selection without site declares no environments, so the live ones stay as they are", () => {
+    expect(fleetFold(selection({ modules: ["bun", "pr-title"] })).environments).toBeUndefined();
   });
 });

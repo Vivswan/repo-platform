@@ -1,3 +1,12 @@
 # The settings apply creates the Pages site when absent, so the first deploy needs no manual Pages toggle.
 pages:
   build_type: workflow
+
+# reusable-site.yml deploys into this environment from main alone; a required-reviewers rule added by hand parks every
+# deploy "waiting for review", so the declared empty roster heals it on the next apply. No deployment_branch_policy: the
+# deploy comes from the default branch, and the key's two booleans set wrong would refuse it.
+environments:
+  - name: github-pages
+    reviewers: []
+    wait_timer: 0
+    prevent_self_review: false

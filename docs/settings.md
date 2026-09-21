@@ -11,7 +11,7 @@ Every managed repository carries a rendered `.github/settings.yml`: a managed fi
 |---|---|---|---|
 | 1 | Fleet baseline | [files/settings/baseline.yml](../files/settings/baseline.yml) | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels |
 | 2 | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | `security_and_analysis` and the `main` ruleset's `code_quality` and `copilot_code_review` rules for public repos; the `settings-as-code-report` marker label for private ones |
-| 3 | Module layer | `files/<module>/settings.yml` | what selecting that module adds: a toolchain module's dependabot label, release-please's four labels, its `release-tags` ruleset, and the Actions grant its release PR needs (`can_approve_pull_request_reviews`), [pr-title's ruleset](#the-pr-title-ruleset) |
+| 3 | Module layer | `files/<module>/settings.yml` | what selecting that module adds: a toolchain module's dependabot label, site's Pages build type and its reviewer-free `github-pages` environment, release-please's four labels, its `release-tags` ruleset, and the Actions grant its release PR needs (`can_approve_pull_request_reviews`), [pr-title's ruleset](#the-pr-title-ruleset) |
 | 4 | CodeQL layer | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml) | the `code_scanning` rule for public repos with a CodeQL toolchain: GitHub rejects it on private repos, and a repo with no CodeQL run would block every merge on it |
 | 5 | Repo overlay | the repo's own `.github/settings.local.yml` | identity keys (`description`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides |
 | 6 | Fleet override | [files/settings/override.yml](../files/settings/override.yml) | the invariants no repo may weaken: the squash-only merge policy (the PR title as the squash subject, a blank squash body), `allow_auto_merge`, `enable_vulnerability_alerts`, the `main` and `non-bypassable` protection rulesets, and the rulesets' `_undeclared: delete` policy |
@@ -42,13 +42,13 @@ The render and the apply read one dialect, spelled out in the library's [layerin
 
 - **An explicit `null` on a mapping key opts it out:** it deletes what the layers BELOW declared, so a repo cannot null away an override (layer 6 puts it straight back).
 
-- **A null that meets nothing below** stays as written with the apply's meaning (`pages: null` disables Pages); inside a keyed entry (a label's field) it deletes the lower layers' value, and one that meets nothing stays and is judged against the field's schema by the fold's final validation. Inside a plain list (a `branches` entry) it is copied as written and judged by the apply's validation.
+- **A null that meets nothing below** stays as written with the apply's meaning (`pages: null` disables Pages); inside a keyed entry (a label's field) it deletes the lower layers' value, and one that meets nothing stays and is judged against the field's schema by the fold's final validation. Inside a scalar list (`topics`) it is copied as written and judged by the apply's validation.
 
 - **`labels` and `rulesets` are NAME-KEYED UNIONS:** both sides' entries are kept, so a plain array-replace can never freeze the fleet roster the moment a repo declares one extra label. Label names match case-insensitively (GitHub deduplicates them that way); ruleset names match exactly.
 
 - **Same-name entries merge field by field, the higher layer's fields winning:** a same-name LABEL keeps the lower fields the higher one leaves unsaid; a same-name RULESET merges key by key, its `rules` pair by `type` and merge their parameters, new types append. That is what lets the CodeQL layer (layer 4) add `code_scanning` to the `main` ruleset the override (layer 6) declares.
 
-- **Every keyed list section unions by its key; every plain list (`branches`, `environments`, `topics`) and every scalar replaces wholesale.**
+- **Every list section unions by its key (`environments` and `branches` by `name`, since the library's keyed wrapper for them); every scalar list (`topics`) and every scalar replaces wholesale.**
 
 - **Every layer is validated on its own** before it may contribute, and the folded document once more as the apply will read it, so the render can never complete a broken layer into a valid document.
 
