@@ -181,5 +181,9 @@ environments:
       custom_branch_policies: true
     deployment_branch_policies:
       - name: main
+  - name: github-pages
+    wait_timer: 0
+    prevent_self_review: false
+    reviewers: []
 pages:
   build_type: workflow
