@@ -752,6 +752,8 @@ describe("the github-pages environment", () => {
     reviewers: [],
     wait_timer: 0,
     prevent_self_review: false,
+    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    deployment_branch_policies: [{ name: "main" }],
   };
 
   test("the site leg deploys into github-pages, so selecting site declares it with no reviewers", () => {
