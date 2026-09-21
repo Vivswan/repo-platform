@@ -105,8 +105,8 @@ function layeringDirective(overlay: Layer, overlayPath: string): string | null {
           .map(([section]) => `under ${section}`)[0];
   if (site === undefined) return null;
   return (
-    `the repository's ${overlayPath} declares ${LAYERING_KEY} ${site}; the fleet's sections ` +
-    "union by name and only labels: null opts out"
+    `the repository's ${overlayPath} declares ${LAYERING_KEY} ${site}; the fleet's list sections ` +
+    "union by their key, and a section set to null opts out of it"
   );
 }
 

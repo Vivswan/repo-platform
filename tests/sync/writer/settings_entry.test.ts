@@ -510,7 +510,7 @@ describe("renderSettings", () => {
       reason: "an overlay re-layering a section",
       overrides: { overlay: `${OVERLAY}labels: {_layering: replace, entries: [{name: mine}]}\n` },
       detail:
-        "the repository's .github/settings.local.yml declares _layering under labels; the fleet's sections union by name and only labels: null opts out",
+        "the repository's .github/settings.local.yml declares _layering under labels; the fleet's list sections union by their key, and a section set to null opts out of it",
     },
     {
       // A plain-list section the library layers by key since its environments wrapper landed: a replace there would
@@ -522,13 +522,13 @@ describe("renderSettings", () => {
         overlay: `${OVERLAY}environments: {_layering: replace, entries: [{name: mine}]}\n`,
       },
       detail:
-        "the repository's .github/settings.local.yml declares _layering under environments; the fleet's sections union by name and only labels: null opts out",
+        "the repository's .github/settings.local.yml declares _layering under environments; the fleet's list sections union by their key, and a section set to null opts out of it",
     },
     {
       reason: "an overlay re-layering every section",
       overrides: { overlay: `_layering: replace\n${OVERLAY}` },
       detail:
-        "the repository's .github/settings.local.yml declares _layering at the top level; the fleet's sections union by name and only labels: null opts out",
+        "the repository's .github/settings.local.yml declares _layering at the top level; the fleet's list sections union by their key, and a section set to null opts out of it",
     },
     {
       reason: "an overlay label colliding with a tracking label",
