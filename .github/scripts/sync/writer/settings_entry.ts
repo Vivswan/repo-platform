@@ -7,7 +7,7 @@
 // the apply refuses, is the operator's error.
 
 import { join } from "node:path";
-import { type Layer, UNDECLARED_POLICY_SECTIONS } from "@vivswan/github-settings-as-code";
+import type { Layer } from "@vivswan/github-settings-as-code";
 import type { FilesConfig } from "../../../../actions/plan/files_config.ts";
 import { PlanError, trackingLabels } from "../../../../actions/plan/plan.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
@@ -91,18 +91,18 @@ function trackingLabelTuples(
 }
 
 /** The hold an overlay earns for re-layering a section, or null. The
- *  library reads the directive at the top level and on a knobbed section's
- *  wrapper alone; the same key inside any other mapping is data. */
+ *  library reads the directive at the top level and on a list section's
+ *  wrapper; every top-level mapping is checked, so a section that gains a
+ *  wrapper in a library bump cannot slip past the guard. */
 function layeringDirective(overlay: Layer, overlayPath: string): string | null {
   if (!isMapping(overlay.doc)) return null;
   const doc = overlay.doc;
   const site =
     LAYERING_KEY in doc
       ? "at the top level"
-      : UNDECLARED_POLICY_SECTIONS.filter((section) => {
-          const value = doc[section];
-          return isMapping(value) && LAYERING_KEY in value;
-        }).map((section) => `under ${section}`)[0];
+      : Object.entries(doc)
+          .filter(([, value]) => isMapping(value) && LAYERING_KEY in value)
+          .map(([section]) => `under ${section}`)[0];
   if (site === undefined) return null;
   return (
     `the repository's ${overlayPath} declares ${LAYERING_KEY} ${site}; the fleet's sections ` +

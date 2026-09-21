@@ -513,6 +513,18 @@ describe("renderSettings", () => {
         "the repository's .github/settings.local.yml declares _layering under labels; the fleet's sections union by name and only labels: null opts out",
     },
     {
+      // A plain-list section the library layers by key since its environments wrapper landed: a replace there would
+      // drop the site module's github-pages environment while the render stays green.
+      reason: "an overlay re-layering a section outside the undeclared-policy set",
+      overrides: {
+        modules: ["bun", "site"],
+        registration: registration("modules: [bun, site]\n"),
+        overlay: `${OVERLAY}environments: {_layering: replace, entries: [{name: mine}]}\n`,
+      },
+      detail:
+        "the repository's .github/settings.local.yml declares _layering under environments; the fleet's sections union by name and only labels: null opts out",
+    },
+    {
       reason: "an overlay re-layering every section",
       overrides: { overlay: `_layering: replace\n${OVERLAY}` },
       detail:

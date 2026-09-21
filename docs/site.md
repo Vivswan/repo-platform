@@ -266,7 +266,7 @@ Nothing to do: the module's settings layer creates the Pages site with Actions-w
 - **A deploy before that apply** skips its Pages steps and ends green with one warning (`no Pages site yet`): the job token can read the site but never create one. No manual toggle is needed, and no red run needs a rerun.
 - **The nightly rebuild** deploys once the site exists; the next main push does the same.
 
-**The `github-pages` environment needs no protection rule:** deploys never run on tag refs, and a required-reviewers rule there parks every deploy "waiting for review" with the later runs queued behind it on the `pages` lane. The settings apply does not manage environments, so remove such a rule by hand (Settings -> Environments -> github-pages).
+**The `github-pages` environment needs no protection rule:** deploys never run on tag refs, and a required-reviewers rule there parks every deploy "waiting for review" with the later runs queued behind it on the `pages` lane. The module's settings layer declares the environment with no reviewers and no wait, so the next daily apply removes such a rule ([settings.md](settings.md)).
 
 ## Caveats
 
