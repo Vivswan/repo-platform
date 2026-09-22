@@ -187,7 +187,7 @@ A stale rendered file behind a held sync PR is exactly what the second and third
 
 - **The `code_scanning` rule blocks at the fleet's high-or-critical bar,** the same bar as the other [security scans](security-scans.md): `alerts_threshold: errors` and `security_alerts_threshold: high_or_higher`, so a non-security warning or a medium security alert never blocks a merge.
 
-**The label roster** is the union of every selected layer's `labels`, less any entry the overlay drops with `_remove: true`, so it cannot drift from what the modules need unless the repository removes a label on purpose:
+**The label roster** is the union of every selected layer's `labels`, less any fleet-layer entry the overlay drops with `_remove: true`; the tracking labels fold in above the overlay, so a removal naming one holds the row instead:
 
 | When | Labels |
 |---|---|
@@ -207,7 +207,7 @@ A stale rendered file behind a held sync PR is exactly what the second and third
 
 Stateless, declared-keys-only, upsert-by-name - on the RENDERED document:
 
-- **Labels:** declared labels are synced; undeclared labels are deleted (loudly) unless the overlay chooses `_undeclared: keep` for that repository. The rendered roster carries every fleet label the overlay did not drop with `_remove: true`, so deletion only ever hits labels no layer declares or the repository removed on purpose.
+- **Labels:** declared labels are synced; undeclared labels are deleted (loudly) unless the overlay chooses `_undeclared: keep` for that repository. The rendered roster carries every fleet-layer label the overlay did not drop with `_remove: true` and every tracking label (which an overlay cannot drop), so deletion only ever hits labels no layer declares or the repository removed on purpose.
 
 - **Rulesets:** upserted by name (branch and tag targets) with the rendered payload, so the live rules array becomes exactly the document's: a rule type no layer declares any more leaves the live ruleset on the next apply. The dialect's rule append runs between LAYERS, never against live state, so it cannot hold a dropped rule alive.
 
