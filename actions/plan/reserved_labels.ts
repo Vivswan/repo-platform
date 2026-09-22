@@ -32,7 +32,7 @@ function layerLabelEntries(config: LayerSources, tree: string): Record<string, u
     }
     // The reader agrees with the writer's layer boundary (the settings library's) on the container shapes and
     // the label identity, not on validation (a numeric color is collected here and refused there): an empty
-    // document is an empty layer, `null` is the dialect's opt-out marker, an absent section declares nothing,
+    // document is an empty layer, a `null` section is read as declaring nothing (the render refuses it), an absent section declares nothing,
     // and the section is a list or the library's `{_undeclared, entries}` wrapper.
     const layer: unknown = parseYaml(readFileSync(path, "utf-8"), { logLevel: "error" }) ?? {};
     if (!isMapping(layer)) {

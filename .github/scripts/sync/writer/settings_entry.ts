@@ -106,7 +106,7 @@ function layeringDirective(overlay: Layer, overlayPath: string): string | null {
   if (site === undefined) return null;
   return (
     `the repository's ${overlayPath} declares ${LAYERING_KEY} ${site}; the fleet's list sections ` +
-    "union by their key, and a section set to null opts out of it"
+    "union by their key, and _remove: true on an entry drops the fleet's"
   );
 }
 
@@ -169,16 +169,12 @@ export function renderSettings(input: SettingsRenderInput): SettingsRender {
   if ("held" in tracking) return tracking;
   const collision = trackingCollision(overlay, tracking, input.overlayPath);
   if (collision !== null) return { held: collision };
-  // `labels: null` in the overlay is the repository's opt-out: it owns its
-  // labels, and a roster of tracking labels alone would make the apply
-  // delete every other label on the repository.
-  const optedOut = isMapping(overlay.doc) && overlay.doc.labels === null;
   const folded = foldSettings(
     [
       ...fleet.slice(0, -1),
       overlay,
       ...fleet.slice(-1),
-      ...(optedOut || tracking.length === 0
+      ...(tracking.length === 0
         ? []
         : [{ name: `the ${REGISTRATION_PATH} tracking labels`, doc: { labels: tracking } }]),
     ],

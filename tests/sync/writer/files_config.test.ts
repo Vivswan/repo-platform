@@ -314,14 +314,18 @@ describe("verifySources", () => {
             'labels:\n  - {name: bug, color: "d73a4a"}\n  - {name: BUG, color: "d73a4a"}\n',
         },
         problems: [
-          'layer "files/settings/baseline.yml": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer',
+          expect.stringContaining(
+            'files/settings/baseline.yml has malformed section entries: labels[1].name: "BUG" names the same label as "bug"',
+          ),
         ],
       },
       {
         reason: "a layer with a section the apply does not know",
         files: { ...LAYERS, "bun/settings.yml": "labels_v2: []\n" },
         problems: [
-          expect.stringContaining("unknown top-level section in files/bun/settings.yml: labels_v2"),
+          expect.stringContaining(
+            "files/bun/settings.yml has malformed section entries: unknown top-level section: labels_v2",
+          ),
         ],
       },
     ])("$reason is a load problem naming the file", ({ files, problems }) => {

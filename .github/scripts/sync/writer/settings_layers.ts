@@ -71,9 +71,9 @@ export function namedModules(config: LayerSources): Module[] {
 /** THE parse boundary for a settings document: YAML text in, a layer for
  *  the fold, or a throw naming `where`, so a loader can report the file.
  *  A repository's overlay is read here and judged only in its stack: a
- *  null inside it (`rules: null` under a ruleset) opts out of what lies
- *  BELOW, and alone it reads as a value over nothing, which the apply's
- *  validation refuses. An empty document is an empty layer. */
+ *  `_remove: true` inside it drops a fleet entry and is refused where no
+ *  lower layer declares the key, so alone it is not a document the apply
+ *  reads. An empty document is an empty layer. */
 export function readLayer(text: string, where: string): Layer {
   const parsed = parseSettingsDoc(text);
   if (parsed.isErr()) throw new Error(`${where}: ${parsed.error.reason.split("\n")[0]}`);

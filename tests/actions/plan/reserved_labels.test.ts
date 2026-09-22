@@ -83,8 +83,8 @@ describe("reservedLabelNames", () => {
     expect(rosterOf(wrapped)).toEqual(rosterOf(plain));
   });
 
-  // Read leniently, `labels: {name: settings-as-code-report}` would leave that name out of the roster; `null` is the
-  // dialect's opt-out and declares nothing.
+  // Read leniently, `labels: {name: settings-as-code-report}` would leave that name out of the roster; a `null`
+  // section declares nothing here and is the render's to refuse.
   test.each<{ reason: string; layer: string | null; result: string | { has: string[] } }>([
     {
       reason: "a declared layer missing from the tree",
