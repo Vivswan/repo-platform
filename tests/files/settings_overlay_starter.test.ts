@@ -60,7 +60,7 @@ test("the written overlay declares the repository's visibility, and that line is
     expect(parseYaml(text)).toEqual({
       repository: {
         description: "A demo",
-        topics: "",
+        topics: [],
         private: visibility === "private",
       },
     });

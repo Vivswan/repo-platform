@@ -334,19 +334,15 @@ describe("layerPaths", () => {
 });
 
 describe("readLayer", () => {
-  // The fail-closed distinction: a fleet layer is judged alone at load, an overlay only in its stack, since a null
-  // inside an entry is the fold's opt-out marker; an all-comment overlay starter must read as an empty layer.
-  test("readLayer accepts nulls and empty documents; readFleetLayer refuses a null inside an entry", () => {
-    expect(readLayer("labels: null\nrepository: {has_wiki: null}\n", "here").doc).toEqual({
-      labels: null,
-      repository: { has_wiki: null },
-    });
+  // The fail-closed distinction: a fleet layer is judged alone at load, an overlay only in its stack, since a
+  // `_remove` inside an entry needs a lower layer to act on; an all-comment overlay starter must read as an empty layer.
+  test("readLayer accepts a removal and empty documents; readFleetLayer refuses a removal with nothing below it", () => {
     expect(readLayer("", "here").doc).toEqual({});
     expect(readLayer("# nothing\n", "here").doc).toEqual({});
-    const overlay = "rulesets: [{name: main, rules: null}]\n";
-    expect(readLayer(overlay, "over").doc).toEqual({ rulesets: [{ name: "main", rules: null }] });
+    const overlay = "labels: [{name: bug, _remove: true}]\n";
+    expect(readLayer(overlay, "over").doc).toEqual({ labels: [{ name: "bug", _remove: true }] });
     expect(() => readFleetLayer(overlay, "fleet")).toThrow(
-      "fleet has malformed section entries: rulesets.entries[0].rules: Invalid input: expected array, received null",
+      'layer "fleet": labels[0] carries _remove: true, but no lower layer declares an entry under its key',
     );
   });
 });
@@ -362,7 +358,7 @@ describe("foldSettings", () => {
       reason: "an alias naming its own ancestor",
       layer: layer("here", "repository: &r {self: *r}\n"),
       message:
-        'layer "here": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees',
+        "here has malformed section entries: repository.self.self refers back to one of its own containers",
     },
     {
       reason: "a name-keyed section that is not a list of mappings",
@@ -373,7 +369,7 @@ describe("foldSettings", () => {
       reason: "a ruleset rule without a type",
       layer: layer("here", "rulesets:\n  - name: main\n    rules: [{parameters: {}}]\n"),
       message:
-        "here has malformed section entries: rulesets[0].rules[0].type: Invalid input: expected string",
+        "here has malformed section entries: rulesets[0].rules[0]: type: Invalid input: expected string",
     },
     {
       reason: "a label without a name",
@@ -381,21 +377,20 @@ describe("foldSettings", () => {
       message: "here has malformed section entries: labels[0].name: Invalid input: expected string",
     },
     {
-      // Under `deep` a null inside an entry deletes what lies below; over nothing it stays as written, and the
-      // fold's final validation refuses the rendered document, naming the fold, not the layer.
-      reason: "a null inside an entry that meets nothing below",
+      // A null is the empty state on GitHub, and a label description has none.
+      reason: "a null on a field with no empty state",
       layer: layer("here", "labels: [{name: bug, color: d73a4a, description: null}]\n"),
-      message: "f has malformed section entries: labels.entries[0].description",
+      message: "here has malformed section entries: labels[0].description has no empty state",
     },
     {
       reason: "a null on a section the apply does not know",
       layer: layer("here", "labels_v2: null\n"),
-      message: "unknown top-level section in here: labels_v2",
+      message: "here has malformed section entries: unknown top-level section: labels_v2",
     },
     {
       reason: "an underscore key outside the library's two directives (no private notes)",
       layer: layer("here", "_notes: {why: mine}\nrepository: {has_wiki: false}\n"),
-      message: "unknown underscore key in here: _notes",
+      message: "here has malformed section entries: unknown underscore key: _notes",
     },
     {
       reason: "a layer built in code whose label color is not a string",
@@ -408,13 +403,16 @@ describe("foldSettings", () => {
     });
   });
 
-  test("a null inside an entry is an opt-out of what lies below, so a layer alone is never judged", () => {
-    // `rules: null` on the overlay's main ruleset drops the lower layers'
-    // rules and cannot touch the override's (docs/settings.md, "Apply semantics").
+  test("a removal inside an entry drops the fleet's rule below it and never the override's, so a layer alone is never judged", () => {
+    // `_remove: true` on a rule the fleet declared drops that rule; the override's rules append above the overlay
+    // (docs/settings.md, "Apply semantics"). The marker never reaches the rendered document.
     const folded = foldSettings(
       [
-        layer("fleet", "rulesets: [{name: main, target: branch, rules: [{type: deletion}]}]\n"),
-        layer("overlay", "rulesets: [{name: main, rules: null}]\n"),
+        layer(
+          "fleet",
+          "rulesets: [{name: main, target: branch, rules: [{type: deletion}, {type: non_fast_forward}]}]\n",
+        ),
+        layer("overlay", "rulesets: [{name: main, rules: [{type: deletion, _remove: true}]}]\n"),
         layer("override", "rulesets: [{name: main, rules: [{type: required_linear_history}]}]\n"),
       ],
       "f",
@@ -428,7 +426,7 @@ describe("foldSettings", () => {
               name: "main",
               target: "branch",
               enforcement: "active",
-              rules: [{ type: "required_linear_history" }],
+              rules: [{ type: "non_fast_forward" }, { type: "required_linear_history" }],
             },
           ],
           _undeclared: "keep",
@@ -436,35 +434,38 @@ describe("foldSettings", () => {
       },
       yaml: expect.any(String),
     });
+    expect(folded).not.toHaveProperty("refused");
+    if ("yaml" in folded) expect(folded.yaml).not.toContain("_remove");
   });
 
   // The one pin of the merge dialect against the library: a semantic change in a bump would otherwise reach the
   // fleet as a rendered diff nobody reads as a dialect change.
-  test("the dialect the fleet relies on: higher wins, null opts out below and stays over nothing, name-keyed unions merging field by field, rules append by type, and the override beats the overlay on every axis", () => {
+  test("the dialect the fleet relies on: higher wins, null is the empty state, name-keyed unions merging field by field, rules append by type, and the override beats the overlay on every axis", () => {
     const folded = foldSettings(
       [
         layer(
           "base",
           [
             "repository: {has_issues: true, has_wiki: false}",
+            "pages: {build_type: workflow}",
             "labels:",
             "  - {name: bug, color: d73a4a, description: base text}",
             "  - {name: dependencies, color: '0366d6'}",
             "rulesets:",
-            "  - {name: main, target: branch, rules: [{type: deletion}, {type: required_status_checks, parameters: {do_not_enforce_on_create: true}}]}",
+            "  - {name: main, target: branch, rules: [{type: deletion}, {type: required_status_checks, parameters: {do_not_enforce_on_create: true, strict_required_status_checks_policy: false, required_status_checks: []}}]}",
             "",
           ].join("\n"),
         ),
         layer(
           "over",
           [
-            // has_wiki: null opts the base's key out; allow_merge_commit and the nulled squash title meet the override.
-            "repository: {has_wiki: null, description: mine, allow_merge_commit: true, squash_merge_commit_title: null}",
+            // has_wiki wins over the base; allow_merge_commit and the squash title meet the override.
+            "repository: {has_wiki: true, description: mine, allow_merge_commit: true, squash_merge_commit_title: COMMIT_OR_PR_TITLE}",
             "labels:",
             "  - {name: Bug, color: '000000'}",
             "  - {name: extra, color: ffffff}",
             "rulesets:",
-            "  - {name: main, enforcement: active, rules: [{type: required_status_checks, parameters: {strict_required_status_checks_policy: true}}, {type: non_fast_forward}]}",
+            "  - {name: main, enforcement: active, rules: [{type: required_status_checks, parameters: {strict_required_status_checks_policy: true, required_status_checks: []}}, {type: non_fast_forward}]}",
             "  - {name: tags, target: tag, rules: [{type: update}]}",
             "pages: null",
             "",
@@ -485,9 +486,9 @@ describe("foldSettings", () => {
       settings: {
         repository: {
           has_issues: true,
+          has_wiki: true,
           description: "mine",
           allow_merge_commit: false,
-          // The null opt-out only removes the key from the layers below the override, so the override puts it back.
           squash_merge_commit_title: "PR_TITLE",
         },
         labels: {
@@ -512,6 +513,7 @@ describe("foldSettings", () => {
                   parameters: {
                     do_not_enforce_on_create: true,
                     strict_required_status_checks_policy: true,
+                    required_status_checks: [],
                   },
                 },
                 { type: "non_fast_forward" },
@@ -522,7 +524,7 @@ describe("foldSettings", () => {
           ],
           _undeclared: "keep",
         },
-        // Met nothing below, so it stays with the apply's meaning (disable Pages).
+        // The higher null wins over the base's Pages block and is written as the empty state: disable Pages.
         pages: null,
       },
       yaml: expect.any(String),
@@ -677,7 +679,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
     return ((main?.rules ?? []) as Record<string, unknown>[]).map((r) => r.type);
   };
 
-  const STARTER = 'repository:\n  description: "x"\n  topics: ""\n  private: true\n';
+  const STARTER = 'repository:\n  description: "x"\n  topics: []\n  private: true\n';
   const REPO_RULE = `${STARTER}rulesets:\n  - name: main\n    rules:\n      - type: copilot_code_review\n        parameters:\n          review_on_push: true\n`;
 
   test("the starter leaves it out of the emitted main ruleset; an overlay declaring it keeps it, BELOW the override", () => {
@@ -753,7 +755,7 @@ describe("the github-pages environment", () => {
     wait_timer: 0,
     prevent_self_review: false,
     deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-    deployment_branch_policies: [{ name: "main" }],
+    deployment_branch_policies: { _undeclared: "delete", entries: [{ name: "main" }] },
   };
 
   test("the site leg deploys into github-pages, so selecting site declares it with no reviewers", () => {

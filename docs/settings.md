@@ -26,7 +26,7 @@ Every layer is a plain settings-as-code YAML document a human can read on its ow
 
 - **Layer 6 is the only layer a repository cannot beat.** Fleet defaults a repo may tune belong in layer 1.
 
-- **Tracking labels are the one non-file input:** the label NAME is the registration's `labels.fuzzer` / `labels.nightly` / `labels.site` key (the module's default when unset), its color and description are the module's `tracking_label` data in `files.yml`, and the render folds them in as the top layer (none when the overlay opts out with `labels: null`, [apply semantics](#apply-semantics)).
+- **Tracking labels are the one non-file input:** the label NAME is the registration's `labels.fuzzer` / `labels.nightly` / `labels.site` key (the module's default when unset), its color and description are the module's `tracking_label` data in `files.yml`, and the render folds them in as the top layer ([apply semantics](#apply-semantics)).
 
 - **A refused tracking label:** a key set for a module the repository does not select, or a name a fleet layer already manages, holds the row with the plan's message ([tracking-issues.md](tracking-issues.md#the-label-is-the-stream)).
 
@@ -40,9 +40,9 @@ The render and the apply read one dialect, spelled out in the library's [layerin
 
 - **The higher layer wins;** mappings merge key by key, lower keys keeping their order.
 
-- **An explicit `null` on a mapping key opts it out:** it deletes what the layers BELOW declared, so a repo cannot null away an override (layer 6 puts it straight back).
+- **`null` is the empty state on GitHub, never an opt-out:** `pages: null` turns Pages off, `protection: null` strips a branch's protection; a key with no empty state (`has_wiki`, a label's description) refuses it. A repo cannot null away an override (layer 6 puts its value straight back).
 
-- **A null that meets nothing below** stays as written with the apply's meaning (`pages: null` disables Pages); inside a keyed entry (a label's field) it deletes the lower layers' value, and one that meets nothing stays and is judged against the field's schema by the fold's final validation. Inside a scalar list (`topics`) it is copied as written and judged by the apply's validation.
+- **`_remove: true` on a keyed entry drops the fleet's entry** under the same key (a label by name, a ruleset's rule by type); the marker never reaches the rendered file. It belongs in the repository overlay: a fleet or module layer is judged alone, where nothing lies below and the removal is refused.
 
 - **`labels` and `rulesets` are NAME-KEYED UNIONS:** both sides' entries are kept, so a plain array-replace can never freeze the fleet roster the moment a repo declares one extra label. Label names match case-insensitively (GitHub deduplicates them that way); ruleset names match exactly.
 
@@ -56,7 +56,7 @@ The render and the apply read one dialect, spelled out in the library's [layerin
 
 - **The `{entries, _undeclared}` wrapper:** the rendered `labels` and `rulesets` carry the library's wrapper with the policy resolved (`delete` for both: the apply's default for labels, the override's declaration for rulesets): the roster semantics under [apply semantics](#apply-semantics) written into the document rather than assumed.
 
-- **What an overlay may set:** `_undeclared` itself (`labels: {_undeclared: keep, entries: [...]}` keeps that repository's undeclared labels). It may not declare the library's `_layering` directive, which would replace the fleet roster wholesale and have the apply delete every managed label, so the render holds the row on it.
+- **What an overlay may set:** `_undeclared` itself (`labels: {_undeclared: keep, entries: [...]}` keeps that repository's undeclared labels) and `_remove: true` on an entry. It may not declare the library's `_layering` directive, which would replace the fleet roster wholesale and have the apply delete every managed label, so the render holds the row on it.
 
 ## Editing your settings
 
@@ -177,7 +177,7 @@ A stale rendered file behind a held sync PR is exactly what the second and third
 
 ## What the baseline contains
 
-- **The shared `repository:` feature toggles** live in the fleet baseline; a repo opts out of any of them by declaring its own value (or `null`) in its overlay.
+- **The shared `repository:` feature toggles** live in the fleet baseline; a repo overrides any of them by declaring its own value in its overlay.
 
 - **The exceptions live in the override layer,** where no repo can opt out: the merge policy, `allow_auto_merge`, and `enable_vulnerability_alerts`. The merge policy is squash-only; the squash subject is the PR title, which the pr-title check and release-please rely on, and the squash body is blank, so a PR body's tables and fences never reach the changelog and release-please footers travel in a `BEGIN_COMMIT_OVERRIDE` block.
 
@@ -187,7 +187,7 @@ A stale rendered file behind a held sync PR is exactly what the second and third
 
 - **The `code_scanning` rule blocks at the fleet's high-or-critical bar,** the same bar as the other [security scans](security-scans.md): `alerts_threshold: errors` and `security_alerts_threshold: high_or_higher`, so a non-security warning or a medium security alert never blocks a merge.
 
-**The label roster** is the union of every selected layer's `labels`, so it cannot drift from what the modules need (a repository whose overlay sets `labels: null` renders no roster at all):
+**The label roster** is the union of every selected layer's `labels`, less any fleet-layer entry the overlay drops with `_remove: true`; the tracking labels fold in above the overlay, so a removal naming one holds the row instead:
 
 | When | Labels |
 |---|---|
@@ -207,17 +207,15 @@ A stale rendered file behind a held sync PR is exactly what the second and third
 
 Stateless, declared-keys-only, upsert-by-name - on the RENDERED document:
 
-- **Labels:** declared labels are synced; undeclared labels are deleted (loudly) unless the overlay chooses `_undeclared: keep` for that repository. When label management is enabled, the rendered roster contains the baseline labels, so deletion only ever hits labels no layer declares.
-
-- **`labels: null`** in `.github/settings.local.yml` opts the repository out of label management: no labels are rendered, tracking labels included, and the apply never touches labels. A repository that opts out owns the tracking labels its nightly and fuzzer workflows file issues under.
+- **Labels:** declared labels are synced; undeclared labels are deleted (loudly) unless the overlay chooses `_undeclared: keep` for that repository. The rendered roster carries every fleet-layer label the overlay did not drop with `_remove: true` and every tracking label (which an overlay cannot drop), so deletion only ever hits labels no layer declares or the repository removed on purpose.
 
 - **Rulesets:** upserted by name (branch and tag targets) with the rendered payload, so the live rules array becomes exactly the document's: a rule type no layer declares any more leaves the live ruleset on the next apply. The dialect's rule append runs between LAYERS, never against live state, so it cannot hold a dropped rule alive.
 
 - **A whole ruleset no layer declares any more** is deleted on the next apply too: the override declares `_undeclared: delete` above every overlay, so no repository can keep one alive.
 
-- **`rules: null`** in the overlay is the one way to remove inherited rules wholesale: it drops what the LOWER layers contributed but cannot touch the override layer's rules, so the fleet's mandatory protection survives it either way.
+- **`_remove: true` on a rule** in the overlay's `main` entry drops the rule a LOWER layer contributed (`rules: [{type: copilot_code_review, _remove: true}]`) but cannot touch the override layer's rules, so the fleet's mandatory protection survives it either way.
 
-- **Repository fields, topics, and security toggles** are applied only when declared; omitting a key leaves the live value alone. The overlay starter therefore seeds `topics:` unconditionally, like `private:`: an empty value declares-and-clears (empty topics normalize to no topics) instead of leaving the field unmanaged.
+- **Repository fields, topics, and security toggles** are applied only when declared; omitting a key leaves the live value alone. The overlay starter therefore seeds `topics: []` unconditionally, like `private:`: the empty list declares-and-clears instead of leaving the field unmanaged (an empty string is refused, since no GitHub topic is empty).
 
 - **Topics set only in the GitHub UI** are cleared by the first apply after the render lands - put values you want to keep in the overlay.
 

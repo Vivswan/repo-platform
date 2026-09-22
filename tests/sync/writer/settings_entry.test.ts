@@ -44,7 +44,7 @@ const LAYERS: Record<string, string> = {
     '  - {name: bug, color: d73a4a, description: "Something isn\'t working"}',
     '  - {name: dependencies, color: "0366d6", description: Dependency updates}',
     "rulesets:",
-    "  - {name: pr-title, target: branch, enforcement: disabled, rules: [{type: required_status_checks}]}",
+    "  - {name: pr-title, target: branch, enforcement: disabled, rules: [{type: required_status_checks, parameters: {strict_required_status_checks_policy: false, required_status_checks: []}}]}",
     "",
   ].join("\n"),
   "settings/public.yml": [
@@ -69,7 +69,7 @@ const LAYERS: Record<string, string> = {
     "      rules:",
     "        - type: deletion",
     "        - type: required_status_checks",
-    "          parameters: {required_status_checks: [{context: all-green, integration_id: 15368}]}",
+    "          parameters: {strict_required_status_checks_policy: false, required_status_checks: [{context: all-green, integration_id: 15368}]}",
     "",
   ].join("\n"),
   "bun/settings.yml": 'labels:\n  - {name: javascript, color: "168700", description: JS updates}\n',
@@ -82,7 +82,7 @@ const OVERLAY = [
   "# my overlay",
   "repository:",
   "  description: Mine",
-  '  topics: ""',
+  "  topics: []",
   "  private: false",
   "rulesets:",
   "  - name: release-branches",
@@ -161,7 +161,7 @@ describe("renderSettings", () => {
       has_wiki: false,
       // The overlay's identity keys ride through; the override beats the baseline's merge flag.
       description: "Mine",
-      topics: "",
+      topics: [],
       private: false,
       security_and_analysis: { secret_scanning: { status: "enabled" } },
       allow_merge_commit: false,
@@ -181,7 +181,12 @@ describe("renderSettings", () => {
       name: "pr-title",
       target: "branch",
       enforcement: "disabled",
-      rules: [{ type: "required_status_checks" }],
+      rules: [
+        {
+          type: "required_status_checks",
+          parameters: { strict_required_status_checks_policy: false, required_status_checks: [] },
+        },
+      ],
     });
     expect(ruleset(doc, "main")).toEqual({
       name: "main",
@@ -193,7 +198,10 @@ describe("renderSettings", () => {
         { type: "deletion" },
         {
           type: "required_status_checks",
-          parameters: { required_status_checks: [{ context: "all-green", integration_id: 15368 }] },
+          parameters: {
+            strict_required_status_checks_policy: false,
+            required_status_checks: [{ context: "all-green", integration_id: 15368 }],
+          },
         },
       ],
     });
@@ -206,11 +214,11 @@ describe("renderSettings", () => {
   });
 
   // The fleet-mandatory override sits above the repository's overlay: reversed, a repository could weaken the merge
-  // gate. Below the override the overlay wins, and its null opts a lower layer's key out.
-  test("the overlay beats the layers below the override and never the override: its null drops has_wiki, its ruleset policy and merge flag lose", () => {
+  // gate. Below the override the overlay wins.
+  test("the overlay beats the layers below the override and never the override: its has_wiki wins, its ruleset policy and merge flag lose", () => {
     const { doc } = rendered({
       overlay: [
-        "repository: {description: Mine, topics: '', private: false, has_wiki: null, allow_merge_commit: true}",
+        "repository: {description: Mine, topics: [], private: false, has_wiki: true, allow_merge_commit: true}",
         'labels: [{name: bug, color: "000000", description: Restyled}]',
         "rulesets:",
         "  _undeclared: keep",
@@ -220,8 +228,9 @@ describe("renderSettings", () => {
       ].join("\n"),
     });
     expect(doc.repository).toEqual({
+      has_wiki: true,
       description: "Mine",
-      topics: "",
+      topics: [],
       private: false,
       security_and_analysis: { secret_scanning: { status: "enabled" } },
       allow_merge_commit: false,
@@ -287,26 +296,12 @@ describe("renderSettings", () => {
     ]);
   });
 
-  // The opt-out leaves the labels to the repository: a roster of tracking labels alone would have the apply delete
-  // every other label on the repository.
   test.each<{
     reason: string;
     modules: string[];
     overlay: string;
     labels: Record<string, unknown>[] | undefined;
   }>([
-    {
-      reason: "labels: null with a tracking stream renders no labels key",
-      modules: ["fuzzer"],
-      overlay: `${OVERLAY}labels: null\n`,
-      labels: undefined,
-    },
-    {
-      reason: "labels: null with no stream renders no labels key",
-      modules: [],
-      overlay: `${OVERLAY}labels: null\n`,
-      labels: undefined,
-    },
     {
       reason:
         "an overlay declaring visibility alone, with a tracking stream, renders the roster and the tuple",
@@ -347,7 +342,7 @@ describe("renderSettings", () => {
           'labels:\n  - {name: javascript, color: "168700"}\n  - {name: JavaScript, color: "168700"}\n',
       },
       message: (tree) =>
-        `layer "${join(tree, "bun/settings.yml")}": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer`,
+        `${join(tree, "bun/settings.yml")} has malformed section entries: labels[1].name: "JavaScript" names the same label as "javascript"`,
     },
     {
       reason: "two fleet layers valid alone but not together",
@@ -432,16 +427,18 @@ describe("renderSettings", () => {
     {
       reason: "an overlay whose alias names its own ancestor",
       overrides: { overlay: "repository: &r {private: false, self: *r}\n" },
-      detail:
-        'layer ".github/settings.local.yml": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees',
+      detail: expect.stringContaining(
+        ".github/settings.local.yml has malformed section entries: repository.self.self refers back to one of its own containers",
+      ),
     },
     {
       reason: "an overlay declaring one label twice",
       overrides: {
         overlay: `${OVERLAY}labels:\n  - {name: mine, color: "000000"}\n  - {name: Mine, color: "000000"}\n`,
       },
-      detail:
-        'layer ".github/settings.local.yml": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer',
+      detail: expect.stringContaining(
+        '.github/settings.local.yml has malformed section entries: labels[1].name: "Mine" names the same label as "mine"',
+      ),
     },
     {
       // Formerly rode through to the apply, which refused it by name; the
@@ -456,14 +453,14 @@ describe("renderSettings", () => {
       reason: "an overlay naming a section the apply does not know",
       overrides: { overlay: `${OVERLAY}labels_v2: []\n` },
       detail: expect.stringContaining(
-        "unknown top-level section in .github/settings.local.yml: labels_v2",
+        ".github/settings.local.yml has malformed section entries: unknown top-level section: labels_v2",
       ),
     },
     {
       reason: "an overlay nulling a section the apply does not know",
       overrides: { overlay: `${OVERLAY}labels_v2: null\n` },
       detail: expect.stringContaining(
-        "unknown top-level section in .github/settings.local.yml: labels_v2",
+        ".github/settings.local.yml has malformed section entries: unknown top-level section: labels_v2",
       ),
     },
     {
@@ -510,7 +507,7 @@ describe("renderSettings", () => {
       reason: "an overlay re-layering a section",
       overrides: { overlay: `${OVERLAY}labels: {_layering: replace, entries: [{name: mine}]}\n` },
       detail:
-        "the repository's .github/settings.local.yml declares _layering under labels; the fleet's list sections union by their key, and a section set to null opts out of it",
+        "the repository's .github/settings.local.yml declares _layering under labels; the fleet's list sections union by their key, and _remove: true on an entry drops the fleet's",
     },
     {
       // A plain-list section the library layers by key since its environments wrapper landed: a replace there would
@@ -522,13 +519,13 @@ describe("renderSettings", () => {
         overlay: `${OVERLAY}environments: {_layering: replace, entries: [{name: mine}]}\n`,
       },
       detail:
-        "the repository's .github/settings.local.yml declares _layering under environments; the fleet's list sections union by their key, and a section set to null opts out of it",
+        "the repository's .github/settings.local.yml declares _layering under environments; the fleet's list sections union by their key, and _remove: true on an entry drops the fleet's",
     },
     {
       reason: "an overlay re-layering every section",
       overrides: { overlay: `_layering: replace\n${OVERLAY}` },
       detail:
-        "the repository's .github/settings.local.yml declares _layering at the top level; the fleet's list sections union by their key, and a section set to null opts out of it",
+        "the repository's .github/settings.local.yml declares _layering at the top level; the fleet's list sections union by their key, and _remove: true on an entry drops the fleet's",
     },
     {
       reason: "an overlay label colliding with a tracking label",
