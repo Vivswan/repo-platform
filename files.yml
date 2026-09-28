@@ -104,16 +104,16 @@ files:
     replace: {"[\r]": "?"}
     always: [Windows, macOS, Linux, VSCode, JetBrains]
     sources:
-      Windows: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Windows.gitignore}
-      macOS: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/macOS.gitignore}
-      Linux: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Linux.gitignore}
-      VSCode: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/VisualStudioCode.gitignore}
-      JetBrains: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/JetBrains.gitignore}
-      Node: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Node.gitignore}
-      bun: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: bun.gitignore}
-      Deno: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Deno.gitignore}
-      Python: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Python.gitignore}
-      Rust: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Rust.gitignore}
+      Windows: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: Global/Windows.gitignore}
+      macOS: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: Global/macOS.gitignore}
+      Linux: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: Global/Linux.gitignore}
+      VSCode: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: Global/VisualStudioCode.gitignore}
+      JetBrains: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: Global/JetBrains.gitignore}
+      Node: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: Node.gitignore}
+      bun: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: bun.gitignore}
+      Deno: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: Deno.gitignore}
+      Python: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: Python.gitignore}
+      Rust: {repository: github/gitignore, sha: 62f3997f1917b30f6eaee0c53ac2d791426513f2, path: Rust.gitignore}
       fuzzer: files/fuzzer/fuzzer.gitignore
   - {path: .github/CODEOWNERS, class: split, region: hash}
   - path: .github/dependabot.yml
