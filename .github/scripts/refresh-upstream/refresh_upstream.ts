@@ -108,7 +108,8 @@ export type Bump =
       name: string;
       from: string;
       to: string;
-      /** Path to its unified diff between the two commits, normalized as the writer fetches it; unchanged paths are absent. */
+      /** Path to its unified diff between the two commits, normalized as the writer fetches it; unchanged paths are
+       *  absent, and `refresh`, the one constructor, builds a bump only from a non-empty map. */
       diffs: Map<string, string>;
     }
   | {
@@ -119,7 +120,13 @@ export type Bump =
       to: string;
     };
 
-async function commitBump(pin: CommitPin, to: string, host: string, fetch: Fetch): Promise<Bump> {
+/** Each fetched path whose normalized body differs between the two commits, to its unified diff. */
+async function commitDiffs(
+  pin: CommitPin,
+  to: string,
+  host: string,
+  fetch: Fetch,
+): Promise<Map<string, string>> {
   const refs = (sha: string) =>
     pin.paths.map((path) => ({ repository: pin.repository, sha, path }));
   const before = await fetchUpstream(refs(pin.sha), host, fetch);
@@ -130,7 +137,7 @@ async function commitBump(pin: CommitPin, to: string, host: string, fetch: Fetch
       diffs.set(old.path, unifiedDiff(old.path, before.body(old), after.body(next)));
     }
   }
-  return { kind: "commit", name: pin.repository, from: pin.sha, to, diffs };
+  return diffs;
 }
 
 function versionFrom(value: unknown, pattern: RegExp, what: string): string {
@@ -247,9 +254,6 @@ function majorJumps(bumps: Bump[]): string {
 function section(bump: Bump): string {
   const head = `## ${bump.name}: \`${shown(bump, bump.from)}\` -> \`${shown(bump, bump.to)}\``;
   if (bump.kind === "release") return head;
-  if (bump.diffs.size === 0) {
-    return `${head}\n\nNo fetched file changed between the two commits; the pin moves so the next refresh diffs from here.`;
-  }
   const blocks = [...bump.diffs].map(
     ([path, diff]) => `### ${path}\n\n\`\`\`\`diff\n${diff}\n\`\`\`\``,
   );
@@ -280,7 +284,8 @@ export interface Refresh {
 
 /** Moves every pin of the kind that upstream moved and returns the bumps. Every fetch and every verdict come before any
  *  write: an unreachable upstream or a downgrade aborts before a pin moves, so "nothing moved" (which lets the workflow
- *  close a stale refresh PR) is never a view that could not look. */
+ *  close a stale refresh PR) is never a view that could not look. A commit pin moves only when a fetched file's
+ *  normalized body moved with it: a HEAD that changes other paths alone leaves the pin. */
 export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bump[]> {
   const configPath = join(root, "files.yml");
   const text = readFileSync(configPath, "utf-8");
@@ -294,8 +299,15 @@ export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bum
         console.log(`${pin.repository}: ${pin.sha} is HEAD`);
         continue;
       }
+      const diffs = await commitDiffs(pin, head, host, fetch);
+      if (diffs.size === 0) {
+        console.log(
+          `${pin.repository}: ${pin.sha} -> ${head} changes no fetched file; the pin stays`,
+        );
+        continue;
+      }
       console.log(`${pin.repository}: ${pin.sha} -> ${head}`);
-      bumps.push(await commitBump(pin, head, host, fetch));
+      bumps.push({ kind: "commit", name: pin.repository, from: pin.sha, to: head, diffs });
       rewritten = repin(rewritten, pin, head);
     }
     if (bumps.length > 0) writeFileSync(configPath, rewritten);
