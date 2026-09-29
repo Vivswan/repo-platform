@@ -373,7 +373,7 @@ describe("the refresh", () => {
     },
   );
 
-  test("a pin already at upstream is reported current and nothing is written; the body of a commit pin whose files did not change says the pin alone moved", async () => {
+  test("a pin already at upstream is reported current and nothing is written", async () => {
     const root = plant();
     const current = upstream({
       ...answers,
@@ -390,10 +390,22 @@ describe("the refresh", () => {
     ]);
     expect(readFileSync(join(root, "files.yml"), "utf-8")).toBe(CONFIG);
     expect(proseBumps([])).toBe("");
-    const still: Bump = { kind: "commit", name: "o/a", from: OLD, to: NEW, diffs: new Map() };
-    expect(prBody("commit", [still])).toContain(
-      "No fetched file changed between the two commits; the pin moves so the next refresh diffs from here.",
-    );
+  });
+
+  // Upstream's HEAD moved on paths files.yml does not fetch (Linux differs by CRLF alone, which the writer's normalization
+  // drops): a bump of that pin would render the same bytes everywhere, so the pin stays and no PR opens for it.
+  test("a commit pin whose fetched files are unchanged at upstream's new HEAD stays, after every file was compared", async () => {
+    const root = plant();
+    const same = upstream({ ...answers, [`h/o/a/${NEW}/Node.gitignore`]: "node_modules/\n" });
+    expect(await refresh({ kind: "commit", root, host: "h", fetch: same.fetch })).toEqual([]);
+    expect(same.fetched).toEqual([
+      `${API}/o/a/commits/HEAD`,
+      `h/o/a/${OLD}/Global/Linux.gitignore`,
+      `h/o/a/${OLD}/Node.gitignore`,
+      `h/o/a/${NEW}/Global/Linux.gitignore`,
+      `h/o/a/${NEW}/Node.gitignore`,
+    ]);
+    expect(readFileSync(join(root, "files.yml"), "utf-8")).toBe(CONFIG);
   });
 
   // A run that cannot see one upstream cannot tell "nothing moved" from "could not look", and an empty bumps output

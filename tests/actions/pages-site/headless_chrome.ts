@@ -59,7 +59,9 @@ export class Chrome {
   }
 
   static async launch(userDataDir: string): Promise<Chrome> {
-    const process = Bun.spawn(
+    // Chrome keeps scratch of its own (com.google.Chrome.*) under TMPDIR, and its URL fetcher's survives Browser.close;
+    // pointed at the profile directory, it goes when the test removes that, never as a leftover the test launcher judges.
+    const child = Bun.spawn(
       [
         chromePath(),
         "--headless=new",
@@ -74,7 +76,12 @@ export class Chrome {
         "--window-size=1400,1200",
         "about:blank",
       ],
-      { stdin: "ignore", stdout: "ignore", stderr: "pipe" },
+      {
+        env: { ...process.env, TMPDIR: userDataDir },
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "pipe",
+      },
     );
     // Chrome is owned from the spawn on: a launch that fails past it must not leave it running.
     try {
@@ -82,7 +89,7 @@ export class Chrome {
         let text = "";
         const decoder = new TextDecoder();
         void (async () => {
-          for await (const chunk of process.stderr) {
+          for await (const chunk of child.stderr) {
             text += decoder.decode(chunk, { stream: true });
             const match = /DevTools listening on (ws:\/\/\S+)/.exec(text);
             if (match !== null) resolve(match[1]);
@@ -95,10 +102,10 @@ export class Chrome {
         socket.addEventListener("open", () => resolve());
         socket.addEventListener("error", () => reject(new Error(`no DevTools socket at ${url}`)));
       });
-      return new Chrome(process, socket);
+      return new Chrome(child, socket);
     } catch (error) {
-      process.kill("SIGKILL");
-      await process.exited;
+      child.kill("SIGKILL");
+      await child.exited;
       throw error;
     }
   }
