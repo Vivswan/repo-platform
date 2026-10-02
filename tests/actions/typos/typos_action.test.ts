@@ -2,7 +2,7 @@
 // promises the extension, and a typos release that replaced instead of layering would drop every repository's words at
 // once. The end-to-end rows need a typos binary on PATH.
 //   locally            -> skipped without one
-//   TYPOS_REQUIRED=1   -> mandatory; ci.yml's script-tests job installs the pinned release and sets it
+//   TYPOS_REQUIRED=1   -> mandatory; ci.yml's script-tests job runs the action (which installs the pinned release) and sets it
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

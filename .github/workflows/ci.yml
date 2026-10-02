@@ -214,20 +214,12 @@ jobs:
           bun-version-file: files/bun/.bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
-      # The typos action's end-to-end cases run the binary the action pins
-      # (its release publishes no checksum file, so the archive's sha256 is
-      # recorded here); TYPOS_REQUIRED makes them fail instead of skip.
-      - name: Install the pinned typos release
-        env:
-          TYPOS_VERSION: 1.50.2
-          TYPOS_SHA256: abcb3e257c7c2abeff4d903f7fe68071357637605bdb283ce2251f44bc70dc09
-        run: |
-          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/typos.tar.gz" \
-            "https://github.com/crate-ci/typos/releases/download/v${TYPOS_VERSION}/typos-v${TYPOS_VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          echo "${TYPOS_SHA256}  $RUNNER_TEMP/typos.tar.gz" | sha256sum --check --strict
-          mkdir -p "$RUNNER_TEMP/typos-bin"
-          tar -xzf "$RUNNER_TEMP/typos.tar.gz" -C "$RUNNER_TEMP/typos-bin" ./typos
-          echo "$RUNNER_TEMP/typos-bin" >>"$GITHUB_PATH"
+      # The typos action's end-to-end cases need the release the action pins on PATH. Running the
+      # action installs that binary into $RUNNER_TEMP, so the pin lives in one place.
+      - name: Install typos by running the action
+        uses: ./actions/typos
+      - name: Put the installed typos on PATH
+        run: echo "$RUNNER_TEMP" >>"$GITHUB_PATH"
       - name: Run .github/scripts and action tests
         env:
           TYPOS_REQUIRED: "1"
