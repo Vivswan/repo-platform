@@ -20,6 +20,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Translate docs (zh-cn/, ja/, ...) | [Site: docs conventions](site.md#docs-conventions) |
 | Move slow or flaky checks into a nightly run | [Nightly: customizing the starter](nightly.md#customizing-the-starter) |
 | Write the fuzz step the nightly-fuzz starter needs | [Fuzzer: customizing the starter](fuzzer.md#customizing-the-starter) |
+| Adopt the Rust lint floor in a repository that already has a `Cargo.toml` | [Rust: how a repository takes it](rust.md#how-a-repository-takes-it) |
 | See which toolchain versions the fleet pins | [Toolchains: the pins](toolchains.md#the-pins) |
 | Use a different toolchain version in one repo | [Toolchains: overriding](toolchains.md#overriding-per-toolchain) |
 | Silence a Trivy finding that blocks my PR, or read the nightly security issue | [Security scans](security-scans.md) |
@@ -55,16 +56,18 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 
 7. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
 
+8. [Rust](rust.md) - the `Cargo.toml` lint floor every Rust repository carries, and the cargo gate that enforces it.
+
 ### Fleet operations
 
-8. [Sync](sync.md) - the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
+9. [Sync](sync.md) - the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
 
-9. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
+10. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
 
-10. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
+11. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
 
-11. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking gate (fixable HIGH-or-CRITICAL vulnerabilities, any HIGH-or-CRITICAL misconfiguration), the expiring bypass file, and the nightly scan that files one tracking issue per public repository; semgrep on public repositories.
+12. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking gate (fixable HIGH-or-CRITICAL vulnerabilities, any HIGH-or-CRITICAL misconfiguration), the expiring bypass file, and the nightly scan that files one tracking issue per public repository; semgrep on public repositories.
 
-12. [Build provenance](build-provenance.md) - why the `stable` delivery tag is trustworthy, and what residual trust remains.
+13. [Build provenance](build-provenance.md) - why the `stable` delivery tag is trustworthy, and what residual trust remains.
 
-13. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+14. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
