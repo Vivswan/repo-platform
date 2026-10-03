@@ -85,7 +85,8 @@ export function missingPlaceholders(text: string, values: PlaceholderValues): st
   return missing;
 }
 
-/** The loader refuses a source with an unlisted token first, so that throw is a second gate; the unsafe-value throw is the only gate for a files.yml label default, which the registration grammar never sees. */
+/** The loader refuses a source with an unlisted token first, so that throw is a second gate.
+ *  The unsafe-value throw is the only gate for a files.yml label default, which the registration grammar never sees. */
 export function substitute(text: string, values: PlaceholderValues): string {
   return text.replace(TOKEN_RE, (whole, dollar: string, name: string) => {
     if (dollar !== "") return whole;

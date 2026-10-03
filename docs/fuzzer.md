@@ -9,14 +9,10 @@ Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter wo
 
 - **A red night** uploads the failure artifacts and files or refreshes a [tracking issue](tracking-issues.md) built from your failure reports.
 - **A green night** closes the stream's open issues.
+- **Shared with the nightly module:** issue lifecycle, release gating, label renaming, and the action pin's history live on [Tracking issues](tracking-issues.md).
+- **The `.gitignore` region:** the module also adds `/.fuzz-failures/` to the managed region of the repository's `.gitignore`, so the failure directory a run leaves behind is never committed.
 
 **Repo-owned:** the starter is written once and then repo-owned. Fuzzers and their toolchains differ too much across repos for the platform to keep managing the file, so it carries the shared machinery and leaves the fuzz step itself to you. Repo-owned also means a fix to the starter never reaches repos that already received it.
-
-**The `.gitignore` region:** the module also adds `/.fuzz-failures/` to the managed region of the repository's `.gitignore`, so the failure directory a run leaves behind is never committed.
-
-**Shared with the nightly module:** issue lifecycle, release gating, label renaming, and the action pin's history: [Tracking issues](tracking-issues.md).
-
-**Hidden files in the upload:** the upload step sets `include-hidden-files: true` because `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default since v4.4, so without it the step finds no files and uploads nothing (`if-no-files-found: ignore` keeps that silent).
 
 ## Module parameter (registration key)
 
@@ -33,6 +29,8 @@ The label is a registration key rather than a starter edit alone because the set
 - **Set up the toolchain** the fuzzer needs in the steps above it (rust nightly and cargo-fuzz, a docker stack, a corpus cache), and point the upload and `artifacts-dir` paths at your failure-report directory.
 
 - **Bound the fuzz run itself** below the job's `timeout-minutes` (a wall-clock flag, or a `timeout` wrapper). A job that hits its timeout is CANCELLED, not failed, and cancelled jobs skip the `if: failure()` steps: no artifact, no issue, a silent night for exactly the hang a fuzzer exists to find.
+
+- **Hidden files in the upload:** the upload step sets `include-hidden-files: true`. Since v4.4, `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default. Without the flag the step finds no files and uploads nothing, and `if-no-files-found: ignore` keeps that silent.
 
 ## The failure-report contract (v1)
 
@@ -54,20 +52,18 @@ The [fuzz-issue action](../actions/fuzz-issue/fuzz-issue.ts) knows nothing about
 
 - **The body** must contain a fenced code block with the exact replay command(s), runnable from the repository root or starting with an explicit `cd`. The producer owns the replay command; the action never constructs one.
 
-- **Recommended content after the replay block:** the seed used, the crashing input's filename, a single-line base64 of the crashing input when it is 3,000 bytes or smaller (it outlives the artifact retention window; one line so head-truncation cannot cut it), and the [regression-pinning](#regression-pinning-and-why-auto-close-is-honest) instruction for your repo.
+- **Recommended content after the replay block:** the seed used, the crashing input's filename, and the [regression-pinning](#regression-pinning-and-why-auto-close-is-honest) instruction for your repo. Add a base64 copy of the crashing input when it is 3,000 bytes or smaller: it outlives the artifact retention window. Keep it on a single line, so head-truncation cannot cut it.
 
 Size limits:
 
 | Budget | Value |
 |---|---|
-| per failure, lines included | the heading plus the first `REPORT_LINES` lines after it (keep the replay block near the top; the rest survives only in the artifact) |
+| per failure, lines included | the heading plus the first `REPORT_LINES` lines after it |
 | per failure, size | at most `MAX_BLOCK_CHARS` characters |
 | without an `artifact-name` | no per-failure cap: the body is the only record, so every report rides whole, each cut at its share of the body budget with a count of the lines missing |
-| whole issue body | `MAX_BODY` characters, under GitHub's cap; failures included oldest-first by directory mtime, then a note says how many were omitted |
+| whole issue body | `MAX_BODY` characters, under GitHub's cap; failures included oldest-first by directory mtime (meaningful only where the reports were written: re-extracting artifacts, as the [shard aggregation](#sharding) does, stamps fresh mtimes), then a note says how many were omitted |
 
-The three constants live in [actions/fuzz-issue/fuzz-issue.ts](../actions/fuzz-issue/fuzz-issue.ts).
-
-Re-extracting artifacts (the [shard aggregation](#sharding) below) stamps fresh mtimes, so the ordering only means something when the reports are read where they were written.
+The three constants live in [actions/fuzz-issue/fuzz-issue.ts](../actions/fuzz-issue/fuzz-issue.ts). Keep the replay block near the top of `report.md`: lines past `REPORT_LINES` survive only in the artifact.
 
 ## Regression pinning, and why auto-close is honest
 

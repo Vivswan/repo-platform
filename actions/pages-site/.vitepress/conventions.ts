@@ -1,5 +1,6 @@
 // Shared by derive.ts, lib.ts, and actions/plan/registration.ts, so an include root the plan accepts is one the site builds.
-// Imports nothing: build.ts copies .vitepress/ into every build root, where an import reaching outside resolves to nothing, and the plan action imports it with none of pages-site's dependencies installed.
+// Imports nothing: build.ts copies .vitepress/ into every build root, where an import reaching outside resolves to nothing.
+// The plan action also imports it with none of pages-site's dependencies installed.
 
 /** ISO 639-1 primary language subtags: the locale-directory convention
  *  accepts exactly `<lang>` or `<lang>-<region>` with a two-letter primary
@@ -29,7 +30,8 @@ export function isUnwalkedEntry(name: string): boolean {
   return name.startsWith(".") || name === "node_modules";
 }
 
-/** The landing-page basenames: a docs/ tag needs one to render, and a page with one is laid out as a landing wherever it serves (deriveRewrites decides which owns the directory URL). */
+/** The landing-page basenames: a docs/ tag needs one to render.
+ *  A page with one is laid out as a landing wherever it serves (deriveRewrites decides which owns the directory URL). */
 export const LANDING_FILES: ReadonlySet<string> = new Set(["README.md", "index.md"]);
 
 /** docs/site.md, "Other roots on the site". */

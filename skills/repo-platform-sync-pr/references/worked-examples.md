@@ -21,7 +21,9 @@ Resolution: the file is now yours. Keep it or delete it; the record left with th
 
 ## 3. A mirror declaration the writer cannot honour
 
-`.repo-platform.yml` declares `mirrors: [{source: LICENSE.md, targets: ["docs/**/LICENSE.md"]}]`. The `plan` step of fleet CI rejects `**` on the PR that adds it; a declaration that lands anyway, or one only the checkout can refuse (a symbolic link where the copy would land), fails the sync: no PR, and the `[repo-platform] sync failed` issue's writer log reads `.repo-platform.yml: mirrors: source 'LICENSE.md', target 'docs/**/LICENSE.md': the pattern uses '**'`.
+`.repo-platform.yml` declares `mirrors: [{source: LICENSE.md, targets: ["docs/**/LICENSE.md"]}]`. The `plan` step of fleet CI rejects `**` on the PR that adds it.
+
+A declaration that lands anyway, or one only the checkout can refuse (a symbolic link where the copy would land), fails the sync: no PR, and the `[repo-platform] sync failed` issue's writer log reads `.repo-platform.yml: mirrors: source 'LICENSE.md', target 'docs/**/LICENSE.md': the pattern uses '**'`.
 
 Resolution: single-segment globs only: `docs/*/LICENSE.md`. Fix the declaration in an ordinary PR, dispatch the sync again; it writes the copies and closes the issue.
 

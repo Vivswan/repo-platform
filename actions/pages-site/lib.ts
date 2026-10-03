@@ -1,4 +1,5 @@
-// Pure planning for the site (docs/site.md); build.ts owns all I/O, which is what lets the tests force every layout row without a git repository or a build.
+// Pure planning for the site (docs/site.md); build.ts owns all I/O.
+// That split lets the tests force every layout row without a git repository or a build.
 
 import {
   type DocsConfig,
@@ -206,7 +207,8 @@ interface VersionTier {
   ref: string;
 }
 
-/** The one owner of which named tiers a mount serves, in the dropdown's order; planMount and versionsIndex derive from it, so a tier cannot exist without its entry or the reverse.
+/** The one owner of which named tiers a mount serves, in the dropdown's order.
+ *  planMount and versionsIndex derive from it, so a tier cannot exist without its entry or the reverse.
  *  stable/ is the newest tag again under a name a link survives releases with, absent without a tag so it never names HEAD. */
 function versionTiers(tags: string[]): VersionTier[] {
   const newest = tags[0];

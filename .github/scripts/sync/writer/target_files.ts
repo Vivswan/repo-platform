@@ -1,4 +1,5 @@
-// File APIs follow symbolic links, so a linked ancestor (docs -> ../shared) would carry a write or an unlink outside the checkout; every ancestor is checked with lstat, and the final component is never read through.
+// File APIs follow symbolic links, so a linked ancestor (docs -> ../shared) would carry a write or an unlink outside the checkout.
+// Every ancestor is therefore checked with lstat, and the final component is never read through.
 
 import {
   mkdirSync,
@@ -23,7 +24,8 @@ export function insideTarget(target: string, path: string): string {
   return join(target, path);
 }
 
-/** The link target is raw bytes, as the mirror writer and the validator hash it: decoding would fold a malformed target onto the replacement character and let it pass as the recorded one. */
+/** The link target is raw bytes, as the mirror writer and the validator hash it.
+ *  Decoding would fold a malformed target onto the replacement character and let it pass as the recorded one. */
 export type Found =
   | { kind: "absent" }
   | { kind: "file"; bytes: Buffer }

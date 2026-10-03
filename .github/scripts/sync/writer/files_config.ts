@@ -94,7 +94,7 @@ export interface TrackingTuples {
   problems: string[];
 }
 
-/** The settings render writes each tracking label with its color and description, so the tuple is required only when the data file renders settings. */
+/** The settings render writes each tracking label's tuple, so the tuple is required only when the data file renders settings. */
 export function trackingTuples(config: FilesConfig): TrackingTuples {
   const tuples: Record<string, TrackingTuple> = {};
   const problems: string[] = [];
@@ -119,10 +119,12 @@ interface SourceUse {
   withBlocks: number;
 }
 
-/** The tree may carry nothing the config never reads: a block file of a module that left or a layer file dropped from the declaration would otherwise sit there unnoticed. */
+/** The tree may carry nothing the config never reads.
+ *  Otherwise a block file of a module that left, or a layer file dropped from the declaration, would sit there unnoticed. */
 export function verifySources(config: FilesConfig, tree: string, label = "files.yml"): void {
   const problems: string[] = [];
-  // A split source must not mention its own markers: the writer adds them, and a second pair leaves the file without an honest slice. A source shared with a managed entry keeps the constraint.
+  // A split source must not mention its own markers: the writer adds them, and a second pair leaves the file without an honest slice.
+  // A source shared with a managed entry keeps the constraint.
   const sources = new Map<string, SourceUse>();
   const use = (source: string): SourceUse => {
     const found = sources.get(source);

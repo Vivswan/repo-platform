@@ -69,7 +69,8 @@ function servedRoute(
   return posix.extname(staged) === "" ? { kind: "page", path: staged } : null;
 }
 
-/** VitePress decodes the href once more when it renders, so a literal `%` in a name must reach it as `%25`; the path math runs on decoded file names. */
+/** VitePress decodes the href once more when it renders, so a literal `%` in a name must reach it as `%25`.
+ *  The path math runs on decoded file names. */
 export function rewriteLink(href: string, relativePath: string, scope: LinkScope): RewrittenLink {
   const asIs = { href, verbatim: false };
   if (NOT_A_PATH.test(href)) return asIs;
