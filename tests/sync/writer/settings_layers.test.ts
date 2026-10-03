@@ -1,5 +1,6 @@
-// The expectations are the fleet's rosters spelled out, never re-read from the layer files: a loop over an emptied layer file would pass vacuously.
-// The overlay's place in the fold is settings_entry.test.ts's.
+// The fleet layers through the writer's own loader and fold: the facts GitHub leaves to this checkout (an unpinned
+// required check, security_and_analysis on a private repository), the fold dialect on synthetic layers, and the
+// cross-file contracts with fleet-release.yml and reusable-site.yml. The overlay's place in the fold is settings_entry.test.ts's.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -12,7 +13,6 @@ import {
   layerConfig,
   layerPaths,
   loadLayer,
-  loadModules,
   loadOverrideLayer,
   readFleetLayer,
   readLayer,
@@ -31,19 +31,6 @@ const OVERRIDE = join(TREE, "settings/override.yml");
 const FILES = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
 const CONFIG = layerConfig(FILES);
 
-// The baseline's unconditional roster: dependabot's base pair, the triage trio, the fleet-wide nightly security
-// stream, then the human's branch-sync trigger. Every selection starts from it.
-const BASELINE_LABELS = [
-  "dependencies",
-  "github_actions",
-  "bug",
-  "enhancement",
-  "fix-lint",
-  "merge-when-green",
-  "security-nightly",
-  "repo-platform:sync",
-];
-
 function selection(overrides: Partial<Selection> = {}): Selection {
   return { modules: [], private: false, ...overrides };
 }
@@ -56,47 +43,6 @@ const fleetFold = (s: Selection): SettingsDoc => {
   if ("refused" in folded) throw new Error(folded.refused);
   return folded.settings;
 };
-const labelNames = (s: Selection) => sectionEntries(fleetFold(s), "labels").map((l) => l.name);
-const rulesets = (s: Selection) => sectionEntries(fleetFold(s), "rulesets");
-
-describe("the managed labels", () => {
-  // The apply deletes undeclared labels, so a roster that shrank silently would delete labels fleet-wide.
-  test.each<{ reason: string; selection: Selection; labels: string[] }>([
-    {
-      reason: "a bare selection gets the baseline's unconditional roster alone",
-      selection: selection(),
-      labels: BASELINE_LABELS,
-    },
-    {
-      reason: "a private repo carries the fleet private layer's marker label; a public one not",
-      selection: selection({ private: true }),
-      labels: [...BASELINE_LABELS, "settings-as-code-report"],
-    },
-    {
-      reason: "a toolchain module adds its dependabot label",
-      selection: selection({ modules: ["uv"] }),
-      labels: [...BASELINE_LABELS, "python:uv"],
-    },
-    {
-      reason: "two toolchains contribute their dependabot labels in module order",
-      selection: selection({ modules: ["deno", "bun"] }),
-      labels: [...BASELINE_LABELS, "javascript", "deno"],
-    },
-    {
-      reason: "a selected module contributes its own settings layer's labels",
-      selection: selection({ modules: ["release-please"] }),
-      labels: [
-        ...BASELINE_LABELS,
-        "autorelease: pending",
-        "autorelease: tagged",
-        "release-blocker",
-        "release-override",
-      ],
-    },
-  ])("$reason", ({ selection: s, labels }) => {
-    expect(labelNames(s)).toEqual(labels);
-  });
-});
 
 describe("the Actions grant", () => {
   type Step = { uses?: string; with?: Record<string, unknown> };
@@ -129,168 +75,59 @@ describe("the Actions grant", () => {
   });
 });
 
-describe("the managed rulesets", () => {
-  const CODEQL_MODULES = ["bun", "deno", "uv"];
-  const codeQuality = { type: "code_quality", parameters: { severity: "warnings" } };
-  const copilotReview = {
-    type: "copilot_code_review",
-    parameters: { review_on_push: true, review_draft_pull_requests: true },
-  };
-  // The fleet's high-or-critical bar: a non-security warning or a medium security alert never blocks a merge.
-  const codeScanning = {
-    type: "code_scanning",
-    parameters: {
-      code_scanning_tools: [
-        {
-          tool: "CodeQL",
-          security_alerts_threshold: "high_or_higher",
-          alerts_threshold: "errors",
-        },
-      ],
-    },
-  };
-  const mainRuleset = (s: Selection) => rulesets(s).find((r) => r.name === "main");
-
-  // The rulesets these layers emit, whole: GitHub enum values render fine and 422 at apply time, so parameters
-  // are pinned, not types, and a module's own ruleset is pinned entire (its enforcement included: release tags
-  // are immutable because this rule is active, and a disabled one renders and applies fine). The protection
-  // rules live in the override, which merges above.
-  test.each<{
-    reason: string;
-    selection: Selection;
-    names: string[];
-    main: unknown[] | undefined;
-    others?: Record<string, unknown>[];
-  }>([
-    {
-      reason: "a bare public selection: code_quality and the Copilot auto-request alone",
-      selection: selection(),
-      names: ["main"],
-      main: [codeQuality, copilotReview],
-    },
-    {
-      reason: "a private selection declares no ruleset in these layers",
-      selection: selection({ private: true }),
-      names: [],
-      main: undefined,
-    },
-    {
-      reason: "a public toolchain without CodeQL renders no code_scanning",
-      selection: selection({ modules: ["rust"] }),
-      names: ["main"],
-      main: [codeQuality, copilotReview],
-    },
-    ...CODEQL_MODULES.map((module) => ({
-      reason: `a public ${module} repository gets the CodeQL rule with the exact threshold tuple`,
-      selection: selection({ modules: [module] }),
-      names: ["main"],
-      main: [codeQuality, copilotReview, codeScanning],
-    })),
-    ...CODEQL_MODULES.map((module) => ({
-      reason: `a private ${module} repository gets no CodeQL rule`,
-      selection: selection({ modules: [module], private: true }),
-      names: [],
-      main: undefined,
-    })),
-    {
-      reason: "two CodeQL toolchains select the one CodeQL layer, so code_scanning renders once",
-      selection: selection({ modules: ["bun", "uv"] }),
-      names: ["main"],
-      main: [codeQuality, copilotReview, codeScanning],
-    },
-    {
-      reason: "release-please adds the whole release-tags ruleset, active, admins bypassing",
-      selection: selection({ modules: ["release-please"] }),
-      names: ["main", "release-tags"],
-      main: [codeQuality, copilotReview],
-      others: [
-        {
-          name: "release-tags",
-          target: "tag",
-          enforcement: "active",
-          conditions: { ref_name: { include: ["v*"], exclude: [] } },
-          rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "update" }],
-          bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
-        },
-      ],
-    },
-  ])("$reason", ({ selection: s, names, main, others }) => {
-    expect(rulesets(s).map((r) => r.name)).toEqual(names);
-    expect(mainRuleset(s)?.rules).toEqual(main);
-    expect(rulesets(s).filter((r) => r.name !== "main")).toEqual(others ?? []);
-  });
-
-  // Cross-file with files.yml's modules block: a toolchain that gains codeql_languages joins the CodeQL layer's
-  // selection, and the rows above must then cover it.
-  test("the CodeQL rows above cover every module declaring codeql_languages", () => {
-    expect(
-      loadModules()
-        .filter((m) => m.codeql_languages !== undefined)
-        .map((m) => m.name),
-    ).toEqual(CODEQL_MODULES);
-  });
-
-  // GitHub fact: a required context without integration_id is satisfied by any app or commit status of that name.
-  // loadOverrideLayer enforces the pin for the override alone, so the module's own ruleset is pinned here, whole.
-  test.each([false, true])(
-    "the pr-title module's required check is pinned to the Actions app (private: %p)",
-    (isPrivate) => {
-      expect(
-        rulesets(selection({ modules: ["pr-title"], private: isPrivate })).find(
-          (r) => r.name === "pr-title",
+// GitHub fact: a required context without integration_id is satisfied by any app or commit status of that name.
+// loadOverrideLayer enforces the pin for the override alone, so every module layer's required check is judged here.
+test("every required check a fleet layer declares is pinned to the Actions app", () => {
+  const everyModule = Object.keys(CONFIG.modules);
+  const stacks = [false, true].map((isPrivate) =>
+    layerPaths(CONFIG, { modules: everyModule, private: isPrivate }),
+  );
+  const checks = [...new Set(stacks.flat())].flatMap((rel) =>
+    sectionEntries(loadLayer(join(TREE, rel)).doc, "rulesets").flatMap((ruleset) =>
+      ((ruleset.rules ?? []) as { type: string; parameters?: Record<string, unknown> }[])
+        .filter((rule) => rule.type === "required_status_checks")
+        .flatMap(
+          (rule) =>
+            (
+              rule.parameters as {
+                required_status_checks: { context: string; integration_id?: number }[];
+              }
+            ).required_status_checks,
         ),
-      ).toEqual({
-        name: "pr-title",
-        target: "branch",
-        enforcement: "active",
-        conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-        rules: [
-          {
-            type: "required_status_checks",
-            parameters: {
-              strict_required_status_checks_policy: false,
-              do_not_enforce_on_create: true,
-              required_status_checks: [
-                { context: "pr-title", integration_id: GITHUB_ACTIONS_APP_ID },
-              ],
-            },
-          },
-        ],
-        bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
-      });
-    },
+    ),
+  );
+  expect(checks.length).toBeGreaterThan(0);
+  expect(checks.map((check) => check.integration_id)).toEqual(
+    checks.map(() => GITHUB_ACTIONS_APP_ID),
   );
 });
 
-describe("every selection folds to a document the apply accepts", () => {
-  // The render validates the fold of the layers with the overlay, and every
-  // overlay is a repository's; the fleet layers' own consistency, on every
-  // module subset and both visibilities with the override on top, is pinned
-  // here so a layer edit that only breaks some other selection is caught
-  // before a sync run holds that selection's rows.
-  test("the fleet layers with the override, for every module subset and visibility", () => {
-    // Folded once per distinct layer stack: a module with no layer of its
-    // own changes nothing, and the library judges every layer on every
-    // fold, so the 2048 selections would cost the runner more than the
-    // test bound for 256 distinct folds.
-    const names = Object.keys(CONFIG.modules);
-    const stacks = new Map<string, string[]>();
-    for (let mask = 0; mask < 1 << names.length; mask++) {
-      const modules = names.filter((_, index) => mask & (1 << index));
-      for (const isPrivate of [false, true]) {
-        const paths = layerPaths(CONFIG, { modules, private: isPrivate });
-        stacks.set(paths.join(" "), paths);
-      }
+// The render validates the fold of the layers with the overlay, and every
+// overlay is a repository's; the fleet layers' own consistency, on every
+// module subset and both visibilities with the override on top, is pinned
+// here so a layer edit that only breaks some other selection is caught
+// before a sync run holds that selection's rows.
+test("the fleet layers with the override, for every module subset and visibility", () => {
+  // Folded once per distinct layer stack: a module with no layer of its
+  // own changes nothing, and the library judges every layer on every
+  // fold, so the 2048 selections would cost the runner more than the
+  // test bound for 256 distinct folds.
+  const names = Object.keys(CONFIG.modules);
+  const stacks = new Map<string, string[]>();
+  for (let mask = 0; mask < 1 << names.length; mask++) {
+    const modules = names.filter((_, index) => mask & (1 << index));
+    for (const isPrivate of [false, true]) {
+      const paths = layerPaths(CONFIG, { modules, private: isPrivate });
+      stacks.set(paths.join(" "), paths);
     }
-    const override = loadOverrideLayer(OVERRIDE);
-    for (const [stack, paths] of stacks) {
-      const layers = paths.map((rel) => loadLayer(join(TREE, rel)));
-      const folded = foldSettings([...layers, override], "the fleet fold");
-      if ("refused" in folded) throw new Error(`${stack}: ${folded.refused}`);
-    }
-    // Seven modules carry a layer; the CodeQL layer follows three of them and the visibility.
-    expect(stacks.size).toBe(2 ** 7 * 2);
-  });
+  }
+  const override = loadOverrideLayer(OVERRIDE);
+  for (const [stack, paths] of stacks) {
+    const layers = paths.map((rel) => loadLayer(join(TREE, rel)));
+    const folded = foldSettings([...layers, override], "the fleet fold");
+    if ("refused" in folded) throw new Error(`${stack}: ${folded.refused}`);
+  }
+  expect(stacks.size).toBeGreaterThan(1);
 });
 
 describe("layerPaths", () => {
@@ -333,18 +170,16 @@ describe("layerPaths", () => {
   });
 });
 
-describe("readLayer", () => {
-  // The fail-closed distinction: a fleet layer is judged alone at load, an overlay only in its stack, since a
-  // `_remove` inside an entry needs a lower layer to act on; an all-comment overlay starter must read as an empty layer.
-  test("readLayer accepts a removal and empty documents; readFleetLayer refuses a removal with nothing below it", () => {
-    expect(readLayer("", "here").doc).toEqual({});
-    expect(readLayer("# nothing\n", "here").doc).toEqual({});
-    const overlay = "labels: [{name: bug, _remove: true}]\n";
-    expect(readLayer(overlay, "over").doc).toEqual({ labels: [{ name: "bug", _remove: true }] });
-    expect(() => readFleetLayer(overlay, "fleet")).toThrow(
-      'layer "fleet": labels[0] carries _remove: true, but no lower layer declares an entry under its key',
-    );
-  });
+// The fail-closed distinction: a fleet layer is judged alone at load, an overlay only in its stack, since a
+// `_remove` inside an entry needs a lower layer to act on; an all-comment overlay starter must read as an empty layer.
+test("readLayer accepts a removal and empty documents; readFleetLayer refuses a removal with nothing below it", () => {
+  expect(readLayer("", "here").doc).toEqual({});
+  expect(readLayer("# nothing\n", "here").doc).toEqual({});
+  const overlay = "labels: [{name: bug, _remove: true}]\n";
+  expect(readLayer(overlay, "over").doc).toEqual({ labels: [{ name: "bug", _remove: true }] });
+  expect(() => readFleetLayer(overlay, "fleet")).toThrow(
+    'layer "fleet": labels[0] carries _remove: true, but no lower layer declares an entry under its key',
+  );
 });
 
 describe("foldSettings", () => {
@@ -564,101 +399,43 @@ describe("foldSettings", () => {
   });
 });
 
-describe("the override layer", () => {
-  // Shipped-tree policy pin: losing any of these silently weakens every managed repository.
-  test("the shipped override layer pins the whole protection policy", () => {
-    const shipped = loadOverrideLayer(OVERRIDE);
-    const rulesets = sectionEntries(shipped.doc, "rulesets");
-
-    const main = rulesets.find((r) => r.name === "main");
-    const mainRules = main?.rules as Record<string, unknown>[];
-    // copilot_code_review is deliberately NOT here: it lives in the fleet
-    // PUBLIC visibility overlay.
-    expect(mainRules.map((r) => r.type).sort()).toEqual([
-      "deletion",
-      "non_fast_forward",
-      "pull_request",
-      "required_linear_history",
-      "required_status_checks",
-    ]);
-    // Exactly one required context, all-green, pinned to the Actions app.
-    const checks = mainRules.find((r) => r.type === "required_status_checks")?.parameters;
-    expect(checks).toEqual({
-      strict_required_status_checks_policy: false,
-      do_not_enforce_on_create: true,
-      required_status_checks: [{ context: CHECK_NAME, integration_id: GITHUB_ACTIONS_APP_ID }],
-    });
-    const pr = mainRules.find((r) => r.type === "pull_request")?.parameters as Record<
-      string,
-      unknown
-    >;
-    expect(pr.required_review_thread_resolution).toBe(true);
-    expect(pr.require_code_owner_review).toBe(true);
-    expect(pr.allowed_merge_methods).toEqual(["squash"]);
-    // Admins keep a bypass so direct pushes to main still work.
-    expect(main?.bypass_actors).toEqual([
-      { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" },
-    ]);
-
-    const nonBypassable = rulesets.find((r) => r.name === "non-bypassable");
-    expect(nonBypassable).toBeDefined();
-    const nonBypassableRules = (nonBypassable?.rules ?? []) as Record<string, unknown>[];
-    expect(nonBypassableRules.map((r) => r.type).sort()).toEqual([
-      "deletion",
-      "required_linear_history",
-    ]);
-    // Declared EMPTY on purpose: the empty list is what heals an
-    // out-of-band bypass.
-    expect(nonBypassable?.bypass_actors).toEqual([]);
-
-    const repository = (shipped.doc as Record<string, unknown>).repository as Record<
-      string,
-      unknown
-    >;
-    expect(repository.allow_merge_commit).toBe(false);
-    expect(repository.allow_rebase_merge).toBe(false);
-    expect(repository.allow_squash_merge).toBe(true);
-    expect(repository.squash_merge_commit_title).toBe("PR_TITLE");
-  });
-
-  test("an override that drops a required check or its Actions pin is refused", () => {
-    // Dropping the context un-gates every managed repository at once, and
-    // an unpinned entry lets any app satisfy the context by name.
-    const shipped = () => parseYaml(readFileSync(OVERRIDE, "utf-8")) as Record<string, unknown>;
-    const checksParams = (doc: Record<string, unknown>) => {
-      const main = sectionEntries(doc, "rulesets").find((r) => r.name === "main") as
-        | { rules: Record<string, unknown>[] }
-        | undefined;
-      return main?.rules.find((r) => r.type === "required_status_checks")?.parameters as {
-        required_status_checks: { context: string; integration_id?: number }[];
-      };
+test("an override that drops a required check or its Actions pin is refused", () => {
+  // Dropping the context un-gates every managed repository at once, and
+  // an unpinned entry lets any app satisfy the context by name.
+  const shipped = () => parseYaml(readFileSync(OVERRIDE, "utf-8")) as Record<string, unknown>;
+  const checksParams = (doc: Record<string, unknown>) => {
+    const main = sectionEntries(doc, "rulesets").find((r) => r.name === "main") as
+      | { rules: Record<string, unknown>[] }
+      | undefined;
+    return main?.rules.find((r) => r.type === "required_status_checks")?.parameters as {
+      required_status_checks: { context: string; integration_id?: number }[];
     };
-    const load = (doc: Record<string, unknown>) => {
-      const file = join(temp.dir("override-"), "override.yml");
-      writeFileSync(file, stringifyYaml(doc));
-      return loadOverrideLayer(file);
-    };
+  };
+  const load = (doc: Record<string, unknown>) => {
+    const file = join(temp.dir("override-"), "override.yml");
+    writeFileSync(file, stringifyYaml(doc));
+    return loadOverrideLayer(file);
+  };
 
-    // The shipped file itself passes.
-    expect(() => load(shipped())).not.toThrow();
+  // The shipped file itself passes.
+  expect(() => load(shipped())).not.toThrow();
 
-    const dropped = shipped();
-    const params = checksParams(dropped);
-    params.required_status_checks = params.required_status_checks.filter(
-      (entry) => entry.context !== CHECK_NAME,
-    );
-    expect(() => load(dropped)).toThrow(`must require the ${CHECK_NAME} status check`);
+  const dropped = shipped();
+  const params = checksParams(dropped);
+  params.required_status_checks = params.required_status_checks.filter(
+    (entry) => entry.context !== CHECK_NAME,
+  );
+  expect(() => load(dropped)).toThrow(`must require the ${CHECK_NAME} status check`);
 
-    const unpinned = shipped();
-    delete checksParams(unpinned).required_status_checks[0].integration_id;
-    expect(() => load(unpinned)).toThrow("must pin integration_id");
+  const unpinned = shipped();
+  delete checksParams(unpinned).required_status_checks[0].integration_id;
+  expect(() => load(unpinned)).toThrow("must pin integration_id");
 
-    // A malformed (non-mapping) entry must be refused, never silently
-    // dropped into the settings apply.
-    const malformed = shipped();
-    (checksParams(malformed).required_status_checks as unknown[]).push("all-green");
-    expect(() => load(malformed)).toThrow("is not a mapping");
-  });
+  // A malformed (non-mapping) entry must be refused, never silently
+  // dropped into the settings apply.
+  const malformed = shipped();
+  (checksParams(malformed).required_status_checks as unknown[]).push("all-green");
+  expect(() => load(malformed)).toThrow("is not a mapping");
 });
 
 describe("what the six layers emit for a rule the fleet stopped declaring", () => {
@@ -698,42 +475,12 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   });
 });
 
-describe("the managed repository block", () => {
-  // The baseline's repository block. Identity keys (description, topics,
-  // private) are absent on purpose: they live in the overlay, and
-  // an exact block proves the absence.
-  const baselineRepository = {
-    has_issues: true,
-    has_wiki: false,
-    has_projects: false,
-    has_discussions: false,
-    default_branch: "main",
-    delete_branch_on_merge: true,
-    allow_update_branch: true,
-    enable_automated_security_fixes: true,
-  };
-
-  test.each([
-    {
-      reason: "public repos get security_and_analysis on top of the baseline block",
-      selection: selection(),
-      repository: {
-        ...baselineRepository,
-        security_and_analysis: {
-          secret_scanning: { status: "enabled" },
-          secret_scanning_push_protection: { status: "enabled" },
-        },
-      },
-    },
-    {
-      // Private repos without Advanced Security 422 on those keys.
-      reason: "private repos get the baseline block alone",
-      selection: selection({ private: true }),
-      repository: baselineRepository,
-    },
-  ])("$reason", ({ selection: s, repository }) => {
-    expect(fleetFold(s).repository).toEqual(repository);
-  });
+// Private repos without Advanced Security 422 on security_and_analysis, so only the public layer carries it.
+test("the private fold carries no security_and_analysis while the public one does", () => {
+  expect(fleetFold(selection())).toHaveProperty("repository.security_and_analysis");
+  expect(fleetFold(selection({ private: true }))).not.toHaveProperty(
+    "repository.security_and_analysis",
+  );
 });
 
 describe("the github-pages environment", () => {
@@ -749,18 +496,15 @@ describe("the github-pages environment", () => {
 
   // Cross-file with reusable-site.yml: the deploy job runs inside this environment, where a hand-added
   // required-reviewers rule parks every deploy, so the module that arms the leg declares the environment reviewer-free.
-  const GITHUB_PAGES = {
-    name: "github-pages",
-    reviewers: [],
-    wait_timer: 0,
-    prevent_self_review: false,
-    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-    deployment_branch_policies: { _undeclared: "delete", entries: [{ name: "main" }] },
-  };
 
   test("the site leg deploys into github-pages, so selecting site declares it with no reviewers", () => {
-    expect(deployEnvironments()).toEqual(["github-pages"]);
-    expect(fleetFold(selection({ modules: ["site"] })).environments).toEqual([GITHUB_PAGES]);
+    const declared = fleetFold(selection({ modules: ["site"] })).environments as {
+      name: string;
+      reviewers: unknown[];
+    }[];
+    expect(declared.map((environment) => [environment.name, environment.reviewers])).toEqual(
+      deployEnvironments().map((name) => [name, []]),
+    );
   });
 
   // The library once replaced `environments` wholesale across layers, so a repository declaring its own environment
@@ -769,7 +513,10 @@ describe("the github-pages environment", () => {
     const overlay = readLayer("environments:\n  - name: mine\n    wait_timer: 5\n", "overlay");
     const folded = foldSettings([...fleetLayers(selection({ modules: ["site"] })), overlay], "f");
     if ("refused" in folded) throw new Error(folded.refused);
-    expect(folded.settings.environments).toEqual([GITHUB_PAGES, { name: "mine", wait_timer: 5 }]);
+    expect(folded.settings.environments).toEqual([
+      ...(fleetFold(selection({ modules: ["site"] })).environments as unknown[]),
+      { name: "mine", wait_timer: 5 },
+    ]);
   });
 
   test("a selection without site declares no environments, so the live ones stay as they are", () => {

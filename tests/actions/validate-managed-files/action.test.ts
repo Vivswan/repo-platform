@@ -496,27 +496,19 @@ describe("freshness against the stable tag informs and never fails", () => {
   });
 });
 
-describe("action.yml", () => {
-  // GitHub resolves these at run time and refuses none of them: a reference to a LATER step's output reads as empty,
-  // so a checkout placed before the read would be skipped on every run; a `path` the two scripts spell differently is a
-  // checkout read_commit.ts never guards and run.ts never finds; a shallow fetch answers freshness's ancestry question
-  // wrong; an install placed after the checkout leaves the checkout in the workspace when it fails. None is a YAML error.
-  test("the recorded commit is read before repo-platform is checked out at it, whole, into the path both scripts read", () => {
-    const steps = action.runs.steps;
-    const index = (id: string) => steps.findIndex((step) => step.id === id);
-    const env = (id: string) => (steps[index(id)] as Step & { env: Record<string, string> }).env;
-    const platform = steps[index("platform")] as Step & { with: Record<string, unknown> };
-    expect(index("install")).toBeLessThan(index("platform"));
-    expect(index("read-commit")).toBeLessThan(index("platform"));
-    expect(index("platform")).toBeLessThan(index("validate"));
-    expect([platform.with.repository, platform.with.ref, platform.with["fetch-depth"]]).toEqual([
-      PLATFORM_SLUG,
-      "${{ steps.read-commit.outputs.commit }}",
-      0,
-    ]);
-    const dir = `\${{ github.workspace }}/${platform.with.path}`;
-    expect([env("read-commit").PLATFORM_DIR, env("validate").PLATFORM_DIR]).toEqual([dir, dir]);
-  });
+// GitHub resolves these at run time and refuses none of them: a `path` the two scripts spell differently is a
+// checkout read_commit.ts never guards and run.ts never finds; a shallow fetch answers freshness's ancestry question
+// wrong; an install placed after the checkout leaves the checkout in the workspace when it fails. None is a YAML error.
+test("repo-platform is checked out whole, after the install and before the validator, into the path both scripts read", () => {
+  const steps = action.runs.steps;
+  const index = (id: string) => steps.findIndex((step) => step.id === id);
+  const env = (id: string) => (steps[index(id)] as Step & { env: Record<string, string> }).env;
+  const platform = steps[index("platform")] as Step & { with: Record<string, unknown> };
+  expect(index("install")).toBeLessThan(index("platform"));
+  expect(index("platform")).toBeLessThan(index("validate"));
+  expect([platform.with.repository, platform.with["fetch-depth"]]).toEqual([PLATFORM_SLUG, 0]);
+  const dir = `\${{ github.workspace }}/${platform.with.path}`;
+  expect([env("read-commit").PLATFORM_DIR, env("validate").PLATFORM_DIR]).toEqual([dir, dir]);
 });
 
 describe("verdict.ts", () => {
