@@ -43,8 +43,10 @@ export function parseRepositorySlug(slug: string): RepositorySlug {
   return { owner: match[1], name: match[2] };
 }
 
-/** The registration never names its own owner, so the slug comes from the operator. A tracking label absent from both the registration and files.yml's module default stays absent:
- *  sync.ts then refuses any listed source that uses it (placeholders.ts, missingPlaceholders). The label's color and description are files.yml's alone. */
+/** The registration never names its own owner, so the slug comes from the operator.
+ *  A tracking label absent from both the registration and files.yml's module default stays absent.
+ *  sync.ts then refuses any listed source that uses it (placeholders.ts, missingPlaceholders).
+ *  The label's color and description are files.yml's alone. */
 export function placeholderValues(
   registration: Registration,
   repository: RepositorySlug,
