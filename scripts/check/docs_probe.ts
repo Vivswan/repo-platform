@@ -15,7 +15,12 @@ export const SKILLS_SHA = "2031d7d7cf0d57af6cbe60947bf81a904b8d7e50";
 const SKILLS_REPOSITORY = "https://github.com/Vivswan/skills";
 const PROBE = "skills/docs-discipline/scripts/docs-probe.mts";
 
+const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
 function main(args: string[]): number {
+  // Under bun's default disposition a signal ends this process before the finally runs and the checkout stays behind;
+  // a no-op handler lets the child return (it gets the same signal) so the directory is removed on that path too.
+  for (const signal of FORWARDED_SIGNALS) process.on(signal, () => {});
   const dir = mkdtempSync(join(tmpdir(), "docs-probe-skills-"));
   try {
     // A blobless clone, then the pinned commit's one file: the probe is one file of one commit.
