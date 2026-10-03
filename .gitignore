@@ -2,11 +2,11 @@
 # here (above BEGIN), or below the END marker where last-match-wins
 # can override managed patterns.
 
-# Paths this repository's own workflows create inside the checkout (the
-# sync's target and build checkouts), root-anchored so a nested folder of
-# the same name is not swallowed.
+# Paths this repository's own workflows create inside the checkout (the sync's target and build checkouts, the docs
+# probe's skills checkout), root-anchored so a nested folder of the same name is not swallowed.
 /target/
 /build/
+/.skills/
 
 # BEGIN REPO-PLATFORM MANAGED
 # Generated from github/gitignore - do not edit between the BEGIN/END
