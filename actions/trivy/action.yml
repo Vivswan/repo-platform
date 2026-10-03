@@ -15,7 +15,9 @@ description: >-
 
 inputs:
   mode:
-    description: blocking (a fixable HIGH or CRITICAL vulnerability or any HIGH or CRITICAL misconfiguration fails) or nightly (HIGH and CRITICAL reported, never fails)
+    description: >-
+      blocking (a fixable HIGH or CRITICAL vulnerability or any HIGH or CRITICAL misconfiguration fails)
+      or nightly (HIGH and CRITICAL reported, never fails)
     required: false
     default: blocking
 

@@ -11,18 +11,16 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { commitlint, writeStdout } from "../../actions/validate-commit-names/commitlint.ts";
 
-// Git cleans the message AFTER this hook and the mode is unknowable here, so both messages it could store are judged
-// and the gate refuses only when neither passes (commitlint's own --edit strips comments unconditionally and reads a
-// rebase squash message, comments first, as having no header). The diff a `commit -v` buffer carries below the
-// scissors line is cut first: it is never part of the message.
+// Git cleans the message AFTER this hook and the mode is unknowable here, so the gate refuses only when neither message git could store passes.
+// commitlint's own --edit cannot judge: it strips comments unconditionally and reads a rebase squash message, comments first, as having no header.
+// The diff a `commit -v` buffer carries below the scissors line is cut first: it is never part of the message.
 //
 //   editor commit   -> git stripspace --strip-comments, honoring core.commentChar
 //   git commit -m   -> git stripspace: whitespace only, a comment line survives as the subject
 //
-// Git's cut line opens with its comment marker: core.commentString, else core.commentChar, else `#`; `auto` is picked
-// per message from a fixed set, matched here as a whole. Lines are git's, split on `\n` alone: to a multiline regex a
-// bare `\r` also starts a line, and a cut there would hand commitlint a subject CI reads whole. A marker this still
-// misses leaves the diff in the message, so the stripspace pipe is sized for one rather than burst by it.
+// Under `auto`, git picks the cut line's comment marker per message from a fixed set, so the whole set is matched.
+// Lines are split on `\n` alone, as git splits them: a multiline regex would also cut at a bare `\r`, handing commitlint a subject CI reads whole.
+// A marker this still misses leaves the diff in the message, so the stripspace pipe is sized for one rather than burst by it.
 const AUTO_MARKERS = "#;@!$%^&|:";
 const STRIPSPACE_MAX_BUFFER = 64 * 1024 * 1024;
 

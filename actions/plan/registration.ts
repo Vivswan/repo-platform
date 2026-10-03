@@ -1,4 +1,5 @@
-// Lives inside the plan action because it needs yaml and zod, which the dependency-free actions/shared zone cannot carry; the sync imports it by relative path.
+// Lives inside the plan action because it needs yaml and zod, which the dependency-free actions/shared zone cannot carry.
+// The sync imports it by relative path.
 import { parse } from "yaml";
 import { z } from "zod";
 import {
@@ -14,7 +15,8 @@ import { REGISTRATION_PATH } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
 import { isMapping } from "../shared/values.ts";
 
-/** The one refusal of a module files.yml does not offer: the plan on every PR and the sync writer speak it alike, so no reader drops a name quietly. */
+/** The one refusal of a module files.yml does not offer.
+ *  The plan on every PR and the sync writer speak it alike, so no reader drops a name quietly. */
 export function unknownModuleProblems(
   requested: readonly string[],
   known: readonly string[],
@@ -78,7 +80,8 @@ export function readModules(
   return { modules, errors: [] };
 }
 
-/** logLevel error: the parser's default level prints warned-on source lines (target content) to stderr, which the fleet plans' public logs must never carry. */
+/** logLevel error: the parser's default level prints warned-on source lines (target content) to stderr.
+ *  The fleet plans' public logs must never carry them. */
 export function declaredModules(registrationText: string): string[] | null {
   let data: unknown;
   try {
