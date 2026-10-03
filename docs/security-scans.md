@@ -5,20 +5,14 @@ group: Fleet operations
 
 # Security scans
 
-Every managed repository is scanned by [Trivy](https://trivy.dev) through the skeleton ci.yml's fleet callers, with zero Trivy files in the repository (public repositories also run [semgrep](#semgrep)). Where the pieces live:
+This page covers the fleet's Trivy and semgrep scans; every other check fleet-ci.yml runs has its row in [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check).
 
-| Piece | Home |
-|---|---|
-| the configuration | the [trivy action](../actions/trivy/action.yml) |
-| the blocking step | [fleet-ci.yml](../.github/workflows/fleet-ci.yml)'s `standard-checks` job |
-| the nightly job | [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml) |
-
-Two halves:
+Every managed repository is scanned by [Trivy](https://trivy.dev) through the skeleton ci.yml's fleet callers, with zero Trivy files in the repository (public repositories also run [semgrep](#semgrep)). The configuration lives in the [trivy action](../actions/trivy/action.yml), and the scan runs in two halves:
 
 | Half | Where | Runs on | Scans | Blocking? | Findings go to |
 |---|---|---|---|---|---|
-| Blocking | the `trivy` step of `standard-checks` in fleet-ci.yml | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the step fails its job, so `all-green` fails | the step log and the job's judge summary |
-| Nightly | `trivy-nightly` in fleet-nightly.yml | the `schedule` trigger, public repositories only | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
+| Blocking | the `trivy` step of [fleet-ci.yml](../.github/workflows/fleet-ci.yml)'s `standard-checks` job | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the step fails its job, so `all-green` fails | the step log and the job's judge summary |
+| Nightly | the `trivy-nightly` job in [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml) | the `schedule` trigger, public repositories only | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
 
 ## The blocking half
 
@@ -59,11 +53,11 @@ misconfigurations:
 
 ## The nightly half
 
+The nightly scan has its own reusable workflow because it files an issue, and `issues: write` exceeds the `ci` caller's permission ceiling. GitHub checks a called job's grant before its condition runs, so a job asking for more inside fleet-ci.yml would fail every fleet run. The `nightly` caller carries exactly the scan's grant and is not in all-green's needs.
+
 - **Trigger:** the managed ci.yml's `schedule` event, on which its `nightly` job calls fleet-nightly.yml and fleet-ci's `trivy` step stands down. Public repositories only: the `nightly` job skips in a private repository, which pays for every job that runs and nothing for a skipped one.
 
 - **The cron's cadence,** and which other jobs stand down on it, belong to the skeleton ci.yml and the per-job conditions, not to the scan.
-
-- **Why its own reusable workflow:** the nightly job files an issue, and `issues: write` exceeds the `ci` caller's permission ceiling. GitHub checks a called job's grant before its condition runs, so a job asking for more inside fleet-ci.yml would fail every fleet run. The `nightly` caller carries exactly the scan's grant and is not in all-green's needs.
 
 - **Findings:** the action writes one report per scanned target in the [fuzz-issue action's](../actions/fuzz-issue/action.yml) report-directory contract ([fuzzer.md](fuzzer.md#the-failure-report-contract-v1)), and the job files or updates the one open issue labeled `security-nightly`; a clean night closes it ([tracking-issues.md](tracking-issues.md)). The full JSON rides the run's artifact.
 
@@ -75,15 +69,18 @@ misconfigurations:
 
 Public repositories also run [semgrep](https://semgrep.dev) as fleet-ci.yml's `semgrep` job, through the [semgrep action](../actions/semgrep/action.yml): the registry needs no token, but code scanning needs a public repository.
 
-- **Rules:** the registry's `p/default` set at `--severity ERROR`, with one rule excluded:
+- **Rules:** the registry's `p/default` set at `--severity ERROR`, with one rule excluded permanently: `github-actions-mutable-action-tag`, because zizmor's `unpinned-uses` owns action pinning (one tool per finding class).
 
-| Excluded rule | Why | Until |
-|---|---|---|
-| `github-actions-mutable-action-tag` | zizmor's `unpinned-uses` owns action pinning: one tool per finding class | permanent |
+**Verdict,** reached in order:
 
-- **Verdict:** a scan that did not exit 0 fails first, naming its exit status, because there is no verdict without a completed scan. Then the JSON copy is judged: ERROR findings and fatal analysis errors fail the job; partial parses and timeouts only annotate. WARNING and INFO rules do not run, so their findings appear nowhere, neither in the verdict nor in code scanning.
+1. A scan that did not exit 0 fails first, naming its exit status: there is no verdict without a completed scan.
+2. Then the JSON copy is judged: ERROR findings and fatal analysis errors fail the job; partial parses and timeouts only annotate.
 
-- **Bypass:** semgrep's own marker on the finding's line or the line above it, `// nosemgrep: <rule-id>` (`# nosemgrep: <rule-id>` in YAML), with the reason beside it. A Dockerfile instruction takes no trailing comment, so there the marker is a `# nosemgrep: <rule-id>` line directly above the instruction, nothing between them. The marker applies to an ERROR finding; whether to mark one is the repository's own call.
+WARNING and INFO rules do not run, so their findings appear nowhere, neither in the verdict nor in code scanning.
+
+- **Bypass:** semgrep's own marker on the finding's line or the line above it, `// nosemgrep: <rule-id>` (`# nosemgrep: <rule-id>` in YAML), with the reason beside it. The marker applies to an ERROR finding; whether to mark one is the repository's own call.
+
+- **Bypass in a Dockerfile:** an instruction takes no trailing comment, so the marker is a `# nosemgrep: <rule-id>` line directly above the instruction, nothing between them.
 
 - **Upload:** unmarked ERROR findings go to code scanning as SARIF under the `semgrep` category, and marked ones do not. A marked finding stays in semgrep's SARIF as a suppressed result, and code scanning ignores the suppressions field and would show it as an open alert, so the action drops suppressed results from the SARIF before the upload.
 
