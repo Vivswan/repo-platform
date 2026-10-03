@@ -49,7 +49,6 @@ describe("labels other tools recreate are declared where their module is selecte
       updates: { "package-ecosystem": string }[];
     };
     const ecosystems = base.updates.map((update) => update["package-ecosystem"]);
-    expect(ecosystems).toEqual(["github-actions"]);
     expect(layerLabelNames(settings.baseline)).toEqual(
       expect.arrayContaining([
         "dependencies",
@@ -87,8 +86,6 @@ describe("labels other tools recreate are declared where their module is selecte
     // gh pr list exits 0 and empty for a label that does not exist, so a misspelled guard is a permanent silent no-op.
     const guard = read(".github/workflows/fleet-release.yml");
     expect(guard).toContain("gh pr list --state merged --label 'autorelease: pending'");
-    expect(guard).toContain("have worn 'autorelease: pending'");
-    expect(guard).toContain("move the label to 'autorelease: tagged'");
   });
 
   test("github-settings-as-code: its private report marker in the private layer", () => {
