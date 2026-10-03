@@ -69,8 +69,19 @@ describe("the trivy action", () => {
     // `found == 'true'` gates upload and file nothing and its `== 'false'` gate closes nothing: a red night is never
     // recorded, green.
     const [blocking, nightly] = scans;
-    // fleet-ci calls the action with no `mode`: without the blocking default an empty mode gates both scans false and
-    // the security job passes without scanning.
+    // Cross-file with fleet-ci.yml: it calls the action with no `mode`, so without the blocking default an empty mode
+    // gates both scans false and the security job passes without scanning; a miswritten gate skips a scan the same way.
+    const caller = (
+      parseYaml(
+        readFileSync(join(import.meta.dir, "../../../.github/workflows/fleet-ci.yml"), "utf8"),
+      ) as {
+        jobs: Record<string, { steps?: Step[] }>;
+      }
+    ).jobs;
+    const call = Object.values(caller)
+      .flatMap((job) => job.steps ?? [])
+      .find((step) => (step.uses ?? "").includes("/actions/trivy@"));
+    expect([call !== undefined, call?.with?.mode]).toEqual([true, undefined]);
     expect([action.inputs.mode.default, blocking.if, nightly.if]).toEqual([
       "blocking",
       "inputs.mode == 'blocking'",

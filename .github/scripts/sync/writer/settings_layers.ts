@@ -10,7 +10,7 @@
 // repository's overlay and the override.
 
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
   describeProblem,
   type Layer,
@@ -22,7 +22,6 @@ import {
 } from "@vivswan/github-settings-as-code";
 import {
   type ModuleData,
-  parseFilesConfig,
   type SettingsLayers,
   SOURCE_PREFIX,
 } from "../../../../actions/plan/files_config.ts";
@@ -54,14 +53,6 @@ export function layerConfig(config: LayerSources): LayerConfig {
     throw new Error("files.yml declares no settings block, so no settings layer can be read");
   }
   return { modules: config.modules, settings: config.settings };
-}
-
-const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..", "..");
-
-const FILES_CONFIG = join(REPO_ROOT, "files.yml");
-
-export function loadModules(path: string = FILES_CONFIG): Module[] {
-  return namedModules(parseFilesConfig(readFileSync(path, "utf-8"), path));
 }
 
 export function namedModules(config: LayerSources): Module[] {
