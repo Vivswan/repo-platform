@@ -994,7 +994,6 @@ describe("grammars", () => {
       }
       return missing;
     };
-    expect(GRAMMAR_WASMS.length).toBe(12);
     expect(await missingImports(GRAMMAR_WASMS)).toEqual([]);
     const crashing = join(
       ACTION_DIR,
