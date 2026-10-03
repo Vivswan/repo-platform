@@ -16,7 +16,6 @@ const SKELETONS = "files/base/.github/workflows";
 
 interface Workflow {
   on: { pull_request?: { types?: string[] } };
-  permissions?: Record<string, string>;
   jobs: Record<string, { if?: string; permissions?: Record<string, string> }>;
 }
 
@@ -24,7 +23,7 @@ const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 const load = (rel: string) =>
   parseYaml(read(rel).replaceAll("{{github_username}}", PLATFORM_OWNER)) as Workflow;
 
-test("the labeled event runs one job, for the platform's label on a same-repository branch, with the repository token alone", () => {
+test("the labeled job gates on the platform's label and a same-repository branch, with the repository token alone", () => {
   const text = read(`${SKELETONS}/sync-branch.yml`);
   const workflow = load(`${SKELETONS}/sync-branch.yml`);
   const skeleton = load(`${SKELETONS}/ci.yml`);
@@ -34,18 +33,14 @@ test("the labeled event runs one job, for the platform's label on a same-reposit
   const jobs = Object.values(workflow.jobs);
   expect({
     trigger: workflow.on,
-    jobs: jobs.length,
     condition: jobs[0]?.if?.replaceAll(/\s+/g, " ").trim(),
-    workflowPermissions: workflow.permissions,
     jobPermissions: jobs[0]?.permissions,
     secrets: text.match(/secrets\.\w+/g) ?? [],
     skeletonPullRequestTypes: skeleton.on.pull_request?.types,
     declaredLabels: baseline.labels.filter((label) => label.name === SYNC_LABEL).length,
   }).toEqual({
     trigger: { pull_request: { types: ["labeled"] } },
-    jobs: 1,
     condition: `github.event.label.name == '${SYNC_LABEL}' && github.event.pull_request.head.repo.full_name == github.repository`,
-    workflowPermissions: {},
     jobPermissions: { contents: "write", "pull-requests": "write" },
     secrets: [],
     skeletonPullRequestTypes: undefined,

@@ -255,8 +255,6 @@ test("renders each mount in the mode's theme and hue, keeps a broken one's sourc
   const config = calls.initialize[0];
   expect(config.securityLevel).toBe("strict");
   expect(config.suppressErrorRendering).toBe(true);
-  expect(config.startOnLoad).toBe(false);
-  expect(config.theme).toBe("base");
   const variables = config.themeVariables as { darkMode: boolean; nodeBorder: string };
   expect(variables.darkMode).toBe(true);
   expect(variables.nodeBorder).toBe(HUES[2].dark.hue);

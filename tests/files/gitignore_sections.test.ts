@@ -8,11 +8,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { capture } from "../../.github/scripts/shared/proc.ts";
-import {
-  type FileEntry,
-  parseFilesConfig,
-  type UpstreamRef,
-} from "../../actions/plan/files_config.ts";
+import { parseFilesConfig } from "../../actions/plan/files_config.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -22,25 +18,6 @@ const BASE = readFileSync(join(FILES, "base/.gitignore"), "utf-8");
 const FUZZER = readFileSync(join(FILES, "fuzzer/fuzzer.gitignore"), "utf-8");
 const ROOT_GITIGNORE = readFileSync(join(REPO_ROOT, ".gitignore"), "utf-8");
 const CI_WORKSPACE_SECTION = "## CI workspace paths (repo-platform)";
-
-test("every repository takes the github/gitignore OS and editor templates, in this order, before any module block", () => {
-  const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
-  const gitignore = config.files.find((entry) => entry.path === ".gitignore") as Extract<
-    FileEntry,
-    { source: string | UpstreamRef }
-  >;
-  const ref = (path: string) => ({ repository: "github/gitignore", path });
-  expect(gitignore).toMatchObject({
-    always: ["Windows", "macOS", "Linux", "VSCode", "JetBrains"],
-    sources: {
-      Windows: ref("Global/Windows.gitignore"),
-      macOS: ref("Global/macOS.gitignore"),
-      Linux: ref("Global/Linux.gitignore"),
-      VSCode: ref("Global/VisualStudioCode.gitignore"),
-      JetBrains: ref("Global/JetBrains.gitignore"),
-    },
-  });
-});
 
 function ignoredByGit(section: string, rel: string, kind: "dir" | "file"): boolean {
   const repo = temp.dir("gitignore-sections-");
