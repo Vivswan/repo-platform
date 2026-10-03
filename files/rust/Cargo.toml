@@ -1,0 +1,42 @@
+# Repo-owned workspace root. Written once by {{github_username}}/repo-platform, never overwritten by a later sync: add members, dependencies, and this repository's own lints freely.
+#
+# The lint floor every Rust repository in the fleet carries.
+# `cargo new` inside this workspace writes `[lints] workspace = true` into each new crate, so every member inherits it.
+# A lint exception is `#[expect(lint, reason = "...")]`: it says why, and it fails once the lint no longer fires there.
+
+[workspace]
+resolver = "3"
+members = []
+
+[workspace.lints.rust]
+# Unsafe is quarantined: denied everywhere, re-admitted at the top of an audited module with `#![expect(unsafe_code, reason = "...")]`, and reached from safe code only through that module's safe API.
+unsafe_code = "deny"
+# An unsafe fn body is not an unsafe scope: each unsafe operation in it sits in its own block, with its own SAFETY comment.
+unsafe_op_in_unsafe_fn = "deny"
+# The fleet's ASCII typography rule, applied to identifiers.
+non_ascii_idents = "deny"
+
+[workspace.lints.clippy]
+# `// SAFETY:` above every unsafe block, stating the invariant it depends on.
+undocumented_unsafe_blocks = "deny"
+# One unsafe block, one operation: a comment that covers several cannot be checked.
+multiple_unsafe_ops_per_block = "deny"
+# Every public unsafe fn carries a `# Safety` doc section: the contract its safe wrapper must uphold.
+missing_safety_doc = "deny"
+# The duals: a SAFETY comment on a safe block, or a `# Safety` section on a safe fn, is a claim the code no longer makes.
+unnecessary_safety_comment = "deny"
+unnecessary_safety_doc = "deny"
+# `allow` hides a lint for good; `expect` with a reason records why and fails when the cause is gone.
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+# Every assert says what broke.
+missing_assert_message = "deny"
+# A match on an enum lists every variant, so a new one is a compile error at each site, never a silent fallthrough.
+wildcard_enum_match_arm = "deny"
+match_wildcard_for_single_variants = "deny"
+# A struct pattern that binds every field carries no `..`, so a `..` always marks a deliberate skip.
+rest_pat_in_fully_bound_structs = "deny"
+
+[workspace.lints.rustdoc]
+# A doc link to an item that is not there fails, as the docs site's link check does for pages.
+broken_intra_doc_links = "deny"

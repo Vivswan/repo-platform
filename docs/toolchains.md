@@ -14,7 +14,7 @@ One version per toolchain, fleet-wide, spelled once: a version dotfile under `fi
 | bun | [files/bun/.bun-version](../files/bun/.bun-version) | the fleet's synced `.bun-version`; this repository's workflows (`bun-version-file: files/bun/.bun-version`); every composite action's bun-setup step; `scripts/bootstrap.ts`, which refuses a local bun at another MAJOR.MINOR; `@types/bun` in every package declaring it, pinned exactly to it |
 | deno | [files/deno/.dvmrc](../files/deno/.dvmrc) | the fleet's synced `.dvmrc` |
 
-Modules without a pin: uv floats on its setup action's default, and rust ships no toolchain setup in CI, so rust version selection stays repository-owned.
+Modules without a pin: uv floats on its setup action's default, and the rust blocks' setup action installs the toolchain the repository's `rust-toolchain.toml` names (stable when there is none), so rust version selection stays repository-owned.
 
 The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.txt` pins the yamllint the action installs and the pathspec release its ignore list is matched with (the validate-managed-files scan ports that release), dependabot's pip entry for that directory bumps them, and this repository's `lint:yaml` script installs from the same file.
 
@@ -52,6 +52,7 @@ To run one repo on a different version, override in a repo-owned workflow and le
 |---|---|
 | bun | pass the explicit version input (`bun-version:` on setup-bun), which the action prefers over its version-file input |
 | deno | setup-deno resolves the other way around (a non-empty `deno-version-file` wins over `deno-version`), so replace or remove the `deno-version-file:` line instead |
+| rust | commit a `rust-toolchain.toml` naming the channel (and components); the setup action in the three rust blocks installs it, with no dotfile to leave alone |
 
 Rules that follow:
 
