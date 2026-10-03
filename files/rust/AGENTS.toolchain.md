@@ -1,1 +1,2 @@
 - Rust with cargo: `cargo build`, `cargo test`, `cargo clippy` (crate layout and dependencies in `Cargo.toml`)
+- Unsafe Rust: one operation per `unsafe` block, a `// SAFETY:` comment above each stating the invariant it relies on, and unsafe kept behind a safe API; the `[workspace.lints]` floor in the root `Cargo.toml` denies the first two and any undocumented public `unsafe fn`.
