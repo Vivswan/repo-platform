@@ -58,7 +58,7 @@ The Written changes:
 
 | Change | What to verify |
 |---|---|
-| `created` | explained by a new module or a first sync |
+| `created` | the path was absent before: a first sync, a new module, or a path the platform newly declares for a selected module |
 | `updated`, `unchanged` | need no look |
 | `replaced local edits` | a managed file, or a split file's region; its diff is below |
 | `region added` | a split file that had no markers, its whole prior content now below the new region |
