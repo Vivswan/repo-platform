@@ -16,7 +16,7 @@ Work in this order, always:
 2. Run the sync: `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true`. Review the sync PR's report and merge.
 3. Finish the module's companion steps (starter customization, one-time setup).
 
-## When to Apply
+## When to apply
 
 - "Enable the fuzzer" / "add nightly CI" / "publish a site" / "add the uv toolchain" on a repo that already carries `.repo-platform.yml`
 - Outcome-shaped asks that map to a module: "add Python/Rust support" (uv/rust), "start cutting releases" (release-please), "publish the docs as a website" / "deploy the repo's own website" (site), "check PR titles" (pr-title), "what modules does this repo have" (read `.repo-platform.yml`)
@@ -79,7 +79,9 @@ gh pr create
 
 The `plan` step of fleet CI parses `.repo-platform.yml` on the PR: an unknown key, a wrong shape, a duplicate module name, a module name the platform does not offer, or a `labels.*` key whose module is not selected fails there. Merge when green.
 
-One exception to "registration first", where a gate job the selection turns on reads a file of yours on that same PR: `site` on a repo with a `docs/` directory. The `docs-check` job builds `docs/` strictly and needs `docs/README.md` (the landing page). Add it in the same PR, or the PR is red. A repo whose own website renders `docs/` sets `site.path: null` instead: the website publishes alone and `docs-check` stands down.
+One exception to "registration first" is `site` on a repo with a `docs/` directory: a gate job the selection turns on reads a file of yours on that same PR. The `docs-check` job builds `docs/` strictly and needs `docs/README.md` (the landing page). Add it in the same PR, or the PR is red.
+
+A repo whose own website renders `docs/` sets `site.path: null` instead: the website publishes alone and `docs-check` stands down.
 
 ### 2. Run the sync and review its PR
 
@@ -98,7 +100,14 @@ The run's job log (`gh run view <id> --log`) reads `plan: 1 rows` and then `row 
 
 Anything the module diff does not explain is reviewed with the `repo-platform-sync-pr` skill before merging.
 
-`row 0: unchanged` with no PR means the repo already holds every file of the new selection. `failed, report filed in the target repository` means the `[repo-platform] sync failed` issue in the repo has the error. Without a dispatch, the Tuesday cron delivers the files on its own.
+The other row lines:
+
+| Line | Meaning |
+| --- | --- |
+| `row 0: unchanged`, no PR | the repo already holds every file of the new selection |
+| `failed, report filed in the target repository` | the `[repo-platform] sync failed` issue in the repo has the error |
+
+Without a dispatch, the Tuesday cron delivers the files on its own.
 
 ### 3. Finish the companion steps
 
@@ -117,9 +126,12 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | `site` | `site.path`, `site.include`, `labels.site` | `docs`, none, `docs-link-rot` |
 | `fuzzer` | `labels.fuzzer` | `fuzz-nightly` |
 | `nightly` | `labels.nightly` | `nightly-failure` |
-| any | `project` (required: `name`, `slug`, `description` together; `copyright_holder` optional), `mirrors` | none (`copyright_holder`: the owner); none |
 
-- A key change alone needs no sync: the site leg reads the registration at run time. `mirrors`, `labels.*`, and `project.*` land with the next sync: `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`), a `labels.*` value is rendered into `.github/settings.yml`, while an existing starter (`.github/settings.local.yml`) keeps its content, so edit it yourself.
+Two keys belong to no module. `project` is required, with `name`, `slug`, and `description` together; `copyright_holder` is optional and defaults to the owner. `mirrors` defaults to none.
+
+- **No sync needed:** a `site.path` or `site.include` change; the site leg reads the registration at run time.
+- **Lands with the next sync:** `mirrors`, `labels.*`, and `project.*`. `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`); a `labels.*` value is rendered into `.github/settings.yml`.
+- **Starters keep their content:** an existing starter (`.github/settings.local.yml`) is not rewritten, so edit it yourself.
 - Tracking labels (`fuzzer`, `nightly`, `site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label. A `labels.*` key whose module is not selected fails the plan.
 - Renaming a fuzz or nightly label never updates the repo-owned starter: change its two `label:` inputs in the same PR.
 
@@ -130,7 +142,8 @@ Remove the name from `modules:` and the module's own keys (`labels.<key>`, `site
 - Retired: the module's managed and split files. `deleted` with the detail `no longer selected` when the file still held the platform's own content; `region removed` when a split file's region was untouched but the repo had written around it (the region and its markers go, your content stays as a plain file); `held` with the reason when someone edited the content (decide, then delete or keep it yourself).
 - Starters stay: the sync never deletes a repo-owned file. Dropping `fuzzer` or `nightly` leaves its workflow running; delete it yourself or keep its label declared in `.github/settings.local.yml`.
 - Labels: the module's labels leave the rendered `.github/settings.yml` on that sync (`managed`, `updated`) and the next apply removes them from the repo, unless another selected module still declares them or your `.github/settings.local.yml` does: a label still declared stays rendered and applied.
-- Adding `custom-license`: the fleet `LICENSE.md` is retired on that sync, `deleted` when untouched, `region removed` when you had written outside its region (your text stays as a plain file), and `held` when the region itself was edited. Commit the repo's own `LICENSE.md` after that PR merges. Removing it: the fleet license region is written above whatever `LICENSE.md` holds (a split file without markers gets the region above its content, reported `region added`, which holds the PR); delete the old text in the sync PR.
+- Adding `custom-license`: the fleet `LICENSE.md` is retired on that sync. It reads `deleted` when untouched, `region removed` when you had written outside its region (your text stays as a plain file), and `held` when the region itself was edited. Commit the repo's own `LICENSE.md` after that PR merges.
+- Removing `custom-license`: the fleet license region is written above whatever `LICENSE.md` holds. A split file without markers gets the region above its content, reported `region added`, which holds the PR; delete the old text in the sync PR.
 
 ## Verify
 

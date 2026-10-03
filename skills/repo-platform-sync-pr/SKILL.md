@@ -8,7 +8,9 @@ metadata:
 
 # repo-platform: Handling a Sync PR
 
-The platform writes its files into managed repos from the outside: a sync run opens (or refreshes) one PR on the `automation/repo-platform` branch for each repo whose tree differs from the build (a repo already matching gets none, and its stale sync PR is closed), and the PR body is the writer's report. This skill is how to read that report, decide every row, and escalate when the sync itself failed.
+The platform writes its files into managed repos from the outside. A sync run opens (or refreshes) one PR on the `automation/repo-platform` branch for each repo whose tree differs from the build; a repo already matching gets none, and its stale sync PR is closed.
+
+The PR body is the writer's report, and this skill is how to read that report, decide every row, and escalate when the sync itself failed.
 
 Work in this order, always:
 
@@ -18,7 +20,7 @@ Work in this order, always:
 4. Disposition every bot review comment; none may be left unaddressed.
 5. Merge (or let auto-merge fire) unless a human does the merging, in which case stop at green and report with a verdict line.
 
-## When to Apply
+## When to apply
 
 - A sync PR appeared, head branch `automation/repo-platform`
 - Its Review section says `Hold for review: yes`
@@ -26,7 +28,7 @@ Work in this order, always:
 
 ## What the PR is
 
-- A copy, not a merge. The writer copies each selected file from the platform's `files/` tree: managed files whole, split files only between their `BEGIN/END REPO-PLATFORM MANAGED` markers, starters once when absent. The one rendered file is `.github/settings.yml`, folded from the fleet settings layers and the repo's own `.github/settings.local.yml`. Nothing is three-way merged and no conflict marker ever lands in the branch.
+- A copy, not a merge: the writer copies each selected file from the platform's `files/` tree (managed files whole, split files only between their `BEGIN/END REPO-PLATFORM MANAGED` markers, starters once when absent). The one rendered file is `.github/settings.yml`, folded from the fleet settings layers and the repo's own `.github/settings.local.yml`. Nothing is three-way merged and no conflict marker ever lands in the branch.
 - The writer tells its own previous write from a local edit through `.github/repo-platform-manifest.json`, which records a hash per managed file and per split region. A managed file, or a split region, whose content is neither the recorded hash nor the new content is replaced and reported with a diff.
 - The head branch is rewritten on every sync run (a dispatch, a labeled merge, or the weekly cron). Commits parked on it between runs are replaced; fix-then-merge promptly.
 - A PR whose report holds nothing arms auto-merge and lands once the required check passes (`all-green`, plus `pr-title` where selected). A run dispatched with `manual=true`, or any hold reason, waits for a human.
@@ -45,12 +47,31 @@ Exactly one open sync PR should exist per repo; when none exists, or more than o
 | Section | Content | What to verify |
 |---|---|---|
 | header | Build sha, the modules the registration selected, the visibility | The module list matches `.repo-platform.yml`; visibility matches the repo |
-| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) | `created` is explained by a new module or a first sync; `updated` and `unchanged` need no look; `replaced local edits` (a managed file, or a split file's region) has a diff below; `region added` is a split file that had no markers, its whole prior content now below the new region; `held` wrote nothing and its Detail says why (the list below). A starter is only ever `created`, `unchanged`, or `held` |
+| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) | Each change per the Written table below. A starter is only ever `created`, `unchanged`, or `held` |
 | Replaced local edits | one unified diff per replaced file or region (40 lines shown, the rest counted) | Decide per diff: the content moves into a repo-owned hook or upstream, or it was a stray edit and goes |
-| Retired | one row per file the platform no longer writes here: `deleted`, `region removed`, `held`, `released` | `deleted` removed the platform's own content; `region removed` took the managed region and its markers out of a split file and left the repository-owned content as a plain file (the record leaves with it, so the row appears once); `held` left a file whose content differs from the recorded write, for your decision; `released` dropped the record of a path the registration's `except` names and touched nothing (yours) |
+| Retired | one row per file the platform no longer writes here: `deleted`, `region removed`, `held`, `released` | Each outcome per the Retired table below |
 | Registration notes | one line per note: an unreadable manifest, a placeholder with no value, a manifest record at an unclean path, a stale record no entry declares, a mirror record no declaration reaches, or an `except` path no entry writes (the exact forms below) | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A dropped mirror record means that copy is the repository's own now |
 | Mirrors | one row per declared target: `written`, `current`, `replaced local edits` (its diff below), `replaced` with a detail naming what was removed | `replaced local edits`: decide per diff like a managed file; `replaced`: a directory stood at the target or a file where a directory had to be, and the diff shows what went. A declaration the writer cannot honour never reaches the report: the sync fails instead (the failure path below) |
 | Review | `Hold for review: yes` with one line per reason, or `no` | Every listed reason resolved before merging |
+
+The Written changes:
+
+| Change | What to verify |
+|---|---|
+| `created` | explained by a new module or a first sync |
+| `updated`, `unchanged` | need no look |
+| `replaced local edits` | a managed file, or a split file's region; its diff is below |
+| `region added` | a split file that had no markers, its whole prior content now below the new region |
+| `held` | wrote nothing; its Detail says why (the list below) |
+
+The Retired outcomes:
+
+| Outcome | What it did |
+|---|---|
+| `deleted` | removed the platform's own content |
+| `region removed` | took the managed region and its markers out of a split file and left the repository-owned content as a plain file; the record leaves with it, so the row appears once |
+| `held` | left a file whose content differs from the recorded write, for your decision |
+| `released` | dropped the record of a path the registration's `except` names and touched nothing (yours) |
 
 The Registration notes, exactly:
 
@@ -66,12 +87,27 @@ The `held` details of a Written row, exactly:
 - `a symbolic link sits where a file is declared` (a managed or split entry; the writer never reads through a link)
 - `a regular file sits where a link is declared`
 - `no value for {{<placeholder>}}` (a Registration note names the key to set)
-- `no overlay at .github/settings.local.yml (its starter is held or missing)`, `.github/settings.local.yml is <what>, which the render does not read through` (a directory, a symbolic link, or something that is not a regular file stands at the overlay path), an overlay problem (a YAML parse error or a duplicated label or ruleset name in `.github/settings.local.yml`, or a tracking label the plan refuses, in the plan's words): the rendered `.github/settings.yml`; the Settings row of the table below says what to do
 - `<what> sits at the path, and the writer will not replace it`: a directory, or something that is neither a regular file nor a link, stands where an entry of any class is declared
 
-A written row (`replaced local edits`, `region added`, `unchanged`) may carry the detail `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`: the recorded class differs from the one the selection declares now and the file was not provably the platform's last write, so the sync judges it as an unrecorded file by the declared class and restamps a successful outcome; the change says what that outcome was.
+Three more `held` details land on the rendered `.github/settings.yml`; the Settings row of the table below says what to do:
 
-The hold reasons, exactly: `local edits replaced in <path>`, `<path>: the managed region was added above repository-owned content`, `<path> held: <detail>`, `retirement of <path> held: <detail>`, `retirement of <path>: the managed region was removed and the repository-owned content kept`, `mirror <target> replaced: <detail>`, `registration: <note>`.
+- `no overlay at .github/settings.local.yml (its starter is held or missing)`
+- `.github/settings.local.yml is <what>, which the render does not read through`: a directory, a symbolic link, or something that is not a regular file stands at the overlay path
+- an overlay problem: a YAML parse error or a duplicated label or ruleset name in `.github/settings.local.yml`, or a tracking label the plan refuses, in the plan's words
+
+A written row (`replaced local edits`, `region added`, `unchanged`) may carry the detail `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`.
+
+That detail means the recorded class differs from the one the selection declares now, and the file was not provably the platform's last write. So the sync judges it as an unrecorded file by the declared class and restamps a successful outcome; the change says what that outcome was.
+
+The hold reasons, exactly:
+
+- `local edits replaced in <path>`
+- `<path>: the managed region was added above repository-owned content`
+- `<path> held: <detail>`
+- `retirement of <path> held: <detail>`
+- `retirement of <path>: the managed region was removed and the repository-owned content kept`
+- `mirror <target> replaced: <detail>`
+- `registration: <note>`
 
 ## Check the diff against the report
 
@@ -88,7 +124,11 @@ Every changed path must be one of:
 - a Mirrors row reading `written`, `replaced local edits`, or `replaced` (a `replaced` row also explains the deleted paths under its target and the ancestor file its detail names)
 - `.github/repo-platform-manifest.json` (rewritten every sync, no row)
 
-Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. One exception: a body carrying a section-ending warning of the form `<N> characters of this section were cut to fit GitHub's body limit.` lost the rows after the cut, so read those paths' classes from `.github/repo-platform-manifest.json` (the PR head's; the base's for a path the sync retired) and judge them by [references/file-ownership.md](references/file-ownership.md) instead. A replaced diff cut at 40 lines is read in full from git:
+Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform.
+
+One exception: a body carrying a section-ending warning of the form `<N> characters of this section were cut to fit GitHub's body limit.` lost the rows after the cut. Read those paths' classes from `.github/repo-platform-manifest.json` (the PR head's; the base's for a path the sync retired) and judge them by [references/file-ownership.md](references/file-ownership.md) instead.
+
+A replaced diff cut at 40 lines is read in full from git:
 
 ```bash
 git fetch origin main automation/repo-platform
@@ -163,7 +203,18 @@ When a human does the merging, your job ends with the branch resolved, pushed, a
 
 ## The failure path
 
-A sync leg that fails files (or refreshes) one issue in the target repository titled `[repo-platform] sync failed`, with the error. The operator run's job log (`gh run view <id> --log` on Vivswan/repo-platform) shows the row as `row <i>: failed, report filed in the target repository`; the line carries an index from 0, never the repository's name. Fix what the issue names (usually the registration: a module `files.yml` does not offer, named as `.repo-platform.yml: module "<name>" is not a module files.yml offers (known: ...)`, or a mirror declaration the writer cannot honour, named as `.repo-platform.yml: mirrors: source '<s>', target '<t>': <reason>`; a manifest record the writer cannot read, counted in the log and named by the repository's own `validate-managed-files` check; or a split file's markers), then dispatch again:
+A sync leg that fails files (or refreshes) one issue in the target repository titled `[repo-platform] sync failed`, with the error. The operator run's job log (`gh run view <id> --log` on Vivswan/repo-platform) shows the row as `row <i>: failed, report filed in the target repository`; the line carries an index from 0, never the repository's name.
+
+Fix what the issue names, usually the registration:
+
+| Cause | How it is named |
+|---|---|
+| a module `files.yml` does not offer (the registration) | `.repo-platform.yml: module "<name>" is not a module files.yml offers (known: ...)` |
+| a mirror declaration the writer cannot honour (the registration) | `.repo-platform.yml: mirrors: source '<s>', target '<t>': <reason>` |
+| a manifest record the writer cannot read | counted in the log, and named by the repository's own `validate-managed-files` check |
+| a split file's markers | - |
+
+Then dispatch again:
 
 ```bash
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true

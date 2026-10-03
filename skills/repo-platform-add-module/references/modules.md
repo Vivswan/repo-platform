@@ -18,7 +18,8 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 
 ## site
 
-- No file of its own. The deploy is the `site` leg of `ci.yml`: every main run whose gate passed (a push, the nightly schedule, a dispatch) builds ONE Pages site from the repo-owned `.github/actions/site-build/action.yml` hook's output (the repository's website, at the root) and `docs/` (rendered under the fleet theme, at `/<site.path>/` beside a website, else at the root). Fleet CI's `docs-check` job builds `docs/` strictly on every PR of a repo that has one, unless `site.path: null` turns the docs half off.
+- No file of its own. The deploy is the `site` leg of `ci.yml`: every main run whose gate passed (a push, the nightly schedule, a dispatch) builds ONE Pages site. It holds the repo-owned `.github/actions/site-build/action.yml` hook's output (the repository's website, at the root) and `docs/` (rendered under the fleet theme, at `/<site.path>/` beside a website, else at the root).
+- PR check: fleet CI's `docs-check` job builds `docs/` strictly on every PR of a repo that has one, unless `site.path: null` turns the docs half off.
 - The hook is a base starter every repository carries, seeded as a no-op (output `dist` empty: only the docs directory publishes, when there is one). Fill it in with the website's build: inputs `base-path` and `origin`, output `dist` naming the built directory. repo-platform's `docs/site.md` has the contract and examples.
 - Keys: `site.path` (URL segment the docs mount under beside a website; default `docs`; `null` turns the docs half off, for a website that renders `docs/` itself), `site.include` (extra trees rendered into the docs: `{path, mount, page}`, every entry naming its page file), `labels.site` (link-rot tracking label; default `docs-link-rot`).
 - Conventions: `docs/README.md` is the landing page and must exist when the repo has `docs/`; titles, order, and groups come from frontmatter and the landing's link table; links resolve inside `docs/` or are absolute.
@@ -30,7 +31,15 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Starters: `release-please-config.json`, `.release-please-manifest.json`. The hooks `update-release.yml` and `update-release-pr.yml` are base starters and run only when this module is selected.
 - Managed: the release variant of `.typography-allow`. The `release`, `update-release`, `publish-release`, and `update-release-pr` legs of `ci.yml` run on a push to main once selected.
 - Pipeline: `release` cuts a draft through release-please (the fleet-release workflow) -> the repo-owned `update-release.yml` hook, a placeholder until you add assets or notes -> `publish-release` (fleet-release-publish) attaches one `attestation.json` per release for a public repo with assets, publishes others unattested, and flips the draft live. `update-release-pr` calls the repo-owned hook for files that ride in the release commit.
-- Gates: fleet CI's `release-pr` job runs on release-please PRs (branches `release-please--*`), freshness first, then health. Freshness requires the PR to contain the tip of its base branch. Health fails on an open tracking issue of a selected stream (`fuzzer`, `nightly`, `site`) or the fleet `security-nightly` stream, an open `release-blocker` issue, or an open Dependabot alert at or above the threshold (default `high`; alerts the token cannot read skip that gate); the cut re-runs the same gate, and `release-override` on the release PR bypasses it.
+- Gates: fleet CI's `release-pr` job runs on release-please PRs (branches `release-please--*`), freshness first, then health. The cut re-runs the same gate, and `release-override` on the release PR bypasses it.
+
+  | Gate | Fails when |
+  | --- | --- |
+  | Freshness | the PR does not contain the tip of its base branch |
+  | Health | a tracking issue of a selected stream (`fuzzer`, `nightly`, `site`) or the fleet `security-nightly` stream is open |
+  | Health | a `release-blocker` issue is open |
+  | Health | a Dependabot alert at or above the threshold (default `high`) is open; alerts the token cannot read skip that gate |
+
 - Labels (`autorelease: pending`, `autorelease: tagged`, `release-blocker`, `release-override`) and the tag-immutability ruleset come from the module's settings layer: the sync renders them into `.github/settings.yml`, the settings apply declares them.
 - Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in the config.
 - Removal: the legs skip; the starters stay.
