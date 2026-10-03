@@ -185,18 +185,11 @@ The loader refuses, all problems at once:
 
 ## files.yml reference
 
-What the committed `files.yml` uses today, so a reader knows which forms are live. The loader accepts more ([files.yml](#filesyml)); the file list itself is `files.yml`.
+What the committed `files.yml` uses today, so a reader knows which forms are live. The loader accepts more ([files.yml](#filesyml)).
 
-| Entry class | Used for |
-| --- | --- |
-| `managed` | the workflows the fleet runs unchanged (`ci.yml`, `auto-assign.yml`, `sync-branch.yml`, the module workflows), `.github/dependabot.yml`, `.yamllint`, `.typography-allow`, the review instructions, the toolchain pin files, and the rendered `.github/settings.yml` (`render: settings`, over the `.github/settings.local.yml` overlay starter) |
-| `split` (region `hash`) | `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS` |
-| `split` (region `html`) | `AGENTS.md`, `LICENSE.md` |
-| `starter` | `checks.yml`, `post-green.yml`, the release hooks, the site-build hook (`.github/actions/site-build/action.yml`), `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml`, the rust module's `Cargo.toml` workspace root, the release-please, fuzzer, and nightly starters |
+The file list is [files.yml](../files.yml) itself: its `files` entries name each path and its `class`, and its `mirrors` list names the fleet's mirror targets. Two starter roles the list does not spell: `update-release.yml` and `update-release-pr.yml` are the release hooks, and the rust module's `Cargo.toml` is the workspace root.
 
-| Fleet mirror | Targets |
-| --- | --- |
-| `AGENTS.md`, `kind: symlink` | `CLAUDE.md`, `.github/agents.md`, `.github/copilot-instructions.md` |
+The tables below cover the `when` forms and `blocks` keys in use.
 
 | `when` form | Used by |
 | --- | --- |
@@ -541,7 +534,7 @@ The sync targets this repository like any other: its [.repo-platform.yml](../.re
 | row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text), at the dispatched branch when there is one; the token is stripped from the remote afterwards; `continue-on-error` |
 | row 4: migrate | the build's own [sync/migrate.ts](../.github/scripts/sync/migrate.ts), run from `build/` | every rung of the build's `migrations/` over the target, in name order ([Migrations](#migrations)); the paths the rungs reported to `$RUNNER_TEMP/migrated.txt`; its log is `sync.log` until the writer's report replaces it; `continue-on-error`, and a failed rung skips the writer |
 | row 5: write | the build's own [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts), run from `build/` | the one writer step, so the commit the manifest records is the code that wrote the tree: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
-| row 6: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform` and a PR whose body is the report ([delivering a row](#delivering-a-row)) |
+| row 6: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform` and a PR whose body is the report, or another outcome ([delivering a row](#delivering-a-row)) |
 | row 7: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 
 The vocabulary, complete (`tests/sync/verdict.test.ts` pins it):
@@ -572,7 +565,7 @@ The residual is a slug another writable repository takes within the run: the row
 
 ### Delivering a row
 
-Row 6 turns the writer's output into one commit and one PR in the target, or one failure issue.
+Row 6 delivers the writer's output: a commit and a PR in the target, one commit onto a dispatched branch with no PR, nothing when the tree already matches the build, or one failure issue.
 
 - **What a delivery commits:** the manifest, the paths the writer's summary says it changed, and the paths the rungs reported. Each is a literal pathspec (a `[` in a name is that character, not a class) forced past the target's own `.gitignore`. Nothing else is staged, and a path git cannot find fails the row.
 - **The commit** lands on `automation/repo-platform`, pushed with a lease. On a branch dispatch it lands on the dispatched branch instead ([syncing a branch](#syncing-a-branch)).
