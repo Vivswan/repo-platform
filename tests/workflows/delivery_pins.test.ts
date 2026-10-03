@@ -69,7 +69,8 @@ export function callableWorkflowNames(files: { path: string; text: string }[]): 
     .sort();
 }
 
-/** GitHub's resolution: a `.github/workflows/` stem is the file itself and must be callable; any other stem is a directory read by either manifest spelling. */
+/** GitHub's resolution: a `.github/workflows/` stem is the file itself and must be callable.
+ *  Any other stem is a directory read by either manifest spelling. */
 export function unresolvedSelfPins(
   pins: SelfPin[],
   exists: (rel: string) => boolean,

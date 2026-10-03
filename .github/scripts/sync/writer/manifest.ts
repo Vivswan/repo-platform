@@ -27,7 +27,8 @@ import { existingFile, writeFile } from "./target_files.ts";
 
 export { MANIFEST_NAME };
 
-/** A record vouches for a write by its hash, so the manifest's own hash-null entry (manifest.ts renderManifest) and a record another tool left unstamped read as no record. */
+/** A record vouches for a write by its hash.
+ *  So the manifest's own hash-null entry (renderManifest) and a record another tool left unstamped read as no record. */
 export type ManifestRecord =
   | { class: "managed"; hash: string }
   | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string }

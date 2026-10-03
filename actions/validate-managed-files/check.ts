@@ -4,7 +4,8 @@
 // the writer would hold the sync PR for. Byte to byte on purpose: a pending registration change reads as red until the
 // sync that carries it lands.
 //
-// Usage: bun actions/validate-managed-files/check.ts --target <checkout> --repository <owner/name> --private <true|false> --build <full sha> [--upstream <raw-content host>]
+// Usage: bun actions/validate-managed-files/check.ts --target <checkout> --repository <owner/name> --private <true|false>
+//          --build <full sha> [--upstream <raw-content host>]
 //   exit 0  the repository is what this tree writes
 //   exit 1  findings: the writer's hold reasons, then one line per path with a unified diff under each
 //   exit 2  the writer refused; its message is the output
