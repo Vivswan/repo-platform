@@ -287,6 +287,17 @@ describe("reusable-site.yml", () => {
   // A Pages step gated on the assembly's `publish` alone runs against an absent site and fails the first deploy again,
   // silent until the next repository selects the module; a check placed after configure-pages reads as an unset output
   // there, and every deploy skips. Exact gates: a skipped check reads as false downstream too.
+  // GitHub fact: artifacts belong to the run, not the attempt, so a re-run after a failed prerequisite (which re-runs
+  // this leg through its needs) leaves two github-pages artifacts in one run and deploy-pages refuses. The attempt number in the
+  // name keeps each attempt's upload and deploy a pair; the two names must agree or the deploy finds nothing.
+  test("each attempt uploads and deploys a Pages artifact of its own name", () => {
+    const at = (action: string) =>
+      steps.find((candidate) => (candidate.uses ?? "").startsWith(`actions/${action}@`));
+    const uploaded = at("upload-pages-artifact")?.with?.name;
+    expect(uploaded).toContain("${{ github.run_attempt }}");
+    expect(at("deploy-pages")?.with?.artifact_name).toBe(uploaded);
+  });
+
   test("the Pages steps and the link check run on the check's verdict alone, asked first", () => {
     const gate = "steps.pages.outputs.exists == 'true'";
     const at = (action: string) =>
