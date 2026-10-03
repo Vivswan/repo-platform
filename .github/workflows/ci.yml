@@ -262,9 +262,9 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: files/bun/.bun-version
-      # A page naming a path a managed repository holds resolves through the shipped trees under files/, passed as bases.
+      # A page naming a path a managed repository holds resolves through the shipped base tree.
       - name: Probe every page's prose units and the paths they name
-        run: bun .skills/skills/docs-discipline/scripts/docs-probe.mts --base files/base --base files/fuzzer --base files/nightly README.md docs/*.md
+        run: bun .skills/skills/docs-discipline/scripts/docs-probe.mts --base files/base README.md docs/*.md
       - uses: ./actions/plan
         id: plan
         with:
