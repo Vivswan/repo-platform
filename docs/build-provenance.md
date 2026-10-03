@@ -50,7 +50,9 @@ A change merges to main as commit S. What happens, in order:
 | 1. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](all-green.md)). |
 | 2. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
 | 3. Move | post-green.yml's move-stable job | [move_stable.ts](../.github/scripts/post-green/move_stable.ts) verifies S is main history with a green check, reads where the tag sits, and moves it to S with a lease push. |
-| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml: calls reusable-site.yml with `github.sha` after the mover, so a green move's theme is what `@stable` serves the build ([all-green.md](all-green.md#after-the-gate)). Gated on the all-green result alone under `!cancelled()`: a red or skipped post-green never holds the site back (the site then deploys from the tag as it stands), and its own failure shows as its own red job. |
+| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml: calls reusable-site.yml with `github.sha` after the mover, so a green move's theme is what `@stable` serves the build ([all-green.md](all-green.md#after-the-gate)). Gated on the all-green result alone under `!cancelled()` (below). |
+
+**The site leg's gate:** a red or skipped post-green never holds the site back (the site then deploys from the tag as it stands), and its own failure shows as its own red job.
 
 **The commit moved to is always SOURCE_SHA:** the judged run's own commit on the call, the operator's sha input on a dispatch. Never a read of origin/main, which can already be a newer, even red, commit (move_stable.ts's header owns this discipline).
 
@@ -59,7 +61,7 @@ A change merges to main as commit S. What happens, in order:
 - the next push to main moves the tag to the newer commit, or
 - an operator dispatches post-green.yml with the green commit's sha.
 
-Until the heal, a sync copies from the commit the tag names as it stands (the residuals table; a sync PR, when one opens, records that commit). Anything without a green `all-green` check is not deliverable - re-run that commit's CI first (the gate job posts the check), then dispatch.
+Until the heal, a sync copies from the commit the tag names as it stands ([Residuals](#residuals)). Anything without a green `all-green` check is not deliverable - re-run that commit's CI first (the gate job posts the check), then dispatch.
 
 ## Newest-green wins, one mover at a time
 
@@ -73,9 +75,7 @@ Until the heal, a sync copies from the commit the tag names as it stands (the re
 
 - **The credential.** The push uses the run's `GITHUB_TOKEN` with `contents: write` (ci.yml's post-green job grants that ceiling), the way GitHub's own actions/publish-action moves an action's major tag with the default token.
 
-- **The open question, settled by the first live move.** The docs list the ref-update endpoints as possibly needing the `workflows` permission too, with no stated condition, and no official page says whether a ref update to a commit already on the server can trip the workflow-file refusal.
-
-- **The fallback if GitHub refuses the push** is the `REPO_PLATFORM_TOKEN` of the `fleet-operator` environment, read by a mover job declaring that environment and passed as its checkout's `token`, with no new secret.
+- **No `workflows` permission is needed.** GitHub's docs list the ref-update endpoints as possibly needing it, with no stated condition; live moves settled it, since the default token moves the tag (the move-stable job's `stable moved to <sha> from <sha>` notice). No fallback credential exists.
 
 ## Provenance is the commit itself
 
@@ -88,7 +88,7 @@ The tag names a main commit whose own CI run passed, so there is no generated tr
 
 The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
-**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run), named in full in the PR body and by its first 12 characters in the sync commit's subject.
+**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run); [sync.md](sync.md#the-command) says where a sync names it.
 
 **The manifest's own entry** records the commit the repository is judged against; a sync moves it under the stamp rule ([sync.md](sync.md#the-manifest)).
 
@@ -106,6 +106,14 @@ So a workflow never runs ahead of the actions it calls: the sync PR that carries
 
 | Residual | Why it stands | What bounds it |
 | --- | --- | --- |
-| `uses: ...@stable` execution trusts the ref. | A user-repo ruleset cannot restrict other writers to one workflow; it blocks deletion only. | Sync consumption re-verifies main history and the green check at the commit; the tag can only ever name a commit that exists on the server, and repo-platform's own CI gates every commit on `main` (an out-of-band move to a red or off-main commit bypasses the fleet's `uses:` execution, the ref-trust residual in full). |
+| `uses: ...@stable` execution trusts the ref. | A user-repo ruleset cannot restrict other writers to one workflow; it blocks deletion only. | Sync consumption re-verifies main history and the green check at the commit; nothing re-verifies for `uses:` (below). |
 | Actor provenance is advisory. | Nothing records which run moved the tag; a lightweight tag carries no message. | The check at the commit is the anchor, not the mover's identity. |
-| A sync copies from the commit the tag names as it stands: a hand dispatch seconds after a merge, or the Tuesday cron firing while a merge shortly before it is still in CI, copies the previous commit, as does any sync while a move is missing. | No freshness wait exists. The post-green call is needs-ordered behind the mover in the same run, so only a sync that wakes on its own (dispatch or cron) can meet the lag. | resolve_build.ts runs the green gate and the ancestry check on that commit, and a sync PR, when one opens, records the commit it copied; the next sync (the weekly cron, or a `fleet-sync:public` label on the next merge - [all-green.md](all-green.md#after-the-gate)) consumes the move once it lands, and a move that never landed is healed by the next push or a dispatch with the green commit's sha. |
+| A sync copies from the commit the tag names as it stands. | No freshness wait exists (the lag, below). | resolve_build.ts runs the green gate and the ancestry check on that commit, and a sync PR, when one opens, records the commit it copied. |
+
+**The ref-trust residual in full:** the tag can only ever name a commit that exists on the server, and repo-platform's own CI gates every commit on `main`. Neither bound covers `uses:`: an out-of-band move to a red or off-main commit still reaches the fleet's `uses:` execution.
+
+The lag of a sync behind the tag:
+
+- **Who meets it:** a hand dispatch seconds after a merge, or the Tuesday cron firing while a merge shortly before it is still in CI, copies the previous commit, as does any sync while a move is missing.
+- **Why only those:** the post-green call is needs-ordered behind the mover in the same run, so only a sync that wakes on its own (dispatch or cron) can meet the lag.
+- **How it ends:** the next sync (the weekly cron, or a `fleet-sync:public` label on the next merge - [all-green.md](all-green.md#after-the-gate)) consumes the move once it lands. A move that never landed heals [as above](#the-delivery-flow-push-to-move): the next push, or a dispatch with the green commit's sha.
