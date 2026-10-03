@@ -193,7 +193,7 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `managed` | the workflows the fleet runs unchanged (`ci.yml`, `auto-assign.yml`, the module workflows), `.github/dependabot.yml`, `.yamllint`, `.typography-allow`, the review instructions, the toolchain pin files, and the rendered `.github/settings.yml` (`render: settings`, over the `.github/settings.local.yml` overlay starter) |
 | `split` (region `hash`) | `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS` |
 | `split` (region `html`) | `AGENTS.md`, `LICENSE.md` |
-| `starter` | `checks.yml`, `post-green.yml`, the release hooks, the site-build hook (`.github/actions/site-build/action.yml`), `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml`, the release-please, fuzzer, and nightly starters |
+| `starter` | `checks.yml`, `post-green.yml`, the release hooks, the site-build hook (`.github/actions/site-build/action.yml`), `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml`, the rust module's `Cargo.toml` workspace root, the release-please, fuzzer, and nightly starters |
 
 | Fleet mirror | Targets |
 | --- | --- |
@@ -214,7 +214,7 @@ A fleet mirror carries no `when`: every repository gets its targets, save one it
 | `gitignore_sources` | `.gitignore` (split) | github/gitignore templates at one pinned sha, fetched by every sync (the OS templates `Global/Windows.gitignore`, `Global/macOS.gitignore`, `Global/Linux.gitignore` and the editor templates `Global/VisualStudioCode.gitignore`, `Global/JetBrains.gitignore` on every repository through `always`; the Node template both JavaScript toolchains list lands once); the fuzzer's failure directory from `files/fuzzer/fuzzer.gitignore` |
 | `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.<ecosystem>.yml`, appended at the anchor line that ends the source |
 | `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.toolchain.md`, the module's Toolchain bullets, appended after the region body |
-| `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
+| `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.toolchain.yml`: the example checks (rust's are live steps: cargo's own commands, the same in every repository), the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
 
 | Module data key | Meaning | Reader |
 | --- | --- | --- |
