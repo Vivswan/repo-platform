@@ -1,15 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
+import { lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import {
-  callerReporterFlags,
-  durationFindings,
-  FILE_SECONDS,
-  fileTimes,
-  leftoversJudgeable,
-  SUITE_SECONDS,
-} from "../../scripts/run_tests";
+import { leftoversJudgeable } from "../../scripts/run_tests";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -114,79 +107,5 @@ describe("run_tests launcher", () => {
     ]) {
       expect(leftoversJudgeable(args, null)).toBe(false);
     }
-  });
-});
-
-describe("the duration budget", () => {
-  // bun's junit report in its shape (hand-written): a describe block is a nested <testsuite> carrying the file it
-  // sits in, so a judgment that counted it would double every file. The caps stretch by the scale ci.yml sets for
-  // its runner, so the same report reads under budget there.
-  const junit = (rows: [string, number][]) =>
-    [
-      '<?xml version="1.0" encoding="UTF-8"?>',
-      '<testsuites name="bun test" tests="2" time="1">',
-      ...rows.flatMap(([file, seconds]) => [
-        `  <testsuite name="${file}" file="${file}" tests="1" failures="0" time="${seconds}" hostname="h">`,
-        `    <testsuite name="a describe" file="${file}" line="3" tests="1" time="${seconds}" hostname="h">`,
-        `      <testcase name="t" classname="a describe" time="${seconds}" file="${file}" line="4" />`,
-        "    </testsuite>",
-        "  </testsuite>",
-      ]),
-      "</testsuites>",
-      "",
-    ].join("\n");
-  const over = FILE_SECONDS + 0.5;
-  const fifth = SUITE_SECONDS / 5 + 2;
-  const atCap = (count: number): [string, number][] =>
-    Array.from({ length: count }, (_, i) => [`tests/${i}.test.ts`, FILE_SECONDS]);
-  test.each<[verdict: string, rows: [string, number][], scale: number, findings: string[]]>([
-    [
-      "files at the caps exactly pass, the describe rows uncounted",
-      atCap(Math.floor(SUITE_SECONDS / FILE_SECONDS)),
-      1,
-      [],
-    ],
-    [
-      "a file over its cap is named with its seconds, its name read back through bun's escaping",
-      [
-        ["tests/a&amp;b.test.ts", over],
-        ["tests/b.test.ts", 1],
-      ],
-      1,
-      [`  tests/a&b.test.ts took ${over.toFixed(1)}s; the cap per file is ${FILE_SECONDS}s x 1`],
-    ],
-    [
-      "files each under their cap summing over the suite's name the suite",
-      Array.from({ length: 5 }, (_, i): [string, number] => [`tests/${i}.test.ts`, fifth]),
-      1,
-      [
-        `  the 5 files took ${(fifth * 5).toFixed(1)}s together; the suite's cap is ${SUITE_SECONDS}s x 1`,
-      ],
-    ],
-    [
-      "the runner's scale stretches both caps",
-      [["tests/a.test.ts", over], ...atCap(Math.floor(SUITE_SECONDS / FILE_SECONDS))],
-      2.5,
-      [],
-    ],
-  ])("%s", (_verdict, rows, scale, findings) => {
-    expect(durationFindings(fileTimes(junit(rows)), scale)).toEqual(findings);
-  });
-
-  // bun keeps the last `--reporter-outfile`, so a caller's would displace the report the budget reads.
-  test("a caller's reporter flag is refused before the run, in every spelling and only before `--`", () => {
-    expect(callerReporterFlags(["--reporter=dots", "--reporter-outfile", "x", "./tests"])).toEqual([
-      "--reporter=dots",
-      "--reporter-outfile",
-    ]);
-    expect(callerReporterFlags(["./tests", "--", "--reporter=dots"])).toEqual([]);
-    const r = boundedSpawnSync(["bun", launcher, "--reporter-outfile=out.xml", "./tests/none"], {
-      cwd: root,
-    });
-    expect([r.exitCode, r.stderr]).toEqual([
-      2,
-      "run_tests: the launcher owns bun's reporter (its duration budget reads the junit report); drop --reporter-outfile=out.xml or run bun test directly\n",
-    ]);
-    expect(existsSync(join(root, "out.xml"))).toBe(false);
   });
 });

@@ -231,8 +231,6 @@ jobs:
       - name: Run .github/scripts and action tests
         env:
           TYPOS_REQUIRED: "1"
-          # The runner is about 2.5x slower than the laptop the launcher's duration caps were measured on.
-          TEST_TIME_SCALE: "2.5"
         run: bun run test
 
   # This repository's own skills catalog, judged by the action Vivswan/skills carries (it pins its
