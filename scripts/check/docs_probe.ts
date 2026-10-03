@@ -15,7 +15,7 @@
 // may name files the reader will create.
 
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 export const DEFAULT_MAX_WORDS = 70;
 
@@ -322,7 +322,7 @@ export function probePage(text: string, file: string, options: ProbeOptions): Fi
 }
 
 const USAGE = [
-  "usage: docs-probe.mts [--root <dir>] [--base <dir>]... [--max-words <n>] [--shape-only] <page.md>...",
+  `usage: ${basename(process.argv[1] ?? "docs-probe.mts")} [--root <dir>] [--base <dir>]... [--max-words <n>] [--shape-only] <page.md>...`,
   "  --root        the repository root paths resolve against (default: cwd)",
   "  --base        a directory under the root that paths also resolve against (repeatable)",
   "  --max-words   the cap on a paragraph or list item (default: 70)",
