@@ -3,6 +3,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { PLATFORM_NAME } from "../../../actions/shared/platform";
 import { loadAction, REPO_ROOT, runBashStep, stepNamed } from "../../shared/action_step";
 import { tempDirs } from "../../shared/temp_dir";
 
@@ -47,7 +49,7 @@ describe("actions/zizmor", () => {
       [undefined, "steps.gate.outcome == 'failure'", undefined, gate.with],
     ]);
     // SARIF mode suppresses zizmor's finding exit codes, so a gate in SARIF mode never fails.
-    // Cross-file with this repository's ci.yml: it omits `upload-sarif`, so the default is what uploads its reports.
+    // This repository's ci.yml omits `upload-sarif`, so its code-scanning alerts follow the declared default.
     expect([
       action.inputs?.["upload-sarif"].default,
       withOf(upload)["advanced-security"],
@@ -71,5 +73,22 @@ describe("actions/zizmor", () => {
     expect(readFileSync(join(repo, COPY), "utf8")).toBe(
       readFileSync(join(ACTION_DIR, "zizmor.yml"), "utf8").replaceAll("{{github_username}}", OWNER),
     );
+  });
+
+  test("the rendered policy: ref pins for the caller's delivery channel only, sha pins elsewhere at zizmor's own severity, no ignores", () => {
+    // The fleet's pinning rule in one document (docs/build-provenance.md; .github/pinact.yaml ignores the same
+    // channel): a widened first key or a loosened second stops flagging unpinned actions fleet-wide with nothing red.
+    const repo = temp.dir("zizmor-policy-");
+    render(repo);
+    const policy = parseYaml(readFileSync(join(repo, COPY), "utf8"));
+    expect(policy).toEqual({
+      rules: {
+        "unpinned-uses": {
+          config: {
+            policies: { [`${OWNER}/${PLATFORM_NAME}/*`]: "ref-pin", "*": "hash-pin" },
+          },
+        },
+      },
+    });
   });
 });

@@ -43,6 +43,7 @@ const fleetFold = (s: Selection): SettingsDoc => {
   if ("refused" in folded) throw new Error(folded.refused);
   return folded.settings;
 };
+const rulesets = (s: Selection) => sectionEntries(fleetFold(s), "rulesets");
 
 describe("the Actions grant", () => {
   type Step = { uses?: string; with?: Record<string, unknown> };
@@ -76,6 +77,37 @@ describe("the Actions grant", () => {
 });
 
 // GitHub fact: a required context without integration_id is satisfied by any app or commit status of that name.
+// loadOverrideLayer enforces the pin for the override alone, so the module's own ruleset is pinned here, whole.
+test.each([false, true])(
+  "the pr-title module's required check is pinned to the Actions app (private: %p)",
+  (isPrivate) => {
+    expect(
+      rulesets(selection({ modules: ["pr-title"], private: isPrivate })).find(
+        (r) => r.name === "pr-title",
+      ),
+    ).toEqual({
+      name: "pr-title",
+      target: "branch",
+      enforcement: "active",
+      conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+      rules: [
+        {
+          type: "required_status_checks",
+          parameters: {
+            strict_required_status_checks_policy: false,
+            do_not_enforce_on_create: true,
+            required_status_checks: [
+              { context: "pr-title", integration_id: GITHUB_ACTIONS_APP_ID },
+            ],
+          },
+        },
+      ],
+      bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+    });
+  },
+);
+
+// GitHub fact: a required context without integration_id is satisfied by any app or commit status of that name.
 // loadOverrideLayer enforces the pin for the override alone, so every module layer's required check is judged here.
 test("every required check a fleet layer declares is pinned to the Actions app", () => {
   const everyModule = Object.keys(CONFIG.modules);
@@ -100,6 +132,108 @@ test("every required check a fleet layer declares is pinned to the Actions app",
   expect(checks.map((check) => check.integration_id)).toEqual(
     checks.map(() => GITHUB_ACTIONS_APP_ID),
   );
+});
+
+describe("the managed rulesets", () => {
+  const CODEQL_MODULES = ["bun", "deno", "uv"];
+  const codeQuality = { type: "code_quality", parameters: { severity: "warnings" } };
+  const copilotReview = {
+    type: "copilot_code_review",
+    parameters: { review_on_push: true, review_draft_pull_requests: true },
+  };
+  // The fleet's high-or-critical bar: a non-security warning or a medium security alert never blocks a merge.
+  const codeScanning = {
+    type: "code_scanning",
+    parameters: {
+      code_scanning_tools: [
+        {
+          tool: "CodeQL",
+          security_alerts_threshold: "high_or_higher",
+          alerts_threshold: "errors",
+        },
+      ],
+    },
+  };
+  const mainRuleset = (s: Selection) => rulesets(s).find((r) => r.name === "main");
+
+  // The rulesets these layers emit, whole: GitHub enum values render fine and 422 at apply time, so parameters
+  // are pinned, not types, and a module's own ruleset is pinned entire (its enforcement included: release tags
+  // are immutable because this rule is active, and a disabled one renders and applies fine). The protection
+  // rules live in the override, which merges above.
+  test.each<{
+    reason: string;
+    selection: Selection;
+    names: string[];
+    main: unknown[] | undefined;
+    others?: Record<string, unknown>[];
+  }>([
+    {
+      reason: "a bare public selection: code_quality and the Copilot auto-request alone",
+      selection: selection(),
+      names: ["main"],
+      main: [codeQuality, copilotReview],
+    },
+    {
+      reason: "a private selection declares no ruleset in these layers",
+      selection: selection({ private: true }),
+      names: [],
+      main: undefined,
+    },
+    {
+      reason: "a public toolchain without CodeQL renders no code_scanning",
+      selection: selection({ modules: ["rust"] }),
+      names: ["main"],
+      main: [codeQuality, copilotReview],
+    },
+    ...CODEQL_MODULES.map((module) => ({
+      reason: `a public ${module} repository gets the CodeQL rule with the exact threshold tuple`,
+      selection: selection({ modules: [module] }),
+      names: ["main"],
+      main: [codeQuality, copilotReview, codeScanning],
+    })),
+    ...CODEQL_MODULES.map((module) => ({
+      reason: `a private ${module} repository gets no CodeQL rule`,
+      selection: selection({ modules: [module], private: true }),
+      names: [],
+      main: undefined,
+    })),
+    {
+      reason: "two CodeQL toolchains select the one CodeQL layer, so code_scanning renders once",
+      selection: selection({ modules: ["bun", "uv"] }),
+      names: ["main"],
+      main: [codeQuality, copilotReview, codeScanning],
+    },
+    {
+      reason: "release-please adds the whole release-tags ruleset, active, admins bypassing",
+      selection: selection({ modules: ["release-please"] }),
+      names: ["main", "release-tags"],
+      main: [codeQuality, copilotReview],
+      others: [
+        {
+          name: "release-tags",
+          target: "tag",
+          enforcement: "active",
+          conditions: { ref_name: { include: ["v*"], exclude: [] } },
+          rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "update" }],
+          bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+        },
+      ],
+    },
+  ])("$reason", ({ selection: s, names, main, others }) => {
+    expect(rulesets(s).map((r) => r.name)).toEqual(names);
+    expect(mainRuleset(s)?.rules).toEqual(main);
+    expect(rulesets(s).filter((r) => r.name !== "main")).toEqual(others ?? []);
+  });
+
+  // Cross-file with files.yml's modules block: a toolchain that gains codeql_languages joins the CodeQL layer's
+  // selection, and the rows above must then cover it.
+  test("the CodeQL rows above cover every module declaring codeql_languages", () => {
+    expect(
+      Object.entries(CONFIG.modules)
+        .filter(([, data]) => data.codeql_languages !== undefined)
+        .map(([name]) => name),
+    ).toEqual(CODEQL_MODULES);
+  });
 });
 
 // The render validates the fold of the layers with the overlay, and every
@@ -399,6 +533,59 @@ describe("foldSettings", () => {
   });
 });
 
+// Shipped-tree policy pin: losing any of these silently weakens every managed repository.
+test("the shipped override layer pins the whole protection policy", () => {
+  const shipped = loadOverrideLayer(OVERRIDE);
+  const rulesets = sectionEntries(shipped.doc, "rulesets");
+
+  const main = rulesets.find((r) => r.name === "main");
+  const mainRules = main?.rules as Record<string, unknown>[];
+  // copilot_code_review is deliberately NOT here: it lives in the fleet
+  // PUBLIC visibility overlay.
+  expect(mainRules.map((r) => r.type).sort()).toEqual([
+    "deletion",
+    "non_fast_forward",
+    "pull_request",
+    "required_linear_history",
+    "required_status_checks",
+  ]);
+  // Exactly one required context, all-green, pinned to the Actions app.
+  const checks = mainRules.find((r) => r.type === "required_status_checks")?.parameters;
+  expect(checks).toEqual({
+    strict_required_status_checks_policy: false,
+    do_not_enforce_on_create: true,
+    required_status_checks: [{ context: CHECK_NAME, integration_id: GITHUB_ACTIONS_APP_ID }],
+  });
+  const pr = mainRules.find((r) => r.type === "pull_request")?.parameters as Record<
+    string,
+    unknown
+  >;
+  expect(pr.required_review_thread_resolution).toBe(true);
+  expect(pr.require_code_owner_review).toBe(true);
+  expect(pr.allowed_merge_methods).toEqual(["squash"]);
+  // Admins keep a bypass so direct pushes to main still work.
+  expect(main?.bypass_actors).toEqual([
+    { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" },
+  ]);
+
+  const nonBypassable = rulesets.find((r) => r.name === "non-bypassable");
+  expect(nonBypassable).toBeDefined();
+  const nonBypassableRules = (nonBypassable?.rules ?? []) as Record<string, unknown>[];
+  expect(nonBypassableRules.map((r) => r.type).sort()).toEqual([
+    "deletion",
+    "required_linear_history",
+  ]);
+  // Declared EMPTY on purpose: the empty list is what heals an
+  // out-of-band bypass.
+  expect(nonBypassable?.bypass_actors).toEqual([]);
+
+  const repository = (shipped.doc as Record<string, unknown>).repository as Record<string, unknown>;
+  expect(repository.allow_merge_commit).toBe(false);
+  expect(repository.allow_rebase_merge).toBe(false);
+  expect(repository.allow_squash_merge).toBe(true);
+  expect(repository.squash_merge_commit_title).toBe("PR_TITLE");
+});
+
 test("an override that drops a required check or its Actions pin is refused", () => {
   // Dropping the context un-gates every managed repository at once, and
   // an unpinned entry lets any app satisfy the context by name.
@@ -475,12 +662,42 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   });
 });
 
-// Private repos without Advanced Security 422 on security_and_analysis, so only the public layer carries it.
-test("the private fold carries no security_and_analysis while the public one does", () => {
-  expect(fleetFold(selection())).toHaveProperty("repository.security_and_analysis");
-  expect(fleetFold(selection({ private: true }))).not.toHaveProperty(
-    "repository.security_and_analysis",
-  );
+describe("the managed repository block", () => {
+  // The baseline's repository block. Identity keys (description, topics,
+  // private) are absent on purpose: they live in the overlay, and
+  // an exact block proves the absence.
+  const baselineRepository = {
+    has_issues: true,
+    has_wiki: false,
+    has_projects: false,
+    has_discussions: false,
+    default_branch: "main",
+    delete_branch_on_merge: true,
+    allow_update_branch: true,
+    enable_automated_security_fixes: true,
+  };
+
+  test.each([
+    {
+      reason: "public repos get security_and_analysis on top of the baseline block",
+      selection: selection(),
+      repository: {
+        ...baselineRepository,
+        security_and_analysis: {
+          secret_scanning: { status: "enabled" },
+          secret_scanning_push_protection: { status: "enabled" },
+        },
+      },
+    },
+    {
+      // Private repos without Advanced Security 422 on those keys.
+      reason: "private repos get the baseline block alone",
+      selection: selection({ private: true }),
+      repository: baselineRepository,
+    },
+  ])("$reason", ({ selection: s, repository }) => {
+    expect(fleetFold(s).repository).toEqual(repository);
+  });
 });
 
 describe("the github-pages environment", () => {

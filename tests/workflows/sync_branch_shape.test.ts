@@ -3,7 +3,7 @@
 //                                           takes `labeled` (it would rerun CI and cancel the in-flight run on every label)
 //   a fork's PR carries a read-only token -> the same-repository guard skips at zero minutes instead of failing at the push
 //   the nightly apply deletes undeclared labels -> the label the condition reads must be one the baseline layer declares
-//   the repository token is the only credential -> no `secrets.` anywhere
+//   the repository token is the only credential -> no `secrets.` anywhere, and the grants are the push and the comment
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -16,7 +16,7 @@ const SKELETONS = "files/base/.github/workflows";
 
 interface Workflow {
   on: { pull_request?: { types?: string[] } };
-  jobs: Record<string, { if?: string }>;
+  jobs: Record<string, { if?: string; permissions?: Record<string, string> }>;
 }
 
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
@@ -32,12 +32,16 @@ test("the labeled job gates on the platform's label and a same-repository branch
   };
   const jobs = Object.values(workflow.jobs);
   expect({
+    trigger: workflow.on,
     condition: jobs[0]?.if?.replaceAll(/\s+/g, " ").trim(),
+    jobPermissions: jobs[0]?.permissions,
     secrets: text.match(/secrets\.\w+/g) ?? [],
     skeletonPullRequestTypes: skeleton.on.pull_request?.types,
     declaredLabels: baseline.labels.filter((label) => label.name === SYNC_LABEL).length,
   }).toEqual({
+    trigger: { pull_request: { types: ["labeled"] } },
     condition: `github.event.label.name == '${SYNC_LABEL}' && github.event.pull_request.head.repo.full_name == github.repository`,
+    jobPermissions: { contents: "write", "pull-requests": "write" },
     secrets: [],
     skeletonPullRequestTypes: undefined,
     declaredLabels: 1,
