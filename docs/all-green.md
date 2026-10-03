@@ -143,7 +143,7 @@ It calls reusable-site.yml by local path; the reusable plans the site configurat
 
 - The leg is ordered behind `move-stable` for its base and never stands down on the mover's word: a newer commit's run reads from its own base, exclusive, which can be this very commit, so only this commit's run is sure to read it.
 
-- After a failed sync, re-run the FAILED jobs: the mover's `previous` output survives, so the whole range syncs. A re-run of every job finds the tag already moved and reads the judged commit alone, so an older commit's opt-in in that range waits for the weekly cron or a hand dispatch.
+- After a failed sync, re-run the FAILED jobs: the mover's `previous` output survives, so the whole range syncs. A re-run of every job finds the tag already moved and reads the original push's range alone, from its `before` to the judged commit, so an opt-in merged before that push waits for the weekly cron or a hand dispatch.
 
 - The labels are [below](#opting-a-pr-into-an-immediate-fleet-sync).
 
@@ -194,8 +194,10 @@ checks + ci -> all-green -> post-green (repo-owned hook) -> release -> update-re
                                                                   \-> update-release-pr (hook)
 ```
 
-**The legs after the hook are STATIC:** every managed ci.yml carries the same `release`, `update-release`, `publish-release`, `update-release-pr`, and `site` jobs, present in every run, and each skips where its module is not selected. `release` and `site` gate themselves on fleet-ci's `modules` output (`contains(needs.ci.outputs.modules, '"release-please"')`: a substring test on the compact JSON array, hence the quoted name); the release hooks gate on the `release` job's outputs.
+**The legs after the hook are STATIC:** every managed ci.yml carries the same `release`, `update-release`, `publish-release`, `update-release-pr`, and `site` jobs, present in every run, and each skips where its module is not selected.
 
+- **`release` and `site` gate on fleet-ci's `modules` output,** each naming its own module: `contains(needs.ci.outputs.modules, '"release-please"')` and `contains(needs.ci.outputs.modules, '"site"')`, a substring test on the compact JSON array, hence the quoted name.
+- **The release hooks** gate on the `release` job's outputs.
 - A job reads outputs only from its direct dependencies, so `ci` sits in the needs list of `release` and `site`.
 - Adding a module needs no change to ci.yml ([changing the module selection](new-repo.md#changing-the-module-selection)).
 
@@ -283,7 +285,7 @@ The tag's previous commit is a durable base: the range from it covers every comm
 The opt-in waits for the weekly sync cron (or a hand dispatch) when:
 
 - no later green run reaches post-green before it
-- a run whose tag did not move (a re-run of every job after a failed sync included) reads from the push's own `before` alone
+- the opt-in was merged before a push whose run's tag did not move (a re-run of every job after a failed sync included), since that run reads from the push's own `before` alone
 - the leg went red on the commit's own run and a later mover moved the tag past it
 
 #### The default label: fleet-sync-default.yml
