@@ -5,6 +5,7 @@
 # A lint exception is `#[expect(lint, reason = "...")]`: it says why, and it fails once the lint no longer fires there.
 
 [workspace]
+# Cargo 1.84 or newer: nothing older parses resolver 3, and `#[expect(.., reason)]` below needs 1.81.
 resolver = "3"
 members = []
 

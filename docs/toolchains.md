@@ -52,7 +52,7 @@ To run one repo on a different version, override in a repo-owned workflow and le
 |---|---|
 | bun | pass the explicit version input (`bun-version:` on setup-bun), which the action prefers over its version-file input |
 | deno | setup-deno resolves the other way around (a non-empty `deno-version-file` wins over `deno-version`), so replace or remove the `deno-version-file:` line instead |
-| rust | commit a `rust-toolchain.toml` naming the channel (and components); the setup action in the three rust blocks installs it, with no dotfile to leave alone |
+| rust | commit a `rust-toolchain.toml` naming the channel (1.84 or newer, [rust.md](rust.md#the-floor)) and components; the setup action in the three rust blocks installs it, with no dotfile to leave alone |
 
 Rules that follow:
 
