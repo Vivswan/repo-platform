@@ -10,12 +10,12 @@ Conventions every managed repository follows, whether the file is managed by syn
 | Guideline | Enforced by |
 |---|---|
 | [Sticky PR comments](#sticky-pr-comments) | review |
-| [Pinned actions](#pinned-actions) | pinact in repo-platform's `actionlint` job and `tests/workflows/delivery_pins.test.ts` (landing); zizmor `unpinned-uses` and `impostor-commit` in every fleet push and PR run; Dependabot bumps the pins |
-| [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` job; the settings override layer (squash-only) |
-| [Plain ASCII punctuation](#plain-ascii-punctuation) | check-typography |
-| [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); `deno fmt --prose-wrap preserve` (deno repos); review elsewhere |
-| [Managed vs repo-owned files](#managed-vs-repo-owned-files) | validate-managed-files; the writer's starter rule |
-| [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; validate-managed-files |
+| [Pinned actions](#pinned-actions) | pinact and `tests/workflows/delivery_pins.test.ts` in repo-platform (landing); zizmor in every fleet push and PR run; Dependabot bumps the pins |
+| [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` step; the settings override layer (squash-only) |
+| [Plain ASCII punctuation](#plain-ascii-punctuation) | the `typography` step |
+| [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
+| [Managed vs repo-owned files](#managed-vs-repo-owned-files) | the managed files check; the writer's starter rule |
+| [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
@@ -25,6 +25,8 @@ Conventions every managed repository follows, whether the file is managed by syn
 ## Sticky PR comments
 
 **Rule:** a workflow that comments on a PR uses `marocchino/sticky-pull-request-comment`, pinned by full sha with the version tag in a trailing comment, `header: <repo>/<workflow-stem>`, upserting in place, and never swallowing a failure (no `continue-on-error`, no `|| true`).
+
+**The one exception:** composite actions alone may set `continue-on-error` on the step. They post under the calling job's token, which a fork PR grants no write, so their comment is a convenience sink beside the step summary.
 
 **Why:** one comment per workflow that edits itself on later runs, instead of a new comment per run.
 
@@ -37,41 +39,44 @@ Conventions every managed repository follows, whether the file is managed by syn
     message: ...
 ```
 
-**Enforced by:** review. Composite actions alone may set `continue-on-error` on the step: they post under the calling job's token, which a fork PR grants no write, so their comment is a convenience sink beside the step summary.
+**Enforced by:** review.
 
 ## Pinned actions
 
-**Rule:** every action outside this repository, the owner's other repositories included, is pinned by full commit sha with the release tag in a trailing comment, `uses: actions/checkout@<40-hex sha> # v7.0.1`, and the same action carries the same sha everywhere repo-platform ships it.
+**Rule:** every action outside this repository, the owner's other repositories included, is pinned by full commit sha with the release tag in a trailing comment, `uses: actions/checkout@<40-hex sha> # v7.0.1`. The same action carries the same sha everywhere repo-platform ships it.
 
-**Why:** a moving tag lets upstream change what the fleet runs without a PR anywhere; the sha freezes the code, the comment keeps the version readable, and Dependabot bumps both together.
+**Why:** a moving tag lets upstream change what the fleet runs without a PR anywhere. The sha freezes the code, the comment keeps the version readable, and Dependabot bumps both together.
 
 **Exceptions:**
 
-- `Vivswan/repo-platform/...@stable` references stay on the moving `stable` tag on purpose. It is the green-gated delivery channel ([build-provenance](build-provenance.md)), so a pinned sha there would freeze the fleet on one green commit.
+- **The platform's own channel:** `Vivswan/repo-platform/...@stable` references stay on the moving `stable` tag on purpose. It is the green-gated delivery channel ([build-provenance](build-provenance.md)), so a pinned sha there would freeze the fleet on one green commit.
 
-- An action that publishes no version tags is pinned to a branch commit with the branch in the comment, `uses: <owner>/<action>@<40-hex sha> # main`, the sha alone naming the version. [.github/pinact.yaml](../.github/pinact.yaml) skips each such action at a full sha only; the same action at a moving ref is judged like any other.
+- **An action that publishes no version tags** is pinned to a branch commit with the branch in the comment, `uses: <owner>/<action>@<40-hex sha> # main`, the sha alone naming the version. [.github/pinact.yaml](../.github/pinact.yaml) skips each such action at a full sha only; the same action at a moving ref is judged like any other. Today that is `Vivswan/skills`, whose validate-skills action repo-platform's own ci.yml runs on its skills catalog.
 
-- Today that is `Vivswan/skills`, whose validate-skills action repo-platform's own ci.yml runs on its skills catalog; [tests/workflows/ci_shape.test.ts](../tests/workflows/ci_shape.test.ts) holds its lines to one sha and the branch comment, which pinact reads as no comment.
+- **How `Vivswan/skills` is held:** [tests/workflows/ci_shape.test.ts](../tests/workflows/ci_shape.test.ts) holds its lines to one sha and the branch comment, which pinact reads as no comment.
 
 **Enforced by, in repo-platform (landing):** [pinact](https://github.com/suzuki-shunsuke/pinact) `run -check -verify-comment` in ci.yml's `actionlint` job, over this checkout and the two fleet trees the writer lands from `files/`.
 
-- Every third-party ref is a full sha, every sha carries a version comment (pinact code 005), and GitHub resolves that comment's tag to that very sha (code 001), so a dangling sha, a dangling tag, and a stale comment all fail before the fleet receives them.
+- **What pinact refuses:** a third-party ref that is not a full sha, a sha without a version comment (pinact code 005), and a comment whose tag GitHub does not resolve to that very sha (code 001). So a dangling sha, a dangling tag, and a stale comment all fail before the fleet receives them.
 
-- [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) refuses a numeric comment pinact reads as a version but does not verify (`# v7`, `# v7.0`, `# v7-beta`): such a line passes pinact unverified, sha included.
+- **What the delivery pins test refuses:** [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) refuses a numeric comment pinact reads as a version but does not verify (`# v7`, `# v7.0`, `# v7-beta`). Such a line passes pinact unverified, sha included.
 
-**Enforced by, in every managed repository:** [actions/zizmor](../actions/zizmor/action.yml) under the fleet policy, `unpinned-uses` (hash-pin for everything but the platform's own actions, so a `@main` platform ref passes here where pinact refuses it) and the online `impostor-commit` (a sha outside the named repository's own history).
+**Enforced by, in every managed repository:** [actions/zizmor](../actions/zizmor/action.yml) under the fleet policy.
+
+- **`unpinned-uses`:** hash-pin for everything but the platform's own actions, so a `@main` platform ref passes here where pinact refuses it.
+- **The online `impostor-commit`:** a sha outside the named repository's own history.
 
 **Not judged, on purpose:**
 
-- One sha per action repo-wide is Dependabot's doing, not a check's, since its one grouped `github-actions` bump PR ([dependabot.yml](../.github/dependabot.yml)) moves every site at once.
+- **One sha per action repo-wide** is Dependabot's doing, not a check's, since its one grouped `github-actions` bump PR ([dependabot.yml](../.github/dependabot.yml)) moves every site at once.
 
-- A commented example pin (the toolchain blocks of the managed `checks.yml`) never executes, so pinact does not read it (the delivery pins test still reads its comment shape, so an example spells the full version too).
+- **A commented example pin** (the toolchain blocks of the managed `checks.yml`) never executes, so pinact does not read it. The delivery pins test still reads its comment shape, so an example spells the full version too.
 
-- The sync writer's `files/` sources are outside Dependabot's reach and nothing compares them with the bumped pins, so a bump PR here updates them by hand, commented examples included; the fleet receives them through the next sync.
+- **The sync writer's `files/` sources** are outside Dependabot's reach and nothing compares them with the bumped pins. So a bump PR here updates them by hand, commented examples included; the fleet receives them through the next sync.
 
 ## Conventional Commits, squash-merged
 
-**Rule:** PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/) as [commitlint](https://commitlint.js.org/)'s config-conventional judges them, with one scope per subject; PRs squash-merge, so the PR title becomes the commit subject.
+**Rule:** PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/) as [commitlint](https://commitlint.js.org/)'s config-conventional judges them, with one scope per subject. PRs squash-merge, so the PR title becomes the commit subject.
 
 **Refused:**
 
@@ -79,13 +84,17 @@ Conventions every managed repository follows, whether the file is managed by syn
 - a Sentence-case description (`fix: Repair installer`)
 - a trailing period
 
-Merge, revert, reapply, fixup, squash, amend, and bare version-number subjects are exempt (commitlint's default ignores, applied to the subject line); no line has a length cap.
+**Exempt:** merge, revert, reapply, fixup, squash, amend, and bare version-number subjects (commitlint's default ignores, applied to the subject line). No line has a length cap.
 
 **Why:** release-please derives versions and changelogs from the subjects.
 
 **How:** `fix(sync): ...`, `feat(writer)!: ...`, `docs: ...`.
 
-**Enforced by:** one judge, actions/validate-commit-names, run as the [`pr-title` check](settings.md#the-pr-title-ruleset) on the PR title (pr-title module) and as the `commit-names` job on the commit subjects; squash-only merging with the PR title as subject is the [settings override layer](settings.md), applied to every managed repository.
+**Enforced by:** one judge, actions/validate-commit-names.
+
+- **On the PR title:** the [`pr-title` check](settings.md#the-pr-title-ruleset) (pr-title module).
+- **On the commit subjects:** the `commit-names` step of fleet-ci.yml's `standard-checks` job (in repo-platform's own ci.yml, a `commit-names` job).
+- **Squash-only merging with the PR title as subject:** the [settings override layer](settings.md), applied to every managed repository.
 
 ## Plain ASCII punctuation
 
@@ -95,7 +104,7 @@ Merge, revert, reapply, fixup, squash, amend, and bare version-number subjects a
 
 **How:** `"..."`, `'...'`, `-`; a file that must carry non-ASCII goes in `.typography-allow.local`.
 
-**Enforced by:** check-typography.
+**Enforced by:** the `typography` step of `standard-checks` ([actions/check-typography](../actions/check-typography/action.yml)).
 
 ## Markdown prose is never hard-wrapped
 
@@ -105,40 +114,49 @@ Merge, revert, reapply, fixup, squash, amend, and bare version-number subjects a
 
 **How:** write the paragraph on one line and let the viewer wrap it.
 
-**Enforced by:** `bun run wrap:check` in repo-platform; `deno fmt --prose-wrap preserve` in deno repos; review elsewhere.
+**Enforced by:** `bun run wrap:check` in repo-platform; review elsewhere.
+
+- **Deno repos:** the auto-format starter runs `deno fmt --prose-wrap preserve`, which keeps a paragraph's existing line breaks. It adds no wraps but removes none, so it does not enforce the rule.
 
 ## Managed vs repo-owned files
 
-**Rule:** a file whose header says `This file is managed by <owner>/repo-platform.` changes only through sync PRs, and so does the rendered `.github/settings.yml` (its header says `Generated by repo-platform - do not edit.`); a repo-owned starter (`checks.yml`, `post-green.yml`, `.github/settings.local.yml`, ...) is written once and never overwritten.
+**Rule:** a file whose header says `This file is managed by <owner>/repo-platform.` changes only through sync PRs, and so does the rendered `.github/settings.yml` (its header says `Generated by repo-platform - do not edit.`). A repo-owned starter (`checks.yml`, `post-green.yml`, `.github/settings.local.yml`, ...) is written once and never overwritten.
 
 **Why:** an edit to a managed file is overwritten by the next sync PR, so the change belongs in repo-platform.
 
 **How:** change the source under `files/` in repo-platform; the starters are the `class: starter` entries of its [files.yml](../files.yml).
 
-**Enforced by:** validate-managed-files (byte to byte against the recorded commit's write) for managed files; the writer for the starters (written only when the path is absent, never touched again).
+**Enforced by:**
+
+- **Managed files:** the managed files check ([actions/validate-managed-files](../actions/validate-managed-files/action.yml)), byte to byte against the recorded commit's write.
+- **Starters:** the writer, which writes one only when the path is absent and never touches it again ([sync.md](sync.md#classes)).
 
 ## Split files: the managed region
 
-**Rule:** a split file (`.gitignore`, `.github/CODEOWNERS`, `AGENTS.md`, ...) is optional repo-owned content above a BEGIN marker line, managed content, an END marker line, and optional repo-owned content below; the ownership manifest declares the markers per file. Repo-owned content goes outside the region; inside it, the content stays exactly as rendered.
+**Rule:** a split file (`.gitignore`, `.github/CODEOWNERS`, `AGENTS.md`, ...) is optional repo-owned content above a BEGIN marker line, managed content, an END marker line, and optional repo-owned content below. The ownership manifest declares the markers per file. Repo-owned content goes outside the region; inside it, the content stays exactly as rendered.
 
-**Why:** the sync rewrites every split file structurally instead of merging it: the fresh managed region, the repository's own sides byte-for-byte around it. A platform retraction can never eat a local side and a local side can never resurrect retracted managed lines, but an edit INSIDE the region is replaced on every sync, reported as a replaced local edit with its diff, and the PR is held for review.
+**Why:** the sync rewrites every split file structurally instead of merging it: the fresh managed region, the repository's own sides byte-for-byte around it. A platform retraction can never eat a local side, and a local side can never resurrect retracted managed lines.
+
+**The cost of an edit INSIDE the region:** it is replaced on every sync, reported as a replaced local edit with its diff, and the PR is held for review.
 
 **How:** put local content above the BEGIN marker or below the END marker.
 
-- A file that never mentions the markers gets the region placed above its content and the PR held for review (`region added`).
-- Marker text duplicated or buried mid-line fails the run, so nothing is dropped silently. Marker text must appear exactly once per marker in the file.
+- **A file that never mentions the markers** gets the region placed above its content and the PR held for review (`region added`).
+- **Marker text duplicated or buried mid-line** fails the run, so nothing is dropped silently. Marker text must appear exactly once per marker in the file.
 
-**Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [sync.md](sync.md#classes)); validate-managed-files on the region.
+**Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [sync.md](sync.md#classes)); the managed files check on the region.
 
 ## Copilot review comments are advisory
 
-**Rule:** Copilot code review comments only on a defect it can demonstrate in the diff; its comments are advisory, so rejecting one is a valid outcome: reply with the reason, then resolve the thread.
+**Rule:** Copilot code review comments only on a defect it can demonstrate in the diff. Its comments are advisory, so rejecting one is a valid outcome: reply with the reason, then resolve the thread.
 
 **Why:** speculative hardening and unenforced style opinions cost review time without catching a bug.
 
-**How:** the rules Copilot reads are the managed `.github/instructions/review.instructions.md` (source: `files/base/.github/instructions/review.instructions.md` in repo-platform). Rejecting a comment is reply then resolve (the UI's "Resolve conversation", or GraphQL `resolveReviewThread`): the managed `main` ruleset sets `required_review_thread_resolution`, so an unresolved thread blocks the merge whatever the reply says.
+**How:** the rules Copilot reads are the managed `.github/instructions/review.instructions.md` (source: `files/base/.github/instructions/review.instructions.md` in repo-platform).
 
-**Enforced by:** that file for what earns a comment (written to every repository); advisory because the `main` ruleset requests the review and no ruleset requires Copilot's approval.
+**Resolving the thread** is the UI's "Resolve conversation", or GraphQL `resolveReviewThread`. It is required: the managed `main` ruleset sets `required_review_thread_resolution`, so an unresolved thread blocks the merge whatever the reply says.
+
+**Enforced by:** that file for what earns a comment (written to every repository). The comments are advisory by the settings layers ([Copilot code review](settings.md#copilot-code-review)).
 
 ## No backwards-compatibility code
 
@@ -148,29 +166,29 @@ Merge, revert, reapply, fixup, squash, amend, and bare version-number subjects a
 
 **How:** replace the shape in one PR and say so in the PR body.
 
-- A file the platform stops writing leaves `files.yml`, and every target's next sync retires the recorded file ([sync.md](sync.md#retirement)).
-- A transition the sync cannot carry by itself is one rung in `migrations/`, the only home for transitional code.
+- **A file the platform stops writing** leaves `files.yml`, and every target's next sync retires the recorded file ([sync.md](sync.md#retirement)).
+- **A transition the sync cannot carry by itself** is one rung in `migrations/`, the only home for transitional code.
 
 **Enforced by:** review.
 
 ## Short comments
 
-**Rule:** a comment says what the code cannot show, in one to three lines; a comment block over 10 lines, or a file header comment over 25, is a warning.
+**Rule:** a comment says what the code cannot show, in one to three lines. A comment block or file header past its warn cap ([the caps table](#file-size-caps)) is a warning.
 
 **Why:** a comment grown into a paragraph is narration (delete it) or a workaround defense (fix the code); the code is the single source of truth.
 
-**How:** cut the comment to its constraint. A block that must stay long (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone; the reason is mandatory, and a bare marker warns.
+**How:** cut the comment to its constraint.
+
+**A block that must stay long** (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone. The reason is mandatory: a bare marker exempts nothing and warns itself.
 
 **Enforced by:** the comment caps of the `file-size` step ([file size caps](#file-size-caps)), warn only, never a failure.
 
-- Comment lines are what the file's tree-sitter grammar tokenizes as comments (a string holding `//` is a string, an unterminated `/*` is a syntax error).
-- A file whose extension has no working grammar is named as unjudged in the step summary instead of being guessed at.
+- **What counts as a comment line:** what the file's tree-sitter grammar tokenizes as comments (a string holding `//` is a string, an unterminated `/*` is a syntax error).
+- **A file whose extension has no working grammar** is unjudged ([file size caps](#file-size-caps)).
 
 ## File size caps
 
-**Rule:** no file over its hard line cap, and in a source, test, workflow, or shell file no line over 256 code points, comment lines included (a `//` line past the cap is a width finding whatever block it sits in). A comment block over 10 lines, or a file header comment over 25, warns.
-
-**What the width cap reads:** every line. It leaves alone only a generated region, an unbreakable one-token line, and (warn tier only) a line that is one string, template, or regex literal, each spelled out under exempt by construction below.
+**Rule:** no file over its hard line cap, and in a source, test, workflow, or shell file no line over 256 code points, comment lines included. A `//` line past the cap is a width finding whatever block it sits in.
 
 The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size.ts):
 
@@ -182,25 +200,27 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | shell | `.sh`, `.bash`, `.zsh` | 1000 lines | 800 lines |
 | markdown | `.md` | 1300 lines | 1040 lines |
 | line width | every kind but markdown (one source line per paragraph is the fleet rule) | 256 code points | 150 code points |
-| comment block | a run of lines holding nothing but comment tokens as the file's grammar tokenizes them (a multi-line comment counts every line between its delimiters; a string or here-doc holding comment syntax is code); a blank line or a code line ends the run, a line with code on it is code (an inline comment after it is not a block), and markdown is prose | never fails | 10 lines; 25 for the file header (the first block, when nothing but a shebang, blank lines, or a generated region precedes it) |
+| comment block | a run of comment-only lines (below; markdown is prose) | never fails | 10 lines; 25 for the file header |
 
-**Why:** a file past these sizes is several files wearing one name; a line past the width is unreadable in any review pane; a comment past its cap is narration or a workaround defense, and the code is the source of truth. The caps are generous on purpose: they catch drift, not style.
+- **A comment block** is a run of lines holding nothing but comment tokens as the file's grammar tokenizes them. A multi-line comment counts every line between its delimiters, and a string or here-doc holding comment syntax is code.
+- **What ends a block:** a blank line or a code line. A line with code on it is code, so an inline comment after it is not a block.
+- **The file header** is the first block, when nothing but a shebang, blank lines, or a generated region precedes it.
+
+**Why:** a file past these sizes is several files wearing one name, and a line past the width is unreadable in any review pane. A comment past its cap is narration or a workaround defense ([short comments](#short-comments)). The caps are generous on purpose: they catch drift, not style.
 
 **Exempt by construction:**
 
-- lockfiles, json, and non-workflow yaml (no kind); anything under `node_modules/`, `vendor/`, `third_party/`, `goldens/`, or `__snapshots__/`
+- **No kind:** lockfiles, json, and non-workflow yaml; anything under `node_modules/`, `vendor/`, `third_party/`, `goldens/`, or `__snapshots__/`.
 
-- a file whose first ten lines carry a comment declaring it generated (`generated by X`, `do not edit`; a comment that merely names a generator is not a declaration), and the lines inside a `BEGIN GENERATED`/`END GENERATED` region
+- **Generated:** a file whose first ten lines carry a comment declaring it generated (`generated by X`, `do not edit`; a comment that merely names a generator is not a declaration), and the lines inside a `BEGIN GENERATED`/`END GENERATED` region.
 
-- a file carrying repo-platform's managed header (the repository cannot fix it; the summary counts them)
+- **Managed:** a file carrying repo-platform's managed header (the repository cannot fix it; the summary counts them).
 
-- a line that is one whitespace-free token (a URL, a sha, an expression): unbreakable, so it passes both width tiers; a literal assigned on the same line is two tokens and does not
+- **One token:** a line that is one whitespace-free token (a URL, a sha, an expression) is unbreakable, so it passes both width tiers. A literal assigned on the same line is two tokens and does not.
 
-- a line that is one string, template, or regex literal with nothing but punctuation and keywords beside it (assigned, returned, keyed, a sole argument, a line inside a multi-line literal): passes the warn width tier only, since wrapping it means splitting the literal
+- **One literal:** a line that is one string, template, or regex literal with nothing but punctuation and keywords beside it (assigned, returned, keyed, a sole argument, a line inside a multi-line literal) passes the warn width tier only, since wrapping it means splitting the literal.
 
-**How:** split the file, wrap the line, shorten the comment. Two per-finding bypasses exist, both repo-owned and visible in the diff:
-
-- **A comment block that must stay long** (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone. A bare marker exempts nothing and warns itself.
+**How:** split the file, wrap the line, shorten the comment. Two per-finding bypasses exist, both repo-owned and visible in the diff: the comment block's marker ([short comments](#short-comments)) and the allowlist.
 
 - **A file that must stay large** goes in `.file-size-allow.local`, one `path # reason` per line (blank lines and `#` comment lines are skipped), which exempts every finding on that path in both tiers.
 
@@ -210,13 +230,13 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **Packaging:** a repository that packages from its root (an npm package with no `files` field, for one) lists the allowlist in its packaging ignore file (`.npmignore`), or it ships as content.
 
-**Enforced by:** the `file-size` step of fleet-ci.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)), which parses every judged file with web-tree-sitter and prebuilt wasm grammars for TypeScript, JavaScript, Python, Rust, Go, Kotlin, Java, C, C++, shell, and yaml.
+**Enforced by:** the `file-size` step of fleet-ci.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It parses every judged file with web-tree-sitter and prebuilt wasm grammars for TypeScript, JavaScript, Python, Rust, Go, Kotlin, Java, C, C++, shell, and yaml.
 
-- An extension without a working grammar (today Swift, whose prebuilt grammar keeps scanner state across files) gets no comment judgement and no literal exemption, and the step summary names it as unjudged.
+- **An extension without a working grammar** (today Swift, whose prebuilt grammar keeps scanner state across files) gets no comment judgement and no literal exemption, and the step summary names it as unjudged instead of guessing at it.
 
-- A hard-cap finding or an allowlist defect fails the step, and the judge fails the `standard-checks` job naming it (repo-platform's own ci.yml runs the same action as its standalone `file-size` job).
+- **What fails:** a hard-cap finding or an allowlist defect fails the step, and the judge fails the `standard-checks` job naming it. repo-platform's own ci.yml runs the same action as its standalone `file-size` job.
 
-- The step summary is written on every outcome (findings, clean, or an error that stopped the check), findings also go to the log annotations, and on pull requests to one sticky PR comment, deleted when the tree is clean.
+- **Where findings go:** the step summary is written on every outcome (findings, clean, or an error that stopped the check). Findings also go to the log annotations, and on pull requests to one sticky PR comment, deleted when the tree is clean.
 
 ## How to bypass a check
 
@@ -226,35 +246,41 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 **How:** the table below, one row per check fleet-ci.yml runs. zizmor runs the fleet policy alone; knip runs on its own defaults, which the repo-owned `knip.json` overrides where it sets a key; `_typos.toml` extends the fleet allowlist.
 
-**What knip finds on its own:** package.json `main`, `bin`, and scripts; the scripts that workflow `run:` steps and `.github/**/action.yml` files invoke; what its plugins read (a bunfig `preload`); `index`, `cli`, and `main` at the root or under `src/`.
-
-**What a repo-owned `knip.json` names,** under `entry` and `ignoreBinaries`, is what knip would otherwise report as unused files and unlisted binaries:
-
-- entrypoints anywhere else: tests run by name through a launcher script, git hooks, scripts run by path, composite actions outside `.github/`
-- package.json scripts that run a tool CI installs itself
-- a configured `entry` list replaces knip's default `index`, `cli`, and `main` patterns rather than extending them, so a repo that keeps one of those repeats it
-
 | Check | Where it runs | Blocks on | Bypass |
 |---|---|---|---|
 | actionlint | standard-checks | any finding | a `# shellcheck disable=SCnnnn` comment on the line above the command (shellcheck findings); the repo-owned `.github/actionlint.yaml` for the rest |
 | yamllint | standard-checks | any finding (strict) | a `# yamllint disable-line rule:<name>` comment on the line (`.yamllint` itself is managed) |
 | gitleaks | standard-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
 | typography | standard-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
-| file-size | standard-checks | a hard-cap finding or an allowlist defect | the path in the repo-owned `.file-size-allow.local` with a `# reason` (every finding on that path); a `comment-cap: ignore <reason>` line inside or above a comment block ([file size caps](#file-size-caps)) |
+| file-size | standard-checks | a hard-cap finding or an allowlist defect | the path in the repo-owned `.file-size-allow.local` with a `# reason`; the comment block's marker ([file size caps](#file-size-caps)) |
 | commit-names | standard-checks | a subject commitlint refuses under config-conventional plus one scope ([the grammar](#conventional-commits-squash-merged)) | none: reword the commit |
-| typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (or `typos.toml`, `.typos.toml`), which typos layers under the fleet config: `[default.extend-words]` for the repository's vocabulary, `[files] extend-exclude` for fixture paths spelled wrong on purpose, `[default.extend-identifiers]` for one identifier; or `# typos: ignore` or `// typos: ignore` at the end of the line for a one-off |
-| zizmor | standard-checks | a high finding (zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt runs once more and only the retry's result counts); code scanning shows high findings only | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it |
+| typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (keys below), or a trailing `typos: ignore` comment for a one-off |
+| zizmor | standard-checks | a high finding (retry rule below); code scanning shows high findings only | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it |
 | knip | standard-checks (bun repos with a package.json to install from; a repo without one stands down with a notice) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
-| semgrep | semgrep (public repos) | an ERROR finding, a fatal analysis error, or a scan that did not complete (its exit status is named); the scan runs at `--severity ERROR`, so code scanning shows ERROR findings only | a `// nosemgrep: <rule-id>` comment (`# nosemgrep: <rule-id>` in YAML) on the finding's line or the line above it, with the reason beside it; the rule set, the excluded rules, and what the upload drops are in [security-scans.md](security-scans.md#semgrep) |
+| semgrep | semgrep (public repos) | an ERROR finding, a fatal analysis error, or a scan that did not complete (its exit status is named) | a `// nosemgrep: <rule-id>` comment (`# nosemgrep: <rule-id>` in YAML) on the finding's line or the line above it, with the reason beside it ([security-scans.md](security-scans.md#semgrep)) |
 | dependency-review | dependency-review | a vulnerable dependency at or above high | none: upgrade or drop the dependency |
 | deno audit | deno-audit.yml (deno repos; pull requests and main pushes touching deno.lock, plus a weekly run) | a high or critical advisory (`--level high`), a lockfile out of date with its manifest (`--frozen`), or no tracked `deno.lock` at all | none: upgrade or drop the dependency, or commit the lockfile |
-| Trivy | standard-checks (every event but the schedule; `trivy-nightly` on the schedule, public repositories only, reports without blocking) | a HIGH or CRITICAL vulnerability with a fix available, or any HIGH or CRITICAL misconfiguration; both scans run at HIGH and CRITICAL, so a MEDIUM or LOW finding appears nowhere | an entry in the repo-owned `.trivyignore.yaml` carrying a `statement` and an `expired_at` date ([security-scans.md](security-scans.md#bypassing-a-finding-trivyignoreyaml)); the plain `.trivyignore` is refused |
-| CodeQL | codeql | nothing in the job; the `main` ruleset's `code_scanning` rule blocks the merge on an error-severity alert or a high-or-critical security alert ([settings.md](settings.md)) | a code scanning dismissal with a reason |
+| Trivy | standard-checks on every event but the schedule (the schedule split below) | a HIGH or CRITICAL vulnerability with a fix available, or any HIGH or CRITICAL misconfiguration | an entry in the repo-owned `.trivyignore.yaml` carrying a `statement` and an `expired_at` date ([security-scans.md](security-scans.md#bypassing-a-finding-trivyignoreyaml)); the plain `.trivyignore` is refused |
+| CodeQL | codeql | nothing in the job; the `main` ruleset's `code_scanning` rule blocks the merge at the fleet's alert bar ([settings.md](settings.md#what-the-baseline-contains)) | a code scanning dismissal with a reason |
 
-**What the fleet configs settle before a repository's bypass applies:**
+- **typos config files:** the repo-owned file may be `_typos.toml`, `typos.toml`, or `.typos.toml`, which typos layers under the fleet config. `[default.extend-words]` holds the repository's vocabulary, `[files] extend-exclude` fixture paths spelled wrong on purpose, and `[default.extend-identifiers]` one identifier.
 
-- **typos** ignores hex digests and a line ending in `typos: ignore`, and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file; a spelling variant a repository keeps goes in its own `_typos.toml`.
+- **The typos one-off:** `# typos: ignore` or `// typos: ignore` at the end of the line.
 
-- **semgrep** runs the registry's `p/default` rule set at ERROR severity with one rule excluded, permanently; WARNING and INFO rules do not run, so their findings appear nowhere, and what to mark on an ERROR finding is the repository's own call ([security-scans.md](security-scans.md#semgrep)).
+- **zizmor's retry:** zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt runs once more and only the retry's result counts.
+
+- **semgrep's fleet config:** the registry's `p/default` rule set at `--severity ERROR` with one rule excluded, permanently, so code scanning shows ERROR findings only. WARNING and INFO rules do not run, so their findings appear nowhere; what to mark on an ERROR finding is the repository's own call. The rule set, the excluded rules, and what the upload drops are in [security-scans.md](security-scans.md#semgrep).
+
+- **Trivy on the schedule:** `trivy-nightly` runs instead, public repositories only, and reports without blocking. Both scans run at HIGH and CRITICAL, so a MEDIUM or LOW finding appears nowhere.
+
+**What knip finds on its own:** package.json `main`, `bin`, and scripts; the scripts that workflow `run:` steps and `.github/**/action.yml` files invoke; what its plugins read (a bunfig `preload`); `index`, `cli`, and `main` at the root or under `src/`.
+
+**What a repo-owned `knip.json` names,** under `entry` and `ignoreBinaries`, is what knip would otherwise report as unused files and unlisted binaries:
+
+- **Entrypoints anywhere else:** tests run by name through a launcher script, git hooks, scripts run by path, composite actions outside `.github/`.
+- **Package.json scripts** that run a tool CI installs itself.
+- **A configured `entry` list replaces** knip's default `index`, `cli`, and `main` patterns rather than extending them, so a repo that keeps one of those repeats it.
+
+**What the typos fleet config settles before a repository's bypass applies:** it ignores hex digests and the one-off marker above, and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file; a spelling variant a repository keeps goes in its own `_typos.toml`.
 
 **Enforced by:** review of the diff that carries the bypass; the sync overwrites a managed file, so a bypass in one is lost on the next sync PR.

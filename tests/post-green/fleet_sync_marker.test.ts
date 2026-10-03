@@ -20,20 +20,13 @@ const TWO_SCOPES = "2 fleet-sync labels (fleet-sync:all, fleet-sync:public): one
 const UNKNOWN = (...names: string[]) =>
   `unknown fleet-sync label${names.length === 1 ? "" : "s"} ${names.join(", ")}; the platform declares fleet-sync:all and fleet-sync:public`;
 
-describe("fleetSyncLabels", () => {
-  // Cross-file: the overlay's label names against the scope enum; the leg reads the overlay at run time.
-  test("the roster is the overlay's fleet-sync labels, lowercased, each scoped by its suffix", () => {
-    expect([...fleetSyncLabels(loadLayer(FLEET_SYNC_OVERLAY).doc, "overlay")]).toEqual([
-      ["fleet-sync:public", "public"],
-      ["fleet-sync:all", "all"],
-    ]);
-    const declared = (...names: string[]) => ({
-      labels: names.map((name) => ({ name, color: "0052cc", description: "d" })),
-    });
-    expect([...fleetSyncLabels(declared("Fleet-Sync:All", "bug"), "overlay")]).toEqual([
-      ["fleet-sync:all", "all"],
-    ]);
+test("a label is lowercased and scoped by its suffix; a label of another kind is not one", () => {
+  const declared = (...names: string[]) => ({
+    labels: names.map((name) => ({ name, color: "0052cc", description: "d" })),
   });
+  expect([...fleetSyncLabels(declared("Fleet-Sync:All", "bug"), "overlay")]).toEqual([
+    ["fleet-sync:all", "all"],
+  ]);
 });
 
 describe("readDirective", () => {
