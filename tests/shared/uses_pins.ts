@@ -8,7 +8,8 @@ export interface Pin {
   version: string | null;
 }
 
-/** Every `uses:` pin of a source, commented example lines included; a placeholder-owner line is a self pin (sourceSelfPins), not a third-party one. */
+/** Every `uses:` pin of a source, commented example lines included.
+ *  A placeholder-owner line is a self pin (sourceSelfPins), not a third-party one. */
 export function extractUsesPins(text: string, file: string): Pin[] {
   const pins: Pin[] = [];
   for (const rawLine of text.split("\n")) {

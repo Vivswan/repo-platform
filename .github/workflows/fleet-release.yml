@@ -4,9 +4,10 @@
 #   release-cut true   -> the cut: tag the release-PR merge and draft the release; no PR work
 #   release-cut false  -> propose or refresh the release PR, only while main's head is still the judged commit
 #
-# The release PR is GITHUB_TOKEN's: GitHub holds its pull_request run for approval, so approve it from the PR's merge box or the Actions tab, or push to the PR.
-# Once the draft exists a rerun cannot recreate it (the tag is forced): re-run the failed jobs, or finish by hand with
-# `gh release upload <tag> <assets> --clobber` and `gh release edit <tag> --draft=false`.
+# The release PR is GITHUB_TOKEN's, so GitHub holds its pull_request run for approval.
+# Approve it from the PR's merge box or the Actions tab, or push to the PR.
+# Once the draft exists a rerun cannot recreate it (the tag is forced), so re-run the failed jobs.
+# Or finish by hand with `gh release upload <tag> <assets> --clobber` and `gh release edit <tag> --draft=false`.
 
 name: Fleet Release
 
@@ -20,7 +21,9 @@ on:
         required: true
         type: string
       tracking-labels:
-        description: Comma-separated nightly tracking-issue labels; release-health blocks on open issues carrying them. Empty disables the tracking gates.
+        description: >-
+          Comma-separated nightly tracking-issue labels; release-health blocks on open issues carrying them.
+          Empty disables the tracking gates.
         required: false
         type: string
         default: ""

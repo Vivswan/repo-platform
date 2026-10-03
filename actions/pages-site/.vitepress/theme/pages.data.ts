@@ -1,4 +1,5 @@
-// Pages are listed in sidebar order (sidebar.ts), so the launcher's page and directory groups follow the sidebar. A page with an include directive VitePress would expand lists no heading rows; sourceHeaders in page-index.ts says why.
+// Pages are listed in sidebar order (sidebar.ts), so the launcher's page and directory groups follow the sidebar.
+// A page with an include directive VitePress would expand lists no heading rows; sourceHeaders in page-index.ts says why.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -5,14 +5,16 @@ group: Fleet operations
 
 # Tracking issues
 
-The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open GitHub issue per failure stream: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating).
+This page is the machinery the tracking-issue streams share; the module pages cover what each one runs.
+
+Each stream keeps one open GitHub issue: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating).
 
 | Stream | Rides the machinery under |
 |---|---|
+| the [fuzzer](fuzzer.md) module | its `labels.fuzzer` registration key |
+| the [nightly](nightly.md) module | its `labels.nightly` registration key |
 | the [site](site.md) module's nightly link-rot check | its `labels.site` registration key |
 | the nightly [security scan](security-scans.md) of every public repository | the fixed `security-nightly` label the settings baseline declares on every repository (no module, no answer) |
-
-This page is the machinery the streams share; the module pages cover what each one runs.
 
 ## The action
 
@@ -43,9 +45,11 @@ The registration grammar and fleet-ci's `plan` step enforce:
 
 ## Issue lifecycle
 
-- **One open issue per label.** A failing night refreshes the newest open issue carrying the label (title and body replaced with the night's report; earlier nights survive in the edit history and their run links), otherwise creates it. The label is created, or an existing one repainted, with the color and description the module data declares (`tracking_label` under `modules.<module>` in `files.yml`, the same source the settings layer reads).
+- **One open issue per label.** A failing night refreshes the newest open issue carrying the label (title and body replaced with the night's report; earlier nights survive in the edit history and their run links), otherwise creates it.
 
-- **A green night** comments on and closes every open issue carrying the label (up to 100 a night), so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([all-green.md](all-green.md)).
+- **The label itself** is created, or an existing one repainted, with the color and description the module data declares (`tracking_label` under `modules.<module>` in `files.yml`, the same source the settings layer reads).
+
+- **A green night** comments on and closes every open issue carrying the label (up to 100 a night), so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([release-health action](../actions/release-health/action.yml)).
 
 - **A manual green dispatch** also closes a fuzz or nightly issue (the site stream's link check runs on the nightly schedule alone, so its issue waits for the next clean night); the close comment links the run, so the provenance is visible.
 
@@ -68,22 +72,24 @@ To unblock:
 
 - **Fix the failure** and let the next green night close the issue, or hand-close it once fixed. Closing re-triggers nothing: re-run the release PR's failed `release-pr` job afterwards (the pre-flight reads issue state fresh at release time).
 
-- **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([all-green.md](all-green.md)).
+- **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([release-health action](../actions/release-health/action.yml)).
 
 ## Renaming the label
 
-The fuzz and nightly starters are repo-owned while the label reaches the rendered settings from the registration on every sync. Renaming the key therefore changes the label the NEXT sync renders and the apply after it declares - but never the repo-owned workflow. The rename is one default-branch PR that:
+A fuzz or nightly rename is one default-branch PR that makes two edits:
 
-1. edits `labels.<key>` in `.repo-platform.yml`
-2. updates the workflow's two `label:` inputs in the same change - or it keeps filing under the old name while the settings apply deletes it
+1. edit `labels.<key>` in `.repo-platform.yml`
+2. update the workflow's two `label:` inputs in the same change, or it keeps filing under the old name while the settings apply deletes it
+
+The reason: the starters are repo-owned, while the label reaches the rendered settings from the registration on every sync. Renaming the key changes the label the NEXT sync renders and the apply after it declares, but never the repo-owned workflow.
 
 The site stream is simpler: its leg is the managed ci.yml's and the plan action resolves the label from the registration at run time, so step 1 alone renames it.
 
 ## Deselecting the module
 
-Deselecting removes the label declaration (remove the `labels.<key>` line with the module: a key for an unselected module fails the plan).
+Deselecting removes the label declaration (remove the `labels.<key>` line with the module: a key for an unselected module fails the plan). Sync never deletes the fuzzer and nightly starters, so their workflow keeps running after the module is dropped.
 
 | Module | What else to do |
 |---|---|
-| fuzzer, nightly | starters are never deleted by sync, so the workflow keeps running: when you drop the module, also delete its workflow file (`.github/workflows/nightly-fuzz.yml` or `nightly.yml`), or keep the label declared in your own `.github/settings.local.yml` if you keep the workflow |
+| fuzzer, nightly | delete its workflow file (`.github/workflows/nightly-fuzz.yml` or `nightly.yml`), or keep the label declared in your own `.github/settings.local.yml` if you keep the workflow |
 | site | no such step: the leg skips on the next run, and the repo-owned site-build hook stays where it is |

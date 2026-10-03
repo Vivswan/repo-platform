@@ -51,6 +51,7 @@ modules:
     dependabot_ecosystems: [cargo]
     gitignore_sources: [Rust]
     agents_toolchain: [rust]
+    toolchain_steps: [rust]
   site:
     description: one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme)
     path: docs
@@ -138,6 +139,7 @@ files:
       bun: files/bun/.github/workflows/checks.toolchain.yml
       deno: files/deno/.github/workflows/checks.toolchain.yml
       uv: files/uv/.github/workflows/checks.toolchain.yml
+      rust: files/rust/.github/workflows/checks.toolchain.yml
   - {path: .github/workflows/post-green.yml, class: starter}
   - {path: .github/workflows/update-release.yml, class: starter}
   - {path: .github/workflows/update-release-pr.yml, class: starter}
@@ -149,6 +151,7 @@ files:
       bun: files/bun/.github/workflows/copilot-setup-steps.toolchain.yml
       deno: files/deno/.github/workflows/copilot-setup-steps.toolchain.yml
       uv: files/uv/.github/workflows/copilot-setup-steps.toolchain.yml
+      rust: files/rust/.github/workflows/copilot-setup-steps.toolchain.yml
   - {path: .gitleaks.toml, class: starter}
   - {path: .yamllint, class: managed}
   - {path: .github/workflows/auto-assign.yml, class: managed}
@@ -161,6 +164,7 @@ files:
       bun: files/bun/.github/workflows/auto-format.toolchain.yml
       deno: files/deno/.github/workflows/auto-format.toolchain.yml
       uv: files/uv/.github/workflows/auto-format.toolchain.yml
+      rust: files/rust/.github/workflows/auto-format.toolchain.yml
   - {path: .typography-allow, class: managed, when: {without: [release-please]}}
   - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
   - {path: AGENTS.md, class: split, region: html, when: {without: {declaring: agents_toolchain}}}
@@ -183,6 +187,7 @@ files:
   - {path: .release-please-manifest.json, class: starter, when: {modules: [release-please]}}
   - {path: release-please-config.json, class: starter, when: {modules: [release-please]}}
   - {path: .github/workflows/pr-title.yml, class: managed, when: {modules: [pr-title]}}
+  - {path: Cargo.toml, class: starter, when: {modules: [rust]}}
   - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
   - {path: .github/workflows/nightly.yml, class: starter, when: {modules: [nightly]}}
 

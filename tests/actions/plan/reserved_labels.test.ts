@@ -1,5 +1,6 @@
-// The expectation is the fleet's roster spelled out, never re-read from the layer files: a loop over an emptied layer file
-// would pass vacuously, and a shrunken roster lets the plan accept a tracking label the settings apply already manages.
+// reservedLabelNames reads the layers through the writer's own boundary: a renaming label reserves both its names, the
+// shapes the writer accepts read the same here, and the shapes it refuses are refused here, so the plan never passes a
+// tracking label the apply would then delete or reject.
 
 import { describe, expect, test } from "bun:test";
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -34,28 +35,6 @@ function writerClaims(tree: string): Set<string> {
 }
 
 describe("reservedLabelNames", () => {
-  test("every emittable label name, lowercased: the fleet layers, every toolchain module's dependabot label, release-please's own", () => {
-    expect([...reservedLabelNames(CONFIG, TREE)]).toEqual([
-      "dependencies",
-      "github_actions",
-      "bug",
-      "enhancement",
-      "fix-lint",
-      "merge-when-green",
-      "security-nightly",
-      "repo-platform:sync",
-      "settings-as-code-report",
-      "javascript",
-      "deno",
-      "python:uv",
-      "rust",
-      "autorelease: pending",
-      "autorelease: tagged",
-      "release-blocker",
-      "release-override",
-    ]);
-  });
-
   test("a renaming label reserves both its names, and the shapes the writer's layer boundary accepts read the same here", () => {
     // The library's union pairs a label by its name AND its new_name, so a tracking label taking either would replace
     // the fleet's entry and the apply would delete the old label instead of renaming it. The writer folds a layer

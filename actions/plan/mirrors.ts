@@ -1,4 +1,6 @@
-// Judged twice: by the plan on every PR of a managed repository, so a declaration that can never be written never lands, and by the sync writer before it copies any mirror.
+// Judged twice, by the plan and by the sync writer.
+// The plan judges on every PR of a managed repository, so a declaration that can never be written never lands.
+// The sync writer judges before it copies any mirror.
 
 import { basename, dirname } from "node:path";
 import {

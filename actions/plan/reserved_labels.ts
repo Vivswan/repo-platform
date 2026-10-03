@@ -1,4 +1,5 @@
-// The plan action and the writer's settings render share this one reading, so they cannot disagree on a name. Which layers exist is declared, never discovered: a missing declared layer fails here, since reading past it would silently shrink the roster.
+// The plan action and the writer's settings render share this one reading, so they cannot disagree on a name.
+// Which layers exist is declared, never discovered: a missing declared layer fails here, since reading past it would silently shrink the roster.
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
