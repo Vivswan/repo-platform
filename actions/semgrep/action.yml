@@ -60,8 +60,15 @@ runs:
       env:
         SCAN_STATUS: ${{ steps.scan.outputs.status }}
       run: |
-        [ "${SCAN_STATUS:-none}" = "0" ] || { echo "::error::semgrep: the scan did not complete (exit status ${SCAN_STATUS:-none}), so there is no verdict; see the scan log above"; exit 1; }
+        [ "${SCAN_STATUS:-none}" = "0" ] || {
+          echo "::error::semgrep: the scan did not complete (exit status ${SCAN_STATUS:-none}), so there is no verdict; see the scan log above"
+          exit 1
+        }
         findings="$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' "$RUNNER_TEMP/semgrep.json")"
         fatal="$(jq '[.errors[] | select(.level == "error")] | length' "$RUNNER_TEMP/semgrep.json")"
-        jq -r '[.errors[] | select(.level != "error")] | if length > 0 then "::warning::semgrep: \(length) non-fatal analysis error(s) (partial parses, timeouts); see the scan log above" else empty end' "$RUNNER_TEMP/semgrep.json"
-        [ "$findings" = "0" ] && [ "$fatal" = "0" ] || { echo "::error::semgrep: $findings ERROR-severity finding(s), $fatal fatal analysis error(s); see the scan log above"; exit 1; }
+        nonfatal="$(jq '[.errors[] | select(.level != "error")] | length' "$RUNNER_TEMP/semgrep.json")"
+        [ "$nonfatal" = "0" ] || echo "::warning::semgrep: $nonfatal non-fatal analysis error(s) (partial parses, timeouts); see the scan log above"
+        [ "$findings" = "0" ] && [ "$fatal" = "0" ] || {
+          echo "::error::semgrep: $findings ERROR-severity finding(s), $fatal fatal analysis error(s); see the scan log above"
+          exit 1
+        }

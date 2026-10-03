@@ -1,4 +1,5 @@
-// Every managed ci.yml is byte-identical; what differs per repository is computed here and handed to the jobs as step outputs. Fail closed: nothing here defaults an invalid registration into a green run.
+// Every managed ci.yml is byte-identical; what differs per repository is computed here and handed to the jobs as step outputs.
+// Fail closed: nothing here defaults an invalid registration into a green run.
 
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeSync } from "node:fs";

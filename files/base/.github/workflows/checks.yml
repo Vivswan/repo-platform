@@ -16,5 +16,5 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 {{blocks}}
 
-      - name: No repository checks yet
-        run: echo "add this repository's test and lint jobs to checks.yml"
+      - name: Repository-specific checks go here
+        run: echo "add this repository's own test and lint jobs to checks.yml"

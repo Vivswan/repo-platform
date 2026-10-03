@@ -75,7 +75,8 @@ export interface SyncOptions {
 }
 
 interface Rendered {
-  /** A starter's content is rendered inside its writer only on creation, so it is empty here; nothing reads it, since no mirror copies a starter and no diff is reported for one. */
+  /** A starter's content is rendered inside its writer only on creation, so it is empty here.
+   *  Nothing reads it, since no mirror copies a starter and no diff is reported for one. */
   content: string;
   record: ManifestRecord;
   write: (recorded: string | null) => WriteOutcome | { missing: string[] };
@@ -160,8 +161,10 @@ interface Written {
   detail?: string;
 }
 
-/** A record under another class than the entry declares is a class flip. A managed, split, or mirror record the file still matches marks it the platform's own previous write, replaced whole;
- *  otherwise (a stale record, or a starter record, which carries no hash and is repo-owned) the file is judged unrecorded. A flip to starter hands the file over and is never judged. */
+/** A record under another class than the entry declares is a class flip.
+ *  A managed, split, or mirror record the file still matches marks it the platform's own previous write, replaced whole.
+ *  Otherwise (a stale record, or a starter record, which carries no hash and is repo-owned) the file is judged unrecorded.
+ *  A flip to starter hands the file over and is never judged. */
 function writeEntry(
   options: SyncOptions,
   config: WriterFilesConfig,
@@ -267,10 +270,10 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
       .filter((path) => !declared.has(path))
       .map((path) => `\`except\` names \`${path}\`, a path no files.yml entry writes`),
   );
-  // A stale record at a path no files.yml entry declares (a hand edit, or an entry deleted from files.yml) is one the writer cannot account for, so its retirement is noted, which holds the PR.
-  // Manifest keys are target-repo content: a stale record is retired only
-  // when its path is one the writer could have written, and the refusal
-  // below carries a count alone.
+  // A stale record at a path no files.yml entry declares (a hand edit, or an entry deleted from files.yml) is one the writer cannot account for.
+  // Its retirement is noted, which holds the PR.
+  // Manifest keys are target-repo content, so a stale record is retired only when its path is one the writer could have written.
+  // For the same reason the refusal below carries a count alone.
   const excepted = new Set(registration.except ?? []);
   const stale: string[] = [];
   const released: RetireRow[] = [];

@@ -1,5 +1,7 @@
-// Stateless by design: every deploy re-enumerates the version tags and rebuilds every docs tier, so theme updates restyle every version and nothing accumulates between runs.
-// Any run that builds a docs tier needs a committed git checkout at GITHUB_WORKSPACE: the tier's project facts and commit are read from the ref's tree with git, never from the working files.
+// Stateless by design: every deploy re-enumerates the version tags and rebuilds every docs tier.
+// So theme updates restyle every version and nothing accumulates between runs.
+// Any run that builds a docs tier needs a committed git checkout at GITHUB_WORKSPACE.
+// The tier's project facts and commit are read from the ref's tree with git, never from the working files.
 
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -79,7 +81,8 @@ function capture(argv: string[], cwd?: string): string {
   return proc.stdout;
 }
 
-/** `git ls-tree` separates the honest answers (exit 0, entry listed or not) from failures (bad ref, corrupt repository), which throw via capture instead of collapsing into absent. */
+/** `git ls-tree` separates the honest answers (exit 0, entry listed or not) from failures (bad ref, corrupt repository).
+ *  A failure throws via capture instead of collapsing into absent. */
 function treeHas(cfg: Config, ref: string, path: string): boolean {
   return capture(["git", "-C", cfg.workspace, "ls-tree", ref, "--", path]).trim() !== "";
 }
@@ -246,12 +249,14 @@ export function resolvePrebuilt(workspace: string, dist: string): string {
   return assertTierIndex(dir, `the site-build hook's dist '${dist}'`);
 }
 
-/** Current content must fail on a dead internal link; historical tags build lenient because history cannot be fixed. Always-lenient would ship silently rotten current docs on a green run. */
+/** Current content must fail on a dead internal link; historical tags build lenient because history cannot be fixed.
+ *  Always-lenient would ship silently rotten current docs on a green run. */
 export function tierStrictLinks(tier: Tier): boolean {
   return tier.ref === "HEAD";
 }
 
-/** Shallower mounts stage first, so a root mounted inside another's mount (`skills/agents` under `skills`) lands in the parent's tree whichever order the caller listed them.
+/** Shallower mounts stage first.
+ *  So a root mounted inside another's mount (`skills/agents` under `skills`) lands in the parent's tree whichever order the caller listed them.
  *  At a tag a missing root is skipped with a notice, since history cannot be fixed. */
 function stageIncludes(
   cfg: Config,
@@ -320,7 +325,8 @@ export function assertIncludePages(target: string, include: IncludeRoot): void {
   }
 }
 
-/** Dead-link strictness is derived here from the tier, the one owner, so a strict HEAD build and a lenient tag build are the only representable states.
+/** Dead-link strictness is derived here from the tier, the one owner.
+ *  So a strict HEAD build and a lenient tag build are the only representable states.
  *  Project facts read the tier's own ref, so a tagged version shows the toolchains and license that tag carried. */
 function buildVitepressTier(
   cfg: Config,
