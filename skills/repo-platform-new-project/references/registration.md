@@ -42,7 +42,7 @@ The files each module brings are listed in the `repo-platform-add-module` skill 
 
 - `fuzzer`, `nightly`, and `site` each file one tracking issue per failure stream and dedup and auto-close by label. When several are selected, their labels must differ (case-insensitively).
 - The fuzzer and nightly starters carry the label in their `label:` inputs as it was when the starter was first written (`labels.*` or the default). A later change to `labels.*` needs the same edit in the repo-owned starter.
-- The sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from `labels.*` (the module's default when a key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; the same keys reach the starters' `label:` inputs when they are first written, and the plan's `tracking-labels` output feeds release-health's gate.
+- The sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from `labels.*` (the module's default when a key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; the plan's `tracking-labels` output feeds release-health's gate.
 - A `labels.<key>` whose module is not selected fails the plan (`labels.nightly names no selected tracking stream`): remove the key together with the module.
 
 ## Visibility

@@ -143,15 +143,15 @@ git diff origin/main...origin/automation/repo-platform -- <path>
 | Held retirement | A file the platform stopped writing here differs from its recorded write: a managed file edited, a split file's region edited or its markers gone | Keep what matters, delete the rest yourself; the row returns every sync until the file is gone |
 | Removed region | A split file the platform stopped writing here carried repository-owned content around its recorded region: the region and its markers went, the rest stayed as a plain file | Read the file that remains; it is yours now, and no row returns for it |
 | Replaced mirror | A declared target held other content (`replaced local edits`, diff below), or a directory or a blocking file stood in the target's way (`replaced`, the detail names it) | Read the diff; the platform's copy or link, by the declared `kind`, stays. Content worth keeping moves to a path no declaration names |
-| Settings | `.github/settings.yml` reads `replaced local edits` (someone edited the rendered file, or the repository carried a hand-written one the sync had not recorded) or `held` (`no overlay at .github/settings.local.yml (its starter is held or missing)`, an overlay naming one label twice, or a tracking label the plan refuses) | `replaced local edits`: move what the diff removed into `.github/settings.local.yml` (the rendered file is never edited by hand); the holds name the registration key or the overlay line to fix |
+| Settings | `.github/settings.yml` reads `replaced local edits` (someone edited the rendered file, or the repository carried a hand-written one the sync had not recorded) or `held` (one of the three overlay details under Read the report) | `replaced local edits`: move what the diff removed into `.github/settings.local.yml` (the rendered file is never edited by hand); the holds name the registration key or the overlay line to fix |
 
-Something that matches none of the above: do not merge. The branch is rewritten on the next run, so nothing is lost by waiting. Escalate with an issue on Vivswan/repo-platform.
+Something that matches none of the above: do not merge; waiting loses nothing (the next run rewrites the branch anyway). Escalate with an issue on Vivswan/repo-platform.
 
 ## Orphaned comments after a retirement
 
 A sync PR that retires a workflow or reshapes the CI legs orphans the comments that named the old shape, so grep the repository's own markdown and workflow comments for every path in the Retired section and rewrite every hit. A comment that names a workflow the repository no longer has is a false statement about the repository.
 
-- The fix is ONE commit pushed onto `automation/repo-platform` BEFORE merging, never a separate PR: the branch is rewritten on the next run, and a follow-up PR leaves the merged tree wrong in between.
+- The fix is ONE commit pushed onto `automation/repo-platform` BEFORE merging, never a separate PR: a follow-up PR leaves the merged tree wrong in between.
 - Repeat the check on every later sync PR that retires or reshapes a file: each retirement can leave a tail, and each reshaped workflow can orphan a comment that named the old shape.
 
 ## The repo-owned tail
@@ -175,7 +175,7 @@ A split file (`AGENTS.md`, `LICENSE.md`, `.gitignore`, `.editorconfig`, `.gitatt
 
 ## Fix the PR
 
-The branch is rewritten every run, so a stale local copy of it bites; always reset to the remote:
+A stale local copy of the branch bites; always reset to the remote:
 
 ```bash
 git fetch origin
@@ -186,7 +186,7 @@ git push origin automation/repo-platform
 ```
 
 - Pushing more commits is the supported way to fix the PR; CI re-runs on the push. Held PRs are never auto-merged, so merge manually when green.
-- Do not rebase the branch onto the default branch or force-push it; the next run replaces it wholesale anyway.
+- Do not rebase the branch onto the default branch or force-push it.
 
 ## Disposition every bot review comment
 
@@ -197,8 +197,8 @@ Copilot and other bots leave review comments on sync PRs; do not merge with any 
 When a human does the merging, your job ends with the branch resolved, pushed, and green:
 
 - NEVER merge, enable auto-merge, or approve reviews.
-- Never rebase or force-push the automation branch; never edit `.github/repo-platform-manifest.json` by hand.
-- Green means the required checks pass on the branch: `all-green`, plus `pr-title` where selected.
+- The branch rules of Fix the PR hold, and never edit `.github/repo-platform-manifest.json` by hand.
+- Green means the required checks (What the PR is) pass on the branch.
 - End the report with a verdict line: "READY TO MERGE" when every row is explained, local content sits in its owned place, and every bot comment is fixed or answered, or "NOT READY: <what blocks it>".
 
 ## The failure path
@@ -224,6 +224,6 @@ A row reading `failed before the target was resolved; re-run the workflow` means
 
 ## Closing instead of fixing
 
-Closing the PR is not an opt-out: the next run rewrites the branch and opens a fresh PR with the same report. To pause syncs, revoke the fleet token's access to the repo or delete `.repo-platform.yml`. To detach permanently, see the platform's [docs/eject.md](https://github.com/Vivswan/repo-platform/blob/main/docs/eject.md).
+Closing the PR is not an opt-out: the next run opens a fresh PR with the same report. To pause syncs, revoke the fleet token's access to the repo or delete `.repo-platform.yml`. To detach permanently, see the platform's [docs/eject.md](https://github.com/Vivswan/repo-platform/blob/main/docs/eject.md).
 
 Worked examples of report rows and their resolutions are in [references/worked-examples.md](references/worked-examples.md); the class of every platform-written path is recorded in the PR head's `.github/repo-platform-manifest.json`, and what each class means is in [references/file-ownership.md](references/file-ownership.md).

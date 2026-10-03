@@ -119,7 +119,7 @@ The PR body is the report, one section per outcome ([the sync-pr skill](https://
 | Written | `created` for every path that was absent; an adopted repo also sees `unchanged` for a starter it already had, `region added` for a split file that had no markers (the region goes above its content and the PR holds), and `replaced local edits` for a managed file or split region it had written itself |
 | Replaced local edits | a diff per replaced file; move anything you want to keep (step 6) |
 | Retired | a row per file the platform no longer writes; `held` means it needs your decision |
-| Registration notes | a placeholder with no value, naming the registration key to set (an empty `project.description` counts as no value: it holds the managed region of `AGENTS.md` on every sync, and the settings starter while it is still absent); an `except` path no `files.yml` entry writes |
+| Registration notes | a placeholder with no value, naming the registration key to set (an empty `project.description` counts as no value; step 2 lists what it holds); an `except` path no `files.yml` entry writes |
 | Mirrors | one row per declared target: `written`, `current`, `replaced local edits`, or `replaced` (the last two hold the PR); a declaration the writer cannot honour fails the sync instead |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
@@ -138,11 +138,11 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 | `.github/actions/site-build/action.yml` | site: build the repo's own website into a directory named in `dist`; a no-op until filled in |
 | `.github/workflows/nightly-fuzz.yml` | fuzzer: replace the placeholder step |
 | `.github/workflows/nightly.yml` | nightly: replace the placeholder step |
-| `.github/settings.local.yml` | the repo's own settings overlay: identity keys, your labels and rulesets; the sync renders the managed `.github/settings.yml` from it and the fleet layers, so never edit the rendered file |
+| `.github/settings.local.yml` | the repo's own settings overlay: identity keys, your labels and rulesets (step 8) |
 
 The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
 
-A `site` repository that publishes its own website needs one more thing of yours before the first run on main: the website build in `.github/actions/site-build/action.yml` (seeded as a no-op, which is the whole configuration for a docs-only site; until filled in the site is the docs alone, or nothing). The platform's [docs/site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/site.md) has the hook contract and the docs conventions.
+A `site` repository that publishes its own website fills in the site-build hook (the table above) before the first run on main. Its no-op seed is the whole configuration for a docs-only site; until filled in the site is the docs alone, or nothing. The platform's [docs/site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/site.md) has the hook contract and the docs conventions.
 
 ### 7. Watch the first CI run
 

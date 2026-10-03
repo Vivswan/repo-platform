@@ -21,7 +21,7 @@ Work in this order, always:
 - "Enable the fuzzer" / "add nightly CI" / "publish a site" / "add the uv toolchain" on a repo that already carries `.repo-platform.yml`
 - Outcome-shaped asks that map to a module: "add Python/Rust support" (uv/rust), "start cutting releases" (release-please), "publish the docs as a website" / "deploy the repo's own website" (site), "check PR titles" (pr-title), "what modules does this repo have" (read `.repo-platform.yml`)
 - "Remove a module" / "drop the fuzzer" / "we do not need pr-title anymore"
-- "Change the nightly label" / "mount the docs under another path": module keys, not selection. The site build itself is the repo-owned `.github/actions/site-build/action.yml` hook, edited like any file of the repo
+- "Change the nightly label" / "mount the docs under another path": module keys, not selection. The site build itself is the repo-owned site-build hook (step 3), edited like any file of the repo
 
 For enrolling a repo that is not managed yet, use the `repo-platform-new-project` skill instead. Inside the platform repository itself, "add a module" means adding a `files/<module>/` folder and its `files.yml` entries; this skill is for managed repos.
 
@@ -113,7 +113,7 @@ Without a dispatch, the Tuesday cron delivers the files on its own.
 
 The full checklist per module is in [references/modules.md](references/modules.md). The ones that bite when skipped:
 
-- Labels: the sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from the registration's `labels.*` keys (the module's default when the key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; a `labels.*` key for a module the repo does not select fails the plan and holds the sync PR.
+- Labels: the sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from the registration's `labels.*` keys (the module's default when the key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; a `labels.*` key for an unselected module fails the plan (step 1) and also holds the sync PR.
 - `fuzzer` / `nightly`: replace the starter's placeholder step with real work; a custom label also goes into the starter's `label:` inputs.
 - `site`: the module's settings layer enables Pages on the next settings apply (before it: `gh api -X POST repos/Vivswan/<repo>/pages -f build_type=workflow`); the repo's own website goes into the repo-owned `.github/actions/site-build/action.yml` hook, seeded as a no-op, so fill it in or the site is the docs alone (`docs/README.md` was step 1's business).
 
@@ -130,9 +130,9 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 Two keys belong to no module. `project` is required, with `name`, `slug`, and `description` together; `copyright_holder` is optional and defaults to the owner. `mirrors` defaults to none.
 
 - **No sync needed:** a `site.path` or `site.include` change; the site leg reads the registration at run time.
-- **Lands with the next sync:** `mirrors`, `labels.*`, and `project.*`. `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`); a `labels.*` value is rendered into `.github/settings.yml`.
+- **Lands with the next sync:** `mirrors`, `labels.*`, and `project.*`. `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`); a `labels.*` value re-renders `.github/settings.yml` (step 3, Labels).
 - **Starters keep their content:** an existing starter (`.github/settings.local.yml`) is not rewritten, so edit it yourself.
-- Tracking labels (`fuzzer`, `nightly`, `site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label. A `labels.*` key whose module is not selected fails the plan.
+- Tracking labels (`fuzzer`, `nightly`, `site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label.
 - Renaming a fuzz or nightly label never updates the repo-owned starter: change its two `label:` inputs in the same PR.
 
 ## Removing a module
