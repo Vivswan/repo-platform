@@ -32,7 +32,7 @@ The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.tx
 
 **How the actions pin their bun:**
 
-- Each action's first step calls the shared `actions/bun-setup` action (`uses: Vivswan/repo-platform/actions/bun-setup@stable` with `pin` set to the pin's path relative to `github.action_path`, `../../files/bun/.bun-version` for a top-level action). It reuses a bun already on PATH at the pin, installs it with oven-sh/setup-bun otherwise (one retry for the known network flake), and records the absolute path of the bun that prints the pin as `path`.
+- Each action's first step calls the shared `actions/bun-setup` action (`uses: Vivswan/repo-platform/actions/bun-setup@stable` with `pin` set to the pin's path relative to `github.action_path`: a top-level action reads it two directories up, at `files/bun/.bun-version`). It reuses a bun already on PATH at the pin, installs it with oven-sh/setup-bun otherwise (one retry for the known network flake), and records the absolute path of the bun that prints the pin as `path`.
 
 - Every later step runs that path, never `bun` by name, because a later setup-bun can put another bun first on PATH.
 

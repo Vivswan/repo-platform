@@ -203,7 +203,7 @@ It fails closed, so an unknown module or a malformed registration never merges t
 
 ### What each module adds
 
-**The community health files** (contributing guide, security policy, code of conduct, issue forms) are not written: GitHub serves them to every repository under the account from the account's `<owner>/.github` repository. A repository that needs a different text commits its own file, which GitHub prefers over the default; the issue forms count as one set, so any file under a repository's own `.github/ISSUE_TEMPLATE/` replaces all of the default forms.
+**The community health files** (contributing guide, security policy, code of conduct, issue forms) are not written: GitHub serves them to every repository under the account from the account's `<owner>/.github` repository. A repository that needs a different text commits its own file, which GitHub prefers over the default; the issue forms count as one set, so any file under a repository's own .github/ISSUE_TEMPLATE folder replaces all of the default forms.
 
 **Every repository receives:**
 

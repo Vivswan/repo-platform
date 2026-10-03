@@ -175,7 +175,7 @@ site:
 
 - **A `SKILL.md`-style page** with neither a `title` nor an h1 is titled by its `name` frontmatter key, its `description` becomes the meta description, and its "Edit this page" link names the real source path.
 
-- **Links resolve from the page's own repository path:** `../repo-platform-sync-pr/SKILL.md` on a skill page is that skill's directory URL; `.codex-plugin/plugin.json` is the file on GitHub at the tier's ref.
+- **Links resolve from the page's own repository path:** a sibling skill's `SKILL.md` linked relatively from a skill page is that skill's directory URL; `.codex-plugin/plugin.json` is the file on GitHub at the tier's ref.
 
 ## Turning the docs half off (`site.path: null`)
 
