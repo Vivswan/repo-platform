@@ -103,7 +103,9 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         LABEL: ${{ inputs.label }}
-      run: number=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty') && echo "number=$number" >> "$GITHUB_OUTPUT"
+      run: >-
+        number=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty') &&
+        echo "number=$number" >> "$GITHUB_OUTPUT"
 
     # --force repaints an existing label to the stream's tuple, which is the
     # tuple the module's settings layer declares; the plan refuses a stream
@@ -140,4 +142,6 @@ runs:
         GH_TOKEN: ${{ github.token }}
         LABEL: ${{ inputs.label }}
         COMMENT_FILE: ${{ steps.body.outputs.file }}
-      run: gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 100 --json number --jq '.[].number' | xargs -r -I{} gh issue close {} --repo "$GITHUB_REPOSITORY" --reason completed --comment "$(cat "$COMMENT_FILE")"
+      run: >-
+        gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 100 --json number --jq '.[].number' |
+        xargs -r -I{} gh issue close {} --repo "$GITHUB_REPOSITORY" --reason completed --comment "$(cat "$COMMENT_FILE")"

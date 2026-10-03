@@ -13,7 +13,8 @@ export interface RetireRow {
 
 /** unrecorded -> no record, or one readRecord refuses, so nothing at the path is the writer's to judge
  *  blank      -> a split whose region is the last write with only blank lines around it, so nothing is worth handing over
- *  A symbolic link is judged by its target string, never read through; under a record that is not a symlink mirror it is foreign, as mirrors.ts reads it. */
+ *  A symbolic link is judged by its target string, never read through.
+ *  Under a record that is not a symlink mirror it is foreign, as mirrors.ts reads it. */
 export type Judgement =
   | { verdict: "unrecorded" }
   | { verdict: "own" }
@@ -77,7 +78,8 @@ export function judge(target: string, path: string, records: Records): Judgement
     : foreign("the content differs from the last write");
 }
 
-/** A class flip rewrites the whole file, so repository-owned content around a split region is as much a reason as any other; blank lines around it are not. */
+/** A class flip rewrites the whole file, so repository-owned content around a split region is as much a reason as any other.
+ *  Blank lines around the region are not. */
 export function keepReason(target: string, path: string, records: Records): string | null {
   const judgement = judge(target, path, records);
   if (judgement.verdict === "own" || judgement.verdict === "blank") return null;

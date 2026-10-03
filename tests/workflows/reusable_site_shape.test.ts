@@ -80,10 +80,8 @@ describe("reusable-site.yml", () => {
 
   // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml), the nightly, and the
   // install ci.yml's fixture job runs so the broken-link test is judged by it, all the same action at the same
-  // version. The internal step's knobs are each silent when wrong: without --offline every external link is fetched
-  // on every build, without the fragment mode a missing anchor passes, without the index and fallback names a
-  // directory or extensionless link Pages serves reads as missing.
-  test("the assembly's internal link check runs the nightly's lychee, offline, over the artifact as Pages serves it", () => {
+  // version. The internal step's own knobs are judged by the live run in tests/ci/pages_site_build.
+  test("the assembly's internal link check, the fixture job, and the nightly run one lychee at one version", () => {
     const internal = stepNamed(
       loadAction("actions/pages-site/action.yml"),
       "Check the site's internal links",
@@ -98,10 +96,6 @@ describe("reusable-site.yml", () => {
     const pin = (of: Step | undefined) => ({ uses: of?.uses, version: of?.with?.lycheeVersion });
     expect([pin(internal), pin(fixtures)]).toEqual([pin(nightly), pin(nightly)]);
     expect(nightly?.with?.lycheeVersion).toMatch(/^v\d+\.\d+\.\d+$/);
-    expect(internal.with?.args).toBe(
-      "--offline --no-progress --include-fragments=anchor-only --index-files index.html " +
-        "--fallback-extensions html,htm ${{ steps.assemble.outputs.link-check-args }}",
-    );
   });
 
   // lychee's markdown report as the action writes it (lychee 0.24.2 over a fixture site, the run link appended by

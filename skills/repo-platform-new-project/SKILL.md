@@ -10,7 +10,7 @@ metadata:
 
 Bring a repository under the platform's management. The platform writes its files into the repository from the outside: the repo carries a registration file, the fleet token can push to it, and every sync arrives as a PR with a report. Nothing is generated locally and the repo holds no sync workflow and no sync secret.
 
-## When to Apply
+## When to apply
 
 - "Create a new project managed by repo-platform"
 - "Set up a repo on the platform" / "enroll this repo in the fleet"
@@ -43,7 +43,13 @@ For an existing repository, skip this step and work on a branch of the repo as i
 
 ### 2. Write `.repo-platform.yml`
 
-`modules` and `project` are both required; `project` needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The settings overlay starter (`.github/settings.local.yml`) and the managed region of `AGENTS.md` both render `{{description}}`, and the writer treats an empty value as missing, so an empty `project.description` holds `AGENTS.md` on every sync, and the overlay starter while it is still absent (the rendered `.github/settings.yml` is held with it, having no overlay to read), with a Registration note until the key is set. The full key table is in [references/registration.md](references/registration.md).
+`modules` and `project` are both required; `project` needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The full key table is in [references/registration.md](references/registration.md).
+
+The settings overlay starter (`.github/settings.local.yml`) and the managed region of `AGENTS.md` both render `{{description}}`, and the writer treats an empty value as missing. Until the key is set, an empty `project.description` holds, with a Registration note:
+
+- `AGENTS.md`, on every sync
+- the overlay starter, while it is still absent
+- the rendered `.github/settings.yml` with it, having no overlay to read
 
 Minimal:
 
@@ -77,7 +83,9 @@ mirrors:
     targets: [skills/*/LICENSE.md]
 ```
 
-Commit it to the default branch (or open a PR for an existing repository). The `plan` step of fleet CI parses this file on every PR, so a typo fails loudly there and in the sync. With `site` selected and a `docs/` directory present, commit `docs/README.md` (the landing page) alongside: the `docs-check` gate job builds `docs/` on every PR from then on (unless `site.path: null` turns the docs half off, for a website that renders `docs/` itself).
+Commit it to the default branch (or open a PR for an existing repository). The `plan` step of fleet CI parses this file on every PR, so a typo fails loudly there and in the sync.
+
+With `site` selected and a `docs/` directory present, commit `docs/README.md` (the landing page) alongside: the `docs-check` gate job builds `docs/` on every PR from then on. `site.path: null` turns the docs half off instead, for a website that renders `docs/` itself.
 
 ### 3. Grant the fleet token
 
@@ -111,7 +119,7 @@ The PR body is the report, one section per outcome ([the sync-pr skill](https://
 | Written | `created` for every path that was absent; an adopted repo also sees `unchanged` for a starter it already had, `region added` for a split file that had no markers (the region goes above its content and the PR holds), and `replaced local edits` for a managed file or split region it had written itself |
 | Replaced local edits | a diff per replaced file; move anything you want to keep (step 6) |
 | Retired | a row per file the platform no longer writes; `held` means it needs your decision |
-| Registration notes | a placeholder with no value, naming the registration key to set (an empty `project.description` counts as no value: it holds the managed region of `AGENTS.md` on every sync, and the settings starter while it is still absent); an `except` path no `files.yml` entry writes |
+| Registration notes | a placeholder with no value, naming the registration key to set (an empty `project.description` counts as no value; step 2 lists what it holds); an `except` path no `files.yml` entry writes |
 | Mirrors | one row per declared target: `written`, `current`, `replaced local edits`, or `replaced` (the last two hold the PR); a declaration the writer cannot honour fails the sync instead |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
@@ -130,11 +138,11 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 | `.github/actions/site-build/action.yml` | site: build the repo's own website into a directory named in `dist`; a no-op until filled in |
 | `.github/workflows/nightly-fuzz.yml` | fuzzer: replace the placeholder step |
 | `.github/workflows/nightly.yml` | nightly: replace the placeholder step |
-| `.github/settings.local.yml` | the repo's own settings overlay: identity keys, your labels and rulesets; the sync renders the managed `.github/settings.yml` from it and the fleet layers, so never edit the rendered file |
+| `.github/settings.local.yml` | the repo's own settings overlay: identity keys, your labels and rulesets (step 8) |
 
 The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
 
-A `site` repository that publishes its own website needs one more thing of yours before the first run on main: the website build in `.github/actions/site-build/action.yml` (seeded as a no-op, which is the whole configuration for a docs-only site; until filled in the site is the docs alone, or nothing). The platform's [docs/site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/site.md) has the hook contract and the docs conventions.
+A `site` repository that publishes its own website fills in the site-build hook (the table above) before the first run on main. Its no-op seed is the whole configuration for a docs-only site; until filled in the site is the docs alone, or nothing. The platform's [docs/site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/site.md) has the hook contract and the docs conventions.
 
 ### 7. Watch the first CI run
 
@@ -143,7 +151,7 @@ Push any commit to main after the merge and read the run. The jobs are the same 
 | Job | On a PR | On a push to main |
 | --- | --- | --- |
 | `checks` | runs (your checks.yml) | runs |
-| `ci` | runs (fleet-ci: plan, base checks, CodeQL where public, module checks) | runs |
+| `ci` | runs (fleet-ci: plan, base checks, CodeQL where public and a selected toolchain declares a language, module checks) | runs |
 | `all-green` | the required check | judged |
 | `post-green` | skipped | runs your hook |
 | `release`, `update-release`, `publish-release`, `update-release-pr` | skipped | run only with `release-please` selected |
@@ -170,7 +178,7 @@ gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-p
 
 ## Private repositories
 
-- No CodeQL or dependency-review jobs.
+- No CodeQL, dependency-review, or Semgrep jobs; zizmor and the nightly Trivy scan still run but upload no SARIF to code scanning.
 - Fleet run logs are public, so the `plan:` and `row <i>:` lines never name a repository (the plan job's selection line names public repositories and counts private ones); the details land in the repo's own sync PR and failure issue.
 
 ## Verify

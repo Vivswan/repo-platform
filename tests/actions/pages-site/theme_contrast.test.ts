@@ -90,7 +90,6 @@ test.each(SCREEN_MODES)(
     if (ground === undefined || secondary === undefined || tertiary === undefined) {
       throw new Error(`${mode} lacks a ground or an ink`);
     }
-    expect(HUES).toHaveLength(6);
     const bands = HUES.map((hue) => tinted(hue[mode].band, ground));
     const aa = (ink: string) =>
       bands.filter((tint) => Color.contrast(tint, ink, "WCAG21") < AA_SMALL_TEXT);

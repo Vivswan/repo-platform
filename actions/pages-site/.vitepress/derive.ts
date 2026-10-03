@@ -1,4 +1,5 @@
-// The fleet's repositories carry only markdown, so the routes, the locales, and what a page says about itself come from the files, never from a per-repo config.
+// The fleet's repositories carry only markdown.
+// So the routes, the locales, and what a page says about itself come from the files, never from a per-repo config.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -125,7 +126,8 @@ function frontmatterGroup(file: string, value: unknown): string | null {
   return value.trim();
 }
 
-/** Only an exact `index.md` basename is a directory index: `search-index.md` is an ordinary page, and a README the rewrite map skipped keeps its own route so the sidebar never points two files at one directory. */
+/** Only an exact `index.md` basename is a directory index: `search-index.md` is an ordinary page.
+ *  A README the rewrite map skipped keeps its own route, so the sidebar never points two files at one directory. */
 export function routeOf(file: string, rewrites: Record<string, string>): string {
   const effective = rewrites[file] ?? file;
   const segments = effective.split("/");
