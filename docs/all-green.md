@@ -164,7 +164,7 @@ It calls reusable-site.yml by local path; the reusable plans the site configurat
 
 - GitHub hands a job that cannot see the secret the empty string, so every declaring job's first read of it is the `Require the fleet token` step ([fleet/require_fleet_token.ts](../.github/scripts/fleet/require_fleet_token.ts)). An empty read fails the job with the setup recipe, and no fleet write ever runs on `github.token`.
 
-### Every managed repository's post-green hook
+### The post-green hook in every managed repository
 
 **Every managed ci.yml carries a `post-green` job** calling the repo-owned starter `post-green.yml` (workflow_call only, seeded once, never resynced) with the judged sha: the repository's own green-gated work goes there - applying settings, refreshing generated artifacts.
 

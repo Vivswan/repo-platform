@@ -91,7 +91,7 @@ CI is split so the platform can keep improving its half while each repo keeps it
 |---|---|---|
 | `.github/workflows/ci.yml` | managed - sync updates it, don't edit; one byte-identical file for the whole fleet | a `checks` job calling checks.yml, a `ci` job calling repo-platform's [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@stable` (which reads the module selection from `.repo-platform.yml`), the `all-green` gate, and the static legs after it ([all-green.md](all-green.md#after-the-gate)) |
 | `.github/workflows/checks.yml` | repo-owned (a starter, written once) | the repository's own test and lint jobs (multiple jobs, matrices, and further local reusable workflows all work); they run inside the gate through the `checks` job |
-| `.github/workflows/post-green.yml` | repo-owned (a starter, written once) | the repository's own green-gated work, seeded as a no-op ([its contract](all-green.md#every-managed-repositorys-post-green-hook)) |
+| `.github/workflows/post-green.yml` | repo-owned (a starter, written once) | the repository's own green-gated work, seeded as a no-op ([its contract](all-green.md#the-post-green-hook-in-every-managed-repository)) |
 | `.github/workflows/update-release.yml`, `update-release-pr.yml` | repo-owned (a starter, written once) | the release hooks ci.yml's release legs call; seeded as no-ops in every repository, module or not ([the release pipeline](#the-release-pipeline-release-please)) |
 | `.github/actions/site-build/action.yml` | repo-owned (a starter, written once) | the site-build hook the `site` leg runs from the checkout before the fleet deploys: the repository's own website build goes there; seeded as a no-op in every repository, module or not ([site.md](site.md#the-hook-githubactionssite-buildactionyml)) |
 
