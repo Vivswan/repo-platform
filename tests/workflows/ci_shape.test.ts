@@ -29,11 +29,12 @@ test("the two skills pins share one sha and the `# main` comment, pinact ignores
   const pinact = parseYaml(readFileSync(join(ROOT, ".github/pinact.yaml"), "utf8")) as {
     rules: { ignore?: boolean; conditions: { expr: string }[] }[];
   };
+  // pinact ANDs a rule's conditions, so the delivery-ref rule must be one ignore rule with exactly this condition.
   expect(
-    pinact.rules
-      .filter((rule) => rule.ignore === true)
-      .flatMap((rule) => rule.conditions.map((c) => c.expr)),
-  ).toContainEqual(`ActionRepoName == "${PLATFORM_NAME}" && ActionVersion == "${DELIVERY_REF}"`);
+    pinact.rules.filter((rule) => rule.ignore === true).map((rule) => rule.conditions),
+  ).toContainEqual([
+    { expr: `ActionRepoName == "${PLATFORM_NAME}" && ActionVersion == "${DELIVERY_REF}"` },
+  ]);
   // The written trees exist only after the writer step, in the same job: swapped, pinact judges the checkout alone and every
   // fleet pin passes unread.
   const steps = ci.jobs.actionlint.steps ?? [];
