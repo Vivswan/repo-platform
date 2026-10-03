@@ -36,6 +36,9 @@ const OVERRIDE = join(LAYER_TREE, SETTINGS.override);
 type Rule = { type: string; parameters?: Record<string, unknown> };
 type Ruleset = {
   name: string;
+  target?: string;
+  enforcement?: string;
+  conditions?: { ref_name?: { include?: string[]; exclude?: string[] } };
   rules?: Rule[];
   bypass_actors?: { actor_id?: number; actor_type?: string; bypass_mode?: string }[];
 };
@@ -69,9 +72,15 @@ function integrationBypasses(files: string[]): { actorsSeen: number; violations:
   return { actorsSeen, violations };
 }
 
-test("the stable-tag ruleset carries the deletion rule alone and no bypass actor, so the lease move stays allowed", () => {
+test("the stable tag is undeletable and otherwise unruled, so the lease move stays allowed", () => {
   const stableTag = readRulesets(OWN_OVERLAY).find((r) => r.name === "stable-tag");
   expect(stableTag).toBeDefined();
+  // A disabled ruleset, or a scope that misses the tag, protects nothing without a word from GitHub.
+  expect([stableTag?.target, stableTag?.enforcement, stableTag?.conditions]).toEqual([
+    "tag",
+    "active",
+    { ref_name: { include: ["stable"], exclude: [] } },
+  ]);
   // Deletion ONLY: git classifies every update of an existing tag as a
   // forced update, so an update or non_fast_forward rule would block
   // the mover (docs/build-provenance.md).
@@ -83,6 +92,12 @@ test("the stable-tag ruleset carries the deletion rule alone and no bypass actor
 
 test("the strict flag rides with the check listed again and no bypass actor, beside main's admin bypass", () => {
   const upToDate = readRulesets(OWN_OVERLAY).find((r) => r.name === "main-up-to-date");
+  // A disabled ruleset, or a scope that misses the default branch, leaves every merge unprotected without a word from GitHub.
+  expect([upToDate?.target, upToDate?.enforcement, upToDate?.conditions]).toEqual([
+    "branch",
+    "active",
+    { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+  ]);
   // GitHub ignores the flag on a ruleset that requires no check, so all-green is listed a second time here.
   expect(requiredChecks(upToDate)).toEqual({
     strict_required_status_checks_policy: true,
