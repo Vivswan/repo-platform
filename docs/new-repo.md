@@ -245,14 +245,12 @@ A new managed repo touches nothing in repo-platform: there is no fleet list to e
 
 Repository settings are applied from repo-platform for every managed repository - the full model (six layers, merge dialect, apply semantics) is in [settings.md](settings.md). What the new repo sees:
 
-- **The first sync writes `.github/settings.local.yml` ONCE** as a repo-owned overlay plus commented examples: `description` from the registration's `project.description`, `topics` declared empty, and `private` matching the repository's visibility. The homepage is unmanaged, so what is set on GitHub stays.
-
-- **The managed `.github/settings.yml` comes with it:** the fleet layers, the selected modules' layers, and that overlay folded into one document. The rendered file is rewritten on every sync; the overlay never is.
+- **The first sync writes the overlay `.github/settings.local.yml` once,** with `description` from the registration's `project.description` and `private` matching the repository's visibility. The rendered `.github/settings.yml` follows on every sync; [the starter and the rendered file](settings.md#the-starter-and-the-rendered-file) has what each holds.
 
 - **Declare only the repo's OWN labels, rulesets, and overrides** in `.github/settings.local.yml`; [the merge dialect](settings.md#the-merge-dialect) says how they combine with the fleet layers, and the override layer's invariants win regardless.
 
-- **Everything fleet-shaped stays out of the overlay,** so the labels dependabot auto-creates can never fall out of sync with the roster: `dependencies` and `github_actions` always, plus one label per toolchain the repo's dependabot.yml covers: `javascript` for bun, `deno` for deno, `python:uv` for uv, `rust` for cargo (the tuples are the [settings layers'](settings.md#what-the-baseline-contains)).
+- **Everything fleet-shaped stays out of the overlay,** so the labels dependabot auto-creates can never fall out of sync with [the label roster](settings.md#what-the-baseline-contains).
 
-- **An overlay edit is one PR with the branch sync:** the [managed files check](#the-managed-files-check) reds it while the rendered `.github/settings.yml` is stale, and the `repo-platform:sync` label or the branch dispatch re-renders the file onto the PR ([settings.md](settings.md#editing-your-settings)). Never edit the rendered file: the next sync replaces it and holds its PR.
+- **An overlay edit is one PR with the branch sync,** and the rendered file is never edited by hand ([editing your settings](settings.md#editing-your-settings)).
 
-- **Nothing in the repository applies its settings:** repo-platform's central run applies the rendered file after every green main merge there and nightly, once the PR carrying it has merged ([settings.md](settings.md#how-the-apply-works)).
+- **Nothing in the repository applies its settings:** repo-platform's central run does ([when it runs](settings.md#when-it-runs)).
