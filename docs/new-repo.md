@@ -39,24 +39,27 @@ git commit -m "chore: initialize"
 - **Module parameters** are read from the same file (see [docs/site.md](site.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)).
 - **Nothing else is asked:** the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
 
-The files themselves arrive as the first sync PR ([step 4](#4-publish-and-register)): the writer copies them from the main commit the `stable` tag names, re-verified as green main history before any row consumes it ([build provenance](build-provenance.md#provenance-is-the-commit-itself)).
+The files themselves arrive as the first sync PR ([step 4](#4-publish-and-grant-the-fleet-pat)): the writer copies them from the main commit the `stable` tag names, re-verified as green main history before any row consumes it ([build provenance](build-provenance.md#provenance-is-the-commit-itself)).
 
-Four files matter later:
+**The list of platform files** is [files.yml](../files.yml) at the commit the `stable` tag names; [sync.md](sync.md#filesyml-reference) explains each entry's `class` and `when`. Four files matter later:
 
-| File | Role |
-|---|---|
-| `.repo-platform.yml` | The module selection's home: edit its `modules:` list in a PR, and the branch sync writes the module's files onto that PR ([changing the module selection](#changing-the-module-selection)). Its presence is what marks the repo as managed. Repo-owned: the sync reads it and never rewrites it. |
-| `.github/settings.local.yml` | Your settings overlay: identity keys, your own labels and rulesets. A starter, written once; the sync renders the managed `.github/settings.yml` from it and the fleet layers on every sync, and repo-platform's central run applies the rendered file ([settings](#5-settings-management)). Edit the overlay, never the rendered file. |
-| `.gitignore` | Split: the managed region carries the OS and editor sections (Windows, macOS, Linux, VS Code, JetBrains), the selected modules' sections (the toolchains' github/gitignore templates, the fuzzer's `/.fuzz-failures/`), agent local state, the secrets files (dotenv files anywhere in the tree with `.env.example` excepted, and private key material), scratch `*.tmp` files, and the CI workspace paths: every path a fleet action or workflow creates inside the checked-out workspace (the validator's platform checkout among them). Repository-owned patterns go above the BEGIN marker or below the END marker ([split files](fleet-guidelines.md#split-files-the-managed-region)). |
-| `.github/repo-platform-manifest.json` | The ownership manifest: each platform-written path's class (`managed`, `split`, `starter`, or `mirror`) plus sha256 hashes of the managed content (a symlink mirror's hash covers its link target string), written by every sync. The `validate-managed-files` check blocks on any byte that differs from what the recorded commit's sync writes ([the managed files check](#the-managed-files-check)). |
+- **`.repo-platform.yml`** is the module selection's home, and its presence is what marks the repo as managed. Edit its `modules:` list in a PR, and the branch sync writes the module's files onto that PR ([changing the module selection](#changing-the-module-selection)). Repo-owned: the sync reads it and never rewrites it.
+- **`.github/settings.local.yml`** is your settings overlay: identity keys, your own labels and rulesets. A starter, written once: every sync renders the managed `.github/settings.yml` from it and the fleet layers, and repo-platform's central run applies the rendered file ([settings](#5-settings-management)). Edit the overlay, never the rendered file.
+- **`.gitignore`** is split: the platform owns the managed region (below), and repository-owned patterns go above the BEGIN marker or below the END marker ([split files](fleet-guidelines.md#split-files-the-managed-region)).
+- **`.github/repo-platform-manifest.json`** is the ownership manifest, written by every sync: each platform-written path's class (`managed`, `split`, `starter`, or `mirror`) plus sha256 hashes of the managed content (a symlink mirror's hash covers its link target string). The `validate-managed-files` check blocks on any byte that differs from what the recorded commit's sync writes ([the managed files check](#the-managed-files-check)).
 
-### What the sync writes
+The managed region of `.gitignore` carries:
 
-The list of platform files is [files.yml](../files.yml) at the commit the `stable` tag names; [sync.md](sync.md#filesyml-reference) explains each entry's `class` and `when`.
+- **OS and editors:** Windows, macOS, Linux, VS Code, JetBrains.
+- **The selected modules' sections:** the toolchains' github/gitignore templates, the fuzzer's `/.fuzz-failures/`.
+- **Agent local state.**
+- **Secrets files:** dotenv files anywhere in the tree (`.env.example` excepted), and private key material.
+- **Scratch:** `*.tmp` files.
+- **CI workspace paths:** every path a fleet action or workflow creates inside the checked-out workspace, the validator's platform checkout among them.
 
 ### Mirror copies of platform files
 
-Some repos must carry byte-identical copies of a platform-written file at paths the platform does not own - the skills repo copies `LICENSE.md` into `template/` and into every skill folder, because a standalone skill install copies only that folder. Declare the copies in `.repo-platform.yml` and every sync rewrites them from the freshly written source, in the same PR:
+Some repos must carry byte-identical copies of a platform-written file at paths the platform does not own. The skills repo copies `LICENSE.md` into `template/` and into every skill folder, because a standalone skill install copies only that folder. Declare the copies in `.repo-platform.yml` and every sync rewrites them from the freshly written source, in the same PR:
 
 ```yaml
 mirrors:
@@ -71,44 +74,14 @@ mirrors:
 ```
 
 - **`source`** names one file `files.yml` writes for the repository as class `managed` or `split`; mirroring repo-owned content is the repository's own job.
-
-- **The fleet's own mirrors** are declared in the same grammar (`mirrors` in `files.yml`): today the `AGENTS.md` symlinks at `CLAUDE.md`, `.github/agents.md`, and `.github/copilot-instructions.md` on every repository.
-
-- **Meeting a fleet mirror:** they are written before yours, a target of yours meeting one of theirs is judged like any two claims on one path (refused, unless it is a pattern of the same source and kind, which finds the fleet's link current), and a fleet target your `except` names is left to you.
-
-- **`kind`** is how each target carries the source: `copy` (the default) writes its bytes; `symlink` places a symbolic link to it, relative to the target's directory (`docs/AGENTS.md -> ../AGENTS.md`), for a tool that follows links and must never see a stale copy. A Windows checkout needs `core.symlinks` for a link; no fleet runner is Windows today.
-
-- **A `*` in a target** matches within one path segment, resolved against the repo's tree at sync time: a literal final segment is written into every matched directory even when the file does not exist there yet, so a new skill folder gets its copy with no declaration edit.
-
+- **`kind: symlink`** places a relative link (`docs/AGENTS.md -> ../AGENTS.md`) for a tool that follows links and must never see a stale copy; `copy`, the default, writes the bytes.
+- **A `*` in a target** matches within one path segment at sync time, so a new skill folder gets its copy with no declaration edit.
+- **One path, one writer:** a target under `.github/workflows/` or at a path `files.yml` writes is refused, since workflow files are platform-written and a mirror there would be a second writer.
 - **`**` is rejected:** nothing in the fleet needs recursive matching, and an unbounded walk over a target-controlled pattern is risk with no customer.
+- **Clean copies auto-merge:** `written` and `current` targets are listed in the PR body but stay auto-merge-eligible. The declaration is repo-owned consent, and holding every LICENSE bump for review would defeat the auto-heal.
+- **`validate-managed-files` judges each target as the writer does:** a regular file where a link is declared, a link where a copy is, or a link pointing elsewhere is a finding.
 
-**What the `plan` step of fleet CI rejects,** on the PR that introduces it, is a declaration `files.yml` alone proves unwritable, so it can never land:
-
-| Refused on the PR | Detail |
-|---|---|
-| a source `files.yml` does not write here | |
-| a `**` | |
-| a target that is not a clean repository path | |
-| a target that is or sits under `.repo-platform.yml` itself | |
-| a target under `.github/workflows/` | workflow files are platform-written, so a mirror there would be a second writer |
-| a target that is, sits under, or is a path prefix of a path `files.yml` writes | one path, one writer |
-| a pattern that matches the registration or a path `files.yml` writes | reserved by the claim, held or not |
-| every path the literal targets alone prove a declaration claims, the pattern's own text included, judged as the sync judges a claim | a literal target declared twice, nested with another claimed path (both sides, so declaration order never chooses the winner), under a path `files.yml` writes, or claimed by two sources or as a copy and as a symbolic link (the sync would expand the pattern to that path and refuse it there) |
-
-Two different pattern texts are nested as written, never by what they can match, so a conflict between them (`tests/*/foo` with `tests/a*/foo/bar`) is refused at sync time instead.
-
-**The sync writes every declared target or fails the run;** none is left stale behind a hold row.
-
-| At sync time | Outcome |
-|---|---|
-| a directory at a target, or a file where an ancestor directory must be | removed and the target written (`replaced`, the detail naming what stood there); holds the PR for review |
-| other content at a target (a file where a link is declared, a link where a copy is, or a link elsewhere, included) | replaced with its diff shown (`replaced local edits`); holds the PR for review |
-| a symbolic link above a target (never followed), a source held this run, a pattern matching nothing or reading through a link, a glob landing on a nested or contested path | fails the sync: no PR, and the `[repo-platform] sync failed` issue names each declaration and its reason |
-| clean copies (`written`, `current`) | listed in the PR body but auto-merge-eligible: the declaration is repo-owned consent, and holding every LICENSE bump for review would defeat the auto-heal |
-
-**The manifest records every target** as class `mirror` with the copy's hash (a `symlink` target with `kind: symlink` and the hash of its link target string), so the next sync can tell its own previous write from a local edit. `validate-managed-files` judges each target as the writer does: a regular file where a link is declared, a link where a copy is, or a link pointing elsewhere is a finding.
-
-The implementation: [sync/writer/mirrors.ts](../.github/scripts/sync/writer/mirrors.ts) and, for the rules both readers share, [actions/plan/mirrors.ts](../actions/plan/mirrors.ts); [sync.md](sync.md#mirrors) has the outcome table.
+**Everything else is [sync.md's Mirrors section](sync.md#mirrors):** the fleet's own mirrors and how yours meet them, what the `plan` step refuses on the PR, each outcome at sync time, and the manifest record. The code is [sync/writer/mirrors.ts](../.github/scripts/sync/writer/mirrors.ts) and, for the rules both readers share, [actions/plan/mirrors.ts](../actions/plan/mirrors.ts).
 
 ## 3. Add checks to checks.yml
 
@@ -118,24 +91,19 @@ CI is split so the platform can keep improving its half while each repo keeps it
 |---|---|---|
 | `.github/workflows/ci.yml` | managed - sync updates it, don't edit; one byte-identical file for the whole fleet | a `checks` job calling checks.yml, a `ci` job calling repo-platform's [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@stable` (which reads the module selection from `.repo-platform.yml`), the `all-green` gate, and the static legs after it ([all-green.md](all-green.md#after-the-gate)) |
 | `.github/workflows/checks.yml` | repo-owned (a starter, written once) | the repository's own test and lint jobs (multiple jobs, matrices, and further local reusable workflows all work); they run inside the gate through the `checks` job |
-| `.github/workflows/post-green.yml` | repo-owned (a starter, written once) | the repository's own green-gated work (applying settings, refreshing generated artifacts): the managed `post-green` job calls it on every push to main whose gate passed, with the judged sha, before the release leg ([after the gate](all-green.md#after-the-gate)). The caller grants `contents: write` (a fast-forward branch push) and `id-token: write` (OIDC trusted publishing), the ceiling for every hook job. Seeded as a no-op |
-| `.github/workflows/update-release.yml`, `update-release-pr.yml` | repo-owned (a starter, written once) | the release hooks ci.yml's release legs call; seeded as no-ops in every repository, module or not, because GitHub resolves a called `./` workflow at run creation ([the release pipeline](#the-release-pipeline-release-please)) |
+| `.github/workflows/post-green.yml` | repo-owned (a starter, written once) | the repository's own green-gated work, seeded as a no-op ([its contract](all-green.md#the-post-green-hook-in-every-managed-repository)) |
+| `.github/workflows/update-release.yml`, `update-release-pr.yml` | repo-owned (a starter, written once) | the release hooks ci.yml's release legs call; seeded as no-ops in every repository, module or not ([the release pipeline](#the-release-pipeline-release-please)) |
 | `.github/actions/site-build/action.yml` | repo-owned (a starter, written once) | the site-build hook the `site` leg runs from the checkout before the fleet deploys: the repository's own website build goes there; seeded as a no-op in every repository, module or not ([site.md](site.md#the-hook-githubactionssite-buildactionyml)) |
 
 **A starter is written once** and never touched by a sync after that, so when the platform INTRODUCES a starter at a path a repository already owns a file at, the writer leaves the repository's file alone and reports the row `unchanged`. Check the kept file against the interface its callers expect (the [sync-PR skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md) has the triage row).
 
-**The `ci` job runs:**
-
-- the standard checks as the steps of one `standard-checks` job whose judge step lists every failed check: `plan`, `validate-managed-files`, typography, file-size ([the caps](fleet-guidelines.md#file-size-caps)), commit-names, actionlint, yamllint, typos, gitleaks, zizmor, trivy, and knip on bun repos
-- the module checks as jobs beside it: `dependency-review` and `semgrep` on public repos, a per-language CodeQL matrix (CodeQL also needs a toolchain), `docs-check`, and `release-pr`
-
-The managed `all-green` job in the same ci.yml needs both callers and its own check run is the required `all-green` check - the [all-green convention](all-green.md).
+**The `ci` job's checks** are listed in [what gates what](all-green.md#what-gates-what), each with where it runs, and [the all-green convention](all-green.md) says how the required `all-green` check judges both callers.
 
 ### The managed files check
 
 The `validate-managed-files` step judges the repository against what repo-platform writes at the commit its manifest records ([sync.md](sync.md#judged-at-the-synced-commit)), in one sticky PR comment plus the step summary, run by the [validate-managed-files](../actions/validate-managed-files/action.yml) action.
 
-- **Its vocabulary** is the recorded commit's `files.yml`, read by that commit's own writer, so a platform change reddens nothing until the repository syncs.
+- **Its vocabulary** is the recorded commit's `files.yml`, read by that commit's own writer: it judges the tree against the commit its LAST sync recorded. So a platform change reddens nothing until the repository syncs, and a registration change on a PR is red until the sync writes the module's files onto the branch ([changing the module selection](#changing-the-module-selection)).
 - **The repository's side of every `when`** is the plan step's resolved visibility.
 
 | Check | Blocks on |
@@ -152,23 +120,9 @@ The `validate-managed-files` step judges the repository against what repo-platfo
 
 - **Freshness informs:** the job summary says whether `stable` has moved past the recorded commit; nothing fails for that, and a sync moves the commit under the stamp rule ([sync.md](sync.md#the-manifest)).
 
-- **What it judges:** the tree against the commit its LAST sync recorded, so a platform change reddens nothing until the repository syncs, and a registration change on a PR is red until the sync writes the module's files onto the branch ([changing the module selection](#changing-the-module-selection)).
-
 ### Changing the module selection
 
-A module change is one PR when the branch sync carries the files onto it: edit the registration on a branch, dispatch `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>`, and the module's files and the manifest stamp land on the same branch as one commit ([sync.md](sync.md#syncing-a-branch)).
-
-The `repo-platform:sync` label on the PR does the same when the sync's whole diff touches no workflow file ([sync.md](sync.md#syncing-a-branch-by-label)); the repository token cannot push one, and the label's comment names the paths when it refuses.
-
-The branch sync is the way through: the registration edit alone is red (below), and the label or the dispatch brings the module's files and the manifest stamp onto the PR as one commit. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` step reads the new list on the next run, validating the registration on the PR.
-
-- **Red on the first PR until the sync writes onto it:** the managed-files check runs the recorded commit's writer over a copy of the tree with the edited registration, so the module's missing files are findings naming each path with its bytes; the branch sync (the label or the dispatch) brings them and the check turns green.
-
-- **A module the recorded commit does not know yet** (added to the platform after this repository's last sync) is the writer's refusal instead, `unknown module(s)`, with the same way out: the sync runs at `stable`, knows the module, and moves the judge.
-
-- **The other red to expect:** a module whose fleet-ci jobs read a file the sync has not written yet (a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the branch sync writes that file onto the PR.
-
-- **The sync writes the module's DATA files** (its workflows, starters, and toolchain pins) onto the PR's branch:
+A module change is one PR when the branch sync carries the files onto it ([sync.md](sync.md#syncing-a-branch)). CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` step reads the new list on the next run. The sync writes the module's DATA files (its workflows, starters, and toolchain pins) and the manifest stamp onto the PR's branch as one commit:
 
 ```text
 PR edits modules: in .repo-platform.yml
@@ -181,15 +135,21 @@ PR edits modules: in .repo-platform.yml
   -> review and merge the one PR
 ```
 
-**What the PR check judges:** the `plan` step runs on every event and reads `.repo-platform.yml`, checking it against the module data at the delivery commit's root beside the plan action: every module name must exist and the file must parse.
+- **Why the label stops at workflow files:** the repository token cannot push one, and the label's comment names the paths when it refuses ([sync.md](sync.md#syncing-a-branch-by-label)).
 
-It fails closed, so an unknown module or a malformed registration never merges through a PR; a registration the sync does meet with an unknown name fails that sync in the same words, with no PR and a `[repo-platform] sync failed` issue on the repository.
+- **What `plan` judges, on every event:** every module name in `.repo-platform.yml` must exist in the module data at the delivery commit's root beside the plan action, and the file must parse. It fails closed, so an unknown module or a malformed registration never merges through a PR.
 
-**What the PR check judges beyond the plan:** `validate-managed-files` runs the recorded commit's writer over a copy of the tree with the edited registration, so the new module's missing files are findings with their bytes; the sync brings the files, and the manifest with them, and the check is green once it has.
+- **A sync that meets an unknown name** in a registration fails in the same words, with no PR and a `[repo-platform] sync failed` issue on the repository.
 
-**The one edit no sync can carry:** a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say); the writer refuses the declaration that now conflicts, so no sync, the branch sync included, restamps the record until it is gone. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules.
+- **Red on the first PR until the sync writes onto it:** validate-managed-files runs the recorded commit's writer over a copy of the tree with the edited registration, so the module's missing files are findings naming each path with its bytes. The branch sync brings them, the manifest with them, and the check turns green.
 
-**Enforced by:** [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` step. The sync side is a dispatch of sync-repos.yml onto the PR's branch or the `repo-platform:sync` label ([sync.md](sync.md#syncing-a-branch-by-label)), or a dispatch after the merge ([the manual run](#the-manual-run)).
+- **A module the recorded commit does not know yet** (added to the platform after this repository's last sync) is the writer's refusal instead, `unknown module(s)`, with the same way out: the sync runs at `stable`, knows the module, and moves the judge.
+
+- **The other red to expect:** a module whose fleet-ci jobs read a file the sync has not written yet (a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the branch sync writes that file onto the PR.
+
+- **Enforced by:** [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` step. The sync side is a dispatch of sync-repos.yml onto the PR's branch or the `repo-platform:sync` label ([sync.md](sync.md#syncing-a-branch-by-label)), or a dispatch after the merge ([the manual run](#the-manual-run)).
+
+**The one edit no sync can carry** is a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say). The writer refuses the declaration that now conflicts, so no sync, the branch sync included, restamps the record until it is gone. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules.
 
 #### The manual run
 
@@ -203,7 +163,7 @@ It fails closed, so an unknown module or a malformed registration never merges t
 
 ### What each module adds
 
-**The community health files** (contributing guide, security policy, code of conduct, issue forms) are not written: GitHub serves them to every repository under the account from the account's `<owner>/.github` repository. A repository that needs a different text commits its own file, which GitHub prefers over the default; the issue forms count as one set, so any file under a repository's own `.github/ISSUE_TEMPLATE/` replaces all of the default forms.
+**The community health files** (contributing guide, security policy, code of conduct, issue forms) are not written: GitHub serves them to every repository under the account from the account's `<owner>/.github` repository. A repository that needs a different text commits its own file, which GitHub prefers over the default; the issue forms count as one set, so any file under a repository's own .github/ISSUE_TEMPLATE folder replaces all of the default forms.
 
 **Every repository receives:**
 
@@ -219,22 +179,21 @@ It fails closed, so an unknown module or a malformed registration never merges t
 
 The modules add:
 
-| Module | What lands |
-| --- | --- |
-| pr-title | A managed `pr-title.yml` workflow running the `commit-names` job's own action (`validate-commit-names`) on the PR title, so a title it accepts is a subject that job accepts (a Conventional Commit with at most one scope; titles become squash-commit subjects), with its own `pr-title` required check installed by the module's settings layer ([the pr-title ruleset](settings.md#the-pr-title-ruleset)). |
-| release-please | Arms the managed ci.yml's static `release` legs and lands the repo-owned release-please configuration - [the release pipeline](#the-release-pipeline-release-please) below. |
-| bun | The fleet's `.bun-version` pin ([toolchains.md](toolchains.md)). Dependabot's bun PRs install with the lockfile Dependabot wrote; a PR whose frozen install fails is fixed by hand, or by re-running Dependabot on it. Known limitation, accepted: Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2, so a Dependabot bun PR that cannot be rebased is closed and the bump made by hand. |
-| deno | A managed `deno-audit.yml` that runs `deno audit` weekly, on lockfile-touching PRs, and on pushes to main that change `deno.lock`, failing when any locked dependency (JSR or npm, transitive included) has a high or critical advisory. Every tracked `deno.lock` is audited, nested workspace lockfiles included; a repository with no tracked `deno.lock` fails the run. |
-| rust | A repo-owned `Cargo.toml` workspace root carrying the fleet's lint floor, and the cargo steps in `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` that gate on it. The floor, how a repository takes it, and the gate: [rust.md](rust.md). |
-| any toolchain | A repo-owned `auto-format.yml` starter: label a PR `fix-lint` to get a formatting commit pushed to it, prefilled with each selected toolchain's formatter. Width limits apply to code only: the deno step runs `deno fmt --prose-wrap preserve`, so markdown prose keeps its line breaks. [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies. |
-| fuzzer | A repo-owned `nightly-fuzz.yml` starter - placeholder fuzz step, seeded replay inputs, failure artifact upload, [tracking-issue](tracking-issues.md) filing, auto-close on green. Replace the placeholder with your fuzzer; [fuzzer.md](fuzzer.md) has the contract. |
-| nightly | A repo-owned `nightly.yml` starter for checks too slow for every PR - placeholder step, tracking issue on failure, auto-close on the next green night ([nightly.md](nightly.md)). |
+- **pr-title:** a managed `pr-title.yml` workflow running the `commit-names` job's own action (`validate-commit-names`) on the PR title, so a title it accepts is a subject that job accepts: a Conventional Commit with at most one scope, since titles become squash-commit subjects. Its own `pr-title` required check is installed by the module's settings layer ([the pr-title ruleset](settings.md#the-pr-title-ruleset)).
+- **release-please:** arms the managed ci.yml's static `release` legs and lands the repo-owned release-please configuration ([the release pipeline](#the-release-pipeline-release-please) below).
+- **bun:** the fleet's `.bun-version` pin ([toolchains.md](toolchains.md)). Dependabot's bun PRs install with the lockfile Dependabot wrote; a PR whose frozen install fails is fixed by hand, or by re-running Dependabot on it.
+- **bun, a known limitation, accepted:** Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2 ([dependabot-core#15848](https://github.com/dependabot/dependabot-core/issues/15848)). So a Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
+- **deno:** a managed `deno-audit.yml` that runs `deno audit` weekly, on lockfile-touching PRs, and on pushes to main that change `deno.lock`. It fails when any locked dependency (JSR or npm, transitive included) has a high or critical advisory. Every tracked `deno.lock` is audited, nested workspace lockfiles included; a repository with no tracked `deno.lock` fails the run.
+- **rust:** a repo-owned `Cargo.toml` workspace root carrying the fleet's lint floor, and the cargo steps in `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` that gate on it. The floor, how a repository takes it, and the gate: [rust.md](rust.md).
+- **Any toolchain:** a repo-owned `auto-format.yml` starter, prefilled with each selected toolchain's formatter: label a PR `fix-lint` to get a formatting commit pushed to it. Width limits apply to code only: the deno step runs `deno fmt --prose-wrap preserve`, so markdown prose keeps its line breaks. [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies.
+- **fuzzer:** a repo-owned `nightly-fuzz.yml` starter - placeholder fuzz step, seeded replay inputs, failure artifact upload, [tracking-issue](tracking-issues.md) filing, auto-close on green. Replace the placeholder with your fuzzer; [fuzzer.md](fuzzer.md) has the contract.
+- **nightly:** a repo-owned `nightly.yml` starter for checks too slow for every PR - placeholder step, tracking issue on failure, auto-close on the next green night ([nightly.md](nightly.md)).
 
 ### Fix commits and re-triggering CI
 
 The `auto-format.yml` starter pushes its formatting commit to the PR branch with the default token (`github.token` / `GITHUB_TOKEN`).
 
-- **The held run:** GitHub creates the new head's `pull_request` run for such a push but holds it in an approval-required state ([its GITHUB_TOKEN docs](https://docs.github.com/en/actions/concepts/security/github_token)), so the required `all-green` check sits unreported until someone approves the run from the PR's merge box or the Actions tab, or pushes a commit to the branch.
+- **The held run:** GitHub creates the new head's `pull_request` run for such a push but holds it in an approval-required state ([its GITHUB_TOKEN docs](https://docs.github.com/en/actions/concepts/security/github_token)). The required `all-green` check sits unreported until someone approves the run from the PR's merge box or the Actions tab, or pushes a commit to the branch.
 
 - **The notice:** the job posts one sticky PR comment (edited in place on later runs) and a run warning saying so.
 
@@ -242,11 +201,7 @@ A PAT with Contents:RW would start the run outright, but any same-repo PR's form
 
 ### The release pipeline (release-please)
 
-The `release` leg in the managed ci.yml calls repo-platform's [fleet-release.yml](../.github/workflows/fleet-release.yml)`@stable`.
-
-- **Its needs:** the gate and the repo-owned post-green hook.
-- **When it releases:** only by a green gate and a green hook on a push to main with the judged commit passed through.
-- **Where it is armed:** only where `.repo-platform.yml` selects the module ([all-green.md](all-green.md#after-the-gate)).
+[The static legs](all-green.md#the-static-legs) own the managed ci.yml's `release` leg: the workflow it calls, its needs, where it is armed, who cuts, and the known limits around the cut.
 
 GitHub releases are immutable once published, so every release moves through three stages in one workflow run (no PAT needed to chain them), always draft-first:
 
@@ -254,23 +209,19 @@ GitHub releases are immutable once published, so every release moves through thr
 
 2. ci.yml's `update-release` job calls the repo-owned `update-release.yml` hook with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
 
-3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@stable`, which attests build provenance for every asset on the draft and flips it live. The attestation is a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json`; it is skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations.
+3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@stable`, which attests build provenance for every asset on the draft and flips it live.
+
+**The attestation** is a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json`. It is skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations.
 
 Around the cut itself:
 
-- **The release PR is `GITHUB_TOKEN`'s:** GitHub lets a workflow open one only where the repository allows Actions to create and approve pull requests, so the module's settings layer ([files/release-please/settings.yml](../files/release-please/settings.yml)) grants it and the central apply sets it once the rendered settings land. Until then the release job is red with `GitHub Actions is not permitted to create or approve pull requests`.
+- **The release PR is `GITHUB_TOKEN`'s:** GitHub lets a workflow open one only where the repository allows Actions to create and approve pull requests. The module's settings layer ([files/release-please/settings.yml](../files/release-please/settings.yml)) grants it, and the central apply sets it once the rendered settings land. Until then the release job is red with `GitHub Actions is not permitted to create or approve pull requests`.
 
-- **The release-PR hook:** a run in which release-please creates or refreshes the release PR (a run finding no unreleased releasable commits triggers neither) calls the repo-owned `update-release-pr.yml` hook with the PR's number and head branch: regenerating files that must ride in the release commit and updating version references go there. Its pushes with the default `GITHUB_TOKEN` do not re-trigger the PR's checks.
+- **The release-PR hook:** a run in which release-please creates or refreshes the release PR (a run finding no unreleased releasable commits triggers neither) calls the repo-owned `update-release-pr.yml` hook with the PR's number and head branch. Regenerating files that must ride in the release commit and updating version references go there. Its pushes with the default `GITHUB_TOKEN` do not re-trigger the PR's checks.
 
-- **Who cuts:** the release is cut by the run on the release commit, in its own job lane keyed by that commit, so no later merge can cancel or take over the cut; the run of any other push only proposes or refreshes the release PR, and skips even that once main has moved on ([all-green.md](all-green.md#after-the-gate)).
+- **A workflow-file change between merge and cut:** `github.token` cannot tag an older commit once a later commit changed a workflow file on main (that ref creation needs `workflows: write`, which it never holds). So a workflow-file change landing on main between the release merge and its cut turns the `release` job red.
 
-- **Two release PRs** merged before either is cut are both tagged by the first cut run.
-
-- **A release merge beside an ordinary push:** when the two land within one run's span, the ordinary run's release-PR refresh can abort green while the merged release PR still wears `autorelease: pending`; the first push after the cut has relabelled it tagged refreshes the PR again.
-
-- **A workflow-file change between merge and cut:** `github.token` cannot tag an older commit once a later commit changed a workflow file on main (that ref creation needs `workflows: write`, which it never holds), so a workflow-file change landing on main between the release merge and its cut turns the `release` job red.
-
-- **Both hooks are seeded in every repository,** module or not (a called `./` workflow must exist at run creation even when its job skips); without the module they are never called.
+- **Both hooks are seeded in every repository,** module or not, because GitHub resolves a called `./` workflow at run creation, even when its job skips; without the module they are never called.
 
 - **The configuration starters:** `release-please-config.json` and `.release-please-manifest.json` are repo-owned too (release-please updates the manifest via release PRs).
 
@@ -278,13 +229,13 @@ Around the cut itself:
 
 - **Never set `release-as` in release-please-config.json:** the key survives the release it pinned, so the next release PR proposes the same version again, and with `force-tag-creation` it would move the published tag. The fleet's validate-managed-files check rejects the key.
 
-## 4. Publish and register
+## 4. Publish and grant the fleet PAT
 
 ```bash
 gh repo create <owner>/my-project --public --source . --push
 ```
 
-That is the whole repo-side setup, plus one grant: give the fleet PAT access to the new repository (its repository access list) - the PAT's grant is the only fleet-membership fact, so that access IS the enrollment.
+That is the whole repo-side setup, plus one grant: give the fleet PAT access to the new repository (its repository access list). The PAT's grant is the only fleet-membership fact, so that access IS the enrollment.
 
 `.repo-platform.yml` opts it into push sync, and update PRs start arriving on the weekly cron (`gh workflow run sync-repos.yml -f repo=<owner>/my-project -R Vivswan/repo-platform` syncs it immediately).
 
@@ -294,12 +245,12 @@ A new managed repo touches nothing in repo-platform: there is no fleet list to e
 
 Repository settings are applied from repo-platform for every managed repository - the full model (six layers, merge dialect, apply semantics) is in [settings.md](settings.md). What the new repo sees:
 
-- **The first sync writes `.github/settings.local.yml` ONCE** as a repo-owned overlay (`description` from the registration's `project.description`, `topics` declared empty, `private` matching the repository's visibility; the homepage is unmanaged, so what is set on GitHub stays) plus commented examples. Right after it comes the managed `.github/settings.yml`: the fleet layers, the selected modules' layers, and that overlay folded into one document. The rendered file is rewritten on every sync; the overlay never is.
+- **The first sync writes the overlay `.github/settings.local.yml` once,** with `description` from the registration's `project.description` and `private` matching the repository's visibility. The rendered `.github/settings.yml` follows on every sync; [the starter and the rendered file](settings.md#the-starter-and-the-rendered-file) has what each holds.
 
 - **Declare only the repo's OWN labels, rulesets, and overrides** in `.github/settings.local.yml`; [the merge dialect](settings.md#the-merge-dialect) says how they combine with the fleet layers, and the override layer's invariants win regardless.
 
-- **Everything fleet-shaped stays out of the overlay,** so the labels dependabot auto-creates can never fall out of sync with the roster: `dependencies` and `github_actions` always, plus one label per toolchain the repo's dependabot.yml covers: `javascript` for bun, `deno` for deno, `python:uv` for uv, `rust` for cargo (the tuples are the [settings layers'](settings.md#what-the-baseline-contains)).
+- **Everything fleet-shaped stays out of the overlay,** so the labels dependabot auto-creates can never fall out of sync with [the label roster](settings.md#what-the-baseline-contains).
 
-- **An overlay edit is one PR with the branch sync:** the [managed files check](#the-managed-files-check) reds it while the rendered `.github/settings.yml` is stale, and the `repo-platform:sync` label or the branch dispatch re-renders the file onto the PR ([settings.md](settings.md#editing-your-settings)). Never edit the rendered file: the next sync replaces it and holds its PR.
+- **An overlay edit is one PR with the branch sync,** and the rendered file is never edited by hand ([editing your settings](settings.md#editing-your-settings)).
 
-- **Nothing in the repository applies its settings:** repo-platform's central run applies the rendered file after every green main merge there and nightly, once the PR carrying it has merged ([settings.md](settings.md#how-the-apply-works)).
+- **Nothing in the repository applies its settings:** repo-platform's central run does ([when it runs](settings.md#when-it-runs)).
