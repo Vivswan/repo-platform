@@ -1,4 +1,4 @@
-# The fleet's one GitHub Pages deploy, called by the managed ci.yml's `site` leg (docs/site.md).
+# The fleet's one GitHub Pages deploy, called by the managed ci.yml's `site` leg (docs/modules/site.md).
 # ONE job on purpose: the repo-owned site-build hook hands its output directory to the fleet's assembly in the same workspace.
 # The Pages artifact is thus the only artifact.
 # Callers own `concurrency: pages`; this workflow declares none.
@@ -170,7 +170,7 @@ jobs:
           fail: false
           format: markdown
           # One failure directory of the fuzz-issue action's report contract
-          # (docs/fuzzer.md): <artifacts-dir>/<failure>/report.md, its first
+          # (docs/modules/fuzzer.md): <artifacts-dir>/<failure>/report.md, its first
           # line lychee's `# Summary` heading.
           output: ${{ runner.temp }}/link-rot/external-links/report.md
 

@@ -24,7 +24,7 @@ The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.tx
 
 - **Version-file inputs:** managed workflows and the repo-owned starters as first written pass the matching version-file input (`bun-version-file: .bun-version`, `deno-version-file: .dvmrc`).
 
-- **The site hook:** the [site module's](site.md) build hook is the repository's own composite action, so it installs whatever toolchain its steps name (the seeded example reads `.bun-version`); the fleet's docs build runs under the fleet's own bun, never the repository's pin.
+- **The site hook:** the [site module's](modules/site.md) build hook is the repository's own composite action, so it installs whatever toolchain its steps name (the seeded example reads `.bun-version`); the fleet's docs build runs under the fleet's own bun, never the repository's pin.
 
 - **Parity:** validate-managed-files fails a repo whose dotfile differs from the one its recorded commit's sync writes ([platform/sync/manifest.md](platform/sync/manifest.md#judged-at-the-synced-commit)).
 
@@ -52,7 +52,7 @@ To run one repo on a different version, override in a repo-owned workflow and le
 |---|---|
 | bun | pass the explicit version input (`bun-version:` on setup-bun), which the action prefers over its version-file input |
 | deno | setup-deno resolves the other way around (a non-empty `deno-version-file` wins over `deno-version`), so replace or remove the `deno-version-file:` line instead |
-| rust | commit a `rust-toolchain.toml` naming the channel (1.84 or newer, [rust.md](rust.md#the-floor)) and components; the setup action in the three rust blocks installs it, with no dotfile to leave alone |
+| rust | commit a `rust-toolchain.toml` naming the channel (1.84 or newer, [rust.md](modules/rust.md#the-floor)) and components; the setup action in the three rust blocks installs it, with no dotfile to leave alone |
 
 Rules that follow:
 

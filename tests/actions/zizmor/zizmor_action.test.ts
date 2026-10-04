@@ -76,7 +76,7 @@ describe("actions/zizmor", () => {
   });
 
   test("the rendered policy: ref pins for the caller's delivery channel only, sha pins elsewhere at zizmor's own severity, no ignores", () => {
-    // The fleet's pinning rule in one document (docs/build-provenance.md; .github/pinact.yaml ignores the same
+    // The fleet's pinning rule in one document (docs/platform/build-provenance.md; .github/pinact.yaml ignores the same
     // channel): a widened first key or a loosened second stops flagging unpinned actions fleet-wide with nothing red.
     const repo = temp.dir("zizmor-policy-");
     render(repo);

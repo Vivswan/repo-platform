@@ -1,6 +1,5 @@
 ---
 order: 220
-group: Fleet operations
 ---
 
 # Tracking issues
@@ -18,7 +17,7 @@ Each stream keeps one open GitHub issue: a red night files or updates it, a gree
 
 ## The action
 
-Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action.
+Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action.
 
 - **How it files:** it assembles the body in TypeScript and hands it to `peter-evans/create-issue-from-file` (sha-pinned), so a red night refreshes the stream's open issue in place instead of commenting on it.
 - **Runner requirement:** it needs `gh` on the runner. GitHub-hosted runners preinstall it, self-hosted runners must provide it.
@@ -33,7 +32,7 @@ Each stream is identified by a label, set as a registration key (`labels.fuzzer`
 
 - **The repository's settings labels:** settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close.
 
-  The rendered `.github/settings.yml` declares the label automatically: the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](settings.md)).
+  The rendered `.github/settings.yml` declares the label automatically: the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](../settings.md)).
 
 The registration grammar and fleet-ci's `plan` step enforce:
 
@@ -49,7 +48,7 @@ The registration grammar and fleet-ci's `plan` step enforce:
 
 - **The label itself** is created, or an existing one repainted, with the color and description the module data declares (`tracking_label` under `modules.<module>` in `files.yml`, the same source the settings layer reads).
 
-- **A green night** comments on and closes every open issue carrying the label (up to 100 a night), so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([release-health action](../actions/release-health/action.yml)).
+- **A green night** comments on and closes every open issue carrying the label (up to 100 a night), so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([release-health action](../../actions/release-health/action.yml)).
 
 - **A manual green dispatch** also closes a fuzz or nightly issue (the site stream's link check runs on the nightly schedule alone, so its issue waits for the next clean night); the close comment links the run, so the provenance is visible.
 
@@ -66,13 +65,13 @@ With the release-please module also selected, an open tracking issue blocks rele
 | the release PR's `release-pr` CI job | fails early and visibly; it blocks that PR on every refresh |
 | the release pipeline's authoritative pre-flight | blocks the cut itself; it self-scopes to release-cut pushes, so ordinary main runs are never blocked |
 
-**How the labels reach the gate:** fleet-ci's `plan` step outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open.
+**How the labels reach the gate:** fleet-ci's `plan` step outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open.
 
 To unblock:
 
 - **Fix the failure** and let the next green night close the issue, or hand-close it once fixed. Closing re-triggers nothing: re-run the release PR's failed `release-pr` job afterwards (the pre-flight reads issue state fresh at release time).
 
-- **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([release-health action](../actions/release-health/action.yml)).
+- **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([release-health action](../../actions/release-health/action.yml)).
 
 ## Renaming the label
 

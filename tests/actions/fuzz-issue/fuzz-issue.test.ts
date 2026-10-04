@@ -79,7 +79,7 @@ describe("the cuts", () => {
   });
 });
 
-test("failureDirs: a directory named outside the docs/fuzzer.md contract is dropped without a word, as is a missing root", () => {
+test("failureDirs: a directory named outside the docs/modules/fuzzer.md contract is dropped without a word, as is a missing root", () => {
   const root = temp.dir("dirs-");
   mkdirSync(join(root, "good_target-1.x"));
   mkdirSync(join(root, "bad name with spaces"));

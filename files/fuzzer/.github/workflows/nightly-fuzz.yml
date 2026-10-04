@@ -1,6 +1,6 @@
 # Nightly fuzzing starter: written once by {{github_username}}/repo-platform,
 # never overwritten by a later sync. Replace the placeholder fuzz step;
-# follow the failure-report contract in docs/fuzzer.md and the issue
+# follow the failure-report contract in docs/modules/fuzzer.md and the issue
 # filing, replay, and auto-close steps keep working.
 name: Nightly Fuzz
 
@@ -39,7 +39,7 @@ jobs:
     timeout-minutes: 60
     # Sharding multiplies coverage, but the issue-filing and resolve steps
     # then race across shards and must move to a `needs: fuzz` job - see
-    # docs/fuzzer.md before enabling:
+    # docs/modules/fuzzer.md before enabling:
     # strategy:
     #   fail-fast: false
     #   matrix:
@@ -59,9 +59,9 @@ jobs:
           fi
           echo "fuzzing with seed $SEED, $ITERATIONS iterations"
           # Replace with your fuzzer: seeded with $SEED for $ITERATIONS iterations, writing one
-          # .fuzz-failures/<name>/report.md per crash (the contract: docs/fuzzer.md).
+          # .fuzz-failures/<name>/report.md per crash (the contract: docs/modules/fuzzer.md).
           # A green no-op until then: an uncustomized starter must not file issues.
-          echo "::warning::nightly-fuzz starter not customized yet - replace the placeholder fuzz step (see repo-platform's docs/fuzzer.md)"
+          echo "::warning::nightly-fuzz starter not customized yet - replace the placeholder fuzz step (see repo-platform's docs/modules/fuzzer.md)"
 
       - name: Upload failure artifacts
         if: failure()

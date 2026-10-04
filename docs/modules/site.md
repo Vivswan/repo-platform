@@ -1,13 +1,12 @@
 ---
 order: 110
-group: Modules
 ---
 
 # Site
 
-This page is the `site` module's guide: what the site carries, how its leg builds, checks, and deploys it, and the conventions docs follow; the Pages settings the module declares are [settings.md](settings.md)'s.
+This page is the `site` module's guide: what the site carries, how its leg builds, checks, and deploys it, and the conventions docs follow; the Pages settings the module declares are [settings.md](../settings.md)'s.
 
-Selecting the module arms the managed ci.yml's `site` leg: ONE GitHub Pages site per repository, deployed by repo-platform's [reusable-site.yml](../.github/workflows/reusable-site.yml) and the shared [pages-site action](../actions/pages-site/action.yml). Two things can be on it, alone or together:
+Selecting the module arms the managed ci.yml's `site` leg: ONE GitHub Pages site per repository, deployed by repo-platform's [reusable-site.yml](../../.github/workflows/reusable-site.yml) and the shared [pages-site action](../../actions/pages-site/action.yml). Two things can be on it, alone or together:
 
 | Part | Built by | Served at |
 |---|---|---|
@@ -29,7 +28,7 @@ The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and 
 - **No workflow of its own and no tag trigger:** a tag created without a push lands on the nightly rebuild, or right away via dispatch.
 - **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
 
-**The release legs sit before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the release chain and then runs whatever its result, and a release commit's own deploy serves its new tag. Without the release-please module the release legs skip and the deploy follows the repo-owned post-green hook directly ([all-green.md](all-green.md#after-the-gate)).
+**The release legs sit before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the release chain and then runs whatever its result, and a release commit's own deploy serves its new tag. Without the release-please module the release legs skip and the deploy follows the repo-owned post-green hook directly ([all-green.md](../all-green.md#after-the-gate)).
 
 The called workflow is one job, in this order:
 
@@ -47,12 +46,12 @@ A repository with nothing to publish ends green with a notice (`nothing to publi
 
 ## Pages enablement
 
-**Nothing to do:** the module's settings layer creates the Pages site on the next fleet settings apply ([settings.md](settings.md)), which runs daily.
+**Nothing to do:** the module's settings layer creates the Pages site on the next fleet settings apply ([settings.md](../settings.md)), which runs daily.
 
 - **A deploy before that apply** skips its Pages steps and ends green with one warning (`no Pages site yet`): the job token can read the site but never create one. No manual toggle is needed, and no red run needs a rerun.
 - **The nightly rebuild** deploys once the site exists; the next main push does the same.
 
-**The `github-pages` environment is the module's,** declared by its settings layer ([settings.md](settings.md)). A required-reviewers rule there parks every deploy "waiting for review" with later runs queued behind it. Once the repository's rendered settings carry the declaration (the next sync), the daily apply removes such a rule or an extra branch pattern.
+**The `github-pages` environment is the module's,** declared by its settings layer ([settings.md](../settings.md)). A required-reviewers rule there parks every deploy "waiting for review" with later runs queued behind it. Once the repository's rendered settings carry the declaration (the next sync), the daily apply removes such a rule or an extra branch pattern.
 
 ## The hook: `.github/actions/site-build/action.yml`
 
@@ -125,7 +124,7 @@ The docs mount carries the tag rules:
 | `vX.Y.Z/` | that tag's docs, one directory per served tag |
 | `versions.json` | the index of served tiers (label and path each), written by the build for anything outside the site that needs the list; the theme's menu is built from the same data at build time |
 
-- **Versions** are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../actions/pages-site/build.ts)). Prerelease-shaped tags (`v1.0.0-rc.1`) are not versions.
+- **Versions** are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../../actions/pages-site/build.ts)). Prerelease-shaped tags (`v1.0.0-rc.1`) are not versions.
 
 - **The version menu** (VitePress's nav dropdown) appears once a tag is served and lists `latest`, `stable`, then the tags newest first; the tier being read names the menu.
 
@@ -159,7 +158,7 @@ The docs mount carries the tag rules:
 
 ## What the theme provides
 
-The theme is one for the whole fleet, owned by [actions/pages-site/.vitepress/theme/](../actions/pages-site/.vitepress/theme/README.md), which says which file controls what. Nothing is configured per repository.
+The theme is one for the whole fleet, owned by [actions/pages-site/.vitepress/theme/](../../actions/pages-site/.vitepress/theme/README.md), which says which file controls what. Nothing is configured per repository.
 
 - **Look:** dark by default with a light variant, one accent hue per repository derived from its name.
 
@@ -207,7 +206,7 @@ site:
 
 - **Key grammar:** `mount` is one or more lowercase URL segments joined by slashes (`skills`, `skills/agents`), `page` a plain markdown file name other than `index.md` or a dot-prefixed one, and no two roots share a `path` or a `mount`. Refused mounts: a locale-shaped name (`de`), a segment the site never walks (`node_modules`), `public/`.
 
-- **The plan refuses a bad registration on every PR,** by the same rule the deploy reads ([conventions.ts](../actions/pages-site/.vitepress/conventions.ts), read by both), so a root the deploy would misplace never reaches it.
+- **The plan refuses a bad registration on every PR,** by the same rule the deploy reads ([conventions.ts](../../actions/pages-site/.vitepress/conventions.ts), read by both), so a root the deploy would misplace never reaches it.
 
 - **A page and an `index.md` in one directory:** a child directory the site walks (neither dot-prefixed nor `node_modules`) carrying both fails the build.
 
@@ -293,9 +292,9 @@ Keep it to hosts that are alive in a browser and reject automated clients, each 
 |---|---|---|
 | `site.path` | the URL segment the docs mount under when the hook also builds a website; `null` turns the docs half off ([above](#turning-the-docs-half-off-sitepath-null)) | `docs` (`modules.site.path` in `files.yml`) |
 | `site.include` | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude)) | none |
-| `labels.site` | the link-rot tracking issue's label | the site module's `tracking_label` default in [files.yml](../files.yml) |
+| `labels.site` | the link-rot tracking issue's label | the site module's `tracking_label` default in [files.yml](../../files.yml) |
 
-**The `config` output:** the plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into one `config` output. That is the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label` with its `link_rot_color` and `link_rot_description`).
+**The `config` output:** the plan action ([actions/plan](../../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into one `config` output. That is the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label` with its `link_rot_color` and `link_rot_description`).
 
 **A caller without a registration** passes the same document by hand, and its `site_title` must be non-empty like the registration's `project.name`.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Resolved once in sync-repos.yml's plan job: every row job checks out exactly this commit, so a tag moved mid-run changes
-// nothing a row reads. The tag's provenance is the commit itself (docs/build-provenance.md): main history and a green
+// nothing a row reads. The tag's provenance is the commit itself (docs/platform/build-provenance.md): main history and a green
 // all-green check, the two facts the mover verified at the move, re-read here because the ruleset cannot pin the tag to
 // one writer.
 

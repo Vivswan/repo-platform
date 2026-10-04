@@ -19,7 +19,7 @@ labels:
     description: Sync the whole fleet from this merge's green run
 
 rulesets:
-  # The fleet's delivery ref (docs/build-provenance.md); post-green moves it along main with a lease push.
+  # The fleet's delivery ref (docs/platform/build-provenance.md); post-green moves it along main with a lease push.
   # Deletion only: a lease move is a force-class update to git, so an update or non_fast_forward rule would need a bypass for the mover.
   # A mover-only ruleset is not expressible (docs/settings.md): GitHub rejects an Integration bypass actor on a user-owned repository.
   - name: stable-tag

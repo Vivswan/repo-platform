@@ -1,18 +1,17 @@
 ---
 order: 225
-group: Fleet operations
 ---
 
 # Security scans
 
-This page covers the fleet's Trivy and semgrep scans; every other check fleet-ci.yml runs has its row in [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check).
+This page covers the fleet's Trivy and semgrep scans; every other check fleet-ci.yml runs has its row in [fleet-guidelines.md](../fleet-guidelines.md#how-to-bypass-a-check).
 
-Every managed repository is scanned by [Trivy](https://trivy.dev) through the skeleton ci.yml's fleet callers, with zero Trivy files in the repository (public repositories also run [semgrep](#semgrep)). The configuration lives in the [trivy action](../actions/trivy/action.yml), and the scan runs in two halves:
+Every managed repository is scanned by [Trivy](https://trivy.dev) through the skeleton ci.yml's fleet callers, with zero Trivy files in the repository (public repositories also run [semgrep](#semgrep)). The configuration lives in the [trivy action](../../actions/trivy/action.yml), and the scan runs in two halves:
 
 | Half | Where | Runs on | Scans | Blocking? | Findings go to |
 |---|---|---|---|---|---|
-| Blocking | the `trivy` step of [fleet-ci.yml](../.github/workflows/fleet-ci.yml)'s `standard-checks` job | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the step fails its job, so `all-green` fails | the step log and the job's judge summary |
-| Nightly | the `trivy-nightly` job in [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml) | the `schedule` trigger, public repositories only | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
+| Blocking | the `trivy` step of [fleet-ci.yml](../../.github/workflows/fleet-ci.yml)'s `standard-checks` job | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the step fails its job, so `all-green` fails | the step log and the job's judge summary |
+| Nightly | the `trivy-nightly` job in [fleet-nightly.yml](../../.github/workflows/fleet-nightly.yml) | the `schedule` trigger, public repositories only | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
 
 ## The blocking half
 
@@ -22,7 +21,7 @@ Every managed repository is scanned by [Trivy](https://trivy.dev) through the sk
 
 - **Unfixed HIGH and CRITICAL vulnerabilities** never block; they surface in the nightly issue (public repositories).
 
-- **The same scan runs in repo-platform's own CI** (`trivy` in [ci.yml](../.github/workflows/ci.yml), a gating job), so a lockfile here is held to the same bar.
+- **The same scan runs in repo-platform's own CI** (`trivy` in [ci.yml](../../.github/workflows/ci.yml), a gating job), so a lockfile here is held to the same bar.
 
 ## Bypassing a finding: `.trivyignore.yaml`
 
@@ -59,15 +58,15 @@ The nightly scan has its own reusable workflow because it files an issue, and `i
 
 - **The cron's cadence,** and which other jobs stand down on it, belong to the skeleton ci.yml and the per-job conditions, not to the scan.
 
-- **Findings:** the action writes one report per scanned target in the [fuzz-issue action's](../actions/fuzz-issue/action.yml) report-directory contract ([fuzzer.md](fuzzer.md#the-failure-report-contract-v1)), and the job runs the `security-nightly` stream through the [issue lifecycle](tracking-issues.md#issue-lifecycle) the tracking-issues page owns. The full JSON rides the run's artifact.
+- **Findings:** the action writes one report per scanned target in the [fuzz-issue action's](../../actions/fuzz-issue/action.yml) report-directory contract ([fuzzer.md](fuzzer.md#the-failure-report-contract-v1)), and the job runs the `security-nightly` stream through the [issue lifecycle](tracking-issues.md#issue-lifecycle) the tracking-issues page owns. The full JSON rides the run's artifact.
 
 - **Code scanning:** the SARIF is uploaded under the `trivy` category when the repository is public (personal-account code scanning is public-only).
 
-- **Release gating:** `security-nightly` is fleet data, not a module answer. The [settings baseline](../files/settings/baseline.yml) declares the label on every repository, [actions/plan](../actions/plan/plan.ts) appends it to every repository's `tracking-labels`, and `release-health` refuses to release while the issue is open ([tracking-issues.md](tracking-issues.md#release-gating)).
+- **Release gating:** `security-nightly` is fleet data, not a module answer. The [settings baseline](../../files/settings/baseline.yml) declares the label on every repository, [actions/plan](../../actions/plan/plan.ts) appends it to every repository's `tracking-labels`, and `release-health` refuses to release while the issue is open ([tracking-issues.md](tracking-issues.md#release-gating)).
 
 ## Semgrep
 
-Public repositories also run [semgrep](https://semgrep.dev) as fleet-ci.yml's `semgrep` job, through the [semgrep action](../actions/semgrep/action.yml): the registry needs no token, but code scanning needs a public repository.
+Public repositories also run [semgrep](https://semgrep.dev) as fleet-ci.yml's `semgrep` job, through the [semgrep action](../../actions/semgrep/action.yml): the registry needs no token, but code scanning needs a public repository.
 
 - **Rules:** the registry's `p/default` set at `--severity ERROR`, with one rule excluded permanently: `github-actions-mutable-action-tag`, because zizmor's `unpinned-uses` owns action pinning (one tool per finding class).
 
@@ -86,4 +85,4 @@ WARNING and INFO rules do not run, so their findings appear nowhere, neither in 
 
 - **Upload edge cases:** a scan that wrote no SARIF leaves nothing to filter, and the upload fails on the missing file. An earlier upload may have opened lower-severity alerts; code scanning marks them fixed once a later upload for the same category and branch lacks them.
 
-- **Merge gate:** the `main` ruleset's `code_scanning` rule lists CodeQL alone, at the same high-or-critical bar (`alerts_threshold: errors`, `security_alerts_threshold: high_or_higher`, [settings.md](settings.md)), so a semgrep alert blocks through this job's verdict, never through the ruleset.
+- **Merge gate:** the `main` ruleset's `code_scanning` rule lists CodeQL alone, at the same high-or-critical bar (`alerts_threshold: errors`, `security_alerts_threshold: high_or_higher`, [settings.md](../settings.md)), so a semgrep alert blocks through this job's verdict, never through the ruleset.

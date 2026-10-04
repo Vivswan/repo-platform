@@ -49,7 +49,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Exceptions:**
 
-- **The platform's own channel:** `Vivswan/repo-platform/...@stable` references stay on the moving `stable` tag on purpose. It is the green-gated delivery channel ([build-provenance](build-provenance.md)), so a pinned sha there would freeze the fleet on one green commit.
+- **The platform's own channel:** `Vivswan/repo-platform/...@stable` references stay on the moving `stable` tag on purpose. It is the green-gated delivery channel ([build-provenance](platform/build-provenance.md)), so a pinned sha there would freeze the fleet on one green commit.
 
 - **An action that publishes no version tags** is pinned to a branch commit with the branch in the comment, `uses: <owner>/<action>@<40-hex sha> # main`, the sha alone naming the version. [.github/pinact.yaml](../.github/pinact.yaml) skips each such action at a full sha only; the same action at a moving ref is judged like any other. Today that is `Vivswan/skills`, whose validate-skills action repo-platform's own ci.yml runs on its skills catalog.
 
@@ -251,10 +251,10 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (keys below), or a trailing `typos: ignore` comment for a one-off |
 | zizmor | standard-checks | a high finding (retry rule below); code scanning shows high findings only | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it |
 | knip | standard-checks (bun repos with a package.json to install from; a repo without one stands down with a notice) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
-| semgrep | semgrep (public repos) | an ERROR finding, a fatal analysis error, or a scan that did not complete (its exit status is named) | a `// nosemgrep: <rule-id>` comment (`# nosemgrep: <rule-id>` in YAML) on the finding's line or the line above it, with the reason beside it ([security-scans.md](security-scans.md#semgrep)) |
+| semgrep | semgrep (public repos) | an ERROR finding, a fatal analysis error, or a scan that did not complete (its exit status is named) | a `// nosemgrep: <rule-id>` comment (`# nosemgrep: <rule-id>` in YAML) on the finding's line or the line above it, with the reason beside it ([security-scans.md](modules/security-scans.md#semgrep)) |
 | dependency-review | dependency-review | a vulnerable dependency at or above high | none: upgrade or drop the dependency |
 | deno audit | deno-audit.yml (deno repos; pull requests and main pushes touching deno.lock, plus a weekly run) | a high or critical advisory (`--level high`), a lockfile out of date with its manifest (`--frozen`), or no tracked `deno.lock` at all | none: upgrade or drop the dependency, or commit the lockfile |
-| Trivy | standard-checks on every event but the schedule (the schedule split below) | a HIGH or CRITICAL vulnerability with a fix available, or any HIGH or CRITICAL misconfiguration | an entry in the repo-owned `.trivyignore.yaml` carrying a `statement` and an `expired_at` date ([security-scans.md](security-scans.md#bypassing-a-finding-trivyignoreyaml)); the plain `.trivyignore` is refused |
+| Trivy | standard-checks on every event but the schedule (the schedule split below) | a HIGH or CRITICAL vulnerability with a fix available, or any HIGH or CRITICAL misconfiguration | an entry in the repo-owned `.trivyignore.yaml` carrying a `statement` and an `expired_at` date ([security-scans.md](modules/security-scans.md#bypassing-a-finding-trivyignoreyaml)); the plain `.trivyignore` is refused |
 | CodeQL | codeql | nothing in the job; the `main` ruleset's `code_scanning` rule blocks the merge at the fleet's alert bar ([settings.md](settings.md#what-the-baseline-contains)) | a code scanning dismissal with a reason |
 
 - **typos config files:** the repo-owned file may be `_typos.toml`, `typos.toml`, or `.typos.toml`, which typos layers under the fleet config. `[default.extend-words]` holds the repository's vocabulary, `[files] extend-exclude` fixture paths spelled wrong on purpose, and `[default.extend-identifiers]` one identifier.

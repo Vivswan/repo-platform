@@ -15,55 +15,52 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Find out why my PR is pending or red | [All-green: quick triage](all-green.md#quick-triage-why-is-my-pr-red-or-waiting) |
 | Change a repository's settings or labels | [Settings](settings.md) |
 | Understand the `pr-title` required check | [Settings: the pr-title ruleset](settings.md#the-pr-title-ruleset) |
-| Publish a site to GitHub Pages: the repo's own website, its docs/, or both | [Site](site.md) |
-| Fill in the site-build hook that builds my website | [Site: the hook](site.md#the-hook-githubactionssite-buildactionyml) |
-| Translate docs (zh-cn/, ja/, ...) | [Site: docs conventions](site.md#docs-conventions) |
-| Move slow or flaky checks into a nightly run | [Nightly: customizing the starter](nightly.md#customizing-the-starter) |
-| Write the fuzz step the nightly-fuzz starter needs | [Fuzzer: customizing the starter](fuzzer.md#customizing-the-starter) |
-| Adopt the Rust lint floor in a repository that already has a `Cargo.toml` | [Rust: how a repository takes it](rust.md#how-a-repository-takes-it) |
+| Publish a site to GitHub Pages: the repo's own website, its docs/, or both | [Site](modules/site.md) |
+| Fill in the site-build hook that builds my website | [Site: the hook](modules/site.md#the-hook-githubactionssite-buildactionyml) |
+| Translate docs (zh-cn/, ja/, ...) | [Site: docs conventions](modules/site.md#docs-conventions) |
+| Move slow or flaky checks into a nightly run | [Nightly: customizing the starter](modules/nightly.md#customizing-the-starter) |
+| Write the fuzz step the nightly-fuzz starter needs | [Fuzzer: customizing the starter](modules/fuzzer.md#customizing-the-starter) |
+| Adopt the Rust lint floor in a repository that already has a `Cargo.toml` | [Rust: how a repository takes it](modules/rust.md#how-a-repository-takes-it) |
 | See which toolchain versions the fleet pins | [Toolchains: the pins](toolchains.md#the-pins) |
 | Use a different toolchain version in one repo | [Toolchains: overriding](toolchains.md#overriding-per-toolchain) |
-| Silence a Trivy finding that blocks my PR, or read the nightly security issue | [Security scans](security-scans.md) |
-| Mark a semgrep finding, or see which rules the fleet excludes | [Security scans: semgrep](security-scans.md#semgrep) |
-| Understand the issue a red night filed | [Tracking issues: lifecycle](tracking-issues.md#issue-lifecycle) |
-| Ship a release while a tracking issue is open | [Tracking issues: release gating](tracking-issues.md#release-gating) |
-| Rename a tracking label without breaking the stream | [Tracking issues: renaming the label](tracking-issues.md#renaming-the-label) |
+| Silence a Trivy finding that blocks my PR, or read the nightly security issue | [Security scans](modules/security-scans.md) |
+| Mark a semgrep finding, or see which rules the fleet excludes | [Security scans: semgrep](modules/security-scans.md#semgrep) |
+| Understand the issue a red night filed | [Tracking issues: lifecycle](modules/tracking-issues.md#issue-lifecycle) |
+| Ship a release while a tracking issue is open | [Tracking issues: release gating](modules/tracking-issues.md#release-gating) |
+| Rename a tracking label without breaking the stream | [Tracking issues: renaming the label](modules/tracking-issues.md#renaming-the-label) |
 | Add or remove a file the platform writes | [The file list: files.yml](platform/sync/files.md#filesyml) |
 | Read a sync PR's report, or find why a row held | [The writer: the report](platform/sync/writer.md#the-report) |
-| Check why the `stable` tag can be trusted | [Build provenance](build-provenance.md) |
-| Change a managed workflow so it uses a new input of a platform action | [Build provenance: a new action input and its workflow land together](build-provenance.md#a-new-action-input-and-its-workflow-land-together) |
+| Check why the `stable` tag can be trusted | [Build provenance](platform/build-provenance.md) |
+| Change a managed workflow so it uses a new input of a platform action | [Build provenance: a new action input and its workflow land together](platform/build-provenance.md#a-new-action-input-and-its-workflow-land-together) |
 | Keep a private repo's name out of fleet logs, and find where its details land | [Private repositories](platform/sync/private-repositories.md) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
 | Detach a repository from management | [Eject](eject.md) |
 
 ## The pages
 
-The groups below are the sidebar's, in its order.
+One list per folder, each in the sidebar's order.
 
-### Start here
+### Run a repository on the fleet (`docs/`)
 
 - [New repo](new-repo.md): scaffold a repository, register it with the fleet, and receive its first sync PR.
 - [Fleet guidelines](fleet-guidelines.md): the conventions every managed repository follows, each with what enforces it.
 - [All-green](all-green.md): the required check: ci.yml's own gate job judging every needed result.
 - [Settings](settings.md): the six-layer settings merge and how applies run.
-
-### Modules
-
-- [Site](site.md): one GitHub Pages site per repository: the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme.
-- [Nightly](nightly.md): a nightly CI stream for checks too slow for every PR.
-- [Fuzzer](fuzzer.md): the nightly fuzz starter and its failure-report contract.
-- [Rust](rust.md): the `Cargo.toml` lint floor every Rust repository carries, and the cargo gate that enforces it.
-
-### Fleet operations
-
 - [Toolchain pins](toolchains.md): the fleet-wide toolchain version pins and how to override one.
-- [Tracking issues](tracking-issues.md): the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
-- [Security scans](security-scans.md): Trivy fleet-wide (the blocking gate, the expiring bypass file, the nightly scan's tracking issues) and semgrep on public repositories.
-- [Build provenance](build-provenance.md): why the `stable` delivery tag is trustworthy, and what residual trust remains.
 - [Eject](eject.md): pausing sync PRs, or detaching a repository entirely.
 
-### Platform
+### Pick a module (`docs/modules/`)
 
+- [Site](modules/site.md): one GitHub Pages site per repository: the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme.
+- [Nightly](modules/nightly.md): a nightly CI stream for checks too slow for every PR.
+- [Fuzzer](modules/fuzzer.md): the nightly fuzz starter and its failure-report contract.
+- [Rust](modules/rust.md): the `Cargo.toml` lint floor every Rust repository carries, and the cargo gate that enforces it.
+- [Tracking issues](modules/tracking-issues.md): the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
+- [Security scans](modules/security-scans.md): Trivy fleet-wide (the blocking gate, the expiring bypass file, the nightly scan's tracking issues) and semgrep on public repositories.
+
+### Understand the platform (`docs/platform/`)
+
+- [Build provenance](platform/build-provenance.md): why the `stable` delivery tag is trustworthy, and what residual trust remains.
 - [Sync](platform/sync/README.md): the entry to the sync's contract: what the writer writes, where its code is, and this repository as a target of itself; one page per subject follows.
 - [The file list](platform/sync/files.md): the grammar of `files.yml`: entries, module data, what the loader refuses, upstream refs, placeholders, selection.
 - [The writer](platform/sync/writer.md): the command, how each class is written and what holds the PR, class flips, retirement, migrations, the report.

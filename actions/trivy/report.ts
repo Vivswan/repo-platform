@@ -1,4 +1,4 @@
-// The fuzz-issue action's report directory (docs/fuzzer.md, contract v1): one subdirectory per scanned target with a report.md.
+// The fuzz-issue action's report directory (docs/modules/fuzzer.md, contract v1): one subdirectory per scanned target with a report.md.
 // A finding's matched secret text never leaves the JSON: the report names the rule, the file, and the line.
 
 import { createHash } from "node:crypto";

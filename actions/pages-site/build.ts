@@ -44,10 +44,10 @@ import {
 const ACTION_DIR = import.meta.dir;
 
 /** The docs tree every repository renders: fixed, so the fleet's layout
- *  and PR check read one path (docs/site.md). */
+ *  and PR check read one path (docs/modules/site.md). */
 export const DOCS_DIR = "docs";
 
-/** Newest version tags a docs mount serves (docs/site.md, "Versions"). */
+/** Newest version tags a docs mount serves (docs/modules/site.md, "Versions"). */
 const MAX_VERSIONS = 5;
 
 function env(name: string, fallback = ""): string {
@@ -120,7 +120,7 @@ export function setOutput(name: string, value: string): void {
   appendFileSync(out, `${name}<<${delimiter}\n${value}\n${delimiter}\n`);
 }
 
-/** The docs landing page (docs/site.md, "Docs conventions"): README.md
+/** The docs landing page (docs/modules/site.md, "Docs conventions"): README.md
  *  is the directory index the way GitHub renders it, and the fleet's
  *  sidebar and launcher key on it, so an index.md standing in for it is
  *  refused on the content being edited today (historical tags keep the

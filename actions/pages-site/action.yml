@@ -1,6 +1,6 @@
 name: Pages Site
 description: >-
-  Assembles the fleet's GitHub Pages site (docs/site.md). Two parts, alone
+  Assembles the fleet's GitHub Pages site (docs/modules/site.md). Two parts, alone
   or together: the repository's own website, prebuilt by its site-build
   hook and handed over as a directory (site-dir), copied to the root; and
   the docs, the repository's docs/ under the central VitePress theme
@@ -96,7 +96,7 @@ runs:
       run: '"$ACTION_BUN" "${{ github.action_path }}/build.ts"'
 
     # Every same-site link of a page built from HEAD must resolve in the
-    # artifact as Pages serves it (docs/site.md, "The docs PR check"): the
+    # artifact as Pages serves it (docs/modules/site.md, "The docs PR check"): the
     # same lychee as reusable-site.yml's nightly link-rot step, offline.
     # It runs in the build's scratch directory, which holds no lychee.toml
     # or .lycheeignore of the caller's, so neither reconfigures the check.

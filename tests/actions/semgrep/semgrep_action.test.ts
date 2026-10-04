@@ -31,7 +31,7 @@ describe("actions/semgrep", () => {
     const command = String(stepNamed(action, "Scan").run);
     expect(command.match(/--severity[= ](\S+)/g)).toEqual(["--severity ERROR"]);
     expect(command).not.toContain("--error");
-    // The registry's whole default ruleset (the contract docs/security-scans.md documents) over the whole checkout, on
+    // The registry's whole default ruleset (the contract docs/modules/security-scans.md documents) over the whole checkout, on
     // one pinned release: a narrower config or target skips findings with nothing red, and an unpinned install moves
     // the fleet to each new release silently.
     expect([

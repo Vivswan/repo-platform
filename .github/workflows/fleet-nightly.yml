@@ -34,7 +34,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The nightly half of the security scan (docs/security-scans.md): never red; its findings become the
+  # The nightly half of the security scan (docs/modules/security-scans.md): never red; its findings become the
   # security-nightly issue that release-health blocks on, and a clean night closes it.
   trivy-nightly:
     needs: [plan]
