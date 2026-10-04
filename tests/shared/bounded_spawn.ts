@@ -1,8 +1,5 @@
-// bun-test's per-test timeout cannot interrupt a synchronous spawn, so one wedged child hangs the
-// whole run. Deliberately not proc.ts's capture().
-//   piped spawnSync without `timeout` on the pinned bun -> returns at pipe EOF, not child exit (proc.ts's header has the measured semantics)
-//   capture() spreads live process.env                  -> disarms the hermetic and poisoned envs tests pass
-//   capture() folds a deadline expiry into an exit code -> an exit-code assertion could misread it as the failure under test
+// bun-test's per-test timeout cannot interrupt a synchronous spawn, so the bound here is the one guard against a wedged child.
+// Tests need a hermetic env and a throwing expiry, which proc.ts's capture() does not give.
 
 import { harnessBound } from "./harness_bound";
 

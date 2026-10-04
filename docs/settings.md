@@ -211,7 +211,7 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 
 - **Why `stable-tag` blocks only deletion** is [build-provenance.md's](platform/build-provenance.md#who-can-write-refstagsstable).
 
-- **What `main-up-to-date` refuses:** admin merges are the stale merges it refuses. A direct push to main is refused with them unless the commit already carries a passing `all-green` run ([all-green.md](all-green.md)).
+- **What `main-up-to-date` refuses:** a stale merge, for admins too (`gh pr update-branch` first), and a direct push to main unless the commit already carries a passing `all-green` run ([all-green.md](all-green.md)). The fleet does not carry it: sync and Dependabot pull requests would stall behind every merge.
 
 - **A stricter mover-only ruleset over the executable ref is not expressible:** GitHub rejects an Integration bypass actor on a user-owned repository's ruleset (422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization").
 
@@ -231,7 +231,7 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 | already matches the new one | `unchanged` |
 | neither: hand-written or edited | replaced with its diff holding the PR (`replaced local edits`); move what it declared into the overlay |
 
-**Nothing in the repository applies its settings:** settings are applied only centrally, by [settings-repos.yml](../.github/workflows/settings-repos.yml) after every green main merge there and nightly ([all-green.md](all-green.md)). A managed repository carries no apply workflow and no token ([the token](platform/settings-apply.md#token)).
+**Nothing in the repository applies its settings:** [settings-repos.yml](../.github/workflows/settings-repos.yml) applies them centrally, on [its own entries](#when-it-runs). A managed repository carries no apply workflow and no token ([the token](platform/settings-apply.md#token)).
 
 ## Opting out
 
