@@ -1,7 +1,8 @@
-// The upstream container mounts nothing but the workspace, so the fleet policy is rendered into it for every repository.
+// The two passes read one rendered policy at one severity floor: split, code scanning shows findings the gate waves
+// through, or the gate fails on findings code scanning never saw.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { PLATFORM_NAME } from "../../../actions/shared/platform";
@@ -10,77 +11,55 @@ import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 const action = loadAction("actions/zizmor/action.yml");
-const [, upload, uploadRetry, gate, gateRetry] = action.runs.steps;
 const ACTION_DIR = join(REPO_ROOT, "actions/zizmor");
-const COPY = ".zizmor-fleet-policy.yml";
 const OWNER = "acme";
-const UPSTREAM = /^zizmorcore\/zizmor-action@[0-9a-f]{40} # v\d+\.\d+\.\d+$/;
-
-const withOf = (step: Record<string, unknown>) => step.with as Record<string, string | boolean>;
+const sarif = stepNamed(action, "Write the high findings as SARIF");
+const gate = stepNamed(action, "Fail on a high finding");
+const upload = stepNamed(action, "Upload the high findings to code scanning");
 
 describe("actions/zizmor", () => {
-  test("every attempt rides one sha-pinned upstream at one zizmor version, a retry keys on its first attempt's outcome, and the gate runs outside SARIF mode", () => {
-    // Dependabot bumps the four `uses` lines together; the four `version:` inputs are hand-edited, so a partial edit
-    // uploads SARIF from one zizmor and gates on another, green.
-    const pins = readFileSync(join(ACTION_DIR, "action.yml"), "utf8")
-      .split("\n")
-      .filter((line) => line.includes("uses: zizmorcore/"))
-      .map((line) => line.trim().replace(/^uses: /, ""));
-    expect(pins).toHaveLength(4);
-    expect(pins[0]).toMatch(UPSTREAM);
-    expect(new Set(pins).size).toBe(1);
-    const attempts = [upload, uploadRetry, gate, gateRetry];
-    // Without `config` zizmor discovers the repository's own configuration and the rendered fleet policy is dead weight.
-    expect(attempts.map((step) => withOf(step).config)).toEqual(
-      attempts.map(() => "${{ steps.policy.outputs.path }}"),
-    );
-    expect(new Set(attempts.map((step) => withOf(step).version)).size).toBe(1);
-    expect(withOf(upload).version).toMatch(/^\d+\.\d+\.\d+$/);
-    // One severity floor for the upload and the gate: split, code scanning shows findings the gate waves through.
-    expect(new Set(attempts.map((step) => withOf(step)["min-severity"])).size).toBe(1);
-    // Under continue-on-error GitHub sets outcome to failure and conclusion to success: a retry keyed on conclusion
-    // never runs, and a high finding on a transient first attempt passes. actionlint does not read action.yml.
-    expect(
-      attempts.map((step) => [step.id, step.if, step["continue-on-error"], step.with]),
-    ).toEqual([
-      ["sarif", "inputs.upload-sarif == 'true'", true, upload.with],
-      [undefined, "steps.sarif.outcome == 'failure'", undefined, upload.with],
-      ["gate", undefined, true, gate.with],
-      [undefined, "steps.gate.outcome == 'failure'", undefined, gate.with],
+  test("the SARIF pass is the gate's command plus the format and its file, and the upload reads that file", () => {
+    // zizmor exits 0 in SARIF mode whatever it finds, so a `--format` on the gate judges nothing; a flag or a token on
+    // one pass alone (online audits need the token) judges findings the other never saw.
+    const sarifRun = String(sarif.run);
+    const tail = ` --format sarif . > "$RUNNER_TEMP/zizmor.sarif"`;
+    expect(sarifRun.endsWith(tail)).toBe(true);
+    expect([`${sarifRun.slice(0, -tail.length)} .`, sarif.env]).toEqual([
+      String(gate.run),
+      gate.env,
     ]);
-    // SARIF mode suppresses zizmor's finding exit codes, so a gate in SARIF mode never fails.
-    // This repository's ci.yml omits `upload-sarif`, so its code-scanning alerts follow the declared default.
-    expect([
-      action.inputs?.["upload-sarif"].default,
-      withOf(upload)["advanced-security"],
-      withOf(gate)["advanced-security"],
-    ]).toEqual(["true", true, false]);
+    expect(String(gate.run)).not.toContain("--format");
+    // The upload runs exactly when the SARIF pass ran, on the file it wrote: a skipped pass leaves none and the upload fails.
+    expect([upload.if, (upload.with as Record<string, string>).sarif_file]).toEqual([
+      sarif.if,
+      "${{ runner.temp }}/zizmor.sarif",
+    ]);
   });
 
-  const render = (repo: string) =>
+  const render = (workspace: string, runnerTemp: string) =>
     runBashStep(stepNamed(action, "Render the fleet policy"), {
       fills: { "${{ github.action_path }}": ACTION_DIR, "${{ github.repository_owner }}": OWNER },
-      cwd: repo,
-      root: repo,
+      env: { RUNNER_TEMP: runnerTemp },
+      cwd: workspace,
+      root: runnerTemp,
     });
 
-  test("render: the fleet policy lands in the workspace with the caller's owner filled in", () => {
-    // A workspace-relative path: the container sees /workspace, never the runner's action path; an unreadable config
-    // path would leave zizmor auditing under its defaults, green.
-    const repo = temp.dir("zizmor-render-");
-    const run = render(repo);
-    expect([run.exitCode, run.outputs]).toEqual([0, { path: COPY }]);
-    expect(readFileSync(join(repo, COPY), "utf8")).toBe(
+  test("render: the fleet policy lands in the runner's temp dir with the caller's owner filled in, and the checkout stays untouched", () => {
+    const workspace = temp.dir("zizmor-workspace-");
+    const runnerTemp = temp.dir("zizmor-render-");
+    expect(render(workspace, runnerTemp).exitCode).toBe(0);
+    expect(readFileSync(join(runnerTemp, "zizmor.yml"), "utf8")).toBe(
       readFileSync(join(ACTION_DIR, "zizmor.yml"), "utf8").replaceAll("{{github_username}}", OWNER),
     );
+    expect(readdirSync(workspace)).toEqual([]);
   });
 
   test("the rendered policy: ref pins for the caller's delivery channel only, sha pins elsewhere at zizmor's own severity, no ignores", () => {
     // The fleet's pinning rule in one document (docs/platform/build-provenance.md; .github/pinact.yaml ignores the same
     // channel): a widened first key or a loosened second stops flagging unpinned actions fleet-wide with nothing red.
-    const repo = temp.dir("zizmor-policy-");
-    render(repo);
-    const policy = parseYaml(readFileSync(join(repo, COPY), "utf8"));
+    const runnerTemp = temp.dir("zizmor-policy-");
+    render(temp.dir("zizmor-workspace-"), runnerTemp);
+    const policy = parseYaml(readFileSync(join(runnerTemp, "zizmor.yml"), "utf8"));
     expect(policy).toEqual({
       rules: {
         "unpinned-uses": {
