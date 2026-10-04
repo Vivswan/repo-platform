@@ -136,6 +136,7 @@ const CMD_KEYWORDS = ["if", "for", "goto"].map(
   (keyword) => [keyword, new RegExp(`(?<![\\w-])${keyword}(?![\\w-])`, "i")] as const,
 );
 const CMD_CALL_LABEL = /(?<![\w-])call\s+:/i;
+const CMD_CONTINUES = /(?<!\^)(\^\^)*\^\r?$/;
 
 /** Tokens, since no cmd parser exists on npm: comment lines (`rem`, `::`) are dropped, a line ending in `^` continues
  *  on the next, then a body is refused for a second command line or for `if`, `for`, `goto`, `call :label`, or `||`
@@ -146,7 +147,8 @@ export function judgeCmd(code: string): Refusal[] {
   let continued = false;
   code.split("\n").forEach((raw, index) => {
     const line = raw.trim();
-    const continues = line.endsWith("^");
+    // An odd run of carets at the physical line end continues the line; `^^` is one literal caret.
+    const continues = CMD_CONTINUES.test(raw);
     if (line === "" || CMD_COMMENT.test(line) || (continued && line === "^")) {
       continued = continued && continues;
       return;

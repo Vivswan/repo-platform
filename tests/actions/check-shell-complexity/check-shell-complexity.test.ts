@@ -28,16 +28,18 @@ const SCRIPT = resolve(
   "../../../actions/check-shell-complexity/check-shell-complexity.ts",
 );
 
-function judge(dialect: Dialect, code: string): Refusal[] {
+function judge(dialect: Dialect, code: string, powershell: Map<string, Refusal[]>): Refusal[] {
   if (dialect === "bash") return judgeBash(code);
   if (dialect === "cmd") return judgeCmd(code);
-  return judgePowerShell([{ id: "0", dialect, code }]).get("0") ?? [];
+  return powershell.get(code) ?? [];
 }
 
 const at = (line: number, construct: string): Refusal => ({ line, construct });
 
+type RuleRow = [name: string, dialect: Dialect, code: string, expected: Refusal[]];
+
 describe("the rule, per construct and dialect", () => {
-  test.each<[string, Dialect, string, Refusal[]]>([
+  const ROWS: RuleRow[] = [
     ["bash: if", "bash", 'if [ -z "$X" ]; then\n  echo no\nfi\n', [at(1, "if")]],
     [
       "bash: if, elif, and else are one construct",
@@ -174,8 +176,30 @@ describe("the rule, per construct and dialect", () => {
     ],
     ["cmd: one command line", "cmd", "rem build\nbun run build --target windows\n", []],
     ["cmd: a continued line is one command", "cmd", "bun run build ^\n ^\n --target windows\n", []],
-  ])("%s", (_name, dialect, code, expected) => {
-    expect(judge(dialect, code)).toEqual(expected);
+    [
+      "cmd: an escaped caret (a literal) continues nothing",
+      "cmd",
+      "echo ^^\necho second\n",
+      [at(2, "a second command line")],
+    ],
+    [
+      "cmd: a caret before trailing blanks continues nothing",
+      "cmd",
+      "echo ^ \necho second\n",
+      [at(2, "a second command line")],
+    ],
+  ];
+  // One pwsh for every PowerShell row, as the action batches them: a cold pwsh takes seconds on a runner, longer than
+  // one test's budget, and the rows' bodies are their ids.
+  const powershell = judgePowerShell(
+    ROWS.filter(([, dialect]) => dialect === "powershell").map(([, dialect, code]) => ({
+      id: code,
+      dialect,
+      code,
+    })),
+  );
+  test.each(ROWS)("%s", (_name, dialect, code, expected) => {
+    expect(judge(dialect, code, powershell)).toEqual(expected);
   });
 });
 
