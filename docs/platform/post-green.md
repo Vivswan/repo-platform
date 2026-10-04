@@ -21,7 +21,7 @@ all-green -> post-green -> site
 **The mover** ([post-green/move_stable.ts](../../.github/scripts/post-green/move_stable.ts)) re-verifies main history and the check at the sha, reads where the tag sits, and moves it with a lease push, the compare-and-swap that makes a racing mover lose loudly.
 
 - It moves nothing when the tag already names the sha or a newer green commit's run already moved it past the sha (newest-green wins).
-- The tag's ruleset ([.github/settings.local.yml](../../.github/settings.local.yml)) blocks deletion only: git treats any move of an existing tag as a forced update, so a force-push or update rule would block the mover itself.
+- Why the tag's ruleset ([.github/settings.local.yml](../../.github/settings.local.yml)) can block deletion only is [build-provenance.md's](build-provenance.md#who-can-write-refstagsstable).
 
 **Repo-platform's own docs site** is the skeleton's `site` leg, carried by hand in its ci.yml, since this repository's ci.yml is its own, not the managed skeleton. The deploy runs after this run's mover, so a green move's theme is what `@stable` serves it. A red or skipped post-green does not hold it back: it deploys from the tag as it stands.
 
@@ -35,14 +35,14 @@ It calls reusable-site.yml by local path; the reusable plans the site configurat
 
 - The labels are [all-green.md's](../all-green.md#opting-a-pr-into-an-immediate-fleet-sync); how the leg reads them is [below](#how-the-leg-reads-the-label).
 
-**The `settings-fleet` leg** calls settings-repos.yml for every target on every called run, with no diff deciding it. The apply is idempotent and reads each target's rendered `.github/settings.yml` beside its live state, so a run that changed no settings input is an early nightly heal: it fixes whatever out-of-band drift its targets carry and nothing else.
+**The `settings-fleet` leg** calls settings-repos.yml for every target on every called run, with no diff and no label deciding it. The apply is idempotent and reads [the document it applies](settings-apply.md#how-the-apply-works) beside its live state, so a run that changed no settings input is an early nightly heal: it fixes whatever out-of-band drift its targets carry and nothing else.
 
 - It runs behind `sync-fleet` whatever that leg's result (skipped, green or red), so a repo whose sync PR merged is applied from its new render, and it holds the `settings-repos` lane the nightly cron also holds.
-- The called run gates on the judged commit through the mover's bounded all-green poll ([settings-apply.md](settings-apply.md#the-green-commit-gate)).
+- How the called run gates on the judged commit is [settings-apply.md's](settings-apply.md#the-green-commit-gate).
 
-**A red mover skips the sync** (the commit the tag names is stale), nothing else: the settings apply reads no delivery ref (each target's rendered `.github/settings.yml` sits in the target), so it still runs, exactly as it does on a call with no label. A mover that stands down because a newer commit already moved the tag exits green, and the sync then renders from that newer commit.
+**A red mover skips the sync** (the commit the tag names is stale), nothing else: the settings apply reads no delivery ref ([how the apply works](settings-apply.md#how-the-apply-works)), so it still runs. A mover that stands down because a newer commit already moved the tag exits green, and the sync then renders from that newer commit.
 
-**Both fleet writers reach the fleet this way and never from a `push`:** their triggers are the schedule, a dispatch, and the post-green call, and the self-woken paths gate in-script (the sync writes only what the `stable` tag names, the settings apply refuses an ungreen commit).
+**Both fleet writers reach the fleet this way and never from a `push`:** their other entries are their own pages' ([the sync's](sync/operator.md#the-operator), [the settings run's](../settings.md#when-it-runs)), and the self-woken paths gate in-script (the sync writes only what the `stable` tag names, the settings apply through [its green-commit gate](settings-apply.md#the-green-commit-gate)).
 
 **The fleet PAT** is a secret of the `fleet-operator` environment ([.github/settings.local.yml](../../.github/settings.local.yml)), whose branch policy admits main alone. Only a job declaring `environment: fleet-operator` in a main run can read `REPO_PLATFORM_TOKEN`, and GitHub holds that rule, not a check here.
 
@@ -54,7 +54,7 @@ It calls reusable-site.yml by local path; the reusable plans the site configurat
 
 ## How the leg reads the label
 
-- **How the leg finds it:** the squash commit carries the PR title alone (the fleet override sets `squash_merge_commit_message: BLANK`), so `read-directives` looks up each commit's merged pull request through the API (`GITHUB_TOKEN`, read) and reads its labels ([post-green/fleet_sync_marker.ts](../../.github/scripts/post-green/fleet_sync_marker.ts)).
+- **How the leg finds it:** the squash commit's subject and body are [the override's](../settings.md#repository-settings) and carry no label, so `read-directives` looks up each commit's merged pull request through the API (`GITHUB_TOKEN`, read) and reads its labels ([post-green/fleet_sync_marker.ts](../../.github/scripts/post-green/fleet_sync_marker.ts)).
 
 - **Where the labels are declared:** this repository's own settings overlay ([.github/settings.local.yml](../../.github/settings.local.yml)); only this repository's PRs carry them, so the fleet's baseline does not. The leg reads that list at run time, the suffix naming the scope.
 
@@ -71,7 +71,7 @@ The leg reads a range: from the commit the `stable` tag named before this run mo
 ::notice::<the tag's previous commit>..<third merge> opted in: syncing public now
 ```
 
-Why a range: every push gets its own run, but the mover legs of neighbouring commits queue on the `stable-tag-move` lane under [the lane rule](../all-green.md#after-the-gate). A commit whose mover was replaced there never syncs from its own run, and its successor's own `before..sha` would miss it.
+Why a range: the mover legs of neighbouring commits queue on the `stable-tag-move` lane under [the lane rule](../all-green.md#after-the-gate). A commit whose mover was replaced there never syncs from its own run, and its successor's own `before..sha` would miss it.
 
 The tag's previous commit is a durable base: the range from it covers every commit since the last move, replaced movers included, so an opt-in survives its own mover being replaced at the lane.
 
@@ -85,7 +85,7 @@ The tag's previous commit is a durable base: the range from it covers every comm
 
 - **Refused labels by commit:** the judged commit's refused labels turn the leg red. An older commit's (its own run was red, or its mover was replaced at the lane) are a warning naming the commit and contribute nothing, and the next merge's correct label still syncs.
 
-- **A merge never loses its own run** (push runs are keyed by the commit), but its mover leg is replaced when a third mover queues on the `stable-tag-move` lane while one runs and one waits. A running mover is never cancelled, and the surviving run's range still reads its label.
+- **A merge never loses its own run** ([after the gate](../all-green.md#after-the-gate)), but its mover leg is replaced when a third mover queues on the `stable-tag-move` lane while one runs and one waits. A running mover is never cancelled, and the surviving run's range still reads its label.
 
 - **The `sync-repos` lane** replaces a pending sync the same way. When the tag had already moved past that merge, no later range covers its label: the next fleet-wide sync-repos.yml run (its cron, or a dispatch) heals it.
 
@@ -137,4 +137,4 @@ The legs, what each does for a repository, and the release leg's known limits ar
 
 - **A job-created `all-green` check from a pull_request run** judged the merge tree, not the sha, and would vouch for a sha that is also a main commit. Reachable only when a PR head becomes a main commit itself, which squash-only merges make contrived (an assessment, not a tested claim).
 
-- **Copilot code review is advisory:** the `copilot_code_review` rule requests a review on every public-repo PR, but nothing blocks on it ([settings.md](../settings.md#copilot-code-review)).
+- **Copilot code review** sits outside the gate: the `copilot_code_review` rule and what blocks on it are [settings.md's](../settings.md#copilot-code-review).

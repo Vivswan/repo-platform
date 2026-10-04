@@ -90,11 +90,8 @@ jobs:
         with:
           artifact_name: github-pages-${{ github.run_attempt }}
 
-      # lychee reads .lycheeignore from its working directory alone (no flag
-      # names another path), and it runs in the site directory: a repository
-      # that keeps one at its root, listing the URL patterns an anonymous
-      # crawl cannot judge (bot walls, login redirects), has it copied there
-      # AFTER the upload, so the served site never carries the file.
+      # lychee reads .lycheeignore from its working directory alone, so the repository's own list (docs/modules/site.md) lands in the
+      # site directory after the upload and the served site never carries it.
       - name: Stage the repository's .lycheeignore
         if: >-
           github.event_name == 'schedule' && steps.site.outputs.pages-exists == 'true' &&
