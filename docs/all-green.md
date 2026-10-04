@@ -15,7 +15,7 @@ Every repository in the fleet - repo-platform included - gates merges on a requi
 | ci.yml | `allowed-skips` | Why |
 | --- | --- | --- |
 | the managed skeleton | `checks` alone | so a schedule night passes on `ci` and an all-skipped run cannot pass |
-| repo-platform's own | nothing | since none of its gating jobs may skip |
+| repo-platform's own | `dependency-review` alone | since only a pull request has a dependency diff to review |
 
 **The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
 
