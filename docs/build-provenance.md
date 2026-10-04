@@ -69,7 +69,7 @@ Until the heal, a sync copies from the commit the tag names as it stands ([Resid
 
 - **The lease.** The push is `--force-with-lease` naming the value just read (the tag object for an annotated tag, an empty lease when the tag is absent), so two movers racing leaves the loser red and the tag untouched.
 
-- **The output.** `previous`, the commit the tag named before a move (empty when nothing moved), is the `read-directives` leg's base ([all-green.md](all-green.md#which-commits-a-run-reads)).
+- **The output.** `previous`, the commit the tag named before a move, is the `read-directives` leg's base; when nothing moved it is empty and the push's `before` stands in ([all-green.md](all-green.md#which-commits-a-run-reads)).
 
 - **The credential.** The push uses the run's `GITHUB_TOKEN` with `contents: write` (ci.yml's post-green job grants that ceiling), the way GitHub's own actions/publish-action moves an action's major tag with the default token.
 
