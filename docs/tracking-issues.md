@@ -91,5 +91,5 @@ Deselecting removes the label declaration (remove the `labels.<key>` line with t
 
 | Module | What else to do |
 |---|---|
-| fuzzer, nightly | delete its workflow file (`nightly-fuzz.yml` or `nightly.yml`), or keep the label declared in your own `.github/settings.local.yml` if you keep the workflow |
+| fuzzer, nightly | delete its workflow file in `.github/workflows/` (`nightly-fuzz.yml` or `nightly.yml`), or keep the label declared in your own `.github/settings.local.yml` if you keep the workflow |
 | site | no such step: the leg skips on the next run, and the repo-owned site-build hook stays where it is |
