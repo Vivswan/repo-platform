@@ -54,6 +54,8 @@ repo-platform manages standards files, CI, and settings across the owner's repos
 ### Where the contracts live
 
 - What the fleet receives and how the writer applies it: docs/platform/sync/README.md
-- Gates, post-green legs, the fleet-sync label: docs/all-green.md
+- The gate, the post-green hook, the fleet-sync label from the PR's side: docs/all-green.md
+- Repo-platform's own post-green legs and how the label is read: docs/platform/post-green.md
 - Delivery trust model: docs/platform/build-provenance.md
 - Settings layers: docs/settings.md
+- The central settings apply: docs/platform/settings-apply.md
