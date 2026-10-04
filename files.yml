@@ -184,6 +184,7 @@ files:
   - {path: .bun-version, class: managed, when: {modules: [bun]}}
   - {path: .dvmrc, class: managed, when: {modules: [deno]}}
   - {path: .github/workflows/deno-audit.yml, class: managed, when: {modules: [deno]}}
+  - {path: .github/scripts/deno-audit.ts, class: managed, when: {modules: [deno]}}
   - {path: .release-please-manifest.json, class: starter, when: {modules: [release-please]}}
   - {path: release-please-config.json, class: starter, when: {modules: [release-please]}}
   - {path: .github/workflows/pr-title.yml, class: managed, when: {modules: [pr-title]}}
