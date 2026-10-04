@@ -1,9 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignoreExportsUsedInFile": true,
-  // Every script runs by path (package.json scripts, workflows, bun test; the shipped ones under
-  // files/ by the fleet's workflows), so the entry globs are wide and entry exports are judged too,
-  // or a dead export in a shared library would never surface.
+  // Every script runs by path (package.json scripts, workflows, bun test), so the entry globs are
+  // wide and entry exports are judged too, or a dead export in a shared library would never surface.
   "includeEntryExports": true,
   "workspaces": {
     ".": {
@@ -11,7 +10,6 @@
         "scripts/**/*.ts",
         ".github/scripts/**/*.ts",
         "migrations/**/*.ts",
-        "files/*/.github/scripts/**/*.ts",
         "tests/**/*.ts"
       ],
       "project": ["**/*.{ts,mts}"],
