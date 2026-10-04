@@ -11,7 +11,7 @@ Sources on `main`, a moving `stable` tag, sync PRs into each repo:
 - [files.yml](files.yml) is the file list: every path the platform writes, its ownership class (`managed`, `split`, `starter`), the module or visibility condition it lands under, and its source under `files/`.
 - The same file holds each module's data (toolchain pin, dependabot ecosystems, gitignore sources, tracking label) in `modules`, the settings layers and the condition each lands under in `settings`, and the fleet's mirrors (the `AGENTS.md` symlinks) in `mirrors`, in the registration's grammar.
 - Every green `main` commit moves the `stable` tag, the one delivery channel. The written workflows pin `@stable` and read `files.yml`, `files/`, `actions/`, and the reusable workflows straight from that commit, so every path is extraction-safe.
-- [sync-repos.yml](.github/workflows/sync-repos.yml) copies the files at the `stable` commit into each managed repo on a dispatch, a labeled merge, or the weekly cron, then pushes a branch and PR into it with the fleet PAT ([docs/sync.md](docs/sync.md)).
+- [sync-repos.yml](.github/workflows/sync-repos.yml) copies the files at the `stable` commit into each managed repo on a dispatch, a labeled merge, or the weekly cron, then pushes a branch and PR into it with the fleet PAT ([docs/platform/sync/README.md](docs/platform/sync/README.md)).
 - A report that holds nothing arms squash auto-merge, and the PR lands once that repo's `all-green` check passes. Anything a human should see (replaced local edits, a held retirement, a refused mirror, a registration note) stays for review.
 
 Fleet settings are rendered into every managed repo as a managed `.github/settings.yml`, merged from the fleet layers and the repo's own `.github/settings.local.yml` starter. [settings-repos.yml](.github/workflows/settings-repos.yml) applies each rendered file in a github-settings-as-code job of its own; [docs/settings.md](docs/settings.md) owns the layers.
@@ -28,7 +28,7 @@ The measure of the design is the cost of a simple change, not the number of chec
 | Fewer derived artifacts beats a better generator | What the fleet receives is written once under `files/` and copied whole; the one rendered file is each repo's `.github/settings.yml`, folded by the sync from the settings layers and the repo's overlay. The generators that remain (gitignore blocks, toolchain pin dotfiles, the theme CSS, this repo's own settings document) each have one offline drift check. |
 | One run, one order | Everything after the gate is a job in the same run, ordered by `needs`: move the `stable` tag, sync the fleet, deploy the docs. No dispatch tokens between workflows. |
 | Sync is copy, not merge | Managed files are replaced whole, split files have their managed region replaced around the repository's own sides, starters are written once, and a file no entry writes any more is deleted when it still holds the platform's own content. |
-| Private is private by where it runs and by what the run can emit | Job names carry row indexes, names are masked where they enter a step, per-row logs go to files, and the details land in the target repository ([docs/sync.md](docs/sync.md#private-repositories)). |
+| Private is private by where it runs and by what the run can emit | Job names carry row indexes, names are masked where they enter a step, per-row logs go to files, and the details land in the target repository ([docs/platform/sync/private-repositories.md](docs/platform/sync/private-repositories.md)). |
 | Own as few files as possible | Community health files come from the account's `.github` defaults repository; tool configs ride inside the actions that run them; the rest is the file list. |
 | TypeScript only | A workflow step is one `bun` call; [AGENTS.md](AGENTS.md#principles) owns the rule for the shell that stays. |
 
@@ -80,6 +80,6 @@ Managed repos need no secret.
 ## Going deeper
 
 - The guides, indexed by task and by page: [docs/README.md](docs/README.md).
-- The file list and its grammar: [files.yml](files.yml) and [docs/sync.md](docs/sync.md#filesyml); the writer's code is under [.github/scripts/sync/writer](.github/scripts/sync/writer).
+- The file list and its grammar: [files.yml](files.yml) and [docs/platform/sync/files.md](docs/platform/sync/files.md#filesyml); the writer's code is under [.github/scripts/sync/writer](.github/scripts/sync/writer).
 - Working in this repository, its conventions and principles: [AGENTS.md](AGENTS.md).
 - [`skills/`](skills/README.md): portable agent skills for driving the platform from other repos, installed with `npx skills` and never synced to managed repos.

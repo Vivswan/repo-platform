@@ -1,5 +1,5 @@
 // The selectors' logs and step summaries are public, so every privacy-sensitive piece (discovery,
-// the dispatch-input read, the slug scrub) lives here once (docs/sync.md).
+// the dispatch-input read, the slug scrub) lives here once (docs/platform/sync/private-repositories.md).
 
 import { readFileSync, writeSync } from "node:fs";
 import { z } from "zod";
@@ -116,7 +116,7 @@ function dispatchInputs(): { repo: string; branch: string } {
   return { repo: event.inputs?.repo ?? "", branch: event.inputs?.branch ?? "" };
 }
 
-/** The branch a dispatch syncs onto (docs/sync.md, "Syncing a branch"); empty on every other run. Verbatim: git forbids
+/** The branch a dispatch syncs onto (docs/platform/sync/operator.md, "Syncing a branch"); empty on every other run. Verbatim: git forbids
  * ASCII whitespace in a refname, so a padded value is a typo the resolve probe refuses, and a name ending in a no-break
  * space is its own branch, which trimming would send to the one it resembles. */
 export function readDispatchBranch(): string {

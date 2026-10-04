@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Runs every rung in the build's migrations/ over the target checkout, in name order, before the writer reads it
-// (docs/sync.md, Migrations). A rung's nonzero exit ends the run with that exit; the writer step then does not run.
+// (docs/platform/sync/writer.md, Migrations). A rung's nonzero exit ends the run with that exit; the writer step then does not run.
 // A rung's stdout is the checkout-relative paths it wrote, one per line, and nothing else: their union goes to
 // $RUNNER_TEMP/migrated.txt, which the delivery stages beside the writer's paths.
 //

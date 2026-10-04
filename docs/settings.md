@@ -5,7 +5,7 @@ group: Start here
 
 # Repository settings
 
-This page is the settings model of a managed repository: the layers the sync renders, the dialect that folds them, and the central run that applies the result; the sync writer itself is [sync.md](sync.md)'s.
+This page is the settings model of a managed repository: the layers the sync renders, the dialect that folds them, and the central run that applies the result; the sync writer itself is [platform/sync/README.md](platform/sync/README.md)'s.
 
 - **The rendered document:** every managed repository carries `.github/settings.yml`, a managed file the sync writes from six plain YAML layers. It is the one document [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code) applies.
 - **The edit rule:** the repository edits `.github/settings.local.yml`, its own layer, never the rendered file ([editing your settings](#editing-your-settings)).
@@ -35,7 +35,7 @@ Every layer is a plain settings-as-code YAML document a human can read on its ow
 
 - **The render** is the writer's settings entry ([sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts)). `files.yml`'s `settings` block names the baseline, the override, and every layer between them with the `when` that selects it (the `source` and `when` of a `files` entry).
 
-- **The entry** `{path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}` folds the layers with the overlay ([sync.md](sync.md#filesyml)).
+- **The entry** `{path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}` folds the layers with the overlay ([platform/sync/files.md](platform/sync/files.md#filesyml)).
 
 - **Layers 1 to 4 are selected by the repository's facts:** the module selection from its `.repo-platform.yml`, and the visibility the overlay's `repository.private` declares. A module name `files.yml` does not offer fails the sync, and an overlay declaring no visibility holds the row.
 
@@ -83,7 +83,7 @@ The render and the apply read one dialect, spelled out in the library's [layerin
 
 - **Edit `.github/settings.local.yml`, never the rendered `.github/settings.yml`.** The next sync re-renders the managed file from the new overlay and replaces a hand edit of it ([the rendered file](#the-starter-and-the-rendered-file)). Before that, the [managed files check](new-repo.md#the-managed-files-check) reds the PR that edits it.
 
-- **An overlay edit is one PR with the branch sync.** The managed files check reds the overlay PR while the rendered file is stale. The `repo-platform:sync` label or the branch dispatch ([sync.md](sync.md#syncing-a-branch)) re-renders `.github/settings.yml` onto the PR's branch as one commit, so the PR merges green.
+- **An overlay edit is one PR with the branch sync.** The managed files check reds the overlay PR while the rendered file is stale. The `repo-platform:sync` label or the branch dispatch ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch)) re-renders `.github/settings.yml` onto the PR's branch as one commit, so the PR merges green.
 
 - **The apply follows the merge:** the nightly cron plus every green main run ([below](#when-it-runs)) applies the new render once it is on main.
 
@@ -163,7 +163,7 @@ A red nightly is the signal that drift is going unhealed, so the halt is a FAILE
 
 ## How the apply works
 
-A `plan` job, then one `apply (row <i>)` job per target, the shape the sync's operator uses ([sync.md](sync.md#the-operator)). The selector lists the targets and keys each row of the apply matrix. Every apply job resolves its own target and runs the library's CLI (`gsac`) on it, in `--repos` mode, from its rendered `.github/settings.yml` on its default branch.
+A `plan` job, then one `apply (row <i>)` job per target, the shape the sync's operator uses ([platform/sync/operator.md](platform/sync/operator.md)). The selector lists the targets and keys each row of the apply matrix. Every apply job resolves its own target and runs the library's CLI (`gsac`) on it, in `--repos` mode, from its rendered `.github/settings.yml` on its default branch.
 
 | Step | Script | What it does |
 | --- | --- | --- |
@@ -211,7 +211,7 @@ A target is selected when all three probes pass, in this order, over every disco
 
 - **In the logs:** a private target appears in its job's log, summary, and outputs as `private repository #1` (`private-repos: redact`). The job's name carries its index in the matrix, `apply (row 3)`, never the repository.
 
-- **A private target's full report** is a reused issue on the target itself, pinned by the `settings-as-code-report` label (`private-report: issue`). It is opened or refreshed when the target fails or drifts, closed when it is healthy, and delivered in check mode too ([private repositories](sync.md#private-repositories)).
+- **A private target's full report** is a reused issue on the target itself, pinned by the `settings-as-code-report` label (`private-report: issue`). It is opened or refreshed when the target fails or drifts, closed when it is healthy, and delivered in check mode too ([private repositories](platform/sync/private-repositories.md)).
 
 - **The first check on a private target** can flag that marker label itself as drift. The label does not exist until the same run's delivery creates it, so the next run is clean.
 
@@ -246,7 +246,7 @@ A fleet check reads clean only when three things hold together. The second and t
 
 | When | Labels |
 |---|---|
-| always | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's approval label `merge-when-green`; the fleet-wide `security-nightly` stream label; `repo-platform:sync`, which a human adds to a PR for the branch sync ([sync.md](sync.md#syncing-a-branch-by-label)) |
+| always | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's approval label `merge-when-green`; the fleet-wide `security-nightly` stream label; `repo-platform:sync`, which a human adds to a PR for the branch sync ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)) |
 | per selected toolchain | the dependabot ecosystem labels: `javascript` for bun, `deno` for deno, `python:uv` for uv, `rust` for cargo |
 | with release-please | the `autorelease: *` pair and release-health's gate labels, `release-blocker` and `release-override`: stripping one un-blocks or un-overrides a release mid-flight |
 | with the fuzzer, nightly, or site module | the tracking labels, named and styled as the layer list above says |
@@ -278,7 +278,7 @@ The apply is stateless, touches only declared keys, and upserts by name, all on 
 
 - **The homepage is unmanaged:** the starter seeds no `homepage` key, so the apply never touches the field and a homepage set on GitHub stays. To have the apply manage a real website, add `homepage:` to the overlay by hand.
 
-- **The overlay cannot declare-and-clear the homepage:** the `0002-homepage-unmanaged` rung ([sync.md](sync.md#migrations)) deletes an empty or own-address `homepage` key on every sync.
+- **The overlay cannot declare-and-clear the homepage:** the `0002-homepage-unmanaged` rung ([platform/sync/writer.md](platform/sync/writer.md#migrations)) deletes an empty or own-address `homepage` key on every sync.
 
 - **Visibility** is managed like any other declared field: the starter seeds `private:` (false included), so the nightly heal reverts an out-of-band flip in either direction. To change visibility on purpose, edit `private:` in the overlay; the visibility-gated layers follow the declared value in the same render.
 
@@ -317,7 +317,7 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 
 ## repo-platform itself is a target
 
-- **Its registration:** it carries its own [.repo-platform.yml](../.repo-platform.yml) (modules and project facts) like any managed repository. The sync writes its rendered [.github/settings.yml](../.github/settings.yml) from the same layers, this registration, and its overlay ([sync.md](sync.md#this-repository-as-a-target)), and the selector picks it up like any other target.
+- **Its registration:** it carries its own [.repo-platform.yml](../.repo-platform.yml) (modules and project facts) like any managed repository. The sync writes its rendered [.github/settings.yml](../.github/settings.yml) from the same layers, this registration, and its overlay ([platform/sync/README.md](platform/sync/README.md#this-repository-as-a-target)), and the selector picks it up like any other target.
 
 - **Its overlay,** [.github/settings.local.yml](../.github/settings.local.yml), carries its identity keys plus its two repo-specific rulesets:
 
@@ -340,7 +340,7 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 
 **The starter:** every repository receives `.github/settings.local.yml` once ([files/base/.github/settings.local.yml](../files/base/.github/settings.local.yml)). It carries the three identity keys (`description` from the registration, `topics` declared empty, `private` from the writer's `--private` flag), plus commented examples for local labels and rulesets. It is repo-owned from then on (a starter: written only when absent).
 
-**The rendered file** `.github/settings.yml` is written right after it, on every sync. It takes the managed rules ([sync.md](sync.md#classes)):
+**The rendered file** `.github/settings.yml` is written right after it, on every sync. It takes the managed rules ([platform/sync/writer.md](platform/sync/writer.md#classes)):
 
 | The file on the target | Row |
 |---|---|

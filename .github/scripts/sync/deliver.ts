@@ -241,7 +241,7 @@ class Delivery {
   readonly targetDir = env("TARGET_DIR", "target");
   readonly build = requireEnv("BUILD");
   readonly runUrl = requireEnv("RUN_URL");
-  /** docs/sync.md, "Syncing a branch". */
+  /** docs/platform/sync/operator.md, "Syncing a branch". */
   readonly branch = readDispatchBranch();
   readonly logFile = join(this.runnerTemp, DELIVER_LOG);
 
