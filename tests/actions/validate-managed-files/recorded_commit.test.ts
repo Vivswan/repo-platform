@@ -23,8 +23,7 @@ const manifest = (self: string) =>
 const STAMPED = manifest(`{"class": "managed", "hash": null, "commit": "${COMMIT}"}`);
 
 const REVERT = "revert the edit (git history has the stamped original) or dispatch a sync";
-const NOT_A_SHA = `${MANIFEST_NAME} records a synced commit that is not a full 40-hex sha; ${REVERT}`;
-const NONE = "no synced commit recorded; merge the pending sync PR or dispatch a sync";
+const NOT_A_SHA = `${MANIFEST_NAME}'s own entry names no full 40-hex commit; ${REVERT}, which rewrites the entry`;
 
 describe("the read-commit step", () => {
   const OCCUPIED = `commit=\nproblem=the repository holds a path at ${JUDGE}, where the check places its checkout of repo-platform; move it\n`;
@@ -58,14 +57,14 @@ describe("the read-commit step", () => {
     {
       reason: "a self entry without its commit",
       tree: { [MANIFEST_NAME]: manifest('{"class": "managed", "hash": null}') },
-      outputs: `commit=\nproblem=${NONE}\n`,
+      outputs: `commit=\nproblem=${NOT_A_SHA}\n`,
     },
     {
       reason: "no self entry at all",
       tree: {
         [MANIFEST_NAME]: `{"files": {".bun-version": {"class": "managed", "hash": "${"a".repeat(64)}"}}}`,
       },
-      outputs: `commit=\nproblem=${NONE}\n`,
+      outputs: `commit=\nproblem=${NOT_A_SHA}\n`,
     },
     {
       reason: "a short sha",

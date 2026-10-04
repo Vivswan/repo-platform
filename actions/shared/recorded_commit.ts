@@ -33,12 +33,9 @@ export function recordedCommit(root: string): { commit: string } | { problem: st
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return { problem: `${MANIFEST_NAME} ${parsed.problem}; ${REVERT}` };
   const commit = parsed.files[MANIFEST_NAME]?.commit;
-  if (commit === undefined) {
-    return { problem: `no synced commit recorded; merge the pending sync PR or ${RESYNC}` };
-  }
   if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) {
     return {
-      problem: `${MANIFEST_NAME} records a synced commit that is not a full 40-hex sha; ${REVERT}`,
+      problem: `${MANIFEST_NAME}'s own entry names no full 40-hex commit; ${REVERT}, which rewrites the entry`,
     };
   }
   return { commit };

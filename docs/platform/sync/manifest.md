@@ -46,8 +46,7 @@ The fleet's `validate-managed-files` check judges a repository as [check.ts](../
 
 | The action finds | The verdict |
 | --- | --- |
-| no `commit` on the manifest's own entry | not judged: `no synced commit recorded; merge the pending sync PR or dispatch a sync` |
-| a `commit` that is not a full 40-hex sha, or a manifest that does not parse | not judged, the reason naming the manifest |
+| no full 40-hex `commit` on the manifest's own entry (a hand edit, since every sync writes it), or a manifest that does not parse | not judged, the reason naming the manifest and the remedy: revert the edit, or dispatch a sync, which rewrites the entry |
 | a commit repo-platform's history lacks (the checkout fails) | not judged, the checkout step's outcome in the reason |
 | a repository path at `.repo-platform-judge`, where the check places its checkout | not judged: move it |
 | `check.ts` exit 1 or 2 with output | findings: its output fenced under `#### repo-platform at <commit>`, with the remedy |

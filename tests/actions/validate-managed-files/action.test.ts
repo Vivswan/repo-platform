@@ -335,9 +335,10 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       reason: "no commit could be read",
       env: {
         COMMIT: "",
-        COMMIT_PROBLEM: "no synced commit recorded; merge the pending sync PR or dispatch a sync",
+        COMMIT_PROBLEM:
+          "the manifest's own entry names no full 40-hex commit; dispatch a sync, which rewrites the entry",
       },
-      text: "no synced commit recorded; merge the pending sync PR or dispatch a sync",
+      text: "the manifest's own entry names no full 40-hex commit; dispatch a sync, which rewrites the entry",
       platformRemoved: false,
     },
     {
