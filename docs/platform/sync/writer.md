@@ -32,7 +32,7 @@ A nonzero exit is a data or environment error, one of:
 - an unreadable registration
 - a registration naming a module `files.yml` does not offer
 - a manifest record the writer cannot read ([Retirement](#retirement))
-- a recorded commit the build checkout cannot fetch ([The manifest](manifest.md#when-the-judged-commit-moves))
+- a recorded commit the build checkout's history lacks ([The manifest](manifest.md#when-the-judged-commit-moves))
 - a symlinked ancestor at a path the writer touches
 - a directory or a symlink at the manifest or registration path
 - a directory at a stale record's path

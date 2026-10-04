@@ -245,7 +245,7 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
   const { records, commit: recorded, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
   const manifestBefore = existingFile(options.target, MANIFEST_NAME);
-  // Read before the writes: a recorded commit the checkout cannot fetch fails the run before a byte moves. `files.yml`
+  // Read before the writes: a recorded commit the checkout's history lacks fails the run before a byte moves. `files.yml`
   // sits at the platform root, which is the checkout the diff reads.
   const checkerMoved =
     recorded !== null &&

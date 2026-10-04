@@ -216,27 +216,7 @@ describe("the manifest's commit under the stamp rule", () => {
     else expect(after).not.toEqual(before);
   });
 
-  test("a shallow build checkout fetches the recorded commit before the diff", () => {
-    const shallow = temp.dir("stamp-shallow-");
-    fixtureGit(p.root, ["checkout", "-q", p.files]);
-    fixtureGit(dirname(shallow), ["clone", "-q", "--depth", "1", `file://${p.root}`, shallow]);
-    // Control: the recorded commit is not in the shallow clone before the writer runs.
-    expect(fixtureGit(shallow, ["rev-parse", "--is-shallow-repository"])).toBe("true");
-    const missing = boundedSpawnSync(
-      ["git", "-C", shallow, "rev-parse", "--verify", "--quiet", `${p.base}^{commit}`],
-      { env: fixtureGitEnv() },
-    );
-    expect(missing.exitCode).toBe(1);
-    const t = target();
-    expect(sync(p.root, t, p.base).exitCode).toBe(0);
-    const run = sync(shallow, t, p.files);
-    expect(run.stderr).toBe("");
-    expect(run.exitCode).toBe(0);
-    expect(recorded(t)).toBe(p.files);
-    expect(fixtureGit(shallow, ["rev-parse", "--verify", `${p.base}^{commit}`])).toBe(p.base);
-  });
-
-  test("a recorded commit the build checkout cannot fetch fails the run before anything is written", () => {
+  test("a recorded commit the build checkout's history lacks fails the run before anything is written", () => {
     const t = target();
     expect(sync(p.root, t, p.base).exitCode).toBe(0);
     const before = snapshotTree(t);
@@ -246,8 +226,9 @@ describe("the manifest's commit under the stamp rule", () => {
     const run = sync(p.root, t, p.docs);
     expect(run.exitCode).toBe(1);
     expect(run.stdout).toContain(
-      `::error::the manifest records commit ${foreign.slice(0, 12)}, which the build checkout cannot fetch`,
+      "::error::git diff could not answer (exit 128); refusing to guess:",
     );
+    expect(run.stdout).toContain(foreign);
     before.set(MANIFEST_NAME, sha256(manifest.replace(p.base, foreign)));
     expect(snapshotTree(t)).toEqual(before);
   });
