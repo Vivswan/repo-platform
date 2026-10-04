@@ -29,7 +29,7 @@ What a module layer adds:
 Two layers of the table need a note:
 
 - **Why layer 4 is gated:** GitHub rejects the `code_scanning` rule on private repos, and a repo with no CodeQL run would block every merge on it.
-- **Layer 6 holds:** the squash-only merge policy (the PR title as the squash subject, a blank squash body), `allow_auto_merge`, `enable_vulnerability_alerts`, the `main` and `non-bypassable` protection rulesets, and the rulesets' `_undeclared: delete` policy.
+- **Layer 6 holds:** the squash-only merge policy (the PR title as the squash subject, a blank squash body: `squash_merge_commit_message: BLANK`), `allow_auto_merge`, `enable_vulnerability_alerts`, the `main` and `non-bypassable` protection rulesets, and the rulesets' `_undeclared: delete` policy.
 
 Every layer is a plain settings-as-code YAML document a human can read on its own. No settings content derives from code. The mechanics:
 
@@ -101,11 +101,11 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -
 
 ## When it runs
 
-[settings-repos.yml](../.github/workflows/settings-repos.yml) has three ways in, none of them a push:
+[settings-repos.yml](../.github/workflows/settings-repos.yml) has three ways in ([post-green.md](platform/post-green.md#the-run-leg-by-leg) owns why no push is one):
 
 | Entry | Effect |
 |---|---|
-| The post-green call, in a green main push's own CI run | every target, on every green main run ([platform/post-green.md](platform/post-green.md#the-run-leg-by-leg)) |
+| The post-green call, in a green main push's own CI run | the scope [the `settings-fleet` leg](platform/post-green.md#the-run-leg-by-leg) owns |
 | Nightly cron | heals out-of-band drift |
 | Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift and changes no settings ([check mode](platform/settings-apply.md#check-mode)); `-f repo=` scopes it ([the dispatch scope](platform/settings-apply.md#the-dispatch-scope)) |
 
@@ -209,9 +209,9 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 | `stable-tag` | only blocks deleting the `stable` tag ([build-provenance.md](platform/build-provenance.md#who-can-write-refstagsstable)) |
 | `main-up-to-date` | requires a pull request branch to be up to date before merging, with no bypass actor |
 
-- **Why `stable-tag` blocks only deletion:** every move of an existing tag is a forced update to git, and any stricter rule would block the mover.
+- **Why `stable-tag` blocks only deletion** is [build-provenance.md's](platform/build-provenance.md#who-can-write-refstagsstable).
 
-- **What `main-up-to-date` refuses:** admin merges are the stale merges it refuses. A direct push to main is refused with them unless the commit already carries a passing `all-green` run ([all-green.md](all-green.md)).
+- **What `main-up-to-date` refuses:** a stale merge, for admins too (`gh pr update-branch` first), and a direct push to main unless the commit already carries a passing `all-green` run ([all-green.md](all-green.md)). The fleet does not carry it: sync and Dependabot pull requests would stall behind every merge.
 
 - **A stricter mover-only ruleset over the executable ref is not expressible:** GitHub rejects an Integration bypass actor on a user-owned repository's ruleset (422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization").
 
@@ -231,7 +231,7 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 | already matches the new one | `unchanged` |
 | neither: hand-written or edited | replaced with its diff holding the PR (`replaced local edits`); move what it declared into the overlay |
 
-**Nothing in the repository applies its settings:** settings are applied only centrally, by [settings-repos.yml](../.github/workflows/settings-repos.yml) after every green main merge there and nightly ([all-green.md](all-green.md)). A managed repository carries no apply workflow and no token ([the token](platform/settings-apply.md#token)).
+**Nothing in the repository applies its settings:** [settings-repos.yml](../.github/workflows/settings-repos.yml) applies them centrally, on [its own entries](#when-it-runs). A managed repository carries no apply workflow and no token ([the token](platform/settings-apply.md#token)).
 
 ## Opting out
 

@@ -39,7 +39,7 @@ Every run, on all three entries ([when it runs](../settings.md#when-it-runs)), a
 
 - **`check_only` while main is red:** check reports are dispatch runs too, so the drift diagnostic is unavailable exactly while main is red.
 
-**The gate is ordering, not content.** The apply reads nothing but the target list from this checkout (every settings document sits rendered in its own repository). So what it guards is the operator's own scripts and the place of the apply behind the sync in a green run.
+**The gate is ordering, not content.** The apply reads nothing from this checkout but the target list ([where the documents sit](#how-the-apply-works)). So what it guards is the operator's own scripts and the place of the apply behind the sync in a green run.
 
 A red nightly is the signal that drift is going unhealed, so the halt is a FAILED run on purpose.
 

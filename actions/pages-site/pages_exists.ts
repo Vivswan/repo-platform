@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
-// GitHub reserves Pages-site creation to a token other than the job's, whatever `pages: write` grants, so a deploy
-// can only ask whether the site exists. A repository's first deploy after selecting the site module can run before
-// the settings apply that creates the site (files/site/settings.yml), and the one known answer, 404, is "wait for
-// the apply", never a failure.
+// GitHub reserves Pages-site creation to a token the job lacks, whatever `pages: write` grants, so a repository's first deploy can
+// precede the settings apply that creates the site (files/site/settings.yml), and 404 means wait for it.
 
 import { appendFileSync, writeSync } from "node:fs";
 import {

@@ -19,11 +19,7 @@ Every repository in the fleet - repo-platform included - gates merges on a requi
 
 **The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
 
-**repo-platform's own main also requires the pull request branch to be up to date before merging:** the `main-up-to-date` ruleset in its [overlay](../.github/settings.local.yml), with no bypass.
-
-- A stale merge fails at GitHub for admins too (`gh pr update-branch` first).
-- A direct push to main is refused unless the commit already carries a passing `all-green` run.
-- The fleet does not, because sync and Dependabot pull requests would stall behind every merge.
+**repo-platform's own main carries one more merge rule,** the `main-up-to-date` ruleset in its [overlay](../.github/settings.local.yml): [settings.md](settings.md#repo-platform-itself-is-a-target) owns what it refuses and why the fleet does not carry it.
 
 ## Quick triage: why is my PR red or waiting?
 
@@ -89,7 +85,7 @@ The jobs beside them gate nothing:
 | `plan` | every event, the schedule included | a failed plan skips every check step (the judge still runs and names it); its outputs gate knip and every job beside |
 | `validate-managed-files` | every push and pull request | the action defers its verdict so the findings comment posts first; the `managed-files` step re-raises it |
 | `typography`, `file-size`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps)) |
-| `zizmor` | every push and pull request | SARIF upload on public repositories only; zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt of either pass runs once more and only the retry's result counts |
+| `zizmor` | every push and pull request | SARIF upload on public repositories only; its retry rule is [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
 | `trivy` | every push and pull request | the blocking half of the [security scans](modules/security-scans.md) |
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
 
@@ -199,6 +195,6 @@ One label on the PR, before it merges.
 
 - **Dispatch-only scopes:** `private`, repository slugs, and the `modules:<a>+<b>` filter ([the README's `repo=` table](../README.md#shipping-a-change)). The leg unions the labels of every commit in its range, and an intersecting token would misread there: a `public, modules:site` beside a `private` would read as every repo selecting site and drop the private repos the second asked for.
 
-- **The settings apply never depends on the label,** since every green run applies every target.
+- **The settings apply and the label:** what a call applies, label or none, is [the `settings-fleet` leg's](platform/post-green.md#the-run-leg-by-leg).
 
 - **How the leg reads the label,** which commits a run reads, and the bot that labels a platform PR by default are [platform/post-green.md](platform/post-green.md#how-the-leg-reads-the-label).
