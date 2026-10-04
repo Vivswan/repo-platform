@@ -1,5 +1,5 @@
 // The settings lane orders its runs by ARRIVAL, and CI durations vary, so an older main commit's run can take its turn after
-// a newer one's (docs/settings.md, "Newest wins"). The selector asks this first: main's tip, read live with one ls-remote and no
+// a newer one's (docs/platform/settings-apply.md, "Newest wins"). The selector asks this first: main's tip, read live with one ls-remote and no
 // history, since the plan job's checkout is one commit deep.
 
 import { gitRemoteRef } from "../shared/git_yes_no.ts";

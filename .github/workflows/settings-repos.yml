@@ -1,6 +1,6 @@
 # A plan job selects the targets into a keyed matrix; one apply job per row resolves its target
 # and runs the github-settings-as-code CLI on it, from its own rendered .github/settings.yml
-# (docs/settings.md). No push trigger: a merge reaches the fleet only through post-green.yml's
+# (docs/platform/settings-apply.md). No push trigger: a merge reaches the fleet only through post-green.yml's
 # call, behind the all-green gate.
 
 name: Settings Repos

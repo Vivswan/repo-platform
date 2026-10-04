@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // One invoker, post-green.yml's move-stable job: SOURCE_SHA is the judged commit on the call, the sha input on a dispatch (the tag's
-// contract: docs/platform/build-provenance.md; its place after the gate: docs/all-green.md).
+// contract: docs/platform/build-provenance.md; its place after the gate: docs/platform/post-green.md).
 // Output `previous` is the base the directives read takes from the tag: the commit it named before this run moved it, "" when
 // nothing moved (the first move included).
 
@@ -54,7 +54,7 @@ if (previous !== "") {
 // The output is written at the terminal points only, so a failed push (a
 // lost lease) reports nothing and the directives read keeps its fallback.
 // A no-move reports "" and no stand-down: that read runs on every mover
-// result (docs/all-green.md).
+// result (docs/platform/post-green.md).
 if (previousCommit === sourceSha) {
   notice(`stable already names ${short} - nothing to move`);
   setOutput("previous", "");

@@ -49,7 +49,7 @@ interface Run {
 }
 
 /** The two workflows' entry scripts: one resolver, each with its own GITHUB_ENV contract. The
- *  settings row asks newest wins (docs/settings.md) before its listing; the sync row asks nothing. */
+ *  settings row asks newest wins (docs/platform/settings-apply.md) before its listing; the sync row asks nothing. */
 const ENTRIES = [
   {
     script: "sync/resolve_row.ts",
