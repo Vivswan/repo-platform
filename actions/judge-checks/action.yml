@@ -11,7 +11,7 @@ description: >-
 
 inputs:
   steps:
-    description: The calling job's steps context as JSON (`${{ toJSON(steps) }}`).
+    description: The calling job's steps context as JSON, passed as toJSON(steps).
     required: true
 
 runs:
