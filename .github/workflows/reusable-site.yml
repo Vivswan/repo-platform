@@ -64,9 +64,8 @@ jobs:
           base-path: ${{ steps.urls.outputs.base_path }}
           origin: ${{ steps.urls.outputs.origin }}
 
-      # The assembly also asks GitHub whether the Pages site exists (pages-exists): a repository's first deploy after
-      # selecting the module can run before the settings apply that creates its site (files/site/settings.yml), and
-      # the job token cannot create one, so the deploy waits for the apply on that one known answer.
+      # The assembly also asks GitHub whether the Pages site exists (pages-exists): why, and the three answers, in
+      # actions/pages-site/pages_exists.ts.
       - name: Assemble the site
         id: site
         uses: Vivswan/repo-platform/actions/pages-site@stable

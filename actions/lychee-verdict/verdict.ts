@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
-// lychee's exit codes are its own: 0 clean, 2 broken links. 1 is lychee's own error, 3 a configuration error, and an
-// empty code a step that never ran; none of those is a clean run, so each fails here instead of reading as one.
+// The exit-code contract this reads is action.yml's description.
 
 import { appendFileSync } from "node:fs";
 import { env, error, requireEnv } from "../shared/action_runtime.ts";
