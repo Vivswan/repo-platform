@@ -1,0 +1,44 @@
+name: Release Assets
+description: >-
+  Inspects a draft release before its assets are attested: deletes a
+  `bundle-name` asset a prior attempt left on the RELEASE, so no later skip
+  path can publish a stale bundle, and reports whether any other asset
+  remains as `present`; a draft with none publishes unattested, with a
+  notice. Runs without a checkout. Needs GH_TOKEN in the environment with
+  contents write.
+
+inputs:
+  tag:
+    description: The draft release's tag.
+    required: true
+  bundle-name:
+    description: >-
+      The attestation bundle's asset name: the one asset never attested, and
+      deleted when found.
+    required: true
+
+outputs:
+  present:
+    description: '"true" when the release carries an asset other than the bundle, "false" otherwise.'
+    value: ${{ steps.inspect.outputs.present }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Inspect the draft release's assets
+      id: inspect
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        TAG: ${{ inputs.tag }}
+        BUNDLE_NAME: ${{ inputs.bundle-name }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/release-assets.ts"'

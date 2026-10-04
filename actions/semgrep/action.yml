@@ -2,49 +2,51 @@ name: Semgrep
 description: >-
   The fleet's static analysis: semgrep's default registry ruleset over the
   caller's checkout, at ERROR severity only. The ERROR findings are uploaded
-  to code scanning as SARIF, and one of them fails the step. WARNING and
-  INFO rules do not run, so their findings appear nowhere. An earlier upload
-  may have opened lower-severity alerts; code scanning marks them fixed once
-  a later upload for the same category and branch lacks them. Public
-  repositories only: the registry needs no token, but code scanning needs a
-  public repository or Advanced Security.
+  to code scanning as SARIF, and one of them fails the step (semgrep's own
+  --error). WARNING and INFO rules do not run, so their findings appear
+  nowhere. An earlier upload may have opened lower-severity alerts; code
+  scanning marks them fixed once a later upload for the same category and
+  branch lacks them. Public repositories only: the registry needs no token,
+  but code scanning needs a public repository or Advanced Security.
   The only bypass is semgrep's own `// nosemgrep: rule-id` comment on the
   finding, with a reason; semgrep keeps a marked finding in its SARIF as a
-  suppressed result and code scanning shows a suppressed result as an open
-  alert, so the upload drops suppressed results first. One registry rule is
-  excluded, permanently: mutable-action-tag duplicates zizmor's
-  unpinned-uses, and one tool owns each finding class.
+  suppressed result and code scanning reads no `suppressions` property, so
+  the upload drops suppressed results first. One registry rule is excluded,
+  permanently: mutable-action-tag duplicates zizmor's unpinned-uses, and one
+  tool owns each finding class.
 
 runs:
   using: composite
   steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first. The script imports node builtins
+    # and actions/shared alone, so there is nothing to install.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
+      with:
+        from: ${{ github.action_path }}
+
     - name: Install semgrep
       shell: bash
       run: python3 -m pip install --quiet semgrep==1.176.1
 
-    # No --error: the exit status means "did the scan complete"; the judge below is the verdict.
-    # The status is a step output, not the step's result, so a fatal scan still reaches the judge.
+    # The verdict is semgrep's exit code: 1 on a finding (--error), 2 and up when the scan itself failed, 0 for a
+    # clean completed scan. Parse failures and timeouts are warn-level, reported in semgrep's own summary, and exit 0.
     - name: Scan
-      id: scan
       shell: bash
-      run: |
-        semgrep scan --config p/default --metrics=off --severity ERROR \
-          --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag \
-          --sarif-output="$RUNNER_TEMP/semgrep.sarif" --json-output="$RUNNER_TEMP/semgrep.json" . \
-          && status=0 || status=$?
-        echo "status=$status" >>"$GITHUB_OUTPUT"
+      run: >-
+        semgrep scan --config p/default --metrics=off --severity ERROR --error
+        --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
+        --sarif-output="$RUNNER_TEMP/semgrep.sarif" .
 
-    # A nosemgrep-marked finding stays in the SARIF as a suppressed result,
-    # and code scanning ignores SARIF suppressions (the JSON copy the judge
-    # reads never carries it). A scan that wrote no SARIF leaves nothing to
-    # filter; the upload then fails on the missing file.
     - name: Drop the marked findings from the SARIF
       if: ${{ !cancelled() }}
       shell: bash
-      run: |
-        [ -f "$RUNNER_TEMP/semgrep.sarif" ] || exit 0
-        jq 'del(.runs[].results[] | select((.suppressions // []) | length > 0))' "$RUNNER_TEMP/semgrep.sarif" >"$RUNNER_TEMP/semgrep.upload.sarif"
-        mv "$RUNNER_TEMP/semgrep.upload.sarif" "$RUNNER_TEMP/semgrep.sarif"
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/drop_suppressed.ts"'
 
     - name: Upload the findings to code scanning
       if: ${{ !cancelled() }}
@@ -52,23 +54,3 @@ runs:
       with:
         sarif_file: ${{ runner.temp }}/semgrep.sarif
         category: semgrep
-
-    # Warn-level analysis errors (partial parses, timeouts) only annotate: they are semgrep's limits, not the repository's findings.
-    - name: Fail on an ERROR finding
-      if: ${{ !cancelled() }}
-      shell: bash
-      env:
-        SCAN_STATUS: ${{ steps.scan.outputs.status }}
-      run: |
-        [ "${SCAN_STATUS:-none}" = "0" ] || {
-          echo "::error::semgrep: the scan did not complete (exit status ${SCAN_STATUS:-none}), so there is no verdict; see the scan log above"
-          exit 1
-        }
-        findings="$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' "$RUNNER_TEMP/semgrep.json")"
-        fatal="$(jq '[.errors[] | select(.level == "error")] | length' "$RUNNER_TEMP/semgrep.json")"
-        nonfatal="$(jq '[.errors[] | select(.level != "error")] | length' "$RUNNER_TEMP/semgrep.json")"
-        [ "$nonfatal" = "0" ] || echo "::warning::semgrep: $nonfatal non-fatal analysis error(s) (partial parses, timeouts); see the scan log above"
-        [ "$findings" = "0" ] && [ "$fatal" = "0" ] || {
-          echo "::error::semgrep: $findings ERROR-severity finding(s), $fatal fatal analysis error(s); see the scan log above"
-          exit 1
-        }
