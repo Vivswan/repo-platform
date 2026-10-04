@@ -19,6 +19,7 @@ description: |
 
   Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it).
   Warned and skipped: a yaml file the reader cannot parse (yamllint owns yaml validity).
+  Never read: vendored installs and build output (node_modules, vendor, third_party, dist, build, .venv).
 
   Findings are written once, as one table through two sinks on every event: the step summary and the
   log annotations. On pull_request events a sticky PR comment carries the same table and is deleted

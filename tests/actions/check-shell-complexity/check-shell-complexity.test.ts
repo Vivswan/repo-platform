@@ -293,6 +293,9 @@ describe("the collector", () => {
     "RUN <<EOF cat",
     "data",
     "EOF",
+    "RUN <<EOF-SCRIPT",
+    "if true; then echo x; fi",
+    "EOF-SCRIPT",
     "",
   ].join("\n");
   const body = (
@@ -367,6 +370,7 @@ describe("the collector", () => {
           body("Containerfile", 16, "containerfile", "powershell", "Write-Output exe"),
           body("Containerfile", 23, "containerfile", "bash", "[ -f /x ]"),
           body("Containerfile", 24, "containerfile", "bash", "<<EOF cat\ndata\nEOF"),
+          body("Containerfile", 28, "containerfile", "bash", "if true; then echo x; fi"),
         ],
         problems: [],
       },

@@ -307,7 +307,9 @@ function isExecForm(code: string): boolean {
   }
 }
 
-const HEREDOC_ALONE = /^\s*<<-?(["']?)\w+\1\s*$/;
+/** A heredoc marker alone on the RUN's first line; the delimiter is any run of non-blank characters, quoted in any of
+ *  bash's ways (`EOF`, `'EOF'`, `EOF'-SCRIPT'`). */
+const HEREDOC_ALONE = /^\s*<<-?\S+\s*$/;
 
 /** dockerfile-ast keeps getHeredocs protected; the content range is the one thing read off it. */
 function heredocRange(instruction: Instruction): HeredocRange | null {
