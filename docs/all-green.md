@@ -17,7 +17,7 @@ Every repository in the fleet - repo-platform included - gates merges on a requi
 | the managed skeleton | `checks` alone | so a schedule night passes on `ci` and an all-skipped run cannot pass |
 | repo-platform's own | nothing | since none of its gating jobs may skip |
 
-**The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
+**The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, which [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) holds to the root's sha, landed in the fleet by the next sync round.
 
 **repo-platform's own main also requires the pull request branch to be up to date before merging:** the `main-up-to-date` ruleset in its [overlay](../.github/settings.local.yml), with no bypass.
 

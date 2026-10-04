@@ -62,6 +62,8 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - **What the delivery pins test refuses:** [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) refuses a numeric comment pinact reads as a version but does not verify (`# v7`, `# v7.0`, `# v7-beta`). Such a line passes pinact unverified, sha included.
 
+- **One sha per action repo-wide** is the same test's other refusal. Dependabot's grouped PR ([dependabot.yml](../.github/dependabot.yml)) moves every site it reaches at once, and the `files/` sources are outside its reach, so a bump PR here updates them by hand, commented examples included, and the test fails it until they match. The fleet receives them through the next sync.
+
 **Enforced by, in every managed repository:** [actions/zizmor](../actions/zizmor/action.yml) under the fleet policy.
 
 - **`unpinned-uses`:** hash-pin for everything but the platform's own actions, so a `@main` platform ref passes here where pinact refuses it.
@@ -69,11 +71,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Not judged, on purpose:**
 
-- **One sha per action repo-wide** is Dependabot's doing, not a check's, since its one grouped `github-actions` bump PR ([dependabot.yml](../.github/dependabot.yml)) moves every site at once.
-
-- **A commented example pin** (the toolchain blocks of the managed `checks.yml`) never executes, so pinact does not read it. The delivery pins test still reads its comment shape, so an example spells the full version too.
-
-- **The sync writer's `files/` sources** are outside Dependabot's reach and nothing compares them with the bumped pins. So a bump PR here updates them by hand, commented examples included; the fleet receives them through the next sync.
+- **A commented example pin** (the toolchain blocks of the managed `checks.yml`) never executes, so pinact does not read it. The delivery pins test still reads its comment shape and its sha, so an example spells the full version and rides the same sha too.
 
 ## Conventional Commits, squash-merged
 
