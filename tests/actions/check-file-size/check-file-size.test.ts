@@ -28,6 +28,7 @@ import { isManaged } from "../../../actions/shared/managed_header.ts";
 import { loadAction, stepNamed } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { checkout } from "../../shared/fixture_checkout.ts";
+import { fixtureGitEnv } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -1357,7 +1358,7 @@ describe("the CLI", () => {
     writeFileSync(outputPath, "");
     const proc = boundedSpawnSync(["bun", SCRIPT, root], {
       env: {
-        ...process.env,
+        ...fixtureGitEnv(),
         REPORT_PATH: reportPath,
         GITHUB_STEP_SUMMARY: summaryPath,
         GITHUB_OUTPUT: outputPath,

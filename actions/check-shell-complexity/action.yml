@@ -14,11 +14,11 @@ description: |
 
   Parsers: mvdan/sh for bash, sh, and zsh; pwsh's own parser for PowerShell, so pwsh must be on PATH
   when a PowerShell body exists (the step fails naming it otherwise); cmd by tokens after dropping rem
-  lines, so nesting is counted by keyword count rather than structure, and a keyword inside a quoted
-  argument counts too.
+  lines, so nesting is counted by keyword count rather than structure, a keyword inside a quoted
+  argument counts too, and a three-way `||` chain is refused where bash passes it as one chain.
 
   Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it).
-  Warned and skipped: a yaml file the reader cannot parse (yamllint owns yaml validity).
+  Warned and skipped: a yaml file the reader cannot parse.
   Never read: vendored installs and build output (node_modules, vendor, third_party, dist, build, .venv).
 
   Findings are written once, as one table through two sinks on every event: the step summary and the

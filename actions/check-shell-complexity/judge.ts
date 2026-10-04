@@ -94,11 +94,18 @@ function constructOf(node: Node, parent: Node | undefined, ancestors: Node[]): s
       return chained ? null : "||";
     }
     case "CmdSubst": {
-      // Only what sits between this substitution and the one enclosing it can test its result.
+      // Only what sits between this substitution and the one enclosing it can test its result, and only through the
+      // test command's arguments: `X="$(x)" test -n ok` assigns the substitution, it does not test it.
       const enclosing = ancestors.findLastIndex(
         (ancestor) => syntax.NodeType(ancestor) === "CmdSubst",
       );
-      return ancestors.slice(enclosing + 1).some(testsItsArguments) ? "$(...) tested" : null;
+      const between = ancestors.slice(enclosing + 1);
+      const tester = between.findLastIndex(testsItsArguments);
+      if (tester === -1) return null;
+      const assigned = between
+        .slice(tester + 1)
+        .some((ancestor) => syntax.NodeType(ancestor) === "Assign");
+      return assigned ? null : "$(...) tested";
     }
     default:
       return null;

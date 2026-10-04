@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   ALLOWLIST_FILE,
+  check,
   REASON_RULE,
 } from "../../../actions/check-shell-complexity/check-shell-complexity.ts";
 import { type Collected, collectFile } from "../../../actions/check-shell-complexity/collect.ts";
@@ -92,6 +93,12 @@ describe("the rule, per construct and dialect", () => {
       "bash: command -v only looks test up, so the substitution is not tested",
       "bash",
       'for f in a; do\n  command -v test "$(ls)"\ndone\n',
+      [],
+    ],
+    [
+      "bash: a substitution in the test command's assignment prefix is assigned, not tested",
+      "bash",
+      'if X="$(printf x)" test -n ok; then :; fi\n',
       [],
     ],
     ["bash: a posix function", "bash", "greet() {\n  echo hi\n}\ngreet\n", [at(1, "function")]],
@@ -296,6 +303,27 @@ describe("the collector", () => {
     "RUN <<EOF-SCRIPT",
     "if true; then echo x; fi",
     "EOF-SCRIPT",
+    "RUN <<EOF",
+    "#!/usr/bin/env python3",
+    "print(1)",
+    "EOF",
+    "RUN <<EOF",
+    "#!/bin/bash",
+    "echo hi",
+    "EOF",
+    "RUN <<-EOF",
+    "\t#!/usr/bin/env python3",
+    "\tprint(2)",
+    "EOF",
+    "RUN <<EOF",
+    "\t#!/usr/bin/env python3",
+    "\techo a tab-led comment, not a shebang",
+    "EOF",
+    'SHELL ["/bin/dash", "-c"]',
+    "RUN <<EOF",
+    "#!/bin/bash",
+    "echo under dash",
+    "EOF",
     "",
   ].join("\n");
   const body = (
@@ -371,6 +399,15 @@ describe("the collector", () => {
           body("Containerfile", 23, "containerfile", "bash", "[ -f /x ]"),
           body("Containerfile", 24, "containerfile", "bash", "<<EOF cat\ndata\nEOF"),
           body("Containerfile", 28, "containerfile", "bash", "if true; then echo x; fi"),
+          body("Containerfile", 35, "containerfile", "bash", "#!/bin/bash\necho hi"),
+          body(
+            "Containerfile",
+            43,
+            "containerfile",
+            "bash",
+            "\t#!/usr/bin/env python3\n\techo a tab-led comment, not a shebang",
+          ),
+          body("Containerfile", 48, "containerfile", "bash", "#!/bin/bash\necho under dash"),
         ],
         problems: [],
       },
@@ -563,6 +600,58 @@ describe("the check over a checkout", () => {
         `2 finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
         "",
       ].join("\n"),
+    ]);
+  });
+
+  // A written fleet tree's ci.yml shares its name with this checkout's, so an annotation at the written path would
+  // land on the wrong file: the finding names the template that produced it, and the written line only where the
+  // template's lines are not the written file's.
+  test("a finding in a written tree is reported against its template, the line mapped or named as the tree's", () => {
+    const NESTED = [
+      "on: push",
+      "jobs:",
+      "  a:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: |",
+      "          for f in *; do",
+      '            if [ -f "$f" ]; then cat "$f"; fi',
+      "          done",
+      "",
+    ].join("\n");
+    const root = checkout(temp, "check-shell-complexity-", {
+      ".github/workflows/ci.yml": `# This file is managed by octocat/repo-platform.\n${NESTED}`,
+      ".github/workflows/checks.yml": NESTED,
+      ".github/workflows/local.yml": NESTED,
+    });
+    const verdict = check(root, {
+      judgeManaged: true,
+      written: {
+        tree: "all",
+        templates: {
+          ".github/workflows/ci.yml": {
+            path: "files/base/.github/workflows/ci.yml",
+            lineMapped: true,
+          },
+          ".github/workflows/checks.yml": {
+            path: "files/base/.github/workflows/checks.yml",
+            lineMapped: false,
+          },
+        },
+      },
+    });
+    const at = (path: string, line: number, written?: { tree: string }) => ({
+      path,
+      line,
+      construct: "if inside for",
+      source: "workflow" as const,
+      dialect: "bash" as const,
+      ...(written === undefined ? {} : { written }),
+    });
+    expect(verdict.findings).toEqual([
+      at("files/base/.github/workflows/checks.yml", 8, { tree: "all" }),
+      at("files/base/.github/workflows/ci.yml", 9),
+      at(".github/workflows/local.yml", 8, { tree: "all" }),
     ]);
   });
 });

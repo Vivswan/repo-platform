@@ -141,10 +141,11 @@ jobs:
         run: bun install --frozen-lockfile --silent
       - name: Write the fleet's workflows
         run: bun .github/scripts/ci/write_fleet_lint_tree.ts "$RUNNER_TEMP/fleet-lint"
-      - name: Judge the written trees, managed files included
+      - name: Judge the written trees, managed files included, each finding against its template
         run: >-
           bun .github/scripts/ci/run_in_fleet_lint_trees.ts "$RUNNER_TEMP/fleet-lint" --
-          bun "$GITHUB_WORKSPACE/actions/check-shell-complexity/check-shell-complexity.ts" --judge-managed
+          bun "$GITHUB_WORKSPACE/actions/check-shell-complexity/check-shell-complexity.ts"
+          --judge-managed --sources .shell-complexity-sources.json
 
   file-size:
     runs-on: ubuntu-latest

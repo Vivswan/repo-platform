@@ -35,8 +35,17 @@ export const REASON_RULE =
   "an allowlist entry needs a reason a reader accepts (the block runs before bun exists, or the file is upstream-shaped)";
 export const REMEDY = `move this block to a TypeScript script run by bun, or list the file in ${ALLOWLIST_FILE} with a # reason`;
 
-/** Directories a repository may track whose files the check still leaves alone: vendored installs and build output. */
-const SKIP_DIRS = new Set(["node_modules", "vendor", "third_party", "dist", "build", ".venv"]);
+/** Directories a repository may track whose files the check still leaves alone: vendored installs, build output, and a
+ *  sync writer's `files` templates, which are judged through the trees the writer lands. */
+const SKIP_DIRS = new Set([
+  "node_modules",
+  "vendor",
+  "third_party",
+  "dist",
+  "build",
+  ".venv",
+  "files",
+]);
 
 export interface Finding {
   path: string;
@@ -45,6 +54,27 @@ export interface Finding {
   construct: string;
   source: SourceKind;
   dialect: Dialect;
+  /** Set when `path` is a template and `line` is the written tree's. */
+  written?: WrittenLine;
+}
+
+/** A path of a written tree reported against the template that produced it: the template's line when the two map,
+ *  else the written line named as such (a template with no record keeps its path, the tree named beside the line). */
+function fromWritten<T extends { path: string; line: number }>(
+  item: T,
+  written: WrittenTree,
+): T & { written?: WrittenLine } {
+  const template = written.templates[item.path];
+  if (template === undefined) return { ...item, written: { tree: written.tree } };
+  if (template.lineMapped) return { ...item, path: template.path };
+  return { ...item, path: template.path, written: { tree: written.tree } };
+}
+
+/** `path:line`, or the written tree's line when `line` is not the template's. */
+export function where(item: { path: string; line: number; written?: WrittenLine }): string {
+  return item.written === undefined
+    ? `${item.path}:${item.line}`
+    : `${item.path} (line ${item.line} of the written ${item.written.tree} tree)`;
 }
 
 export interface Verdict {
@@ -55,8 +85,8 @@ export interface Verdict {
   bodies: Record<SourceKind, number>;
   /** Files carrying the platform's managed header: a fleet repository cannot fix such a file. */
   managedSkipped: number;
-  /** Files of a judged kind the reader could not read; yamllint owns yaml validity, so these warn and never fail. */
-  unreadable: CollectProblem[];
+  /** Files of a judged kind the reader could not read as yaml: warned and skipped, never a failure. */
+  unreadable: (CollectProblem & { written?: WrittenLine })[];
 }
 
 function isJudged(relPath: string): boolean {
@@ -93,8 +123,23 @@ export function judgeBodies(bodies: CollectedBody[]): Finding[] {
 
 /** `judgeManaged`: the platform's own run over the fleet trees its writer lands, where the managed files are its own
  *  to fix; a fleet repository never judges them. */
+/** `judgeManaged`: the platform's own run over the fleet trees its writer lands, where the managed files are its own
+ *  to fix; a fleet repository never judges them. `written`: that tree's name and each written file's template, so a
+ *  finding points at the template that produced it rather than at a same-named file of the checkout. */
 export interface CheckOptions {
   judgeManaged: boolean;
+  written?: WrittenTree;
+}
+
+export interface WrittenTree {
+  tree: string;
+  /** Written path to its template; `lineMapped` when the template's lines are the written file's (no block splice). */
+  templates: Record<string, { path: string; lineMapped: boolean }>;
+}
+
+/** Set on a remapped item whose `line` is the written tree's, not the template's. */
+export interface WrittenLine {
+  tree: string;
 }
 
 export function check(root: string, options: CheckOptions = { judgeManaged: false }): Verdict {
@@ -132,20 +177,26 @@ export function check(root: string, options: CheckOptions = { judgeManaged: fals
       a.path.localeCompare(b.path) || a.line - b.line || a.construct.localeCompare(b.construct),
   );
   const found = new Set(findings.map((finding) => finding.path));
+  const written = options.written;
   return {
-    findings: findings.filter((finding) => !allow.allowed.has(finding.path)),
+    findings: findings
+      .filter((finding) => !allow.allowed.has(finding.path))
+      .map((finding) => (written === undefined ? finding : fromWritten(finding, written))),
     allowlistErrors: [
       ...allow.failures,
       ...staleEntries(allow, found, ALLOWLIST_FILE, "no refused construct"),
     ],
     bodies: counts,
     managedSkipped,
-    unreadable,
+    unreadable:
+      written === undefined
+        ? unreadable
+        : unreadable.map((problem) => fromWritten(problem, written)),
   };
 }
 
 export function describe(finding: Finding): string {
-  return `${finding.path}:${finding.line}: ${finding.construct}; ${REMEDY}`;
+  return `${where(finding)}: ${finding.construct}; ${REMEDY}`;
 }
 
 export type Outcome = CheckOutcome<Verdict>;
@@ -165,7 +216,7 @@ function census(verdict: Verdict): string {
   }
   if (verdict.unreadable.length > 0) {
     parts.push(
-      `${verdict.unreadable.length} file(s) not readable as yaml and skipped (yamllint owns yaml validity): ${verdict.unreadable.map((problem) => `\`${problem.path}:${problem.line}\``).join(", ")}.`,
+      `${verdict.unreadable.length} file(s) not readable as yaml and skipped: ${verdict.unreadable.map((problem) => `\`${where(problem)}\``).join(", ")}.`,
     );
   }
   return parts.join(" ");
@@ -194,7 +245,7 @@ export function report(outcome: Outcome): string {
         "| --- | --- | --- |",
         ...findings.map(
           (finding) =>
-            `| \`${finding.path}:${finding.line}\` | \`${cell(finding.construct)}\` | ${SOURCE_LABEL[finding.source]}, ${DIALECT_LABEL[finding.dialect]} |`,
+            `| \`${where(finding)}\` | \`${cell(finding.construct)}\` | ${SOURCE_LABEL[finding.source]}, ${DIALECT_LABEL[finding.dialect]} |`,
         ),
       );
     }
@@ -211,23 +262,48 @@ export function report(outcome: Outcome): string {
 }
 
 const JUDGE_MANAGED_FLAG = "--judge-managed";
+const SOURCES_FLAG = "--sources";
+
+/** `--judge-managed` and `--sources <file>` are this check's; the root argument is the shared main's. */
+function parseFlags(argv: string[]): { options: CheckOptions; rest: string[] } {
+  const rest: string[] = [];
+  const options: CheckOptions = { judgeManaged: false };
+  for (let at = 0; at < argv.length; at++) {
+    if (argv[at] === JUDGE_MANAGED_FLAG) options.judgeManaged = true;
+    else if (argv[at] === SOURCES_FLAG) {
+      const file = argv[++at];
+      if (file === undefined) throw new Error(`${SOURCES_FLAG} needs a file`);
+      options.written = JSON.parse(readFileSync(file, "utf-8")) as WrittenTree;
+    } else rest.push(argv[at]);
+  }
+  return { options, rest };
+}
 
 if (import.meta.main) {
-  const argv = process.argv.slice(2);
-  const judgeManaged = argv.includes(JUDGE_MANAGED_FLAG);
+  const { options, rest } = parseFlags(process.argv.slice(2));
   await runCheck<Verdict>(
     {
       name: "check-shell-complexity",
-      check: (root) => check(root, { judgeManaged }),
+      check: (root) => check(root, options),
       outcomeOf,
       report,
       warnings: (verdict) =>
-        verdict.unreadable.map(({ path, line, message }) =>
-          workflowCommand("warning", `${path}:${line}: ${message}; skipped`, path, line),
+        verdict.unreadable.map((problem) =>
+          workflowCommand(
+            "warning",
+            `${where(problem)}: ${problem.message}; skipped`,
+            problem.path,
+            problem.written === undefined ? problem.line : undefined,
+          ),
         ),
       errors: (verdict) => [
         ...verdict.findings.map((finding) =>
-          workflowCommand("error", describe(finding), finding.path, finding.line),
+          workflowCommand(
+            "error",
+            describe(finding),
+            finding.path,
+            finding.written === undefined ? finding.line : undefined,
+          ),
         ),
         ...verdict.allowlistErrors.map((failure) => workflowCommand("error", failure)),
       ],
@@ -235,6 +311,6 @@ if (import.meta.main) {
       failed: (count) =>
         `${count} finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
     },
-    argv.filter((arg) => arg !== JUDGE_MANAGED_FLAG),
+    rest,
   );
 }

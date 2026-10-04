@@ -39,8 +39,7 @@ export interface CollectedBody {
   code: string;
 }
 
-/** A file of a judged kind the reader could not read (yaml that does not parse): skipped and named, never a failure,
- *  since yamllint and actionlint own yaml validity. */
+/** A file of a judged kind the reader could not read as yaml: skipped and named, never a failure. */
 export interface CollectProblem {
   path: string;
   line: number;
@@ -265,22 +264,31 @@ function collectContainerfile(relPath: string, text: string): CollectedBody[] {
       if (stage !== null) stages.set(stage, dialect);
       continue;
     }
-    if (keyword !== "RUN" || dialect === null) continue;
+    if (keyword !== "RUN") continue;
     const code = instruction.getArgumentsContent();
     const first = instruction.getArguments()[0];
     if (code === null || first === undefined || isExecForm(code)) continue;
-    const heredoc = HEREDOC_ALONE.test(code.split("\n")[0]) ? heredocRange(instruction) : null;
+    const marker = code.split("\n")[0];
+    const heredoc = HEREDOC_ALONE.test(marker) ? heredocRange(instruction) : null;
     if (heredoc !== null) {
       const { start, end } = heredoc;
-      bodies.push({
-        path: relPath,
-        line: start + 1,
-        kind: "containerfile",
-        dialect,
-        code: sourceLines.slice(start, end + 1).join("\n"),
-      });
+      const body = sourceLines.slice(start, end + 1).join("\n");
+      // A heredoc script names its own interpreter, whatever the stage's SHELL: a shell shebang is judged as that
+      // shell, any other is not shell. Only `<<-` strips leading tabs, so only there may the shebang sit behind them.
+      const script = /^\s*<<-/.test(marker) ? body.replace(/^\t+/, "") : body;
+      const bodyDialect = script.startsWith("#!") ? shebangDialect(script) : dialect;
+      if (bodyDialect !== null) {
+        bodies.push({
+          path: relPath,
+          line: start + 1,
+          kind: "containerfile",
+          dialect: bodyDialect,
+          code: body,
+        });
+      }
       continue;
     }
+    if (dialect === null) continue;
     bodies.push({
       path: relPath,
       line: first.getRange().start.line + 1,
@@ -307,8 +315,8 @@ function isExecForm(code: string): boolean {
   }
 }
 
-/** A heredoc marker alone on the RUN's first line; the delimiter is any run of non-blank characters, quoted in any of
- *  bash's ways (`EOF`, `'EOF'`, `EOF'-SCRIPT'`). */
+/** A heredoc marker alone on the RUN's first line; the delimiter is any run of non-blank characters, bare or quoted
+ *  (`EOF`, `EOF-SCRIPT`, `'EOF'`). */
 const HEREDOC_ALONE = /^\s*<<-?\S+\s*$/;
 
 /** dockerfile-ast keeps getHeredocs protected; the content range is the one thing read off it. */

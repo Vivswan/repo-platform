@@ -73,12 +73,37 @@ export function writeTargets(dest: string, upstream?: string): Record<string, st
       ],
       { cwd: REPO_ROOT },
     );
+    writeFileSync(
+      join(target, SOURCES_FILE),
+      `${JSON.stringify({ tree: name, templates: templatesOf(filesText, target) }, null, 2)}\n`,
+    );
     written[name] = writtenWorkflows(target);
     if (written[name].length === 0) {
       throw new Error(`${target}: the writer landed no workflow - the lint would judge nothing`);
     }
   }
   return written;
+}
+
+/** The sidecar the shell-complexity check reads (`--sources`) to report a written file's finding against its template. */
+export const SOURCES_FILE = ".shell-complexity-sources.json";
+const BLOCKS_LINE = /^\s*\{\{blocks\}\}\s*$/m;
+
+/** Each written file's template under files/, and whether the template's lines are the written file's: a spliced
+ *  `{{blocks}}` shifts every line after it, so such a template maps its lines no further than the splice. */
+export function templatesOf(
+  filesText: string,
+  target: string,
+): Record<string, { path: string; lineMapped: boolean }> {
+  const templates: Record<string, { path: string; lineMapped: boolean }> = {};
+  for (const entry of parseFilesConfig(filesText, "files.yml").files) {
+    if (!("source" in entry) || typeof entry.source !== "string") continue;
+    if (!existsSync(join(target, entry.path))) continue;
+    const template = join("files", entry.source);
+    const text = readFileSync(join(REPO_ROOT, template), "utf-8");
+    templates[entry.path] = { path: template, lineMapped: !BLOCKS_LINE.test(text) };
+  }
+  return templates;
 }
 
 if (import.meta.main) {
