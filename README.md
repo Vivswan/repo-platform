@@ -20,7 +20,7 @@ Which files the platform owns, and how strongly, is declared as data in `files.y
 
 ## Design
 
-The measure of the design is the cost of a simple change, not the number of checks. Each principle is named by the cost it removes.
+The measure of the design is the cost of a simple change, not the number of checks.
 
 | Principle | What it means here |
 |---|---|
@@ -30,28 +30,21 @@ The measure of the design is the cost of a simple change, not the number of chec
 | Sync is copy, not merge | Managed files are replaced whole, split files have their managed region replaced around the repository's own sides, starters are written once, and a file no entry writes any more is deleted when it still holds the platform's own content. |
 | Private is private by where it runs and by what the run can emit | Job names carry row indexes, names are masked where they enter a step, per-row logs go to files, and the details land in the target repository ([docs/sync.md](docs/sync.md#private-repositories)). |
 | Own as few files as possible | Community health files come from the account's `.github` defaults repository; tool configs ride inside the actions that run them; the rest is the file list. |
-| TypeScript only | A workflow step is one `bun` call; the shell that stays is listed in [AGENTS.md](AGENTS.md). |
+| TypeScript only | A workflow step is one `bun` call; [AGENTS.md](AGENTS.md#principles) owns the rule for the shell that stays. |
 
 ## Modules
 
-Modules (pick any combination): `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `pr-title`, `fuzzer`, `nightly`, `custom-license`. Module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change. The roster is the `modules` section of [files.yml](files.yml).
+A repo picks any combination of modules in the `modules:` list of its own `.repo-platform.yml`, and the next sync applies the change. The roster is the `modules` section of [files.yml](files.yml).
 
 ## Onboarding a repo
 
 Walkthrough: [docs/new-repo.md](docs/new-repo.md). The shape of it: scaffold with the native tool (`uv init`, `bun init`), commit a `.repo-platform.yml`, grant the fleet PAT access to the repo, and dispatch a sync that opens the first PR.
 
-The fleet PAT's grant decides the fleet: every owned, non-archived repo the REPO_PLATFORM_TOKEN can push to is a member, and nothing in this repository lists them. A member is synced only once it carries `.repo-platform.yml`, so granting the PAT and committing that file is what enrolls a repo; revoking the grant is what removes it.
+The fleet PAT's grant is the membership list, and [docs/new-repo.md](docs/new-repo.md#4-publish-and-grant-the-fleet-pat) owns enrolling a repo. Revoking the grant removes one, and archived repos and repos of another owner are left out.
 
 ## Shipping a change
 
-Merge to `main`; once CI's `all-green` gate passes, the `stable` tag moves to the merged commit and the fleet picks it up on the next weekly sync. To sync right after the merge, put one label on the PR before it merges:
-
-| Label | Syncs |
-| --- | --- |
-| `fleet-sync:public` | the public repos (the default) |
-| `fleet-sync:all` | the whole fleet |
-
-Post-green reads the label off the merged PR ([docs/all-green.md](docs/all-green.md)). Two fleet-sync labels on the merged PR turn its own run's read-directives leg red and nothing syncs from it. The `private` token, slugs, and module filters are dispatch-only, below.
+Merge to `main`; once CI's `all-green` gate passes, the `stable` tag moves to the merged commit and the fleet picks it up on the next weekly sync. To sync right after the merge, put one `fleet-sync:` label on the PR before it merges; [docs/all-green.md](docs/all-green.md#opting-a-pr-into-an-immediate-fleet-sync) owns the labels and what a refused one does.
 
 The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_scope.ts) owns the grammar; settings-repos.yml's `repo=` reads the same):
 
@@ -65,7 +58,7 @@ The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_sco
 | `all` or empty | the whole fleet |
 
 - A module name outside `files.yml` fails the plan before any repository is probed, naming the roster; a repo whose `.repo-platform.yml` has no readable `modules` list is reported as a warning and left out, and the plan prints how many repos the filter left out.
-- The filter, `private`, and slugs are dispatch-only: the merge label carries `public` or `all` alone, since the read-directives leg unions the labels of every commit in its range and an intersecting token would misread there.
+- The filter, `private`, and slugs are dispatch-only, so a merge label carries `public` or `all` alone; [docs/all-green.md](docs/all-green.md#opting-a-pr-into-an-immediate-fleet-sync) says why.
 
 ## Credentials
 
@@ -77,10 +70,8 @@ One fine-grained PAT covers the whole fleet, stored ONLY in this repo as the `RE
 
 Every permission in that link is a hard requirement. A section the token cannot reach must not hide drift behind a green run, so a missing one fails the leg loudly with GitHub's error and nothing is delivered partially.
 
-| Permission | Needed by |
-| --- | --- |
-| Contents, Pull requests, Workflows, Administration, Issues: write | the sync and the settings apply; a `.github/workflows/` push GitHub refuses without Workflows write fails that repo's sync whole |
-| Actions: read, Environments: write | the `fleet-operator` environment the settings run reconciles |
+- **Contents, Pull requests, Workflows, Administration, and Issues write** serve the sync and the settings apply; a `.github/workflows/` push GitHub refuses without Workflows write fails that repo's sync whole.
+- **Actions read and Environments write** serve the `fleet-operator` environment the settings run reconciles.
 
 A missing secret is a misconfiguration of this repo, and the failure carries the setup link.
 
@@ -88,7 +79,7 @@ Managed repos need no secret.
 
 ## Going deeper
 
-- Guides: [new repo](docs/new-repo.md), [sync](docs/sync.md), [settings](docs/settings.md), [all-green convention](docs/all-green.md), [build provenance](docs/build-provenance.md), [site module](docs/site.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [toolchain pins](docs/toolchains.md), [eject](docs/eject.md).
-- The file list and its grammar: [files.yml](files.yml) and [docs/sync.md](docs/sync.md#filesyml); the writer's code under [.github/scripts/sync/writer](.github/scripts/sync/writer).
-- Working in this repo - generators, editing rules, local gates: [AGENTS.md](AGENTS.md).
-- [`skills/`](skills/): portable agent skills for driving the platform from other repos - new project, sync-PR handling, module add/remove - installed with `npx skills`; never synced to managed repos.
+- The guides, indexed by task and by page: [docs/README.md](docs/README.md).
+- The file list and its grammar: [files.yml](files.yml) and [docs/sync.md](docs/sync.md#filesyml); the writer's code is under [.github/scripts/sync/writer](.github/scripts/sync/writer).
+- Working in this repository, its conventions and principles: [AGENTS.md](AGENTS.md).
+- [`skills/`](skills/README.md): portable agent skills for driving the platform from other repos, installed with `npx skills` and never synced to managed repos.
