@@ -145,7 +145,7 @@ if [ -f x ]; then cat x; fi
 - **zsh parses as bash:** mvdan/sh's zsh support is experimental, so a zsh-only expansion is a "does not parse" finding; the allow-list is the remedy.
 - **pwsh must be on the runner** when a PowerShell body exists; the step fails naming it, never skips.
 - **Exempt:** a block that must stay shell goes in `.shell-complexity-allow.local` as `path # reason`, the reason mandatory; an entry whose file has no refused construct left fails as stale.
-- **Skipped and counted:** a file with the managed header (repo-platform owns it), and a yaml file that does not parse (the check warns). Vendored installs, build output, and a sync writer's `files` templates are never read: `node_modules`, `vendor`, `third_party`, `dist`, `build`, `.venv`, `files`.
+- **Skipped and counted:** a file with the managed header (repo-platform owns it), and a yaml file that does not parse (the check warns). Vendored installs and build output are never read (`node_modules`, `vendor`, `third_party`, `dist`, `build`, `.venv`), nor the directories a caller names in the action's `skip` input (repo-platform names `files`, its sync templates, judged written).
 
 **Enforced by:** today, repo-platform's own `shell-complexity` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)), over this checkout and over the fleet trees its writer lands: the templates under `files/` are judged written, never raw, with the managed files included and each finding reported against its template. The `standard-checks` step for the fleet lands in a sibling PR once every shipped template and reusable workflow is clean.
 

@@ -35,17 +35,9 @@ export const REASON_RULE =
   "an allowlist entry needs a reason a reader accepts (the block runs before bun exists, or the file is upstream-shaped)";
 export const REMEDY = `move this block to a TypeScript script run by bun, or list the file in ${ALLOWLIST_FILE} with a # reason`;
 
-/** Directories a repository may track whose files the check still leaves alone: vendored installs, build output, and a
- *  sync writer's `files` templates, which are judged through the trees the writer lands. */
-const SKIP_DIRS = new Set([
-  "node_modules",
-  "vendor",
-  "third_party",
-  "dist",
-  "build",
-  ".venv",
-  "files",
-]);
+/** Directories a repository may track whose files the check still leaves alone: vendored installs and build output.
+ *  A repository's own such directory (a sync writer's templates) is the caller's `skip` input. */
+const SKIP_DIRS = new Set(["node_modules", "vendor", "third_party", "dist", "build", ".venv"]);
 
 export interface Finding {
   path: string;
@@ -89,11 +81,11 @@ export interface Verdict {
   unreadable: (CollectProblem & { written?: WrittenLine })[];
 }
 
-function isJudged(relPath: string): boolean {
+function isJudged(relPath: string, skip: ReadonlySet<string>): boolean {
   return !relPath
     .split("/")
     .slice(0, -1)
-    .some((dir) => SKIP_DIRS.has(dir));
+    .some((dir) => SKIP_DIRS.has(dir) || skip.has(dir));
 }
 
 /** Every refusal of every body, at file lines. */
@@ -129,6 +121,8 @@ export function judgeBodies(bodies: CollectedBody[]): Finding[] {
 export interface CheckOptions {
   judgeManaged: boolean;
   written?: WrittenTree;
+  /** Directory names of the caller's own the check must not read, beside the generic skip set. */
+  skip?: readonly string[];
 }
 
 export interface WrittenTree {
@@ -144,6 +138,7 @@ export interface WrittenLine {
 
 export function check(root: string, options: CheckOptions = { judgeManaged: false }): Verdict {
   const allow = loadAllowlist(root, ALLOWLIST_FILE, REASON_RULE);
+  const skip = new Set(options.skip ?? []);
   const bodies: CollectedBody[] = [];
   const unreadable: CollectProblem[] = [];
   const counts: Record<SourceKind, number> = {
@@ -158,7 +153,7 @@ export function check(root: string, options: CheckOptions = { judgeManaged: fals
   // .husky/_/ are untracked.
   const tracked = new Set(repositoryFiles(root, { untracked: false }));
   for (const relPath of repositoryFiles(root, { untracked: true })) {
-    if (!isJudged(relPath)) continue;
+    if (!isJudged(relPath, skip)) continue;
     const named = sourceKindOf(relPath);
     if (named === null && !(tracked.has(relPath) && isExtensionless(relPath))) continue;
     const text = readFileSync(join(root, relPath), "utf-8");
@@ -263,6 +258,7 @@ export function report(outcome: Outcome): string {
 
 const JUDGE_MANAGED_FLAG = "--judge-managed";
 const SOURCES_FLAG = "--sources";
+const SKIP_FLAG = "--skip";
 
 /** `--judge-managed` and `--sources <file>` are this check's; the root argument is the shared main's. */
 function parseFlags(argv: string[]): { options: CheckOptions; rest: string[] } {
@@ -274,6 +270,14 @@ function parseFlags(argv: string[]): { options: CheckOptions; rest: string[] } {
       const file = argv[++at];
       if (file === undefined) throw new Error(`${SOURCES_FLAG} needs a file`);
       options.written = JSON.parse(readFileSync(file, "utf-8")) as WrittenTree;
+    } else if (argv[at] === SKIP_FLAG) {
+      // Comma-separated, the action input's shape; an empty value (the input unset) skips nothing.
+      const names = argv[++at];
+      if (names === undefined) throw new Error(`${SKIP_FLAG} needs directory names`);
+      options.skip = names
+        .split(",")
+        .map((name) => name.trim())
+        .filter((name) => name !== "");
     } else rest.push(argv[at]);
   }
   return { options, rest };

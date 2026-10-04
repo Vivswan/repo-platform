@@ -654,4 +654,21 @@ describe("the check over a checkout", () => {
       at(".github/workflows/local.yml", 8, { tree: "all" }),
     ]);
   });
+
+  // The generic skip set is the fleet's; a directory of the caller's own (repo-platform's sync templates) is skipped
+  // only when the caller names it, so a fleet repository's `files/` is judged like any other directory.
+  test("a caller's named directory is skipped on request and judged by default", () => {
+    const root = checkout(temp, "check-shell-complexity-", {
+      "files/x.sh": '#!/bin/sh\nif true; then\n  for f in a; do echo "$f"; done\nfi\n',
+    });
+    const finding = {
+      path: "files/x.sh",
+      line: 3,
+      construct: "for inside if",
+      source: "script" as const,
+      dialect: "bash" as const,
+    };
+    expect(check(root).findings).toEqual([finding]);
+    expect(check(root, { judgeManaged: false, skip: ["files"] }).findings).toEqual([]);
+  });
 });

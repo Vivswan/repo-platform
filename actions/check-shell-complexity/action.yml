@@ -19,13 +19,23 @@ description: |
 
   Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it).
   Warned and skipped: a yaml file the reader cannot parse.
-  Never read: vendored installs and build output (node_modules, vendor, third_party, dist, build, .venv).
+  Never read: vendored installs and build output (node_modules, vendor, third_party, dist, build, .venv),
+  and the directories the caller names in `skip` (repo-platform names `files`, its sync templates, judged
+  through the trees its writer lands instead).
 
   Findings are written once, as one table through two sinks on every event: the step summary and the
   log annotations. On pull_request events a sticky PR comment carries the same table and is deleted
   when there is nothing to say; the calling job needs `pull-requests: write` for it.
 
   Exemptions: `.shell-complexity-allow.local`, one path per line with a `# reason`.
+
+inputs:
+  skip:
+    description: >-
+      Directory names of the caller's own the check must not read, comma-separated, beside
+      the generic skip set; empty skips nothing more.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -56,7 +66,8 @@ runs:
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         REPORT_PATH: ${{ runner.temp }}/check-shell-complexity-report.md
-      run: '"$ACTION_BUN" "${{ github.action_path }}/check-shell-complexity.ts"'
+        SKIP: ${{ inputs.skip }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/check-shell-complexity.ts" --skip "$SKIP"'
 
     # The comment is a convenience sink: the summary and annotations carry
     # the same table, so a token without pull-requests write (a fork or
