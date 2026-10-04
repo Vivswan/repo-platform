@@ -1,7 +1,13 @@
 /**
  * In release mode only a release-please PR's merge commit is gated; every other main push exits 0, because gating
  * ordinary pushes would paint all of main red while one issue is open. fleet-release.yml lets release-please tag only
- * on a "true" `release-cut` output, so an ordinary-push run cannot release a merge its gate never judged.
+ * on a "true" `release-cut` output, so an ordinary-push run cannot release a merge its gate never judged. On that
+ * ordinary push `head-current` says whether the branch still stands at the judged commit, so a run whose commit is no
+ * longer the head leaves the release-PR refresh to the newer run instead of racing it.
+ *
+ * After-propose mode runs once release-please proposed: its propose phase aborts GREEN ("untagged, merged release PRs
+ * outstanding") while a merged release PR still wears the pending label, so the guard runs after it, once
+ * release-please's own recovery phase has had its turn, and fails naming the parked PRs.
  */
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
@@ -31,11 +37,18 @@ export const BLOCKER_LABEL = "release-blocker";
 export const OVERRIDE_LABEL = "release-override";
 export const SECURITY_THRESHOLD: Severity = "high";
 
+/** release-please's own labels on a merged release PR: pending until the cut tags it (tests/files/label_names.test.ts). */
+export const PENDING_LABEL = "autorelease: pending";
+export const TAGGED_LABEL = "autorelease: tagged";
+/** A label this young is a cut still in flight, not a parked release. */
+const PENDING_GRACE_MINUTES = 30;
+
 /** Mode-specific context, parsed up front so each mode's requirements
  * (event payload vs commit sha) cannot be missing later. */
 export type ModeContext =
   | { mode: "pull-request"; eventPath: string }
-  | { mode: "release"; sha: string };
+  | { mode: "release"; sha: string; ref: string }
+  | { mode: "after-propose" };
 
 export interface Config {
   context: ModeContext;
@@ -87,9 +100,14 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     if (!env.GITHUB_SHA) {
       throw new Error("GITHUB_SHA is required in release mode");
     }
-    context = { mode, sha: env.GITHUB_SHA };
+    if (!env.GITHUB_REF_NAME) {
+      throw new Error("GITHUB_REF_NAME is required in release mode");
+    }
+    context = { mode, sha: env.GITHUB_SHA, ref: env.GITHUB_REF_NAME };
+  } else if (mode === "after-propose") {
+    context = { mode };
   } else {
-    throw new Error(`unknown MODE '${mode}' (expected pull-request or release)`);
+    throw new Error(`unknown MODE '${mode}' (expected pull-request, release, or after-propose)`);
   }
 
   return { context, repo, trackingLabels: parseTrackingLabels(env) };
@@ -204,6 +222,61 @@ export type GateOutcome =
   | { gate: string; status: "pass"; summary: string }
   | { gate: string; status: "fail"; problem: string; advice: string };
 
+/** The branch head through the API, not an anonymous ls-remote, so private repositories work. */
+export async function branchHead(run: GhRunner, repo: string, ref: string): Promise<string> {
+  const json = await run(["api", `repos/${repo}/git/ref/heads/${ref}`]);
+  const sha = (JSON.parse(json) as { object?: { sha?: string } }).object?.sha;
+  if (!sha) {
+    throw new Error(`repos/${repo}/git/ref/heads/${ref} carries no object sha`);
+  }
+  return sha;
+}
+
+/** gh's mergedAt is an ISO instant; one it cannot read is a broken listing, never a fresh merge. */
+export async function stalePendingGuard(
+  run: GhRunner,
+  repo: string,
+  now: Date,
+  out: (line: string) => void,
+): Promise<number> {
+  const json = await run([
+    "pr",
+    "list",
+    "--repo",
+    repo,
+    "--state",
+    "merged",
+    "--label",
+    PENDING_LABEL,
+    "--limit",
+    String(ISSUE_LIMIT),
+    "--json",
+    "number,mergedAt",
+  ]);
+  const merged = JSON.parse(json) as Array<{ number: number; mergedAt: string }>;
+  // gh's mergedAt carries whole seconds, so the cutoff does too: a merge exactly 30 minutes old is not yet stale.
+  const cutoff = Math.floor(now.getTime() / 1000) * 1000 - PENDING_GRACE_MINUTES * 60_000;
+  const stale = merged.filter((pr) => {
+    const mergedAt = Date.parse(pr.mergedAt);
+    if (Number.isNaN(mergedAt)) {
+      throw new Error(`PR #${pr.number} carries an unreadable mergedAt '${pr.mergedAt}'`);
+    }
+    return mergedAt < cutoff;
+  });
+  if (stale.length === 0) {
+    out(`no merged release PR has worn '${PENDING_LABEL}' past ${PENDING_GRACE_MINUTES} minutes`);
+    return 0;
+  }
+  const list = stale.map((pr) => `#${pr.number}`).join(", ");
+  out(
+    `::error::merged release PR(s) ${list} have worn '${PENDING_LABEL}' for over ${PENDING_GRACE_MINUTES} minutes, ` +
+      "so release-please refuses to propose any new release ('untagged, merged release PRs outstanding'). " +
+      "Re-run the CI run of that merge commit (only the run that judged the merge tags it), " +
+      `or finish or abandon the release by hand and then move the label to '${TAGGED_LABEL}'.`,
+  );
+  return 1;
+}
+
 /** gh issue list returns at most this many entries; a count that hits it is
  * reported as "at least" so the message never understates the backlog. */
 const ISSUE_LIMIT = 100;
@@ -287,19 +360,29 @@ export async function runHealthCheck(
   run: GhRunner,
   out: (line: string) => void,
   setOutput: (name: string, value: string) => void,
+  now: Date = new Date(),
 ): Promise<number> {
+  if (cfg.context.mode === "after-propose") {
+    return stalePendingGuard(run, cfg.repo, now, out);
+  }
   let override: Override;
   if (cfg.context.mode === "release") {
-    const { pr, unmerged } = await findReleasePr(run, cfg.repo, cfg.context.sha);
+    const { sha, ref } = cfg.context;
+    const { pr, unmerged } = await findReleasePr(run, cfg.repo, sha);
     setOutput("release-cut", pr === undefined ? "false" : "true");
     if (pr === undefined) {
       const open =
         unmerged.length > 0
           ? ` (open release PR(s) associated: ${unmerged.map((n) => `#${n}`).join(", ")})`
           : "";
-      out(
-        `::notice::release health: ${cfg.context.sha} is not a release-PR merge; nothing to gate${open}`,
-      );
+      out(`::notice::release health: ${sha} is not a release-PR merge; nothing to gate${open}`);
+      const head = await branchHead(run, cfg.repo, ref);
+      setOutput("head-current", head === sha ? "true" : "false");
+      if (head !== sha) {
+        out(
+          `::notice::${ref} moved to ${head.slice(0, 7)} since ${sha.slice(0, 7)} was judged; the newer run refreshes the release PR`,
+        );
+      }
       return 0;
     }
     override = hasLabel(pr.labels, OVERRIDE_LABEL)

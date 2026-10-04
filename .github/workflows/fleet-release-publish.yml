@@ -27,25 +27,13 @@ jobs:
     steps:
       # A stale bundle from a prior attempt is deleted from the RELEASE, so
       # no later skip path can publish it.
-      - name: Inspect the draft release's assets
+      - uses: Vivswan/repo-platform/actions/release-assets@stable
         id: assets
+        with:
+          tag: ${{ inputs.tag }}
+          bundle-name: ${{ env.BUNDLE_NAME }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          names="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
-          present=false
-          while IFS= read -r name; do
-            case "$name" in
-              "$BUNDLE_NAME") gh release delete-asset "$TAG" "$name" --yes ;;
-              ?*) present=true ;;
-            esac
-          done <<< "$names"
-          if [ "$present" = true ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::the release has no assets; nothing to attest"
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
       - name: Download the assets for attestation
         id: download
         if: >-

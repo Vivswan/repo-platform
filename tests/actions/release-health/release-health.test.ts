@@ -37,6 +37,10 @@ interface Fixture {
   /** One inner array per page, as `--paginate --slurp` hands them over. */
   commitPulls?: CommitPull[][];
   prViewLabels?: string[];
+  /** What the branch ref read answers (release mode, an ordinary push). */
+  headSha?: string;
+  /** The merged PRs still labelled pending, as `gh pr list --state merged` answers them (after-propose mode). */
+  mergedPending?: Array<{ number: number; mergedAt: string }>;
 }
 
 const REPO = "o/r";
@@ -77,6 +81,12 @@ function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
     }
     if (args[0] === "api" && args.some((arg) => arg.includes("/pulls"))) {
       return JSON.stringify(fixture.commitPulls ?? [[]]);
+    }
+    if (args[0] === "api" && args[1]?.includes("/git/ref/heads/")) {
+      return JSON.stringify({ object: { sha: fixture.headSha } });
+    }
+    if (args[0] === "pr" && args[1] === "list") {
+      return JSON.stringify(fixture.mergedPending ?? []);
     }
     if (args[0] === "pr" && args[1] === "view") {
       if (fixture.prViewLabels === undefined) {
@@ -121,7 +131,7 @@ function prConfig(overrides: Partial<Config> = {}): Config {
 }
 
 function releaseConfig(overrides: Partial<Config> = {}): Config {
-  return { ...prConfig(overrides), context: { mode: "release", sha: "abc123" } };
+  return { ...prConfig(overrides), context: { mode: "release", sha: "abc123", ref: "main" } };
 }
 
 const PR_VIEW_CALL = ["pr", "view", "12", "--repo", REPO, "--json", "labels"];
@@ -130,6 +140,21 @@ const COMMIT_PULLS_CALL = [
   "--paginate",
   "--slurp",
   "repos/o/r/commits/abc123/pulls?per_page=100",
+];
+const HEAD_CALL = ["api", "repos/o/r/git/ref/heads/main"];
+const PENDING_CALL = [
+  "pr",
+  "list",
+  "--repo",
+  REPO,
+  "--state",
+  "merged",
+  "--label",
+  "autorelease: pending",
+  "--limit",
+  "100",
+  "--json",
+  "number,mergedAt",
 ];
 const alertsCall = (severities: string) => [
   "api",
@@ -434,6 +459,8 @@ describe("runHealthCheck", () => {
     outputs: string[];
     calls: string[][];
   }
+  // Half a second past the minute: GitHub's timestamps carry whole seconds, so the cutoff must too.
+  const NOW = new Date("2026-08-09T12:00:00.500Z");
   async function run(config: Config, fixture: Fixture): Promise<Run> {
     const gh = fakeGh(fixture);
     const lines: string[] = [];
@@ -443,6 +470,7 @@ describe("runHealthCheck", () => {
       gh.run,
       (line) => lines.push(line),
       (name, value) => outputs.push(`${name}=${value}`),
+      NOW,
     );
     return { exit, lines, outputs, calls: gh.calls };
   }
@@ -605,14 +633,37 @@ describe("runHealthCheck", () => {
         ],
       },
     },
+    // An ordinary push is not gated; `head-current` says whether the branch still stands at the judged commit, so a
+    // run whose commit is no longer the head leaves the release-PR refresh to the newer run instead of racing it.
     {
-      reason: "a push that is not a release-PR merge is not gated at all",
-      fixture: { issues: { "release-blocker": [7] }, commitPulls: [[FEATURE_PR]] },
+      reason: "a push that is not a release-PR merge is not gated at all, and is the branch head",
+      fixture: {
+        issues: { "release-blocker": [7] },
+        commitPulls: [[FEATURE_PR]],
+        headSha: "abc123",
+      },
       expected: {
         exit: 0,
         lines: ["::notice::release health: abc123 is not a release-PR merge; nothing to gate"],
-        outputs: ["release-cut=false"],
-        calls: [COMMIT_PULLS_CALL],
+        outputs: ["release-cut=false", "head-current=true"],
+        calls: [COMMIT_PULLS_CALL, HEAD_CALL],
+      },
+    },
+    {
+      reason: "an ordinary push the branch has moved past says so, head-current false",
+      fixture: {
+        issues: { "release-blocker": [7] },
+        commitPulls: [[FEATURE_PR]],
+        headSha: "def4567890abcdef",
+      },
+      expected: {
+        exit: 0,
+        lines: [
+          "::notice::release health: abc123 is not a release-PR merge; nothing to gate",
+          "::notice::main moved to def4567 since abc123 was judged; the newer run refreshes the release PR",
+        ],
+        outputs: ["release-cut=false", "head-current=false"],
+        calls: [COMMIT_PULLS_CALL, HEAD_CALL],
       },
     },
     {
@@ -621,17 +672,70 @@ describe("runHealthCheck", () => {
       fixture: {
         issues: { "release-blocker": [7] },
         commitPulls: [[releasePr(9, ["release-override"], null)]],
+        headSha: "abc123",
       },
       expected: {
         exit: 0,
         lines: [
           "::notice::release health: abc123 is not a release-PR merge; nothing to gate (open release PR(s) associated: #9)",
         ],
-        outputs: ["release-cut=false"],
-        calls: [COMMIT_PULLS_CALL],
+        outputs: ["release-cut=false", "head-current=true"],
+        calls: [COMMIT_PULLS_CALL, HEAD_CALL],
       },
     },
   ])("release mode: $reason", async ({ fixture, expected }) => {
     expect(await run(releaseConfig(), fixture)).toEqual(expected);
+  });
+
+  // release-please's propose phase aborts GREEN while a merged release PR still wears "autorelease: pending", so the
+  // guard runs after it and names the parked PRs; a label 30 minutes old or younger is a cut still in flight. The cutoff
+  // is NOW minus 30 minutes, and gh's mergedAt is an ISO instant, so a PR merged 29 minutes ago is not stale.
+  const afterProposeConfig = (): Config =>
+    parseConfig({ GITHUB_REPOSITORY: REPO, MODE: "after-propose" } as NodeJS.ProcessEnv);
+  const PARKED =
+    "::error::merged release PR(s) #12, #14 have worn 'autorelease: pending' for over 30 minutes, " +
+    "so release-please refuses to propose any new release ('untagged, merged release PRs outstanding'). " +
+    "Re-run the CI run of that merge commit (only the run that judged the merge tags it), " +
+    "or finish or abandon the release by hand and then move the label to 'autorelease: tagged'.";
+  test.each<{ reason: string; fixture: Fixture; expected: Run }>([
+    {
+      reason: "no merged PR wears the pending label",
+      fixture: { mergedPending: [] },
+      expected: {
+        exit: 0,
+        lines: ["no merged release PR has worn 'autorelease: pending' past 30 minutes"],
+        outputs: [],
+        calls: [PENDING_CALL],
+      },
+    },
+    {
+      reason:
+        "merges 29 minutes and exactly 30 minutes old are cuts in flight, not parked releases",
+      fixture: {
+        mergedPending: [
+          { number: 13, mergedAt: "2026-08-09T11:31:00Z" },
+          { number: 15, mergedAt: "2026-08-09T11:30:00Z" },
+        ],
+      },
+      expected: {
+        exit: 0,
+        lines: ["no merged release PR has worn 'autorelease: pending' past 30 minutes"],
+        outputs: [],
+        calls: [PENDING_CALL],
+      },
+    },
+    {
+      reason: "merges older than 30 minutes fail, each named, the fresh one not",
+      fixture: {
+        mergedPending: [
+          { number: 12, mergedAt: "2026-08-09T11:29:59Z" },
+          { number: 13, mergedAt: "2026-08-09T11:31:00Z" },
+          { number: 14, mergedAt: "2026-08-08T12:00:00Z" },
+        ],
+      },
+      expected: { exit: 1, lines: [PARKED], outputs: [], calls: [PENDING_CALL] },
+    },
+  ])("after-propose mode: $reason", async ({ fixture, expected }) => {
+    expect(await run(afterProposeConfig(), fixture)).toEqual(expected);
   });
 });
