@@ -45,7 +45,9 @@ A red nightly is the signal that drift is going unhealed, so the halt is a FAILE
 
 ## Newest wins
 
-**A superseded run stands down GREEN.** A run asks whether main's tip is still its own commit ([fleet/newest_main.ts](../../.github/scripts/fleet/newest_main.ts), one `git ls-remote`). When main moved on, it stands down with the notice `superseded by <sha>`; the tip's own run or the nightly applies.
+**A superseded run's rows stand down GREEN.** Each row asks whether main's tip is still its run's commit ([fleet/newest_main.ts](../../.github/scripts/fleet/newest_main.ts), one `git ls-remote`). When main moved on, the row stands down with the notice `superseded by <sha>`; the tip's own run or the nightly applies.
+
+**The plan's refusals are red whatever main's tip is:** a scope naming no repository, or a selected target carrying a hand-written `.github/settings.yml`, fails the run before any row exists.
 
 **Why it asks:** the `settings-repos` lane runs one apply at a time in ARRIVAL order, and CI durations vary, so an older commit's run can reach the lane after a newer one's. post-green.yml's `settings-fleet` job holds the lane on a call; the cron and dispatch runs hold it themselves. Neither cancels a run in progress.
 
