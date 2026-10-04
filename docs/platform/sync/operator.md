@@ -13,7 +13,7 @@ This page is the operator's contract: the run that writes every managed reposito
 
 | Step | Script | What it does |
 | --- | --- | --- |
-| plan: resolve the build | [sync/resolve_build.ts](../../../.github/scripts/sync/resolve_build.ts) | the commit the `stable` tag names, re-verified main history with a green `all-green` check ([build-provenance.md](../../build-provenance.md)) and carrying `files.yml`; every row checks out exactly this commit |
+| plan: resolve the build | [sync/resolve_build.ts](../../../.github/scripts/sync/resolve_build.ts) | the commit the `stable` tag names, re-verified main history with a green `all-green` check ([build-provenance.md](../build-provenance.md)) and carrying `files.yml`; every row checks out exactly this commit |
 | plan: discover and select | [fleet/discover_repos.ts](../../../.github/scripts/fleet/discover_repos.ts), [fleet/select_sync_repos.ts](../../../.github/scripts/fleet/select_sync_repos.ts) | the rows: the repositories the fleet token can push to that have adopted the platform, narrowed by the dispatch `repo` input or the called `repos` scope ([fleet/sync_scope.ts](../../../.github/scripts/fleet/sync_scope.ts)), written sorted to `$RUNNER_TEMP/rows.json`; the matrix: one `{row, key}` per row, the key opaque ([private repositories](private-repositories.md)); the log names the public slugs and counts the private ones |
 | plan: print | [sync/verdict.ts](../../../.github/scripts/sync/verdict.ts) `plan` | `plan: <N> rows` |
 | row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/`, whose dependencies are installed there (`bun install --cwd build`) so its writer renders with its own versions |

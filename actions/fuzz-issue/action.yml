@@ -10,7 +10,7 @@ description: >-
   login it cannot assign). Resolve mode comments on and closes the open
   labeled issues, up to 100 a run, after a green run. With an artifacts-dir
   the body is built from failure reports (the contract is repo-platform's
-  docs/fuzzer.md); without one it is a generic nightly-failure report
+  docs/modules/fuzzer.md); without one it is a generic nightly-failure report
   (workflow, commit, run link). The action carries no stream's wording as
   a default: every caller names its mode and stream and, in report mode,
   its title and label tuple.

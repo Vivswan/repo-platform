@@ -264,7 +264,7 @@ describe("seedPages", () => {
 });
 
 describe("siteLayout", () => {
-  // The layout rows of docs/site.md, whole: the docs move under the
+  // The layout rows of docs/modules/site.md, whole: the docs move under the
   // configured segment only beside a website, a docs half turned off
   // (site.path: null) leaves docs/ out even when it exists, and neither
   // part is the nothing-to-publish row.
@@ -336,7 +336,7 @@ describe("resolvePrebuilt", () => {
     );
   });
 
-  // The hook contract's refusals (docs/site.md), each naming the path; every spelling of traversal is refused.
+  // The hook contract's refusals (docs/modules/site.md), each naming the path; every spelling of traversal is refused.
   const relPath = (dist: string) =>
     `the site-build hook's dist '${dist}' must be a plain relative path`;
   test.each<[reason: string, dist: string, error: string | null]>([

@@ -1,6 +1,5 @@
 ---
 order: 250
-group: Fleet operations
 ---
 
 # Build provenance
@@ -9,9 +8,9 @@ How the `stable` tag gets moved, how a sync verifies the commit it names before 
 
 | Question | Owner |
 | --- | --- |
-| When does a move happen, and what gates it? | [post-green/move_stable.ts](../.github/scripts/post-green/move_stable.ts) |
-| How does a sync verify the commit before consuming it? | [sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts) |
-| Which workflows drive the flow? | [ci.yml](../.github/workflows/ci.yml) (the [all-green gate](all-green.md) + the post-green caller), [post-green.yml](../.github/workflows/post-green.yml) (the move, on the call and on a dispatch) |
+| When does a move happen, and what gates it? | [post-green/move_stable.ts](../../.github/scripts/post-green/move_stable.ts) |
+| How does a sync verify the commit before consuming it? | [sync/resolve_build.ts](../../.github/scripts/sync/resolve_build.ts) |
+| Which workflows drive the flow? | [ci.yml](../../.github/workflows/ci.yml) (the [all-green gate](../all-green.md) + the post-green caller), [post-green.yml](../../.github/workflows/post-green.yml) (the move, on the call and on a dispatch) |
 
 ## The delivery ref is a tag on main
 
@@ -19,7 +18,7 @@ How the `stable` tag gets moved, how a sync verifies the commit it names before 
 
 | What the fleet reads | Where it sits at the commit | Who reads it |
 | --- | --- | --- |
-| `files.yml` and `files/` | the repository root | the sync writer ([platform/sync/README.md](platform/sync/README.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../actions/plan/reserved_labels.ts)), validate-managed-files |
+| `files.yml` and `files/` | the repository root | the sync writer ([platform/sync/README.md](sync/README.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../../actions/plan/reserved_labels.ts)), validate-managed-files |
 | `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | every managed workflow's `uses:` |
 | `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` |
 
@@ -27,9 +26,9 @@ Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. 
 
 - **No unextractable name:** a `uses:` ref downloads the whole repository tarball at the tag, so no path may carry a name extraction cannot write (conditional landing is `files.yml`'s `when` clauses, never a filename).
 
-- **Self-contained actions:** a composite action must resolve from that tarball alone: its own directory plus the root files it reads from there (`files.yml`, and the `.bun-version` its bun-setup step finds, [toolchains.md](toolchains.md#how-the-composite-actions-pin-bun)), since nothing installs the repository's root dependencies on the caller's runner.
+- **Self-contained actions:** a composite action must resolve from that tarball alone: its own directory plus the root files it reads from there (`files.yml`, and the `.bun-version` its bun-setup step finds, [toolchains.md](../toolchains.md#how-the-composite-actions-pin-bun)), since nothing installs the repository's root dependencies on the caller's runner.
 
-**Every self pin resolves:** [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout. A renamed or deleted action, or a pin off the delivery ref, fails CI here instead of the next fleet run.
+**Every self pin resolves:** [tests/workflows/delivery_pins.test.ts](../../tests/workflows/delivery_pins.test.ts) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout. A renamed or deleted action, or a pin off the delivery ref, fails CI here instead of the next fleet run.
 
 ## Who can write `refs/tags/stable`?
 
@@ -37,7 +36,7 @@ Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. 
 | --- | --- | --- |
 | post-green.yml's move-stable job, called | After the `all-green` gate passes on a push to main | ci.yml's post-green job (needs-ordered behind the gate, same run) releases it, and move_stable.ts re-verifies main history and the check at the commit before the push. |
 | post-green.yml's move-stable job, dispatched | A manual `workflow_dispatch` naming a green main commit's sha (the self-heal) | move_stable.ts's verification - main history, completed successful `all-green` - is the SOLE gate there. |
-| Anyone with push access, out of band | Any time | Nothing at write time: the `stable-tag` ruleset ([.github/settings.local.yml](../.github/settings.local.yml)) blocks deletion only. Sync consumption re-verifies below; `uses:` execution trusts the ref (the residuals table). |
+| Anyone with push access, out of band | Any time | Nothing at write time: the `stable-tag` ruleset ([.github/settings.local.yml](../../.github/settings.local.yml)) blocks deletion only. Sync consumption re-verifies below; `uses:` execution trusts the ref (the residuals table). |
 
 The ruleset blocks deletion only because git classifies every update of an existing tag as a forced update, so a `non_fast_forward` or `update` rule would block the mover itself; rollback protection is the mover's ancestry skip plus the lease.
 
@@ -47,10 +46,10 @@ A change merges to main as commit S. What happens, in order:
 
 | Step | Actor | What happens |
 | --- | --- | --- |
-| 1. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](all-green.md)). |
-| 2. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
-| 3. Move | post-green.yml's move-stable job | [move_stable.ts](../.github/scripts/post-green/move_stable.ts) verifies S is main history with a green check, reads where the tag sits, and moves it to S with a lease push. |
-| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml, calls reusable-site.yml with `github.sha` after the mover, gated on the all-green result alone ([all-green.md](all-green.md#repo-platforms-own-post-green-run)); its failure is its own red job. |
+| 1. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](../all-green.md)). |
+| 2. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
+| 3. Move | post-green.yml's move-stable job | [move_stable.ts](../../.github/scripts/post-green/move_stable.ts) verifies S is main history with a green check, reads where the tag sits, and moves it to S with a lease push. |
+| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml, calls reusable-site.yml with `github.sha` after the mover, gated on the all-green result alone ([all-green.md](../all-green.md#repo-platforms-own-post-green-run)); its failure is its own red job. |
 
 **The commit moved to is always SOURCE_SHA:** the judged run's own commit on the call, the operator's sha input on a dispatch. Never a read of origin/main, which can already be a newer, even red, commit (move_stable.ts's header owns this discipline).
 
@@ -69,7 +68,7 @@ Until the heal, a sync copies from the commit the tag names as it stands ([Resid
 
 - **The lease.** The push is `--force-with-lease` naming the value just read (the tag object for an annotated tag, an empty lease when the tag is absent), so two movers racing leaves the loser red and the tag untouched.
 
-- **The output.** `previous`, the commit the tag named before a move, is the `read-directives` leg's base; when nothing moved it is empty and the push's `before` stands in ([all-green.md](all-green.md#which-commits-a-run-reads)).
+- **The output.** `previous`, the commit the tag named before a move, is the `read-directives` leg's base; when nothing moved it is empty and the push's `before` stands in ([all-green.md](../all-green.md#which-commits-a-run-reads)).
 
 - **The credential.** The push uses the run's `GITHUB_TOKEN` with `contents: write` (ci.yml's post-green job grants that ceiling), the way GitHub's own actions/publish-action moves an action's major tag with the default token.
 
@@ -77,26 +76,26 @@ Until the heal, a sync copies from the commit the tag names as it stands ([Resid
 
 ## Provenance is the commit itself
 
-The tag names a main commit whose own CI run passed, so there is no generated tree to prove and no stamp to parse. Two facts anchor everything, verified at the move and re-verified at every sync ([sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts)), both hard failures:
+The tag names a main commit whose own CI run passed, so there is no generated tree to prove and no stamp to parse. Two facts anchor everything, verified at the move and re-verified at every sync ([sync/resolve_build.ts](../../.github/scripts/sync/resolve_build.ts)), both hard failures:
 
 | # | Check | What it catches |
 | --- | --- | --- |
-| 1 | The commit is `main` history (`git merge-base --is-ancestor`, through [shared/git_yes_no.ts](../.github/scripts/shared/git_yes_no.ts), so an errored look is fatal, never a "no"). | A tag pointed at a PR head, a side branch, or a foreign commit. |
-| 2 | The commit carries a completed successful `all-green` check run ([shared/all_green.ts](../.github/scripts/shared/all_green.ts)). | A red or unjudged commit. |
+| 1 | The commit is `main` history (`git merge-base --is-ancestor`, through [shared/git_yes_no.ts](../../.github/scripts/shared/git_yes_no.ts), so an errored look is fatal, never a "no"). | A tag pointed at a PR head, a side branch, or a foreign commit. |
+| 2 | The commit carries a completed successful `all-green` check run ([shared/all_green.ts](../../.github/scripts/shared/all_green.ts)). | A red or unjudged commit. |
 
 The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
-**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run); [platform/sync/writer.md](platform/sync/writer.md#the-command) says where a sync names it.
+**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run); [platform/sync/writer.md](sync/writer.md#the-command) says where a sync names it.
 
-**The manifest's own entry** records the commit the repository is judged against; a sync moves it under the stamp rule ([platform/sync/manifest.md](platform/sync/manifest.md#when-the-judged-commit-moves)).
+**The manifest's own entry** records the commit the repository is judged against; a sync moves it under the stamp rule ([platform/sync/manifest.md](sync/manifest.md#when-the-judged-commit-moves)).
 
-**Every fleet repository is judged at that recorded commit:** the validate-managed-files action checks out repo-platform at it and runs that commit's `check.ts`, so a `stable` move reddens nothing until the repository syncs ([platform/sync/manifest.md](platform/sync/manifest.md#judged-at-the-synced-commit)).
+**Every fleet repository is judged at that recorded commit:** the validate-managed-files action checks out repo-platform at it and runs that commit's `check.ts`, so a `stable` move reddens nothing until the repository syncs ([platform/sync/manifest.md](sync/manifest.md#judged-at-the-synced-commit)).
 
 Old delivery commits stay reachable forever: they are main history.
 
 ## A new action input and its workflow land together
 
-A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([platform/sync/README.md](platform/sync/README.md#this-repository-as-a-target)).
+A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([platform/sync/README.md](sync/README.md#this-repository-as-a-target)).
 
 So a workflow never runs ahead of the actions it calls: the sync PR that carries a new workflow line lands only once the delivery ref names a commit carrying the action input it feeds. One PR may add the input and the line together; no check here runs the workflow before the move.
 
@@ -114,4 +113,4 @@ The lag of a sync behind the tag:
 
 - **Who meets it:** a hand dispatch seconds after a merge, or the Tuesday cron firing while a merge shortly before it is still in CI, copies the previous commit, as does any sync while a move is missing.
 - **Why only those:** the post-green call is needs-ordered behind the mover in the same run, so only a sync that wakes on its own (dispatch or cron) can meet the lag.
-- **How it ends:** the next sync (the weekly cron, or a `fleet-sync:public` label on the next merge - [all-green.md](all-green.md#after-the-gate)) consumes the move once it lands. A move that never landed heals [as above](#the-delivery-flow-push-to-move): the next push, or a dispatch with the green commit's sha.
+- **How it ends:** the next sync (the weekly cron, or a `fleet-sync:public` label on the next merge - [all-green.md](../all-green.md#after-the-gate)) consumes the move once it lands. A move that never landed heals [as above](#the-delivery-flow-push-to-move): the next push, or a dispatch with the green commit's sha.

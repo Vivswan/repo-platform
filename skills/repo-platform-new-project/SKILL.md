@@ -142,7 +142,7 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 
 The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
 
-A `site` repository that publishes its own website fills in the site-build hook (the table above) before the first run on main. Its no-op seed is the whole configuration for a docs-only site; until filled in the site is the docs alone, or nothing. The platform's [docs/site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/site.md) has the hook contract and the docs conventions.
+A `site` repository that publishes its own website fills in the site-build hook (the table above) before the first run on main. Its no-op seed is the whole configuration for a docs-only site; until filled in the site is the docs alone, or nothing. The platform's [docs/modules/site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/modules/site.md) has the hook contract and the docs conventions.
 
 ### 7. Watch the first CI run
 

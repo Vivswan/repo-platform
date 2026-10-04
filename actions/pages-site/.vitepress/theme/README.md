@@ -91,7 +91,7 @@ Rules a change keeps:
 - **Launcher states:** each has a non-color cue at 3:1 or better against the panel; matches are bold, never colored.
 - **A new mermaid text surface** adds its pair to `theme_contrast.test.ts`, which lists the pairs by hand.
 - **The launcher's data and rules:** `pages.data.ts` keeps exporting `data: PageIndexEntry[]`, which the launcher reads. Grouping, folding, and matching rules change in `launcher-model.ts`, never in the component.
-- **The sidebar's ordering rule** is documented for fleet authors in `docs/site.md` (Docs conventions); change `../sidebar.ts` and that page together.
+- **The sidebar's ordering rule** is documented for fleet authors in `docs/modules/site.md` (Docs conventions); change `../sidebar.ts` and that page together.
 - **Anchors:** changing `../anchors.ts`'s algorithm changes every site's anchors at once.
 - **`local-search.d.ts` is hand-written:** a VitePress bump is checked against the local-search plugin's `load()` output by hand.
 

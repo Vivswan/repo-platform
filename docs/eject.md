@@ -7,7 +7,7 @@ group: Fleet operations
 
 This page detaches a repository from repo-platform management. To stop updates without detaching, see [Pause instead of eject](#pause-instead-of-eject).
 
-Detaching is cheap by design: managed repos degrade to normal repos, not broken ones. Nothing at runtime depends on repo-platform except workflow `uses:` references, which keep working as long as repo-platform exists. Every reusable-workflow call (fleet CI, auto-assign, the site deploy) and every composite-action step is pinned at `@stable`, repo-platform's green-gated delivery tag ([build-provenance.md](build-provenance.md)).
+Detaching is cheap by design: managed repos degrade to normal repos, not broken ones. Nothing at runtime depends on repo-platform except workflow `uses:` references, which keep working as long as repo-platform exists. Every reusable-workflow call (fleet CI, auto-assign, the site deploy) and every composite-action step is pinned at `@stable`, repo-platform's green-gated delivery tag ([build-provenance.md](platform/build-provenance.md)).
 
 Management is push-based, so ejecting starts in repo-platform, not in the repo: stop the machinery here, then optionally strip the managed files there.
 

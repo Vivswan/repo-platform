@@ -63,7 +63,7 @@ const hrefs = (html: string, selector: string) => select(html, selector).map((a)
 
 describe("the artifact a deploy lands", () => {
   test("lays out the website at the root and the docs beside it (root = newest tag, latest = HEAD, stable = newest tag, one dir per served tag, the indexes), skips the landing-less tag with a notice, and emits the outputs the deploy step reads", () => {
-    // docs/site.md's "website and docs" Layout row as the artifact tree, llms.txt included; siteLayout's unit
+    // docs/modules/site.md's "website and docs" Layout row as the artifact tree, llms.txt included; siteLayout's unit
     // table pins the rows as values, this pins the artifact and the `publish` output.
     const expected = [
       "index.html",
@@ -528,7 +528,7 @@ describe("link strictness on HEAD", () => {
 });
 
 describe("layouts that build no docs tier", () => {
-  // docs/site.md's two Layout rows a deploy settles without vitepress; the refused layouts are resolvePrebuilt's
+  // docs/modules/site.md's two Layout rows a deploy settles without vitepress; the refused layouts are resolvePrebuilt's
   // and assertDocsLanding's unit tables.
   const NO_LINK_ROT = { "link-rot-label": "", "link-rot-color": "", "link-rot-description": "" };
   test.each<{

@@ -1,7 +1,7 @@
 # Nightly CI starter: written once by {{github_username}}/repo-platform,
 # never overwritten by a later sync. Replace the placeholder step; the
 # report job files one label-deduplicated tracking issue on a red night
-# and closes it on a green one (docs/nightly.md).
+# and closes it on a green one (docs/modules/nightly.md).
 name: Nightly
 
 on:
@@ -31,7 +31,7 @@ jobs:
         run: |
           # Replace with the repository's nightly checks. A green no-op
           # until then: an uncustomized starter must not file issues.
-          echo "::warning::nightly starter not customized yet - replace the placeholder step (see repo-platform's docs/nightly.md)"
+          echo "::warning::nightly starter not customized yet - replace the placeholder step (see repo-platform's docs/modules/nightly.md)"
 
   # A CANCELLED checks job counts as red: hitting the timeout cancels
   # rather than fails, and a hang is exactly what a nightly exists to

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // One invoker, post-green.yml's move-stable job: SOURCE_SHA is the judged commit on the call, the sha input on a dispatch (the tag's
-// contract: docs/build-provenance.md; its place after the gate: docs/all-green.md).
+// contract: docs/platform/build-provenance.md; its place after the gate: docs/all-green.md).
 // Output `previous` is the base the directives read takes from the tag: the commit it named before this run moved it, "" when
 // nothing moved (the first move included).
 

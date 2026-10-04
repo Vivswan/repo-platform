@@ -47,4 +47,4 @@ The settings apply ([settings-repos.yml](../../../.github/workflows/settings-rep
 - **Mask registration is a snapshot:** a repository renamed while its row runs surfaces under its new name, which no mask covers.
 - **The `repo=` input** typed into a dispatch stays off the log: the plan reads it from the event payload, never from step env, and refusals count entries instead of quoting them.
 - **The failure issue and the PR body are write-forward:** a report delivered while the repository was private stays in the issue's edit history forever. Flipping a repository public publishes it; delete the report issue before a deliberate flip.
-- **The [site module](../../site.md)** publishes a PUBLIC site even from a private repository, `<owner>.github.io/<repo>` included; that is outside this model entirely.
+- **The [site module](../../modules/site.md)** publishes a PUBLIC site even from a private repository, `<owner>.github.io/<repo>` included; that is outside this model entirely.

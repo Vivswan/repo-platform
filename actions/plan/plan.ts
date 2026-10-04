@@ -188,7 +188,7 @@ export function weekly(now: Date): boolean {
   return now.getUTCDay() === 1;
 }
 
-/** The fleet-wide nightly security stream (docs/security-scans.md): fleet-nightly.yml files every repository's Trivy findings under it,
+/** The fleet-wide nightly security stream (docs/modules/security-scans.md): fleet-nightly.yml files every repository's Trivy findings under it,
  *  so it joins the tracking labels without a module; the settings baseline declares it on every repository, and its entry is the
  *  tuple the plan hands fleet-nightly's report step. */
 export const SECURITY_LABEL = "security-nightly";
@@ -221,7 +221,7 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
   };
 }
 
-/** The site configuration the pages-site action consumes (docs/site.md):
+/** The site configuration the pages-site action consumes (docs/modules/site.md):
  *  the website itself is the repo-owned hook's, so nothing about it is
  *  planned here. */
 export interface SitePlan {
