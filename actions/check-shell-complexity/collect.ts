@@ -97,7 +97,14 @@ export function dialectOfShell(shell: unknown, unset: Dialect): Dialect | null {
   const text = String(shell).trim();
   if (text.includes("${{")) return unset;
   const word = text.split(/\s+/)[0] ?? "";
-  return SHELL_DIALECT[basename(word)] ?? null;
+  return SHELL_DIALECT[shellName(word)] ?? null;
+}
+
+/** A shell program by its bare name: `C:\...\pwsh.exe` and `powershell.exe` are pwsh and powershell. */
+function shellName(program: string): string {
+  return basename(program.replaceAll("\\", "/"))
+    .toLowerCase()
+    .replace(/\.exe$/, "");
 }
 
 /** A `runs-on` naming a Windows image or label; a matrix expression names none and reads as a Linux runner. */
@@ -242,7 +249,7 @@ function collectContainerfile(relPath: string, text: string): CollectedBody[] {
     }
     if (keyword === "SHELL") {
       const program = (instruction as JSONInstruction).getJSONStrings()[0]?.getJSONValue();
-      dialect = program === undefined ? null : (SHELL_DIALECT[basename(program)] ?? null);
+      dialect = program === undefined ? null : (SHELL_DIALECT[shellName(program)] ?? null);
       if (stage !== null) stages.set(stage, dialect);
       continue;
     }
