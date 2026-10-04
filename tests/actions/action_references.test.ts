@@ -233,3 +233,65 @@ test("every with: key a workflow, a starter, or a composite passes to a platform
     "omits 'stream', which fuzz-issue requires",
   ]);
 });
+
+/** The step arrays of a document (a workflow's jobs, a starter's fragment): an array whose every item is a step. */
+function stepArrays(node: unknown): Step[][] {
+  if (Array.isArray(node)) {
+    const steps = node.every(
+      (item) => item !== null && typeof item === "object" && ("uses" in item || "run" in item),
+    );
+    return steps && node.length > 0 ? [node as Step[]] : node.flatMap(stepArrays);
+  }
+  if (node === null || typeof node !== "object") return [];
+  return Object.values(node as Record<string, unknown>).flatMap(stepArrays);
+}
+
+/** Every `steps.<id>.outputs.<key>` a job reads from a step that `uses:` a platform action, with the action's name. */
+export function undeclaredOutputReads(steps: Step[], actions: Map<string, Action>): string[] {
+  const ownAction = new Map<string, string>();
+  for (const step of steps) {
+    const own = OWN_ACTION.exec(String(step.uses ?? ""));
+    if (own !== null && typeof step.id === "string") ownAction.set(step.id, own[1]);
+  }
+  const problems: string[] = [];
+  for (const [, id, key] of JSON.stringify(steps).matchAll(STEP_REF)) {
+    const name = ownAction.get(id);
+    if (key === undefined || name === undefined) continue;
+    const action = actions.get(name);
+    if (action === undefined || !Object.hasOwn(action.outputs ?? {}, key)) {
+      problems.push(`steps.${id}.outputs.${key}: ${name} declares no output '${key}'`);
+    }
+  }
+  return problems;
+}
+
+// GitHub reads an output the action never declares as the empty string and warns nowhere, so a deploy gated on a
+// misspelled or not-yet-shipped output skips every time, green. The workflow and the action are two files; this is
+// the one place their names meet.
+test("every output a workflow or starter reads from a platform action step is one the action declares", () => {
+  const actions = new Map(ACTION_NAMES.map((name) => [name, loadAction(name)]));
+  const documents = CALLER_ROOTS.flatMap((root) =>
+    readdirSync(join(REPO_ROOT, root))
+      .filter((file) => file.endsWith(".yml"))
+      .map((file) => `${root}/${file}`),
+  );
+  const judged = Object.fromEntries(
+    documents.map((rel) => [
+      rel,
+      stepArrays(loadYaml(rel)).flatMap((steps) => undeclaredOutputReads(steps, actions)),
+    ]),
+  );
+  expect(judged).toEqual(Object.fromEntries(documents.map((rel) => [rel, []])));
+  const control: Step[] = [
+    { id: "site", uses: `${PLATFORM_SLUG}/actions/pages-site@stable` },
+    { id: "other", uses: "actions/checkout@sha" },
+    {
+      if: "steps.site.outputs.publish == 'true' && steps.site.outputs.pages-exist == 'true'",
+      run: "x",
+    },
+    { if: "steps.other.outputs.whatever == 'true'", run: "y" },
+  ];
+  expect(undeclaredOutputReads(control, actions)).toEqual([
+    "steps.site.outputs.pages-exist: pages-site declares no output 'pages-exist'",
+  ]);
+});

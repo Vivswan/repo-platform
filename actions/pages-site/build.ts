@@ -593,6 +593,11 @@ async function main(): Promise<void> {
     setSiteOutputs(cfg, null, "");
     return;
   }
+  if (website === null) {
+    console.log(
+      `::notice::no repository website (no site-build dist directory was handed over), so ${DOCS_DIR}/ publishes alone`,
+    );
+  }
   // The hook's dist is judged before any docs tier builds: a refused
   // website fails in seconds, not after the versions rendered.
   const websiteDir = website === null ? null : resolvePrebuilt(cfg.workspace, website.dist);
