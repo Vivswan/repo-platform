@@ -38,7 +38,12 @@ const ask = (status: string, body: string, answers = true) => {
     },
   });
   expect(gh.calls()).toEqual([["gh", "api", "--include", "repos/o/r/pages"]]);
-  return { exitCode: run.exitCode, stdout: run.stdout, output: readFileSync(output, "utf8") };
+  return {
+    exitCode: run.exitCode,
+    stdout: run.stdout,
+    stderr: run.stderr,
+    output: readFileSync(output, "utf8"),
+  };
 };
 
 describe("pages_exists.ts", () => {
@@ -46,12 +51,12 @@ describe("pages_exists.ts", () => {
     status: string;
     body: string;
     answers?: boolean;
-    outcome: { exitCode: number; stdout: string; output: string };
+    outcome: { exitCode: number; stdout: string; stderr: string; output: string };
   }>([
     {
       status: "200 OK",
       body: '{"url":"https://api.github.com/repos/o/r/pages","status":"built"}',
-      outcome: { exitCode: 0, stdout: "", output: "exists=true\n" },
+      outcome: { exitCode: 0, stdout: "", stderr: "", output: "exists=true\n" },
     },
     {
       status: "404 Not Found",
@@ -60,6 +65,7 @@ describe("pages_exists.ts", () => {
         exitCode: 0,
         stdout:
           "::warning::no Pages site yet: repo-platform's settings apply creates it on its next run (daily), and the nightly rebuild deploys; nothing to do here.\n",
+        stderr: "",
         output: "exists=false\n",
       },
     },
@@ -76,11 +82,13 @@ describe("pages_exists.ts", () => {
         exitCode: 1,
         stdout:
           '::error::reading the Pages site answered HTTP 500: { "message": "Server Error", "documentation_url": "https://docs.github.com/rest", "status": "500" }\n',
+        stderr: "",
         output: "",
       },
     },
     {
-      // No status line at all (gh never reached the API): gh's first stderr line stands in for the body.
+      // No status line at all (gh never reached the API): gh's first stderr line stands in for the body, and gh's
+      // stderr reaches the step log whole.
       status: "nothing (no response)",
       body: "",
       answers: false,
@@ -88,6 +96,7 @@ describe("pages_exists.ts", () => {
         exitCode: 1,
         stdout:
           "::error::reading the Pages site answered HTTP nothing: error connecting to api.github.com\n",
+        stderr: "error connecting to api.github.com\n",
         output: "",
       },
     },
