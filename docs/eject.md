@@ -65,7 +65,7 @@ Every remaining file is plain configuration that works standalone: the rendered 
 
 ## Pause instead of eject
 
-To stop receiving sync PRs without detaching, do one of these, and undo it to resume updates.
+To stop receiving sync PRs without detaching, do one of these, and undo it to resume updates. Both pauses also drop the repository from the central settings apply ([selection](settings.md#selection)).
 
 | Pause | How | In the plan log |
 |---|---|---|
