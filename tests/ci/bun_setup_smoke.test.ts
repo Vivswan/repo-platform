@@ -20,8 +20,8 @@ describe("smokeProblems", () => {
   const good: SmokeReading = {
     current: "1.4.0",
     previous: "1.3.0",
-    first: { path: "/opt/bun/1.4.0/bun", ready: "true", installed: "false", version: "1.4.0" },
-    second: { path: "/opt/bun/1.3.0/bun", ready: "true", installed: "true", version: "1.3.0" },
+    first: { path: "/opt/bun/1.4.0/bun", installed: "false", version: "1.4.0" },
+    second: { path: "/opt/bun/1.3.0/bun", installed: "true", version: "1.3.0" },
   };
 
   // ci.yml's bun-setup smoke job runs this judge over two recorded calls; a verdict that
@@ -45,15 +45,6 @@ describe("smokeProblems", () => {
       reason: "a first path that is not absolute and prints nothing",
       reading: { ...good, first: { ...good.first, path: "bun", version: "" } },
       problems: ["first path is not absolute: 'bun'", "first version is '', pin is '1.4.0'"],
-    },
-    {
-      reason: "neither call ready",
-      reading: {
-        ...good,
-        first: { ...good.first, ready: "false" },
-        second: { ...good.second, ready: "false" },
-      },
-      problems: ["first ready is 'false'", "second ready is 'false'"],
     },
   ])("$reason", ({ reading, problems }) => {
     expect(smokeProblems(reading)).toEqual(problems);

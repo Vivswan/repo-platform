@@ -18,7 +18,6 @@ export function earlierRelease(version: string): string {
 
 export interface CallOutputs {
   path: string;
-  ready: string;
   installed: string;
   /** The action's `version` output: what `path` printed when it was resolved. */
   version: string;
@@ -42,7 +41,6 @@ export function smokeProblems(reading: SmokeReading): string[] {
       problems.push(`${call} path is not absolute: '${outputs.path}'`);
     if (outputs.version !== pin)
       problems.push(`${call} version is '${outputs.version}', pin is '${pin}'`);
-    if (outputs.ready !== "true") problems.push(`${call} ready is '${outputs.ready}'`);
     if (outputs.installed !== installed) {
       problems.push(`${call} installed is '${outputs.installed}', expected ${installed}`);
     }
@@ -71,7 +69,6 @@ function plant(): number {
 function judge(): number {
   const call = (prefix: string): CallOutputs => ({
     path: env(`${prefix}_PATH`),
-    ready: env(`${prefix}_READY`),
     installed: env(`${prefix}_INSTALLED`),
     version: env(`${prefix}_VERSION`),
   });

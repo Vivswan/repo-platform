@@ -17,28 +17,18 @@ inputs:
       first .bun-version in it or any directory above it is the pin, and the
       step fails when none exists.
     required: true
-  required:
-    description: >-
-      Fail when no bun matching the pin is on PATH after the setup. Pass
-      "false" to leave the verdict to the caller through `ready`, for an
-      action that must reach its own report step whatever happened.
-    required: false
-    default: "true"
 
 outputs:
   path:
     description: >-
-      Absolute path of the bun that prints the pinned version; empty when
-      none does. Callers run this path, never `bun` by name.
+      Absolute path of the bun that prints the pinned version. Callers run
+      this path, never `bun` by name.
     value: ${{ steps.resolve.outputs.path }}
-  ready:
-    description: Whether `path` is set ("true" or "false").
-    value: ${{ steps.resolve.outputs.ready }}
   installed:
     description: Whether setup-bun ran, "true" unless the pin was already satisfied.
     value: ${{ steps.resolve.outputs.installed }}
   version:
-    description: What `path` printed for --version when resolved; empty when `path` is.
+    description: What `path` printed for --version.
     value: ${{ steps.resolve.outputs.version }}
 
 runs:
@@ -101,7 +91,6 @@ runs:
       shell: bash
       env:
         PIN_FILE: ${{ steps.locate.outputs.file }}
-        REQUIRED: ${{ inputs.required }}
         SETUP_OUTCOME: ${{ steps.setup-bun.outcome }}
       run: |
         pin="$(cat "$PIN_FILE")"
@@ -112,9 +101,8 @@ runs:
         if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
         echo "path=$path" >> "$GITHUB_OUTPUT"
         echo "version=$([ -n "$path" ] && echo "$have")" >> "$GITHUB_OUTPUT"
-        echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
         echo "installed=$([ "$SETUP_OUTCOME" != "skipped" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-        if [ -z "$path" ] && [ "$REQUIRED" != "false" ]; then
+        if [ -z "$path" ]; then
           echo "::error::no bun matching the pin '$pin' ($PIN_FILE) is on PATH after the setup and its retry"
           exit 1
         fi

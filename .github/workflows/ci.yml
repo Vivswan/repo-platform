@@ -394,11 +394,9 @@ jobs:
           CURRENT: ${{ steps.pins.outputs.current }}
           PREVIOUS: ${{ steps.pins.outputs.previous }}
           FIRST_PATH: ${{ steps.first.outputs.path }}
-          FIRST_READY: ${{ steps.first.outputs.ready }}
           FIRST_INSTALLED: ${{ steps.first.outputs.installed }}
           FIRST_VERSION: ${{ steps.first.outputs.version }}
           SECOND_PATH: ${{ steps.second.outputs.path }}
-          SECOND_READY: ${{ steps.second.outputs.ready }}
           SECOND_INSTALLED: ${{ steps.second.outputs.installed }}
           SECOND_VERSION: ${{ steps.second.outputs.version }}
         # Whichever bun is current by now (the second call overwrote the
