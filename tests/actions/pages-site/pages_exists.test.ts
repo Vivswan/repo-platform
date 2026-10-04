@@ -42,7 +42,7 @@ const ask = (status: string, body: string, answers = true) => {
 };
 
 describe("pages_exists.ts", () => {
-  test.each([
+  test.each<{ status: string; body: string; answers?: boolean; outcome: object }>([
     {
       status: "200 OK",
       body: '{"url":"https://api.github.com/repos/o/r/pages","status":"built"}',
@@ -74,17 +74,19 @@ describe("pages_exists.ts", () => {
         output: "",
       },
     },
-  ])("against HTTP $status: deploys, waits, or fails", ({ status, body, outcome }) => {
-    expect(ask(status, body)).toEqual(outcome);
-  });
-
-  // No status line at all (gh never reached the API): the error carries gh's own first stderr line in place of a body.
-  test("against no response: fails naming gh's reason", () => {
-    expect(ask("", "", false)).toEqual({
-      exitCode: 1,
-      stdout:
-        "::error::reading the Pages site answered HTTP nothing: error connecting to api.github.com\n",
-      output: "",
-    });
+    {
+      // No status line at all (gh never reached the API): gh's first stderr line stands in for the body.
+      status: "nothing (no response)",
+      body: "",
+      answers: false,
+      outcome: {
+        exitCode: 1,
+        stdout:
+          "::error::reading the Pages site answered HTTP nothing: error connecting to api.github.com\n",
+        output: "",
+      },
+    },
+  ])("against HTTP $status: deploys, waits, or fails", ({ status, body, answers, outcome }) => {
+    expect(ask(status, body, answers)).toEqual(outcome);
   });
 });

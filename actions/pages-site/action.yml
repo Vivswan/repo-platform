@@ -123,10 +123,7 @@ runs:
           ${{ steps.assemble.outputs.link-check-args }}
         output: ${{ runner.temp }}/pages-site/link-check.md
 
-    # A repository's first deploy after selecting the module can run before the settings apply that creates its
-    # Pages site (files/site/settings.yml), and the job token cannot create one: GitHub reserves that to another
-    # token whatever `pages: write` grants. So the action asks, and the caller waits for the apply on the one known
-    # answer: 200 -> exists true, 404 -> exists false and a warning, anything else -> the step fails.
+    # Why the deploy asks: pages_exists.ts's header; the three answers: its judgePagesAnswer.
     - name: Ask whether the Pages site exists
       id: pages
       if: steps.assemble.outputs.publish == 'true'
