@@ -183,11 +183,11 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Pre-commit hooks only check
 
-**Rule:** a pre-commit hook checks, and a failing check fails the commit. It may also write the fix into the working tree before it fails. It never stages, commits, or passes a commit it fixed; the developer reviews and stages the fix, then reruns the commit.
+**Rule:** a pre-commit hook does one of two things: it checks, and a failing check fails the commit; or it checks, writes the fix into the working tree, and still fails. Nothing else: no staging or committing, no fix-then-pass, no push, no network, no side effect beyond that write. The developer reviews and stages the fix, then reruns the commit.
 
 **Why:** a hook that fixes and re-stages commits bytes the developer never saw, and the one that regenerated and staged under git's exported `GIT_DIR` rewrote a repository's shared config.
 
-**How:** either run the check-only form of each tool (`biome ci`) and let its failure stand, or run the write form (`biome format --write`) and fail the hook whenever it changed a file, naming the files. Never `git add` in a hook.
+**How:** either run the check-only form of each tool (`biome ci`) and let its failure stand, or run the write form (`biome format --write`) and fail the hook whenever it changed a file, naming the files. Never a git command that writes (`add`, `commit`, `stash`, `checkout`, `reset`, `push`, `config`); read-only queries such as `git diff --cached --name-only` are fine. A formatter-and-restage step, lint-staged and its kind, is out.
 
 **Enforced by:** review; repo-platform ships no hook.
 
