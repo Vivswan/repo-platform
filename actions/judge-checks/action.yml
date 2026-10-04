@@ -1,0 +1,34 @@
+name: Judge Checks
+description: >-
+  The last step of a job whose check steps each run under `!cancelled()`:
+  reads the job's `steps` context (pass `toJSON(steps)`), writes one table of
+  every step's outcome to the step summary, and fails naming each step whose
+  conclusion is neither success nor skipped. A skipped step stood down and is
+  never a failure. `conclusion` decides, not `outcome`, so a failed step under
+  continue-on-error counts as the success GitHub records for it. Run it under
+  `if: always()`, or a failed check never reaches the judge; an empty context
+  fails rather than passing a judge fed nothing.
+
+inputs:
+  steps:
+    description: The calling job's steps context as JSON, passed as toJSON(steps).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Judge the checks
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        STEPS: ${{ inputs.steps }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/judge-checks.ts"'

@@ -7,7 +7,12 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadLayer, sectionEntries } from "../../.github/scripts/sync/writer/settings_layers";
 import { parseFilesConfig } from "../../actions/plan/files_config";
-import { BLOCKER_LABEL, OVERRIDE_LABEL } from "../../actions/release-health/release-health";
+import {
+  BLOCKER_LABEL,
+  OVERRIDE_LABEL,
+  PENDING_LABEL,
+  TAGGED_LABEL,
+} from "../../actions/release-health/release-health";
 import { REPO_ROOT } from "../shared/action_step";
 
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
@@ -73,19 +78,13 @@ describe("labels other tools recreate are declared where their module is selecte
     expect(layerLabelNames(moduleLayer(module))).toEqual(expect.arrayContaining(labels));
   });
 
-  test("release-please: its two autorelease labels in the release-please layer, and the release guard queries the pending one", () => {
+  // gh pr list exits 0 and empty for a label that does not exist, so a guard spelled differently from the layer is a
+  // permanent silent no-op: the labels the release guard queries and names are the ones the layer must declare.
+  test("release-please: its two autorelease labels in the release-please layer, the ones the release guard queries", () => {
     const declared = layerLabelNames(moduleLayer("release-please"));
     expect(declared).toEqual(
-      expect.arrayContaining([
-        "autorelease: pending",
-        "autorelease: tagged",
-        BLOCKER_LABEL,
-        OVERRIDE_LABEL,
-      ]),
+      expect.arrayContaining([PENDING_LABEL, TAGGED_LABEL, BLOCKER_LABEL, OVERRIDE_LABEL]),
     );
-    // gh pr list exits 0 and empty for a label that does not exist, so a misspelled guard is a permanent silent no-op.
-    const guard = read(".github/workflows/fleet-release.yml");
-    expect(guard).toContain("gh pr list --state merged --label 'autorelease: pending'");
   });
 
   test("github-settings-as-code: its private report marker in the private layer", () => {
