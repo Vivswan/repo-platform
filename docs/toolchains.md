@@ -36,7 +36,7 @@ repo-platform's own composite actions (under `actions/`) pin their bun from the 
 
 - Every later step runs that path, never `bun` by name, because a later setup-bun can put another bun first on PATH.
 
-- validate-managed-files passes `required: "false"` and gates its legs on the `ready` output, so its report step still runs and reports a missing bun instead of the action dying before it.
+- validate-managed-files passes `required: "false"` and gates its legs on the `ready` output, so a missing bun is reported by its own shell step (the verdict `failure`, one summary line) instead of the action dying before it.
 
 - The actions run vendored scripts and action-local lockfiles inside caller checkouts, so the CALLER's version resolution must never pick their bun: a repository pinning an older bun cannot parse the lockfiles repo-platform's bun writes. `tests/actions/bun_setup_first.test.ts` asserts that shape of every action shipping a bun.lock: the setup step first, no bare `bun` line.
 
