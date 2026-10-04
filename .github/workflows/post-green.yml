@@ -1,4 +1,4 @@
-# The legs after the all-green gate (docs/all-green.md, "After the gate"; the trust model: docs/platform/build-provenance.md).
+# The legs after the all-green gate (docs/platform/post-green.md; the trust model: docs/platform/build-provenance.md).
 # Inside a called run github.event_name is the CALLER's event, so `!= 'workflow_dispatch'` is what gates the call-only legs.
 #
 # Every leg holds three invariants:
@@ -77,7 +77,7 @@ jobs:
         run: bun .github/scripts/post-green/move_stable.ts
 
   # Ordered behind the mover for its base, and run on every mover result: only this run is sure to read
-  # this commit's fleet-sync label (fleet_sync_marker.ts; docs/all-green.md, "Opting a PR into an immediate fleet sync").
+  # this commit's fleet-sync label (fleet_sync_marker.ts; docs/platform/post-green.md, "How the leg reads the label").
   read-directives:
     needs: [move-stable]
     if: github.event_name != 'workflow_dispatch' && !cancelled()

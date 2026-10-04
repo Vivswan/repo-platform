@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
 // The squash commit carries the PR title alone (the fleet's squash_merge_commit_message is BLANK), so the opt-in rides on the merged
-// pull request's labels; a commit no pull request produced (a direct push) carries none (docs/all-green.md).
+// pull request's labels; a commit no pull request produced (a direct push) carries none. The lookup: docs/platform/post-green.md,
+// "How the leg reads the label"; the direct-push rule: docs/all-green.md.
 
 import { resolve } from "node:path";
 import { z } from "zod";

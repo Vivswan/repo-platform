@@ -8,7 +8,7 @@ repository:
   # Declared so the apply heals an out-of-band flip to private.
   private: false
 
-# A merged pull request's fleet-sync label opts it into an immediate sync (docs/all-green.md): fleet_sync_marker.ts reads this
+# A merged pull request's fleet-sync label opts it into an immediate sync (docs/platform/post-green.md): fleet_sync_marker.ts reads this
 # list at run time, the suffix naming the scope. One label per pull request.
 labels:
   - name: fleet-sync:public

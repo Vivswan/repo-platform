@@ -106,8 +106,8 @@ describe("deliveredBySync", () => {
 describe("the delivered surface", () => {
   const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
-  test("is the list docs/all-green.md documents, each path the kind its spelling says", () => {
-    const line = readFileSync(join(REPO_ROOT, "docs/all-green.md"), "utf-8")
+  test("is the list docs/platform/post-green.md documents, each path the kind its spelling says", () => {
+    const line = readFileSync(join(REPO_ROOT, "docs/platform/post-green.md"), "utf-8")
       .split("\n")
       .find((l) => l.includes("`DELIVERED_SURFACE`"));
     expect(line).toBeDefined();
