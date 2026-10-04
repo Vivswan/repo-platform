@@ -79,9 +79,9 @@ describe("reusable-site.yml", () => {
   });
 
   // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml), the nightly, and the
-  // install ci.yml's fixture job runs so the broken-link test is judged by it, all the same action at the same
+  // install ci.yml's test job runs so the broken-link test is judged by it, all the same action at the same
   // version. The internal step's own knobs are judged by the live run in tests/ci/pages_site_build.
-  test("the assembly's internal link check, the fixture job, and the nightly run one lychee at one version", () => {
+  test("the assembly's internal link check, the test job, and the nightly run one lychee at one version", () => {
     const internal = stepNamed(
       loadAction("actions/pages-site/action.yml"),
       "Check the site's internal links",
@@ -89,7 +89,7 @@ describe("reusable-site.yml", () => {
     const ci = parseYaml(
       readFileSync(join(import.meta.dir, "../../.github/workflows/ci.yml"), "utf8"),
     ) as { jobs: Record<string, { steps?: Step[] }> };
-    const fixtures = ci.jobs["pages-site-build"]?.steps?.find(
+    const fixtures = ci.jobs["script-tests"]?.steps?.find(
       (candidate) => candidate.uses === internal.uses,
     );
     const nightly = step("links");
@@ -287,6 +287,17 @@ describe("reusable-site.yml", () => {
   // A Pages step gated on the assembly's `publish` alone runs against an absent site and fails the first deploy again,
   // silent until the next repository selects the module; a check placed after configure-pages reads as an unset output
   // there, and every deploy skips. Exact gates: a skipped check reads as false downstream too.
+  // GitHub fact: artifacts belong to the run, not the attempt, so a re-run after a failed prerequisite (which re-runs
+  // this leg through its needs) leaves two github-pages artifacts in one run and deploy-pages refuses. The attempt number in the
+  // name keeps each attempt's upload and deploy a pair; the two names must agree or the deploy finds nothing.
+  test("each attempt uploads and deploys a Pages artifact of its own name", () => {
+    const at = (action: string) =>
+      steps.find((candidate) => (candidate.uses ?? "").startsWith(`actions/${action}@`));
+    const uploaded = at("upload-pages-artifact")?.with?.name;
+    expect(uploaded).toContain("${{ github.run_attempt }}");
+    expect(at("deploy-pages")?.with?.artifact_name).toBe(uploaded);
+  });
+
   test("the Pages steps and the link check run on the check's verdict alone, asked first", () => {
     const gate = "steps.pages.outputs.exists == 'true'";
     const at = (action: string) =>

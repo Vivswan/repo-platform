@@ -101,7 +101,9 @@ The jobs beside them gate nothing:
 
 - **Its skills checks:** `validate-skills` (structure, offline) and `skills-discovery` (the real `npx skills` listing, so its own job) run [Vivswan/skills' validate-skills action](https://github.com/Vivswan/skills/tree/main/.github/actions/validate-skills) on this repository's own skills catalog. The action is pinned by sha like every other third-party action ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)).
 
-- **Its docs probe:** the `docs-check` job runs the docs-discipline probe from that same Vivswan/skills commit over the README and every page under `docs/`. A paragraph or list item over 70 words, or a named repository path that does not exist, fails it; a path a managed repository holds resolves through `files/base`. CI-only: `bun run check` does not run it.
+- **Its docs shape and wording check:** the `docs-check` job runs [Vale](https://vale.sh) over README.md and docs/*.md with the skills repository's styles, read from a checkout at the validate-skills sha: a paragraph or list item over 70 words, or a word or phrase from the unslop and natural-writing skills' lists, fails the job, naming the line. The binary is a pinned release verified by sha256, as pinact is.
+
+- **Its docs path check:** the same job runs the docs-discipline probe from that checkout over the same pages: a backticked or linked repository path that does not exist fails it, and a path a managed repository holds resolves through `files/base`. Its word cap repeats Vale's verdict.
 
 - **A repo-owned advisory check** opts out with `continue-on-error: true` on its job in checks.yml.
 
