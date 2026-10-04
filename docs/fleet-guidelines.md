@@ -19,6 +19,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
+| [Pre-commit hooks only check](#pre-commit-hooks-only-check) | review |
 | [File size caps](#file-size-caps) | the `file-size` step (a hard cap fails the step, and the step fails the `standard-checks` job) |
 | [How to bypass a check](#how-to-bypass-a-check) | each tool's own per-finding, in-repo bypass; no job-level switch exists |
 
@@ -179,6 +180,16 @@ Conventions every managed repository follows, whether the file is managed by syn
 **A block that must stay long** (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone. The reason is mandatory: a bare marker exempts nothing and warns itself.
 
 **Enforced by:** the comment caps of the `file-size` step ([file size caps](#file-size-caps)), warn only, never a failure.
+
+## Pre-commit hooks only check
+
+**Rule:** a pre-commit hook checks, and a failing check fails the commit. It may also write the fix into the working tree before it fails. It never stages, commits, or passes a commit it fixed; the developer reruns the commit.
+
+**Why:** a hook that fixes and re-stages commits bytes the developer never saw, and the one that regenerated and staged under git's exported `GIT_DIR` rewrote a repository's shared config.
+
+**How:** run the check-only form of each tool (`biome ci`, not `biome format --write`); when the hook writes a fix, its refusal names the file and the command that produced it.
+
+**Enforced by:** review; repo-platform ships no hook.
 
 ## File size caps
 
