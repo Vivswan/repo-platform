@@ -12,7 +12,9 @@ description: >-
   /<docs_path>/ beside the website or at the root alone. Other roots of the
   repository (skills/, for one) render inside the docs through the include
   list. Once every part is in place the whole artifact's internal links
-  are checked, fragments included, and a broken one fails the step. With
+  are checked, fragments included, and a broken one fails the step, and
+  GitHub is asked whether the repository's Pages site exists yet
+  (pages-exists), since the job token can read one but never create it. With
   neither part the step ends green with publish false and no directory.
   With check true it instead builds docs/ once, strictly (dead internal
   links fatal), with the same include roots and link check, as the docs PR
@@ -44,6 +46,12 @@ outputs:
   site-dir:
     description: The assembled site directory to upload as the Pages artifact (empty when publish is false or in check mode)
     value: ${{ steps.assemble.outputs.site-dir }}
+  pages-exists:
+    description: >-
+      Whether the repository has a Pages site to deploy to, asked of GitHub once a site was assembled: "true", or
+      "false" with a warning when the settings apply has not created it yet (the caller skips its Pages steps);
+      empty when publish is false or in check mode. Any other answer fails the action.
+    value: ${{ steps.pages.outputs.exists }}
   link-rot-label:
     description: The nightly external-link check's tracking label from the configuration ("" disables the check)
     value: ${{ steps.assemble.outputs.link-rot-label }}
@@ -114,3 +122,16 @@ runs:
           --fallback-extensions html,htm
           ${{ steps.assemble.outputs.link-check-args }}
         output: ${{ runner.temp }}/pages-site/link-check.md
+
+    # A repository's first deploy after selecting the module can run before the settings apply that creates its
+    # Pages site (files/site/settings.yml), and the job token cannot create one: GitHub reserves that to another
+    # token whatever `pages: write` grants. So the action asks, and the caller waits for the apply on the one known
+    # answer: 200 -> exists true, 404 -> exists false and a warning, anything else -> the step fails.
+    - name: Ask whether the Pages site exists
+      id: pages
+      if: steps.assemble.outputs.publish == 'true'
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        GH_TOKEN: ${{ github.token }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/pages_exists.ts"'
