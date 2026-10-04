@@ -28,7 +28,7 @@ The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.tx
 
 - **Parity:** validate-managed-files fails a repo whose dotfile differs from the one its recorded commit's sync writes ([sync.md](sync.md#judged-at-the-synced-commit)).
 
-## How this repository's actions pin bun
+## How the composite actions pin bun
 
 repo-platform's own composite actions (under `actions/`) pin their bun from the root `.bun-version` the sync writes from the same file, which every `uses:` fetch carries: it is the whole repository at the ref.
 
