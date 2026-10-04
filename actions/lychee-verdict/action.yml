@@ -1,0 +1,38 @@
+name: Lychee Verdict
+description: >-
+  Reads lychee-action's `exit_code` output as one verdict the steps after
+  it can gate on positively: 0 is a clean run (found false), 2 is broken
+  links (found true), and anything else, an unset code included, is no
+  verdict and fails the step (lychee's own error, a step that never ran).
+  lychee-action with `fail: false` keeps the job green whatever happened,
+  so without this reading a crashed lychee passes as a clean run.
+
+inputs:
+  exit-code:
+    description: lychee-action's `exit_code` output
+    required: true
+
+outputs:
+  found:
+    description: '"true" when lychee reported broken links, "false" on a clean run'
+    value: ${{ steps.verdict.outputs.found }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Read the verdict
+      id: verdict
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        EXIT_CODE: ${{ inputs.exit-code }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/verdict.ts"'

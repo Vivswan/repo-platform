@@ -37,10 +37,9 @@ The called workflow is one job, in this order:
 | checkout | always | the judged commit, full history (the tag list is the version set) |
 | urls | always | computes the base path `/<repo>/` and the origin `https://<owner>.github.io` |
 | hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
-| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes `versions.json` under the docs mount |
-| pages | something was built | asks GitHub whether the Pages site exists; absent, the deploy skips with a warning ([below](#pages-enablement)) |
+| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes `versions.json` under the docs mount, and, once something was built, asks GitHub whether the Pages site exists (`pages-exists`); absent, the deploy skips with a warning ([below](#pages-enablement)) |
 | configure, upload, deploy | the Pages site exists | the one Pages artifact, deployed to the `github-pages` environment |
-| link rot | the schedule alone, after a deploy | checks the site's external links with lychee and files the tracking issue ([below](#link-rot)) |
+| link rot | the schedule alone, after a deploy | checks the site's external links with lychee, reads lychee's exit code as the verdict through the shared [lychee-verdict action](../../actions/lychee-verdict/action.yml), and files the tracking issue ([below](#link-rot)) |
 
 A repository with nothing to publish ends green with a notice (`nothing to publish`) and no deploy ([layout](#layout)).
 
@@ -66,7 +65,7 @@ It is a composite action, so the fleet can run it from the caller's checkout ins
 | output `dist` | the built site's directory, relative to the repository root, with an `index.html`; empty (the seeded default) means no repository website |
 | runs as | a step of the deploy job, on the checked-out judged commit, under that job's token (contents read, pages and id-token write, issues write), the same exposure the release hooks have, so it runs only code from the judged commit |
 | refused | an absolute `dist`, one that leaves the repository (`..`, or a symlink resolving outside it), a missing directory, or one without `index.html`: the leg goes red naming the path |
-| declares no `dist` output | only the docs directory publishes, when there is one, with a notice that the hook named no directory |
+| declares no `dist` output | only the docs directory publishes, when there is one, with the assembly's notice that no dist directory was named |
 
 A website built by the repository's own toolchain (its setup steps go before the build step):
 

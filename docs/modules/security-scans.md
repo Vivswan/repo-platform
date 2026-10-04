@@ -70,18 +70,20 @@ Public repositories also run [semgrep](https://semgrep.dev) as fleet-ci.yml's `s
 
 - **Rules:** the registry's `p/default` set at `--severity ERROR`, with one rule excluded permanently: `github-actions-mutable-action-tag`, because zizmor's `unpinned-uses` owns action pinning (one tool per finding class).
 
-**Verdict,** reached in order:
+**Verdict:** semgrep's own exit code, through two of its flags.
 
-1. A scan that did not exit 0 fails first, naming its exit status: there is no verdict without a completed scan.
-2. Then the JSON copy is judged: ERROR findings and fatal analysis errors fail the job; partial parses and timeouts only annotate.
+| Flag | What it carries |
+|---|---|
+| `--severity ERROR` | only ERROR rules run, so WARNING and INFO findings appear nowhere, neither in the verdict nor in code scanning |
+| `--error` | exit 1 on a finding, so the scan step fails the job; a scan that failed exits 2 or higher and fails it too |
 
-WARNING and INFO rules do not run, so their findings appear nowhere, neither in the verdict nor in code scanning.
+Partial parses and timeouts are warn-level: semgrep's summary names them in the step log, and the step stays green.
 
 - **Bypass:** semgrep's own marker on the finding's line or the line above it, `// nosemgrep: <rule-id>` (`# nosemgrep: <rule-id>` in YAML), with the reason beside it. The marker applies to an ERROR finding; whether to mark one is the repository's own call.
 
 - **Bypass in a Dockerfile:** an instruction takes no trailing comment, so the marker is a `# nosemgrep: <rule-id>` line directly above the instruction, nothing between them.
 
-- **Upload:** unmarked ERROR findings go to code scanning as SARIF under the `semgrep` category, and marked ones do not. A marked finding stays in semgrep's SARIF as a suppressed result, and code scanning ignores the suppressions field and would show it as an open alert, so the action drops suppressed results from the SARIF before the upload.
+- **Upload:** unmarked ERROR findings go to code scanning as SARIF under the `semgrep` category, and marked ones do not. A marked finding stays in semgrep's SARIF as a suppressed result, and code scanning reads no `suppressions` property ([its SARIF support](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning)) and would show it as an open alert, so the action drops suppressed results from the SARIF before the upload.
 
 - **Upload edge cases:** a scan that wrote no SARIF leaves nothing to filter, and the upload fails on the missing file. An earlier upload may have opened lower-severity alerts; code scanning marks them fixed once a later upload for the same category and branch lacks them.
 
