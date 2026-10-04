@@ -3,4 +3,3 @@
 # left fails the check as stale. "owed" names a block whose TypeScript replacement is not written yet.
 actions/bun-setup/action.yml # the pre-bun pin walk: bash is all there is before bun exists
 .github/workflows/reusable-site.yml # owed: the Pages probe and the link-rot verdict run in the caller's checkout, so a composite action is their shape
-actions/semgrep/action.yml # owed: a judge script beside the scan step, run by the action's own bun
