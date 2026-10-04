@@ -6,7 +6,7 @@
 //
 // Usage: bun .github/scripts/sync/migrate.ts <migrations dir> <checkout>
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fail, requireEnv } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
@@ -20,18 +20,12 @@ export function rungsOf(dir: string): string[] {
     .map((name) => join(dir, name));
 }
 
-/** NUL-separated, as the runner wrote it; null when no list exists, which is a build whose runner predates the list
- *  (the operator's delivery runs from main, the runner from the build). */
-export function readMigrated(runnerTemp: string): string[] | null {
-  const file = join(runnerTemp, MIGRATED_FILE);
-  if (!existsSync(file)) return null;
-  return readFileSync(file, "utf-8")
+/** NUL-separated, as the runner wrote it. */
+export function readMigrated(runnerTemp: string): string[] {
+  return readFileSync(join(runnerTemp, MIGRATED_FILE), "utf-8")
     .split("\0")
     .filter((path) => path !== "");
 }
-
-export const NO_MIGRATED_LIST =
-  "the build's migration runner left no migrated list: the build is older than this delivery";
 
 function main(argv: string[]): number {
   const [dir, checkout] = argv;
