@@ -200,7 +200,7 @@ site:
 |---|---|---|
 | `path` | the repository directory to stage | `skills/` |
 | `mount` | the URL directory under the docs mount | `.../skills/` (or `.../<site.path>/skills/` beside a website) |
-| `page` | the file that serves as each child directory's page | `skills/repo-platform-sync-pr/SKILL.md` renders at `/skills/repo-platform-sync-pr/` |
+| `page` | the file that is each child directory's page | `skills/repo-platform-sync-pr/SKILL.md` renders at `/skills/repo-platform-sync-pr/` |
 
 - **The section's landing page** is a `README.md` at the include's root; the other markdown files in a child directory render at their own paths.
 

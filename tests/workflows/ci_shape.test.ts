@@ -1,7 +1,7 @@
 // What holds repo-platform's own third-party pins together and pinact cannot: pinact reads a branch comment as no comment,
-// so nothing else ties the two Vivswan/skills lines to one sha (docs/fleet-guidelines.md names this test), and the
-// delivery-ref ignore rule in .github/pinact.yaml is a cross-file fact (the ref and the repository name live in
-// actions/shared/platform.ts).
+// so nothing else ties the Vivswan/skills lines to one sha (docs/fleet-guidelines.md names this test); Dependabot bumps the
+// `uses:` lines and never the docs-check checkout `ref:` that Vale reads its styles from; and the delivery-ref ignore rule in
+// .github/pinact.yaml is a cross-file fact (the ref and the repository name live in actions/shared/platform.ts).
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -14,16 +14,21 @@ interface Step {
   name?: string;
   uses?: string;
   run?: string;
+  with?: Record<string, string>;
 }
 
 const ROOT = join(import.meta.dir, "../..");
 const source = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
 const ci = parseYaml(source) as { jobs: Record<string, { steps?: Step[] }> };
 
-test("the two skills pins share one sha and the `# main` comment, pinact ignores the delivery ref, and verifies comments after the writer", () => {
+test("the skills pins share one sha and the `# main` comment, the skills checkout ref included; pinact ignores the delivery ref, and verifies comments after the writer", () => {
   const pins = extractUsesPins(source, "ci.yml").filter((pin) => pin.action === "Vivswan/skills");
   expect(new Set(pins.map((pin) => `${pin.ref} # ${pin.version}`)).size).toBe(1);
   expect(pins).toHaveLength(2);
+  const skillsCheckout = (ci.jobs["docs-check"].steps ?? []).find(
+    (step) => step.with?.repository === "Vivswan/skills",
+  );
+  expect(skillsCheckout?.with?.ref).toBe(pins[0].ref);
   expect(pins[0].ref).toMatch(/^[0-9a-f]{40}$/);
   expect(pins[0].version).toBe("main");
   const pinact = parseYaml(readFileSync(join(ROOT, ".github/pinact.yaml"), "utf8")) as {
