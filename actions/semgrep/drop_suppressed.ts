@@ -15,7 +15,6 @@ interface Sarif {
   runs?: { results?: SarifResult[] }[];
 }
 
-/** Every run's results minus the suppressed ones; everything else in the document stays as written. */
 export function dropSuppressed(sarif: Sarif): Sarif {
   for (const run of sarif.runs ?? []) {
     if (run.results === undefined) continue;

@@ -1,7 +1,5 @@
-// semgrep keeps a nosemgrep-marked finding in its SARIF as a suppressed result (an external fact: the JSON copy drops
-// it, the SARIF keeps it with `suppressions`), and code scanning reads no `suppressions` property, so an upload that
-// kept it would show the bypassed finding as an OPEN alert; one that dropped too much would lose real findings. Both
-// green. SARIF 2.1.0 makes a run's `results` optional, so a run without the key must survive the filter.
+// Three external facts: semgrep keeps a nosemgrep-marked finding in its SARIF under `suppressions` (its JSON copy
+// drops it), code scanning reads no `suppressions` property, and SARIF 2.1.0 makes a run's `results` optional.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
