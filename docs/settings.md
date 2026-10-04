@@ -87,7 +87,7 @@ The render and the apply read one dialect, spelled out in the library's [layerin
 
 - **The apply follows the merge:** the nightly cron plus every green main run ([below](#when-it-runs)) applies the new render once it is on main.
 
-- **A faulty overlay** (one that names one label twice, declares a label without a `name`, or does not parse) holds the rendered row with the reason. The overlay itself is never rewritten. The same fault in a fleet or module layer fails the run instead ([the merge dialect](#the-merge-dialect)).
+- **A faulty overlay** (one that names one label twice, declares a label without a `name`, or does not parse) holds the rendered row with the reason ([the merge dialect](#the-merge-dialect)); the overlay itself is never rewritten.
 
 What re-renders on main without a PR of the repository's own:
 
@@ -107,7 +107,7 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -
 
 | Entry | Effect |
 |---|---|
-| The post-green call, in a green main push's own CI run | every target, on every green main run, after the run's fleet sync when a label armed one; the apply is idempotent, so no diff decides it ([all-green.md](all-green.md#after-the-gate)) |
+| The post-green call, in a green main push's own CI run | every target, on every green main run ([all-green.md](all-green.md#repo-platforms-own-post-green-run)) |
 | Nightly cron | heals out-of-band drift |
 | Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift and changes no settings ([check mode](#check-mode)); `-f repo=` scopes it |
 
@@ -159,7 +159,7 @@ A red nightly is the signal that drift is going unhealed, so the halt is a FAILE
 
 - **Guarantee:** no apply row writes after a row of a newer main commit's run did. An older run's rows wait their turn on the lane and stand down, or never spin up.
 
-- **The one gap:** GitHub keeps one pending job per lane and replaces it with the newest arrival, so a burst can evict the newest commit's pending run behind an older one's. That older run stands down, and the next green push or the nightly applies.
+- **The one gap:** under [the lane rule](all-green.md#after-the-gate), a burst can evict the newest commit's pending run behind an older one's. That older run stands down, and the next green push or the nightly applies.
 
 - **A failed look:** a `git ls-remote` that cannot answer fails the run or the row. A guessed "newest" would let a superseded run write; a guessed "superseded" would stand the newest run down.
 
@@ -201,8 +201,6 @@ A target is selected when all three probes pass, in this order, over every disco
 | Adopted | `.repo-platform.yml` on the default branch | skipped with the not-adopted notice; a probe that keeps failing after retries is skipped for the run with a warning and picked up again the next night |
 | Rendered | `.github/settings.yml` on the default branch opens with the generator header's first line | a missing file is skipped with the notice `it has no .github/settings.yml yet; the sync PR that renders it has not merged`; a file without the header fails the plan with a count (the log is public, so no name) |
 
-- **The operator repository is selected like any other target** ([below](#repo-platform-itself-is-a-target)).
-
 - **The hand-written refusal keeps a first sync safe:** a `.github/settings.yml` the sync did not render is never applied on its own. Applying it in `repos` mode would delete every fleet label it does not declare. The plan stays red until the sync PR that renders it merges.
 
 ### Private targets
@@ -238,13 +236,11 @@ A fleet check reads clean only when three things hold together. The second and t
 
 - **The exceptions live in the override layer** (layer 6 above), where no repo can opt out.
 
-- **Why the squash body is blank:** a PR body's tables and fences never reach the changelog, so release-please footers travel in a `BEGIN_COMMIT_OVERRIDE` block. The squash subject is the PR title, which the pr-title check and release-please rely on.
+- **Why the squash body is blank:** a PR body's tables and fences never reach the changelog, so release-please footers travel in a `BEGIN_COMMIT_OVERRIDE` block.
 
 - **Visibility-dependent blocks** follow the `private:` the overlay declares, so a deliberate flip and its visibility-gated blocks land in one render.
 
 - **Why only the public overlay carries `security_and_analysis`** (secret scanning + push protection): private repos without Advanced Security reject it with a 422.
-
-- **`code_quality` follows visibility alone:** code quality results are required on every public repo regardless of toolchain ([files/settings/public.yml](../files/settings/public.yml)). The `code_scanning` rule renders only where CodeQL analyzes (layer 4).
 
 - **The `code_scanning` rule blocks at the fleet's high-or-critical bar,** the same bar as the other [security scans](security-scans.md): `alerts_threshold: errors` and `security_alerts_threshold: high_or_higher`. So a non-security warning or a medium security alert never blocks a merge.
 
@@ -256,15 +252,13 @@ A fleet check reads clean only when three things hold together. The second and t
 | per selected toolchain | the dependabot ecosystem labels: `javascript` for bun, `deno` for deno, `python:uv` for uv, `rust` for cargo |
 | with release-please | the `autorelease: *` pair and release-health's gate labels, `release-blocker` and `release-override`: stripping one un-blocks or un-overrides a release mid-flight |
 | with the fuzzer, nightly, or site module | the tracking labels, named and styled as the layer list above says |
-| private repos only | the `settings-as-code-report` marker label that private reporting pins its report issue with, declared in the private visibility overlay |
+| private repos only | the `settings-as-code-report` marker label for private report issues: declared in the private overlay, and injected by the apply for redacted targets |
 
 - **Why the dependabot labels are declared:** dependabot recreates its labels when missing, so an undeclared one would loop delete/recreate nightly. [tests/files/label_names.test.ts](../tests/files/label_names.test.ts) holds the layers to dependabot's names.
 
 - **`merge-when-green`** is applied by the owner alone. Whoever runs the landing verifies the labeling actor is the repository owner and that no push followed the labeling, then merges once every check is green; a later push voids it.
 
 - **The tracking label** is the [tracking-issue stream's identity](tracking-issues.md#the-label-is-the-stream), so losing it breaks the auto-close and the release-health gate stops seeing the open issue.
-
-- **The marker label:** the apply injects it automatically for redacted targets, and the overlay declares it so the layers spell out the roster the apply reconciles.
 
 ## Apply semantics
 

@@ -142,8 +142,7 @@ Remove the name from `modules:` and the module's own keys (`labels.<key>`, `site
 - Retired: the module's managed and split files. `deleted` with the detail `no longer selected` when the file still held the platform's own content; `region removed` when a split file's region was untouched but the repo had written around it (the region and its markers go, your content stays as a plain file); `held` with the reason when someone edited the content (decide, then delete or keep it yourself).
 - Starters stay: the sync never deletes a repo-owned file. Dropping `fuzzer` or `nightly` leaves its workflow running; delete it yourself or keep its label declared in `.github/settings.local.yml`.
 - Labels: the module's labels leave the rendered `.github/settings.yml` on that sync (`managed`, `updated`) and the next apply removes them from the repo, unless another selected module still declares them or your `.github/settings.local.yml` does: a label still declared stays rendered and applied.
-- Adding `custom-license`: the fleet `LICENSE.md` is retired on that sync. It reads `deleted` when untouched, `region removed` when you had written outside its region (your text stays as a plain file), and `held` when the region itself was edited. Commit the repo's own `LICENSE.md` after that PR merges.
-- Removing `custom-license`: the fleet license region is written above whatever `LICENSE.md` holds. A split file without markers gets the region above its content, reported `region added`, which holds the PR; delete the old text in the sync PR.
+- `custom-license`: adding it retires the fleet `LICENSE.md` on that sync, and removing it writes the fleet region back above your text; [references/modules.md](references/modules.md#custom-license) has each report outcome.
 
 ## Verify
 

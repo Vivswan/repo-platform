@@ -47,8 +47,7 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 ## fuzzer / nightly
 
 - Starters: `nightly-fuzz.yml` (fuzzer) / `nightly.yml` (nightly). The placeholder step is a green no-op until customized.
-- Keys: `labels.fuzzer` (default `fuzz-nightly`) / `labels.nightly` (default `nightly-failure`). The two must differ when both are selected: both streams dedup and auto-close by label.
-- A custom label goes in two places: the registration key (read by fleet CI's plan and by the sync, which renders it into `.github/settings.yml` for the settings apply to declare) and the starter's two `label:` inputs (the starter is repo-owned; the sync never edits it).
+- Keys: `labels.fuzzer` (default `fuzz-nightly`) / `labels.nightly` (default `nightly-failure`); the label rules, including the starter's two `label:` inputs, are in [Module keys](../SKILL.md#module-keys).
 - Removal: remove `labels.<key>` together with the module (a leftover key fails the plan). The label leaves the rendered settings on that sync and the next apply deletes it. The starter keeps running; delete it yourself or declare its label in `.github/settings.local.yml` first.
 - Depth: the platform's `docs/fuzzer.md` and `docs/nightly.md`.
 

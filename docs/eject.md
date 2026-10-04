@@ -37,8 +37,8 @@ Leaving the fleet means revoking the fleet token's write access to the repo: rem
    | every copied step's condition | remove `steps.plan.outcome == 'success' &&` |
    | every copied job's `needs` list | remove `standard-checks` |
    | each `steps.plan.outputs.*` and `needs.standard-checks.outputs.*` condition and value | replace with your repo's literals (actionlint reports a read of the deleted step) |
-   | the `release` and `site` legs | they need `ci` and read `needs.ci.outputs.*` in their conditions and inputs (`modules`, `tracking-labels`): delete the legs you do not keep, and replace every such read in the rest with your repo's literals |
-   | the `site` job | it calls `reusable-site.yml`, which configures the deploy from `.repo-platform.yml` and takes no input but the commit `sha`. Replace the job with your own deploy that runs `.github/actions/site-build`, passes the pages-site action its `config` by hand, and uploads the output. The hook itself is already yours |
+   | the `release` leg | it needs `ci` and reads `needs.ci.outputs.*` in its condition and inputs (`modules`, `tracking-labels`): delete it, or replace each such read with your repo's literals |
+   | the `site` job | it needs `ci`, reads `needs.ci.outputs.modules` in its condition, and calls `reusable-site.yml`, which configures the deploy from `.repo-platform.yml` and takes no input but the commit `sha`. Delete it, or replace it with your own deploy that runs `.github/actions/site-build` (the hook is already yours), passes the pages-site action its `config` by hand, and uploads the output |
    | every job you remove | rewire each surviving job's `needs` to jobs that still exist (actionlint reports a dangling one) |
    | the `nightly` caller | it runs `fleet-nightly.yml` on the schedule in a public repository, and its plan job reads the registration too: delete the job, or inline the scan with literal configuration |
    | ci.yml's `all-green` job | it keeps judging whatever its needs list names; drop it too if you drop the `all-green` required check from your branch protection |
@@ -65,7 +65,7 @@ Every remaining file is plain configuration that works standalone: the rendered 
 
 ## Pause instead of eject
 
-To stop receiving sync PRs without detaching, do one of these, and undo it to resume updates. Both pauses also stop the central settings apply for the repo.
+To stop receiving sync PRs without detaching, do one of these, and undo it to resume updates.
 
 | Pause | How | In the plan log |
 |---|---|---|
