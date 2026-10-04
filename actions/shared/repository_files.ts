@@ -9,8 +9,8 @@ const LIST_BUFFER_BYTES = 64 * 1024 * 1024;
 
 /** The files a check over "the repository" judges: what git tracks and, with `untracked`, what it would track.
  *  An ignored untracked path never appears (a gitignored `.skills/` checkout once failed the typography check).
- *  A listed path may be gone from disk, or be a symlink (CLAUDE.md -> AGENTS.md is judged through its target),
- *  so only the regular files that exist are returned. */
+ *  A listed path may be gone from disk, or be a symlink (CLAUDE.md -> AGENTS.md: the link is omitted, its target
+ *  is listed on its own), so only the regular files that exist are returned. */
 export function repositoryFiles(root: string, options: { untracked: boolean }): string[] {
   // --deduplicate: an unresolved merge lists one path per stage.
   const args = ["-C", root, "ls-files", "-z", "--deduplicate", "--cached"];
