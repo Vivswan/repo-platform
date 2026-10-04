@@ -43,7 +43,7 @@ The called workflow is one job, in this order:
 | configure, upload, deploy | the Pages site exists | the one Pages artifact, deployed to the `github-pages` environment |
 | link rot | the schedule alone, after a deploy | checks the site's external links with lychee and files the tracking issue ([below](#link-rot)) |
 
-A repository with neither a hook output nor a `docs/` directory ends green with a notice (`nothing to publish`) and no deploy.
+A repository with nothing to publish ends green with a notice (`nothing to publish`) and no deploy ([layout](#layout)).
 
 ## Pages enablement
 
@@ -111,8 +111,7 @@ Map the two inputs onto whatever the tool expects (`ASTRO_BASE`/`ASTRO_SITE`, `v
 | set | no | any | the website at `/` alone |
 | empty | yes | a segment | the docs versioned at `/` |
 | set | yes | `null` | the website at `/` alone; `docs/` is the website's own business |
-| empty | any | `null` | nothing published; the leg is green with a notice |
-| empty | no | any | nothing published; the leg is green with a notice |
+| empty | any | `null`, or any when there is no `docs/` | nothing published; the leg is green with a notice |
 
 **Version navigation belongs to the docs:** the `vX.Y.Z/` tiers exist only under the docs mount. A repository that wants versioned website builds puts them in its own hook output.
 

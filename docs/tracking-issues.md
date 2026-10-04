@@ -20,7 +20,7 @@ Each stream keeps one open GitHub issue: a red night files or updates it, a gree
 
 Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action.
 
-- **How it files:** it assembles the body in TypeScript and hands it to the fleet's standard issue action, `peter-evans/create-issue-from-file` (sha-pinned), the way `marocchino/sticky-pull-request-comment` is the fleet's PR-comment mechanism: a red night refreshes the stream's open issue in place instead of commenting on it.
+- **How it files:** it assembles the body in TypeScript and hands it to `peter-evans/create-issue-from-file` (sha-pinned), so a red night refreshes the stream's open issue in place instead of commenting on it.
 - **Runner requirement:** it needs `gh` on the runner. GitHub-hosted runners preinstall it, self-hosted runners must provide it.
 
 **The pin inside a starter:** because the starters are repo-owned, the sync never rewrites them, so the `fuzz-issue` pin inside a starter stays whatever was last written. New repositories get `@stable`. A pin move or a breaking change to the action's inputs still needs a manual edit in each repo, announced loudly in the change's PR.
