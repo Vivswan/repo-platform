@@ -120,7 +120,7 @@ const label = z
 
 /** One grammar for both documents that declare mirrors: files.yml's fleet list (actions/plan/files_config.ts) and the
  *  registration's own. `kind` is how each target carries the source: its bytes, or a relative symbolic link to it
- *  (docs/sync.md, Mirrors). */
+ *  (docs/platform/sync/mirrors.md). */
 export const mirrorsSchema = z.array(
   z.strictObject({
     source: z.string().min(1),
@@ -164,7 +164,7 @@ export const registrationSchema = z.strictObject({
     .optional(),
   labels: z.record(z.string(), label).optional(),
   // Paths the repository keeps as its own: no files.yml entry there is
-  // written for it (docs/sync.md, Selection).
+  // written for it (docs/platform/sync/files.md, Selection).
   except: z.array(judged(pathProblem)).optional(),
   mirrors: mirrorsSchema.optional(),
 });

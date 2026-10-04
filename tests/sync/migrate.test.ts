@@ -34,7 +34,7 @@ function run(dir: string, checkout: string, runnerTemp: string) {
 }
 
 describe("migrate.ts", () => {
-  // The migrations contract of docs/sync.md: name order, the failing rung's own exit, stderr passed through (a
+  // The migrations contract of docs/platform/sync/writer.md: name order, the failing rung's own exit, stderr passed through (a
   // failed rung's line is what the delivered log tail carries), and stdout collected as the paths the delivery
   // stages: written only by a run every rung finished, deduplicated, NUL-separated.
   test("runs every rung in name order over the checkout; a failing rung ends the run with its exit, the rest do not run, and no list is written", () => {

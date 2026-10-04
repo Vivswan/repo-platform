@@ -42,7 +42,7 @@ labels:
     color: "1d76db"
     description: Automated nightly security scan findings
   # Added by a human alone, never by automation: the managed sync-branch.yml runs the sync on the labeled pull
-  # request's branch and removes the label (docs/sync.md, "Syncing a branch by label").
+  # request's branch and removes the label (docs/platform/sync/operator.md, "Syncing a branch by label").
   - name: repo-platform:sync
     color: "5319e7"
     description: Sync this pull request's branch from repo-platform (the workflow removes the label)

@@ -298,7 +298,7 @@ The opt-in waits for the weekly sync cron (or a hand dispatch) when:
 
 - **Watches the delivered surface:** `files.yml`, `files/`, `actions/`, `.github/scripts/sync/`, `.github/scripts/shared/`, `migrations/`, `bun.lock`, and `package.json` (`DELIVERED_SURFACE` in [its script](../.github/scripts/fleet/fleet_sync_default.ts)), so a lockfile bump gets the label too.
 
-- **Any other change** is live at `stable` on merge and gets no label. Whether that sync then moves a repository's judge is the stamp rule ([sync.md](sync.md#the-manifest)): a theme change syncs nothing and restamps nothing.
+- **Any other change** is live at `stable` on merge and gets no label. Whether that sync then moves a repository's judge is the stamp rule ([platform/sync/manifest.md](platform/sync/manifest.md#when-the-judged-commit-moves)): a theme change syncs nothing and restamps nothing.
 
 - **Not forced:** a human removing the label is final for that pull request (the comment then reads `removed by <login>; not re-adding it`), and a human's own fleet-sync label is never touched.
 

@@ -20,7 +20,7 @@ Every managed repository is scanned by [Trivy](https://trivy.dev) through the sk
 
 - **Misconfigurations block too:** `--ignore-unfixed` filters vulnerabilities only, so a HIGH or CRITICAL misconfiguration (a Dockerfile, an infrastructure file) blocks too, and its fix is the file or a bypass entry.
 
-- **Unfixed HIGH and CRITICAL vulnerabilities** never block; they surface in the nightly issue (public repositories). MEDIUM and below neither block nor surface: both scans run at `--severity HIGH,CRITICAL`.
+- **Unfixed HIGH and CRITICAL vulnerabilities** never block; they surface in the nightly issue (public repositories).
 
 - **The same scan runs in repo-platform's own CI** (`trivy` in [ci.yml](../.github/workflows/ci.yml), a gating job), so a lockfile here is held to the same bar.
 

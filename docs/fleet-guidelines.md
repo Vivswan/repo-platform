@@ -129,7 +129,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 **Enforced by:**
 
 - **Managed files:** the managed files check ([actions/validate-managed-files](../actions/validate-managed-files/action.yml)), byte to byte against the recorded commit's write.
-- **Starters:** the writer, which writes one only when the path is absent and never touches it again ([sync.md](sync.md#classes)).
+- **Starters:** the writer, which writes one only when the path is absent and never touches it again ([platform/sync/writer.md](platform/sync/writer.md#classes)).
 
 ## Split files: the managed region
 
@@ -141,10 +141,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **How:** put local content above the BEGIN marker or below the END marker.
 
-- **A file that never mentions the markers** gets the region placed above its content and the PR held for review (`region added`).
-- **Marker text duplicated or buried mid-line** fails the run, so nothing is dropped silently. Marker text must appear exactly once per marker in the file.
-
-**Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [sync.md](sync.md#classes)); the managed files check on the region.
+**Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [platform/sync/writer.md](platform/sync/writer.md#classes)); the managed files check on the region.
 
 ## Copilot review comments are advisory
 
@@ -160,13 +157,13 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## No backwards-compatibility code
 
-**Rule:** no compatibility shims, dual code paths, or retired-shape handling outside a repo's own `migrations/` directory; repo-platform's rungs live in its own ([sync.md](sync.md#migrations)).
+**Rule:** no compatibility shims, dual code paths, or retired-shape handling outside a repo's own `migrations/` directory; repo-platform's rungs live in its own ([platform/sync/writer.md](platform/sync/writer.md#migrations)).
 
 **Why:** a one-shot replacement with a loud PR note stays readable; a compat era accretes paths nobody removes.
 
 **How:** replace the shape in one PR and say so in the PR body.
 
-- **A file the platform stops writing** leaves `files.yml`, and every target's next sync retires the recorded file ([sync.md](sync.md#retirement)).
+- **A file the platform stops writing** leaves `files.yml`, and every target's next sync retires the recorded file ([platform/sync/writer.md](platform/sync/writer.md#retirement)).
 - **A transition the sync cannot carry by itself** is one rung in `migrations/`, the only home for transitional code.
 
 **Enforced by:** review.
@@ -182,9 +179,6 @@ Conventions every managed repository follows, whether the file is managed by syn
 **A block that must stay long** (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone. The reason is mandatory: a bare marker exempts nothing and warns itself.
 
 **Enforced by:** the comment caps of the `file-size` step ([file size caps](#file-size-caps)), warn only, never a failure.
-
-- **What counts as a comment line:** what the file's tree-sitter grammar tokenizes as comments (a string holding `//` is a string, an unterminated `/*` is a syntax error).
-- **A file whose extension has no working grammar** is unjudged ([file size caps](#file-size-caps)).
 
 ## File size caps
 
@@ -206,7 +200,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 - **What ends a block:** a blank line or a code line. A line with code on it is code, so an inline comment after it is not a block.
 - **The file header** is the first block, when nothing but a shebang, blank lines, or a generated region precedes it.
 
-**Why:** a file past these sizes is several files wearing one name, and a line past the width is unreadable in any review pane. A comment past its cap is narration or a workaround defense ([short comments](#short-comments)). The caps are generous on purpose: they catch drift, not style.
+**Why:** a file past these sizes is several files wearing one name, and a line past the width is unreadable in any review pane. The caps are generous on purpose: they catch drift, not style.
 
 **Exempt by construction:**
 
@@ -252,7 +246,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | yamllint | standard-checks | any finding (strict) | a `# yamllint disable-line rule:<name>` comment on the line (`.yamllint` itself is managed) |
 | gitleaks | standard-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
 | typography | standard-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
-| file-size | standard-checks | a hard-cap finding or an allowlist defect | the path in the repo-owned `.file-size-allow.local` with a `# reason`; the comment block's marker ([file size caps](#file-size-caps)) |
+| file-size | standard-checks | a hard-cap finding or an allowlist defect | the path in the repo-owned `.file-size-allow.local` with a `# reason`; the comment block's marker ([short comments](#short-comments)) |
 | commit-names | standard-checks | a subject commitlint refuses under config-conventional plus one scope ([the grammar](#conventional-commits-squash-merged)) | none: reword the commit |
 | typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (keys below), or a trailing `typos: ignore` comment for a one-off |
 | zizmor | standard-checks | a high finding (retry rule below); code scanning shows high findings only | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it |
@@ -268,8 +262,6 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 - **The typos one-off:** `# typos: ignore` or `// typos: ignore` at the end of the line.
 
 - **zizmor's retry:** zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt runs once more and only the retry's result counts.
-
-- **semgrep's fleet config:** the registry's `p/default` rule set at `--severity ERROR` with one rule excluded, permanently, so code scanning shows ERROR findings only. WARNING and INFO rules do not run, so their findings appear nowhere; what to mark on an ERROR finding is the repository's own call. The rule set, the excluded rules, and what the upload drops are in [security-scans.md](security-scans.md#semgrep).
 
 - **Trivy on the schedule:** `trivy-nightly` runs instead, public repositories only, and reports without blocking. Both scans run at HIGH and CRITICAL, so a MEDIUM or LOW finding appears nowhere.
 

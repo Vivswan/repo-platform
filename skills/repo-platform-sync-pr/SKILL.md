@@ -145,7 +145,7 @@ git diff origin/main...origin/automation/repo-platform -- <path>
 | Replaced mirror | A declared target held other content (`replaced local edits`, diff below), or a directory or a blocking file stood in the target's way (`replaced`, the detail names it) | Read the diff; the platform's copy or link, by the declared `kind`, stays. Content worth keeping moves to a path no declaration names |
 | Settings | `.github/settings.yml` reads `replaced local edits` (someone edited the rendered file, or the repository carried a hand-written one the sync had not recorded) or `held` (one of the three overlay details under Read the report) | `replaced local edits`: move what the diff removed into `.github/settings.local.yml` (the rendered file is never edited by hand); the holds name the registration key or the overlay line to fix |
 
-Something that matches none of the above: do not merge; waiting loses nothing (the next run rewrites the branch anyway). Escalate with an issue on Vivswan/repo-platform.
+Something that matches none of the above: do not merge; waiting loses nothing. Escalate with an issue on Vivswan/repo-platform.
 
 ## Orphaned comments after a retirement
 

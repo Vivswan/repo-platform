@@ -1,5 +1,5 @@
 # Grammar: actions/plan/files_config.ts (mirrors: actions/plan/registration.ts); tree checks: .github/scripts/sync/writer/files_config.ts;
-# contract: docs/sync.md. The modules block's key order is the canonical module order the plan emits.
+# contract: docs/platform/sync/files.md. The modules block's key order is the canonical module order the plan emits.
 
 placeholders:
   - project_name

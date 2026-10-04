@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
-// The manifest records the build as the commit the repository is judged against (docs/sync.md, The manifest), so the
+// The manifest records the build as the commit the repository is judged against (docs/platform/sync/manifest.md), so the
 // code that writes the tree must be the build's, not the operator checkout's: a stable-tag lag would otherwise stamp a
 // commit whose writer never ran.
 

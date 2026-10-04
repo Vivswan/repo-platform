@@ -19,7 +19,7 @@ How the `stable` tag gets moved, how a sync verifies the commit it names before 
 
 | What the fleet reads | Where it sits at the commit | Who reads it |
 | --- | --- | --- |
-| `files.yml` and `files/` | the repository root | the sync writer ([sync.md](sync.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../actions/plan/reserved_labels.ts)), validate-managed-files |
+| `files.yml` and `files/` | the repository root | the sync writer ([platform/sync/README.md](platform/sync/README.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../actions/plan/reserved_labels.ts)), validate-managed-files |
 | `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | every managed workflow's `uses:` |
 | `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` |
 
@@ -50,9 +50,7 @@ A change merges to main as commit S. What happens, in order:
 | 1. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](all-green.md)). |
 | 2. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
 | 3. Move | post-green.yml's move-stable job | [move_stable.ts](../.github/scripts/post-green/move_stable.ts) verifies S is main history with a green check, reads where the tag sits, and moves it to S with a lease push. |
-| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml: calls reusable-site.yml with `github.sha` after the mover, so a green move's theme is what `@stable` serves the build ([all-green.md](all-green.md#after-the-gate)). Gated on the all-green result alone under `!cancelled()` (below). |
-
-**The site leg's gate:** a red or skipped post-green never holds the site back (the site then deploys from the tag as it stands), and its own failure shows as its own red job.
+| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml, calls reusable-site.yml with `github.sha` after the mover, gated on the all-green result alone ([all-green.md](all-green.md#repo-platforms-own-post-green-run)); its failure is its own red job. |
 
 **The commit moved to is always SOURCE_SHA:** the judged run's own commit on the call, the operator's sha input on a dispatch. Never a read of origin/main, which can already be a newer, even red, commit (move_stable.ts's header owns this discipline).
 
@@ -71,7 +69,7 @@ Until the heal, a sync copies from the commit the tag names as it stands ([Resid
 
 - **The lease.** The push is `--force-with-lease` naming the value just read (the tag object for an annotated tag, an empty lease when the tag is absent), so two movers racing leaves the loser red and the tag untouched.
 
-- **The output.** `previous`, the commit the tag named before a move (empty when nothing moved), is the `read-directives` leg's base ahead of the push's `before`. On a call that leg reads on every mover result: a newer run's range starts after its own base, which can be this very commit, so only this commit's run is sure to read it ([all-green.md](all-green.md#after-the-gate)).
+- **The output.** `previous`, the commit the tag named before a move, is the `read-directives` leg's base; when nothing moved it is empty and the push's `before` stands in ([all-green.md](all-green.md#which-commits-a-run-reads)).
 
 - **The credential.** The push uses the run's `GITHUB_TOKEN` with `contents: write` (ci.yml's post-green job grants that ceiling), the way GitHub's own actions/publish-action moves an action's major tag with the default token.
 
@@ -88,17 +86,17 @@ The tag names a main commit whose own CI run passed, so there is no generated tr
 
 The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
-**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run); [sync.md](sync.md#the-command) says where a sync names it.
+**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run); [platform/sync/writer.md](platform/sync/writer.md#the-command) says where a sync names it.
 
-**The manifest's own entry** records the commit the repository is judged against; a sync moves it under the stamp rule ([sync.md](sync.md#the-manifest)).
+**The manifest's own entry** records the commit the repository is judged against; a sync moves it under the stamp rule ([platform/sync/manifest.md](platform/sync/manifest.md#when-the-judged-commit-moves)).
 
-**Every fleet repository is judged at that recorded commit:** the validate-managed-files action checks out repo-platform at it and runs that commit's `check.ts`, so a `stable` move reddens nothing until the repository syncs ([sync.md](sync.md#judged-at-the-synced-commit)).
+**Every fleet repository is judged at that recorded commit:** the validate-managed-files action checks out repo-platform at it and runs that commit's `check.ts`, so a `stable` move reddens nothing until the repository syncs ([platform/sync/manifest.md](platform/sync/manifest.md#judged-at-the-synced-commit)).
 
 Old delivery commits stay reachable forever: they are main history.
 
 ## A new action input and its workflow land together
 
-A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([sync.md](sync.md#this-repository-as-a-target)).
+A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([platform/sync/README.md](platform/sync/README.md#this-repository-as-a-target)).
 
 So a workflow never runs ahead of the actions it calls: the sync PR that carries a new workflow line lands only once the delivery ref names a commit carrying the action input it feeds. One PR may add the input and the line together; no check here runs the workflow before the move.
 

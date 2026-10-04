@@ -246,7 +246,8 @@ export function knownProbe(literals: ReadonlyMap<string, MirrorKind>): TreeProbe
   };
 }
 
-/** docs/sync.md lists the rules. A target the grammar refuses is judged by that alone: the nesting and matching walks need a clean relative path. */
+/** docs/platform/sync/mirrors.md lists the rules. A target the grammar refuses is judged by that alone: the nesting and matching
+ *  walks need a clean relative path. */
 export function mirrorDeclarationProblems(
   mirrors: readonly Mirror[],
   owned: OwnedPaths,

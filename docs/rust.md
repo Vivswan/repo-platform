@@ -49,14 +49,14 @@ pub fn read(p: &u8) -> u8 {
 
 ## How a repository takes it
 
-A starter is written once ([sync.md](sync.md#classes)), so the path depends on what the repository already has:
+A starter is written once ([platform/sync/writer.md](platform/sync/writer.md#classes)), so the path depends on what the repository already has:
 
 1. **A new repository:** the sync writes `Cargo.toml` before any crate exists. `cargo new crates/<name>` inside the workspace adds the member and writes `[lints] workspace = true` into it, so every crate inherits the floor.
 2. **A repository that already owns `Cargo.toml`:** copy the three lint tables into it by hand, and give each member crate `[lints] workspace = true`. Its workflows are starters too, written once, so copy the cargo steps from the [three rust blocks](https://github.com/Vivswan/repo-platform/tree/main/files/rust/.github/workflows) into its `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` as well.
 
 ## The gate
 
-The module's toolchain blocks ([sync.md](sync.md#filesyml-reference)) put these steps into the repo-owned `checks.yml`:
+The module's toolchain blocks ([platform/sync/files.md](platform/sync/files.md#filesyml-reference)) put these steps into the repo-owned `checks.yml`:
 
 ```yaml
 - uses: actions-rust-lang/setup-rust-toolchain@<sha> # v2.0.0

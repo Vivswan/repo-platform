@@ -120,4 +120,4 @@ The first six live in `tests/actions/pages-site/`.
 
 - Fleet docs are plain `.md` only - no MDX and no per-repo Vue components. Rich widgets are added HERE, as theme-provided [markdown containers](https://vitepress.dev/guide/markdown#custom-containers) or globally registered components, so every repository gets them for free.
 - Translations follow one convention: `docs/<lang>[-<region>]/` (a two-letter ISO 639-1 code, e.g. `zh-cn/`, `ja/`) mirroring the root structure. Detected directories become VitePress locales with the language switcher in the nav (carbon ships the translations menu); the root tree is the default (English) locale. The detection rule lives in `../derive.ts`.
-- The dropdown navigates to a version's ROOT, not the same page in the other version - page sets differ across versions, so deep cross-version links are not guaranteed to exist. Every version is its own build: a link into another one is a full page load (`tier-routes.ts`), never a client-side route.
+- The dropdown navigates to a version's ROOT, not the same page in the other version - page sets differ across versions, so deep cross-version links are not guaranteed to exist.
