@@ -215,14 +215,12 @@ jobs:
       # The root install's postinstall installs every action's pinned dependencies, the site action's among them.
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
-      # The typos action's end-to-end cases need the release the action pins on PATH. Running the
-      # action installs that binary into $RUNNER_TEMP, so the pin lives in one place.
+      # Running the typos action installs its pinned release into $RUNNER_TEMP, which the end-to-end cases need on PATH.
       - name: Install typos by running the action
         uses: ./actions/typos
       - name: Put the installed typos on PATH
         run: echo "$RUNNER_TEMP" >>"$GITHUB_PATH"
-      # The site action's link-check step installs lychee on PATH for the steps after it; run over nothing, it
-      # leaves the same lychee the action runs, so the site tests' live link check is judged by it here too.
+      # The link-check step installs the pinned lychee on PATH, which the site tests' live link check then runs.
       - name: Install the site action's lychee
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:

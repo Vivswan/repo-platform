@@ -5,7 +5,5 @@
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:
-      # GITHUB_TOKEN has a vulnerability-alerts permission key (the
-      # release-health gate needs it) that actionlint does not know yet
-      # (rhysd/actionlint#666). Drop this once it does.
+      # actionlint's permission-scope list lacks `vulnerability-alerts` (rhysd/actionlint#666); drop when it knows the scope.
       - 'unknown permission scope "vulnerability-alerts"'
