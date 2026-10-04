@@ -1,9 +1,10 @@
 // A composite action runs in the CALLER's checkout, whose bun may predate the lockfiles this repository's bun writes, so
-// every action shipping a bun.lock sets up its own bun first, from the fleet's one pin, and runs it by the recorded path.
-// GitHub gives a composite no shared preamble, so the shape is asserted here over every manifest.
+// every action running a script sets up its own bun first, from the fleet's one pin, and runs it by the recorded path.
+// GitHub gives a composite no shared preamble, so the shape is asserted here over every manifest. A script importing
+// node builtins and actions/shared alone ships no lockfile and installs nothing; one with dependencies ships both.
 
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { actionManifestPaths } from "../../scripts/lib/action_steps";
@@ -21,6 +22,9 @@ const setupStep = {
 const manifests = actionManifestPaths(join(REPO_ROOT, "actions")).filter(
   (file) => dirname(file) !== "actions/bun-setup",
 );
+
+const runsScripts = (dir: string): boolean =>
+  readdirSync(dir).some((name) => name.endsWith(".ts")) || existsSync(join(dir, "bun.lock"));
 
 test.each(manifests)(
   "%s sets up the pinned bun first and runs it by path, or never touches bun",
@@ -45,7 +49,7 @@ test.each(manifests)(
       mentionsBun: /bun/i.test(JSON.stringify(steps)),
     };
     expect(shape).toEqual(
-      existsSync(join(dir, "bun.lock"))
+      runsScripts(dir)
         ? { first: setupStep, bareBunLines: [], laterSetups: 0, mentionsBun: true }
         : { first: shape.first, bareBunLines: [], laterSetups: 0, mentionsBun: false },
     );
