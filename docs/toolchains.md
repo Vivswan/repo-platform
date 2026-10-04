@@ -11,7 +11,7 @@ One version per toolchain, fleet-wide, spelled once: a version dotfile under `fi
 
 | Toolchain | Pin | Readers |
 |---|---|---|
-| bun | [files/bun/.bun-version](../files/bun/.bun-version) | the fleet's synced `.bun-version`; this repository's workflows (`bun-version-file: files/bun/.bun-version`); every composite action's bun-setup step; `scripts/bootstrap.ts`, which refuses a local bun at another MAJOR.MINOR; `@types/bun` in every package declaring it, pinned exactly to it |
+| bun | [files/bun/.bun-version](../files/bun/.bun-version) | the fleet's synced `.bun-version`; this repository's workflows (`bun-version-file: files/bun/.bun-version`); every composite action's bun-setup step, through this repository's own synced root copy; `scripts/bootstrap.ts`, which refuses a local bun at another MAJOR.MINOR; `@types/bun` in every package declaring it, pinned exactly to it |
 | deno | [files/deno/.dvmrc](../files/deno/.dvmrc) | the fleet's synced `.dvmrc` |
 
 Modules without a pin: uv floats on its setup action's default, and the rust blocks' setup action installs the toolchain the repository's `rust-toolchain.toml` names (stable when there is none), so rust version selection stays repository-owned.
@@ -30,9 +30,9 @@ The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.tx
 
 ## How this repository's actions pin bun
 
-repo-platform's own composite actions (under `actions/`) pin their bun from the same file, which every `uses:` fetch carries: it is the whole repository at the ref.
+repo-platform's own composite actions (under `actions/`) pin their bun from the root `.bun-version` the sync writes from the same file, which every `uses:` fetch carries: it is the whole repository at the ref.
 
-- Each action's first step calls the shared `actions/bun-setup` action (`uses: Vivswan/repo-platform/actions/bun-setup@stable` with `pin` set to the pin's path relative to `github.action_path`: a top-level action reads it two directories up, at `files/bun/.bun-version`). It reuses a bun already on PATH at the pin, installs it with oven-sh/setup-bun otherwise (one retry for the known network flake), and records the absolute path of the bun that prints the pin as `path`.
+- Each action's first step calls the shared `actions/bun-setup` action (`uses: Vivswan/repo-platform/actions/bun-setup@stable` with `from` set to `github.action_path`). It walks up from that directory to the nearest `.bun-version` (the root's synced copy) and fails when none exists; it reuses a bun on PATH at the pin or installs it with oven-sh/setup-bun (one retry for the known network flake), and records the absolute path of the bun that prints the pin as `path`.
 
 - Every later step runs that path, never `bun` by name, because a later setup-bun can put another bun first on PATH.
 

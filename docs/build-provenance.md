@@ -27,7 +27,7 @@ Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. 
 
 - **No unextractable name:** a `uses:` ref downloads the whole repository tarball at the tag, so no path may carry a name extraction cannot write (conditional landing is `files.yml`'s `when` clauses, never a filename).
 
-- **Self-contained actions:** a composite action must resolve from that tarball alone: its own directory plus the root files it reads by relative path (`files.yml`, `files/bun/.bun-version`), since nothing installs the repository's root dependencies on the caller's runner.
+- **Self-contained actions:** a composite action must resolve from that tarball alone: its own directory plus the root files it reads from there (`files.yml`, and the `.bun-version` its bun-setup step finds, [toolchains.md](toolchains.md#how-this-repositorys-actions-pin-bun)), since nothing installs the repository's root dependencies on the caller's runner.
 
 **Every self pin resolves:** [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout. A renamed or deleted action, or a pin off the delivery ref, fails CI here instead of the next fleet run.
 

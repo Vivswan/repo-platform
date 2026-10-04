@@ -1,27 +1,22 @@
 name: Bun Setup
 description: >-
-  The one bun setup for repo-platform's composite actions: locates the
-  .bun-version pin (the file a caller passes as `pin`, or the nearest one at or
-  above the directory it passes as `from`, so an action reads its own
-  repository's pin without path arithmetic and its scripts and lockfiles never
-  ride the CALLING repository's bun resolution), reuses a bun already on PATH
-  at that version or installs it with oven-sh/setup-bun, one retry for the
-  known network flake, and records the absolute path of the bun that prints
-  the pin. One call per job: setup-bun installs every version at the same
-  path, so `path` is valid only until another setup-bun runs in that job.
+  The one bun setup for repo-platform's composite actions: finds the nearest
+  .bun-version at or above the directory passed as `from` (an action's own
+  `github.action_path`, so it reads its own repository's pin and its scripts
+  and lockfiles never ride the CALLING repository's bun resolution), reuses a
+  bun already on PATH at that version or installs it with oven-sh/setup-bun,
+  one retry for the known network flake, and records the absolute path of the
+  bun that prints the pin. One call per job: setup-bun installs every version
+  at the same path, so `path` is valid only until another setup-bun runs in
+  that job.
 
 inputs:
-  pin:
-    description: >-
-      Path to the .bun-version file naming the version to run. Exactly one
-      of `pin` and `from` is passed.
-    required: false
   from:
     description: >-
       A directory inside the action's repository (`github.action_path`); the
       first .bun-version in it or any directory above it is the pin, and the
-      step fails when none exists. Exactly one of `pin` and `from` is passed.
-    required: false
+      step fails when none exists.
+    required: true
   required:
     description: >-
       Fail when no bun matching the pin is on PATH after the setup. Pass
@@ -54,28 +49,21 @@ runs:
       id: locate
       shell: bash
       env:
-        PIN_FILE: ${{ inputs.pin }}
         FROM_DIR: ${{ inputs.from }}
       run: |
-        case "${PIN_FILE:+pin}${FROM_DIR:+from}" in
-          pin) file="$PIN_FILE" ;;
-          from)
-            dir="$(cd "$FROM_DIR" && pwd)"
-            while [ ! -f "$dir/.bun-version" ]; do
-              if [ -z "$dir" ]; then
-                echo "::error::no .bun-version in $FROM_DIR or any directory above it"
-                exit 1
-              fi
-              dir="${dir%/*}"
-            done
-            file="$dir/.bun-version"
-            ;;
-          *)
-            echo "::error::pass exactly one of pin and from (pin='$PIN_FILE', from='$FROM_DIR')"
+        if [ -z "$FROM_DIR" ]; then
+          echo "::error::from is empty: pass the directory to walk up from"
+          exit 1
+        fi
+        dir="$(cd "$FROM_DIR" && pwd)"
+        while [ ! -f "$dir/.bun-version" ]; do
+          if [ -z "$dir" ]; then
+            echo "::error::no .bun-version in $FROM_DIR or any directory above it"
             exit 1
-            ;;
-        esac
-        echo "file=$file" >> "$GITHUB_OUTPUT"
+          fi
+          dir="${dir%/*}"
+        done
+        echo "file=$dir/.bun-version" >> "$GITHUB_OUTPUT"
 
     # Pinned by the resolver's own test below: an absolute path that prints
     # the pin and exits 0, so the setup is skipped only for a bun the
