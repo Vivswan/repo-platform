@@ -44,7 +44,7 @@ outputs:
 runs:
   using: composite
   steps:
-    # Shell parameter expansion does the climb, so the walk needs no command beyond bash (there is no bun yet).
+    # This step cannot depend on a bun being on PATH, so the climb is shell parameter expansion alone.
     - name: Locate the .bun-version pin
       id: locate
       shell: bash
@@ -65,9 +65,7 @@ runs:
         done
         echo "file=$dir/.bun-version" >> "$GITHUB_OUTPUT"
 
-    # Pinned by the resolver's own test below: an absolute path that prints
-    # the pin and exits 0, so the setup is skipped only for a bun the
-    # resolver will accept.
+    # ci.yml's bun-setup-smoke job pins this probe to the resolver's test, so the setup is skipped only for a bun the resolver accepts.
     - name: Check for a bun matching the pin
       id: probe
       shell: bash

@@ -11,7 +11,7 @@ interface YesNoOptions extends RunOptions {
   noExit?: number;
 }
 
-/** A deadline expiry throws even beside an exit code: a child that left a descendant holding the pipe reports its own exit at the deadline. */
+/** A child that left a descendant holding the pipe reports its own exit at the deadline, so an expiry throws whatever the exit code. */
 function answered(args: string[], options: YesNoOptions): RunResult {
   const probe = capture(["git", ...args], options);
   const no = options.noExit ?? 1;
