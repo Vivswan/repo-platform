@@ -2,14 +2,15 @@
 
 // The script exemptions mirror VS Code's "allowed locales": a script's punctuation is allowed only in files carrying that script's text.
 
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { AmbiguousCharacters, InvisibleCharacters } from "monaco-editor/base/common/strings.js";
+import { repositoryFiles } from "../shared/repository_files.ts";
 
 const ROOT = resolve(process.argv[2] ?? ".");
+// Directories a repository may track whose files the check still leaves alone: vendored installs, build output, agent state.
 const SKIP_DIRS = new Set([
   "node_modules",
-  ".git",
   ".output",
   ".wxt",
   ".astro",
@@ -18,12 +19,6 @@ const SKIP_DIRS = new Set([
   "build",
   "coverage",
   "htmlcov",
-  // Cargo build output: gitignored in CI checkouts, but local runs would
-  // otherwise scan extensionless build binaries as text.
-  "target",
-  // VS Code extension test downloads: gitignored, but a local run would
-  // scan the downloaded app bundle's extensionless binaries.
-  ".vscode-test",
   ".venv",
   "__pycache__",
   ".pytest_cache",
@@ -188,26 +183,16 @@ function violation(code: number, context: ScriptContext): string | null {
   return null;
 }
 
-function* walk(dir: string): Generator<string> {
-  for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry);
-    const stat = lstatSync(path);
-    // Symlinks (e.g. CLAUDE.md -> AGENTS.md) are skipped: their targets are
-    // checked directly, and a managed symlink may be dangling by design.
-    if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) {
-      if (!SKIP_DIRS.has(entry)) yield* walk(path);
-    } else if (isCheckable(entry)) {
-      yield path;
-    }
-  }
+function isJudged(relPath: string): boolean {
+  const segments = relPath.split("/");
+  const name = segments[segments.length - 1];
+  return !segments.slice(0, -1).some((dir) => SKIP_DIRS.has(dir)) && isCheckable(name);
 }
 
 const failures: string[] = [];
-for (const path of walk(ROOT)) {
-  const relPath = relative(ROOT, path);
-  if (isExempt(relPath)) continue;
-  const content = readFileSync(path, "utf-8");
+for (const relPath of repositoryFiles(ROOT, { untracked: true })) {
+  if (!isJudged(relPath) || isExempt(relPath)) continue;
+  const content = readFileSync(join(ROOT, relPath), "utf-8");
   const context = { cjk: CJK_TEXT.test(content), devanagari: DEVANAGARI_TEXT.test(content) };
   content.split("\n").forEach((line, index) => {
     for (const ch of line) {
