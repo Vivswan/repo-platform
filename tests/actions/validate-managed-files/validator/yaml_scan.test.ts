@@ -136,9 +136,8 @@ describe("conflict markers", () => {
 describe("the walk honours the repository's .yamllint ignore list", () => {
   // yamllint skips what `ignore:` names, so a YAML-shaped file there (this repository's writer templates under files/,
   // with their {{placeholder}} tokens) is not YAML to the repository; the scan reading it anyway was 16 findings on a
-  // clean tree. The matcher is a port of pathspec's GitIgnoreSpec, the library yamllint reads the list with, at the
-  // release the yamllint action pins beside yamllint; each row below was checked against that release, and a row's
-  // expectation is its answer.
+  // clean tree. The list is read as gitignore patterns (the ignore package); yamllint reads it with pathspec, and the
+  // rows below pin the two places where a repository would feel the difference: an ignored directory, and case.
   // One walk feeds every check, so the conflict-marker scan skips the same paths.
   const TEMPLATE =
     "ci:\n  uses: {{github_username}}/repo-platform/.github/workflows/fleet-ci.yml@stable\n";
@@ -172,13 +171,14 @@ describe("the walk honours the repository's .yamllint ignore list", () => {
       errors: ["other/vendor/generated.yml", "src/build", "vendor/checked.yml"],
     },
     {
-      reason: "a negation re-includes what an earlier pattern ignored",
+      reason:
+        "git's rule, where yamllint's pathspec re-includes: a negation under an ignored directory re-includes nothing",
       tree: {
         ".yamllint": ignore("  - fixtures\n  - '!fixtures/kept.yml'\n"),
         "fixtures/dropped.yml": BROKEN,
         "fixtures/kept.yml": BROKEN,
       },
-      errors: ["fixtures/kept.yml"],
+      errors: [],
     },
     {
       reason: "the conflict-marker scan skips the ignored paths too",
@@ -202,27 +202,13 @@ describe("the walk honours the repository's .yamllint ignore list", () => {
     },
     {
       reason:
-        "pathspec's shapes: a directory pattern after **, literal braces, a kept leading and escaped trailing space",
+        "a pattern matches by case, as yamllint matches it; the library folds case by default",
       tree: {
-        ".yamllint": ignore("  - a/**/\n  - '*.{md,txt}'\n  - ' spaced'\n  - 'tail\\ '\n"),
-        "a/x.yml": BROKEN,
-        "notes.md": CONFLICTED,
-        "x.{md,txt}": CONFLICTED,
-        " spaced/y.yml": BROKEN,
-        "spaced/y.yml": BROKEN,
-        "tail /z.yml": BROKEN,
-        "tail/z.yml": BROKEN,
+        ".yamllint": ignore("  - files\n  - config.yml\n"),
+        "FILES/broken.yml": BROKEN,
+        "CONFIG.yml": BROKEN,
       },
-      errors: ["notes.md", "spaced/y.yml", "tail/z.yml"],
-    },
-    {
-      reason: "pathspec's precedence: a later directory match does not override a file negation",
-      tree: {
-        ".yamllint": ignore("  - foo/\n  - '!foo/bar.yml'\n  - foo/\n"),
-        "foo/bar.yml": BROKEN,
-        "foo/baz.yml": BROKEN,
-      },
-      errors: ["foo/bar.yml"],
+      errors: ["CONFIG.yml", "FILES/broken.yml"],
     },
     {
       reason: "the list arrives through a merge key, as PyYAML reads it for yamllint",
@@ -242,8 +228,7 @@ describe("the walk honours the repository's .yamllint ignore list", () => {
       errors: ["files/base/ci.yml", "node_modules/pkg/broken.yml"],
     },
     {
-      reason:
-        "a class that swallows the directory probe's slash prunes nothing; the files decide one by one",
+      reason: "a class never matches the slash: a[!b] ignores ac/ and leaves a/ alone",
       tree: {
         ".yamllint": ignore("  - a[!b]\n"),
         "a/broken.yml": BROKEN,
@@ -252,8 +237,7 @@ describe("the walk honours the repository's .yamllint ignore list", () => {
       errors: ["a/broken.yml"],
     },
     {
-      reason:
-        "pathspec's classes: a literal ] leads a class, negated or not; an unclosed class discards its pattern",
+      reason: "a literal ] leads a class, negated or not; an unclosed class discards its pattern",
       tree: {
         ".yamllint": ignore("  - '[!]]a.yml'\n  - '[]b]c.yml'\n  - '[abc.yml'\n  - files\n"),
         "]a.yml": BROKEN,
@@ -265,19 +249,6 @@ describe("the walk honours the repository's .yamllint ignore list", () => {
       },
       errors: ["[abc.yml", "]a.yml"],
     },
-    {
-      reason:
-        "pathspec's units: a space is a segment character, not a separator; ? is one code point",
-      tree: {
-        ".yamllint": ignore("  - '/** *'\n  - '*.yml'\n  - '!?.yml'\n"),
-        "a b.md": CONFLICTED,
-        "ab.md": CONFLICTED,
-        "sub/a b.md": CONFLICTED,
-        "\u{1F600}.yml": BROKEN,
-        "ab.yml": BROKEN,
-      },
-      errors: ["ab.md", "sub/a b.md", "\u{1F600}.yml"],
-    },
   ])("$reason", ({ tree, errors }) => {
     const { exitCode, stderr } = runValidator(tree);
     expect([exitCode, erroring(stderr).sort()]).toEqual([errors.length === 0 ? 0 : 1, errors]);
@@ -285,11 +256,6 @@ describe("the walk honours the repository's .yamllint ignore list", () => {
 
   test.each([
     { reason: "does not parse", config: "ignore: [files\n", message: "does not parse as YAML" },
-    {
-      reason: "carries a pattern yamllint refuses",
-      config: "ignore:\n  - 'a\\'\n",
-      message: "invalid ignore pattern",
-    },
     {
       reason: "lists a non-string",
       config: "ignore:\n  - 1\n",

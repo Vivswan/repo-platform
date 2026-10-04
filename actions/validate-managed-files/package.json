@@ -1,8 +1,9 @@
 {
   "name": "validate-managed-files",
   "private": true,
-  "description": "Dependency manifest for the validate-managed-files action: yaml is the hygiene validator's runtime dependency (it parses every YAML file it scans); the step scripts under src/ carry none, and check.ts runs from the platform checkout with that checkout's dependencies.",
+  "description": "Dependency manifest for the validate-managed-files action: yaml and ignore are the hygiene validator's runtime dependencies (it parses every YAML file it scans, and skips what the repository's .yamllint ignores); the step scripts under src/ carry none, and check.ts runs from the platform checkout with that checkout's dependencies.",
   "dependencies": {
+    "ignore": "7.0.12",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
