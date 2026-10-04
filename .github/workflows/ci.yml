@@ -37,10 +37,7 @@ jobs:
       - name: Write the fleet's workflows
         run: bun .github/scripts/ci/write_fleet_lint_tree.ts "$RUNNER_TEMP/fleet-lint"
       - name: actionlint the written workflows
-        run: |
-          for target in all none; do
-            (cd "$RUNNER_TEMP/fleet-lint/$target" && actionlint -color)
-          done
+        run: bun .github/scripts/ci/run_in_fleet_lint_trees.ts "$RUNNER_TEMP/fleet-lint" -- actionlint -color
       # The archive's sha256 is the pin: the release's checksums file comes from the same place as the archive.
       - name: Install the pinned pinact release
         env:
@@ -62,10 +59,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PINACT_CONFIG: ${{ github.workspace }}/.github/pinact.yaml
-        run: |
-          for root in . "$RUNNER_TEMP"/fleet-lint/*/; do
-            (cd "$root" && pinact run -check -verify-comment)
-          done
+        run: bun .github/scripts/ci/run_in_fleet_lint_trees.ts --with-checkout "$RUNNER_TEMP/fleet-lint" -- pinact run -check -verify-comment
 
   # fetch-depth 0 so the event's commit range resolves; pull-requests read because the action lists
   # the PR's commits to build that range. Comments off keeps that scope at read; findings still land
@@ -127,6 +121,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./actions/check-typography
+
+  shell-complexity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Only for the sticky comment.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./actions/check-shell-complexity
 
   file-size:
     runs-on: ubuntu-latest
@@ -407,6 +412,7 @@ jobs:
       - yamllint
       - biome
       - typography
+      - shell-complexity
       - file-size
       - commit-names
       - typecheck

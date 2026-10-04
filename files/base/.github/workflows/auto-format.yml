@@ -37,8 +37,14 @@ jobs:
           persist-credentials: false
 {{blocks}}
 
+      # The diff's exit status is the branch: 0 leaves nothing to commit, so the push step stands down.
+      - name: Look for formatting changes
+        id: diff
+        continue-on-error: true
+        run: git diff --quiet
       - name: Commit and push changes
         id: push
+        if: steps.diff.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
@@ -47,10 +53,6 @@ jobs:
             for approval, so its checks stay unreported. Approve the run from the PR's merge box or the
             Actions tab, or push a commit to this branch.
         run: |
-          if git diff --quiet; then
-            echo "nothing to format"
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A

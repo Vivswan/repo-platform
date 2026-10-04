@@ -54,9 +54,7 @@ jobs:
           SEED: ${{ inputs.seed }}
           ITERATIONS: ${{ inputs.iterations || '1000' }}
         run: |
-          if [ -z "$SEED" ]; then
-            SEED="$RANDOM$RANDOM"
-          fi
+          SEED="${SEED:-$RANDOM$RANDOM}"
           echo "fuzzing with seed $SEED, $ITERATIONS iterations"
           # Replace with your fuzzer: seeded with $SEED for $ITERATIONS iterations, writing one
           # .fuzz-failures/<name>/report.md per crash (the contract: docs/modules/fuzzer.md).

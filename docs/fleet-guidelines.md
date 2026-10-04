@@ -13,6 +13,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Pinned actions](#pinned-actions) | pinact and `tests/workflows/delivery_pins.test.ts` in repo-platform (landing); zizmor in every fleet push and PR run; Dependabot bumps the pins |
 | [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` step; the settings override layer (squash-only) |
 | [Plain ASCII punctuation](#plain-ascii-punctuation) | the `typography` step |
+| [Shell is a straight line of commands](#shell-is-a-straight-line-of-commands) | the `shell-complexity` job of repo-platform's ci.yml; the fleet's `standard-checks` step is staged |
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | the managed files check; the writer's starter rule |
 | [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
@@ -106,6 +107,29 @@ Conventions every managed repository follows, whether the file is managed by syn
 **How:** `"..."`, `'...'`, `-`; a file that must carry non-ASCII goes in `.typography-allow.local`.
 
 **Enforced by:** the `typography` step of `standard-checks` ([actions/check-typography](../actions/check-typography/action.yml)).
+
+## Shell is a straight line of commands
+
+**Rule:** an inline shell body (a workflow or composite-action `run:` step, a moon task `script`, a Containerfile `RUN`, a `*.sh`, `*.ps1`, or `*.bat` file) is a straight line of commands. The moment it needs a branch, a loop, a function, `||` error handling, or a command substitution whose result is tested, it is a TypeScript script run by bun.
+
+**Why:** bash-only defects cost review rounds: `set -e` does not reach a failed command inside a tested `$(...)`, macOS ships bash 3.2, and `grep`'s locale and PCRE behaviour differ by runner. A script has types, a test, and one runtime.
+
+**How:** refused and allowed, per dialect:
+
+| Dialect | Parsed by | Refused |
+| --- | --- | --- |
+| bash, sh, zsh (an unset `shell:` is bash, or pwsh on a Windows `runs-on`) | mvdan/sh, shfmt's parser, as bash | `if`, `case`, `for`, `while`, `until`, a function, `\|\|`, a `$(...)` fed to `test`, `[`, or `[[` |
+| PowerShell (`pwsh`, `powershell`, `*.ps1`, `*.psm1`) | PowerShell's own parser, through `pwsh` | `if`, `switch`, `for`, `foreach`, `while`, `do`, `function`, `try`, `trap`, `throw`, `\|\|` |
+| cmd (`shell: cmd`, `*.bat`, `*.cmd`) | tokens, after dropping `rem` and `::` lines: no parser exists for cmd | a second command line, `if`, `for`, `goto`, `call :label`, `\|\|` |
+
+- **Allowed:** commands joined by newlines, `&&`, or pipes; redirects; `set -e` and `set -o pipefail`; assignments, `${X:-default}` included; `echo "k=$(v)" >> "$GITHUB_OUTPUT"`.
+- **cmd over-reports:** a token scan cannot tell a keyword inside a quoted argument from the real thing, so it refuses both; the allow-list is the remedy.
+- **zsh parses as bash:** mvdan/sh's zsh support is experimental, so a zsh-only expansion is a "does not parse" finding; the allow-list is the remedy.
+- **pwsh must be on the runner** when a PowerShell body exists; the step fails naming it, never skips.
+- **Exempt:** a block that must stay shell goes in `.shell-complexity-allow.local` as `path # reason`, the reason mandatory; an entry whose file has no refused construct left fails as stale.
+- **Skipped and counted:** a file with the managed header (repo-platform owns it), and a yaml file that does not parse (yamllint owns validity; the check warns).
+
+**Enforced by:** today, repo-platform's own `shell-complexity` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)). The `standard-checks` step for the fleet lands in a sibling PR once every shipped template and reusable workflow is clean.
 
 ## Markdown prose is never hard-wrapped
 
@@ -257,6 +281,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | yamllint | standard-checks | any finding (strict) | a `# yamllint disable-line rule:<name>` comment on the line (`.yamllint` itself is managed) |
 | gitleaks | standard-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
 | typography | standard-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
+| shell-complexity | repo-platform's ci.yml today; the `standard-checks` step is staged | a refused construct or an allowlist defect | the path in the repo-owned `.shell-complexity-allow.local` with a `# reason` |
 | file-size | standard-checks | a hard-cap finding or an allowlist defect | the path in the repo-owned `.file-size-allow.local` with a `# reason`; the comment block's marker ([short comments](#short-comments)) |
 | commit-names | standard-checks | a subject commitlint refuses under config-conventional plus one scope ([the grammar](#conventional-commits-squash-merged)) | none: reword the commit |
 | typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (keys below), or a trailing `typos: ignore` comment for a one-off |

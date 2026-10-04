@@ -1,0 +1,11 @@
+# Paths exempt from the check-shell-complexity action, one per line, relative to the repository root, each with a
+# `# reason` on the same line. Repo-owned: sync never touches this file. An entry whose file has no refused construct
+# left fails the check as stale. "owed" names a block whose TypeScript replacement is not written yet.
+actions/bun-setup/action.yml # the pre-bun pin walk: bash is all there is before bun exists
+.github/workflows/fleet-ci.yml # owed: the judge and the release-pr ancestry steps run in the caller's checkout, so a composite action is their shape
+.github/workflows/fleet-release.yml # owed: the head and stale-release-PR steps run in the caller's checkout, so a composite action is their shape
+.github/workflows/fleet-release-publish.yml # owed: the asset inspection runs in the caller's checkout, so a composite action is its shape
+.github/workflows/reusable-site.yml # owed: the Pages probe and the link-rot verdict run in the caller's checkout, so a composite action is their shape
+actions/semgrep/action.yml # owed: a judge script beside the scan step, run by the action's own bun
+actions/validate-managed-files/action.yml # owed: the no-bun fallback of the report step
+files/deno/.github/workflows/deno-audit.yml # owed: the lockfile walk as a shipped deno script under .github/scripts/

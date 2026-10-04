@@ -15,7 +15,6 @@ import {
   type Grammars,
   HARD,
   isGenerated,
-  isManaged,
   judgeFile,
   type Kind,
   loadGrammars,
@@ -25,6 +24,7 @@ import {
   type Tier,
   WARN,
 } from "../../../actions/check-file-size/check-file-size.ts";
+import { isManaged } from "../../../actions/shared/managed_header.ts";
 import { loadAction, stepNamed } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
