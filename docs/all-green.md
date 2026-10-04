@@ -199,6 +199,6 @@ One label on the PR, before it merges.
 
 - **Dispatch-only scopes:** `private`, repository slugs, and the `modules:<a>+<b>` filter ([the README's `repo=` table](../README.md#shipping-a-change)). The leg unions the labels of every commit in its range, and an intersecting token would misread there: a `public, modules:site` beside a `private` would read as every repo selecting site and drop the private repos the second asked for.
 
-- **The settings apply never depends on the label,** since every green run applies every target.
+- **The settings apply and the label:** what a call applies, label or none, is [the `settings-fleet` leg's](platform/post-green.md#the-run-leg-by-leg).
 
 - **How the leg reads the label,** which commits a run reads, and the bot that labels a platform PR by default are [platform/post-green.md](platform/post-green.md#how-the-leg-reads-the-label).
