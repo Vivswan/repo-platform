@@ -99,57 +99,46 @@ describe("actions/bun-setup", () => {
   // marker is found by walking up from a directory the caller names. Each row plants a tree and runs the step on it.
   test.each<{
     reason: string;
-    plant: (root: string) => { pin: string; from: string };
+    plant: (root: string) => void;
+    from: (root: string) => string;
     exitCode: number;
-    error: (fills: { pin: string; from: string }) => string;
+    error: (from: string) => string;
     outputs: (root: string) => Record<string, string>;
   }>([
     {
       reason: "`from` three directories below the marker finds it",
-      plant: (root) => {
-        writeFileSync(join(root, ".bun-version"), `${Bun.version}\n`);
-        mkdirSync(join(root, "a/b/c"), { recursive: true });
-        return { pin: "", from: join(root, "a/b/c") };
-      },
+      plant: (root) => writeFileSync(join(root, ".bun-version"), `${Bun.version}\n`),
+      from: (root) => join(root, "a/b/c"),
       exitCode: 0,
       error: () => "",
       outputs: (root) => ({ file: join(root, ".bun-version") }),
     },
     {
       reason: "`from` with no marker anywhere above fails naming the start directory",
-      plant: (root) => {
-        mkdirSync(join(root, "a/b/c"), { recursive: true });
-        return { pin: "", from: join(root, "a/b/c") };
-      },
+      plant: () => {},
+      from: (root) => join(root, "a/b/c"),
       exitCode: 1,
-      error: ({ from }) => `::error::no .bun-version in ${from} or any directory above it`,
+      error: (from) => `::error::no .bun-version in ${from} or any directory above it`,
       outputs: () => ({}),
     },
     {
-      reason: "`pin` and `from` together are refused",
-      plant: (root) => ({ pin: join(root, ".bun-version"), from: root }),
+      // `cd ""` is a no-op, so an unguarded walk would start at the working directory: the caller's checkout, whose own
+      // .bun-version is the one pin this action exists to never read (this repository's root copy plays it here).
+      reason: "an empty `from` is refused, not walked from the working directory",
+      plant: () => {},
+      from: () => "",
       exitCode: 1,
-      error: () => "::error::pass exactly one of pin and from",
+      error: () => "::error::from is empty",
       outputs: () => ({}),
     },
-    {
-      reason: "neither `pin` nor `from` is refused",
-      plant: () => ({ pin: "", from: "" }),
-      exitCode: 1,
-      error: () => "::error::pass exactly one of pin and from",
-      outputs: () => ({}),
-    },
-  ])("locate with $reason", ({ plant, exitCode, error, outputs }) => {
+  ])("locate with $reason", ({ plant, from, exitCode, error, outputs }) => {
     const root = temp.dir("bun-setup-locate-");
-    const fills = plant(root);
-    const locate = runStep(
-      stepById("locate"),
-      { "${{ inputs.pin }}": fills.pin, "${{ inputs.from }}": fills.from },
-      BUN_DIR,
-      root,
-    );
+    mkdirSync(join(root, "a/b/c"), { recursive: true });
+    plant(root);
+    const start = from(root);
+    const locate = runStep(stepById("locate"), { "${{ inputs.from }}": start }, BUN_DIR, root);
     expect([locate.exitCode, locate.outputs]).toEqual([exitCode, outputs(root)]);
-    if (exitCode !== 0) expect(locate.stdout).toContain(error(fills));
+    if (exitCode !== 0) expect(locate.stdout).toContain(error(start));
   });
 
   test("neither setup attempt can end the action, the retry keys on the first attempt's outcome, and the resolve runs whatever they did", () => {

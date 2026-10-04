@@ -368,7 +368,7 @@ jobs:
         id: second
         uses: ./actions/bun-setup
         with:
-          pin: ${{ runner.temp }}/bun-setup-smoke/previous/.bun-version
+          from: ${{ runner.temp }}/bun-setup-smoke/previous
       - name: Judge both calls
         shell: bash
         env:

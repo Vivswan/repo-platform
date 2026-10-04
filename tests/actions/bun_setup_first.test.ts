@@ -4,19 +4,18 @@
 
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { actionManifestPaths } from "../../scripts/lib/action_steps";
 import { REPO_ROOT } from "../shared/action_step";
 
 type Step = Record<string, unknown>;
 
-// GitHub resolves the pin against the manifest's own directory, so a nested action climbs one level more.
-const setupStep = (file: string) => ({
+const setupStep = {
   id: "action-bun",
   uses: "Vivswan/repo-platform/actions/bun-setup@stable",
-  pin: `\${{ github.action_path }}/${relative(dirname(file), "files/bun/.bun-version")}`,
-});
+  from: "${{ github.action_path }}",
+};
 
 // The shared setup action is the one place setup-bun runs (tests/actions/bun-setup pins its shape).
 const manifests = actionManifestPaths(join(REPO_ROOT, "actions")).filter(
@@ -33,7 +32,7 @@ test.each(manifests)(
     const steps = manifest.runs.steps;
     const [first, ...rest] = steps;
     const shape = {
-      first: { id: first.id, uses: first.uses, pin: (first.with as Step | undefined)?.pin },
+      first: { id: first.id, uses: first.uses, from: (first.with as Step | undefined)?.from },
       bareBunLines: steps.flatMap((step) =>
         String(step.run ?? "")
           .split("\n")
@@ -47,7 +46,7 @@ test.each(manifests)(
     };
     expect(shape).toEqual(
       existsSync(join(dir, "bun.lock"))
-        ? { first: setupStep(file), bareBunLines: [], laterSetups: 0, mentionsBun: true }
+        ? { first: setupStep, bareBunLines: [], laterSetups: 0, mentionsBun: true }
         : { first: shape.first, bareBunLines: [], laterSetups: 0, mentionsBun: false },
     );
   },
