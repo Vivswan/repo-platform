@@ -209,7 +209,7 @@ GitHub releases are immutable once published, so every release moves through thr
 
 2. ci.yml's `update-release` job calls the repo-owned `update-release.yml` hook with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
 
-3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@stable`, which attests build provenance for every asset on the draft and flips it live.
+3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@stable`, which attests build provenance for every asset on the draft and flips it live. [actions/release-assets](../actions/release-assets/action.yml) inspects the draft first, deleting a bundle a prior attempt left.
 
 **The attestation** is a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json`. It is skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations.
 
