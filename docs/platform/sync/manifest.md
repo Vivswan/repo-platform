@@ -22,7 +22,7 @@ The entry moves to the build when the sync wrote a change or the checker changed
 
 | The manifest names | The build is | The sync | The entry after the sync |
 | --- | --- | --- | --- |
-| no commit the writer can read (a manifest from before the field, or a hand edit) | any | any | the build |
+| no manifest the writer accepts: none (a first sync), one that does not parse, or one whose own entry names no full commit (a hand edit, since every sync writes the field) | any | any | the build |
 | commit C | C | any | C |
 | commit C | N | wrote at least one byte differently: a managed, split, starter, or mirror write, a retirement, a replaced local edit, or a manifest record moved | N |
 | commit C | N, with the checker different between C and N | wrote nothing | N |

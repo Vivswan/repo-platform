@@ -113,7 +113,7 @@ Beyond the table:
 
 - **A stale record at a path no `files.yml` entry declares at all** (a hand edit, or an entry that left `files.yml`) is retired the same way. While a file sits at the path it is also noted (`manifest record for <path> had no writer: ...`), which holds the PR for the Retired row's outcome.
 - **A recorded path that is not a clean repository path** is ignored and noted.
-- **A held file and a held entry keep their records** in the new manifest every run, so the file is held again next time and never becomes an unrecorded orphan.
+- **A held file and a held entry keep their records** (from a manifest the writer accepted) in the new manifest every run, so the file is held again next time and never becomes an unrecorded orphan.
 - **A `starter` record whose entry nothing selects** leaves the manifest; the file is the repository's own either way.
 - **A `mirror` record no declaration reaches any more** (a fleet target the registration excepts included) is dropped with a note. The copy stays as the repository's own, and a mirror declared again adopts it while it still holds the source's content.
 - **A record that is not exactly a shape the writer writes** (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers) fails the run with a count before anything is written.
@@ -151,7 +151,7 @@ Beyond the table:
 
 A Registration note is one of:
 
-- an unparsable manifest
+- a manifest refused whole: one that does not parse, or one whose own entry names no full commit
 - a placeholder with no value, and the key that sets it
 - a manifest record at a path that is not a clean repository path
 - a stale record no `files.yml` entry declares now, while a file sits at its path

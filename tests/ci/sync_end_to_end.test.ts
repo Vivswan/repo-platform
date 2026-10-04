@@ -151,8 +151,8 @@ function oldManifest(): string {
     // The same with nothing at the path: nothing to review, so no note; the
     // record leaves the manifest like any other stale record of an absent file.
     "HANDMADE-GONE.md": `{"class": "managed", "hash": "${sha256(HANDMADE)}"}`,
-    // A self entry from before the commit field: this sync stamps the build.
-    [MANIFEST]: '{"class": "managed", "hash": null}',
+    // The self entry as the previous sync stamped it, at this build: the stamp stays whatever this run writes.
+    [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${BUILD}"}`,
   };
   const lines = Object.entries(entries).map(
     ([path, body]) => `    ${JSON.stringify(path)}: ${body}`,
@@ -836,7 +836,7 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
         writeFileSync(join(target, OVERLAY), THEIRS);
         writeFileSync(
           join(target, MANIFEST),
-          `{\n  "files": {\n    ${JSON.stringify(MANIFEST)}: {"class": "managed", "hash": null},\n    ${JSON.stringify(SETTINGS)}: {"class": "starter"}\n  }\n}\n`,
+          `{\n  "files": {\n    ${JSON.stringify(MANIFEST)}: {"class": "managed", "hash": null, "commit": "${BUILD}"},\n    ${JSON.stringify(SETTINGS)}: {"class": "starter"}\n  }\n}\n`,
         );
       },
       rows: [
@@ -1098,7 +1098,7 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
     );
     // A managed record of a module no longer selected: the run retires it,
     // and no mirror may land there.
-    const stale = `{\n  "files": {\n    "docs/GONE.md": {"class": "managed", "hash": "${sha256("gone\n")}"}\n  }\n}\n`;
+    const stale = `{\n  "files": {\n    "docs/GONE.md": {"class": "managed", "hash": "${sha256("gone\n")}"},\n    ${JSON.stringify(MANIFEST)}: {"class": "managed", "hash": null, "commit": "${BUILD}"}\n  }\n}\n`;
     mkdirSync(join(target, ".github"));
     writeFileSync(join(target, MANIFEST), stale);
     writeFileSync(join(target, ".github/dependabot.yml"), own);
@@ -1167,7 +1167,10 @@ describe("sync.ts over manifest records it cannot read", () => {
     "docs/old.md": '{"class": "starter", "hash": null}',
   };
   const manifestOf = (records: Record<string, string>) =>
-    `{\n  "files": {\n${Object.entries(records)
+    `{\n  "files": {\n${Object.entries({
+      ...records,
+      [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${BUILD}"}`,
+    })
       .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
       .join(",\n")}\n  }\n}\n`;
   const refusal = (count: number) =>

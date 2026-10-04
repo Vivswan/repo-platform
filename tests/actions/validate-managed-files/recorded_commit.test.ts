@@ -56,7 +56,7 @@ describe("the read-commit step", () => {
       outputs: `commit=\nproblem=${MANIFEST_NAME} does not parse as a manifest (invalid JSON); ${REVERT}\n`,
     },
     {
-      reason: "a self entry from before the field",
+      reason: "a self entry without its commit",
       tree: { [MANIFEST_NAME]: manifest('{"class": "managed", "hash": null}') },
       outputs: `commit=\nproblem=${NONE}\n`,
     },

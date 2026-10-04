@@ -6,7 +6,6 @@ import {
   type ManifestRecord,
   readRecord,
   readRecords,
-  recordedCommit,
   renderManifest,
   writeManifest,
 } from "../../../.github/scripts/sync/writer/manifest.ts";
@@ -24,7 +23,7 @@ const CTOR = "constructor";
 
 describe("renderManifest", () => {
   // Cross-file: the shared parser (actions/shared/manifest.ts) reads what the writer renders; the self entry's null
-  // hash is what readRecord reads as no record, and its commit is what recordedCommit reads for sync.ts's
+  // hash is what readRecord reads as no record, and its commit is what readRecords reads for sync.ts's
   // judgedCommit and the fleet action checks repo-platform out at; sorted one-line entries keep the fleet's diffs readable.
   test("one entry per line, sorted, with the self entry carrying the commit and no hash", () => {
     const text = renderManifest(
@@ -140,14 +139,15 @@ describe("readRecord", () => {
 });
 
 describe("readRecords", () => {
-  // A missing manifest is a first sync, and an unparsable one is a problem the writer notes (every file then judged
+  // A missing manifest is a first sync, and a refused one is a problem the writer notes (every file then judged
   // unrecorded) instead of a throw that would fail the row.
-  test("a missing manifest is no records; a written one reads back; an unparsable one is a problem", () => {
+  test("a missing manifest is no records; a written one reads back with its commit; an unparsable one is a problem", () => {
     const target = temp.dir("writer-manifest-");
-    expect(readRecords(target)).toEqual({ records: {}, problem: null });
+    expect(readRecords(target)).toEqual({ records: {}, commit: null, problem: null });
     writeManifest(target, { "a.txt": { class: "managed", hash: HASH } }, BUILD);
-    const { records, problem } = readRecords(target);
+    const { records, commit, problem } = readRecords(target);
     expect(problem).toBeNull();
+    expect(commit).toBe(BUILD);
     expect(records).toEqual({
       "a.txt": { class: "managed", hash: HASH },
       [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD },
@@ -156,7 +156,35 @@ describe("readRecords", () => {
     writeFileSync(join(target, MANIFEST_NAME), "{ not json");
     expect(readRecords(target)).toEqual({
       records: {},
+      commit: null,
       problem: `${MANIFEST_NAME} does not parse as a manifest (invalid JSON)`,
+    });
+  });
+
+  // Every sync writes the self entry's commit, so a manifest without a full one is a hand edit: refused whole, as the
+  // fleet action refuses it (actions/shared/recorded_commit.ts), never restamped silently with every record believed.
+  test.each<[string, Record<string, ManifestEntryShape>]>([
+    ["no self entry", {}],
+    ["a self entry without the commit", { [MANIFEST_NAME]: { class: "managed", hash: null } }],
+    [
+      "a commit that is not a full lowercase sha",
+      { [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD.slice(0, 12) } },
+    ],
+    [
+      "a commit that is not a string",
+      { [MANIFEST_NAME]: { class: "managed", hash: null, commit: 42 } },
+    ],
+  ])("a manifest with %s is refused whole", (_name, self) => {
+    const target = temp.dir("writer-manifest-commit-");
+    mkdirSync(join(target, ".github"), { recursive: true });
+    writeFileSync(
+      join(target, MANIFEST_NAME),
+      JSON.stringify({ files: { "a.txt": { class: "managed", hash: HASH }, ...self } }),
+    );
+    expect(readRecords(target)).toEqual({
+      records: {},
+      commit: null,
+      problem: `${MANIFEST_NAME} names no full 40-hex commit in its own entry`,
     });
   });
 
@@ -194,33 +222,4 @@ describe("readRecords", () => {
     expect(() => writeManifest(target, {}, BUILD)).toThrow("not a regular file");
     expect(readFileSync(join(target, "notes.json"), "utf-8")).toBe('{"files": {}}');
   });
-});
-
-describe("recordedCommit", () => {
-  // The commit the stamp rule (judged_commit.ts) keeps while the sync writes nothing and the checker is unchanged; a
-  // stamp the writer cannot read (a manifest from before the field, a hand edit) is null, and the rule takes the build.
-  test.each([
-    ["no manifest", {}, null],
-    ["a self entry before the field", { [MANIFEST_NAME]: { class: "managed", hash: null } }, null],
-    [
-      "the stamped self entry",
-      { [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD } },
-      BUILD,
-    ],
-    [
-      "a commit that is not a full lowercase sha",
-      { [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD.slice(0, 12) } },
-      null,
-    ],
-    [
-      "a commit that is not a string",
-      { [MANIFEST_NAME]: { class: "managed", hash: null, commit: 42 } },
-      null,
-    ],
-  ] as [string, Record<string, ManifestEntryShape>, string | null][])(
-    "%s",
-    (_name, records, commit) => {
-      expect(recordedCommit(records)).toBe(commit);
-    },
-  );
 });
