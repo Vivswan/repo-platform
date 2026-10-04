@@ -79,9 +79,9 @@ describe("reusable-site.yml", () => {
   });
 
   // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml), the nightly, and the
-  // install ci.yml's fixture job runs so the broken-link test is judged by it, all the same action at the same
+  // install ci.yml's test job runs so the broken-link test is judged by it, all the same action at the same
   // version. The internal step's own knobs are judged by the live run in tests/ci/pages_site_build.
-  test("the assembly's internal link check, the fixture job, and the nightly run one lychee at one version", () => {
+  test("the assembly's internal link check, the test job, and the nightly run one lychee at one version", () => {
     const internal = stepNamed(
       loadAction("actions/pages-site/action.yml"),
       "Check the site's internal links",
@@ -89,7 +89,7 @@ describe("reusable-site.yml", () => {
     const ci = parseYaml(
       readFileSync(join(import.meta.dir, "../../.github/workflows/ci.yml"), "utf8"),
     ) as { jobs: Record<string, { steps?: Step[] }> };
-    const fixtures = ci.jobs["pages-site-build"]?.steps?.find(
+    const fixtures = ci.jobs["script-tests"]?.steps?.find(
       (candidate) => candidate.uses === internal.uses,
     );
     const nightly = step("links");

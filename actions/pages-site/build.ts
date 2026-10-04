@@ -83,17 +83,17 @@ function capture(argv: string[], cwd?: string): string {
 
 /** `git ls-tree` separates the honest answers (exit 0, entry listed or not) from failures (bad ref, corrupt repository).
  *  A failure throws via capture instead of collapsing into absent. */
-function treeHas(cfg: Config, ref: string, path: string): boolean {
-  return capture(["git", "-C", cfg.workspace, "ls-tree", ref, "--", path]).trim() !== "";
+function treeHas(workspace: string, ref: string, path: string): boolean {
+  return capture(["git", "-C", workspace, "ls-tree", ref, "--", path]).trim() !== "";
 }
 
 /** `git show` on a symlink yields its target path text, which must never be judged as content. */
-function treeFile(cfg: Config, ref: string, path: string): string | null {
-  const entry = capture(["git", "-C", cfg.workspace, "ls-tree", ref, "--", path]).trim();
+function treeFile(workspace: string, ref: string, path: string): string | null {
+  const entry = capture(["git", "-C", workspace, "ls-tree", ref, "--", path]).trim();
   if (entry === "") return null;
   const mode = entry.split(" ")[0];
   if (mode !== "100644" && mode !== "100755") return null;
-  return capture(["git", "-C", cfg.workspace, "show", `${ref}:${path}`]);
+  return capture(["git", "-C", workspace, "show", `${ref}:${path}`]);
 }
 
 function writeExclusive(path: string, content: string, what: string): void {
@@ -197,13 +197,13 @@ function readConfig(): Config {
 }
 
 /** `git archive` never carries .git, so extracted builds cannot read history. */
-function extractTree(cfg: Config, ref: string, into: string, subtree?: string): void {
+function extractTree(workspace: string, ref: string, into: string, subtree?: string): void {
   mkdirSync(into, { recursive: true });
   const tar = `${into}.tar`;
   run([
     "git",
     "-C",
-    cfg.workspace,
+    workspace,
     "archive",
     "--format=tar",
     "-o",
@@ -257,9 +257,9 @@ export function tierStrictLinks(tier: Tier): boolean {
 
 /** Shallower mounts stage first.
  *  So a root mounted inside another's mount (`skills/agents` under `skills`) lands in the parent's tree whichever order the caller listed them.
- *  At a tag a missing root is skipped with a notice, since history cannot be fixed. */
-function stageIncludes(
-  cfg: Config,
+ *  At a tag a missing root is skipped with a notice, since history cannot be fixed. Exported for its tests. */
+export function stageIncludes(
+  workspace: string,
   tier: Tier,
   root: string,
   srcDir: string,
@@ -270,7 +270,7 @@ function stageIncludes(
   for (const include of [...includes].sort((a, b) => depth(a) - depth(b))) {
     // The tag's own tree decides first: a tag from before the root existed
     // is skipped whatever its docs tree carries at the mount's name.
-    if (tier.ref !== "HEAD" && !treeHas(cfg, tier.ref, include.path)) {
+    if (tier.ref !== "HEAD" && !treeHas(workspace, tier.ref, include.path)) {
       console.log(
         `::notice::docs version ${tier.version} has no ${include.mount}/: ${include.path}/ does not exist at ${tier.ref}`,
       );
@@ -285,7 +285,7 @@ function stageIncludes(
       );
     }
     if (tier.ref === "HEAD") {
-      const tree = join(cfg.workspace, include.path);
+      const tree = join(workspace, include.path);
       if (!existsSync(tree)) {
         throw new Error(
           `${include.path}/ does not exist in the repository - the docs site includes it at ` +
@@ -296,7 +296,7 @@ function stageIncludes(
       cpSync(tree, target, { recursive: true });
     } else {
       const staging = join(root, ".src");
-      extractTree(cfg, tier.ref, staging, include.path);
+      extractTree(workspace, tier.ref, staging, include.path);
       mkdirSync(dirname(target), { recursive: true });
       renameSync(join(staging, include.path), target);
       rmSync(staging, { recursive: true, force: true });
@@ -361,19 +361,19 @@ function buildVitepressTier(
     // Extract into a staging dir first so the tree's leaf directory moves
     // to the root's fixed docs/ slot.
     const staging = join(root, ".src");
-    extractTree(cfg, tier.ref, staging, DOCS_DIR);
+    extractTree(cfg.workspace, tier.ref, staging, DOCS_DIR);
     renameSync(join(staging, DOCS_DIR), srcDir);
     rmSync(staging, { recursive: true, force: true });
     assertCentralTheme(srcDir);
   }
-  const staged = stageIncludes(cfg, tier, root, srcDir, includes);
+  const staged = stageIncludes(cfg.workspace, tier, root, srcDir, includes);
   // The action's own dependency set serves every build root: vitepress,
   // vue, and the llms plugin resolve through this link, so no build root
   // ever installs anything.
   symlinkSync(join(ACTION_DIR, "node_modules"), join(root, "node_modules"));
   const strictLinks = tierStrictLinks(tier);
   const sha = capture(["git", "-C", cfg.workspace, "rev-parse", `${tier.ref}^{commit}`]).trim();
-  const facts = collectFacts((path) => treeFile(cfg, tier.ref, path), {
+  const facts = collectFacts((path) => treeFile(cfg.workspace, tier.ref, path), {
     repository: cfg.repository,
     docsDir: DOCS_DIR,
     defaultBranch: cfg.defaultBranch,
@@ -438,14 +438,14 @@ function eligibleDocsTags(cfg: Config, kept: string[]): string[] {
     return false;
   };
   return kept.filter((tag) => {
-    if (!treeHas(cfg, tag, DOCS_DIR)) return skip(tag, `${DOCS_DIR}/ does not exist`);
-    if (treeHas(cfg, tag, `${DOCS_DIR}/.vitepress`)) {
+    if (!treeHas(cfg.workspace, tag, DOCS_DIR)) return skip(tag, `${DOCS_DIR}/ does not exist`);
+    if (treeHas(cfg.workspace, tag, `${DOCS_DIR}/.vitepress`)) {
       return skip(
         tag,
         `${DOCS_DIR}/.vitepress exists (the theme is central; a repo-local one would be ignored)`,
       );
     }
-    if (![...LANDING_FILES].some((name) => treeHas(cfg, tag, `${DOCS_DIR}/${name}`))) {
+    if (![...LANDING_FILES].some((name) => treeHas(cfg.workspace, tag, `${DOCS_DIR}/${name}`))) {
       return skip(tag, `${DOCS_DIR}/ has no landing page (${[...LANDING_FILES].join(" or ")})`);
     }
     return true;
