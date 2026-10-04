@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
-// --check is the pre-commit hook's form (check:static): a hook never touches the network (docs/fleet-guidelines.md).
+// --check is the pre-commit hook's form (check:static): a hook only checks and fails, and an install is not a check
+// (docs/fleet-guidelines.md, "Pre-commit hooks only check").
 //
 // Usage: bun scripts/bootstrap.ts [--check]
 
@@ -46,25 +47,30 @@ export function runtimeMismatch(local: string, pinned: string): string | null {
     : `local bun ${local.trim()} is not at the pinned ${want} (${BUN_PIN_FILE}); install the pin, a green under another runtime is unreliable`;
 }
 
-function fail(message: string): 1 {
+function fail(code: 1 | 2, message: string): 1 | 2 {
   console.error(`bootstrap: ${message}`);
-  return 1;
+  return code;
 }
 
-export function main(argv: string[], root: string): number {
-  const mismatch = runtimeMismatch(Bun.version, readFileSync(join(root, BUN_PIN_FILE), "utf-8"));
-  if (mismatch !== null) return fail(mismatch);
-  const dirs = bunLockDirs(root);
+function main(argv: string[]): number {
+  const unknown = argv.find((arg) => arg !== "--check");
+  if (unknown !== undefined) return fail(2, `unknown argument '${unknown}'`);
+  const mismatch = runtimeMismatch(
+    Bun.version,
+    readFileSync(join(REPO_ROOT, BUN_PIN_FILE), "utf-8"),
+  );
+  if (mismatch !== null) return fail(1, mismatch);
+  const dirs = bunLockDirs(REPO_ROOT);
   if (argv.includes("--check")) {
-    const missing = missingNodeModules(root, dirs);
+    const missing = missingNodeModules(REPO_ROOT, dirs);
     if (missing.length === 0) return 0;
-    return fail(`node_modules missing in ${missing.join(", ")}; run \`bun run bootstrap\``);
+    return fail(1, `node_modules missing in ${missing.join(", ")}; run \`bun run bootstrap\``);
   }
   for (const dir of dirs) {
     console.log(`bootstrap: bun install --frozen-lockfile in ${dir}`);
-    must(["bun", "install", "--frozen-lockfile", "--silent"], { cwd: join(root, dir) });
+    must(["bun", "install", "--frozen-lockfile", "--silent"], { cwd: join(REPO_ROOT, dir) });
   }
   return 0;
 }
 
-if (import.meta.main) process.exit(main(process.argv.slice(2), REPO_ROOT));
+if (import.meta.main) process.exit(main(process.argv.slice(2)));
