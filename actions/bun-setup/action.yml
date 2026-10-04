@@ -1,18 +1,27 @@
 name: Bun Setup
 description: >-
-  The one bun setup for repo-platform's composite actions: given the path
-  of a .bun-version pin (a caller passes the fleet's files/bun/.bun-version
-  from the delivery checkout, so its scripts and lockfiles never ride the
-  CALLING repository's bun resolution), reuses a bun already on PATH at
-  that version or installs it with oven-sh/setup-bun, one retry for the
+  The one bun setup for repo-platform's composite actions: locates the
+  .bun-version pin (the file a caller passes as `pin`, or the nearest one at or
+  above the directory it passes as `from`, so an action reads its own
+  repository's pin without path arithmetic and its scripts and lockfiles never
+  ride the CALLING repository's bun resolution), reuses a bun already on PATH
+  at that version or installs it with oven-sh/setup-bun, one retry for the
   known network flake, and records the absolute path of the bun that prints
   the pin. One call per job: setup-bun installs every version at the same
   path, so `path` is valid only until another setup-bun runs in that job.
 
 inputs:
   pin:
-    description: Path to the .bun-version file naming the version to run.
-    required: true
+    description: >-
+      Path to the .bun-version file naming the version to run. Exactly one
+      of `pin` and `from` is passed.
+    required: false
+  from:
+    description: >-
+      A directory inside the action's repository (`github.action_path`); the
+      first .bun-version in it or any directory above it is the pin, and the
+      step fails when none exists. Exactly one of `pin` and `from` is passed.
+    required: false
   required:
     description: >-
       Fail when no bun matching the pin is on PATH after the setup. Pass
@@ -40,6 +49,34 @@ outputs:
 runs:
   using: composite
   steps:
+    # Shell parameter expansion does the climb, so the walk needs no command beyond bash (there is no bun yet).
+    - name: Locate the .bun-version pin
+      id: locate
+      shell: bash
+      env:
+        PIN_FILE: ${{ inputs.pin }}
+        FROM_DIR: ${{ inputs.from }}
+      run: |
+        case "${PIN_FILE:+pin}${FROM_DIR:+from}" in
+          pin) file="$PIN_FILE" ;;
+          from)
+            dir="$(cd "$FROM_DIR" && pwd)"
+            while [ ! -f "$dir/.bun-version" ]; do
+              if [ -z "$dir" ]; then
+                echo "::error::no .bun-version in $FROM_DIR or any directory above it"
+                exit 1
+              fi
+              dir="${dir%/*}"
+            done
+            file="$dir/.bun-version"
+            ;;
+          *)
+            echo "::error::pass exactly one of pin and from (pin='$PIN_FILE', from='$FROM_DIR')"
+            exit 1
+            ;;
+        esac
+        echo "file=$file" >> "$GITHUB_OUTPUT"
+
     # Pinned by the resolver's own test below: an absolute path that prints
     # the pin and exits 0, so the setup is skipped only for a bun the
     # resolver will accept.
@@ -47,7 +84,7 @@ runs:
       id: probe
       shell: bash
       env:
-        PIN_FILE: ${{ inputs.pin }}
+        PIN_FILE: ${{ steps.locate.outputs.file }}
       run: |
         pin="$(cat "$PIN_FILE")"
         path="$(command -v bun || true)"
@@ -62,7 +99,7 @@ runs:
       continue-on-error: true
       uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       with:
-        bun-version-file: ${{ inputs.pin }}
+        bun-version-file: ${{ steps.locate.outputs.file }}
 
     - name: Set up bun (retry)
       id: setup-bun-retry
@@ -70,14 +107,14 @@ runs:
       continue-on-error: true
       uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       with:
-        bun-version-file: ${{ inputs.pin }}
+        bun-version-file: ${{ steps.locate.outputs.file }}
 
     # A later setup-bun can put another bun first on PATH, so callers run the path, never the name.
     - name: Resolve the pinned bun
       id: resolve
       shell: bash
       env:
-        PIN_FILE: ${{ inputs.pin }}
+        PIN_FILE: ${{ steps.locate.outputs.file }}
         REQUIRED: ${{ inputs.required }}
         SETUP_OUTCOME: ${{ steps.setup-bun.outcome }}
       run: |

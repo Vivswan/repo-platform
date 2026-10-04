@@ -59,7 +59,7 @@ The nightly scan has its own reusable workflow because it files an issue, and `i
 
 - **The cron's cadence,** and which other jobs stand down on it, belong to the skeleton ci.yml and the per-job conditions, not to the scan.
 
-- **Findings:** the action writes one report per scanned target in the [fuzz-issue action's](../actions/fuzz-issue/action.yml) report-directory contract ([fuzzer.md](fuzzer.md#the-failure-report-contract-v1)), and the job files or updates the one open issue labeled `security-nightly`; a clean night closes it ([tracking-issues.md](tracking-issues.md)). The full JSON rides the run's artifact.
+- **Findings:** the action writes one report per scanned target in the [fuzz-issue action's](../actions/fuzz-issue/action.yml) report-directory contract ([fuzzer.md](fuzzer.md#the-failure-report-contract-v1)), and the job runs the `security-nightly` stream through the [issue lifecycle](tracking-issues.md#issue-lifecycle) the tracking-issues page owns. The full JSON rides the run's artifact.
 
 - **Code scanning:** the SARIF is uploaded under the `trivy` category when the repository is public (personal-account code scanning is public-only).
 
