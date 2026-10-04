@@ -293,11 +293,10 @@ jobs:
         with:
           bun-version-file: files/bun/.bun-version
       # The docs-discipline probe's path check: a page naming a path a managed repository holds resolves through the shipped base tree.
-      # The probe takes files, and the runner's bash has no globstar, so each docs level is spelled.
       - name: Probe every path the pages name
         run: >-
-          bun .skills/skills/docs-discipline/scripts/docs-probe.mts --base files/base
-          README.md docs/*.md docs/modules/*.md docs/platform/*.md docs/platform/sync/*.md
+          git ls-files 'README.md' 'docs/*.md'
+          | xargs bun .skills/skills/docs-discipline/scripts/docs-probe.mts --base files/base
 
   # A caller job's permissions are the ceiling for the called workflow, so the scan grants sit here.
   codeql-javascript:
