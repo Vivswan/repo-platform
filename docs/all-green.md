@@ -71,7 +71,7 @@ The jobs beside them gate nothing:
 | Non-gating job | What it is |
 | --- | --- |
 | the `post-green` caller and the static legs | gate-downstream ([after the gate](#after-the-gate)) |
-| the schedule-only `nightly` caller of [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml)`@stable` | the nightly [security scan](security-scans.md), public repositories only |
+| the schedule-only `nightly` caller of [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml)`@stable` | the nightly [security scan](modules/security-scans.md), public repositories only |
 
 - **Why `nightly` has its own caller:** it runs on the schedule alone and files the tracking issue.
 - **Why public only:** a private repository pays for every job that runs, and a skipped job bills nothing.
@@ -90,7 +90,7 @@ The jobs beside them gate nothing:
 | `validate-managed-files` | every push and pull request | the action defers its verdict so the findings comment posts first; the `managed-files` step re-raises it |
 | `typography`, `file-size`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps)) |
 | `zizmor` | every push and pull request | SARIF upload on public repositories only; zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt of either pass runs once more and only the retry's result counts |
-| `trivy` | every push and pull request | the blocking half of the [security scans](security-scans.md) |
+| `trivy` | every push and pull request | the blocking half of the [security scans](modules/security-scans.md) |
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
 
 - **Beside it, one job each:** `semgrep` and `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix, on public repositories with an analyzable toolchain), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts.
@@ -111,7 +111,7 @@ The jobs beside them gate nothing:
 
 Anything that asks "is this commit green" reads the CHECK RUN, never the CI run's conclusion (a run whose gating job was skipped still concludes success).
 
-- **One implementation:** [shared/all_green.ts](../.github/scripts/shared/all_green.ts), shared by the [stable tag mover](build-provenance.md), the sync's delivery-commit gate, and the [settings green-commit gate](settings.md#when-it-runs).
+- **One implementation:** [shared/all_green.ts](../.github/scripts/shared/all_green.ts), shared by the [stable tag mover](platform/build-provenance.md), the sync's delivery-commit gate, and the [settings green-commit gate](settings.md#when-it-runs).
 - **The poll:** consumers that wake on their own (a dispatched tag move, the sync) can race a fresh check, so the read polls briefly before failing closed. The unwedge for a missing check is re-running the sha's CI run - the gate job posts the check.
 
 ## After the gate
@@ -129,7 +129,7 @@ all-green -> post-green -> site
              post-green.yml: move-stable -> read-directives -> sync-fleet -> settings-fleet
 ```
 
-**The `post-green` job** calls [post-green.yml](../.github/workflows/post-green.yml), whose `move-stable` leg moves the `stable` tag, the fleet's delivery ref, to the judged commit in that run - re-verifying main history and the check at the commit before the push ([build-provenance.md](build-provenance.md)).
+**The `post-green` job** calls [post-green.yml](../.github/workflows/post-green.yml), whose `move-stable` leg moves the `stable` tag, the fleet's delivery ref, to the judged commit in that run - re-verifying main history and the check at the commit before the push ([build-provenance.md](platform/build-provenance.md)).
 
 - post-green.yml's only other way in is a `workflow_dispatch` with a green main commit's `sha`, which runs the mover alone: the self-heal for a tag move that failed or was evicted after its gate passed (the next push heals it too; a sync meanwhile renders the commit the tag still names).
 - The file's header has the coalescing contract every leg there must satisfy.
@@ -224,7 +224,7 @@ checks + ci -> all-green -> post-green (repo-owned hook) -> release -> update-re
 
 **Its outputs drive the release hooks** `update-release`, `publish-release`, and `update-release-pr`; [the release pipeline](new-repo.md#the-release-pipeline-release-please) owns what each one does, and why the two repo-owned hooks are seeded in every repository whatever its modules.
 
-**The `site` leg** calls [reusable-site.yml](../.github/workflows/reusable-site.yml)`@stable` with the judged sha, holding the `pages` lane ([site.md](site.md)). The called workflow runs the repo-owned `.github/actions/site-build` hook from the checkout and reads the docs configuration from the repository's registration.
+**The `site` leg** calls [reusable-site.yml](../.github/workflows/reusable-site.yml)`@stable` with the judged sha, holding the `pages` lane ([site.md](modules/site.md)). The called workflow runs the repo-owned `.github/actions/site-build` hook from the checkout and reads the docs configuration from the repository's registration.
 
 - The leg has no push clause: it runs on every main run whose gate passed, so the nightly schedule is the rebuild and a dispatch is the manual deploy, and no site workflow of its own exists.
 

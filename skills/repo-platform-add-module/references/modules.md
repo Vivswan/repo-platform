@@ -20,7 +20,7 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 
 - No file of its own. The deploy is the `site` leg of `ci.yml`: every main run whose gate passed (a push, the nightly schedule, a dispatch) builds ONE Pages site. It holds the repo-owned `.github/actions/site-build/action.yml` hook's output (the repository's website, at the root) and `docs/` (rendered under the fleet theme, at `/<site.path>/` beside a website, else at the root).
 - PR check: fleet CI's `docs-check` job builds `docs/` strictly on every PR of a repo that has one, unless `site.path: null` turns the docs half off.
-- The hook is a base starter every repository carries, seeded as a no-op (output `dist` empty: only the docs directory publishes, when there is one). Fill it in with the website's build: inputs `base-path` and `origin`, output `dist` naming the built directory. repo-platform's `docs/site.md` has the contract and examples.
+- The hook is a base starter every repository carries, seeded as a no-op (output `dist` empty: only the docs directory publishes, when there is one). Fill it in with the website's build: inputs `base-path` and `origin`, output `dist` naming the built directory. repo-platform's `docs/modules/site.md` has the contract and examples.
 - Keys: `site.path` (URL segment the docs mount under beside a website; default `docs`; `null` turns the docs half off, for a website that renders `docs/` itself), `site.include` (extra trees rendered into the docs: `{path, mount, page}`, every entry naming its page file), `labels.site` (link-rot tracking label; default `docs-link-rot`).
 - Conventions: `docs/README.md` is the landing page and must exist when the repo has `docs/`; titles, order, and groups come from frontmatter and the landing's link table; links resolve inside `docs/` or are absolute.
 - Companion: Pages is enabled by the module's settings layer on the next settings apply; before it, enable Pages with Source: GitHub Actions by hand.
@@ -49,7 +49,7 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Starters: `nightly-fuzz.yml` (fuzzer) / `nightly.yml` (nightly). The placeholder step is a green no-op until customized.
 - Keys: `labels.fuzzer` (default `fuzz-nightly`) / `labels.nightly` (default `nightly-failure`); the label rules, including the starter's two `label:` inputs, are in [Module keys](../SKILL.md#module-keys).
 - Removal: remove `labels.<key>` together with the module (a leftover key fails the plan). The label leaves the rendered settings on that sync and the next apply deletes it. The starter keeps running; delete it yourself or declare its label in `.github/settings.local.yml` first.
-- Depth: the platform's `docs/fuzzer.md` and `docs/nightly.md`.
+- Depth: the platform's `docs/modules/fuzzer.md` and `docs/modules/nightly.md`.
 
 ## pr-title
 

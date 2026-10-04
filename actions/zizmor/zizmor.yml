@@ -6,6 +6,6 @@ rules:
     config:
       policies:
         # The stable tag is the fleet's green-gated delivery channel
-        # (docs/build-provenance.md): a moving ref on purpose.
+        # (docs/platform/build-provenance.md): a moving ref on purpose.
         "{{github_username}}/repo-platform/*": ref-pin
         "*": hash-pin

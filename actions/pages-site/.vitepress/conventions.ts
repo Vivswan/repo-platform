@@ -34,7 +34,7 @@ export function isUnwalkedEntry(name: string): boolean {
  *  A page with one is laid out as a landing wherever it serves (deriveRewrites decides which owns the directory URL). */
 export const LANDING_FILES: ReadonlySet<string> = new Set(["README.md", "index.md"]);
 
-/** docs/site.md, "Other roots on the site". */
+/** docs/modules/site.md, "Other roots on the site". */
 export interface IncludeRoot {
   /** Repo-relative source directory (`skills`). */
   path: string;

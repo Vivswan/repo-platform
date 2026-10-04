@@ -1,6 +1,5 @@
 ---
 order: 150
-group: Modules
 ---
 
 # Fuzzer
@@ -17,7 +16,7 @@ Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter wo
 
 | Key in `.repo-platform.yml` | Meaning | Default |
 |---|---|---|
-| `labels.fuzzer` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | the fuzzer module's `tracking_label` default in [files.yml](../files.yml) |
+| `labels.fuzzer` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | the fuzzer module's `tracking_label` default in [files.yml](../../files.yml) |
 
 The label is a registration key rather than a starter edit alone because the settings layer must declare it too; [Tracking issues: the label is the stream](tracking-issues.md#the-label-is-the-stream) has the reasoning and the reserved-name rules.
 
@@ -33,7 +32,7 @@ The label is a registration key rather than a starter edit alone because the set
 
 ## The failure-report contract (v1)
 
-The [fuzz-issue action](../actions/fuzz-issue/fuzz-issue.ts) knows nothing about any repository's fuzzer. Your fuzz step communicates failures through a directory (the action's `artifacts-dir` input, relative to the workspace):
+The [fuzz-issue action](../../actions/fuzz-issue/fuzz-issue.ts) knows nothing about any repository's fuzzer. Your fuzz step communicates failures through a directory (the action's `artifacts-dir` input, relative to the workspace):
 
 ```
 <artifacts-dir>/
@@ -43,7 +42,7 @@ The [fuzz-issue action](../actions/fuzz-issue/fuzz-issue.ts) knows nothing about
   stray-file.txt      # files at the top level are ignored
 ```
 
-- **The failure subdirectory's name** identifies the failure (the fuzz target, the suite) and must match `DIR_NAME` in [actions/fuzz-issue/fuzz-issue.ts](../actions/fuzz-issue/fuzz-issue.ts): letters, digits, dots, underscores, dashes.
+- **The failure subdirectory's name** identifies the failure (the fuzz target, the suite) and must match `DIR_NAME` in [actions/fuzz-issue/fuzz-issue.ts](../../actions/fuzz-issue/fuzz-issue.ts): letters, digits, dots, underscores, dashes.
 
 - **An absent or empty directory** on a failed job makes the action file a bare notice pointing at the run log; that covers failures outside the fuzz step itself.
 
@@ -62,7 +61,7 @@ Size limits:
 | without an `artifact-name` | no per-failure cap: the body is the only record, so every report rides whole, each cut at its share of the body budget with a count of the lines missing |
 | whole issue body | `MAX_BODY` characters, under GitHub's cap; failures included oldest-first by directory mtime (meaningful only where the reports were written: re-extracting artifacts, as the [shard aggregation](#sharding) does, stamps fresh mtimes), then a note says how many were omitted |
 
-The three constants live in [actions/fuzz-issue/fuzz-issue.ts](../actions/fuzz-issue/fuzz-issue.ts). Keep the replay block near the top of `report.md`: lines past `REPORT_LINES` survive only in the artifact.
+The three constants live in [actions/fuzz-issue/fuzz-issue.ts](../../actions/fuzz-issue/fuzz-issue.ts). Keep the replay block near the top of `report.md`: lines past `REPORT_LINES` survive only in the artifact.
 
 ## Regression pinning, and why auto-close is honest
 

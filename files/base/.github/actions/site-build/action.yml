@@ -1,6 +1,6 @@
 # Repo-owned: seeded once by the fleet sync, never overwritten by a later sync. ci.yml's `site` leg runs this action
 # on the judged commit before the fleet renders docs/ and deploys: build this repository's own website here.
-# Contract and examples: the fleet's docs/site.md.
+# Contract and examples: the fleet's docs/modules/site.md.
 
 name: Site Build
 description: Builds this repository's own website for the fleet's Pages deploy.

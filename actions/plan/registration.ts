@@ -138,7 +138,7 @@ export const registrationSchema = z.strictObject({
     description: plainText("project.description"),
     copyright_holder: plainText("project.copyright_holder").pipe(z.string().min(1)).optional(),
   }),
-  // `path: null` turns the docs half off (docs/site.md, "Turning the docs
+  // `path: null` turns the docs half off (docs/modules/site.md, "Turning the docs
   // half off"): the site is the hook's website alone.
   site: z
     .strictObject({

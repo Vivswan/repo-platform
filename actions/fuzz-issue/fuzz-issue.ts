@@ -2,7 +2,7 @@
  * Assembles the text the composite sends on - the issue body to the stock issue action (report mode) or the close comment to gh (resolve mode) -
  * into a file under RUNNER_TEMP named by the `file` output; the gh and issue plumbing is action.yml's.
  * Knows nothing about any repo's fuzzer: the producer writes the replay command, and the failure-report layout it reads
- * is the contract in docs/fuzzer.md ("The failure-report contract (v1)").
+ * is the contract in docs/modules/fuzzer.md ("The failure-report contract (v1)").
  */
 
 import {

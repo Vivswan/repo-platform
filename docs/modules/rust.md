@@ -1,11 +1,10 @@
 ---
 order: 160
-group: Modules
 ---
 
 # Rust
 
-Selecting the `rust` module gives a repository a `Cargo.toml` workspace-root starter carrying the fleet's lint floor ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/rust/Cargo.toml)), and the cargo steps that make the floor a gate. This page is the floor's contract; the toolchain version stays the repository's own, at Rust 1.84 or newer ([toolchains.md](toolchains.md#overriding-per-toolchain)).
+Selecting the `rust` module gives a repository a `Cargo.toml` workspace-root starter carrying the fleet's lint floor ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/rust/Cargo.toml)), and the cargo steps that make the floor a gate. This page is the floor's contract; the toolchain version stays the repository's own, at Rust 1.84 or newer ([toolchains.md](../toolchains.md#overriding-per-toolchain)).
 
 ## The floor
 
@@ -49,14 +48,14 @@ pub fn read(p: &u8) -> u8 {
 
 ## How a repository takes it
 
-A starter is written once ([platform/sync/writer.md](platform/sync/writer.md#classes)), so the path depends on what the repository already has:
+A starter is written once ([platform/sync/writer.md](../platform/sync/writer.md#classes)), so the path depends on what the repository already has:
 
 1. **A new repository:** the sync writes `Cargo.toml` before any crate exists. `cargo new crates/<name>` inside the workspace adds the member and writes `[lints] workspace = true` into it, so every crate inherits the floor.
 2. **A repository that already owns `Cargo.toml`:** copy the three lint tables into it by hand, and give each member crate `[lints] workspace = true`. Its workflows are starters too, written once, so copy the cargo steps from the [three rust blocks](https://github.com/Vivswan/repo-platform/tree/main/files/rust/.github/workflows) into its `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` as well.
 
 ## The gate
 
-The module's toolchain blocks ([platform/sync/files.md](platform/sync/files.md#filesyml-reference)) put these steps into the repo-owned `checks.yml`:
+The module's toolchain blocks ([platform/sync/files.md](../platform/sync/files.md#filesyml-reference)) put these steps into the repo-owned `checks.yml`:
 
 ```yaml
 - uses: actions-rust-lang/setup-rust-toolchain@<sha> # v2.0.0

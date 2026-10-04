@@ -1,6 +1,6 @@
 // The Trivy JSON field names are external, and a matched secret in an issue body is the one silent security failure
 // here. The report shape is a contract with fuzz-issue: only the first 60 lines survive into the issue when an artifact
-// exists (docs/fuzzer.md), so a replay block below the rows would vanish, and a directory named outside fuzz-issue's
+// exists (docs/modules/fuzzer.md), so a replay block below the rows would vanish, and a directory named outside fuzz-issue's
 // DIR_NAME is dropped without a word.
 
 import { describe, expect, test } from "bun:test";

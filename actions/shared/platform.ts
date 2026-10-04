@@ -28,7 +28,7 @@ export const MANAGED_HEADER_PATTERN = new RegExp(
 
 export const SYNC_BOT = `${PLATFORM_NAME}-sync`;
 
-/** The moving tag the fleet's `uses:` pins ride (docs/build-provenance.md); post-green's mover pushes refs/tags/<this>. */
+/** The moving tag the fleet's `uses:` pins ride (docs/platform/build-provenance.md); post-green's mover pushes refs/tags/<this>. */
 export const DELIVERY_REF = "stable";
 
 export const AUTOMATION_BRANCH = `automation/${PLATFORM_NAME}`;

@@ -1,4 +1,4 @@
-// Pure planning for the site (docs/site.md); build.ts owns all I/O.
+// Pure planning for the site (docs/modules/site.md); build.ts owns all I/O.
 // That split lets the tests force every layout row without a git repository or a build.
 
 import {
@@ -156,7 +156,7 @@ export function parseSiteConfig(json: string): SiteConfig {
   };
 }
 
-/** The table in docs/site.md, "Layout". */
+/** The table in docs/modules/site.md, "Layout". */
 export function siteLayout(input: {
   dist: string;
   hasDocs: boolean;

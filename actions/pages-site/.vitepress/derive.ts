@@ -76,7 +76,7 @@ export function deriveRewrites(
   return rewrites;
 }
 
-/** `order` and `group` are the sidebar's frontmatter keys (docs/site.md). */
+/** `order` and `group` are the sidebar's frontmatter keys (docs/modules/site.md). */
 export interface PageMeta {
   title: string;
   order: number | null;

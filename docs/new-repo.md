@@ -36,10 +36,10 @@ git commit -m "chore: initialize"
 ```
 
 - **`modules`** is any combination of `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster).
-- **Module parameters** are read from the same file (see [docs/site.md](site.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)).
+- **Module parameters** are read from the same file (see [docs/modules/site.md](modules/site.md), [docs/modules/fuzzer.md](modules/fuzzer.md), and [docs/modules/nightly.md](modules/nightly.md)).
 - **Nothing else is asked:** the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
 
-The files themselves arrive as the first sync PR ([step 4](#4-publish-and-grant-the-fleet-pat)): the writer copies them from the main commit the `stable` tag names, re-verified as green main history before any row consumes it ([build provenance](build-provenance.md#provenance-is-the-commit-itself)).
+The files themselves arrive as the first sync PR ([step 4](#4-publish-and-grant-the-fleet-pat)): the writer copies them from the main commit the `stable` tag names, re-verified as green main history before any row consumes it ([build provenance](platform/build-provenance.md#provenance-is-the-commit-itself)).
 
 **The list of platform files** is [files.yml](../files.yml) at the commit the `stable` tag names; [platform/sync/files.md](platform/sync/files.md#filesyml-reference) explains each entry's `class` and `when`. Four files matter later:
 
@@ -93,7 +93,7 @@ CI is split so the platform can keep improving its half while each repo keeps it
 | `.github/workflows/checks.yml` | repo-owned (a starter, written once) | the repository's own test and lint jobs (multiple jobs, matrices, and further local reusable workflows all work); they run inside the gate through the `checks` job |
 | `.github/workflows/post-green.yml` | repo-owned (a starter, written once) | the repository's own green-gated work, seeded as a no-op ([its contract](all-green.md#the-post-green-hook-in-every-managed-repository)) |
 | `.github/workflows/update-release.yml`, `update-release-pr.yml` | repo-owned (a starter, written once) | the release hooks ci.yml's release legs call; seeded as no-ops in every repository, module or not ([the release pipeline](#the-release-pipeline-release-please)) |
-| `.github/actions/site-build/action.yml` | repo-owned (a starter, written once) | the site-build hook the `site` leg runs from the checkout before the fleet deploys: the repository's own website build goes there; seeded as a no-op in every repository, module or not ([site.md](site.md#the-hook-githubactionssite-buildactionyml)) |
+| `.github/actions/site-build/action.yml` | repo-owned (a starter, written once) | the site-build hook the `site` leg runs from the checkout before the fleet deploys: the repository's own website build goes there; seeded as a no-op in every repository, module or not ([site.md](modules/site.md#the-hook-githubactionssite-buildactionyml)) |
 
 **A starter is written once** and never touched by a sync after that, so when the platform INTRODUCES a starter at a path a repository already owns a file at, the writer leaves the repository's file alone and reports the row `unchanged`. Check the kept file against the interface its callers expect (the [sync-PR skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md) has the triage row).
 
@@ -184,10 +184,10 @@ The modules add:
 - **bun:** the fleet's `.bun-version` pin ([toolchains.md](toolchains.md)). Dependabot's bun PRs install with the lockfile Dependabot wrote; a PR whose frozen install fails is fixed by hand, or by re-running Dependabot on it.
 - **bun, a known limitation, accepted:** Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2 ([dependabot-core#15848](https://github.com/dependabot/dependabot-core/issues/15848)). So a Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
 - **deno:** a managed `deno-audit.yml` that runs `deno audit` weekly, on lockfile-touching PRs, and on pushes to main that change `deno.lock`. It fails when any locked dependency (JSR or npm, transitive included) has a high or critical advisory. Every tracked `deno.lock` is audited, nested workspace lockfiles included; a repository with no tracked `deno.lock` fails the run.
-- **rust:** a repo-owned `Cargo.toml` workspace root carrying the fleet's lint floor, and the cargo steps in `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` that gate on it. The floor, how a repository takes it, and the gate: [rust.md](rust.md).
+- **rust:** a repo-owned `Cargo.toml` workspace root carrying the fleet's lint floor, and the cargo steps in `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` that gate on it. The floor, how a repository takes it, and the gate: [rust.md](modules/rust.md).
 - **Any toolchain:** a repo-owned `auto-format.yml` starter, prefilled with each selected toolchain's formatter: label a PR `fix-lint` to get a formatting commit pushed to it. Width limits apply to code only: the deno step runs `deno fmt --prose-wrap preserve`, so markdown prose keeps its line breaks. [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies.
-- **fuzzer:** a repo-owned `nightly-fuzz.yml` starter - placeholder fuzz step, seeded replay inputs, failure artifact upload, [tracking-issue](tracking-issues.md) filing, auto-close on green. Replace the placeholder with your fuzzer; [fuzzer.md](fuzzer.md) has the contract.
-- **nightly:** a repo-owned `nightly.yml` starter for checks too slow for every PR - placeholder step, tracking issue on failure, auto-close on the next green night ([nightly.md](nightly.md)).
+- **fuzzer:** a repo-owned `nightly-fuzz.yml` starter - placeholder fuzz step, seeded replay inputs, failure artifact upload, [tracking-issue](modules/tracking-issues.md) filing, auto-close on green. Replace the placeholder with your fuzzer; [fuzzer.md](modules/fuzzer.md) has the contract.
+- **nightly:** a repo-owned `nightly.yml` starter for checks too slow for every PR - placeholder step, tracking issue on failure, auto-close on the next green night ([nightly.md](modules/nightly.md)).
 
 ### Fix commits and re-triggering CI
 

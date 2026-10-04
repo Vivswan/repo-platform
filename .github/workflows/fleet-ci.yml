@@ -115,7 +115,7 @@ jobs:
         with:
           upload-sarif: ${{ steps.plan.outputs.private != 'true' }}
 
-      # Blocks for every visibility (docs/security-scans.md); the only bypass is the repository's
+      # Blocks for every visibility (docs/modules/security-scans.md); the only bypass is the repository's
       # .trivyignore.yaml, statement and expiry per entry.
       - id: trivy
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}

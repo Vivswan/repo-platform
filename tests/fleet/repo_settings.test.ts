@@ -83,7 +83,7 @@ test("the stable tag is undeletable and otherwise unruled, so the lease move sta
   ]);
   // Deletion ONLY: git classifies every update of an existing tag as a
   // forced update, so an update or non_fast_forward rule would block
-  // the mover (docs/build-provenance.md).
+  // the mover (docs/platform/build-provenance.md).
   expect(stableTag?.rules?.map((r) => r.type)).toEqual(["deletion"]);
   // Declared EMPTY, never omitted: only the explicit empty list lets
   // the nightly heal clear an out-of-band bypass actor.

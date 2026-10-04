@@ -1,4 +1,4 @@
-# The legs after the all-green gate (docs/all-green.md, "After the gate"; the trust model: docs/build-provenance.md).
+# The legs after the all-green gate (docs/all-green.md, "After the gate"; the trust model: docs/platform/build-provenance.md).
 # Inside a called run github.event_name is the CALLER's event, so `!= 'workflow_dispatch'` is what gates the call-only legs.
 #
 # Every leg holds three invariants:
