@@ -260,6 +260,20 @@ jobs:
         with:
           check: "true"
           config: ${{ steps.plan.outputs.config }}
+      # The /docs-discipline shape rule (.vale.ini and .vale/styles/House); the release by sha256, as pinact above.
+      - name: Install the pinned Vale release
+        env:
+          VALE_VERSION: 3.24.0
+          VALE_SHA256: 867534ddb678abca7f214bc4706ead0922bd5252ffe8035fc227013f66c8b214
+        run: |
+          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/vale.tar.gz" \
+            "https://github.com/vale-cli/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz"
+          echo "${VALE_SHA256}  $RUNNER_TEMP/vale.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/vale-bin"
+          tar -xzf "$RUNNER_TEMP/vale.tar.gz" -C "$RUNNER_TEMP/vale-bin" vale
+          echo "$RUNNER_TEMP/vale-bin" >>"$GITHUB_PATH"
+      - name: Vale over the pages (no paragraph or list item over 70 words)
+        run: vale README.md docs/*.md
 
   # vitepress in the runner's directory topology (workspace, action tree, and RUNNER_TEMP apart): the
   # build's module resolution breaks only under that separation, which a laptop layout cannot

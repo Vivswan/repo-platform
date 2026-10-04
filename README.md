@@ -8,11 +8,13 @@ Everything originates here. This repo pushes standards files into managed repos 
 
 Sources on `main`, a moving `stable` tag, sync PRs into each repo:
 
-- [files.yml](files.yml) is the file list: every path the platform writes, its ownership class (`managed`, `split`, `starter`), the module or visibility condition it lands under, and its source under `files/`. The `modules` section holds each module's data (toolchain pin, dependabot ecosystems, gitignore sources, tracking label); the `settings` section declares the settings layers and the condition each lands under; the `mirrors` list declares the fleet's mirrors (the `AGENTS.md` symlinks) in the registration's grammar.
-- Every green `main` commit moves the `stable` tag, the one delivery channel: the written workflows pin `@stable` and read `files.yml` and `files/` (the writer), `actions/` (the composite actions), and the fleet-facing reusable workflows straight from that commit. Every path is extraction-safe.
-- [sync-repos.yml](.github/workflows/sync-repos.yml) copies the files at the `stable` commit into each managed repo on a dispatch, a labeled merge, or the weekly cron, then pushes a branch and PR into it with the fleet PAT ([docs/sync.md](docs/sync.md)). A report that holds nothing arms squash auto-merge and lands once the repo's `all-green` check passes; anything a human should see (replaced local edits, a held retirement, a refused mirror, a registration note) stays for review.
+- [files.yml](files.yml) is the file list: every path the platform writes, its ownership class (`managed`, `split`, `starter`), the module or visibility condition it lands under, and its source under `files/`.
+- The same file holds each module's data (toolchain pin, dependabot ecosystems, gitignore sources, tracking label) in `modules`, the settings layers and the condition each lands under in `settings`, and the fleet's mirrors (the `AGENTS.md` symlinks) in `mirrors`, in the registration's grammar.
+- Every green `main` commit moves the `stable` tag, the one delivery channel. The written workflows pin `@stable` and read `files.yml`, `files/`, `actions/`, and the reusable workflows straight from that commit, so every path is extraction-safe.
+- [sync-repos.yml](.github/workflows/sync-repos.yml) copies the files at the `stable` commit into each managed repo on a dispatch, a labeled merge, or the weekly cron, then pushes a branch and PR into it with the fleet PAT ([docs/sync.md](docs/sync.md)).
+- A report that holds nothing arms squash auto-merge, and the PR lands once that repo's `all-green` check passes. Anything a human should see (replaced local edits, a held retirement, a refused mirror, a registration note) stays for review.
 
-Fleet settings are rendered into every managed repo: the sync writes a managed `.github/settings.yml` as a merge of plain YAML documents - the fleet baseline, the layers `files.yml` selects for the repo (its visibility, its modules, CodeQL where it runs), the repo's own `.github/settings.local.yml` (a starter written once, for its identity keys and its own labels), then a fleet override layer no repo can weaken - and [settings-repos.yml](.github/workflows/settings-repos.yml) applies each rendered file in a github-settings-as-code job of its own ([docs/settings.md](docs/settings.md)).
+Fleet settings are rendered into every managed repo as a managed `.github/settings.yml`, merged from the fleet layers and the repo's own `.github/settings.local.yml` starter. [settings-repos.yml](.github/workflows/settings-repos.yml) applies each rendered file in a github-settings-as-code job of its own; [docs/settings.md](docs/settings.md) owns the layers.
 
 Which files the platform owns, and how strongly, is declared as data in `files.yml`, and every sync stamps the resulting map into the repo as `.github/repo-platform-manifest.json`, so a repo always carries the classification of its own files.
 
@@ -67,9 +69,20 @@ The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_sco
 
 ## Credentials
 
-One fine-grained PAT covers the whole fleet, stored ONLY in this repo, as the `REPO_PLATFORM_TOKEN` secret of the `fleet-operator` environment ([create it with the permissions pre-selected](https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write&actions=read&environments=write)), granted access to the managed repositories. The token is a secret of the `fleet-operator` environment ([.github/settings.local.yml](.github/settings.local.yml)), whose branch policy admits main runs alone: only the operator's jobs there can read it. The settings apply creates and reconciles the environment from that declaration; once it exists, store the token with `gh secret set REPO_PLATFORM_TOKEN --env fleet-operator`.
+One fine-grained PAT covers the whole fleet, stored ONLY in this repo as the `REPO_PLATFORM_TOKEN` secret of the `fleet-operator` environment, whose branch policy admits main runs alone.
 
-Every permission in that link is a hard requirement: Contents, Pull requests, Workflows, Administration, and Issues write for the sync and the settings apply; Actions read and Environments write for the `fleet-operator` environment the settings run reconciles. Without one of them a sync leg or a settings run fails loudly, because a section the token cannot reach must not hide drift behind a green run. In particular a push GitHub refuses for a `.github/workflows/` change (the token lacks Workflows write) fails the sync for that repo with GitHub's error; nothing is delivered partially. A missing secret is a misconfiguration of this repo, and the failure carries the setup link.
+1. [Create the token with the permissions pre-selected](https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write&actions=read&environments=write) and grant it access to the managed repositories.
+2. Let the settings apply create the environment from [.github/settings.local.yml](.github/settings.local.yml); it reconciles the declaration on every run.
+3. Store the token: `gh secret set REPO_PLATFORM_TOKEN --env fleet-operator`.
+
+Every permission in that link is a hard requirement. A section the token cannot reach must not hide drift behind a green run, so a missing one fails the leg loudly with GitHub's error and nothing is delivered partially.
+
+| Permission | Needed by |
+| --- | --- |
+| Contents, Pull requests, Workflows, Administration, Issues: write | the sync and the settings apply; a `.github/workflows/` push GitHub refuses without Workflows write fails that repo's sync whole |
+| Actions: read, Environments: write | the `fleet-operator` environment the settings run reconciles |
+
+A missing secret is a misconfiguration of this repo, and the failure carries the setup link.
 
 Managed repos need no secret.
 
