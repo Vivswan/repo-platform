@@ -2,7 +2,7 @@
 
 repo-platform manages standards files, CI workflows, and repository settings across Vivswan's repositories from one place: a writer copies each repo's files from one file list, push-based sync PRs keep them current, and reusable workflows run the fleet's CI. Code is the source of truth, so each page links to the file that owns a behavior instead of restating it.
 
-## Pages by task
+## I want to...
 
 | Goal | Read |
 |---|---|
@@ -42,29 +42,23 @@ The groups below are the sidebar's, in its order.
 
 ### Start here
 
-| Page | Covers |
-|---|---|
-| [New repo](new-repo.md) | scaffold a repository, register it with the fleet, and receive its first sync PR |
-| [Fleet guidelines](fleet-guidelines.md) | the conventions every managed repository follows, each with what enforces it |
-| [All-green](all-green.md) | the required check: ci.yml's own gate job judging every needed result |
-| [Settings](settings.md) | the six-layer settings merge and how applies run |
+- [New repo](new-repo.md): scaffold a repository, register it with the fleet, and receive its first sync PR.
+- [Fleet guidelines](fleet-guidelines.md): the conventions every managed repository follows, each with what enforces it.
+- [All-green](all-green.md): the required check: ci.yml's own gate job judging every needed result.
+- [Settings](settings.md): the six-layer settings merge and how applies run.
 
 ### Modules
 
-| Page | Covers |
-|---|---|
-| [Site](site.md) | one GitHub Pages site per repository: the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme |
-| [Nightly](nightly.md) | a nightly CI stream for checks too slow for every PR |
-| [Fuzzer](fuzzer.md) | the nightly fuzz starter and its failure-report contract |
-| [Rust](rust.md) | the `Cargo.toml` lint floor every Rust repository carries, and the cargo gate that enforces it |
+- [Site](site.md): one GitHub Pages site per repository: the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme.
+- [Nightly](nightly.md): a nightly CI stream for checks too slow for every PR.
+- [Fuzzer](fuzzer.md): the nightly fuzz starter and its failure-report contract.
+- [Rust](rust.md): the `Cargo.toml` lint floor every Rust repository carries, and the cargo gate that enforces it.
 
 ### Fleet operations
 
-| Page | Covers |
-|---|---|
-| [Toolchain pins](toolchains.md) | the fleet-wide toolchain version pins and how to override one |
-| [Tracking issues](tracking-issues.md) | the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming |
-| [Security scans](security-scans.md) | Trivy fleet-wide (the blocking gate, the expiring bypass file, the nightly scan's tracking issues) and semgrep on public repositories |
-| [Sync](sync.md) | the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories |
-| [Build provenance](build-provenance.md) | why the `stable` delivery tag is trustworthy, and what residual trust remains |
-| [Eject](eject.md) | pausing sync PRs, or detaching a repository entirely |
+- [Toolchain pins](toolchains.md): the fleet-wide toolchain version pins and how to override one.
+- [Tracking issues](tracking-issues.md): the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
+- [Security scans](security-scans.md): Trivy fleet-wide (the blocking gate, the expiring bypass file, the nightly scan's tracking issues) and semgrep on public repositories.
+- [Sync](sync.md): the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
+- [Build provenance](build-provenance.md): why the `stable` delivery tag is trustworthy, and what residual trust remains.
+- [Eject](eject.md): pausing sync PRs, or detaching a repository entirely.

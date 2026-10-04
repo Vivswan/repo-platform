@@ -14,19 +14,17 @@ This page is the settings model of a managed repository: the layers the sync ren
 |---|---|---|---|
 | 1 | Fleet baseline | [files/settings/baseline.yml](../files/settings/baseline.yml) | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels |
 | 2 | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | public: `security_and_analysis`, and the `main` ruleset's `code_quality` and `copilot_code_review` rules; private: the `settings-as-code-report` marker label |
-| 3 | Module layer | `files/<module>/settings.yml` | what selecting that module adds (the table below) |
+| 3 | Module layer | `files/<module>/settings.yml` | what selecting that module adds (the list below) |
 | 4 | CodeQL layer | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml) | the `code_scanning` rule, for public repos with a CodeQL toolchain |
 | 5 | Repo overlay | the repo's own `.github/settings.local.yml` | identity keys (`description`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides |
 | 6 | Fleet override | [files/settings/override.yml](../files/settings/override.yml) | the invariants no repo may weaken (the list below) |
 
 What a module layer adds:
 
-| Module | Its layer adds |
-|---|---|
-| a toolchain module | its dependabot label |
-| site | the Pages build type (Actions-workflow builds) and the `github-pages` environment: no reviewers, no wait, and the branch policy GitHub creates it with, `main` alone |
-| release-please | four labels, the `release-tags` ruleset, and the Actions grant its release PR needs (`can_approve_pull_request_reviews`) |
-| pr-title | [the pr-title ruleset](#the-pr-title-ruleset) |
+- **A toolchain module:** its dependabot label.
+- **site:** the Pages build type (Actions-workflow builds) and the `github-pages` environment: no reviewers, no wait, and the branch policy GitHub creates it with, `main` alone.
+- **release-please:** four labels, the `release-tags` ruleset, and the Actions grant its release PR needs (`can_approve_pull_request_reviews`).
+- **pr-title:** [the pr-title ruleset](#the-pr-title-ruleset).
 
 - **Why layer 4 is gated:** GitHub rejects the `code_scanning` rule on private repos, and a repo with no CodeQL run would block every merge on it.
 - **Layer 6 holds:** the squash-only merge policy (the PR title as the squash subject, a blank squash body), `allow_auto_merge`, `enable_vulnerability_alerts`, the `main` and `non-bypassable` protection rulesets, and the rulesets' `_undeclared: delete` policy.
@@ -91,11 +89,9 @@ The render and the apply read one dialect, spelled out in the library's [layerin
 
 What re-renders on main without a PR of the repository's own:
 
-| Trigger | When |
-|---|---|
-| the Tuesday cron | weekly |
-| a `fleet-sync:public` or `fleet-sync:all` label on a merged platform PR ([all-green.md](all-green.md#opting-a-pr-into-an-immediate-fleet-sync)) | from that merge's green run |
-| a manual dispatch (below) | at once |
+- **The Tuesday cron:** weekly.
+- **A `fleet-sync:public` or `fleet-sync:all` label on a merged platform PR:** from that merge's green run ([all-green.md](all-green.md#opting-a-pr-into-an-immediate-fleet-sync)).
+- **A manual dispatch (below):** at once.
 
 ```bash
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true

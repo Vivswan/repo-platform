@@ -70,10 +70,8 @@ One fine-grained PAT covers the whole fleet, stored ONLY in this repo as the `RE
 
 Every permission in that link is a hard requirement. A section the token cannot reach must not hide drift behind a green run, so a missing one fails the leg loudly with GitHub's error and nothing is delivered partially.
 
-| Permission | Needed by |
-| --- | --- |
-| Contents, Pull requests, Workflows, Administration, Issues: write | the sync and the settings apply; a `.github/workflows/` push GitHub refuses without Workflows write fails that repo's sync whole |
-| Actions: read, Environments: write | the `fleet-operator` environment the settings run reconciles |
+- **Contents, Pull requests, Workflows, Administration, and Issues write** serve the sync and the settings apply; a `.github/workflows/` push GitHub refuses without Workflows write fails that repo's sync whole.
+- **Actions read and Environments write** serve the `fleet-operator` environment the settings run reconciles.
 
 A missing secret is a misconfiguration of this repo, and the failure carries the setup link.
 
