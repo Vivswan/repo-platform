@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
-// `bun run check` runs this first with --if-missing (package.json), so a fresh worktree needs no manual install.
+// --check is the pre-commit hook's form (check:static): a hook never touches the network (docs/fleet-guidelines.md).
 //
-// Usage: bun scripts/bootstrap.ts [--if-missing]
+// Usage: bun scripts/bootstrap.ts [--check]
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -46,21 +46,25 @@ export function runtimeMismatch(local: string, pinned: string): string | null {
     : `local bun ${local.trim()} is not at the pinned ${want} (${BUN_PIN_FILE}); install the pin, a green under another runtime is unreliable`;
 }
 
-function main(argv: string[]): void {
-  const mismatch = runtimeMismatch(
-    Bun.version,
-    readFileSync(join(REPO_ROOT, BUN_PIN_FILE), "utf-8"),
-  );
-  if (mismatch !== null) {
-    console.error(`bootstrap: ${mismatch}`);
-    process.exit(1);
-  }
-  const all = bunLockDirs(REPO_ROOT);
-  const dirs = argv.includes("--if-missing") ? missingNodeModules(REPO_ROOT, all) : all;
-  for (const dir of dirs) {
-    console.log(`bootstrap: bun install --frozen-lockfile in ${dir}`);
-    must(["bun", "install", "--frozen-lockfile", "--silent"], { cwd: join(REPO_ROOT, dir) });
-  }
+function fail(message: string): 1 {
+  console.error(`bootstrap: ${message}`);
+  return 1;
 }
 
-if (import.meta.main) main(process.argv.slice(2));
+export function main(argv: string[], root: string): number {
+  const mismatch = runtimeMismatch(Bun.version, readFileSync(join(root, BUN_PIN_FILE), "utf-8"));
+  if (mismatch !== null) return fail(mismatch);
+  const dirs = bunLockDirs(root);
+  if (argv.includes("--check")) {
+    const missing = missingNodeModules(root, dirs);
+    if (missing.length === 0) return 0;
+    return fail(`node_modules missing in ${missing.join(", ")}; run \`bun run bootstrap\``);
+  }
+  for (const dir of dirs) {
+    console.log(`bootstrap: bun install --frozen-lockfile in ${dir}`);
+    must(["bun", "install", "--frozen-lockfile", "--silent"], { cwd: join(root, dir) });
+  }
+  return 0;
+}
+
+if (import.meta.main) process.exit(main(process.argv.slice(2), REPO_ROOT));

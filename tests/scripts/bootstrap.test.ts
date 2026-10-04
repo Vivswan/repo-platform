@@ -1,7 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { bunLockDirs, missingNodeModules, runtimeMismatch } from "../../scripts/bootstrap";
+import {
+  BUN_PIN_FILE,
+  bunLockDirs,
+  main,
+  missingNodeModules,
+  runtimeMismatch,
+} from "../../scripts/bootstrap";
 import { tempDirs } from "../shared/temp_dir";
 
 const root = join(import.meta.dir, "../..");
@@ -28,6 +34,36 @@ describe("bunLockDirs", () => {
     writeFileSync(join(base, "bun.lock"), "");
     expect(bunLockDirs(base)).toEqual([".", "actions/parent/nested", "actions/with-lock"]);
   });
+});
+
+// The flag comes from check:static itself: a flag the script no longer recognizes would turn the hook step back
+// into an install, and nothing else would notice.
+test("the check:static step refuses a package without node_modules, naming bun run bootstrap", () => {
+  const scripts = (
+    JSON.parse(readFileSync(join(root, "package.json"), "utf-8")) as {
+      scripts: Record<string, string>;
+    }
+  ).scripts;
+  const [bootstrapStep] = scripts["check:static"].split(" && ");
+  expect(bootstrapStep).toStartWith("bun scripts/bootstrap.ts ");
+  const argv = bootstrapStep.split(" ").slice(2);
+
+  const base = temp.dir("bootstrap-check-");
+  plant(base, "files/bun", []);
+  writeFileSync(join(base, BUN_PIN_FILE), `${Bun.version}\n`);
+  plant(base, "actions/pkg", ["bun.lock", "package.json"]);
+  const stderr = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    expect(main(argv, base)).toBe(1);
+    expect(stderr.mock.calls).toEqual([
+      ["bootstrap: node_modules missing in actions/pkg; run `bun run bootstrap`"],
+    ]);
+    plant(base, "actions/pkg/node_modules", []);
+    expect(main(argv, base)).toBe(0);
+    expect(stderr.mock.calls).toHaveLength(1);
+  } finally {
+    stderr.mockRestore();
+  }
 });
 
 /** bun.lock is JSON with trailing commas, so they go before the parse. */

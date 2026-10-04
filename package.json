@@ -4,7 +4,7 @@
   "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies, which the root postinstall installs so one root bun install covers every action package.",
   "scripts": {
     "check": "bun run check:static && bun run docs:check && bun run test",
-    "check:static": "bun scripts/bootstrap.ts --if-missing && bun run lint && bun run lint:actions && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run lint:yaml && bun run invariants",
+    "check:static": "bun scripts/bootstrap.ts --check && bun run lint && bun run lint:actions && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run lint:yaml && bun run invariants",
     "invariants": "bun run wrap:check",
     "bootstrap": "bun scripts/bootstrap.ts",
     "docs:check": "bun scripts/docs_check.ts",
