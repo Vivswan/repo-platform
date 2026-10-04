@@ -8,8 +8,9 @@ export interface Context {
   files: readonly string[];
 }
 
-/** One walk feeds every check, and it reads the tree yamllint reads: everything but `.git` (at any depth: a nested
- *  checkout's is working state, never content) and what the repository's own .yamllint ignores. */
+/** One walk feeds every check: everything but `.git` (at any depth: a nested checkout's is working state, never
+ *  content) and what the repository's own .yamllint ignores, read as gitignore patterns (docs/toolchains.md names the
+ *  corner where yamllint's own reader differs). */
 export function loadContext(root: string): Context {
   const skips = yamllintIgnore(root);
   const found: string[] = [];
