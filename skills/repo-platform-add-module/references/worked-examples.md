@@ -6,7 +6,7 @@ One end-to-end module addition, with the checks that matter at each step.
 
 Goal: the repo's slow suites move off the PR path into a nightly stream with automatic issue filing, next to the existing fuzz stream.
 
-**1. Label distinctness first.** The defaults already differ (`nightly-failure` vs `fuzz-nightly`); a custom label goes under `labels.nightly`.
+**1. Label distinctness first.** The defaults already differ (`nightly-failure` vs `fuzz-nightly`); a custom label goes under `labels.nightly` and must differ from every other selected stream's label ([the rule](../../../docs/tracking-issues.md#the-label-is-the-stream)).
 
 **2. The edit.**
 
