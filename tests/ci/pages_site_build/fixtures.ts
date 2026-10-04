@@ -5,13 +5,13 @@
 // node_modules when the build copies it there - a laptop layout with the
 // repo near the dependencies cannot see that class, this topology can.
 
-import { expect } from "bun:test";
 import {
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -25,7 +25,7 @@ import type { TempDirs } from "../../shared/temp_dir.ts";
 
 export const BUILD_TS = resolve(import.meta.dir, "../../../actions/pages-site/build.ts");
 
-/** A vitepress build of four tiers runs well under this on CI runners; it
+/** A vitepress build of five tiers runs well under this on CI runners; it
  *  is a hang bound, not a deadline (boundedSpawnSync stretches it for load). */
 export const BUILD_TIMEOUT_MS = 180_000;
 export const TEST_TIMEOUT_MS = harnessBound(200_000);
@@ -80,6 +80,15 @@ export function deployLinkCheckArgs(runner: RunnerTemp, repository: string): str
     `--root-dir '${dirname(runner.site)}' --files-from '${join(scratch, "link-check-inputs.txt")}' ` +
     `--remap '^https://${owner.toLowerCase()}\\.github\\.io/${repo}([/?#]|$) file://${runner.site}$1'`
   );
+}
+
+/** The pages the build listed for lychee, relative to the site. */
+export function linkCheckInputs(runner: RunnerTemp): string[] {
+  const scratch = dirname(dirname(runner.site));
+  return readFileSync(join(scratch, "link-check-inputs.txt"), "utf-8")
+    .trimEnd()
+    .split("\n")
+    .map((line) => line.slice(runner.site.length + 1));
 }
 
 const LINK_CHECK_STEP = stepNamed(
@@ -159,14 +168,6 @@ export function outputs(stdout: string): Record<string, string> {
   );
 }
 
-/** A refusal lands before any build and any output, so no half-built site is handed on. */
-export function expectRefusedBeforeBuild(result: BuildResult, message: string): void {
-  expect(result.exitCode, describeRun(result)).toBe(1);
-  expect(result.stderr).toContain(`::error::${message}`);
-  expect(result.stdout).not.toMatch(/vitepress|building docs tier/);
-  expect(outputs(result.stdout)).toEqual({});
-}
-
 export function present(site: string, rels: string[]): string[] {
   return rels.filter((rel) => existsSync(join(site, rel)));
 }
@@ -175,18 +176,6 @@ export function commitAll(repo: string, message: string): void {
   const identity = ["-c", "user.name=fixture", "-c", "user.email=f@localhost"];
   fixtureGit(repo, [...identity, "add", "-A"]);
   fixtureGit(repo, [...identity, "commit", "-qm", message]);
-}
-
-export function revertHead(repo: string): void {
-  fixtureGit(repo, [
-    "-c",
-    "user.name=fixture",
-    "-c",
-    "user.email=f@localhost",
-    "revert",
-    "--no-edit",
-    "HEAD",
-  ]);
 }
 
 export function initRepo(repo: string): void {
@@ -296,46 +285,156 @@ const SETUP_MD =
   "# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n\n" +
   "## Install steps\n\nOne, then two.\n\n## Upgrade steps\n\nThree.\n";
 
-/** The HEAD-only pages exercise sidebar placement: zulu.md ranks by
- *  `order` and opens the Basics group, alpha.md joins it by name alone,
- *  setup.md is placed by the landing table, bravo.md by nothing. */
-export function docsFixture(repo: string): void {
-  mkdirSync(join(repo, "docs", "guide"), { recursive: true });
-  writeFileSync(
-    join(repo, "docs", "README.md"),
+/** The sealed dead link: history cannot be fixed, so the tag carrying it builds lenient. */
+export const SEALED_DEAD_LINK = "A [dead link](missing-page).\n";
+
+/** The docs landing page: a landing table placing setup.md, and links into the skills mount once it exists. The
+ *  HEAD page links a heading that does not exist, which vitepress never judges and lychee reports. */
+function docsReadme(skills: string): string {
+  return (
     "# Fixture\n\nWelcome. See the [guide](guide/) and [setup](setup).\n\n" +
-      "| Goal | Read |\n|---|---|\n| Set things up | [Setup](setup.md) |\n",
+    "| Goal | Read |\n|---|---|\n| Set things up | [Setup](setup.md) |\n" +
+    skills
   );
-  writeFileSync(join(repo, "docs", "setup.md"), SETUP_MD);
-  writeFileSync(join(repo, "docs", "alerts.md"), ALERTS_MD);
+}
+const SKILL_LINKS_AT_TAG =
+  "\nSee the [alpha skill](skills/alpha/) and how to [install it](skills/alpha/#install).\n";
+const SKILL_LINKS_AT_HEAD =
+  "\nSee the [skills](skills/), the [alpha skill](skills/alpha/), how to " +
+  "[install it](skills/alpha/#install), and [nothing](skills/alpha/#nope).\n";
+
+const ALPHA_SKILL = [
+  "---",
+  "name: alpha",
+  "description: The alpha skill.",
+  "---",
+  "",
+  "# Alpha skill",
+  "",
+  "Read the [reference](reference.md) and the [beta skill](../beta).",
+  "",
+  "Plugin metadata sits in [plugin.json](.codex-plugin/plugin.json).",
+  "",
+  "## Install",
+  "",
+  "Steps.",
+  "",
+].join("\n");
+
+/** A README-less skill with frontmatter alone: no h1, so the page is
+ *  titled by its name and described by its description. */
+const BETA_SKILL = "---\nname: beta\ndescription: Beta does things.\n---\n\nBody of beta.\n";
+
+/** A skill whose name says nothing (blank) and no h1: titled by its file
+ *  name, in the document title and the sidebar alike. */
+const GAMMA_SKILL = "---\nname: '   '\n---\n\nBody of gamma.\n";
+
+/** The agent links the skill back in repository space; the skill links the agent the same way at HEAD. */
+const ONE_AGENT =
+  "---\nname: one\n---\n\nUses the [alpha skill](../../skills/alpha/SKILL.md#install).\n";
+
+export const FLEET_REPO = "fixture-owner/fixture-repo";
+
+/** The include roots as a registration lists them, child first: a staging that followed list order would land
+ *  agents/ where its parent has yet to be copied. */
+export const FLEET_INCLUDE = [
+  { path: "agents", mount: "skills/agents", page: "AGENT.md" },
+  { path: "skills", mount: "skills", page: "SKILL.md" },
+];
+
+export const FLEET_ENV = {
+  SITE_DIR: "dist",
+  CONFIG: siteConfig({ site_title: "Fixture Docs", include: FLEET_INCLUDE, link_rot_label: "rot" }),
+};
+
+/** The hook's dist: the website's page links INTO the docs mount, an include page among them and an extensionless
+ *  path as Pages serves it; a sibling site of the same owner is not this artifact's to judge. Two links are dead on
+ *  purpose, one on a page named with a glob metacharacter (lychee would read its raw path as a pattern and skip it
+ *  silently): the check over the assembled artifact is the only judge of a website link into the docs. */
+function website(repo: string): void {
+  const links = [
+    '<a href="/fixture-repo/docs/">docs</a>',
+    '<a href="/fixture-repo/docs/skills/alpha/">alpha</a>',
+    '<a href="/fixture-repo/docs/skills/alpha/reference">reference</a>',
+    '<a href="https://fixture-owner.github.io/other-repo/">sibling</a>',
+    '<a href="/fixture-repo/docs/skills/missing/">gone</a>',
+  ].join(" ");
+  mkdirSync(join(repo, "dist", "assets"), { recursive: true });
   writeFileSync(
-    join(repo, "docs", "guide", "README.md"),
-    "# Guide\n\nThe guide index, version one.\n",
+    join(repo, "dist", "index.html"),
+    `<html><body>WEBSITE-ROOT ${links}</body></html>\n`,
   );
+  writeFileSync(join(repo, "dist", "assets", "app.js"), "console.log(1)\n");
+  writeFileSync(
+    join(repo, "dist", "[guide].html"),
+    '<a href="/fixture-repo/docs/skills/also-missing/">gone too</a>\n',
+  );
+}
+
+function write(repo: string, rel: string, content: string): void {
+  mkdirSync(dirname(join(repo, rel)), { recursive: true });
+  writeFileSync(join(repo, rel), content);
+}
+
+/** One repository the way a fleet repository with the site module looks, at every ref a deploy reads:
+ *
+ *  v0.0.1  docs/ holds a listing and no landing page           -> skipped with a notice
+ *  v0.1.0  the docs; a dead link sealed into setup.md;         -> lenient tier; the hand-written page serves at the
+ *          docs/skills/README.md from before skills/ existed      mount's name, the missing root is a notice
+ *  v0.2.0  the zh-cn locale, a favicon, skills/alpha;          -> the root and stable/ tiers
+ *          the hand-written docs/skills/ page gone
+ *  HEAD    the HEAD-only setup line, the sidebar-placement     -> latest/, the pages lychee judges
+ *          pages, skills/beta and gamma with the skills
+ *          landing, agents/one, the hook's dist */
+export function fleetRepo(repo: string): void {
+  write(repo, "docs/store-listing.md", "# Store listing\n\nBlurb.\n");
   initRepo(repo);
+  commitAll(repo, "a docs listing before the landing page");
+  fixtureGit(repo, ["tag", "v0.0.1"]);
+
+  rmSync(join(repo, "docs", "store-listing.md"));
+  write(repo, "docs/README.md", docsReadme(""));
+  write(repo, "docs/setup.md", `${SETUP_MD}${SEALED_DEAD_LINK}`);
+  write(repo, "docs/alerts.md", ALERTS_MD);
+  write(repo, "docs/guide/README.md", "# Guide\n\nThe guide index, version one.\n");
+  write(repo, "docs/skills/README.md", "# Skills, hand-written\n");
   commitAll(repo, "v1 docs");
   fixtureGit(repo, ["tag", "v0.1.0"]);
 
-  mkdirSync(join(repo, "docs", "zh-cn"));
-  writeFileSync(join(repo, "docs", "zh-cn", "README.md"), "# Fixture zh\n\nlocale landing page\n");
-  writeFileSync(
-    join(repo, "docs", "guide", "README.md"),
+  rmSync(join(repo, "docs", "skills"), { recursive: true });
+  write(repo, "docs/README.md", docsReadme(SKILL_LINKS_AT_TAG));
+  write(repo, "docs/setup.md", SETUP_MD);
+  write(repo, "docs/zh-cn/README.md", "# Fixture zh\n\nlocale landing page\n");
+  write(repo, "docs/public/favicon.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>\n');
+  write(
+    repo,
+    "docs/guide/README.md",
     "# Guide\n\nThe guide index, version one.\nSecond version line.\n",
   );
-  commitAll(repo, "v2 docs + locale");
+  write(repo, "skills/alpha/SKILL.md", ALPHA_SKILL);
+  write(repo, "skills/alpha/reference.md", "# Alpha reference\n\nDetails.\n");
+  write(repo, "skills/alpha/.codex-plugin/plugin.json", "{}\n");
+  commitAll(repo, "v2 docs, the locale, the favicon, and the alpha skill");
   fixtureGit(repo, ["tag", "v0.2.0"]);
 
-  writeFileSync(join(repo, "docs", "setup.md"), `${SETUP_MD}HEAD-only line.\n`);
-  writeFileSync(
-    join(repo, "docs", "zulu.md"),
-    "---\norder: 1\ngroup: Basics\n---\n\n# Zulu\n\nRanked.\n",
+  write(repo, "docs/README.md", docsReadme(SKILL_LINKS_AT_HEAD));
+  write(repo, "docs/setup.md", `${SETUP_MD}HEAD-only line.\n`);
+  write(repo, "docs/zulu.md", "---\norder: 1\ngroup: Basics\n---\n\n# Zulu\n\nRanked.\n");
+  write(repo, "docs/delta.md", "---\ngroup: Basics\n---\n\n# Delta\n\nGrouped.\n");
+  write(repo, "docs/bravo.md", "# Bravo\n\nUnplaced.\n");
+  write(
+    repo,
+    "skills/alpha/SKILL.md",
+    `${ALPHA_SKILL}\nSee the [one agent](../../agents/one/AGENT.md).\n`,
   );
-  writeFileSync(join(repo, "docs", "alpha.md"), "---\ngroup: Basics\n---\n\n# Alpha\n\nGrouped.\n");
-  writeFileSync(join(repo, "docs", "bravo.md"), "# Bravo\n\nUnplaced.\n");
-  commitAll(repo, "head docs");
-}
-
-export function appendDeadLink(repo: string): void {
-  const setup = join(repo, "docs", "setup.md");
-  writeFileSync(setup, `${readFileSync(setup, "utf-8")}\nA [dead link](missing-page).\n`);
+  write(repo, "skills/beta/SKILL.md", BETA_SKILL);
+  write(repo, "skills/gamma/SKILL.md", GAMMA_SKILL);
+  write(
+    repo,
+    "skills/README.md",
+    "# Skills\n\n| Skill | Purpose |\n|---|---|\n| [alpha](alpha/) | Alpha |\n| [beta](beta/) | Beta |\n",
+  );
+  write(repo, "agents/one/AGENT.md", ONE_AGENT);
+  website(repo);
+  commitAll(repo, "head docs, the skills landing, the agent, and the website");
 }

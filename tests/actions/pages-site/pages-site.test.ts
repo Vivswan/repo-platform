@@ -28,6 +28,7 @@ import {
   copyInto,
   resolvePrebuilt,
   setOutput,
+  stageIncludes,
   tierStrictLinks,
 } from "../../../actions/pages-site/build.ts";
 import {
@@ -553,6 +554,81 @@ describe("central theme guard", () => {
     expect(() => assertIncludePages(root, include)).toThrow(
       "skills/alpha/ carries both SKILL.md and index.md - both would serve at skills/alpha/; remove one",
     );
+  });
+});
+
+describe("stageIncludes at HEAD", () => {
+  // The docs PR check's refusals, judged against the working tree: each message is the fix the fleet reads. The
+  // nested row is the staging order: depth decides, never the list, so the child listed first meets its parent's
+  // copy already in place and is refused as that mount's collision.
+  const SKILLS = { path: "skills", mount: "skills", page: "SKILL.md" };
+  const AGENTS = { path: "agents", mount: "skills/agents", page: "AGENT.md" };
+  const HEAD: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
+  const plant = (dir: string, files: string[]) => {
+    for (const rel of files) {
+      mkdirSync(join(dir, rel, ".."), { recursive: true });
+      writeFileSync(join(dir, rel), rel.endsWith("/") ? "" : "# x\n");
+    }
+  };
+  const collision = (root: string, mount: string) =>
+    `the include root '${root}' mounts at '${mount}/', which the docs tree (docs/, or a root mounted above it) ` +
+    "already carries at HEAD - two sources would claim one URL; mount the root under another name";
+  test.each<
+    [
+      reason: string,
+      repo: string[],
+      docs: string[],
+      include: (typeof SKILLS)[],
+      error: string | null,
+    ]
+  >([
+    [
+      "a root staged whole into the docs tree, its hidden entries included",
+      ["skills/alpha/SKILL.md", "skills/alpha/.codex-plugin/plugin.json"],
+      [],
+      [SKILLS],
+      null,
+    ],
+    [
+      "HEAD without the root",
+      ["docs/README.md"],
+      [],
+      [SKILLS],
+      "skills/ does not exist in the repository - the docs site includes it at skills/; create it or drop the include",
+    ],
+    [
+      "the root a file",
+      ["skills"],
+      [],
+      [SKILLS],
+      "the include root 'skills' is a file, not a directory, at HEAD",
+    ],
+    [
+      "the docs tree already carrying the mount",
+      ["skills/alpha/SKILL.md"],
+      ["skills/README.md"],
+      [SKILLS],
+      collision("skills", "skills"),
+    ],
+    [
+      "the parent root's own source carrying the child's mount, the child listed first",
+      ["skills/alpha/SKILL.md", "skills/agents/README.md", "agents/one/AGENT.md"],
+      [],
+      [AGENTS, SKILLS],
+      collision("agents", "skills/agents"),
+    ],
+  ])("%s", (_reason, repo, docs, include, error) => {
+    const workspace = temp.dir("ws-");
+    const srcDir = temp.dir("docs-");
+    plant(workspace, repo);
+    plant(srcDir, docs);
+    const stage = () => stageIncludes(workspace, HEAD, temp.dir("build-"), srcDir, include);
+    if (error !== null) {
+      expect(stage).toThrow(error);
+      return;
+    }
+    expect(stage()).toEqual(include);
+    expect(existsSync(join(srcDir, "skills/alpha/.codex-plugin/plugin.json"))).toBe(true);
   });
 });
 
