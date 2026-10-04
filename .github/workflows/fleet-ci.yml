@@ -144,24 +144,9 @@ jobs:
 
       - name: Judge the checks
         if: always()
-        env:
-          STEPS: ${{ toJSON(steps) }}
-        run: |
-          {
-            printf '## Standard checks\n\n| check | outcome | verdict |\n| --- | --- | --- |\n'
-            jq -r 'to_entries[] | "| \(.key) | \(.value.outcome) | \(
-              if .value.conclusion == "success" then "ok"
-              elif .value.conclusion == "skipped" then "stood down"
-              else "FAILED" end) |"' <<<"$STEPS"
-          } >>"$GITHUB_STEP_SUMMARY"
-          failed="$(jq -r 'to_entries[] | select(.value.conclusion != "success" and .value.conclusion != "skipped")
-            | "::error::check failed: \(.key)"' <<<"$STEPS")"
-          if [ -z "$failed" ]; then
-            echo "every check passed"
-            exit 0
-          fi
-          echo "$failed"
-          exit 1
+        uses: Vivswan/repo-platform/actions/judge-checks@stable
+        with:
+          steps: ${{ toJSON(steps) }}
 
   # Public only: the dependency-graph API is free just there. A successful plan publishes `modules` (at least `[]`) and
   # a failed one publishes nothing, so `modules != ''` skips the job after a failed plan; `private != 'true'` then runs
@@ -229,9 +214,9 @@ jobs:
       - if: hashFiles('docs/**') == ''
         run: echo "::notice::docs-check stood down, this repository has no docs/ directory"
 
-  # The release PR's two gates, one job so they share one condition. Freshness fails when the PR head lacks main's tip at
-  # CHECK time: a stale release PR cuts a release missing commits already on main (other PRs stay mergeable while behind).
-  # Health can go stale between check and release, so the release path re-runs the same action as its pre-flight.
+  # The release PR's two gates run in release-health's pull-request mode. Freshness fails when the PR head lacks main's
+  # tip at CHECK time: a stale release PR cuts a release missing commits already on main (other PRs stay mergeable while
+  # behind). Health can go stale between check and release, so the release path re-runs the same action as its pre-flight.
   release-pr:
     needs: [standard-checks]
     if: >-
@@ -248,22 +233,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history: the ancestor check needs origin/main.
+          # Full history: the freshness check needs origin/main.
           fetch-depth: 0
           # PR head, not the default merge ref - the merge ref already
           # contains main's tip, so it would always pass.
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Require the release PR to contain the tip of main
-        run: |
-          tip="$(git rev-parse "origin/${GITHUB_BASE_REF}")"
-          if git merge-base --is-ancestor "$tip" HEAD; then
-            echo "release PR contains the ${GITHUB_BASE_REF} tip (${tip})"
-          else
-            echo "::error::Release PR is behind ${GITHUB_BASE_REF} (tip ${tip});"\
-              "its version and changelog would miss commits already on ${GITHUB_BASE_REF}."\
-              "Do not merge; release-please refreshes the PR after the next green run on ${GITHUB_BASE_REF}."
-            exit 1
-          fi
       - uses: Vivswan/repo-platform/actions/release-health@stable
         with:
           mode: pull-request
