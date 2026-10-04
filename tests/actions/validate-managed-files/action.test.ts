@@ -10,7 +10,7 @@ import {
   readVerdict,
   writeVerdict,
 } from "../../../actions/validate-managed-files/src/verdict";
-import { loadAction, type Step } from "../../shared/action_step";
+import { loadAction, runBashStep, type Step, stepNamed } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../../shared/fixture_git";
 import { tempDirs } from "../../shared/temp_dir";
@@ -516,6 +516,43 @@ test("repo-platform is checked out whole, after the install and before the valid
   ]);
   const dir = `\${{ github.workspace }}/${platform.with.path}`;
   expect([env("read-commit").PLATFORM_DIR, env("validate").PLATFORM_DIR]).toEqual([dir, dir]);
+});
+
+// Two writers of one contract: the shell step that reports a missing bun must spell the outputs the caller and the
+// sticky-comment gates read (`integrity`, `report`) and the comment the way report.ts does for a not-judged verdict,
+// or a bun-setup flake posts nothing and the caller fails with no comment naming why. The step is executed as the
+// runner runs it, against report.ts's own wording.
+test("the no-bun step, executed, fails the verdict and posts the not-judged comment in report.ts's shape", () => {
+  const noBun = stepNamed(action, "Report a missing bun");
+  const root = temp.dir("validate-managed-no-bun-");
+  const summary = join(root, "summary.md");
+  writeFileSync(summary, "");
+  const run = runBashStep(noBun, {
+    fills: {
+      "${{ runner.temp }}": root,
+      "${{ github.server_url }}": "https://example.invalid",
+      "${{ github.repository }}": "o/r",
+      "${{ github.run_id }}": "1",
+    },
+    cwd: root,
+    root,
+    env: { GITHUB_STEP_SUMMARY: summary },
+  });
+  const reason = "the action's pinned bun is unavailable";
+  const body = `${HEADING}Not judged: ${reason}. See the [run log](https://example.invalid/o/r/actions/runs/1). ${FAILS}\n`;
+  expect({
+    exitCode: run.exitCode,
+    stdout: run.stdout,
+    outputs: run.outputs,
+    comment: read(join(root, "validate-managed-files-report.md")),
+    summary: read(summary),
+  }).toEqual({
+    exitCode: 0,
+    stdout: `::error::${reason}\n`,
+    outputs: { integrity: "failure", report: REPORT.post },
+    comment: body,
+    summary: body,
+  });
 });
 
 describe("verdict.ts", () => {
