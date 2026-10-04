@@ -3,12 +3,14 @@
   "ignoreExportsUsedInFile": true,
   // Every script runs by path (package.json scripts, workflows, bun test), so the entry globs are
   // wide and entry exports are judged too, or a dead export in a shared library would never surface.
+  // An action whose scripts need no package of their own (actions/semgrep) is read as part of the root.
   "includeEntryExports": true,
   "workspaces": {
     ".": {
       "entry": [
         "scripts/**/*.ts",
         ".github/scripts/**/*.ts",
+        "actions/semgrep/*.ts",
         "migrations/**/*.ts",
         "tests/**/*.ts"
       ],
@@ -49,9 +51,9 @@
       "project": ["**/*.{ts,mts}"]
     },
     "actions/pages-site": {
-      // The script action.yml runs; the vitepress plugin adds the config and theme, and vitepress
+      // The scripts action.yml runs; the vitepress plugin adds the config and theme, and vitepress
       // consumes the data loaders' default exports, which is why entry exports are not judged here.
-      "entry": ["build.ts", ".vitepress/**/*.data.ts"],
+      "entry": ["build.ts", "pages_exists.ts", ".vitepress/**/*.data.ts"],
       "project": ["**/*.{ts,mts,vue}"],
       "includeEntryExports": false,
       // @localSearchIndex is vitepress's virtual module; shiki and markdown-it are imported directly but arrive through

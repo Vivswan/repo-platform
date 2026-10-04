@@ -55,7 +55,7 @@ jobs:
             echo "edit_links=^${edit_url//./\\.}"
           } >> "$GITHUB_OUTPUT"
 
-      # A repository without the hook publishes docs/ alone, when it has one.
+      # A repository without the hook publishes docs/ alone, when it has one; the assembly says so with a notice.
       - name: Build the repository's website
         id: hook
         if: hashFiles('.github/actions/site-build/action.yml') != ''
@@ -64,59 +64,28 @@ jobs:
           base-path: ${{ steps.urls.outputs.base_path }}
           origin: ${{ steps.urls.outputs.origin }}
 
-      - name: Note a hook that named no directory
-        if: steps.hook.outcome == 'success'
-        env:
-          DIST: ${{ steps.hook.outputs.dist }}
-        run: '[ -n "$DIST" ] || echo "::notice::the site-build hook ran and named no dist directory; only the docs directory publishes, when there is one"'
-
+      # The assembly also asks GitHub whether the Pages site exists (pages-exists): why, and the three answers, in
+      # actions/pages-site/pages_exists.ts.
       - name: Assemble the site
         id: site
         uses: Vivswan/repo-platform/actions/pages-site@stable
         with:
           site-dir: ${{ steps.hook.outputs.dist }}
 
-      # A repository's first deploy after selecting the module can run before the settings apply that creates its
-      # Pages site (files/site/settings.yml), and the job token cannot create one: GitHub reserves that to another
-      # token whatever `pages: write` grants. So the deploy asks, and waits for the apply on the one known answer.
-      #   200 -> exists=true    404 -> exists=false and a warning    anything else -> the step fails
-      - name: Ask whether the Pages site exists
-        id: pages
-        if: steps.site.outputs.publish == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          response=$(gh api --include "repos/$GITHUB_REPOSITORY/pages") || true
-          status=$(sed -n '1s#^HTTP/[0-9.]* \([0-9]\{3\}\) .*#\1#p' <<<"$response")
-          case "$status" in
-            200) echo "exists=true" >>"$GITHUB_OUTPUT" ;;
-            404)
-              echo "exists=false" >>"$GITHUB_OUTPUT"
-              echo "::warning::no Pages site yet: repo-platform's settings apply creates it on its next run (daily)," \
-                "and the nightly rebuild deploys; nothing to do here."
-              ;;
-            *)
-              body=$(sed '1,/^\r\{0,1\}$/d' <<<"$response" | tr -d '\r' | tr -s '\n ' ' ')
-              body=${body% }
-              echo "::error::reading the Pages site answered HTTP ${status:-nothing}${body:+: $body}"
-              exit 1
-              ;;
-          esac
-
-      - if: steps.pages.outputs.exists == 'true'
+      - if: steps.site.outputs.pages-exists == 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       # Artifacts belong to the RUN, not the attempt: a re-run after a failed prerequisite (post-green) re-runs this leg, and a second
       # github-pages artifact in the run makes deploy-pages refuse ("Multiple artifacts named github-pages").
       # The attempt number in the name keeps each attempt's upload and deploy a pair of their own.
-      - if: steps.pages.outputs.exists == 'true'
+      - if: steps.site.outputs.pages-exists == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ${{ steps.site.outputs.site-dir }}
           name: github-pages-${{ github.run_attempt }}
 
       - id: deployment
-        if: steps.pages.outputs.exists == 'true'
+        if: steps.site.outputs.pages-exists == 'true'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: github-pages-${{ github.run_attempt }}
@@ -128,7 +97,7 @@ jobs:
       # AFTER the upload, so the served site never carries the file.
       - name: Stage the repository's .lycheeignore
         if: >-
-          github.event_name == 'schedule' && steps.pages.outputs.exists == 'true' &&
+          github.event_name == 'schedule' && steps.site.outputs.pages-exists == 'true' &&
           steps.site.outputs.link-rot-label != '' && hashFiles('.lycheeignore') != ''
         env:
           SITE_DIR: ${{ steps.site.outputs.site-dir }}
@@ -142,7 +111,7 @@ jobs:
       # the step when lychee extracted no link at all (excluded ones count).
       - name: Check external links
         id: links
-        if: github.event_name == 'schedule' && steps.pages.outputs.exists == 'true' && steps.site.outputs.link-rot-label != ''
+        if: github.event_name == 'schedule' && steps.site.outputs.pages-exists == 'true' && steps.site.outputs.link-rot-label != ''
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           workingDirectory: ${{ steps.site.outputs.site-dir }}
@@ -176,19 +145,14 @@ jobs:
 
       # A verdict the gates below can test positively (an absent step output
       # reads as 0, tests/workflows/step_output_gates.test.ts): anything but
-      # lychee's two verdicts fails here rather than reading as a clean
+      # lychee's two verdicts fails there rather than reading as a clean
       # night, and neither the report nor the close runs.
       - name: Read the link-rot verdict
         id: rot
         if: steps.links.outcome == 'success'
-        env:
-          EXIT_CODE: ${{ steps.links.outputs.exit_code }}
-        run: |
-          case "$EXIT_CODE" in
-            0) echo "found=false" >> "$GITHUB_OUTPUT" ;;
-            2) echo "found=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "::error::lychee published no verdict: exit code '$EXIT_CODE' (0 = clean, 2 = broken links)"; exit 1 ;;
-          esac
+        uses: Vivswan/repo-platform/actions/lychee-verdict@stable
+        with:
+          exit-code: ${{ steps.links.outputs.exit_code }}
 
       - name: File or update the link-rot issue
         if: steps.rot.outputs.found == 'true'
