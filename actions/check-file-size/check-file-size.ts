@@ -3,17 +3,11 @@
 // Comments and literals are exactly what the file's tree-sitter grammar tokenizes; every other token, ERROR included, is code.
 // Policy: docs/fleet-guidelines.md.
 
-import {
-  appendFileSync,
-  existsSync,
-  lstatSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Language, Parser, type Tree } from "web-tree-sitter";
 import { MANAGED_HEADER_PATTERN, PLATFORM_NAME } from "../shared/platform.ts";
+import { repositoryFiles } from "../shared/repository_files.ts";
 
 export type Kind = "source" | "test" | "workflow" | "shell" | "markdown";
 export type Tier = "hard" | "warn";
@@ -658,18 +652,6 @@ export function parseAllowlist(text: string): { entries: AllowEntry[]; failures:
   return { entries, failures };
 }
 
-function trackedFiles(root: string): string[] {
-  const args = ["git", "-C", root, "ls-files", "-z"];
-  const proc = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" });
-  if (proc.exitCode !== 0) {
-    throw new Error(`git ls-files failed in ${root}: ${proc.stderr.toString().trim()}`);
-  }
-  return proc.stdout
-    .toString()
-    .split("\0")
-    .filter((path) => path !== "");
-}
-
 export interface Verdict {
   /** Hard-tier findings on files the allowlist does not name. */
   failures: (Finding & { tier: "hard" })[];
@@ -706,17 +688,11 @@ export function check(root: string, grammars: Grammars): Verdict {
     found.add(relPath);
     if (!allowed.has(relPath)) findings.push(...judged);
   };
-  const readTracked = (relPath: string): string | null => {
-    const path = join(root, relPath);
-    if (!existsSync(path) || lstatSync(path).isSymbolicLink()) return null;
-    return readFileSync(path, "utf-8");
-  };
-
-  for (const relPath of trackedFiles(root)) {
+  for (const relPath of repositoryFiles(root, { untracked: false })) {
     const kind = classify(relPath);
     if (kind === null) continue;
-    const text = readTracked(relPath);
-    if (text === null || isGenerated(text)) continue;
+    const text = readFileSync(join(root, relPath), "utf-8");
+    if (isGenerated(text)) continue;
     if (isManaged(text)) {
       managedSkipped += 1;
       continue;
