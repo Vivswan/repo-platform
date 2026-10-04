@@ -47,6 +47,10 @@ repo-platform manages standards files, CI, and settings across the owner's repos
 - Logic lives in TypeScript run with bun; shell is one command of glue in a `run:` step.
 - A behavior change updates the `docs/` guide that describes it.
 
+### Working on this repository
+
+- `bun run bootstrap` is the developer setup: every package's dependencies, then the git hooks under `.husky/`. A bare `bun install` installs no hook.
+
 ### Decisions to keep
 
 - Sync triggers, in order of preference: the weekly schedule; a `fleet-sync:public` or `fleet-sync:all` label on the merged PR; a manual dispatch only when neither fits. Unsure which is right: ask the owner.

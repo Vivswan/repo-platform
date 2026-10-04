@@ -18,8 +18,7 @@
     "wrap:check": "bun scripts/check/check_markdown_wrap.ts",
     "lint:yaml": "uvx --with-requirements actions/yamllint/requirements.txt yamllint -s .",
     "test": "bun scripts/run_tests.ts",
-    "postinstall": "for pkg in actions/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done",
-    "prepare": "husky"
+    "postinstall": "for pkg in actions/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11",
