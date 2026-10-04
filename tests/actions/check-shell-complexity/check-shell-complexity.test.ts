@@ -397,6 +397,39 @@ describe("the collector", () => {
       },
     ],
     [
+      ".husky/pre-commit",
+      "#!/bin/sh\nfor x in a; do echo $x; done\n",
+      {
+        bodies: [
+          body(
+            ".husky/pre-commit",
+            1,
+            "script",
+            "bash",
+            "#!/bin/sh\nfor x in a; do echo $x; done\n",
+          ),
+        ],
+        problems: [],
+      },
+    ],
+    [
+      "bin/release",
+      "#!/usr/bin/env pwsh\nGet-Date\n",
+      {
+        bodies: [body("bin/release", 1, "script", "powershell", "#!/usr/bin/env pwsh\nGet-Date\n")],
+        problems: [],
+      },
+    ],
+    ["bin/tool", "#!/usr/bin/env python3\nprint(1)\n", { bodies: [], problems: [] }],
+    [
+      ".profile",
+      "#!/bin/sh\nexport PATH=/opt/bin:$PATH\n",
+      {
+        bodies: [body(".profile", 1, "script", "bash", "#!/bin/sh\nexport PATH=/opt/bin:$PATH\n")],
+        problems: [],
+      },
+    ],
+    [
       ".github/workflows/broken.yml",
       "jobs:\n  a:\n    steps:\n      - run: x\n   bad: [\n",
       {

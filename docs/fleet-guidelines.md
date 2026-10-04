@@ -110,7 +110,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Shell is a straight line of commands
 
-**Rule:** an inline shell body (a workflow or composite-action `run:` step, a moon task `script`, a Containerfile `RUN`, a `*.sh`, `*.ps1`, or `*.bat` file) is a straight line of commands. The moment it needs a branch, a loop, a function, `||` error handling, or a command substitution whose result is tested, it is a TypeScript script run by bun.
+**Rule:** an inline shell body (a workflow or composite-action `run:` step, a moon task `script`, a Containerfile `RUN`, a `*.sh`, `*.ps1`, or `*.bat` file, a tracked extensionless file whose shebang names a shell) is a straight line of commands. The moment it needs a branch, a loop, a function, `||` error handling, or a command substitution whose result is tested, it is a TypeScript script run by bun.
 
 **Why:** bash-only defects cost review rounds: `set -e` does not reach a failed command inside a tested `$(...)`, macOS ships bash 3.2, and `grep`'s locale and PCRE behaviour differ by runner. A script has types, a test, and one runtime.
 

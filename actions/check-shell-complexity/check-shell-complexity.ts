@@ -15,8 +15,10 @@ import {
   type CollectedBody,
   type CollectProblem,
   collectFile,
+  isExtensionless,
   SOURCE_LABEL,
   type SourceKind,
+  shebangDialect,
   sourceKindOf,
 } from "./collect.ts";
 import {
@@ -101,16 +103,21 @@ export function check(root: string): Verdict {
     script: 0,
   };
   let managedSkipped = 0;
+  // An extensionless file is shell only by its shebang, and only a tracked one is read: husky's generated hooks under
+  // .husky/_/ are untracked.
+  const tracked = new Set(repositoryFiles(root, { untracked: false }));
   for (const relPath of repositoryFiles(root, { untracked: true })) {
-    const kind = sourceKindOf(relPath);
-    if (kind === null || !isJudged(relPath)) continue;
+    if (!isJudged(relPath)) continue;
+    const named = sourceKindOf(relPath);
+    if (named === null && !(tracked.has(relPath) && isExtensionless(relPath))) continue;
     const text = readFileSync(join(root, relPath), "utf-8");
+    if (named === null && shebangDialect(text) === null) continue;
     if (isManaged(text)) {
       managedSkipped += 1;
       continue;
     }
     const collected = collectFile(relPath, text);
-    counts[kind] += collected.bodies.length;
+    counts[named ?? "script"] += collected.bodies.length;
     bodies.push(...collected.bodies);
     unreadable.push(...collected.problems);
   }

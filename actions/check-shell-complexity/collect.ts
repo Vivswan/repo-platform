@@ -125,9 +125,30 @@ export function collectFile(relPath: string, text: string): Collected {
       const dialect = SCRIPT_DIALECT[extensionOf(basename(relPath))];
       return { bodies: [{ path: relPath, line: 1, kind, dialect, code: text }], problems: [] };
     }
-    case null:
-      return { bodies: [], problems: [] };
+    case null: {
+      const dialect = isExtensionless(relPath) ? shebangDialect(text) : null;
+      if (dialect === null) return { bodies: [], problems: [] };
+      return {
+        bodies: [{ path: relPath, line: 1, kind: "script", dialect, code: text }],
+        problems: [],
+      };
+    }
   }
+}
+
+/** A hook or tool script with no extension (`.husky/pre-commit`, `.profile`); its shebang names the shell. */
+export function isExtensionless(relPath: string): boolean {
+  return basename(relPath).lastIndexOf(".") <= 0;
+}
+
+const SHEBANG = /^#!\s*(\S+)(?:[ \t]+(\S+))?/;
+
+/** The dialect a first-line shebang names, `#!/usr/bin/env bash` included; null for no shebang or another program. */
+export function shebangDialect(text: string): Dialect | null {
+  const match = SHEBANG.exec(text.split("\n", 1)[0] ?? "");
+  if (match === null) return null;
+  const program = basename(match[1]) === "env" ? (match[2] ?? "") : match[1];
+  return SHELL_DIALECT[shellName(program)] ?? null;
 }
 
 /** A sync writer's template carries `{{name}}` placeholders where its rendered copy carries yaml: the name alone stands

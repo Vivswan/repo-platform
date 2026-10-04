@@ -6,7 +6,8 @@ description: >-
   every inline body in the caller's checkout: workflow and composite-action
   `run:` steps (bash, sh, zsh, pwsh, powershell, cmd), moon task scripts,
   Containerfile RUN instructions, and *.sh, *.bash, *.zsh, *.ps1, *.psm1,
-  *.bat, *.cmd files. bash/sh/zsh parse with mvdan/sh (shfmt's parser);
+  *.bat, *.cmd files, plus a tracked extensionless file whose shebang names
+  one of those shells (a git hook). bash/sh/zsh parse with mvdan/sh (shfmt's parser);
   PowerShell parses with pwsh's own parser, so pwsh must be on PATH when a
   PowerShell body exists (the step fails naming it otherwise); cmd, which no
   parser serves, is judged by tokens after dropping rem lines, so a keyword
