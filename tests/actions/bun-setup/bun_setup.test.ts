@@ -95,6 +95,63 @@ function runStep(
 }
 
 describe("actions/bun-setup", () => {
+  // GitHub exposes no context for an action repository's root and unpacks a remote action without `.git`, so the
+  // marker is found by walking up from a directory the caller names. Each row plants a tree and runs the step on it.
+  test.each<{
+    reason: string;
+    plant: (root: string) => { pin: string; from: string };
+    exitCode: number;
+    error: (fills: { pin: string; from: string }) => string;
+    outputs: (root: string) => Record<string, string>;
+  }>([
+    {
+      reason: "`from` three directories below the marker finds it",
+      plant: (root) => {
+        writeFileSync(join(root, ".bun-version"), `${Bun.version}\n`);
+        mkdirSync(join(root, "a/b/c"), { recursive: true });
+        return { pin: "", from: join(root, "a/b/c") };
+      },
+      exitCode: 0,
+      error: () => "",
+      outputs: (root) => ({ file: join(root, ".bun-version") }),
+    },
+    {
+      reason: "`from` with no marker anywhere above fails naming the start directory",
+      plant: (root) => {
+        mkdirSync(join(root, "a/b/c"), { recursive: true });
+        return { pin: "", from: join(root, "a/b/c") };
+      },
+      exitCode: 1,
+      error: ({ from }) => `::error::no .bun-version in ${from} or any directory above it`,
+      outputs: () => ({}),
+    },
+    {
+      reason: "`pin` and `from` together are refused",
+      plant: (root) => ({ pin: join(root, ".bun-version"), from: root }),
+      exitCode: 1,
+      error: () => "::error::pass exactly one of pin and from",
+      outputs: () => ({}),
+    },
+    {
+      reason: "neither `pin` nor `from` is refused",
+      plant: () => ({ pin: "", from: "" }),
+      exitCode: 1,
+      error: () => "::error::pass exactly one of pin and from",
+      outputs: () => ({}),
+    },
+  ])("locate with $reason", ({ plant, exitCode, error, outputs }) => {
+    const root = temp.dir("bun-setup-locate-");
+    const fills = plant(root);
+    const locate = runStep(
+      stepById("locate"),
+      { "${{ inputs.pin }}": fills.pin, "${{ inputs.from }}": fills.from },
+      BUN_DIR,
+      root,
+    );
+    expect([locate.exitCode, locate.outputs]).toEqual([exitCode, outputs(root)]);
+    if (exitCode !== 0) expect(locate.stdout).toContain(error(fills));
+  });
+
   test("neither setup attempt can end the action, the retry keys on the first attempt's outcome, and the resolve runs whatever they did", () => {
     // Under continue-on-error GitHub sets outcome to failure and conclusion to success, so a retry keyed on conclusion
     // never fires; actionlint does not read action.yml. Together with an unconditional resolve this is the
@@ -199,12 +256,17 @@ describe("actions/bun-setup", () => {
       const pin = join(root, ".bun-version");
       writeFileSync(pin, `${Bun.version}\n`);
       const path = pathFor(onPath, root);
-      const probe = runStep(stepById("probe"), { "${{ inputs.pin }}": pin }, path, root);
+      const probe = runStep(
+        stepById("probe"),
+        { "${{ steps.locate.outputs.file }}": pin },
+        path,
+        root,
+      );
       expect([probe.exitCode, probe.outputs]).toEqual([0, { pinned }]);
       const resolve = runStep(
         stepById("resolve"),
         {
-          "${{ inputs.pin }}": pin,
+          "${{ steps.locate.outputs.file }}": pin,
           "${{ inputs.required }}": required,
           "${{ steps.setup-bun.outcome }}": outcome,
         },

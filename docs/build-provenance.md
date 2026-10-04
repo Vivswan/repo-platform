@@ -50,9 +50,7 @@ A change merges to main as commit S. What happens, in order:
 | 1. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](all-green.md)). |
 | 2. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
 | 3. Move | post-green.yml's move-stable job | [move_stable.ts](../.github/scripts/post-green/move_stable.ts) verifies S is main history with a green check, reads where the tag sits, and moves it to S with a lease push. |
-| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml: calls reusable-site.yml with `github.sha` after the mover, so a green move's theme is what `@stable` serves the build ([all-green.md](all-green.md#after-the-gate)). Gated on the all-green result alone under `!cancelled()` (below). |
-
-**The site leg's gate:** a red or skipped post-green never holds the site back (the site then deploys from the tag as it stands), and its own failure shows as its own red job.
+| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml, calls reusable-site.yml with `github.sha` after the mover, gated on the all-green result alone ([all-green.md](all-green.md#repo-platforms-own-post-green-run)); its failure is its own red job. |
 
 **The commit moved to is always SOURCE_SHA:** the judged run's own commit on the call, the operator's sha input on a dispatch. Never a read of origin/main, which can already be a newer, even red, commit (move_stable.ts's header owns this discipline).
 
@@ -71,7 +69,7 @@ Until the heal, a sync copies from the commit the tag names as it stands ([Resid
 
 - **The lease.** The push is `--force-with-lease` naming the value just read (the tag object for an annotated tag, an empty lease when the tag is absent), so two movers racing leaves the loser red and the tag untouched.
 
-- **The output.** `previous`, the commit the tag named before a move (empty when nothing moved), is the `read-directives` leg's base ahead of the push's `before`. On a call that leg reads on every mover result: a newer run's range starts after its own base, which can be this very commit, so only this commit's run is sure to read it ([all-green.md](all-green.md#after-the-gate)).
+- **The output.** `previous`, the commit the tag named before a move, is the `read-directives` leg's base; when nothing moved it is empty and the push's `before` stands in ([all-green.md](all-green.md#which-commits-a-run-reads)).
 
 - **The credential.** The push uses the run's `GITHUB_TOKEN` with `contents: write` (ci.yml's post-green job grants that ceiling), the way GitHub's own actions/publish-action moves an action's major tag with the default token.
 

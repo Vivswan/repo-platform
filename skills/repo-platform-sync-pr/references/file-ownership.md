@@ -10,11 +10,4 @@ Classify every file a sync PR touches before deciding what to do with a surprisi
 | Repo-owned, read by the platform | Never in the diff: the sync reads it and rewrites nothing |
 | Mirror | `written` and `current` are routine; `replaced local edits` shows the replaced content's diff and `replaced` names the directory or blocking file removed, both holding the PR. A declaration the writer cannot honour fails the sync instead of appearing here |
 
-Retired rows (the Retired section) follow the same ownership:
-
-| Retired row | What it did |
-|---|---|
-| `deleted` | removed the platform's own content |
-| `region removed` | took the managed region out of a split file and left your content as a plain file |
-| `held` | found content that differs from the recorded write and left the file for you |
-| `released` | dropped the record of a path the registration's `except` names and touched nothing (yours) |
+Retired rows (the Retired section) follow the same ownership; the skill's Retired outcomes table ([Read the report](../SKILL.md#read-the-report)) says what each outcome did.

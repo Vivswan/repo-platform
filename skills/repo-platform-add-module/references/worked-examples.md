@@ -6,11 +6,9 @@ One end-to-end module addition, with the checks that matter at each step.
 
 Goal: the repo's slow suites move off the PR path into a nightly stream with automatic issue filing, next to the existing fuzz stream.
 
-### Label distinctness first
+**1. Label distinctness first.** The defaults already differ (`nightly-failure` vs `fuzz-nightly`); a custom label goes under `labels.nightly` and must differ from every other selected stream's label ([the rule](../../../docs/tracking-issues.md#the-label-is-the-stream)).
 
-Both streams dedup and auto-close their tracking issue by label, so the nightly label must differ from the fuzzer label (case-insensitively). The defaults already differ (`nightly-failure` vs `fuzz-nightly`); a custom label goes under `labels.nightly`.
-
-### The edit
+**2. The edit.**
 
 ```bash
 git checkout -b add-nightly
@@ -23,7 +21,7 @@ gh pr create
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
 ```
 
-### The sync PR
+**3. The sync PR.**
 
 The run's job log ends `row 0: PR opened`. In the report:
 
@@ -31,14 +29,14 @@ The run's job log ends `row 0: PR opened`. In the report:
 - Review: `Hold for review: no`; `manual=true` keeps it waiting for you.
 - No edit of your own in `.github/settings.local.yml` is needed for the label: the registration key is its home, and the settings apply after the merge declares it.
 
-### The starter, and moving real checks in
+**4. The starter, and moving real checks in.**
 
 Two jobs: `checks` (yours; the placeholder is a green no-op that never files issues) and `report` (the machinery: `needs: [checks]`, `if: always()`, a cancelled checks job counts as red). Pick the repo's own cron minute.
 
 - Port the slow suites' steps into `checks`, or add them as sibling jobs, list every one in `report`'s `needs`, and fold each result into the red/green conditions. Keep siblings unconditional: a job skipped by its own `if:` matches neither condition and the report does nothing that night.
 - With a custom label, change the two `label:` inputs in the starter to match `labels.nightly`.
 
-### Verify
+**5. Verify.**
 
 - The first scheduled run is green, or files one issue carrying the label.
 - The label exists on the repo: `gh label list -R Vivswan/<repo>`. It arrives with the first settings apply after the sync PR merges; before that, create it with `gh label create`.

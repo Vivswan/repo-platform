@@ -167,7 +167,6 @@ Repository settings (labels, rulesets, fields) are rendered into the managed `.g
 gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project
 ```
 
-- The sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from the registration's `labels.*` keys (the module's default when a key is unset) into the file; the apply declares them on the repository.
 - Your own labels, rulesets, and identity keys go in `.github/settings.local.yml`; an edit there lands in the rendered file on the next sync PR (`gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project -f manual=true` brings it at once). A hand edit of `.github/settings.yml` is replaced by the next sync and reds the managed files check before that.
 - Until the sync PR carrying the rendered file has merged, the apply skips a repository with no `.github/settings.yml` with a notice; one carrying a hand-written file fails the plan.
 
@@ -178,7 +177,7 @@ gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-p
 
 ## Private repositories
 
-- No CodeQL, dependency-review, or Semgrep jobs; zizmor and the nightly Trivy scan still run but upload no SARIF to code scanning.
+- No CodeQL, dependency-review, Semgrep, or nightly Trivy jobs; zizmor still runs but uploads no SARIF to code scanning.
 - Fleet run logs are public, so the `plan:` and `row <i>:` lines never name a repository (the plan job's selection line names public repositories and counts private ones); the details land in the repo's own sync PR and failure issue.
 
 ## Verify

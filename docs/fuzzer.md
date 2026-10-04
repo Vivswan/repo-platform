@@ -7,9 +7,8 @@ group: Modules
 
 Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter workflow ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/fuzzer/.github/workflows/nightly-fuzz.yml)): a nightly cron plus a `workflow_dispatch` with `seed` and `iterations` inputs, your fuzz step in the middle, and shared reporting machinery around it.
 
-- **A red night** uploads the failure artifacts and files or refreshes a [tracking issue](tracking-issues.md) built from your failure reports.
+- **A red night** uploads the failure artifacts and files or refreshes a [tracking issue](tracking-issues.md) built from your failure reports; that page owns the issue lifecycle, release gating, and label renaming.
 - **A green night** closes the stream's open issues.
-- **Shared with the nightly module:** issue lifecycle, release gating, label renaming, and the action pin's history live on [Tracking issues](tracking-issues.md).
 - **The `.gitignore` region:** the module also adds `/.fuzz-failures/` to the managed region of the repository's `.gitignore`, so the failure directory a run leaves behind is never committed.
 
 **Repo-owned:** the starter is written once and then repo-owned. Fuzzers and their toolchains differ too much across repos for the platform to keep managing the file, so it carries the shared machinery and leaves the fuzz step itself to you. Repo-owned also means a fix to the starter never reaches repos that already received it.

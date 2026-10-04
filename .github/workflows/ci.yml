@@ -363,7 +363,7 @@ jobs:
         id: first
         uses: ./actions/bun-setup
         with:
-          pin: ${{ runner.temp }}/bun-setup-smoke/current/.bun-version
+          from: ${{ runner.temp }}/bun-setup-smoke/current
       - name: Set up an earlier release (not the bun on PATH)
         id: second
         uses: ./actions/bun-setup
