@@ -26,6 +26,8 @@ What a module layer adds:
 - **release-please:** four labels, the `release-tags` ruleset, and the Actions grant its release PR needs (`can_approve_pull_request_reviews`).
 - **pr-title:** [the pr-title ruleset](#the-pr-title-ruleset).
 
+Two layers of the table need a note:
+
 - **Why layer 4 is gated:** GitHub rejects the `code_scanning` rule on private repos, and a repo with no CodeQL run would block every merge on it.
 - **Layer 6 holds:** the squash-only merge policy (the PR title as the squash subject, a blank squash body), `allow_auto_merge`, `enable_vulnerability_alerts`, the `main` and `non-bypassable` protection rulesets, and the rulesets' `_undeclared: delete` policy.
 
