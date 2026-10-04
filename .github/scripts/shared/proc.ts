@@ -1,10 +1,7 @@
 // Commands are argv arrays, never shell strings, so target-derived values cannot be re-parsed as syntax.
-// Two bun >= 1.4.0 quirks shape every spawn here (the first unreported upstream as of 2026-08):
-//
-//   piped spawnSync, no `timeout`   -> returns at pipe EOF, not child exit; a descendant holding the pipe hangs the caller until it exits
-//   piped spawnSync with `timeout`  -> returns by the deadline even with a descendant still holding the pipe, so every piped run carries one
-//   the default child env           -> a snapshot from PROCESS START; a caller's process.env scrub never reaches the child unless passed explicitly
-//   an undefined entry in `env`     -> deletes that key for the child
+// Under bun >= 1.4.0, piped spawnSync returns at pipe EOF without `timeout` and by the deadline with it, so every piped run carries one.
+// bun's default child env is a snapshot from process start, not the live process.env.
+// An undefined entry in a spawn `env` deletes that key for the child.
 
 import { constants } from "node:os";
 
@@ -50,8 +47,8 @@ export function exitCodeOf(proc: { exitCode: number | null; signalCode?: string 
   return signal !== undefined ? 128 + signal : 1;
 }
 
-/** 124 (timeout(1)'s convention) when the child had already exited 0: a piped run can hit the deadline waiting for pipe EOF
- * after a clean exit, and an expiry must never read as success. */
+/** 124 (timeout(1)'s convention) over a clean exit 0: a piped run can reach the deadline after the child exited, and an expiry
+ * must never read as success. */
 export function timeoutExitCode(proc: {
   exitCode: number | null;
   signalCode?: string | null;
