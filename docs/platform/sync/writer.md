@@ -151,7 +151,7 @@ Beyond the table:
 
 A Registration note is one of:
 
-- a manifest refused whole: one that does not parse, or one whose own entry names no full commit
+- a manifest refused whole ([The manifest](manifest.md#when-the-judged-commit-moves))
 - a placeholder with no value, and the key that sets it
 - a manifest record at a path that is not a clean repository path
 - a stale record no `files.yml` entry declares now, while a file sits at its path

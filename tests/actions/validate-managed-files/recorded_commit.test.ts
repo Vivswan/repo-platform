@@ -23,7 +23,7 @@ const manifest = (self: string) =>
 const STAMPED = manifest(`{"class": "managed", "hash": null, "commit": "${COMMIT}"}`);
 
 const REVERT = "revert the edit (git history has the stamped original) or dispatch a sync";
-const NOT_A_SHA = `${MANIFEST_NAME}'s own entry names no full 40-hex commit; ${REVERT}, which rewrites the entry`;
+const NOT_A_SHA = `${MANIFEST_NAME} names no full 40-hex commit in its own entry; ${REVERT}`;
 
 describe("the read-commit step", () => {
   const OCCUPIED = `commit=\nproblem=the repository holds a path at ${JUDGE}, where the check places its checkout of repo-platform; move it\n`;

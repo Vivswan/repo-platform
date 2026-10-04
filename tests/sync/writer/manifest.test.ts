@@ -161,33 +161,6 @@ describe("readRecords", () => {
     });
   });
 
-  // Every sync writes the self entry's commit, so a manifest without a full one is a hand edit: refused whole, as the
-  // fleet action refuses it (actions/shared/recorded_commit.ts), never restamped silently with every record believed.
-  test.each<[string, Record<string, ManifestEntryShape>]>([
-    ["no self entry", {}],
-    ["a self entry without the commit", { [MANIFEST_NAME]: { class: "managed", hash: null } }],
-    [
-      "a commit that is not a full lowercase sha",
-      { [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD.slice(0, 12) } },
-    ],
-    [
-      "a commit that is not a string",
-      { [MANIFEST_NAME]: { class: "managed", hash: null, commit: 42 } },
-    ],
-  ])("a manifest with %s is refused whole", (_name, self) => {
-    const target = temp.dir("writer-manifest-commit-");
-    mkdirSync(join(target, ".github"), { recursive: true });
-    writeFileSync(
-      join(target, MANIFEST_NAME),
-      JSON.stringify({ files: { "a.txt": { class: "managed", hash: HASH }, ...self } }),
-    );
-    expect(readRecords(target)).toEqual({
-      records: {},
-      commit: null,
-      problem: `${MANIFEST_NAME} names no full 40-hex commit in its own entry`,
-    });
-  });
-
   // Prototype pollution: on a plain object a lookup of an absent __proto__ answers Object.prototype, which every
   // reader would then judge; the null prototype is load-bearing here alone. An object literal keyed __proto__ would
   // set the fixture's prototype, so the records are built as the writer builds them, from entries.

@@ -336,9 +336,9 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: {
         COMMIT: "",
         COMMIT_PROBLEM:
-          "the manifest's own entry names no full 40-hex commit; dispatch a sync, which rewrites the entry",
+          ".github/repo-platform-manifest.json names no full 40-hex commit in its own entry; revert the edit (git history has the stamped original) or dispatch a sync",
       },
-      text: "the manifest's own entry names no full 40-hex commit; dispatch a sync, which rewrites the entry",
+      text: ".github/repo-platform-manifest.json names no full 40-hex commit in its own entry; revert the edit (git history has the stamped original) or dispatch a sync",
       platformRemoved: false,
     },
     {

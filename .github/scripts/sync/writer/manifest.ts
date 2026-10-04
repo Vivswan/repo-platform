@@ -89,18 +89,14 @@ export function regionMarkers(kind: RegionKind): RegionMarkers {
 
 const COMMIT_RE = /^[0-9a-f]{40}$/;
 
-export interface ReadRecords {
-  records: Records;
-  /** The commit the manifest's own entry names, the one the stamp rule (judged_commit.ts) keeps; null when no manifest
-   *  was accepted. */
-  commit: string | null;
-  /** Why the manifest was refused whole, every record with it. */
-  problem: string | null;
-}
-
 /** A manifest is refused whole, as the fleet action refuses it (actions/shared/recorded_commit.ts): one that does not parse,
- *  and one whose own entry names no full commit, which is a hand edit since every sync writes that field. */
-export function readRecords(target: string): ReadRecords {
+ *  and one whose own entry names no full commit, which is a hand edit since every sync writes that field. The commit is
+ *  the one the stamp rule (judged_commit.ts) keeps, null when no manifest was accepted. */
+export function readRecords(target: string): {
+  records: Records;
+  commit: string | null;
+  problem: string | null;
+} {
   const bytes = existingFile(target, MANIFEST_NAME);
   if (bytes === null) return { records: recordsOf(), commit: null, problem: null };
   const parsed = parseManifestFiles(bytes.toString("utf-8"));
@@ -112,7 +108,7 @@ export function readRecords(target: string): ReadRecords {
   return { records: recordsOf(parsed.files), commit, problem: null };
 }
 
-function refused(problem: string): ReadRecords {
+function refused(problem: string): ReturnType<typeof readRecords> {
   return { records: recordsOf(), commit: null, problem: `${MANIFEST_NAME} ${problem}` };
 }
 
