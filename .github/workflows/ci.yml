@@ -240,7 +240,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/skills/.github/actions/validate-skills@4b20c540d4464370a13b7a2549dff242f2d4556c # main
+      - uses: Vivswan/skills/.github/actions/validate-skills@cff7bdd1435143ad62567862cf89e9f1af308b26 # main
 
   # Discovery runs the real `npx skills add --list` against the checkout, so it reaches the npm
   # registry: its own job, so a registry hiccup names itself instead of the structure check.
@@ -249,7 +249,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/skills/.github/actions/validate-skills@4b20c540d4464370a13b7a2549dff242f2d4556c # main
+      - uses: Vivswan/skills/.github/actions/validate-skills@cff7bdd1435143ad62567862cf89e9f1af308b26 # main
         with:
           mode: discovery
 
@@ -265,7 +265,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Vivswan/skills
-          ref: 4b20c540d4464370a13b7a2549dff242f2d4556c
+          ref: cff7bdd1435143ad62567862cf89e9f1af308b26
           path: .skills
       - uses: ./actions/plan
         id: plan
