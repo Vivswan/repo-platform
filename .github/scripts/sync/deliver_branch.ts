@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The delivery step of the managed sync-branch.yml, run from the platform checkout at `stable` inside the labeled pull
-// request's own repository (docs/sync.md, "Syncing a branch by label"). The log is the repository's own, so nothing here
+// request's own repository (docs/platform/sync/operator.md, "Syncing a branch by label"). The log is the repository's own, so nothing here
 // is redacted; the pull request's one sticky comment is the record a human reads.
 //
 // The label comes off before anything is judged, so adding it again is always a new run. A hold is refused before the

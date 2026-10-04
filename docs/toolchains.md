@@ -26,7 +26,7 @@ The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.tx
 
 - **The site hook:** the [site module's](site.md) build hook is the repository's own composite action, so it installs whatever toolchain its steps name (the seeded example reads `.bun-version`); the fleet's docs build runs under the fleet's own bun, never the repository's pin.
 
-- **Parity:** validate-managed-files fails a repo whose dotfile differs from the one its recorded commit's sync writes ([sync.md](sync.md#judged-at-the-synced-commit)).
+- **Parity:** validate-managed-files fails a repo whose dotfile differs from the one its recorded commit's sync writes ([platform/sync/manifest.md](platform/sync/manifest.md#judged-at-the-synced-commit)).
 
 ## How this repository's actions pin bun
 
@@ -64,7 +64,7 @@ Rules that follow:
 
 ## Keeping the pins fresh
 
-Each pinned module declares its pin in `files.yml` (`modules.<name>.pin`, its keys defined in [sync.md](sync.md#module-data)), data the refresh reads and never content the sync writes. bun's:
+Each pinned module declares its pin in `files.yml` (`modules.<name>.pin`, its keys defined in [platform/sync/files.md](platform/sync/files.md#module-data)), data the refresh reads and never content the sync writes. bun's:
 
 | Key | bun |
 |---|---|
@@ -72,7 +72,7 @@ Each pinned module declares its pin in `files.yml` (`modules.<name>.pin`, its ke
 | `repository` | `oven-sh/bun` |
 | `tag` | `bun-v{version}` |
 
-[refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) (weekly cron plus manual dispatch) runs `release` pins as one matrix leg beside the `commit` pins of [sync.md](sync.md#upstream-refs), each on its own PR branch, so a toolchain bump is never held behind a gitignore diff:
+[refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) (weekly cron plus manual dispatch) runs `release` pins as one matrix leg beside the `commit` pins of [platform/sync/files.md](platform/sync/files.md#upstream-refs), each on its own PR branch, so a toolchain bump is never held behind a gitignore diff:
 
 1. **Fetch each pin's latest release** (`releases/latest`, never a prerelease) and read the version through `tag`; a tag of another shape is refused. An unreachable source, or a "latest" older than the pin (a backport surfacing as latest), aborts the run: such a view cannot tell "nothing moved" from "could not see upstream's newest".
 

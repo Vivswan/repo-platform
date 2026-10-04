@@ -129,7 +129,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 **Enforced by:**
 
 - **Managed files:** the managed files check ([actions/validate-managed-files](../actions/validate-managed-files/action.yml)), byte to byte against the recorded commit's write.
-- **Starters:** the writer, which writes one only when the path is absent and never touches it again ([sync.md](sync.md#classes)).
+- **Starters:** the writer, which writes one only when the path is absent and never touches it again ([platform/sync/writer.md](platform/sync/writer.md#classes)).
 
 ## Split files: the managed region
 
@@ -144,7 +144,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 - **A file that never mentions the markers** gets the region placed above its content and the PR held for review (`region added`).
 - **Marker text duplicated or buried mid-line** fails the run, so nothing is dropped silently. Marker text must appear exactly once per marker in the file.
 
-**Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [sync.md](sync.md#classes)); the managed files check on the region.
+**Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [platform/sync/writer.md](platform/sync/writer.md#classes)); the managed files check on the region.
 
 ## Copilot review comments are advisory
 
@@ -160,13 +160,13 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## No backwards-compatibility code
 
-**Rule:** no compatibility shims, dual code paths, or retired-shape handling outside a repo's own `migrations/` directory; repo-platform's rungs live in its own ([sync.md](sync.md#migrations)).
+**Rule:** no compatibility shims, dual code paths, or retired-shape handling outside a repo's own `migrations/` directory; repo-platform's rungs live in its own ([platform/sync/writer.md](platform/sync/writer.md#migrations)).
 
 **Why:** a one-shot replacement with a loud PR note stays readable; a compat era accretes paths nobody removes.
 
 **How:** replace the shape in one PR and say so in the PR body.
 
-- **A file the platform stops writing** leaves `files.yml`, and every target's next sync retires the recorded file ([sync.md](sync.md#retirement)).
+- **A file the platform stops writing** leaves `files.yml`, and every target's next sync retires the recorded file ([platform/sync/writer.md](platform/sync/writer.md#retirement)).
 - **A transition the sync cannot carry by itself** is one rung in `migrations/`, the only home for transitional code.
 
 **Enforced by:** review.

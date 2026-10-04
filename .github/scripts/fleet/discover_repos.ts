@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Only a count and the owner login reach the public log; each row's `private` flag decides what the selector may name later
-// (docs/sync.md).
+// (docs/platform/sync/private-repositories.md).
 
 import { writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";

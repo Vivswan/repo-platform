@@ -57,7 +57,7 @@ export interface StampInput {
   wroteChange: boolean;
 }
 
-/** The stamp rule, docs/sync.md "The manifest". */
+/** The stamp rule, docs/platform/sync/manifest.md "When the judged commit moves". */
 export function judgedCommit({ recorded, build, checkerMoved, wroteChange }: StampInput): string {
   return recorded === null || checkerMoved || wroteChange ? build : recorded;
 }

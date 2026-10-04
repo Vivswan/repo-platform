@@ -28,11 +28,11 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Understand the issue a red night filed | [Tracking issues: lifecycle](tracking-issues.md#issue-lifecycle) |
 | Ship a release while a tracking issue is open | [Tracking issues: release gating](tracking-issues.md#release-gating) |
 | Rename a tracking label without breaking the stream | [Tracking issues: renaming the label](tracking-issues.md#renaming-the-label) |
-| Add or remove a file the platform writes | [Sync: files.yml](sync.md#filesyml) |
-| Read a sync PR's report, or find why a row held | [Sync: the report](sync.md#the-report) |
+| Add or remove a file the platform writes | [The file list: files.yml](platform/sync/files.md#filesyml) |
+| Read a sync PR's report, or find why a row held | [The writer: the report](platform/sync/writer.md#the-report) |
 | Check why the `stable` tag can be trusted | [Build provenance](build-provenance.md) |
 | Change a managed workflow so it uses a new input of a platform action | [Build provenance: a new action input and its workflow land together](build-provenance.md#a-new-action-input-and-its-workflow-land-together) |
-| Keep a private repo's name out of fleet logs, and find where its details land | [Sync: private repositories](sync.md#private-repositories) |
+| Keep a private repo's name out of fleet logs, and find where its details land | [Private repositories](platform/sync/private-repositories.md) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
 | Detach a repository from management | [Eject](eject.md) |
 
@@ -59,6 +59,15 @@ The groups below are the sidebar's, in its order.
 - [Toolchain pins](toolchains.md): the fleet-wide toolchain version pins and how to override one.
 - [Tracking issues](tracking-issues.md): the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
 - [Security scans](security-scans.md): Trivy fleet-wide (the blocking gate, the expiring bypass file, the nightly scan's tracking issues) and semgrep on public repositories.
-- [Sync](sync.md): the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
 - [Build provenance](build-provenance.md): why the `stable` delivery tag is trustworthy, and what residual trust remains.
 - [Eject](eject.md): pausing sync PRs, or detaching a repository entirely.
+
+### Platform
+
+- [Sync](platform/sync/README.md): the entry to the sync's contract: what the writer writes, where its code is, and this repository as a target of itself; one page per subject follows.
+- [The file list](platform/sync/files.md): the grammar of `files.yml`: entries, module data, what the loader refuses, upstream refs, placeholders, selection.
+- [The writer](platform/sync/writer.md): the command, how each class is written and what holds the PR, class flips, retirement, migrations, the report.
+- [Mirrors](platform/sync/mirrors.md): a written file carried to more paths, and what each of its two readers refuses.
+- [The manifest](platform/sync/manifest.md): the records, the stamp rule that moves the judged commit, and the managed files check that judges at it.
+- [The operator](platform/sync/operator.md): the fleet run, one row job per repository: delivery, the branch dispatch, the `repo-platform:sync` label.
+- [Private repositories](platform/sync/private-repositories.md): what the public log keeps out for a private repository, and where that model stops.

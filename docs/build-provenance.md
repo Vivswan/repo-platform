@@ -19,7 +19,7 @@ How the `stable` tag gets moved, how a sync verifies the commit it names before 
 
 | What the fleet reads | Where it sits at the commit | Who reads it |
 | --- | --- | --- |
-| `files.yml` and `files/` | the repository root | the sync writer ([sync.md](sync.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../actions/plan/reserved_labels.ts)), validate-managed-files |
+| `files.yml` and `files/` | the repository root | the sync writer ([platform/sync/README.md](platform/sync/README.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../actions/plan/reserved_labels.ts)), validate-managed-files |
 | `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | every managed workflow's `uses:` |
 | `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` |
 
@@ -88,17 +88,17 @@ The tag names a main commit whose own CI run passed, so there is no generated tr
 
 The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
-**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run); [sync.md](sync.md#the-command) says where a sync names it.
+**The delivery** is the full 40-hex sha of that main commit, taken from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run); [platform/sync/writer.md](platform/sync/writer.md#the-command) says where a sync names it.
 
-**The manifest's own entry** records the commit the repository is judged against; a sync moves it under the stamp rule ([sync.md](sync.md#the-manifest)).
+**The manifest's own entry** records the commit the repository is judged against; a sync moves it under the stamp rule ([platform/sync/manifest.md](platform/sync/manifest.md#when-the-judged-commit-moves)).
 
-**Every fleet repository is judged at that recorded commit:** the validate-managed-files action checks out repo-platform at it and runs that commit's `check.ts`, so a `stable` move reddens nothing until the repository syncs ([sync.md](sync.md#judged-at-the-synced-commit)).
+**Every fleet repository is judged at that recorded commit:** the validate-managed-files action checks out repo-platform at it and runs that commit's `check.ts`, so a `stable` move reddens nothing until the repository syncs ([platform/sync/manifest.md](platform/sync/manifest.md#judged-at-the-synced-commit)).
 
 Old delivery commits stay reachable forever: they are main history.
 
 ## A new action input and its workflow land together
 
-A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([sync.md](sync.md#this-repository-as-a-target)).
+A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([platform/sync/README.md](platform/sync/README.md#this-repository-as-a-target)).
 
 So a workflow never runs ahead of the actions it calls: the sync PR that carries a new workflow line lands only once the delivery ref names a commit carrying the action input it feeds. One PR may add the input and the line together; no check here runs the workflow before the move.
 

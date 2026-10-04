@@ -1,4 +1,4 @@
-# The push-only sync operator (docs/sync.md, "The operator"): the public log carries the operator's vocabulary and
+# The push-only sync operator (docs/platform/sync/operator.md): the public log carries the operator's vocabulary and
 # nothing else, so a row's steps write their detail to $RUNNER_TEMP files or to the target repository itself.
 # GitHub keeps ONE pending run per concurrency group, so multi-repo work belongs in a single run (repo=all, or a comma list).
 
@@ -188,7 +188,7 @@ jobs:
         run: bun .github/scripts/sync/checkout_target.ts > "$RUNNER_TEMP/checkout-stdio.log" 2>&1
 
       # Every rung of the build's migrations/, in name order, over the target
-      # (docs/sync.md, Migrations), driven by the build's own migrate.ts like
+      # (docs/platform/sync/writer.md, Migrations), driven by the build's own migrate.ts like
       # the writer below. Its log is the writer's until the writer writes its
       # report over it: a failed rung skips the writer and is delivered as
       # the writer's failure, the rung's line in the log tail.
@@ -198,7 +198,7 @@ jobs:
         continue-on-error: true
         run: bun build/.github/scripts/sync/migrate.ts build/migrations target > "$RUNNER_TEMP/sync.log" 2>&1
 
-      # The one writer step (docs/sync.md): its report is the PR body (the
+      # The one writer step (docs/platform/sync/operator.md): its report is the PR body (the
       # job summary on a branch dispatch), its summary the hold decision; a
       # failure is delivered as an issue. The build's own writer runs, so the
       # commit the manifest records is the code that wrote the tree.

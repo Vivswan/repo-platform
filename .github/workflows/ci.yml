@@ -288,13 +288,14 @@ jobs:
           tar -xzf "$RUNNER_TEMP/vale.tar.gz" -C "$RUNNER_TEMP/vale-bin" vale
           echo "$RUNNER_TEMP/vale-bin" >>"$GITHUB_PATH"
       - name: Vale over the pages (shape and wording, the skills' rules)
-        run: vale README.md docs/*.md
+        run: vale README.md docs
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: files/bun/.bun-version
       # The docs-discipline probe's path check: a page naming a path a managed repository holds resolves through the shipped base tree.
+      # The probe takes files, and the runner's bash has no globstar, so each docs level is spelled.
       - name: Probe every path the pages name
-        run: bun .skills/skills/docs-discipline/scripts/docs-probe.mts --base files/base README.md docs/*.md
+        run: bun .skills/skills/docs-discipline/scripts/docs-probe.mts --base files/base README.md docs/*.md docs/platform/sync/*.md
 
   # A caller job's permissions are the ceiling for the called workflow, so the scan grants sit here.
   codeql-javascript:

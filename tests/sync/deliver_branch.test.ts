@@ -1,4 +1,4 @@
-// The branch delivery's contract with the human reading the pull request (docs/sync.md, "Syncing a branch by label"),
+// The branch delivery's contract with the human reading the pull request (docs/platform/sync/operator.md, "Syncing a branch by label"),
 // driven as the workflow drives it: the script spawned over git and gh stubs, one row per outcome. What would drift
 // silently: the label staying on after a failure, a hold or a workflow-file diff reaching the push, a queued relabel
 // losing the approval line, a refused push reported without git's own words.

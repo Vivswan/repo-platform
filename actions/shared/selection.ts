@@ -45,7 +45,7 @@ export function applies(when: When | null, selection: Selection): boolean {
   );
 }
 
-/** The ONE "this entry applies to this repository" rule (docs/sync.md, Selection): its `when` holds and its path is not
+/** The ONE "this entry applies to this repository" rule (docs/platform/sync/files.md, Selection): its `when` holds and its path is not
  *  excepted. The writer, the fleet plan, and the validator select by it, so a clause the validator judges live is the
  *  clause the writer wrote. */
 export function selects(entry: { path: string; when: When | null }, selection: Selection): boolean {

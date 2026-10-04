@@ -1,4 +1,4 @@
-// The facts GitHub leaves to this checkout to hold for the label-triggered branch sync (docs/sync.md, "Syncing a branch by label"):
+// The facts GitHub leaves to this checkout to hold for the label-triggered branch sync (docs/platform/sync/operator.md, "Syncing a branch by label"):
 //   `labeled` fires for every label      -> the job's own condition names the one label, and the skeleton ci.yml never
 //                                           takes `labeled` (it would rerun CI and cancel the in-flight run on every label)
 //   a fork's PR carries a read-only token -> the same-repository guard skips at zero minutes instead of failing at the push

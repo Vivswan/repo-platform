@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The only lines sync-repos.yml prints on its own behalf; everything else a run learns goes to $RUNNER_TEMP files or the target
-// repository (docs/sync.md, "The operator").
+// repository (docs/platform/sync/operator.md).
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

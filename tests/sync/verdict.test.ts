@@ -57,7 +57,7 @@ describe("verdict.ts", () => {
     });
   });
 
-  // The lines are docs/sync.md's vocabulary spelled here, independent of the printer's own table, so a swapped
+  // The lines are docs/platform/sync/operator.md's vocabulary spelled here, independent of the printer's own table, so a swapped
   // mapping cannot pass by agreeing with itself; an unresolved row is told from a delivered one by TARGET alone.
   test.each<{ verdict?: string; row: string; line: string }>([
     { verdict: "unchanged", row: "0", line: "row 0: unchanged" },

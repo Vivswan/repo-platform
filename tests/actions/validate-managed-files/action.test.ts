@@ -506,7 +506,7 @@ test("repo-platform is checked out whole, after the install and before the valid
   const platform = steps[index("platform")] as Step & { with: Record<string, unknown> };
   expect(index("install")).toBeLessThan(index("platform"));
   expect(index("platform")).toBeLessThan(index("validate"));
-  // The validator runs the RECORDED commit's checkout (docs/sync.md, the manifest): `ref: stable` would judge a
+  // The validator runs the RECORDED commit's checkout (docs/platform/sync/manifest.md): `ref: stable` would judge a
   // repository synced at commit A with commit B's validator, green. action_references checks only that a present
   // reference resolves, not which one it is.
   expect([platform.with.repository, platform.with.ref, platform.with["fetch-depth"]]).toEqual([
