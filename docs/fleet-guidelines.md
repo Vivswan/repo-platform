@@ -98,7 +98,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Plain ASCII punctuation
 
-**Rule:** no curly quotes, em-dashes, or invisible unicode in any text file.
+**Rule:** no curly quotes, em-dashes, or invisible unicode in any text file git tracks or would track; an ignored path is never judged.
 
 **Why:** look-alike characters break greps, diffs, and agent edits that match on plain text.
 
