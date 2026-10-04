@@ -240,7 +240,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/skills/.github/actions/validate-skills@0cdcc48f2f14ca815b0d32fc7938f138637e0888 # main
+      - uses: Vivswan/skills/.github/actions/validate-skills@cff7bdd1435143ad62567862cf89e9f1af308b26 # main
 
   # Discovery runs the real `npx skills add --list` against the checkout, so it reaches the npm
   # registry: its own job, so a registry hiccup names itself instead of the structure check.
@@ -249,7 +249,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/skills/.github/actions/validate-skills@0cdcc48f2f14ca815b0d32fc7938f138637e0888 # main
+      - uses: Vivswan/skills/.github/actions/validate-skills@cff7bdd1435143ad62567862cf89e9f1af308b26 # main
         with:
           mode: discovery
 
@@ -260,6 +260,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The skills repository at the sha the validate-skills pins name: Vale's styles live there (.vale.ini). Dependabot bumps
+      # the `uses:` lines and never a `ref:`, so tests/workflows/ci_shape.test.ts holds this ref to them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Vivswan/skills
+          ref: cff7bdd1435143ad62567862cf89e9f1af308b26
+          path: .skills
       - uses: ./actions/plan
         id: plan
         with:
@@ -268,7 +275,7 @@ jobs:
         with:
           check: "true"
           config: ${{ steps.plan.outputs.config }}
-      # The /docs-discipline shape rule (.vale.ini and .vale/styles/House); the release by sha256, as pinact above.
+      # The skills' Vale styles over this repository's pages (.vale.ini); the release by sha256, as pinact above.
       - name: Install the pinned Vale release
         env:
           VALE_VERSION: 3.24.0
@@ -280,7 +287,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/vale-bin"
           tar -xzf "$RUNNER_TEMP/vale.tar.gz" -C "$RUNNER_TEMP/vale-bin" vale
           echo "$RUNNER_TEMP/vale-bin" >>"$GITHUB_PATH"
-      - name: Vale over the pages (no paragraph or list item over 70 words)
+      - name: Vale over the pages (shape and wording, the skills' rules)
         run: vale README.md docs/*.md
 
   # A caller job's permissions are the ceiling for the called workflow, so the scan grants sit here.
