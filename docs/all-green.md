@@ -103,7 +103,7 @@ The jobs beside them gate nothing:
 
 - **Its docs shape and wording check:** the `docs-check` job runs [Vale](https://vale.sh) over README.md and docs/*.md with the skills repository's styles, read from a checkout at the validate-skills sha: a paragraph or list item over 70 words, or a word or phrase from the unslop and natural-writing skills' lists, fails the job, naming the line. The binary is a pinned release verified by sha256, as pinact is.
 
-- **Its docs path check:** the same job runs the docs-discipline probe from that checkout over the same pages. A relative link whose target is missing fails it. A backticked path fails it when its first directory exists beside the page, at the root, or in `files/base` and the rest does not; bare file names and other layouts are left alone. Its word cap repeats Vale's verdict.
+- **Its docs path check, CI-only like Vale:** the same job runs the docs-discipline probe from that checkout over the same pages; `bun run check` does not. A relative link whose target is missing fails it. A backticked path fails it when its first directory exists beside the page, at the root, or in `files/base` and the rest does not; bare file names and other layouts are left alone.
 
 - **A repo-owned advisory check** opts out with `continue-on-error: true` on its job in checks.yml.
 
