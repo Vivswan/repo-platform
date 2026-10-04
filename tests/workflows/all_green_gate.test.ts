@@ -4,6 +4,7 @@
 //
 //   name: or strategy: on the gate  -> the check run posts under that name or a matrix suffix, never as the required context
 //   if: other than always()         -> a failed dependency SKIPS the gate, and GitHub reads a skipped required check as satisfied
+//   a conditional job off allowed-skips -> its skip fails the gate on every run its condition excludes
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -18,6 +19,7 @@ interface Job {
   if?: string;
   name?: string;
   strategy?: unknown;
+  steps?: { with?: { "allowed-skips"?: string } }[];
 }
 type Rule = { type: string; parameters?: { required_status_checks?: { context: string }[] } };
 
@@ -38,6 +40,17 @@ test("ci.yml's gate needs exactly the jobs that do not ride behind it", () => {
     );
   const gating = Object.keys(ci).filter((name) => name !== CHECK_NAME && !reachesGate(name));
   expect(needsOf(ci[CHECK_NAME]).sort()).toEqual(gating.sort());
+});
+
+test.each([
+  ["ci.yml", ci],
+  ["the skeleton", skeleton],
+])("%s's allowed-skips names exactly the needed jobs that carry a condition", (_, jobs) => {
+  const conditional = needsOf(jobs[CHECK_NAME]).filter((name) => jobs[name]?.if !== undefined);
+  const allowed = jobs[CHECK_NAME]?.steps
+    ?.map((step) => step.with?.["allowed-skips"])
+    .find((value) => value !== undefined);
+  expect(allowed?.split(/[\s,]+/).sort()).toEqual(conditional.sort());
 });
 
 test("both gate jobs post the check as CHECK_NAME, fail closed, and the override ruleset requires that context", () => {

@@ -4,7 +4,7 @@ description: >-
   so the upstream version pin and the severity threshold live in one place
   instead of in every rendered ci.yml. Diffs the dependency graph between
   the PR's base and head; only PR events have a diff to review, so callers
-  put the pull_request condition on their steps.
+  run it on pull_request and allow its skip at their gate.
 
 runs:
   using: composite
