@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-// Shell stays while it is a straight line of commands; the moment a body needs a branch, a loop, a function, `||`, or a
-// tested `$(...)`, it is a TypeScript script run by bun. Policy: docs/fleet-guidelines.md.
+// Shell may carry one level of a construct; a construct inside another, or a function at any depth, is a TypeScript
+// script run by bun. Policy: docs/fleet-guidelines.md.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -178,7 +178,7 @@ export function report(outcome: Outcome): string {
   }
   const { findings, allowlistErrors } = outcome.verdict;
   if (outcome.state === "clean") {
-    parts.push("Every shell body is a straight line of commands.");
+    parts.push("Every shell body stays within one level of a construct.");
   } else {
     parts.push(`${findings.length} refused construct(s) (fails).`);
     if (findings.length > 0) {
@@ -221,6 +221,7 @@ if (import.meta.main) {
       ...verdict.allowlistErrors.map((failure) => workflowCommand("error", failure)),
     ],
     passed: (verdict) => `Shell complexity check passed. ${census(verdict)}`,
-    failed: (count) => `${count} finding(s). Shell is a straight line of commands; ${REMEDY}.`,
+    failed: (count) =>
+      `${count} finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
   });
 }

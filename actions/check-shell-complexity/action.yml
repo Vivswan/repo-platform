@@ -1,25 +1,30 @@
 name: Check Shell Complexity
-description: >-
-  Fails on a shell body that is more than a straight line of commands: a
-  branch, a loop, a function, `||` error handling, or a command substitution
-  whose result is tested belongs in a TypeScript script run by bun. Judges
-  every inline body in the caller's checkout: workflow and composite-action
-  `run:` steps (bash, sh, zsh, pwsh, powershell, cmd), moon task scripts,
-  Containerfile RUN instructions, and *.sh, *.bash, *.zsh, *.ps1, *.psm1,
-  *.bat, *.cmd files, plus a tracked extensionless file whose shebang names
-  one of those shells (a git hook). bash/sh/zsh parse with mvdan/sh (shfmt's parser);
-  PowerShell parses with pwsh's own parser, so pwsh must be on PATH when a
-  PowerShell body exists (the step fails naming it otherwise); cmd, which no
-  parser serves, is judged by tokens after dropping rem lines, so a keyword
-  inside a quoted argument is refused too. Findings are written ONCE as one
-  table through two sinks on every event, the step summary and the log
-  annotations, plus a sticky PR comment on pull_request events (deleted when
-  there is nothing to say).
-  Files carrying repo-platform's managed header are skipped and counted
-  (the caller cannot fix them); a yaml file the reader cannot parse warns and
-  is skipped (yamllint owns yaml validity). Repo-owned exemptions live in
-  .shell-complexity-allow.local, one path per line with a `# reason`. The
-  calling job needs pull-requests: write for the comment.
+description: |
+  Refuses shell nested more than one level deep, and any function.
+
+  Depth 1 is allowed: an if, for, while, until, case, `||` chain, or tested command substitution
+  whose body holds only plain commands. Depth 2 is refused: any construct inside another.
+  A function is refused at any depth, since a function is a script asking to be TypeScript.
+
+  Judged, in the caller's checkout:
+    - `run:` steps of workflows and composite actions (bash, sh, zsh, pwsh, powershell, cmd)
+    - moon task scripts and Containerfile RUN instructions
+    - *.sh, *.bash, *.zsh, *.ps1, *.psm1, *.bat, *.cmd files
+    - a tracked extensionless file whose shebang names one of those shells (a git hook)
+
+  Parsers: mvdan/sh for bash, sh, and zsh; pwsh's own parser for PowerShell, so pwsh must be on PATH
+  when a PowerShell body exists (the step fails naming it otherwise); cmd by tokens after dropping rem
+  lines, so nesting is counted by keyword count rather than structure, and a keyword inside a quoted
+  argument counts too.
+
+  Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it).
+  Warned and skipped: a yaml file the reader cannot parse (yamllint owns yaml validity).
+
+  Findings are written once, as one table through two sinks on every event: the step summary and the
+  log annotations. On pull_request events a sticky PR comment carries the same table and is deleted
+  when there is nothing to say; the calling job needs `pull-requests: write` for it.
+
+  Exemptions: `.shell-complexity-allow.local`, one path per line with a `# reason`.
 
 runs:
   using: composite

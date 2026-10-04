@@ -1,6 +1,7 @@
-// The rule is binary (a construct is refused or allowed) and it is the only part that is ours; every parse is a library's
-// or the language's own parser, which is why PowerShell goes out to pwsh and cmd, which no parser serves, is judged by
-// tokens: a keyword inside a quoted argument is refused like the real thing, and the allow-list is the remedy.
+// The rule is the only part that is ours: one level of a construct passes, a construct inside another is refused, a
+// function at any depth. Every parse is a library's or the language's own parser, which is why PowerShell goes out to
+// pwsh and cmd, which no parser serves, is judged by tokens: nesting there is a keyword count, not structure, and a
+// keyword inside a quoted argument counts like the real thing; the allow-list is the remedy.
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -70,6 +71,41 @@ function isParseError(error: unknown): error is ParseError {
   );
 }
 
+/** The construct a node opens, or null: an `elif`/`else` branch is its `if`'s, and a `||` directly under a `||` is the
+ *  same chain. A command substitution is a construct only where its result is tested. */
+function constructOf(node: Node, parent: Node | undefined, ancestors: Node[]): string | null {
+  switch (syntax.NodeType(node)) {
+    case "IfClause":
+      return parent !== undefined && syntax.NodeType(parent) === "IfClause" ? null : "if";
+    case "CaseClause":
+      return "case";
+    case "ForClause":
+      return "for";
+    case "WhileClause":
+      return (node as WhileClause).Until ? "until" : "while";
+    case "BinaryCmd": {
+      if ((node as BinaryCmd).Op !== OR_OPERATOR) return null;
+      // `a || b || c` nests right through a Stmt: the inner chain is the outer one.
+      const enclosing = ancestors.findLast((ancestor) => syntax.NodeType(ancestor) !== "Stmt");
+      const chained =
+        enclosing !== undefined &&
+        syntax.NodeType(enclosing) === "BinaryCmd" &&
+        (enclosing as BinaryCmd).Op === OR_OPERATOR;
+      return chained ? null : "||";
+    }
+    case "CmdSubst": {
+      // Only what sits between this substitution and the one enclosing it can test its result.
+      const enclosing = ancestors.findLastIndex(
+        (ancestor) => syntax.NodeType(ancestor) === "CmdSubst",
+      );
+      return ancestors.slice(enclosing + 1).some(testsItsArguments) ? "$(...) tested" : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** One level of a construct is allowed; a construct inside another is refused, and so is a function at any depth. */
 export function judgeBash(code: string): Refusal[] {
   let file: Node;
   try {
@@ -80,42 +116,25 @@ export function judgeBash(code: string): Refusal[] {
   }
   const refusals: Refusal[] = [];
   const ancestors: Node[] = [];
+  const opened: (string | null)[] = [];
   syntax.Walk(file, (node) => {
     if (node === null) {
       ancestors.pop();
+      opened.pop();
       return false;
     }
-    const line = node.Pos().Line();
-    switch (syntax.NodeType(node)) {
-      case "IfClause":
-        // An `elif` or `else` branch is an IfClause whose direct parent is the IfClause: the same construct, not a second one.
-        if (syntax.NodeType(ancestors[ancestors.length - 1]) !== "IfClause") {
-          refusals.push({ line, construct: "if" });
-        }
-        break;
-      case "CaseClause":
-        refusals.push({ line, construct: "case" });
-        break;
-      case "ForClause":
-        refusals.push({ line, construct: "for" });
-        break;
-      case "WhileClause":
-        refusals.push({ line, construct: (node as WhileClause).Until ? "until" : "while" });
-        break;
-      case "FuncDecl":
-        refusals.push({ line, construct: "function" });
-        break;
-      case "BinaryCmd": {
-        const binary = node as BinaryCmd;
-        if (binary.Op === OR_OPERATOR)
-          refusals.push({ line: binary.OpPos.Line(), construct: "||" });
-        break;
+    const construct = constructOf(node, ancestors[ancestors.length - 1], ancestors);
+    if (syntax.NodeType(node) === "FuncDecl") {
+      refusals.push({ line: node.Pos().Line(), construct: "function" });
+    } else if (construct !== null) {
+      const outer = opened.findLast((label) => label !== null);
+      if (outer !== undefined) {
+        const line = construct === "||" ? (node as BinaryCmd).OpPos.Line() : node.Pos().Line();
+        refusals.push({ line, construct: `${construct} inside ${outer}` });
       }
-      case "CmdSubst":
-        if (ancestors.some(testsItsArguments)) refusals.push({ line, construct: "$(...) tested" });
-        break;
     }
     ancestors.push(node);
+    opened.push(construct);
     return true;
   });
   return dedupe(refusals);
@@ -133,41 +152,41 @@ function dedupe(refusals: Refusal[]): Refusal[] {
 }
 
 const CMD_COMMENT = /^@?\s*(rem\b|::)/i;
-/** A keyword stands alone: `for` is refused, `format` and `--for` are not. */
-const CMD_KEYWORDS = ["if", "for", "goto"].map(
-  (keyword) => [keyword, new RegExp(`(?<![\\w-])${keyword}(?![\\w-])`, "i")] as const,
+/** A keyword stands alone: `for` is a construct, `format` and `--for` are not. */
+const CMD_CONSTRUCTS = ["if", "for"].map(
+  (keyword) => [keyword, new RegExp(`(?<![\\w-])${keyword}(?![\\w-])`, "gi")] as const,
 );
+const CMD_GOTO = /(?<![\w-])goto(?![\w-])/i;
 const CMD_CALL_LABEL = /(?<![\w-])call\s+:/i;
-const CMD_CONTINUES = /(?<!\^)(\^\^)*\^\r?$/;
+const CMD_LABEL = /^:[^:]/;
 
-/** Tokens, since no cmd parser exists on npm: comment lines (`rem`, `::`) are dropped, a line ending in `^` continues
- *  on the next, then a body is refused for a second command line or for `if`, `for`, `goto`, `call :label`, or `||`
- *  anywhere on a line. */
+/** Tokens, since no cmd parser exists on npm: comment lines (`rem`, `::`) are dropped, then one construct keyword
+ *  (`if`, `for`, a `||`) passes and a second is refused, nesting counted by keyword count rather than structure. A
+ *  `goto`, a `:label` line, or a `call :label` is refused at any count: a jump is a script. */
 export function judgeCmd(code: string): Refusal[] {
   const refusals: Refusal[] = [];
-  let commands = 0;
-  let continued = false;
+  const constructs: Refusal[] = [];
   code.split("\n").forEach((raw, index) => {
     const line = raw.trim();
-    // An odd run of carets at the physical line end continues the line; `^^` is one literal caret.
-    const continues = CMD_CONTINUES.test(raw);
-    if (line === "" || CMD_COMMENT.test(line) || (continued && line === "^")) {
-      continued = continued && continues;
-      return;
-    }
-    if (!continued) commands += 1;
-    continued = continues;
+    if (line === "" || CMD_COMMENT.test(line)) return;
     const at = index + 1;
-    if (commands === 2 && !refusals.some((r) => r.construct === "a second command line")) {
-      refusals.push({ line: at, construct: "a second command line" });
-    }
-    for (const [keyword, pattern] of CMD_KEYWORDS) {
-      if (pattern.test(line)) refusals.push({ line: at, construct: keyword });
-    }
+    if (CMD_LABEL.test(line)) refusals.push({ line: at, construct: "label" });
+    if (CMD_GOTO.test(line)) refusals.push({ line: at, construct: "goto" });
     if (CMD_CALL_LABEL.test(line)) refusals.push({ line: at, construct: "call :label" });
-    if (line.includes("||")) refusals.push({ line: at, construct: "||" });
+    for (const [keyword, pattern] of CMD_CONSTRUCTS) {
+      // Every occurrence counts: `if exist x if exist y` is two constructs on one line.
+      for (const _ of line.matchAll(pattern)) constructs.push({ line: at, construct: keyword });
+    }
+    for (const _ of line.matchAll(/\|\|/g)) constructs.push({ line: at, construct: "||" });
   });
-  return refusals;
+  if (constructs.length >= 2) {
+    const names = constructs.map((construct) => construct.construct).join(", ");
+    refusals.push({
+      line: constructs[1].line,
+      construct: `${constructs.length} constructs (${names})`,
+    });
+  }
+  return refusals.sort((a, b) => a.line - b.line);
 }
 
 export const POWERSHELL_SCRIPT = join(import.meta.dir, "find-constructs.ps1");
@@ -175,7 +194,28 @@ const PWSH_TIMEOUT_MS = 120_000;
 
 interface PowerShellResult {
   id: string;
-  findings: Refusal[] | null;
+  findings: PowerShellConstruct[] | null;
+}
+
+/** What find-constructs.ps1 emits per construct: its line, its label, and the nearest construct enclosing it. */
+interface PowerShellConstruct {
+  line: number;
+  construct: string;
+  outer: string | null;
+}
+
+/** The depth rule, as judgeBash applies it: a construct inside another is refused, a function at any depth, and a
+ *  parse error as reported. */
+function refusalsOf(constructs: PowerShellConstruct[]): Refusal[] {
+  const refusals: Refusal[] = [];
+  for (const { line, construct, outer } of constructs) {
+    if (construct === "function" || construct.startsWith("does not parse")) {
+      refusals.push({ line, construct });
+    } else if (outer !== null) {
+      refusals.push({ line, construct: `${construct} inside ${outer}` });
+    }
+  }
+  return refusals;
 }
 
 /** One pwsh per batch: it reads the bodies from a file this call owns and removes, so a refused body never rides argv. */
@@ -195,7 +235,7 @@ export function judgePowerShell(bodies: Body[]): Map<string, Refusal[]> {
       input,
     ]);
     for (const { id, findings } of JSON.parse(result) as PowerShellResult[]) {
-      judged.set(id, findings ?? []);
+      judged.set(id, refusalsOf(findings ?? []));
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });

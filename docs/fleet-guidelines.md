@@ -110,20 +110,38 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Shell is a straight line of commands
 
-**Rule:** an inline shell body (a workflow or composite-action `run:` step, a moon task `script`, a Containerfile `RUN`, a `*.sh`, `*.ps1`, or `*.bat` file, a tracked extensionless file whose shebang names a shell) is a straight line of commands. The moment it needs a branch, a loop, a function, `||` error handling, or a command substitution whose result is tested, it is a TypeScript script run by bun.
+**Rule:** an inline shell body (a workflow or composite-action `run:` step, a moon task `script`, a Containerfile `RUN`, a `*.sh`, `*.ps1`, or `*.bat` file, a tracked extensionless file whose shebang names a shell) may carry one level of a construct. A construct inside another, or a function at any depth, is a TypeScript script run by bun.
+
+- **Depth 1, allowed:** an `if`, `for`, `while`, `until`, `case`, `||` chain, or tested command substitution whose body holds only plain commands.
+- **Depth 2, refused:** any construct inside another: an `if` inside a `for`, a `case` inside an `if`, a `||` inside an `if` body, a tested `$(...)` inside a loop or an `if`.
+- **A function is refused at any depth:** a function is a script asking to be TypeScript.
+
+Refused:
+
+```bash
+for f in *; do
+  if [ -f "$f" ]; then cat "$f"; fi
+done
+```
+
+Allowed:
+
+```bash
+if [ -f x ]; then cat x; fi
+```
 
 **Why:** bash-only defects cost review rounds: `set -e` does not reach a failed command inside a tested `$(...)`, macOS ships bash 3.2, and `grep`'s locale and PCRE behaviour differ by runner. A script has types, a test, and one runtime.
 
-**How:** refused and allowed, per dialect:
+**How:** the constructs the depth rule counts, per dialect:
 
-| Dialect | Parsed by | Refused |
+| Dialect | Parsed by | Constructs |
 | --- | --- | --- |
-| bash, sh, zsh (an unset `shell:` is bash, or pwsh on a Windows `runs-on`) | mvdan/sh, shfmt's parser, as bash | `if`, `case`, `for`, `while`, `until`, a function, `\|\|`, a `$(...)` fed to `test`, `[`, or `[[` |
-| PowerShell (`pwsh`, `powershell`, `*.ps1`, `*.psm1`) | PowerShell's own parser, through `pwsh` | `if`, `switch`, `for`, `foreach`, `while`, `do`, `function`, `try`, `trap`, `throw`, `\|\|` |
-| cmd (`shell: cmd`, `*.bat`, `*.cmd`) | tokens, after dropping `rem` and `::` lines: no parser exists for cmd | a second command line, `if`, `for`, `goto`, `call :label`, `\|\|` |
+| bash, sh, zsh (an unset `shell:` is bash, or pwsh on a Windows `runs-on`) | mvdan/sh, shfmt's parser, as bash | `if`, `case`, `for`, `while`, `until`, a `\|\|` chain, a `$(...)` fed to `test`, `[`, or `[[`; a function is refused outright |
+| PowerShell (`pwsh`, `powershell`, `*.ps1`, `*.psm1`) | PowerShell's own parser, through `pwsh` | `if`, `switch`, `for`, `foreach`, `while`, `do`, `try`, a `\|\|` chain; a function is refused outright |
+| cmd (`shell: cmd`, `*.bat`, `*.cmd`) | tokens, after dropping `rem` and `::` lines: no parser exists for cmd | `if`, `for`, `\|\|`, counted by keyword rather than structure: one passes, two or more are refused; a `goto`, a `:label`, or a `call :label` is refused outright |
 
-- **Allowed:** commands joined by newlines, `&&`, or pipes; redirects; `set -e` and `set -o pipefail`; assignments, `${X:-default}` included; `echo "k=$(v)" >> "$GITHUB_OUTPUT"`.
-- **cmd over-reports:** a token scan cannot tell a keyword inside a quoted argument from the real thing, so it refuses both; the allow-list is the remedy.
+- **Allowed at any depth:** commands joined by newlines, `&&`, or pipes; redirects; `set -e` and `set -o pipefail`; assignments, `${X:-default}` included; `echo "k=$(v)" >> "$GITHUB_OUTPUT"`.
+- **cmd over-reports:** a token scan cannot tell a keyword inside a quoted argument from the real thing, so it counts both; the allow-list is the remedy.
 - **zsh parses as bash:** mvdan/sh's zsh support is experimental, so a zsh-only expansion is a "does not parse" finding; the allow-list is the remedy.
 - **pwsh must be on the runner** when a PowerShell body exists; the step fails naming it, never skips.
 - **Exempt:** a block that must stay shell goes in `.shell-complexity-allow.local` as `path # reason`, the reason mandatory; an entry whose file has no refused construct left fails as stale.
