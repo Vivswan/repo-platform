@@ -82,7 +82,7 @@ The jobs beside them gate nothing:
 
 - **The checks every repository runs** are the steps of one `standard-checks` job, because GitHub bills a job a rounded-up minute.
 
-- **Each check step** runs under `!cancelled()` once the plan resolved: one failure never hides another, a cancelled run stops them, and a failed plan runs none. The judge step last fails the job naming every failed check in the log and step summary; a step that stood down is never a failure.
+- **Each check step** runs under `!cancelled()` once the plan resolved: one failure never hides another, a cancelled run stops them, and a failed plan runs none. The judge step last ([actions/judge-checks](../actions/judge-checks/action.yml)) fails the job naming every failed check in the log and step summary; a step that stood down is never a failure.
 
 | Step | Runs on | Notes |
 | --- | --- | --- |
@@ -94,6 +94,8 @@ The jobs beside them gate nothing:
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
 
 - **Beside it, one job each:** `semgrep` and `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix, on public repositories with an analyzable toolchain), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts.
+
+- **The `release-pr` job** runs [release-health](../actions/release-health/action.yml) in pull-request mode on the PR head: the head must contain the base tip (a stale release PR would cut a release missing commits already on main), then the health gates run.
 
 - **Bypassing a check:** each check's per-finding bypass is the table in [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check).
 
@@ -210,13 +212,13 @@ checks + ci -> all-green -> post-green (repo-owned hook) -> release -> update-re
 | Push | Path |
 | --- | --- |
 | a release-PR merge | it cuts: release-please tags that merge commit (never the branch head) and drafts the release, whatever main does afterwards |
-| every other push | it proposes or refreshes the release PR, and only while main's head is still the judged commit: a run whose commit is no longer the head skips instead of racing the newer run's refresh |
+| every other push | it proposes or refreshes the release PR, and only while main's head is still the judged commit (release-health's `head-current` output): a run whose commit is no longer the head skips instead of racing the newer run's refresh |
 
 - **The cut's lane is keyed by the judged sha,** so no other run shares it and nothing can cancel a pending cut; a re-run of the same commit waits, then finds the release already cut.
 
 - **The leg itself holds no lane:** a shared lane keeps one pending call and cancels the older one, so a release commit's call could be cancelled before it cuts.
 
-- **A release merge whose own run went red** stays pending until that run is re-run, and the stale-label guard names it on the next push.
+- **A release merge whose own run went red** stays pending until that run is re-run, and the stale-label guard (release-health in `after-propose` mode, run once release-please proposed) names it on the next push.
 
 - **Known limit:** two release PRs merged before either is cut are both tagged by the first cut run, since release-please builds every pending release PR.
 

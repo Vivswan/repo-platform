@@ -3,18 +3,27 @@ description: >-
   Gates releases in managed repos: fails when an open tracking issue of a
   nightly stream (fuzz or CI), an open release-blocker issue, or an open
   Dependabot alert at high or critical severity says the repository is not
-  release-worthy. Two modes: pull-request (on a release-please PR's CI) and
-  release (on the main-push release path; a push that is not a release-PR
-  merge is not gated, and the release-cut output tells the caller which it
-  was). The release-override label on the release PR turns failures into
-  warnings. Needs GH_TOKEN in the environment with issues read,
-  pull-requests read, and vulnerability-alerts read (an unreadable alerts
-  endpoint fails the gate) and gh >= 2.51 on the runner (GitHub-hosted
+  release-worthy. Three modes. pull-request (on a release-please PR's CI, in
+  a full-history checkout of the PR head) first requires the head to contain
+  the base branch's tip, since a stale release PR cuts a release missing
+  commits already on it, then runs the gates. release (on the main-push
+  release path) gates a release-PR merge and tells the caller which push it
+  was through `release-cut`; an ordinary push is not gated, and
+  `head-current` says whether the branch still stands at the judged commit.
+  after-propose (after release-please's propose step) fails when a merged
+  release PR has worn "autorelease: pending" for over 30 minutes, since
+  release-please then proposes nothing, green. The release-override label on
+  the release PR turns gate failures into warnings; the freshness and pending
+  checks are never overridden. Needs GH_TOKEN in the environment with issues
+  read, pull-requests read, and vulnerability-alerts read (an unreadable
+  alerts endpoint fails the gate) and gh >= 2.51 on the runner (GitHub-hosted
   runners ship current gh).
 
 inputs:
   mode:
-    description: pull-request (on the release PR's CI) or release (on the main-push release path)
+    description: >-
+      pull-request (on the release PR's CI), release (on the main-push release
+      path), or after-propose (after release-please proposed)
     required: true
   tracking-labels:
     description: >-
@@ -27,6 +36,12 @@ outputs:
   release-cut:
     description: Release mode only; "true" when the judged commit is a release-PR merge, "false" otherwise.
     value: ${{ steps.check.outputs.release-cut }}
+  head-current:
+    description: >-
+      Release mode, ordinary pushes only; "true" when the branch head is still
+      the judged commit, "false" when a newer push moved it (that run
+      refreshes the release PR).
+    value: ${{ steps.check.outputs.head-current }}
 
 runs:
   using: composite
@@ -39,6 +54,15 @@ runs:
       uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
         from: ${{ github.action_path }}
+
+    # The merge ref GitHub checks out by default already contains the base
+    # tip, so the caller checks out the PR head; GITHUB_BASE_REF names the base.
+    - name: Require the release PR to contain the tip of its base branch
+      if: inputs.mode == 'pull-request'
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/freshness.ts"'
 
     - name: Check release health
       id: check

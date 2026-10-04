@@ -183,7 +183,7 @@ The modules add:
 - **release-please:** arms the managed ci.yml's static `release` legs and lands the repo-owned release-please configuration ([the release pipeline](#the-release-pipeline-release-please) below).
 - **bun:** the fleet's `.bun-version` pin ([toolchains.md](toolchains.md)). Dependabot's bun PRs install with the lockfile Dependabot wrote; a PR whose frozen install fails is fixed by hand, or by re-running Dependabot on it.
 - **bun, a known limitation, accepted:** Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2 ([dependabot-core#15848](https://github.com/dependabot/dependabot-core/issues/15848)). So a Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
-- **deno:** a managed `deno-audit.yml` that runs `deno audit` weekly, on lockfile-touching PRs, and on pushes to main that change `deno.lock`. It fails when any locked dependency (JSR or npm, transitive included) has a high or critical advisory. Every tracked `deno.lock` is audited, nested workspace lockfiles included; a repository with no tracked `deno.lock` fails the run.
+- **deno:** a managed `deno-audit.yml` that runs `deno audit --frozen --level high` at the root weekly, on lockfile-touching PRs, and on pushes to main that change `deno.lock`. It fails when any locked dependency (JSR or npm, transitive included) has a high or critical advisory, and when the root `deno.lock` is not committed.
 - **rust:** a repo-owned `Cargo.toml` workspace root carrying the fleet's lint floor, and the cargo steps in `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` that gate on it. The floor, how a repository takes it, and the gate: [rust.md](modules/rust.md).
 - **Any toolchain:** a repo-owned `auto-format.yml` starter, prefilled with each selected toolchain's formatter: label a PR `fix-lint` to get a formatting commit pushed to it. Width limits apply to code only: the deno step runs `deno fmt --prose-wrap preserve`, so markdown prose keeps its line breaks. [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies.
 - **fuzzer:** a repo-owned `nightly-fuzz.yml` starter - placeholder fuzz step, seeded replay inputs, failure artifact upload, [tracking-issue](modules/tracking-issues.md) filing, auto-close on green. Replace the placeholder with your fuzzer; [fuzzer.md](modules/fuzzer.md) has the contract.
@@ -209,7 +209,7 @@ GitHub releases are immutable once published, so every release moves through thr
 
 2. ci.yml's `update-release` job calls the repo-owned `update-release.yml` hook with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
 
-3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@stable`, which attests build provenance for every asset on the draft and flips it live.
+3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@stable`, which attests build provenance for every asset on the draft and flips it live. [actions/release-assets](../actions/release-assets/action.yml) inspects the draft first, deleting a bundle a prior attempt left.
 
 **The attestation** is a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json`. It is skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations.
 

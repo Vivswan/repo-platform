@@ -11,6 +11,7 @@ interface Step {
   id?: string;
   if?: string;
   run?: string;
+  with?: Record<string, string>;
   env?: Record<string, string>;
 }
 interface Job {
@@ -50,18 +51,15 @@ test("every release-health output is the check step's own, and every output the 
 
 describe("fleet-release.yml's release-please job", () => {
   // release-please's propose phase ABORTS green while a merged PR still wears "autorelease: pending", so the stale-pending
-  // guard must run AFTER propose, once release-please's own recovery phase has had its turn (commit 634326366); moved above
-  // it, the guard fails every run that the recovery would have healed. The health gate first: its output is what the cut
-  // and the propose read.
-  test("health, cut, head, propose, then the stale-pending guard: the guard after release-please's recovery phase", () => {
-    const label = (step: Step) =>
-      step.id ?? ((step.run ?? "").includes("autorelease: pending") ? "stale-pending guard" : "?");
-    expect((job.steps ?? []).map(label)).toEqual([
-      "health",
-      "cut",
-      "head",
-      "propose",
-      "stale-pending guard",
+  // guard (release-health's after-propose mode) must run AFTER propose, once release-please's own recovery phase has had
+  // its turn (commit 634326366); moved above it, the guard fails every run that the recovery would have healed. The health
+  // gate first: its outputs are what the cut and the propose read.
+  test("health, cut, propose, then release-health after-propose: the guard after release-please's recovery phase", () => {
+    expect((job.steps ?? []).map((step) => [step.id, step.with?.mode])).toEqual([
+      ["health", "release"],
+      ["cut", undefined],
+      ["propose", undefined],
+      ["after-propose", "after-propose"],
     ]);
   });
 

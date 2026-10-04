@@ -19,6 +19,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
+| [Pre-commit hooks only check](#pre-commit-hooks-only-check) | review |
 | [File size caps](#file-size-caps) | the `file-size` step (a hard cap fails the step, and the step fails the `standard-checks` job) |
 | [How to bypass a check](#how-to-bypass-a-check) | each tool's own per-finding, in-repo bypass; no job-level switch exists |
 
@@ -180,6 +181,16 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Enforced by:** the comment caps of the `file-size` step ([file size caps](#file-size-caps)), warn only, never a failure.
 
+## Pre-commit hooks only check
+
+**Rule:** a pre-commit hook does one of two things: it checks, and a failing check fails the commit; or it checks, writes the fix into the working tree, and still fails. Nothing else: no staging or committing, no fix-then-pass, no push, no network, no side effect beyond that write. The developer reviews and stages the fix, then reruns the commit.
+
+**Why:** a hook that fixes and re-stages commits bytes the developer never saw, and the one that regenerated and staged under git's exported `GIT_DIR` rewrote a repository's shared config.
+
+**How:** either run the check-only form of each tool (`biome ci`) and let its failure stand, or run the write form (`biome format --write`) and fail the hook whenever it changed a file, naming the files. Never a git command that writes (`add`, `commit`, `stash`, `checkout`, `reset`, `push`, `config`); read-only queries such as `git diff --cached --name-only` are fine. A formatter-and-restage step, lint-staged and its kind, is out.
+
+**Enforced by:** review; repo-platform ships no hook.
+
 ## File size caps
 
 **Rule:** no file over its hard line cap, and in a source, test, workflow, or shell file no line over 256 code points, comment lines included. A `//` line past the cap is a width finding whatever block it sits in.
@@ -253,7 +264,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | knip | standard-checks (bun repos with a package.json to install from; a repo without one stands down with a notice) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
 | semgrep | semgrep (public repos) | an ERROR finding, a fatal analysis error, or a scan that did not complete (its exit status is named) | a `// nosemgrep: <rule-id>` comment (`# nosemgrep: <rule-id>` in YAML) on the finding's line or the line above it, with the reason beside it ([security-scans.md](modules/security-scans.md#semgrep)) |
 | dependency-review | dependency-review | a vulnerable dependency at or above high | none: upgrade or drop the dependency |
-| deno audit | deno-audit.yml (deno repos; pull requests and main pushes touching deno.lock, plus a weekly run) | a high or critical advisory (`--level high`), a lockfile out of date with its manifest (`--frozen`), or no tracked `deno.lock` at all | none: upgrade or drop the dependency, or commit the lockfile |
+| deno audit | deno-audit.yml (deno repos; pull requests and main pushes touching deno.lock, plus a weekly run) | a high or critical advisory (`--level high`), a lockfile out of date with its manifest (`--frozen`), or no tracked `deno.lock` at the repository root | none: upgrade or drop the dependency, or commit the lockfile |
 | Trivy | standard-checks on every event but the schedule (the schedule split below) | a HIGH or CRITICAL vulnerability with a fix available, or any HIGH or CRITICAL misconfiguration | an entry in the repo-owned `.trivyignore.yaml` carrying a `statement` and an `expired_at` date ([security-scans.md](modules/security-scans.md#bypassing-a-finding-trivyignoreyaml)); the plain `.trivyignore` is refused |
 | CodeQL | codeql | nothing in the job; the `main` ruleset's `code_scanning` rule blocks the merge at the fleet's alert bar ([settings.md](settings.md#what-the-baseline-contains)) | a code scanning dismissal with a reason |
 
