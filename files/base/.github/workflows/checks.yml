@@ -1,7 +1,12 @@
-# Repo-owned: seeded once by the fleet sync, never overwritten by a later sync - edit freely.
-# The caller grants no secrets and caps at contents: read; a check needing more gets its own workflow, wired via .github/settings.yml.
-#   a job skipped by its own `if:`   -> stands down from the all-green gate
-#   `continue-on-error: true`        -> an advisory check: even its failures stay out of the gate
+# Runs this repository's own checks under the all-green gate.
+#
+# This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync, so edit freely.
+#
+# The caller grants no secrets and caps at contents: read. A check needing more gets its own workflow, wired via
+# .github/settings.yml.
+#
+# A job skipped by its own `if:` stands down from the all-green gate. A job with `continue-on-error: true` is an
+# advisory check, whose failures stay out of the gate too.
 
 name: Checks
 
