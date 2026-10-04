@@ -72,6 +72,12 @@ describe("the rule, per construct and dialect", () => {
     ],
     ["bash: command -v only looks test up", "bash", 'command -v test "$(ls dist)"\n', []],
     [
+      "bash: $(...) in a path-qualified test",
+      "bash",
+      '/usr/bin/test -n "$(ls dist)"\n',
+      [at(1, "$(...) tested")],
+    ],
+    [
       "bash: the line is the construct's, not the body's first",
       "bash",
       "bun install\nbun run build\nif [ -d dist ]; then\n  bun run test\nfi\n",

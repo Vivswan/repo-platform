@@ -12,8 +12,9 @@ description: >-
   PowerShell body exists (the step fails naming it otherwise); cmd, which no
   parser serves, is judged by tokens after dropping rem lines, so a keyword
   inside a quoted argument is refused too. Findings are written ONCE as one
-  every event, the step summary and the log annotations, plus a sticky PR
-  comment on pull_request events (deleted when there is nothing to say).
+  table through two sinks on every event, the step summary and the log
+  annotations, plus a sticky PR comment on pull_request events (deleted when
+  there is nothing to say).
   Files carrying repo-platform's managed header are skipped and counted
   (the caller cannot fix them); a yaml file the reader cannot parse warns and
   is skipped (yamllint owns yaml validity). Repo-owned exemptions live in

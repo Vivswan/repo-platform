@@ -59,7 +59,9 @@ function testsItsArguments(node: Node): boolean {
       at += 1;
     }
   }
-  return words[at] === "test" || words[at] === "[";
+  // `/usr/bin/test` is test; `[` never carries a path.
+  const command = words[at]?.slice(words[at].lastIndexOf("/") + 1);
+  return command === "test" || command === "[";
 }
 
 function isParseError(error: unknown): error is ParseError {
