@@ -4,7 +4,7 @@
 // the settings apply that creates the site (files/site/settings.yml), and the one known answer, 404, is "wait for
 // the apply", never a failure.
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeSync } from "node:fs";
 import {
   capture,
   error,
@@ -69,7 +69,7 @@ export function askPages(repository: string): RunResult {
 if (import.meta.main) {
   const result = askPages(requireEnv("GITHUB_REPOSITORY"));
   // gh's own diagnostics reach the step log whole, as they did when the shell let them through.
-  process.stderr.write(result.stderr);
+  writeSync(2, result.stderr);
   const verdict = judgePagesAnswer(parseIncludedResponse(result.stdout), failureDetail(result));
   if (verdict.exists === null) {
     error(verdict.error);
