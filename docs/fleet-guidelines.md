@@ -16,7 +16,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | the managed files check; the writer's starter rule |
 | [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
-| [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
+| [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`, and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)) |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
 | [Pre-commit hooks only check](#pre-commit-hooks-only-check) | review |
@@ -144,7 +144,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Copilot review comments are advisory
 
-**Rule:** Copilot code review comments only on a defect it can demonstrate in the diff. Its comments are advisory, so rejecting one is a valid outcome: reply with the reason, then resolve the thread.
+**Rule:** Copilot code review comments only on a defect it can demonstrate in the diff. Rejecting one is a valid outcome ([Copilot code review](settings.md#copilot-code-review) owns why): reply with the reason, then resolve the thread.
 
 **Why:** speculative hardening and unenforced style opinions cost review time without catching a bug.
 
@@ -152,7 +152,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Resolving the thread** is the UI's "Resolve conversation", or GraphQL `resolveReviewThread`. It is required: the managed `main` ruleset sets `required_review_thread_resolution`, so an unresolved thread blocks the merge whatever the reply says.
 
-**Enforced by:** that file for what earns a comment (written to every repository). The comments are advisory by the settings layers ([Copilot code review](settings.md#copilot-code-review)).
+**Enforced by:** that file for what earns a comment (written to every repository), and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)).
 
 ## No backwards-compatibility code
 
@@ -270,7 +270,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **The typos one-off:** `# typos: ignore` or `// typos: ignore` at the end of the line.
 
-- **zizmor's retry:** zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt runs once more and only the retry's result counts.
+- **zizmor's retry:** zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt of either pass runs once more and only the retry's result counts.
 
 - **Trivy on the schedule:** `trivy-nightly` runs instead, public repositories only, and reports without blocking. Both scans run at HIGH and CRITICAL, so a MEDIUM or LOW finding appears nowhere.
 
