@@ -187,7 +187,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Why:** a hook that fixes and re-stages commits bytes the developer never saw, and the one that regenerated and staged under git's exported `GIT_DIR` rewrote a repository's shared config.
 
-**How:** either run the check-only form of each tool (`biome ci`) and let its failure stand, or run the write form (`biome format --write`) and fail the hook whenever it changed a file, naming the files. Never `git add` in a hook.
+**How:** either run the check-only form of each tool (`biome ci`) and let its failure stand, or run the write form (`biome format --write`) and fail the hook whenever it changed a file, naming the files. Never a git command that writes (`add`, `commit`, `stash`, `checkout`, `reset`, `push`, `config`); read-only queries such as `git diff --cached --name-only` are fine.
 
 **Enforced by:** review; repo-platform ships no hook.
 
