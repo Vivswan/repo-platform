@@ -1,6 +1,6 @@
 // The fleet's commit grammar: @commitlint/config-conventional plus one scope per subject. Both feeders of the action
-// (the commit-names step over a range, the pr-title workflow over the title) and this repository's commit-msg hook
-// run commitlint over this file: the grammar has one home.
+// (the commit-names step over a range, the pr-title workflow over the title) run commitlint over this file: the
+// grammar has one home.
 //
 // header/body/footer line caps off -> the fleet's titles run long by house style, the house style never hard-wraps a
 // commit body, and a squash body carries PR text
