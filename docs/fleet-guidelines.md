@@ -147,7 +147,7 @@ if [ -f x ]; then cat x; fi
 - **Exempt:** a block that must stay shell goes in `.shell-complexity-allow.local` as `path # reason`, the reason mandatory; an entry whose file has no refused construct left fails as stale.
 - **Skipped and counted:** a file with the managed header (repo-platform owns it), and a yaml file that does not parse (yamllint owns validity; the check warns).
 
-**Enforced by:** today, repo-platform's own `shell-complexity` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)). The `standard-checks` step for the fleet lands in a sibling PR once every shipped template and reusable workflow is clean.
+**Enforced by:** today, repo-platform's own `shell-complexity` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)), over this checkout and over the fleet trees its writer lands (the templates under `files/` are not yaml until written, and there the managed files are judged too). The `standard-checks` step for the fleet lands in a sibling PR once every shipped template and reusable workflow is clean.
 
 ## Markdown prose is never hard-wrapped
 

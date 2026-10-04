@@ -151,15 +151,6 @@ export function shebangDialect(text: string): Dialect | null {
   return SHELL_DIALECT[shellName(program)] ?? null;
 }
 
-/** A sync writer's template carries `{{name}}` placeholders where its rendered copy carries yaml: the name alone stands
- *  in for an inline one, and a comment at the same indentation for a whole-line one (a block of steps, a line of a
- *  run body), so the template parses with its lines in place. `${{ }}` is GitHub's and stays. */
-export function renderPlaceholders(text: string): string {
-  return text
-    .replace(/^([ \t]*)\{\{\s*(\w+)\s*\}\}[ \t]*$/gm, "$1# $2")
-    .replace(/(?<!\$)\{\{\s*(\w+)\s*\}\}/g, "$1");
-}
-
 /** A block scalar's content starts on the line after its `|` or `>` header; any other scalar starts where it is written. */
 function scalarLine(scalar: Scalar, lines: LineCounter): number {
   const { line } = lines.linePos(scalar.range?.[0] ?? 0);
@@ -172,7 +163,7 @@ function collectYaml(
   kind: "workflow" | "action" | "moon",
 ): Collected {
   const lines = new LineCounter();
-  const doc = parseDocument(renderPlaceholders(text), { lineCounter: lines });
+  const doc = parseDocument(text, { lineCounter: lines });
   if (doc.errors.length > 0) {
     const [error] = doc.errors;
     const line = error.linePos?.[0].line ?? 1;

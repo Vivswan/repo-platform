@@ -91,7 +91,13 @@ export function judgeBodies(bodies: CollectedBody[]): Finding[] {
   return findings;
 }
 
-export function check(root: string): Verdict {
+/** `judgeManaged`: the platform's own run over the fleet trees its writer lands, where the managed files are its own
+ *  to fix; a fleet repository never judges them. */
+export interface CheckOptions {
+  judgeManaged: boolean;
+}
+
+export function check(root: string, options: CheckOptions = { judgeManaged: false }): Verdict {
   const allow = loadAllowlist(root, ALLOWLIST_FILE, REASON_RULE);
   const bodies: CollectedBody[] = [];
   const unreadable: CollectProblem[] = [];
@@ -112,7 +118,7 @@ export function check(root: string): Verdict {
     if (named === null && !(tracked.has(relPath) && isExtensionless(relPath))) continue;
     const text = readFileSync(join(root, relPath), "utf-8");
     if (named === null && shebangDialect(text) === null) continue;
-    if (isManaged(text)) {
+    if (!options.judgeManaged && isManaged(text)) {
       managedSkipped += 1;
       continue;
     }
@@ -204,24 +210,31 @@ export function report(outcome: Outcome): string {
   return `${parts.join("\n")}\n`;
 }
 
+const JUDGE_MANAGED_FLAG = "--judge-managed";
+
 if (import.meta.main) {
-  await runCheck<Verdict>({
-    name: "check-shell-complexity",
-    check,
-    outcomeOf,
-    report,
-    warnings: (verdict) =>
-      verdict.unreadable.map(({ path, line, message }) =>
-        workflowCommand("warning", `${path}:${line}: ${message}; skipped`, path, line),
-      ),
-    errors: (verdict) => [
-      ...verdict.findings.map((finding) =>
-        workflowCommand("error", describe(finding), finding.path, finding.line),
-      ),
-      ...verdict.allowlistErrors.map((failure) => workflowCommand("error", failure)),
-    ],
-    passed: (verdict) => `Shell complexity check passed. ${census(verdict)}`,
-    failed: (count) =>
-      `${count} finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
-  });
+  const argv = process.argv.slice(2);
+  const judgeManaged = argv.includes(JUDGE_MANAGED_FLAG);
+  await runCheck<Verdict>(
+    {
+      name: "check-shell-complexity",
+      check: (root) => check(root, { judgeManaged }),
+      outcomeOf,
+      report,
+      warnings: (verdict) =>
+        verdict.unreadable.map(({ path, line, message }) =>
+          workflowCommand("warning", `${path}:${line}: ${message}; skipped`, path, line),
+        ),
+      errors: (verdict) => [
+        ...verdict.findings.map((finding) =>
+          workflowCommand("error", describe(finding), finding.path, finding.line),
+        ),
+        ...verdict.allowlistErrors.map((failure) => workflowCommand("error", failure)),
+      ],
+      passed: (verdict) => `Shell complexity check passed. ${census(verdict)}`,
+      failed: (count) =>
+        `${count} finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
+    },
+    argv.filter((arg) => arg !== JUDGE_MANAGED_FLAG),
+  );
 }

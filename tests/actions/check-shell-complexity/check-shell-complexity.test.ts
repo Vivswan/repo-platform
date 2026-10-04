@@ -265,19 +265,6 @@ describe("the collector", () => {
     "    - uses: actions/checkout@v7",
     "",
   ].join("\n");
-  const TEMPLATE = [
-    "# This file is managed by {{github_username}}/repo-platform.",
-    "jobs:",
-    "  checks:",
-    "    steps:",
-    "      - uses: {{github_username}}/repo-platform/actions/plan@stable",
-    "{{blocks}}",
-    "      - run: bun run check",
-    "      - run: |",
-    "          {{year}}",
-    "          if true; then echo x; fi",
-    "",
-  ].join("\n");
   const MOON = ["tasks:", "  build:", "    script: |", "      bun run build", ""].join("\n");
   const CONTAINERFILE = [
     "FROM alpine",
@@ -347,25 +334,6 @@ describe("the collector", () => {
       ACTION,
       {
         bodies: [body("tools/pin/action.yml", 7, "action", "bash", "bun install\n")],
-        problems: [],
-      },
-    ],
-    [
-      "files/base/.github/workflows/checks.yml",
-      TEMPLATE,
-      {
-        bodies: [
-          body("files/base/.github/workflows/checks.yml", 7, "workflow", "bash", "bun run check"),
-          // An indented whole-line placeholder keeps its indentation, so the run body stays readable and its `if`
-          // is judged at line 10.
-          body(
-            "files/base/.github/workflows/checks.yml",
-            9,
-            "workflow",
-            "bash",
-            "# year\nif true; then echo x; fi\n",
-          ),
-        ],
         problems: [],
       },
     ],
