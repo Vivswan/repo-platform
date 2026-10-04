@@ -42,7 +42,12 @@ const ask = (status: string, body: string, answers = true) => {
 };
 
 describe("pages_exists.ts", () => {
-  test.each<{ status: string; body: string; answers?: boolean; outcome: object }>([
+  test.each<{
+    status: string;
+    body: string;
+    answers?: boolean;
+    outcome: { exitCode: number; stdout: string; output: string };
+  }>([
     {
       status: "200 OK",
       body: '{"url":"https://api.github.com/repos/o/r/pages","status":"built"}',
