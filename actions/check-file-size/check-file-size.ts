@@ -3,10 +3,12 @@
 // Comments and literals are exactly what the file's tree-sitter grammar tokenizes; every other token, ERROR included, is code.
 // Policy: docs/fleet-guidelines.md.
 
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Language, Parser, type Tree } from "web-tree-sitter";
-import { parseAllowlist } from "../shared/allowlist.ts";
+import { workflowCommand } from "../shared/action_runtime.ts";
+import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
+import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
 import { COMMENT_LINE, headerLines, isManaged } from "../shared/managed_header.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { repositoryFiles } from "../shared/repository_files.ts";
@@ -631,11 +633,8 @@ export interface Verdict {
 }
 
 export function check(root: string, grammars: Grammars): Verdict {
-  const allowFile = join(root, ALLOWLIST_FILE);
-  const allow = existsSync(allowFile)
-    ? parseAllowlist(readFileSync(allowFile, "utf-8"), ALLOWLIST_FILE, REASON_RULE)
-    : { entries: [], failures: [] };
-  const allowed = new Set(allow.entries.map((entry) => entry.path));
+  const allow = loadAllowlist(root, ALLOWLIST_FILE, REASON_RULE);
+  const { allowed } = allow;
   const findings: Finding[] = [];
   const found = new Set<string>();
   let managedSkipped = 0;
@@ -665,14 +664,10 @@ export function check(root: string, grammars: Grammars): Verdict {
     }
     judge(relPath, kind, text);
   }
-  const allowlistErrors = [...allow.failures];
-  for (const entry of allow.entries) {
-    if (!found.has(entry.path)) {
-      allowlistErrors.push(
-        `${ALLOWLIST_FILE}:${entry.line}: '${entry.path}' is stale (under every cap, or not a tracked file); remove the entry`,
-      );
-    }
-  }
+  const allowlistErrors = [
+    ...allow.failures,
+    ...staleEntries(allow, found, ALLOWLIST_FILE, "under every cap"),
+  ];
   return {
     failures: findings.filter(
       (finding): finding is Finding & { tier: "hard" } => finding.tier === "hard",
@@ -687,9 +682,7 @@ export function check(root: string, grammars: Grammars): Verdict {
 }
 
 /** The three outcomes the action distinguishes (its `report` output). */
-export type Outcome =
-  | { state: "findings" | "clean"; verdict: Verdict }
-  | { state: "error"; message: string };
+export type Outcome = CheckOutcome<Verdict>;
 
 export function outcomeOf(verdict: Verdict): Outcome {
   const { failures, warnings, allowlistErrors } = verdict;
@@ -736,45 +729,22 @@ export function report(outcome: Outcome): string {
   return `${parts.join("\n")}\n`;
 }
 
-export function parseArgs(argv: string[]): { root: string } {
-  if (argv.length > 1) throw new Error(`unexpected argument(s): ${argv.slice(1).join(" ")}`);
-  return { root: resolve(argv[0] ?? ".") };
-}
+const REMEDY = `Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`;
 
 if (import.meta.main) {
-  // Cleared first, so a crash below leaves no comment body behind.
-  const reportPath = process.env.REPORT_PATH;
-  if (reportPath) rmSync(reportPath, { force: true });
-  const emit = (outcome: Outcome): void => {
-    const body = report(outcome);
-    if (reportPath && outcome.state === "findings") writeFileSync(reportPath, body);
-    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
-    if (process.env.GITHUB_OUTPUT)
-      appendFileSync(process.env.GITHUB_OUTPUT, `report=${outcome.state}\n`);
-  };
-  let verdict: Verdict;
-  try {
-    const { root } = parseArgs(process.argv.slice(2));
-    verdict = check(root, await loadGrammars());
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`::error::check-file-size did not run to completion: ${message}`);
-    emit({ state: "error", message });
-    process.exit(1);
-  }
-  for (const warning of verdict.warnings) console.log(`::warning::${describe(warning)}`);
-  const failures = [...verdict.failures.map(describe), ...verdict.allowlistErrors];
-  if (failures.length > 0) {
-    for (const failure of failures) console.error(`::error::${failure}`);
-    console.error(
-      `${failures.length} finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
-    );
-  } else {
-    console.log(
+  await runCheck<Verdict>({
+    name: "check-file-size",
+    check: async (root) => check(root, await loadGrammars()),
+    outcomeOf,
+    report,
+    warnings: (verdict) =>
+      verdict.warnings.map((warning) => workflowCommand("warning", describe(warning))),
+    errors: (verdict) =>
+      [...verdict.failures.map(describe), ...verdict.allowlistErrors].map((failure) =>
+        workflowCommand("error", failure),
+      ),
+    passed: (verdict) =>
       `File size check passed (${verdict.warnings.length} warning(s), ${verdict.managedSkipped} managed file(s) skipped).`,
-    );
-  }
-  // Last, so nothing after it can leave a recorded state the run's exit contradicts.
-  emit(outcomeOf(verdict));
-  process.exit(failures.length > 0 ? 1 : 0);
+    failed: (count) => `${count} finding(s). ${REMEDY}`,
+  });
 }

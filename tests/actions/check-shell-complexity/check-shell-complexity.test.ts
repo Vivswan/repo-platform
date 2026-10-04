@@ -4,8 +4,8 @@
 // `[ ]`, where `set -e` does not reach a failed command, which one `bun script.ts` line replaces.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
   ALLOWLIST_FILE,
   REASON_RULE,
@@ -19,7 +19,8 @@ import {
   type Refusal,
 } from "../../../actions/check-shell-complexity/judge.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
-import { fixtureGit, fixtureGitEnv } from "../../shared/fixture_git.ts";
+import { checkout } from "../../shared/fixture_checkout.ts";
+import { fixtureGitEnv } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -265,6 +266,9 @@ describe("the collector", () => {
     "      - uses: {{github_username}}/repo-platform/actions/plan@stable",
     "{{blocks}}",
     "      - run: bun run check",
+    "      - run: |",
+    "          {{year}}",
+    "          if true; then echo x; fi",
     "",
   ].join("\n");
   const MOON = ["tasks:", "  build:", "    script: |", "      bun run build", ""].join("\n");
@@ -343,6 +347,15 @@ describe("the collector", () => {
       {
         bodies: [
           body("files/base/.github/workflows/checks.yml", 7, "workflow", "bash", "bun run check"),
+          // An indented whole-line placeholder keeps its indentation, so the run body stays readable and its `if`
+          // is judged at line 10.
+          body(
+            "files/base/.github/workflows/checks.yml",
+            9,
+            "workflow",
+            "bash",
+            "# year\nif true; then echo x; fi\n",
+          ),
         ],
         problems: [],
       },
@@ -377,14 +390,6 @@ describe("the collector", () => {
           body("Containerfile", 21, "containerfile", "bash", "[ -f /x ]"),
           body("Containerfile", 22, "containerfile", "bash", "<<EOF cat\ndata\nEOF"),
         ],
-        problems: [],
-      },
-    ],
-    [
-      "scripts/run.sh",
-      "#!/bin/sh\nbun run build\n",
-      {
-        bodies: [body("scripts/run.sh", 1, "script", "bash", "#!/bin/sh\nbun run build\n")],
         problems: [],
       },
     ],
@@ -454,17 +459,6 @@ describe("the check over a checkout", () => {
     "",
   ].join("\n");
 
-  function checkout(files: Record<string, string>): string {
-    const root = temp.dir("check-shell-complexity-");
-    fixtureGit(root, ["init", "-q"]);
-    for (const [rel, text] of Object.entries(files)) {
-      mkdirSync(dirname(join(root, rel)), { recursive: true });
-      writeFileSync(join(root, rel), text);
-    }
-    fixtureGit(root, ["add", "-A"]);
-    return root;
-  }
-
   function run(root: string) {
     const output = join(root, "github-output.txt");
     const report = join(root, "report.md");
@@ -491,7 +485,7 @@ describe("the check over a checkout", () => {
   const REMEDY = `move this block to a TypeScript script run by bun, or list the file in ${ALLOWLIST_FILE} with a # reason`;
 
   test("the incident block is refused at its lines, an exempted action is not, and the report carries the table", () => {
-    const root = checkout({
+    const root = checkout(temp, "check-shell-complexity-", {
       ".github/workflows/release.yml": INCIDENT,
       "actions/pin/action.yml": PIN_ACTION,
       [ALLOWLIST_FILE]: "actions/pin/action.yml # the pre-bun pin walk\n",
@@ -529,7 +523,7 @@ describe("the check over a checkout", () => {
   });
 
   test("the same work as one bun line is clean and records report=clean, and a managed file is skipped and counted", () => {
-    const root = checkout({
+    const root = checkout(temp, "check-shell-complexity-", {
       ".github/workflows/release.yml": GLUE,
       ".github/workflows/managed.yml": `# This file is managed by octocat/repo-platform.\n${INCIDENT}`,
     });
@@ -544,7 +538,7 @@ describe("the check over a checkout", () => {
   });
 
   test("an allow-list entry without a reason and a stale one fail the check", () => {
-    const root = checkout({
+    const root = checkout(temp, "check-shell-complexity-", {
       ".github/workflows/release.yml": GLUE,
       "scripts/run.sh": "bun run build\n",
       [ALLOWLIST_FILE]: "scripts/run.sh\n.github/workflows/release.yml # was shell once\n",

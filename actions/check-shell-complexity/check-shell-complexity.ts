@@ -3,9 +3,11 @@
 // Shell stays while it is a straight line of commands; the moment a body needs a branch, a loop, a function, `||`, or a
 // tested `$(...)`, it is a TypeScript script run by bun. Policy: docs/fleet-guidelines.md.
 
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { parseAllowlist } from "../shared/allowlist.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { workflowCommand } from "../shared/action_runtime.ts";
+import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
+import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
 import { isManaged } from "../shared/managed_header.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { repositoryFiles } from "../shared/repository_files.ts";
@@ -88,11 +90,7 @@ export function judgeBodies(bodies: CollectedBody[]): Finding[] {
 }
 
 export function check(root: string): Verdict {
-  const allowFile = join(root, ALLOWLIST_FILE);
-  const allow = existsSync(allowFile)
-    ? parseAllowlist(readFileSync(allowFile, "utf-8"), ALLOWLIST_FILE, REASON_RULE)
-    : { entries: [], failures: [] };
-  const allowed = new Set(allow.entries.map((entry) => entry.path));
+  const allow = loadAllowlist(root, ALLOWLIST_FILE, REASON_RULE);
   const bodies: CollectedBody[] = [];
   const unreadable: CollectProblem[] = [];
   const counts: Record<SourceKind, number> = {
@@ -121,17 +119,12 @@ export function check(root: string): Verdict {
       a.path.localeCompare(b.path) || a.line - b.line || a.construct.localeCompare(b.construct),
   );
   const found = new Set(findings.map((finding) => finding.path));
-  const allowlistErrors = [...allow.failures];
-  for (const entry of allow.entries) {
-    if (!found.has(entry.path)) {
-      allowlistErrors.push(
-        `${ALLOWLIST_FILE}:${entry.line}: '${entry.path}' is stale (no refused construct, or not a tracked file); remove the entry`,
-      );
-    }
-  }
   return {
-    findings: findings.filter((finding) => !allowed.has(finding.path)),
-    allowlistErrors,
+    findings: findings.filter((finding) => !allow.allowed.has(finding.path)),
+    allowlistErrors: [
+      ...allow.failures,
+      ...staleEntries(allow, found, ALLOWLIST_FILE, "no refused construct"),
+    ],
     bodies: counts,
     managedSkipped,
     unreadable,
@@ -142,10 +135,7 @@ export function describe(finding: Finding): string {
   return `${finding.path}:${finding.line}: ${finding.construct}; ${REMEDY}`;
 }
 
-/** The three outcomes the action distinguishes (its `report` output). */
-export type Outcome =
-  | { state: "findings" | "clean"; verdict: Verdict }
-  | { state: "error"; message: string };
+export type Outcome = CheckOutcome<Verdict>;
 
 export function outcomeOf(verdict: Verdict): Outcome {
   const silent = verdict.findings.length + verdict.allowlistErrors.length === 0;
@@ -207,50 +197,23 @@ export function report(outcome: Outcome): string {
   return `${parts.join("\n")}\n`;
 }
 
-export function parseArgs(argv: string[]): { root: string } {
-  if (argv.length > 1) throw new Error(`unexpected argument(s): ${argv.slice(1).join(" ")}`);
-  return { root: resolve(argv[0] ?? ".") };
-}
-
-/** Workflow-command payloads escape newlines, or a multi-line message would end the command at the first break. */
-function annotation(finding: Finding): string {
-  const message = describe(finding).replaceAll("%", "%25").replaceAll("\n", "%0A");
-  return `::error file=${finding.path},line=${finding.line}::${message}`;
-}
-
 if (import.meta.main) {
-  // Cleared first, so a crash below leaves no comment body behind.
-  const reportPath = process.env.REPORT_PATH;
-  if (reportPath) rmSync(reportPath, { force: true });
-  const emit = (outcome: Outcome): void => {
-    const body = report(outcome);
-    if (reportPath && outcome.state === "findings") writeFileSync(reportPath, body);
-    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
-    if (process.env.GITHUB_OUTPUT)
-      appendFileSync(process.env.GITHUB_OUTPUT, `report=${outcome.state}\n`);
-  };
-  let verdict: Verdict;
-  try {
-    verdict = check(parseArgs(process.argv.slice(2)).root);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`::error::check-shell-complexity did not run to completion: ${message}`);
-    emit({ state: "error", message });
-    process.exit(1);
-  }
-  const failures = [
-    ...verdict.findings.map(annotation),
-    ...verdict.allowlistErrors.map((e) => `::error::${e}`),
-  ];
-  if (failures.length > 0) {
-    for (const failure of failures) console.error(failure);
-    console.error(
-      `${failures.length} finding(s). Shell is a straight line of commands; ${REMEDY}.`,
-    );
-  } else {
-    console.log(`Shell complexity check passed. ${census(verdict)}`);
-  }
-  // Last, so nothing after it can leave a recorded state the run's exit contradicts.
-  emit(outcomeOf(verdict));
-  process.exit(failures.length > 0 ? 1 : 0);
+  await runCheck<Verdict>({
+    name: "check-shell-complexity",
+    check,
+    outcomeOf,
+    report,
+    warnings: (verdict) =>
+      verdict.unreadable.map(({ path, line, message }) =>
+        workflowCommand("warning", `${path}:${line}: ${message}; skipped`, path, line),
+      ),
+    errors: (verdict) => [
+      ...verdict.findings.map((finding) =>
+        workflowCommand("error", describe(finding), finding.path, finding.line),
+      ),
+      ...verdict.allowlistErrors.map((failure) => workflowCommand("error", failure)),
+    ],
+    passed: (verdict) => `Shell complexity check passed. ${census(verdict)}`,
+    failed: (count) => `${count} finding(s). Shell is a straight line of commands; ${REMEDY}.`,
+  });
 }

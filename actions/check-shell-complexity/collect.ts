@@ -124,11 +124,11 @@ export function collectFile(relPath: string, text: string): Collected {
 }
 
 /** A sync writer's template carries `{{name}}` placeholders where its rendered copy carries yaml: the name alone stands
- *  in for an inline one, and a comment for a whole-line one (a block of steps), so the template parses with its lines
- *  in place. `${{ }}` is GitHub's and stays. */
+ *  in for an inline one, and a comment at the same indentation for a whole-line one (a block of steps, a line of a
+ *  run body), so the template parses with its lines in place. `${{ }}` is GitHub's and stays. */
 export function renderPlaceholders(text: string): string {
   return text
-    .replace(/^[ \t]*\{\{\s*(\w+)\s*\}\}[ \t]*$/gm, "# $1")
+    .replace(/^([ \t]*)\{\{\s*(\w+)\s*\}\}[ \t]*$/gm, "$1# $2")
     .replace(/(?<!\$)\{\{\s*(\w+)\s*\}\}/g, "$1");
 }
 
