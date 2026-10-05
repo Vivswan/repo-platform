@@ -135,8 +135,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: fleet-operator
     # Every bound a step can hit before deliver.ts files a failure counts
-    # (the listing, the target clone, the writer's own timeout, the delivery
-    # calls): a row the runner kills at its timeout files nothing.
+    # (the listing, the target clone, the writer's git and upstream calls, the
+    # delivery calls): a row the runner kills at its timeout files nothing.
     timeout-minutes: 65
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -158,6 +158,7 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.build }}
           path: build
+          fetch-depth: 0
 
       # The build's writer renders with the build's dependency versions, not
       # the checkout's: bun resolves the nearest node_modules first.
@@ -204,9 +205,6 @@ jobs:
         id: write
         if: steps.migrate.outcome == 'success'
         continue-on-error: true
-        # The writer may fetch the manifest's recorded commit by sha from
-        # origin; its timeout is the bound on that and on its local git calls.
-        timeout-minutes: 10
         env:
           BUILD: ${{ needs.plan.outputs.build }}
         run: >-

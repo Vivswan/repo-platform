@@ -32,7 +32,7 @@ The entry moves to the build when the sync wrote a change or the checker changed
 - **Why the checker counts:** a change there can turn C's verdict away from N's with no byte written. N's registration parser accepts a `site.path` C's rejects, so C's check would stay red with no sync PR to move the stamp.
 - **Never on the surface:** the operator scripts, the action's stable-run `src/` and `validator/` files (they reach every repository the moment the tag moves), and the docs-site theme.
 - **Why not every platform change:** a docs-theme change under `actions/pages-site/` once restamped nine repositories with one-line manifest PRs (copilot-env #279, after repo-platform #356); under this rule that sync writes nothing, moves nothing, and opens no PR.
-- **The diff runs in the build checkout** under `build/`, which is one commit deep, so the writer fetches C by sha first, before anything is written; a C the remote cannot serve fails the run.
+- **The diff runs in the build checkout** under `build/`, checked out with its full history, before anything is written; a C that history lacks fails the run.
 
 ## Judged at the synced commit
 

@@ -3,9 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { gitAnswersYes, gitResolvedCommit } from "../../shared/git_yes_no.ts";
-import { lastLine } from "../../shared/lines.ts";
-import { capture } from "../../shared/proc.ts";
+import { gitAnswersYes } from "../../shared/git_yes_no.ts";
 
 /** The fleet check's entry at a recorded commit; the action's other entries run at `stable` and restamp nothing. */
 export const CHECK_ENTRY = "actions/validate-managed-files/check.ts";
@@ -31,20 +29,11 @@ export function checkerSurface(root: string): string[] {
 
 /** Whether the checker differs between two commits of the platform checkout at `root`, the surface read from `to`'s
  *  tree (the checkout). A file imported at `from` and dropped since is covered: dropping an import changes a file still
- *  on the surface. The operator's build checkout is one commit deep, so `from` is fetched by sha first when the checkout
- *  lacks it. */
+ *  on the surface. */
 export function checkerChanged(root: string, from: string, to: string): boolean {
-  const cwd = { cwd: root };
-  if (gitResolvedCommit(from, cwd) === "") {
-    const fetched = capture(["git", "fetch", "--quiet", "--depth=1", "origin", from], cwd);
-    if (fetched.exitCode !== 0) {
-      throw new Error(
-        `the manifest records commit ${from.slice(0, 12)}, which the build checkout cannot fetch ` +
-          `(${lastLine(fetched.stderr) || `exit ${fetched.exitCode}`}); the sync judges nothing against a commit it cannot see`,
-      );
-    }
-  }
-  return !gitAnswersYes(["diff", "--quiet", from, to, "--", ...checkerSurface(root)], cwd);
+  return !gitAnswersYes(["diff", "--quiet", from, to, "--", ...checkerSurface(root)], {
+    cwd: root,
+  });
 }
 
 export interface StampInput {
