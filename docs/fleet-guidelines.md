@@ -397,6 +397,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 - **Entrypoints anywhere else:** tests run by name through a launcher script, git hooks, scripts run by path, composite actions outside `.github/`.
 - **Package.json scripts** that run a tool CI installs itself.
 - **A configured `entry` list replaces** knip's default `index`, `cli`, and `main` patterns rather than extending them, so a repo that keeps one of those repeats it.
+- **Configuration hints stay with the repo's own knip run:** the fleet run passes `--no-config-hints`, since the configuration it hands knip carries a key knip would hint about ([build-provenance.md](platform/build-provenance.md#one-commit-per-fleet-ci-run)).
 
 **What the typos fleet config settles before a repository's bypass applies:** it ignores hex digests and the one-off marker above, and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file; a spelling variant a repository keeps goes in its own `_typos.toml`.
 
