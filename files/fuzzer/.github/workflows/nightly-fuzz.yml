@@ -30,17 +30,9 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    # issues: write is for the fuzz-issue action; an issue it creates fires no issues:opened event, so it assigns the owner itself.
-    permissions:
-      contents: read
-      issues: write
-    # A job hitting this timeout is CANCELLED, not failed, so the
-    # `if: failure()` reporting below never runs - bound the fuzz run
-    # itself below this value so a hang surfaces as a failure.
     timeout-minutes: 60
-    # Sharding multiplies coverage, but the issue-filing and resolve steps
-    # then race across shards and must move to a `needs: fuzz` job - see
-    # docs/modules/fuzzer.md before enabling:
+    # Sharding multiplies coverage: uncomment the matrix and suffix the
+    # artifact name below with the shard (docs/modules/fuzzer.md).
     # strategy:
     #   fail-fast: false
     #   matrix:
@@ -62,8 +54,10 @@ jobs:
           # A green no-op until then: an uncustomized starter must not file issues.
           echo "::warning::nightly-fuzz starter not customized yet - replace the placeholder fuzz step (see repo-platform's docs/modules/fuzzer.md)"
 
+      # A job that hits timeout-minutes is cancelled, not failed, and its
+      # later steps still run under this condition.
       - name: Upload failure artifacts
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-failures-${{ github.run_attempt }}
@@ -73,8 +67,30 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
 
+  # A CANCELLED fuzz job counts as red: hitting the timeout cancels rather
+  # than fails, and a hang is exactly what a fuzzer exists to find.
+  report:
+    needs: [fuzz]
+    if: always()
+    runs-on: ubuntu-latest
+    # A hung reporter is the residual silence window; keep this tight.
+    timeout-minutes: 5
+    # issues: write is for the fuzz-issue action; an issue it creates fires no issues:opened event, so it assigns the owner itself.
+    permissions:
+      issues: write
+    steps:
+      # A pattern download of nothing succeeds, so a night that wrote no
+      # artifact still files the bare notice.
+      - name: Download the failure artifacts
+        if: needs.fuzz.result == 'failure' || needs.fuzz.result == 'cancelled'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: fuzz-failures-*
+          path: .fuzz-failures
+          merge-multiple: true
+
       - name: File or update the fuzz issue
-        if: failure()
+        if: needs.fuzz.result == 'failure' || needs.fuzz.result == 'cancelled'
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
@@ -87,7 +103,7 @@ jobs:
           stream: fuzz
 
       - name: Close the fuzz issue on a green night
-        if: success()
+        if: needs.fuzz.result == 'success'
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: resolve

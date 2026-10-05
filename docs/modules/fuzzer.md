@@ -6,8 +6,9 @@ order: 150
 
 Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter workflow ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/fuzzer/.github/workflows/nightly-fuzz.yml)): a nightly cron plus a `workflow_dispatch` with `seed` and `iterations` inputs, your fuzz step in the middle, and shared reporting machinery around it.
 
-- **A red night** uploads the failure artifacts and files or refreshes a [tracking issue](tracking-issues.md) built from your failure reports; that page owns the issue lifecycle, release gating, and label renaming.
+- **A red night** uploads the failure artifacts, and the `report` job files or refreshes a [tracking issue](tracking-issues.md) built from your failure reports; that page owns the issue lifecycle, release gating, and label renaming.
 - **A green night** closes the stream's open issues.
+- **Red means failed or cancelled:** the `report` job runs with `needs: [fuzz]` and judges `needs.fuzz.result`, so a fuzz job that hits its `timeout-minutes` (cancelled, not failed) still files the issue, and the upload step runs on `failure() || cancelled()` so the reports a hung run wrote ride along. A human cancelling the run files an issue too, which the next green night closes.
 - **The `.gitignore` region:** the module also adds `/.fuzz-failures/` to the managed region of the repository's `.gitignore`, so the failure directory a run leaves behind is never committed.
 
 **Repo-owned:** the starter is written once and then repo-owned. Fuzzers and their toolchains differ too much across repos for the platform to keep managing the file, so it carries the shared machinery and leaves the fuzz step itself to you. Repo-owned also means a fix to the starter never reaches repos that already received it.
@@ -24,9 +25,9 @@ The label is a registration key rather than a starter edit alone because the set
 
 - **Replace the placeholder** in the `Fuzz` step with your fuzzer, seeded from `$SEED` and bounded by `$ITERATIONS`. Until you do, the step is a green no-op that prints a warning; an uncustomized starter never files issues.
 
-- **Set up the toolchain** the fuzzer needs in the steps above it (rust nightly and cargo-fuzz, a docker stack, a corpus cache), and point the upload and `artifacts-dir` paths at your failure-report directory.
+- **Set up the toolchain** the fuzzer needs in the steps above it (rust nightly and cargo-fuzz, a docker stack, a corpus cache), and point the upload step's `path` at your failure-report directory. The artifact carries the failure directories themselves, so the `report` job's download path and `artifacts-dir` stay as they are.
 
-- **Bound the fuzz run itself** below the job's `timeout-minutes` (a wall-clock flag, or a `timeout` wrapper). A job that hits its timeout is CANCELLED, not failed, and cancelled jobs skip the `if: failure()` steps: no artifact, no issue, a silent night for exactly the hang a fuzzer exists to find.
+- **The `report` job is the machinery:** it downloads every `fuzz-failures-*` artifact of the run into `.fuzz-failures` (a pattern download of nothing succeeds, so a night that wrote no artifact files the bare notice) and runs the action once. Leave it as it is; only [sharding](#sharding) touches its `artifact-name`.
 
 - **Hidden files in the upload:** the upload step sets `include-hidden-files: true`. Since v4.4, `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default. Without the flag the step finds no files and uploads nothing, and `if-no-files-found: ignore` keeps that silent.
 
@@ -73,10 +74,9 @@ A coverage-guided fuzzer that found a crash yesterday can miss it today, so one 
 
 ## Sharding
 
-The starter carries a commented-out shard matrix. Sharding multiplies nightly coverage at the same wall-clock cost, but the report and resolve steps must then move out of the matrixed job: as steps of each shard they race, and one shard's green resolve can close the issue another shard just filed.
+The starter carries a commented-out shard matrix. Sharding multiplies nightly coverage at the same wall-clock cost, and the `report` job already sits outside the fuzz job: it merges every shard's `fuzz-failures-*` artifact into one directory and judges the matrix's aggregate result, so no shard's green resolve can close the issue another shard just filed.
 
-1. Put them in a separate `needs: fuzz` job with `if: always()`.
-2. That job first downloads every shard's failure artifact into one directory.
-3. It decides red or green from the aggregate, and runs the action once.
-
-Also make sure a shared corpus cache is either per-shard or read-only under a matrix.
+1. Uncomment the matrix.
+2. Append the shard from the matrix to the upload's artifact name, since two uploads cannot share a name, and set the report step's `artifact-name` to the download's pattern, `fuzz-failures-*`: the action prints that name verbatim in the issue body, so the pointer covers every shard's artifact (left alone, it names an artifact no shard uploaded).
+3. Put the shard in each failure directory's name: the merge keeps one copy of a path two shards both wrote.
+4. Keep a shared corpus cache per-shard or read-only.
