@@ -219,11 +219,15 @@ if [ -f x ]; then cat x; fi
 
 ## The boundary repairs or refuses
 
-**Rule:** malformed input or state is resolved once, where it enters. When one unambiguous repair exists, apply it, continue, and report it where a user would want to know. When none exists, refuse there. Code past the boundary trusts what it receives. Nothing fails later on what the boundary could have repaired or refused. Nothing bends silently.
+**Rule:** malformed input or state is resolved once, where it enters. Ownership follows the direction of data. What the tool only reads is never its own: a malformation there is refused, naming the key and the fix. What the tool also writes may be its own: one unambiguous repair is applied, reported where a user would want to know, and the tool continues. With no repair, refuse there.
 
-**Why:** refusing what one repair would fix stops a repository for nothing. A defect carried past the boundary fails a later step far from its cause.
+**Why:** a refusal in state the tool itself writes, where one repair exists, stops a repository for nothing. A repair of a value the user declared hides their mistake and rewrites their file. A defect carried past the boundary fails a later step far from its cause.
 
-**How:** a settings parser that drops a duplicate or empty entry and continues is right. Turning that drop into a refusal would be wrong. The comment on a healing step states the rule in one line and does not argue for it ([short comments](#short-comments)). A retired shape is not malformed input: it is a migration rung ([no backwards-compatibility code](#no-backwards-compatibility-code)).
+**How:** read only (a user's settings file, CLI arguments, a caller's payload): refuse. Read and written (state the tool applies, config it renders, caches, generated artifacts): heal toward the declared intent. A quoted `"true"` is refused in the user's settings file and healed in a config file the tool renders. When the direction is unclear, ask the owner.
+
+**Healing runs toward the declaration, never away from it.** A settings-apply tool heals the live settings when they drift from the user's yaml. Healing the yaml from the live settings is the forbidden direction. The comment on a healing step states the rule in one line and does not argue for it ([short comments](#short-comments)).
+
+**A tool's block inside a user's file splits by the same test.** User-supplied values in the block are the user's: a malformation is reported, naming the key and the fix, never healed. The shape is the tool's: a [schema migration](#no-backwards-compatibility-code) may rewrite the block. In a block the tool renders whole, an edit is [replaced](#split-files-the-managed-region) toward the declaration and the diff is reported. Nothing outside the block is touched.
 
 **A failure that happens on its own needs no check in front of it.** The tool's own failure is the boundary's refusal. A missing package, a stale lockfile, a version conflict, or a wrong toolchain fails the build or the gate when it happens and is fixed then. A pre-check that restates the tool's failure is deleted. A test stays for behavior the code does not enforce.
 
