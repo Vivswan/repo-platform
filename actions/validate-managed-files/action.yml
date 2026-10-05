@@ -6,9 +6,10 @@ description: >-
   action makes under the runner's temp directory), then the repository's
   YAML, conflict-marker, and release-as hygiene, and posts the findings as
   one sticky PR comment plus the step summary, exporting the one verdict as
-  the `integrity` output. The action never fails on its own - a report step
-  ALWAYS runs, the shell one when no bun could be set up - so the comment is
-  already posted when the caller fails LAST on `integrity`. The calling job
+  the `integrity` output. A missing bun fails the action before anything
+  runs; past that it never fails on its own - the report step ALWAYS runs -
+  so the comment is already posted when the caller fails LAST on
+  `integrity`. The calling job
   needs pull-requests: write for the comment (and nothing else beyond
   contents: read).
 
@@ -24,22 +25,20 @@ outputs:
     description: >-
       The report step's reading of the one verdict: success only for a
       clean verdict, failure for findings, for a run that could not be
-      judged, and for a missing or malformed verdict. Nothing else sets it,
-      except the no-bun step, which sets failure.
-    value: ${{ steps.report.outputs.integrity || steps.report-without-bun.outputs.integrity }}
+      judged, and for a missing or malformed verdict. Nothing else sets it.
+    value: ${{ steps.report.outputs.integrity }}
 
 runs:
   using: composite
   steps:
-    # The action's pinned bun by absolute path; `required: false` so a
-    # missing bun reaches the no-bun report step as ready=false instead of
-    # ending the action here.
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
     - name: Set up the action's bun
       id: action-bun
       uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
         from: ${{ github.action_path }}
-        required: "false"
 
     # Every predictable scratch path (the platform clone sits under the scratch root), cleared by ONE fixed /bin/rm
     # before anything reads it; any failed removal fails the step.
@@ -59,7 +58,7 @@ runs:
     # The tarball ships no node_modules; a failed install is the verdict, through the report step.
     - name: Install the action's dependencies
       id: install
-      if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'
+      if: steps.clear.outcome == 'success'
       continue-on-error: true
       shell: bash
       env:
@@ -113,7 +112,7 @@ runs:
     # happened above, once there is a bun to read it with.
     - name: Report the findings
       id: report
-      if: always() && steps.action-bun.outputs.ready == 'true'
+      if: always() && steps.action-bun.outcome == 'success'
       shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
@@ -123,32 +122,12 @@ runs:
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/src/report.ts"'
 
-    # Without a bun there is no report.ts, so the same two outputs and the one summary line come from shell: the
-    # caller still fails on `integrity`, and the comment names why. `!= 'true'` on purpose: a bun-setup that died
-    # before writing `ready` must land here too.
-    - name: Report a missing bun
-      id: report-without-bun
-      if: always() && steps.action-bun.outputs.ready != 'true'
-      shell: bash
-      env:
-        REASON: the action's pinned bun is unavailable
-        COMMENT_FILE: ${{ runner.temp }}/validate-managed-files-report.md
-        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      run: |
-        echo "integrity=failure" >> "$GITHUB_OUTPUT"
-        echo "report=findings" >> "$GITHUB_OUTPUT"
-        echo "::error::$REASON"
-        printf '### Managed files check\n\nNot judged: %s. See the [run log](%s). This FAILS the check.\n' \
-          "$REASON" "$RUN_URL" | tee "$COMMENT_FILE" >> "$GITHUB_STEP_SUMMARY"
-
     # The comment is a convenience sink: the summary carries the same body,
     # so a token without pull-requests write (a fork or Dependabot PR) must
     # not turn the verdict red. The caller fails on `integrity`, never here.
     - name: Post the findings as a sticky PR comment
       id: post-comment
-      if: >-
-        github.event_name == 'pull_request' &&
-        (steps.report.outputs.report == 'findings' || steps.report-without-bun.outputs.report == 'findings')
+      if: github.event_name == 'pull_request' && steps.report.outputs.report == 'findings'
       continue-on-error: true
       uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
       with:
