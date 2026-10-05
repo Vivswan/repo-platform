@@ -1,9 +1,11 @@
-# Repo-owned: seeded once by the fleet sync, never
-# overwritten by a later sync - adjust the format commands freely. GitHub
-# holds the new head's pull_request run for approval after this workflow's
-# github.token push; a PAT would start it outright, but any same-repo PR's
-# formatter tooling runs in this checkout before the push - only wire in a
-# token you would expose to it.
+# Formats a same-repository pull request's branch and pushes the result when the fix-lint label is added.
+#
+# This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync, so adjust the format
+# commands freely.
+#
+# GitHub holds the new head's pull_request run for approval after this workflow's github.token push. A PAT would
+# start it outright, but any same-repo PR's formatter tooling runs in this checkout before the push, so wire in only
+# a token you would expose to it.
 
 name: Auto Format
 
