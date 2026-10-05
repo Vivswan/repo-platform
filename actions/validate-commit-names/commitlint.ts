@@ -1,7 +1,6 @@
-// commitlint in this process, over the config beside this file. The commit-msg hook (scripts/check/check_commit_subject.ts)
-// imports it from here: an action resolves imports from its own directory alone, and node_modules sits in this directory.
-// Not the CLI as a child: a report crossing a pipe was cut (the CLI exits before its pipe drains, and a capture has a
-// byte cap), and the CLI drops a whitespace-only message before any rule sees it.
+// commitlint in this process, over the config beside this file. Not the CLI as a child: a report crossing a pipe was
+// cut (the CLI exits before its pipe drains, and a capture has a byte cap), and the CLI drops a whitespace-only message
+// before any rule sees it.
 
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +15,6 @@ type LintOptions = NonNullable<Parameters<typeof lint>[2]>;
 
 export interface Verdict {
   status: number;
-  /** commitlint's report, returned so a caller judging several candidates prints only the one it settles on. */
   report: string;
 }
 
