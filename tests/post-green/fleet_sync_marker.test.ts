@@ -10,6 +10,7 @@ import {
 import { loadLayer } from "../../.github/scripts/sync/writer/settings_layers.ts";
 import { argvStub } from "../shared/argv_stub";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
+import { fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -60,16 +61,10 @@ describe("main", () => {
   const root = temp.dir("fleet-sync-marker-");
 
   function git(cwd: string, args: string[]): string {
-    const proc = boundedSpawnSync([
-      "git",
-      "-C",
-      cwd,
-      "-c",
-      "user.name=t",
-      "-c",
-      "user.email=t@x.test",
-      ...args,
-    ]);
+    const proc = boundedSpawnSync(
+      ["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@x.test", ...args],
+      { env: fixtureGitEnv() },
+    );
     if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
     return proc.stdout.trimEnd();
   }
@@ -139,7 +134,7 @@ describe("main", () => {
     const proc = boundedSpawnSync(["bun", script], {
       cwd,
       env: {
-        ...process.env,
+        ...fixtureGitEnv(),
         PATH: `${gh.bin}:${process.env.PATH}`,
         GH_TOKEN: "t",
         GITHUB_REPOSITORY: "o/r",

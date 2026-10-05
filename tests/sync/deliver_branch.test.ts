@@ -98,6 +98,7 @@ function run(options: Options = {}): Run {
     written: [],
     retired: [],
     mirrors: [],
+    templates: {},
   };
   writeFileSync(join(runnerTemp, "summary.json"), JSON.stringify(summary));
   writeFileSync(join(runnerTemp, "sync.log"), REPORT);

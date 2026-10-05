@@ -87,13 +87,29 @@ export function regionMarkers(kind: RegionKind): RegionMarkers {
   return kind === "hash" ? HASH_REGION_MARKERS : HTML_REGION_MARKERS;
 }
 
-export function readRecords(target: string): { records: Records; problem: string | null } {
+const COMMIT_RE = /^[0-9a-f]{40}$/;
+
+/** A manifest is refused whole, as the fleet action refuses it (actions/shared/recorded_commit.ts): one that does not parse,
+ *  and one whose own entry names no full commit, which is a hand edit since every sync writes that field. The commit is
+ *  the one the stamp rule (judged_commit.ts) keeps, null when no manifest was accepted. */
+export function readRecords(target: string): {
+  records: Records;
+  commit: string | null;
+  problem: string | null;
+} {
   const bytes = existingFile(target, MANIFEST_NAME);
-  if (bytes === null) return { records: recordsOf(), problem: null };
+  if (bytes === null) return { records: recordsOf(), commit: null, problem: null };
   const parsed = parseManifestFiles(bytes.toString("utf-8"));
-  if (parsed.problem !== null)
-    return { records: recordsOf(), problem: `${MANIFEST_NAME} ${parsed.problem}` };
-  return { records: recordsOf(parsed.files), problem: null };
+  if (parsed.problem !== null) return refused(parsed.problem);
+  const commit = parsed.files[MANIFEST_NAME]?.commit;
+  if (typeof commit !== "string" || !COMMIT_RE.test(commit)) {
+    return refused("names no full 40-hex commit in its own entry");
+  }
+  return { records: recordsOf(parsed.files), commit, problem: null };
+}
+
+function refused(problem: string): ReturnType<typeof readRecords> {
+  return { records: recordsOf(), commit: null, problem: `${MANIFEST_NAME} ${problem}` };
 }
 
 const COMMENT =
@@ -105,15 +121,6 @@ const COMMENT =
   "relative symbolic link to it whose hash is sha256 of the link target, declared in files.yml or " +
   `${REGISTRATION_PATH}). This file's own entry names the ${PLATFORM_NAME} commit the repository is judged against ` +
   "until a sync moves it.";
-
-const COMMIT_RE = /^[0-9a-f]{40}$/;
-
-/** The commit the manifest's own entry names, null when it names none the writer can read (a manifest from before
- *  the field, or a hand edit): the stamp rule (judged_commit.ts) then takes the build. */
-export function recordedCommit(records: Records): string | null {
-  const commit = records[MANIFEST_NAME]?.commit;
-  return typeof commit === "string" && COMMIT_RE.test(commit) ? commit : null;
-}
 
 /** The manifest's own entry carries the commit and no hash: a self-hash would be circular. */
 export function renderManifest(records: Record<string, ManifestRecord>, commit: string): string {

@@ -86,6 +86,7 @@ export function writtenTree(root: string, build: string): SyncReport {
       { path: BRACKETED_PATH, class: "managed", change: "created", detail: "" },
       { path: "README.md", class: "managed", change: "unchanged", detail: "" },
     ],
+    templates: {},
     replaced: [],
     retired: [
       { path: "old.yml", outcome: "deleted", detail: "no longer selected" },

@@ -1,9 +1,8 @@
 #!/usr/bin/env bun
-// Runs from the caller's checkout; the exit code colours the step only, the gate reads report.ts. The checkout of
-// repo-platform at the recorded commit judges the tree with its own check.ts and is removed before the hygiene checks
-// walk the checkout, so none of repo-platform's files is read as the repository's.
+// Runs from the caller's checkout; the exit code colours the step only, the gate reads report.ts. The clone of
+// repo-platform at the recorded commit, under the scratch root, judges the tree with its own check.ts.
 
-import { appendFileSync, mkdirSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   capture,
@@ -96,7 +95,7 @@ function judgeAtRecordedCommit(commit: string): Integrity {
   const outcome = env("PLATFORM_OUTCOME");
   if (outcome !== "success") {
     return notJudged(
-      `${PLATFORM_NAME} could not be checked out at ${short} (checkout step outcome: ${outcome || "none"}); ` +
+      `${PLATFORM_NAME} could not be cloned at ${short} (clone step outcome: ${outcome || "none"}); ` +
         "the recorded commit must be one it holds",
     );
   }
@@ -148,17 +147,8 @@ function merge(a: Integrity, b: Integrity): Integrity {
 
 mkdirSync(scratch, { recursive: true });
 const commit = env("COMMIT");
-let judged: Integrity;
-if (commit === "") {
-  // The checkout was skipped, so whatever stands at the platform path is the repository's own and stays.
-  judged = notJudged(requireEnv("COMMIT_PROBLEM"));
-} else {
-  try {
-    judged = judgeAtRecordedCommit(commit);
-  } finally {
-    rmSync(platform, { recursive: true, force: true });
-  }
-}
+const judged =
+  commit === "" ? notJudged(requireEnv("COMMIT_PROBLEM")) : judgeAtRecordedCommit(commit);
 const verdict = merge(judged, hygiene());
 writeVerdict(verdictFile, verdict);
 if (verdict.kind === "not-judged") error(verdict.reason);

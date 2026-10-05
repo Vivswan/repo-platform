@@ -135,7 +135,7 @@ describe("the manifest's commit under the stamp rule", () => {
     p = platform();
   });
 
-  test("a manifest without the field takes the build", () => {
+  test("a first sync, with no manifest, takes the build", () => {
     const t = target();
     const run = sync(p.root, t, p.base);
     expect(run.stderr).toBe("");
