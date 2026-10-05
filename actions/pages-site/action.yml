@@ -1,37 +1,29 @@
 name: Pages Site
-description: >-
-  Assembles the fleet's GitHub Pages site (docs/modules/site.md). Two parts, alone
-  or together: the repository's own website, prebuilt by its site-build
-  hook and handed over as a directory (site-dir), copied to the root; and
-  the docs, the repository's docs/ under the central VitePress theme
-  (config and theme live in this action, the repository carries only
-  markdown), versioned from its plain vX.Y.Z tags - latest/ from HEAD, one
-  directory per served tag (a tag whose tree has no docs/ is skipped with a
-  notice), stable/ and the mount root both serving the newest served
-  version (stable/ only while one is served) - at
-  /<docs_path>/ beside the website or at the root alone. Other roots of the
-  repository (skills/, for one) render inside the docs through the include
-  list. Once every part is in place the whole artifact's internal links
-  are checked, fragments included, and a broken one fails the step, and
-  GitHub is asked whether the repository's Pages site exists yet
-  (pages-exists), since the job token can read one but never create it. With
-  neither part the step ends green with publish false and no directory.
-  With check true it instead builds docs/ once, strictly (dead internal
-  links fatal), with the same include roots and link check, as the docs PR
-  check. The configuration is the config input, or the repository's
-  registration read through the plan action when the input is empty; a
-  null docs_path (the registration's site.path: null) turns the docs half
-  off, so the website publishes alone whatever docs/ carries and the check
-  stands down with a notice. A deploy needs a full checkout (fetch-depth
-  0): version tags and per-ref trees come from git history.
+description: |
+  Assembles the fleet's GitHub Pages site from the repository's own website, its docs/, or both.
+
+  The layout and the versioning rules (the two parts and where each mounts, the docs tiers from the
+  vX.Y.Z tags, the include roots, the link check, the pages-exists question, a null docs_path, and
+  check mode) are docs/modules/site.md's.
+
+  The website arrives prebuilt by the repository's site-build hook as the site-dir input. The
+  configuration is the config input, or the repository's registration read through the plan action
+  when the input is empty. With neither part the step ends green with publish false and no directory.
+
+  A deploy needs a full checkout (fetch-depth 0): version tags and per-ref trees come from git history.
 
 inputs:
   site-dir:
-    description: The repository's prebuilt website (the site-build hook's dist), a directory relative to the repository root; empty = no website
+    description: >-
+      The repository's prebuilt website (the site-build hook's dist), a directory relative to
+      the repository root. Empty means no website.
     required: false
     default: ""
   config:
-    description: 'The site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label", "link_rot_color", "link_rot_description"} (docs_path null = no docs half); empty reads the registration through the plan action'
+    description: >-
+      The site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label",
+      "link_rot_color", "link_rot_description"}, docs_path null for no docs half. Empty reads
+      the registration through the plan action.
     required: false
     default: ""
   check:
@@ -48,9 +40,9 @@ outputs:
     value: ${{ steps.assemble.outputs.site-dir }}
   pages-exists:
     description: >-
-      Whether the repository has a Pages site to deploy to, asked of GitHub once a site was assembled: "true", or
-      "false" with a warning when the settings apply has not created it yet (the caller skips its Pages steps);
-      empty when publish is false or in check mode. Any other answer fails the action.
+      "true" when the repository has a Pages site to deploy to, "false" with a warning when the
+      settings apply has not created it yet, empty when publish is false or in check mode. The
+      caller skips its Pages steps on "false", and any other answer from GitHub fails the action.
     value: ${{ steps.pages.outputs.exists }}
   link-rot-label:
     description: The nightly external-link check's tracking label from the configuration ("" disables the check)

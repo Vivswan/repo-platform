@@ -1,7 +1,10 @@
-# A change under files.yml, files/, migrations/, the sync writer, or the managed-files validator reaches the fleet only when a
-# sync runs, so a pull request touching them gets fleet-sync:public by default, with one sticky comment saying so; a human
-# removing the label is final for that pull request (docs/platform/post-green.md). Information only: the script exits 0 on every path and
-# the job is outside all-green's needs.
+# Labels a pull request that changes what the fleet receives fleet-sync:public by default (docs/platform/post-green.md).
+#
+# A change under files.yml, files/, migrations/, the sync writer, or the managed-files validator reaches the fleet
+# only when a sync runs, so such a pull request gets the label, with one sticky comment saying so. A human removing
+# the label is final for that pull request.
+#
+# Information only: the script exits 0 on every path, and the job is outside all-green's needs.
 name: Fleet Sync Default
 
 # Every event that changes the answer: the diff (a push, a retarget arrives as edited, a reopen) or the labels. The bot's own

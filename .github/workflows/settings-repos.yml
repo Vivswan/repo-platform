@@ -1,7 +1,9 @@
-# A plan job selects the targets into a keyed matrix; one apply job per row resolves its target
-# and runs the github-settings-as-code CLI on it, from its own rendered .github/settings.yml
-# (docs/platform/settings-apply.md). No push trigger: a merge reaches the fleet only through post-green.yml's
-# call, behind the all-green gate.
+# Applies the fleet's settings to every target, one apply job per row of a keyed matrix (docs/platform/settings-apply.md).
+#
+# The plan job selects the targets into the matrix. Each apply row resolves its target and runs the
+# github-settings-as-code CLI on it, from the target's own rendered .github/settings.yml.
+#
+# No push trigger: a merge reaches the fleet only through post-green.yml's call, behind the all-green gate.
 
 name: Settings Repos
 
@@ -13,11 +15,9 @@ on:
     inputs:
       repo:
         description: >-
-          owner/name to heal, a comma-separated list of them, public,
-          private, modules:<a>+<b> (every
-          target whose .repo-platform.yml selects ALL the listed modules; a
-          visibility token intersects with it), or the literal "all" - same as
-          leaving it empty, every settings target
+          The targets to heal, comma-separated: owner/name slugs, public, private, or modules:<a>+<b>
+          (every target whose .repo-platform.yml selects all the listed modules, intersected with a
+          visibility token). The literal "all", or empty, is every settings target.
         required: false
         type: string
       check_only:
@@ -34,16 +34,14 @@ on:
     inputs:
       repos:
         description: >-
-          "all", or a comma-separated list of owner/name slugs and the
-          visibility tokens public and private (fleet/sync_scope.ts);
-          post-green passes the literal all, and the dispatch-only
-          modules: filter never appears here
+          "all", or a comma-separated list of owner/name slugs and the visibility tokens public and
+          private (fleet/sync_scope.ts). post-green passes the literal all, and the dispatch-only
+          modules: filter never appears here.
         required: true
         type: string
       sha:
         description: >-
-          The judged main commit - the caller's own github.sha, which
-          the gate step requires and verifies green
+          The judged main commit, the caller's own github.sha, which the gate step requires and verifies green.
         required: true
         type: string
 

@@ -1,11 +1,12 @@
 name: Release Assets
-description: >-
-  Inspects a draft release before its assets are attested: deletes a
-  `bundle-name` asset a prior attempt left on the RELEASE, so no later skip
-  path can publish a stale bundle, and reports whether any other asset
-  remains as `present`; a draft with none publishes unattested, with a
-  notice. Runs without a checkout. Needs GH_TOKEN in the environment with
-  contents write.
+description: |
+  Inspects a draft release before its assets are attested.
+
+  A `bundle-name` asset a prior attempt left on the release is deleted, so no later skip path
+  can publish a stale bundle. Whether any other asset remains is the `present` output. A draft
+  with none publishes unattested, with a notice.
+
+  Runs without a checkout. Needs GH_TOKEN in the environment with contents write.
 
 inputs:
   tag:

@@ -1,10 +1,12 @@
 name: Dependency Review
-description: >-
-  The fleet's dependency-review gate: wraps actions/dependency-review-action
-  so the upstream version pin and the severity threshold live in one place
-  instead of in every rendered ci.yml. Diffs the dependency graph between
-  the PR's base and head; only PR events have a diff to review, so callers
-  run it on pull_request and allow its skip at their gate.
+description: |
+  Diffs the dependency graph between a PR's base and head, the fleet's dependency-review gate.
+
+  Wraps actions/dependency-review-action so the upstream version pin and the severity
+  threshold live in one place instead of in every rendered ci.yml.
+
+  Only a pull_request event has a diff to review, so callers run it on pull_request
+  and allow its skip at their gate.
 
 runs:
   using: composite

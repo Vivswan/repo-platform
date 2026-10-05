@@ -1,7 +1,10 @@
-# The fleet's one GitHub Pages deploy, called by the managed ci.yml's `site` leg (docs/modules/site.md).
-# ONE job on purpose: the repo-owned site-build hook hands its output directory to the fleet's assembly in the same workspace.
-# The Pages artifact is thus the only artifact.
-# Callers own `concurrency: pages`; this workflow declares none.
+# Deploys the calling repository's GitHub Pages site, as the fleet's one Pages deploy, called by the managed ci.yml's
+# `site` leg (docs/modules/site.md).
+#
+# One job on purpose: the repo-owned site-build hook hands its output directory to the fleet's assembly in the same
+# workspace, so the Pages artifact is the only artifact.
+#
+# Callers own `concurrency: pages`. This workflow declares none.
 
 name: Reusable Site
 

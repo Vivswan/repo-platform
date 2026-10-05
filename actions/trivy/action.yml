@@ -1,17 +1,20 @@
 name: Trivy
-description: >-
-  The fleet's Trivy scan of the caller's checkout (lockfiles, Dockerfiles,
-  infrastructure files), so the configuration lives here once and no
-  managed repository carries a Trivy file. Mode blocking fails on a HIGH or
-  CRITICAL vulnerability with a fix available and on any HIGH or CRITICAL
-  misconfiguration (ignore-unfixed filters vulnerabilities only; a
-  misconfiguration has no fixed version). Mode nightly scans everything at
-  HIGH and CRITICAL severity, never fails, and leaves the findings as the
-  fuzz-issue action's report directory plus a SARIF file for code scanning.
-  A MEDIUM or LOW finding neither blocks nor surfaces. Both modes
-  honor the repository's .trivyignore.yaml only when every entry carries a
-  statement and an expired_at date (Trivy drops expired entries, so a
-  bypass undoes itself); the plain .trivyignore format is refused.
+description: |
+  Scans the caller's checkout with Trivy (lockfiles, Dockerfiles, infrastructure files).
+
+  The configuration lives here once, so no managed repository carries a Trivy file. A MEDIUM
+  or LOW finding neither blocks nor surfaces.
+
+  Modes:
+    - blocking: fails on a HIGH or CRITICAL vulnerability with a fix available, and on any
+      HIGH or CRITICAL misconfiguration (ignore-unfixed filters vulnerabilities only, since a
+      misconfiguration has no fixed version)
+    - nightly: scans everything at HIGH and CRITICAL severity, never fails, and leaves the
+      findings as the fuzz-issue action's report directory plus a SARIF file for code scanning
+
+  Both modes honor the repository's .trivyignore.yaml only when every entry carries a
+  statement and an expired_at date (Trivy drops expired entries, so a bypass undoes itself).
+  The plain .trivyignore format is refused.
 
 inputs:
   mode:
@@ -29,7 +32,7 @@ outputs:
     description: '"true" when the nightly scan reported anything, "false" on a clean scan (mode nightly)'
     value: ${{ steps.report.outputs.found }}
   report-dir:
-    description: The fuzz-issue report directory; empty of subdirectories on a clean scan (mode nightly)
+    description: The fuzz-issue report directory, empty of subdirectories on a clean scan (mode nightly)
     value: ${{ steps.report.outputs.report-dir }}
   sarif:
     description: The SARIF file for code scanning (mode nightly)

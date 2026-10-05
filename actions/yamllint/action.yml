@@ -1,10 +1,11 @@
 name: Yamllint
-description: >-
-  The fleet's YAML lint step: installs the yamllint pinned in this action's
-  requirements.txt and lints the caller's checkout in strict mode (warnings
-  fail too), honoring the repository's own .yamllint config. One
-  implementation for every managed repo, so the install, the version, and
-  the invocation cannot drift per repository.
+description: |
+  Installs the yamllint pinned in this action's requirements.txt and lints the caller's checkout with it, the fleet's YAML lint step.
+
+  It lints in strict mode, so warnings fail too. The repository's own .yamllint config is honored.
+
+  One implementation for every managed repository, so the install, the version, and the
+  invocation cannot drift per repository.
 
 runs:
   using: composite

@@ -18,7 +18,7 @@ inputs:
 
 outputs:
   dist:
-    description: The built site's directory, relative to the repository root; empty = no repository site
+    description: The built site's directory, relative to the repository root, or empty for no repository site
     value: ${{ steps.build.outputs.dist }}
 
 runs:

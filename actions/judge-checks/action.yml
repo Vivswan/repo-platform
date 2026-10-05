@@ -1,13 +1,17 @@
 name: Judge Checks
-description: >-
-  The last step of a job whose check steps each run under `!cancelled()`:
-  reads the job's `steps` context (pass `toJSON(steps)`), writes one table of
-  every step's outcome to the step summary, and fails naming each step whose
-  conclusion is neither success nor skipped. A skipped step stood down and is
-  never a failure. `conclusion` decides, not `outcome`, so a failed step under
-  continue-on-error counts as the success GitHub records for it. Run it under
-  `if: always()`, or a failed check never reaches the judge; an empty context
-  fails rather than passing a judge fed nothing.
+description: |
+  Judges a job's check steps from its `steps` context, as the job's last step.
+
+  The check steps each run under `!cancelled()`, so one red check hides no other. The judge
+  writes one table of every step's outcome to the step summary and fails naming, by step id,
+  each step whose conclusion is neither success nor skipped.
+
+  A skipped step stood down and is never a failure. `conclusion` decides, not `outcome`, so a
+  failed step under continue-on-error counts as the success GitHub records for it. An empty
+  context fails rather than passing a judge fed nothing.
+
+  The caller passes `toJSON(steps)` as the steps input and runs the judge under `if: always()`,
+  or a failed check never reaches it.
 
 inputs:
   steps:

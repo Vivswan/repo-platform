@@ -1,18 +1,21 @@
 name: Plan
-description: >-
-  Resolves one managed repository's fleet configuration at run time, so
-  every managed ci.yml can be byte-identical: reads the repository's
-  registration (.repo-platform.yml), checks it against the module data at
-  the root of the delivery commit beside this action (files.yml, whose modules
-  block is the vocabulary in canonical order), and publishes the result as
-  step outputs. Mode default resolves what fleet-ci.yml's jobs key on (the
-  module selection in canonical order, the visibility, the CodeQL languages,
-  the tracking labels); mode site resolves the site configuration the
-  pages-site action consumes as one JSON document (the site title, the docs
-  mount path or null for no docs half, the include roots, the link-rot
-  label). Fails closed on any invalid registration. Runs in the caller's
-  checkout; needs GH_TOKEN in the environment only when the
-  private input is empty (the visibility is then read from the API).
+description: |
+  Resolves one managed repository's fleet configuration at run time, so every managed ci.yml can be byte-identical.
+
+  It reads the repository's registration (.repo-platform.yml) in the caller's checkout,
+  checks it against the module data at the root of the delivery commit beside this action,
+  and publishes the result as step outputs. That data is files.yml, whose modules block is
+  the vocabulary in canonical order. Any invalid registration fails closed.
+
+  Modes:
+    - default: what fleet-ci.yml's jobs key on (the module selection in canonical order, the
+      visibility, the CodeQL languages, the tracking labels)
+    - site: the site configuration the pages-site action consumes, as one JSON document (the
+      site title, the docs mount path or null for no docs half, the include roots, the
+      link-rot label)
+
+  GH_TOKEN is needed in the environment only when the private input is empty, since the
+  visibility is then read from the API.
 
 inputs:
   mode:
@@ -21,8 +24,8 @@ inputs:
     default: default
   private:
     description: >-
-      The repository's visibility ("true"/"false"; pass
-      github.event.repository.private). Empty asks the API with GH_TOKEN.
+      The repository's visibility, "true" or "false" (pass github.event.repository.private).
+      Empty asks the API with GH_TOKEN.
     required: false
     default: ""
 outputs:
@@ -33,7 +36,7 @@ outputs:
     description: The repository's visibility, "true" or "false" (mode default).
     value: ${{ steps.plan.outputs.private }}
   codeql-languages:
-    description: CodeQL languages to analyze, a compact JSON array; "[]" when CodeQL is off (mode default).
+    description: CodeQL languages to analyze, a compact JSON array, "[]" when CodeQL is off (mode default).
     value: ${{ steps.plan.outputs.codeql-languages }}
   tracking-labels:
     description: Comma-separated nightly tracking-issue labels of the selected stream modules, the fleet-wide security stream last (mode default).
@@ -53,8 +56,8 @@ outputs:
   config:
     description: >-
       The site configuration as compact JSON {"site_title", "docs_path", "include", "link_rot_label",
-      "link_rot_color", "link_rot_description"}, the pages-site action's config input; docs_path is null
-      when the registration turns the docs half off with site.path: null (mode site).
+      "link_rot_color", "link_rot_description"}, the pages-site action's config input (mode site).
+      docs_path is null when the registration turns the docs half off with site.path: null.
     value: ${{ steps.plan.outputs.config }}
 
 runs:

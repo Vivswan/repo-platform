@@ -1,25 +1,28 @@
 name: Zizmor
-description: >-
-  The fleet's GitHub Actions security audit: zizmor over every workflow and
-  action.yml in the caller's checkout, under the fleet policy shipped
-  beside this action and rendered into the runner's temp dir (a
-  repository's own zizmor config is not read). Two direct passes of the
-  one zizmor this action's requirements.txt pins, both at high severity
-  and under the same policy, so they cannot disagree on findings, only on
-  format: the SARIF pass uploads the high findings to code scanning
-  (public repositories only, as private personal repositories have no
-  code scanning), and the plain pass's exit is the verdict. zizmor exits 0
-  in SARIF mode whatever it finds, so the SARIF pass fails only on an
-  audit error, and the plain pass fails on a high finding (its exit 14). A
-  medium or low finding neither blocks nor surfaces. The only bypass is
-  zizmor's own inline `# zizmor: ignore[rule]` comment, in the
-  repository, with a reason.
+description: |
+  Audits every workflow and action.yml in the caller's checkout with zizmor, the fleet's GitHub Actions security audit.
+
+  The fleet policy shipped beside this action is the configuration, rendered into the runner's
+  temp dir, and a repository's own zizmor config is not read. A medium or low finding neither
+  blocks nor surfaces.
+
+  Two direct passes of the one zizmor this action's requirements.txt pins, both at high
+  severity and under the same policy, so they cannot disagree on findings, only on format:
+    - the SARIF pass uploads the high findings to code scanning (public repositories only, as
+      private personal repositories have no code scanning). zizmor exits 0 in SARIF mode
+      whatever it finds, so this pass fails only on an audit error
+    - the plain pass's exit is the verdict, and it fails on a high finding (zizmor's exit 14)
+
+  The only bypass is zizmor's own inline `# zizmor: ignore[rule]` comment, in the repository,
+  with a reason.
+
+  The calling job needs security-events: write for the SARIF upload, when upload-sarif is true.
 
 inputs:
   upload-sarif:
     description: >-
-      Whether to upload the findings to code scanning ("true"/"false"); pass
-      false where the repository has no code scanning.
+      Whether to upload the findings to code scanning, "true" or "false". Pass false where the
+      repository has no code scanning.
     required: false
     default: "true"
 

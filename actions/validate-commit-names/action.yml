@@ -1,12 +1,13 @@
 name: Validate Commit Names
-description: >-
-  Fails when commitlint refuses a commit message under the action's
-  commitlint.config.mjs (@commitlint/config-conventional plus one scope per
-  subject); both feeders run that one judge. Without `title`, judges every
-  commit in the push/PR range (commitlint ignores merge commits), which needs
-  the repository checked out with fetch-depth: 0 so base..head resolves on
-  pull_request events. With `title`, judges that one string instead and needs
-  no checkout.
+description: |
+  Fails when commitlint refuses a commit message under the action's commitlint.config.mjs.
+
+  The config is @commitlint/config-conventional plus one scope per subject. Both feeders run
+  that one judge:
+    - without `title`: every commit in the push/PR range (commitlint ignores merge commits).
+      Needs the repository checked out with fetch-depth: 0, so base..head resolves on
+      pull_request events.
+    - with `title`: that one string instead, with no checkout needed.
 
 inputs:
   title:

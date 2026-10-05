@@ -1,19 +1,23 @@
 name: Semgrep
-description: >-
-  The fleet's static analysis: semgrep's default registry ruleset over the
-  caller's checkout, at ERROR severity only. The ERROR findings are uploaded
-  to code scanning as SARIF, and one of them fails the step (semgrep's own
-  --error). WARNING and INFO rules do not run, so their findings appear
-  nowhere. An earlier upload may have opened lower-severity alerts; code
-  scanning marks them fixed once a later upload for the same category and
-  branch lacks them. Public repositories only: the registry needs no token,
-  but code scanning needs a public repository or Advanced Security.
-  The only bypass is semgrep's own `// nosemgrep: rule-id` comment on the
-  finding, with a reason; semgrep keeps a marked finding in its SARIF as a
-  suppressed result and code scanning reads no `suppressions` property, so
-  the upload drops suppressed results first. One registry rule is excluded,
-  permanently: mutable-action-tag duplicates zizmor's unpinned-uses, and one
-  tool owns each finding class.
+description: |
+  Runs semgrep's default registry ruleset over the caller's checkout at ERROR severity, the fleet's static analysis.
+
+  The ERROR findings are uploaded to code scanning as SARIF, and one of them fails the step
+  (semgrep's own --error). WARNING and INFO rules do not run, so their findings appear
+  nowhere. An earlier upload may have opened lower-severity alerts, and code scanning marks
+  them fixed once a later upload for the same category and branch lacks them.
+
+  Public repositories only: the registry needs no token, but code scanning needs a public
+  repository or Advanced Security.
+
+  The only bypass is semgrep's own `// nosemgrep: rule-id` comment on the finding, with a
+  reason. semgrep keeps a marked finding in its SARIF as a suppressed result and code scanning
+  reads no `suppressions` property, so the upload drops suppressed results first.
+
+  One registry rule is excluded, permanently: mutable-action-tag duplicates zizmor's
+  unpinned-uses, and one tool owns each finding class.
+
+  The calling job needs security-events: write for the SARIF upload.
 
 runs:
   using: composite

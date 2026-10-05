@@ -1,8 +1,11 @@
-# Split from fleet-ci.yml: GitHub validates a called job's permissions against the CALLER job's grant before any `if` runs,
-# and trivy-nightly needs `issues: write`, which the skeleton's `ci` caller never grants, so it rides its own `nightly` caller.
+# Runs the fleet's nightly scans for every managed ci.yml, behind its own `nightly` caller.
 #
-#   not in the all-green needs list   -> nothing here gates; the scan stays green whatever it finds
-#   a `./` action path                -> resolves against the CALLER's checkout, so repo-platform's action refs stay `@stable`
+# Split from fleet-ci.yml: GitHub validates a called job's permissions against the caller job's grant before any `if`
+# runs, and trivy-nightly needs `issues: write`, which the skeleton's `ci` caller never grants.
+#
+# Nothing here gates: no job is in the all-green needs list, and the scan stays green whatever it finds.
+#
+# A `./` action path resolves against the caller's checkout, so repo-platform's action refs stay `@stable`.
 
 name: Fleet nightly
 

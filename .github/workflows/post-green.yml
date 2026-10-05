@@ -1,11 +1,12 @@
-# The legs after the all-green gate (docs/platform/post-green.md; the trust model: docs/platform/build-provenance.md).
-# Inside a called run github.event_name is the CALLER's event, so `!= 'workflow_dispatch'` is what gates the call-only legs.
+# Runs the legs after the all-green gate (docs/platform/post-green.md). The trust model is docs/platform/build-provenance.md.
+#
+# Inside a called run github.event_name is the caller's event, so `!= 'workflow_dispatch'` gates the call-only legs.
 #
 # Every leg holds three invariants:
-#   state-shaped        -> a leg evicted while pending at its lane is covered by its evictor or healed by the next trigger
-#   sha from the input  -> a leg acting on the judged commit reads it from `inputs.sha`, never from github.sha or a read of main
-#                          (the sync reads the commit the stable tag names instead: this run's mover or a newer one moved it)
-#   own green check     -> a leg that mutates shared state re-verifies the all-green check itself
+#   - state-shaped: a leg evicted while pending at its lane is covered by its evictor or healed by the next trigger
+#   - sha from the input: a leg acting on the judged commit reads it from `inputs.sha`, never from github.sha or a
+#     read of main (the sync reads the commit the stable tag names instead: this run's mover or a newer one moved it)
+#   - own green check: a leg that mutates shared state re-verifies the all-green check itself
 
 name: Post Green
 
@@ -14,17 +15,15 @@ on:
     inputs:
       sha:
         description: >-
-          The green main commit the calling run judged (github.sha there
-          - same run, so it IS the judged commit): the commit the mover,
-          directives, and settings legs act on (the sync reads the stable tag).
+          The green main commit the calling run judged, its own github.sha, which the mover,
+          directives, and settings legs act on. The sync reads the stable tag instead.
         required: true
         type: string
       before:
         description: >-
-          The push payload's `before` (all zeros for a branch-creating
-          push): the read-directives leg's base when the mover reports
-          none (the tag did not move, or did not exist before this run).
-          Explicit like sha, and verified an ancestor of it.
+          The push payload's `before` (all zeros for a branch-creating push), the read-directives
+          leg's base when the mover reports none because the tag did not move or did not exist
+          before this run. Explicit like sha, and verified an ancestor of it.
         required: true
         type: string
   # The self-heal: the scripts refuse any sha that is not green main history, so re-run that commit's CI first
@@ -33,8 +32,7 @@ on:
     inputs:
       sha:
         description: >-
-          The full 40-hex main commit to move the stable tag to; must carry
-          a green all-green check.
+          The full 40-hex main commit to move the stable tag to. It must carry a green all-green check.
         required: true
         type: string
 

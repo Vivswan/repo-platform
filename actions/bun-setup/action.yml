@@ -1,28 +1,30 @@
 name: Bun Setup
-description: >-
-  The one bun setup for repo-platform's composite actions: finds the nearest
-  .bun-version at or above the directory passed as `from` (an action's own
-  `github.action_path`, so it reads its own repository's pin and its scripts
-  and lockfiles never ride the CALLING repository's bun resolution), reuses a
-  bun already on PATH at that version or installs it with oven-sh/setup-bun,
-  one retry for the known network flake, and records the absolute path of the
-  bun that prints the pin. One call per job: setup-bun installs every version
-  at the same path, so `path` is valid only until another setup-bun runs in
-  that job.
+description: |
+  Sets up a repo-platform composite action's pinned bun, the one bun setup for those actions.
+
+  The pin is the nearest .bun-version at or above `from`, the action's own `github.action_path`,
+  so it is the action's repository's own. Its scripts and lockfiles never ride the calling
+  repository's bun resolution.
+
+  A bun already on PATH at the pinned version is reused. Otherwise oven-sh/setup-bun installs
+  it, with one retry for the known network flake. The `path` output is the absolute path of
+  the bun that prints the pin.
+
+  Call it once per job. setup-bun installs every version at the same path, so `path` is valid
+  only until another setup-bun runs in that job.
 
 inputs:
   from:
     description: >-
-      A directory inside the action's repository (`github.action_path`); the
-      first .bun-version in it or any directory above it is the pin, and the
-      step fails when none exists.
+      A directory inside the action's repository (`github.action_path`), whose nearest
+      .bun-version at or above it is the pin. The step fails when none exists.
     required: true
 
 outputs:
   path:
     description: >-
-      Absolute path of the bun that prints the pinned version. Callers run
-      this path, never `bun` by name.
+      Absolute path of the bun that prints the pinned version. Callers run this path, never
+      `bun` by name.
     value: ${{ steps.resolve.outputs.path }}
   installed:
     description: Whether setup-bun ran, "true" unless the pin was already satisfied.
