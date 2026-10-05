@@ -34,8 +34,8 @@ jobs:
   # One job for the plan and every check that runs in every repository. GitHub bills a job a rounded-up minute, so as
   # separate jobs of 4 to 30 seconds the checks billed five to six minutes per push for about two minutes of work.
   #
-  # The check steps run under `!cancelled()` and the judge-checks action judges them last (its description owns the
-  # reading). A skipped step stood down and is never a failure.
+  # The check steps run under `!cancelled()`, so one red check hides no other. Each fails in place, and the job's page
+  # names the failed step. A skipped step stood down and is never a failure.
   #
   # On an event without a repository object the visibility input is empty, and the plan action's `private` input
   # owns what happens then.
@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      # The sticky findings comments of validate-managed-files and file-size.
+      # The sticky findings comments of validate-managed-files, file-size, and shell-complexity.
       pull-requests: write
       # zizmor's SARIF upload.
       security-events: write
@@ -79,6 +79,9 @@ jobs:
       - id: file-size
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: Vivswan/repo-platform/actions/check-file-size@stable
+      - id: shell-complexity
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: Vivswan/repo-platform/actions/check-shell-complexity@stable
       - id: commit-names
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: Vivswan/repo-platform/actions/validate-commit-names@stable
@@ -141,12 +144,6 @@ jobs:
       - name: Note why knip stood down
         if: ${{ !cancelled() && steps.bun.outcome == 'success' && steps.bun-install.outcome == 'skipped' }}
         run: echo "::notice::knip stood down, this repository has no package.json to install from"
-
-      - name: Judge the checks
-        if: always()
-        uses: Vivswan/repo-platform/actions/judge-checks@stable
-        with:
-          steps: ${{ toJSON(steps) }}
 
   # Public only: the dependency-graph API is free just there. A successful plan publishes `modules` (at least `[]`) and
   # a failed one publishes nothing, so `modules != ''` skips the job after a failed plan; `private != 'true'` then runs

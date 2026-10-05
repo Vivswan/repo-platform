@@ -25,14 +25,11 @@ import { githubSlug, headingText } from "./anchors.ts";
 import type { IncludeRoot } from "./conventions.ts";
 import { alertTitlesRule, CUSTOM_BLOCK_LABELS } from "./custom-blocks.ts";
 import { deriveRewrites, includeIndexPages, untitledPageTitle, walkMarkdown } from "./derive.ts";
-import { inlineTextRule } from "./inline-text.ts";
-import { landingLauncherRule } from "./landing-launcher.ts";
 import { mermaidRule } from "./mermaid.ts";
 import { rewriteLinksRule } from "./rewrite-links.ts";
 import { deriveSidebar, fileSource, sidebarTrees } from "./sidebar.ts";
 import { isLandingFile, sourcePathOf } from "./source-path.ts";
 import { tableWrapRule } from "./table-wrap.ts";
-import { headersRule } from "./theme/page-index.ts";
 import { tokensCssPlugin } from "./theme/tokens-css.ts";
 import { type VersionLink, versionNav } from "./version-nav.ts";
 
@@ -103,7 +100,6 @@ const markdown: MarkdownOptions = {
     }),
   ),
   config(md) {
-    inlineTextRule(md);
     rewriteLinksRule(md, {
       docsDir: facts.docsDir,
       includes,
@@ -113,12 +109,10 @@ const markdown: MarkdownOptions = {
       repoUrl: facts.repoUrl,
       ref: facts.provenance.label,
     });
-    landingLauncherRule(md, rewrites);
     // VitePress installs its own table_open renderer between preConfig and
     // config, so the wrapper's rule must land here to move the tab stop from
     // the table to the wrapper.
     tableWrapRule(md);
-    headersRule(md);
     alertTitlesRule(md);
     mermaidRule(md);
   },

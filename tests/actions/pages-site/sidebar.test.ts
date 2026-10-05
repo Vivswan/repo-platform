@@ -4,7 +4,6 @@ import {
   deriveSidebar,
   type PageSource,
   type SidebarItem,
-  sidebarOrder,
   sidebarTrees,
 } from "../../../actions/pages-site/.vitepress/sidebar.ts";
 
@@ -21,8 +20,7 @@ function source(pages: Record<string, [string, number | null, string | null]>): 
 const plain = (title: string): [string, null, null] => [title, null, null];
 
 describe("deriveSidebar", () => {
-  // The launcher's page index (pages.data.ts) copies this order through sidebarOrder, so the two must agree or the
-  // launcher and the sidebar list pages differently, green; the root tree and each locale are walked in that order.
+  // The root tree and each locale are walked as their own trees, each in the order the name states.
   test("a tree saying nothing reads: landing first, pages by title, one collapsible group per directory titled from its folder; each locale is its own tree", () => {
     const files = [
       "README.md",
@@ -86,17 +84,6 @@ describe("deriveSidebar", () => {
       },
     ];
     expect(deriveSidebar(trees[0].files, pages)).toEqual(expected);
-    expect(sidebarOrder(files, pages)).toEqual([
-      "README.md",
-      "zz-intro.md",
-      "setup.md",
-      "api-reference/errors.md",
-      "guide/README.md",
-      "guide/deep-dive.md",
-      "release_notes/changes.md",
-      "ja/README.md",
-      "ja/z.md",
-    ]);
   });
 
   // The rule docs/modules/site.md states for fleet authors, who place pages by it: `order` ascending, then title. A
@@ -157,15 +144,6 @@ describe("deriveSidebar", () => {
       { text: "C", link: "/c" },
       { text: "Later", items: [{ text: "E", link: "/e" }] },
       { text: "Sub", collapsed: false, items: [{ text: "X", link: "/sub/x" }] },
-    ]);
-    expect(sidebarOrder(files, pages)).toEqual([
-      "README.md",
-      "a.md",
-      "b.md",
-      "d.md",
-      "c.md",
-      "e.md",
-      "sub/x.md",
     ]);
   });
 
@@ -237,17 +215,11 @@ describe("deriveSidebar", () => {
         ],
       },
     ]);
-    expect(sidebarOrder(files, pages, options.indexPages)).toEqual([
-      "README.md",
-      "manuals/README.md",
-      "manuals/topic/detail.md",
-      "manuals/topic/README.md",
-    ]);
   });
 
   // Every row kind (a plain page, a group member, a directory's landing and
-  // its child) is spelled the way the launcher spells the same page, so a
-  // `#` or `?` in a name never reads as a fragment or query.
+  // its child) escapes its link, so a `#` or `?` in a name never reads as a
+  // fragment or query to the router.
   test("a reserved character in a file or directory name is escaped in the link, at every row kind", () => {
     const files = ["README.md", "hash#page.md", "query?page.md", "q?dir/README.md", "q?dir/e#f.md"];
     const pages = source({

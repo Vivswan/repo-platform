@@ -405,8 +405,8 @@ jobs:
 
   # GitHub loads an action's manifest when the job starts, so a manifest error fails every caller before its first step.
   # A local `uses: ./actions/<name>` is the exception: it loads when its step runs, and a skipped step loads nothing. So the
-  # actions no other gating job runs run here, with inputs that change nothing, and the judge last, as the fleet
-  # runs it; tests/workflows/action_load.test.ts holds the job to the actions directory.
+  # actions no other gating job runs run here, with inputs that change nothing;
+  # tests/workflows/action_load.test.ts holds the job to the actions directory.
   action-load:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -434,10 +434,6 @@ jobs:
           mode: after-propose
         env:
           GH_TOKEN: ${{ github.token }}
-      - uses: ./actions/judge-checks
-        if: always()
-        with:
-          steps: ${{ toJSON(steps) }}
 
   # THE gate: this job's own check run is the ruleset's required check (files/settings/override.yml),
   # and alls-green passes only when every needed result is success, or skipped for a job named in allowed-skips.

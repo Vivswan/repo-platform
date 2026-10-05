@@ -161,6 +161,7 @@ function callerProblems(caller: Caller, actions: Map<string, Action>): string[] 
 
 const CONTROL_ACTION: Action = {
   name: "control",
+  description: "",
   inputs: { mode: { description: "", required: true } },
   outputs: { path: { description: "", value: "${{ steps.gone.outputs.path }}" } },
   runs: {

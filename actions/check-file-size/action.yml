@@ -2,10 +2,14 @@ name: Check File Size
 description: |
   Caps file length, line width, and comment block length in the caller's checkout.
 
-  Two tiers for length and width: a sensible size warns, a hard cap fails. One tier for a
-  comment block: it warns only, and a comment line `comment-cap: ignore <reason>` exempts its
-  block. The caps and the file kinds are check-file-size.ts, which reads comments and literals
-  off each file's tree-sitter grammar.
+  Two tiers for length: a sensible size warns, a hard cap fails. One tier for width: a line
+  over 256 code points fails. One tier for a comment block: it warns only, and a comment line
+  `comment-cap: ignore <reason>` exempts its block.
+
+  The caps and the file kinds are check-file-size.ts.
+
+  A comment block is a run of lines opening with a comment prefix, whatever the language. So a
+  string line opening with `//` counts toward a block warning, never a red check.
 
   Findings are written once, as one table, and reported through the sinks the fleet rule sets
   for any check that reports findings:
@@ -29,15 +33,6 @@ runs:
       uses: Vivswan/repo-platform/actions/bun-setup@stable
       with:
         from: ${{ github.action_path }}
-
-    # The grammars are runtime dependencies (web-tree-sitter and its wasm
-    # packages), installed frozen so the fleet runs the pinned build.
-    - name: Install the action's dependencies
-      shell: bash
-      env:
-        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
-        ACTION_PATH: ${{ github.action_path }}
-      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
     # The script records report=findings|clean|error itself; a crash before
     # that leaves it empty, which posts no comment. The comment steps read it
