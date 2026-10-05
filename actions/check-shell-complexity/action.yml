@@ -59,12 +59,11 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
-    # continue-on-error so the comment steps run first; the last step
-    # re-raises. The script records report=findings|clean|error itself; a
-    # crash before that leaves it empty, which posts no comment.
+    # The script records report=findings|clean|error itself; a crash before
+    # that leaves it empty, which posts no comment. The comment steps read it
+    # on !cancelled(), so the comment is posted before the job turns red.
     - name: Check shell complexity
       id: check
-      continue-on-error: true
       shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
@@ -76,7 +75,7 @@ runs:
     # the same table, so a token without pull-requests write (a fork or
     # Dependabot PR) must not turn the verdict red.
     - name: Post the findings as a sticky PR comment
-      if: github.event_name == 'pull_request' && steps.check.outputs.report == 'findings'
+      if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.check.outputs.report == 'findings' }}
       continue-on-error: true
       uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
       with:
@@ -84,16 +83,9 @@ runs:
         path: ${{ runner.temp }}/check-shell-complexity-report.md
 
     - name: Remove a stale sticky comment
-      if: github.event_name == 'pull_request' && steps.check.outputs.report == 'clean'
+      if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.check.outputs.report == 'clean' }}
       continue-on-error: true
       uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
       with:
         header: repo-platform/check-shell-complexity
         delete: true
-
-    - name: Fail on a refused construct
-      if: steps.check.outcome == 'failure'
-      shell: bash
-      run: |
-        echo "::error::check-shell-complexity failed; see the annotations above, the step summary, or the PR comment."
-        exit 1
