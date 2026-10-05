@@ -1,0 +1,99 @@
+name: Check Shell Complexity
+description: |
+  Refuses shell nested more than one level deep, and any function.
+
+  Depth 1 is allowed: an if, for, while, until, case, `||` chain, or tested command substitution
+  whose body holds only plain commands. Depth 2 is refused: any construct inside another.
+  A function is refused at any depth, since a function is a script asking to be TypeScript.
+
+  Judged, in the caller's checkout:
+    - `run:` steps of workflows and composite actions (bash, sh, zsh, pwsh, powershell, cmd)
+    - moon task scripts and Containerfile RUN instructions
+    - *.sh, *.bash, *.zsh, *.ps1, *.psm1, *.bat, *.cmd files
+    - a tracked extensionless file whose shebang names one of those shells (a git hook)
+
+  Parsers: mvdan/sh for bash, sh, and zsh; pwsh's own parser for PowerShell, so pwsh must be on PATH
+  when a PowerShell body exists (the step fails naming it otherwise); cmd by tokens after dropping rem
+  lines, so nesting is counted by keyword count rather than structure, a keyword inside a quoted
+  argument counts too, and a three-way `||` chain is refused where bash passes it as one chain.
+
+  Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it).
+  Warned and skipped: a yaml file the reader cannot parse.
+  Never read: vendored installs and build output (node_modules, vendor, third_party, dist, build, .venv),
+  and the directories the caller names in `skip` (repo-platform names `files`, its sync templates, judged
+  through the trees its writer lands instead).
+
+  Findings are written once, as one table through two sinks on every event: the step summary and the
+  log annotations. On pull_request events a sticky PR comment carries the same table and is deleted
+  when there is nothing to say; the calling job needs `pull-requests: write` for it.
+
+  Exemptions: `.shell-complexity-allow.local`, one path per line with a `# reason`.
+
+inputs:
+  skip:
+    description: |
+      Directory names the check must not read, beyond the generic ones it always skips.
+
+      Comma-separated, spaces trimmed; directory components only, never file names.
+
+      Empty, the default, skips nothing more.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    # continue-on-error so the comment steps run first; the last step
+    # re-raises. The script records report=findings|clean|error itself; a
+    # crash before that leaves it empty, which posts no comment.
+    - name: Check shell complexity
+      id: check
+      continue-on-error: true
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        REPORT_PATH: ${{ runner.temp }}/check-shell-complexity-report.md
+        SKIP: ${{ inputs.skip }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/check-shell-complexity.ts" --skip "$SKIP"'
+
+    # The comment is a convenience sink: the summary and annotations carry
+    # the same table, so a token without pull-requests write (a fork or
+    # Dependabot PR) must not turn the verdict red.
+    - name: Post the findings as a sticky PR comment
+      if: github.event_name == 'pull_request' && steps.check.outputs.report == 'findings'
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      with:
+        header: repo-platform/check-shell-complexity
+        path: ${{ runner.temp }}/check-shell-complexity-report.md
+
+    - name: Remove a stale sticky comment
+      if: github.event_name == 'pull_request' && steps.check.outputs.report == 'clean'
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      with:
+        header: repo-platform/check-shell-complexity
+        delete: true
+
+    - name: Fail on a refused construct
+      if: steps.check.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::error::check-shell-complexity failed; see the annotations above, the step summary, or the PR comment."
+        exit 1

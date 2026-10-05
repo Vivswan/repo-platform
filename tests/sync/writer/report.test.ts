@@ -15,6 +15,7 @@ const QUIET: SyncOutcome = {
   modules: ["bun"],
   private: false,
   written: [{ path: "ci.yml", class: "managed", change: "updated", detail: "" }],
+  templates: {},
   replaced: [],
   retired: [{ path: "old.yml", outcome: "deleted", detail: "no longer selected" }],
   notes: [],

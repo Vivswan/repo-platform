@@ -17,7 +17,7 @@ Every repository in the fleet - repo-platform included - gates merges on a requi
 | the managed skeleton | `checks` alone | so a schedule night passes on `ci` and an all-skipped run cannot pass |
 | repo-platform's own | `dependency-review` alone | since only a pull request has a dependency diff to review |
 
-**The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
+**The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, which [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) holds to the root's sha, landed in the fleet by the next sync round.
 
 **repo-platform's own main carries one more merge rule,** the `main-up-to-date` ruleset in its [overlay](../.github/settings.local.yml): [settings.md](settings.md#repo-platform-itself-is-a-target) owns what it refuses and why the fleet does not carry it.
 
@@ -101,7 +101,7 @@ The jobs beside them gate nothing:
 
 - **Its docs shape and wording check:** the `docs-check` job runs [Vale](https://vale.sh) over README.md and every page under docs/ with the skills repository's styles, read from a checkout at the validate-skills sha: a paragraph or list item over 70 words, or a word or phrase from the unslop and natural-writing skills' lists, fails the job, naming the line. The binary is a pinned release verified by sha256, as pinact is.
 
-- **Its docs path check, CI-only like Vale:** the same job runs the docs-discipline probe from that checkout over the same pages; `bun run check` does not. A relative link whose target is missing fails it. A backticked path fails it when its first directory exists beside the page, at the root, or in `files/base` and the rest does not; bare file names and other layouts are left alone.
+- **Its docs path check, CI-only like Vale:** the same job runs the working-text probe from that checkout over the same pages; `bun run check` does not. A relative link whose target is missing fails it. A backticked path fails it when its first directory exists beside the page, at the root, or in `files/base` and the rest does not; bare file names and other layouts are left alone.
 
 - **A repo-owned advisory check** opts out with `continue-on-error: true` on its job in checks.yml.
 

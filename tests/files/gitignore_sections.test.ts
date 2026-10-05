@@ -1,4 +1,4 @@
-// The platform-authored gitignore sections, judged by git itself: the workspace paths a fleet step creates are
+// The platform-authored gitignore sections, judged by git itself: the workspace paths a fleet step writes are
 // root-anchored so a nested source folder of the same name is not swallowed, the secrets and scratch rules are not
 // so a nested service's are, and the fuzz failure directory rides the fuzzer module alone because only its starter
 // produces it.
@@ -7,8 +7,9 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { capture } from "../../.github/scripts/shared/proc.ts";
 import { parseFilesConfig } from "../../actions/plan/files_config.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -21,15 +22,15 @@ const CI_WORKSPACE_SECTION = "## CI workspace paths (repo-platform)";
 
 function ignoredByGit(section: string, rel: string, kind: "dir" | "file"): boolean {
   const repo = temp.dir("gitignore-sections-");
-  expect(capture(["git", "-C", repo, "init", "-q"], {}).exitCode).toBe(0);
+  fixtureGit(repo, ["init", "-q"]);
   writeFileSync(join(repo, ".gitignore"), section);
   const abs = join(repo, rel);
   mkdirSync(dirname(abs), { recursive: true });
   if (kind === "dir") mkdirSync(abs);
   else writeFileSync(abs, "");
-  const probe = capture(
+  const probe = boundedSpawnSync(
     ["git", "-C", repo, "-c", "core.excludesFile=/dev/null", "check-ignore", "-q", rel],
-    {},
+    { env: fixtureGitEnv() },
   );
   // 0 ignored, 1 not ignored; anything else is a broken probe, never a verdict.
   expect([0, 1]).toContain(probe.exitCode);
@@ -151,8 +152,9 @@ function workspaceCheckouts(): WorkspaceCheckout[] {
 
 test("every checkout path a fleet action or workflow creates inside the workspace is ignored, root-anchored", () => {
   const census = workspaceCheckouts();
-  // Armed: the validator's platform checkout is the first member of the class, so an empty census is a broken scan.
-  expect(census.filter((entry) => entry.judge === "base section").length).toBeGreaterThan(0);
+  // Armed by this repository's own workflows (the sync's build checkout, the docs-check job's skills checkout): an
+  // empty census is a broken scan. No shipped action or workflow checks out into the caller's workspace today.
+  expect(census.length).toBeGreaterThan(0);
   const start = BASE.indexOf(CI_WORKSPACE_SECTION);
   expect(start).toBeGreaterThanOrEqual(0);
   const section = BASE.slice(start).split(/\n(?=## )/)[0];
