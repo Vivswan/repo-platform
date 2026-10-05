@@ -1,17 +1,18 @@
 name: Validate Managed Files
-description: >-
-  The fleet's validate-managed-files step body: judges the caller's checkout
-  as repo-platform writes it at the commit the repository was last synced
-  with (that commit's own check.ts, run from a clone of repo-platform the
-  action makes under the runner's temp directory), then the repository's
-  YAML, conflict-marker, and release-as hygiene, and posts the findings as
-  one sticky PR comment plus the step summary, exporting the one verdict as
-  the `integrity` output. A missing bun fails the action before anything
-  runs; past that it never fails on its own - the report step ALWAYS runs -
-  so the comment is already posted when the caller fails LAST on
-  `integrity`. The calling job
-  needs pull-requests: write for the comment (and nothing else beyond
-  contents: read).
+description: |
+  Judges the caller's checkout as repo-platform writes it, the body of the fleet's validate-managed-files step.
+
+  The judge is the check.ts of the commit the repository was last synced with, run from a
+  clone of repo-platform the action makes under the runner's temp directory. After it, the
+  action checks the repository's YAML, conflict-marker, and release-as hygiene.
+
+  The findings are posted as one sticky PR comment plus the step summary, and the one verdict
+  is the `integrity` output. A missing bun fails the action before anything runs. Past that it
+  never fails on its own: the report step always runs, so the comment is already posted when
+  the caller fails last on `integrity`.
+
+  The calling job needs pull-requests: write for the comment, and nothing else beyond
+  contents: read.
 
 inputs:
   private:
@@ -23,9 +24,8 @@ inputs:
 outputs:
   integrity:
     description: >-
-      The report step's reading of the one verdict: success only for a
-      clean verdict, failure for findings, for a run that could not be
-      judged, and for a missing or malformed verdict. Nothing else sets it.
+      The report step's reading of the one verdict: success for a clean verdict, failure for
+      findings, an unjudged run, or a missing or malformed verdict. Nothing else sets it.
     value: ${{ steps.report.outputs.integrity }}
 
 runs:

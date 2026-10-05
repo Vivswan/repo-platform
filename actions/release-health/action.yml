@@ -1,23 +1,29 @@
 name: Release Health
-description: >-
-  Gates releases in managed repos: fails when an open tracking issue of a
-  nightly stream (fuzz or CI), an open release-blocker issue, or an open
-  Dependabot alert at high or critical severity says the repository is not
-  release-worthy. Three modes. pull-request (on a release-please PR's CI, in
-  a full-history checkout of the PR head) first requires the head to contain
-  the base branch's tip, since a stale release PR cuts a release missing
-  commits already on it, then runs the gates. release (on the main-push
-  release path) gates a release-PR merge and tells the caller which push it
-  was through `release-cut`; an ordinary push is not gated, and
-  `head-current` says whether the branch still stands at the judged commit.
-  after-propose (after release-please's propose step) fails when a merged
-  release PR has worn "autorelease: pending" for over 30 minutes, since
-  release-please then proposes nothing, green. The release-override label on
-  the release PR turns gate failures into warnings; the freshness and pending
-  checks are never overridden. Needs GH_TOKEN in the environment with issues
-  read, pull-requests read, and vulnerability-alerts read (an unreadable
-  alerts endpoint fails the gate) and gh >= 2.51 on the runner (GitHub-hosted
-  runners ship current gh).
+description: |
+  Gates releases in managed repositories on what says the repository is not release-worthy.
+
+  Any of these open fails the gate:
+    - a tracking issue of a nightly stream (fuzz or CI)
+    - a release-blocker issue
+    - a Dependabot alert at high or critical severity
+
+  Modes:
+    - pull-request: on a release-please PR's CI, in a full-history checkout of the PR head.
+      First requires the head to contain the base branch's tip, since a stale release PR cuts
+      a release missing commits already on it, then runs the gates.
+    - release: on the main-push release path. Gates a release-PR merge and tells the caller
+      which push it was through `release-cut`. An ordinary push is not gated, and
+      `head-current` says whether the branch still stands at the judged commit.
+    - after-propose: after release-please's propose step. Fails when a merged release PR has
+      worn "autorelease: pending" for over 30 minutes, since release-please then proposes
+      nothing, green.
+
+  The release-override label on the release PR turns gate failures into warnings. The
+  freshness and pending checks are never overridden.
+
+  Needs GH_TOKEN in the environment with issues read, pull-requests read, and
+  vulnerability-alerts read (an unreadable alerts endpoint fails the gate), and gh >= 2.51 on
+  the runner (GitHub-hosted runners ship current gh).
 
 inputs:
   mode:
@@ -27,20 +33,19 @@ inputs:
     required: true
   tracking-labels:
     description: >-
-      Comma-separated labels of the nightly tracking-issue streams; an open
-      issue carrying any of them blocks. Empty disables the tracking gates.
+      Comma-separated labels of the nightly tracking-issue streams, where an open issue
+      carrying any of them blocks. Empty disables the tracking gates.
     required: false
     default: ""
 
 outputs:
   release-cut:
-    description: Release mode only; "true" when the judged commit is a release-PR merge, "false" otherwise.
+    description: 'Release mode only: "true" when the judged commit is a release-PR merge, "false" otherwise.'
     value: ${{ steps.check.outputs.release-cut }}
   head-current:
     description: >-
-      Release mode, ordinary pushes only; "true" when the branch head is still
-      the judged commit, "false" when a newer push moved it (that run
-      refreshes the release PR).
+      Release mode, ordinary pushes only: "true" when the branch head is still the judged
+      commit, "false" when a newer push moved it (that run refreshes the release PR).
     value: ${{ steps.check.outputs.head-current }}
 
 runs:

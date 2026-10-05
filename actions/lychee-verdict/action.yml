@@ -1,11 +1,15 @@
 name: Lychee Verdict
-description: >-
-  Reads lychee-action's `exit_code` output as one verdict the steps after
-  it can gate on positively: 0 is a clean run (found false), 2 is broken
-  links (found true), and anything else, an unset code included, is no
-  verdict and fails the step (lychee's own error, a step that never ran).
-  lychee-action with `fail: false` keeps the job green whatever happened,
-  so without this reading a crashed lychee passes as a clean run.
+description: |
+  Reads lychee-action's `exit_code` output as one verdict the steps after it gate on positively.
+
+  The reading:
+    - 0: a clean run, found false
+    - 2: broken links, found true
+    - anything else, an unset code included: no verdict, and the step fails (lychee's own
+      error, or a step that never ran)
+
+  lychee-action with `fail: false` keeps the job green whatever happened, so without this
+  reading a crashed lychee passes as a clean run.
 
 inputs:
   exit-code:

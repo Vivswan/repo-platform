@@ -1,18 +1,22 @@
 name: Check File Size
-description: >-
-  Caps file length and line width in two tiers (sensible sizes warn, hard
-  caps fail) and comment block length in one (warns only; a comment line
-  `comment-cap: ignore <reason>` exempts its block); caps and kinds:
-  check-file-size.ts, which reads comments and literals off each file's
-  tree-sitter grammar. Findings are written ONCE
-  as one table and reported through two sinks - the step summary and the
-  log annotations on every event, plus a sticky PR comment on pull_request
-  events (deleted when there is nothing to say); the fleet rule for any
-  check that reports findings. Files carrying repo-platform's managed
-  header are skipped and counted (the caller cannot fix them). Repo-owned
-  exemptions live in .file-size-allow.local, one path per line with a
-  `# reason`. Scans the caller's checkout; the calling job needs
-  pull-requests: write for the comment.
+description: |
+  Caps file length, line width, and comment block length in the caller's checkout.
+
+  Two tiers for length and width: a sensible size warns, a hard cap fails. One tier for a
+  comment block: it warns only, and a comment line `comment-cap: ignore <reason>` exempts its
+  block. The caps and the file kinds are check-file-size.ts, which reads comments and literals
+  off each file's tree-sitter grammar.
+
+  Findings are written once, as one table, and reported through the sinks the fleet rule sets
+  for any check that reports findings:
+    - the step summary and the log annotations, on every event
+    - a sticky PR comment on pull_request events, deleted when there is nothing to say
+
+  Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it).
+
+  Repo-owned exemptions: `.file-size-allow.local`, one path per line with a `# reason`.
+
+  The calling job needs pull-requests: write for the comment.
 
 runs:
   using: composite

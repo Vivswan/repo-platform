@@ -20,6 +20,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`, and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)) |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
+| [Action and workflow descriptions](#action-and-workflow-descriptions) | `tests/actions/action_metadata.test.ts` in repo-platform (no expression delimiter); review for the shape |
 | [Pre-commit hooks only check](#pre-commit-hooks-only-check) | review |
 | [File size caps](#file-size-caps) | the `file-size` step (a hard cap fails the step, and the step fails the `standard-checks` job) |
 | [How to bypass a check](#how-to-bypass-a-check) | each tool's own per-finding, in-repo bypass; no job-level switch exists |
@@ -226,6 +227,43 @@ if [ -f x ]; then cat x; fi
 **A block that must stay long** (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone. The reason is mandatory: a bare marker exempts nothing and warns itself.
 
 **Enforced by:** the comment caps of the `file-size` step ([file size caps](#file-size-caps)), warn only, never a failure.
+
+## Action and workflow descriptions
+
+**Rule:** an action's `description:`, a workflow's header comment, and a `workflow_call` or `workflow_dispatch` input or output description open with one orienting sentence saying what the thing does, then carry one fact per short paragraph.
+
+- **A literal block** (`|`) carries an action's description, so its paragraphs and lists keep their line breaks.
+- **A paragraph** is one to three sentences, under 70 words, with no semicolon chain.
+- **An enumerable set** is an indented `-` list.
+- **The caller's obligations** (permissions, inputs it must pass, PATH requirements) are stated plainly.
+- **An input or output description** is one sentence, or two short ones.
+- **A fact the code or a docs page owns** is one sentence plus the file or page name, never restated at length.
+- **No GitHub expression in any description:** GitHub evaluates an expression delimiter in action metadata at load time, so one failed every consumer's job.
+
+**Why:** the description is what the GitHub UI and an agent read first about the action, so a wall of text costs the reader there what it costs on a docs page.
+
+**How:** the yamllint action's description, before and after.
+
+```yaml
+description: >-
+  The fleet's YAML lint step: installs the yamllint pinned in this action's
+  requirements.txt and lints the caller's checkout in strict mode (warnings
+  fail too), honoring the repository's own .yamllint config. One
+  implementation for every managed repo, so the install, the version, and
+  the invocation cannot drift per repository.
+```
+
+```yaml
+description: |
+  Installs the yamllint pinned in this action's requirements.txt and lints the caller's checkout with it, the fleet's YAML lint step.
+
+  It lints in strict mode, so warnings fail too. The repository's own .yamllint config is honored.
+
+  One implementation for every managed repository, so the install, the version, and the
+  invocation cannot drift per repository.
+```
+
+**Enforced by:** `tests/actions/action_metadata.test.ts` in repo-platform refuses an expression delimiter in any action's name or descriptions; review for the shape.
 
 ## Pre-commit hooks only check
 

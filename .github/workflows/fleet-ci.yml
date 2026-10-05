@@ -1,12 +1,19 @@
-# Every managed ci.yml calls this workflow, so an edit here changes fleet CI with no per-repo diff
-# trail; this repository's own gate is the counterweight. The caller judges the call's one RESULT:
-# a job that fails here fails the call, a SKIPPED job leaves it green, and no job is name-addressed.
+# Runs the fleet's CI, called by every managed ci.yml, so an edit here changes fleet CI with no per-repo diff trail.
 #
-#   `./` ACTION path   -> the CALLER's checkout, so action refs stay Vivswan/repo-platform/actions/<name>@stable
-#   `./` WORKFLOW ref  -> this repository (reusable-codeql.yml)
-#   job permissions    -> checked against the skeleton ci.yml's caller grant BEFORE the job's `if` runs (tests/workflows/caller_ceilings.test.ts)
-#   `!cancelled()`     -> on every job below standard-checks: a bare job skips when a dependency fails, so a red check would hide its verdict
-# A job needing more than that grant lives in fleet-nightly.yml behind its own caller.
+# This repository's own gate is the counterweight.
+#
+# The caller judges the call's one result: a job that fails here fails the call, a skipped job leaves it green, and
+# no job is name-addressed.
+#
+# A `./` action path resolves against the caller's checkout, so action refs stay Vivswan/repo-platform/actions/<name>@stable.
+# A `./` workflow ref resolves against this repository (reusable-codeql.yml).
+#
+# GitHub checks a job's permissions against the skeleton ci.yml's caller grant before the job's `if` runs
+# (tests/workflows/caller_ceilings.test.ts). A job needing more than that grant lives in fleet-nightly.yml behind
+# its own caller.
+#
+# Every job below standard-checks runs under `!cancelled()`: a bare job skips when a dependency fails, so a red check
+# would hide its verdict.
 
 name: Fleet CI
 
@@ -24,15 +31,14 @@ permissions:
   contents: read
 
 jobs:
-  # One job for the plan and every check that runs in every repository: GitHub bills a job a rounded-up minute, so as
-  # separate jobs of 4 to 30 seconds they billed five to six minutes per push for about two minutes of work. A check
-  # step runs under `!cancelled() && steps.plan.outcome == 'success'`, so one red check hides no other and a plan that
-  # failed runs none; the judge at the end fails the job naming each failed step.
+  # One job for the plan and every check that runs in every repository. GitHub bills a job a rounded-up minute, so as
+  # separate jobs of 4 to 30 seconds the checks billed five to six minutes per push for about two minutes of work.
   #
-  #   step ids               -> the check names the judge reports; a skipped step stood down, it is never a failure
-  #   != 'schedule'          -> the nightly cron reaches only the plan (CodeQL reads it on its weekly day)
-  #   knip's install last    -> trivy and the base checks judge the checkout before node_modules exists
-  #   the visibility input   -> empty on events without a repository object; the plan action asks the API then
+  # The check steps run under `!cancelled()` and the judge-checks action judges them last (its description owns the
+  # reading). A skipped step stood down and is never a failure.
+  #
+  # On an event without a repository object the visibility input is empty, and the plan action's `private` input
+  # owns what happens then.
   standard-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -121,9 +127,11 @@ jobs:
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: Vivswan/repo-platform/actions/trivy@stable
 
-      # knip resolves imports through node_modules, so the repository's own bun installs first; it runs knip's
-      # defaults, overridden by whatever knip configuration the repository carries (a configured entry or
-      # project list replaces the default list, it does not extend it). A repository committed right after
+      # knip resolves imports through node_modules, so the repository's own bun installs first, and last among the
+      # checks, so trivy and the base checks judge the checkout before node_modules exists.
+      #
+      # knip runs its defaults, overridden by whatever knip configuration the repository carries (a configured entry
+      # or project list replaces the default list, it does not extend it). A repository committed right after
       # selecting the module has no package.json yet, so knip stands down then.
       - id: bun
         if: >-

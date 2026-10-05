@@ -1,6 +1,10 @@
-# The push-only sync operator (docs/platform/sync/operator.md): the public log carries the operator's vocabulary and
-# nothing else, so a row's steps write their detail to $RUNNER_TEMP files or to the target repository itself.
-# GitHub keeps ONE pending run per concurrency group, so multi-repo work belongs in a single run (repo=all, or a comma list).
+# Syncs the selected managed repositories, as the push-only sync operator (docs/platform/sync/operator.md).
+#
+# The public log carries the operator's vocabulary and nothing else, so a row's steps write their detail to
+# $RUNNER_TEMP files or to the target repository itself.
+#
+# GitHub keeps one pending run per concurrency group, so multi-repo work belongs in a single run (repo=all, or a
+# comma list).
 
 name: Sync Repos
 
@@ -11,26 +15,25 @@ on:
     inputs:
       repo:
         description: >-
-          owner/name to sync, a comma-separated list of them, the visibility tokens public and private,
-          modules:<a>+<b> (every managed repo whose .repo-platform.yml selects ALL the listed modules;
-          a visibility token intersects with it, a slug adds as typed), or the
-          literal "all" - same as leaving it empty, every managed repo
+          The repositories to sync, comma-separated: owner/name slugs, the visibility tokens public and private,
+          or modules:<a>+<b> (every managed repo whose .repo-platform.yml selects all the listed modules,
+          intersected with a visibility token, while a slug adds as typed). The literal "all", or empty, is
+          every managed repo.
         required: false
         type: string
       manual:
         description: >-
-          Never arm auto-merge - every PR this run delivers waits for
-          human review, clean updates included
+          Never arm auto-merge, so every PR this run delivers waits for human review, clean updates included.
         required: false
         type: boolean
         default: false
       branch:
         description: >-
-          A branch of the ONE repository named in repo: the row checks it out, runs the writer over it, and
-          commits the result onto it (no PR; the report goes to the job summary; a failure files the
-          target's issue as always), so the PR that changes a module selection carries its own files.
-          Refused with manual, with a scope other than one owner/name, for the repository's default
-          branch, and for a branch it does not have
+          A branch of the one repository in repo, which the row checks out, writes over, and commits onto with
+          no PR, so a PR changing a module selection carries its own files. The report goes to the job summary,
+          a failure files the target's issue, and the refusals (manual, more than one repository, the default
+          branch, a branch the repository lacks) are the operator page's "Syncing a branch"
+          (docs/platform/sync/operator.md).
         required: false
         type: string
   # Named `repos`, not `repo`, on purpose: the dispatch input may be a private slug and never rides in step env,
@@ -39,10 +42,9 @@ on:
     inputs:
       repos:
         description: >-
-          "all", or a comma-separated list of owner/name slugs and the
-          visibility tokens public and private (fleet/sync_scope.ts);
-          post-green passes its label reader's public or all, and the
-          dispatch-only modules: filter never appears here
+          "all", or a comma-separated list of owner/name slugs and the visibility tokens public and private
+          (fleet/sync_scope.ts). post-green passes its label reader's public or all, and the dispatch-only
+          modules: filter never appears here.
         required: true
         type: string
 

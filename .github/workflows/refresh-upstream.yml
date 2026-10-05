@@ -1,7 +1,13 @@
-# Moves every upstream pin in files.yml: a commit pin (an upstream ref's sha) to its repository's HEAD, a release pin (a
-# module's version dotfile under files/) to its repository's latest release. One matrix leg and one PR branch per kind,
-# so a toolchain bump is never held behind a gitignore diff. A commit PR's body carries each fetched file's diff between
-# the two commits, which the next sync renders, after each entry's `replace`, wherever the file lands.
+# Moves every upstream pin in files.yml that is behind and opens at most one PR per kind of pin.
+#
+# The kinds:
+#   - a commit pin (an upstream ref's sha) moves to its repository's HEAD
+#   - a release pin (a module's version dotfile under files/) moves to its repository's latest release
+#
+# One matrix leg and one PR branch per kind, so a toolchain bump is never held behind a gitignore diff.
+#
+# A commit PR's body carries each fetched file's diff between the two commits, which the next sync renders, after
+# each entry's `replace`, wherever the file lands.
 
 name: Refresh upstream pins
 

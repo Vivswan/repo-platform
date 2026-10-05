@@ -1,59 +1,60 @@
 name: Nightly Issue
-description: >-
-  The fleet's issue mechanism for any nightly stream (fuzz, plain CI,
-  security, link rot), the way the sticky PR comment is its comment
-  mechanism. Report mode files the stream's issue or refreshes the newest
-  open one carrying the label - the body is replaced, never appended to -
-  through peter-evans/create-issue-from-file, and assigns the repository
-  owner every time (an issue created with GITHUB_TOKEN fires no
-  issues:opened event for the auto-assign workflow to catch; GitHub drops a
-  login it cannot assign). Resolve mode comments on and closes the open
-  labeled issues, up to 100 a run, after a green run. With an artifacts-dir
-  the body is built from failure reports (the contract is repo-platform's
-  docs/modules/fuzzer.md); without one it is a generic nightly-failure report
-  (workflow, commit, run link). The action carries no stream's wording as
-  a default: every caller names its mode and stream and, in report mode,
-  its title and label tuple.
-  Needs issues: write and gh on the runner (preinstalled on GitHub-hosted
-  runners).
+description: |
+  Files, refreshes, or closes the tracking issue of a nightly stream (fuzz, plain CI, security, link rot).
+
+  It is the fleet's issue mechanism, the way the sticky PR comment is its comment mechanism.
+  No stream's wording is a default: every caller names its mode and stream, and in report
+  mode its title and label tuple.
+
+  Modes:
+    - report: files the stream's issue, or refreshes the newest open one carrying the label,
+      through peter-evans/create-issue-from-file. The body is replaced, never appended to.
+    - resolve: after a green run, comments on and closes the open labeled issues, up to 100 a run.
+
+  Report mode assigns the repository owner every time. An issue created with GITHUB_TOKEN
+  fires no issues:opened event for the auto-assign workflow to catch, and GitHub drops a login
+  it cannot assign.
+
+  With an artifacts-dir the body is built from failure reports, under the contract
+  docs/modules/fuzzer.md owns. Without one it is a generic nightly-failure report: workflow,
+  commit, run link.
+
+  The calling job needs issues: write, and gh on the runner (GitHub-hosted runners preinstall it).
 
 inputs:
   mode:
     description: report (file/update from artifacts-dir) or resolve (close after a green run)
     required: true
   label:
-    description: Label identifying the issue stream; one open issue per label
+    description: Label identifying the issue stream, one open issue per label
     required: true
   title:
-    description: Title of the issue, required in report mode; a refresh sets it again
+    description: Title of the issue, required in report mode, and set again on a refresh
     required: false
   artifacts-dir:
     description: >-
-      Directory of per-failure subdirectories (contract v1). Empty means the
-      stream has no failure artifacts: report mode files a generic
-      nightly-failure report instead.
+      Directory of per-failure subdirectories (contract v1). Empty means the stream has no
+      failure artifacts, so report mode files a generic nightly-failure report instead.
     required: false
     default: ""
   artifact-name:
     description: >-
-      Name of the uploaded workflow artifact carrying the full reports; the
-      issue body then summarizes each report's head and points at it. Empty
-      means the issue body is the only record: every report rides whole, cut
-      only at GitHub's body limit, and nothing points at an artifact.
+      Name of the uploaded workflow artifact carrying the full reports, which the issue body
+      summarizes by each report's head and points at. Empty makes the issue body the only
+      record: every report rides whole, cut only at GitHub's body limit.
     required: false
     default: ""
   label-color:
-    description: Color report mode creates the label with, or repaints an existing one to; required in report mode
+    description: Color report mode creates the label with, or repaints an existing one to. Required in report mode.
     required: false
   label-description:
-    description: Description report mode creates the label with, or resets an existing one to; required in report mode
+    description: Description report mode creates the label with, or resets an existing one to. Required in report mode.
     required: false
   stream:
     description: >-
-      Which nightly stream the issue tracks - shapes the wording of the
-      report body and the resolve comment. fuzz speaks of failure reports
-      and crashing inputs and hedges on unpinned regression seeds; generic
-      carries no fuzz notions.
+      Which nightly stream the issue tracks, which shapes the wording of the report body and
+      the resolve comment. fuzz speaks of failure reports and crashing inputs and hedges on
+      unpinned regression seeds, while generic carries no fuzz notions.
     required: true
 
 outputs:

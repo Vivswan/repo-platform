@@ -1,5 +1,10 @@
-# A called job can only downgrade the caller's token, so a scope added here lands in the managed auto-assign.yml caller in the same change.
-# This runs in the CALLER's repository, where repo-platform's scripts do not exist, so the steps are gh commands.
+# Assigns opened or dispatched issues and PRs to the repository owner (a fork or Dependabot PR waits for the sweep),
+# and sweeps every open unassigned one on the caller's schedule or an empty dispatch.
+#
+# A called job can only downgrade the caller's token, so a scope added here lands in the managed auto-assign.yml
+# caller in the same change.
+#
+# It runs in the caller's repository, where repo-platform's scripts do not exist, so the steps are gh commands.
 
 name: Reusable Auto Assign
 
@@ -7,7 +12,7 @@ on:
   workflow_call:
     inputs:
       issue:
-        description: Issue or PR number to assign (dispatch only; empty means sweep)
+        description: Issue or PR number to assign, dispatch only. Empty means sweep.
         required: false
         type: string
         default: ""

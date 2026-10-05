@@ -1,4 +1,7 @@
-# Attestation needs a public repository, so non-public releases publish unattested.
+# Publishes the draft release fleet-release.yml cut, attested when the repository is public and the draft has assets.
+#
+# Attestation needs a public repository, so a non-public release publishes unattested.
+#
 # The gates are step-level on purpose: whether the draft has assets is only knowable at run time.
 
 name: Fleet Release Publish
