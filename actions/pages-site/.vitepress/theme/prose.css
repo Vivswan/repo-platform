@@ -165,8 +165,7 @@
     color: var(--fleet-hue);
     text-decoration: inherit;
   }
-  /* Highlights carry the hue's band, never the agent's yellow; keycaps are
-   * the launcher's (launcher.css .fleet-launcher-keys kbd). */
+  /* Highlights carry the hue's band, never the agent's yellow. */
   mark {
     background: var(--fleet-hue-band);
     color: inherit;

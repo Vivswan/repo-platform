@@ -1,10 +1,7 @@
 {
   "name": "validate-managed-files",
   "private": true,
-  "description": "Dependency manifest for the validate-managed-files action: yaml is the hygiene validator's runtime dependency (it parses every YAML file it scans); the step scripts under src/ carry none, and check.ts runs from the platform checkout with that checkout's dependencies.",
-  "dependencies": {
-    "yaml": "^2.9.0"
-  },
+  "description": "Dependency manifest for the validate-managed-files action: the step scripts under src/ and the hygiene validator carry no runtime dependency, and check.ts runs from the platform checkout with that checkout's dependencies.",
   "devDependencies": {
     "@types/bun": "1.4.2",
     "typescript": "^7.0.2"
