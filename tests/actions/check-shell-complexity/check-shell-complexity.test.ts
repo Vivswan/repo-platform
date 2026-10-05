@@ -324,6 +324,8 @@ describe("the collector", () => {
     "#!/bin/bash",
     "echo under dash",
     "EOF",
+    'SHELL ["constructor", "-c"]',
+    "RUN if true; then echo no; fi",
     "",
   ].join("\n");
   const body = (
@@ -444,6 +446,11 @@ describe("the collector", () => {
         bodies: [body(".profile", 1, "script", "bash", "#!/bin/sh\nexport PATH=/opt/bin:$PATH\n")],
         problems: [],
       },
+    ],
+    [
+      ".github/workflows/odd.yml",
+      "jobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - shell: constructor {0}\n        run: if true; then echo no; fi\n",
+      { bodies: [], problems: [] },
     ],
     [
       ".github/workflows/broken.yml",

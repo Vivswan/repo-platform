@@ -55,25 +55,27 @@ const WORKFLOW_PATH = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/;
 const ACTION_NAME = /^action\.ya?ml$/;
 const MOON_PATH = /(^|\/)(moon\.yml|\.moon\/.*\.yml)$/;
 const CONTAINERFILE_NAME = /^(Dockerfile|Containerfile)(\..+)?$|\.(Dockerfile|Containerfile)$/;
-const SCRIPT_DIALECT: Readonly<Record<string, Dialect>> = {
-  ".sh": "bash",
-  ".bash": "bash",
-  ".zsh": "bash",
-  ".ps1": "powershell",
-  ".psm1": "powershell",
-  ".bat": "cmd",
-  ".cmd": "cmd",
-};
+// Maps, not records: a key the repository controls (an extension, a shell program) must find nothing when it names an
+// inherited property such as `constructor`.
+const SCRIPT_DIALECT: ReadonlyMap<string, Dialect> = new Map([
+  [".sh", "bash"],
+  [".bash", "bash"],
+  [".zsh", "bash"],
+  [".ps1", "powershell"],
+  [".psm1", "powershell"],
+  [".bat", "cmd"],
+  [".cmd", "cmd"],
+]);
 /** The `shell:` of a run step by its first word (`bash -e {0}` is bash), or the runner's default when unset: pwsh on a
  *  Windows runner, bash elsewhere. Any other shell (python, a custom template) is not shell. */
-const SHELL_DIALECT: Readonly<Record<string, Dialect>> = {
-  bash: "bash",
-  sh: "bash",
-  zsh: "bash",
-  pwsh: "powershell",
-  powershell: "powershell",
-  cmd: "cmd",
-};
+const SHELL_DIALECT: ReadonlyMap<string, Dialect> = new Map([
+  ["bash", "bash"],
+  ["sh", "bash"],
+  ["zsh", "bash"],
+  ["pwsh", "powershell"],
+  ["powershell", "powershell"],
+  ["cmd", "cmd"],
+]);
 
 export function sourceKindOf(relPath: string): SourceKind | null {
   const name = basename(relPath);
@@ -81,7 +83,7 @@ export function sourceKindOf(relPath: string): SourceKind | null {
   if (ACTION_NAME.test(name)) return "action";
   if (MOON_PATH.test(relPath)) return "moon";
   if (CONTAINERFILE_NAME.test(name)) return "containerfile";
-  if (extensionOf(name) in SCRIPT_DIALECT) return "script";
+  if (SCRIPT_DIALECT.has(extensionOf(name))) return "script";
   return null;
 }
 
@@ -96,7 +98,7 @@ export function dialectOfShell(shell: unknown, unset: Dialect): Dialect | null {
   const text = String(shell).trim();
   if (text.includes("${{")) return unset;
   const word = text.split(/\s+/)[0] ?? "";
-  return SHELL_DIALECT[shellName(word)] ?? null;
+  return SHELL_DIALECT.get(shellName(word)) ?? null;
 }
 
 /** A shell program by its bare name: `C:\...\pwsh.exe` and `powershell.exe` are pwsh and powershell. */
@@ -121,7 +123,8 @@ export function collectFile(relPath: string, text: string): Collected {
     case "containerfile":
       return { bodies: collectContainerfile(relPath, text), problems: [] };
     case "script": {
-      const dialect = SCRIPT_DIALECT[extensionOf(basename(relPath))];
+      const dialect = SCRIPT_DIALECT.get(extensionOf(basename(relPath)));
+      if (dialect === undefined) return { bodies: [], problems: [] };
       return { bodies: [{ path: relPath, line: 1, kind, dialect, code: text }], problems: [] };
     }
     case null: {
@@ -147,7 +150,7 @@ export function shebangDialect(text: string): Dialect | null {
   const match = SHEBANG.exec(text.split("\n", 1)[0] ?? "");
   if (match === null) return null;
   const program = basename(match[1]) === "env" ? (match[2] ?? "") : match[1];
-  return SHELL_DIALECT[shellName(program)] ?? null;
+  return SHELL_DIALECT.get(shellName(program)) ?? null;
 }
 
 /** A block scalar's content starts on the line after its `|` or `>` header; any other scalar starts where it is written. */
@@ -260,7 +263,7 @@ function collectContainerfile(relPath: string, text: string): CollectedBody[] {
     }
     if (keyword === "SHELL") {
       const program = (instruction as JSONInstruction).getJSONStrings()[0]?.getJSONValue();
-      dialect = program === undefined ? null : (SHELL_DIALECT[shellName(program)] ?? null);
+      dialect = program === undefined ? null : (SHELL_DIALECT.get(shellName(program)) ?? null);
       if (stage !== null) stages.set(stage, dialect);
       continue;
     }

@@ -56,7 +56,10 @@ function fromWritten<T extends { path: string; line: number }>(
   item: T,
   written: WrittenTree,
 ): T & { written?: WrittenLine } {
-  const template = written.templates[item.path];
+  // An own record only: a written path named `constructor` must find nothing, not Object's.
+  const template = Object.hasOwn(written.templates, item.path)
+    ? written.templates[item.path]
+    : undefined;
   if (template === undefined) return { ...item, written: { tree: written.tree } };
   if (template.lineMapped) return { ...item, path: template.path };
   return { ...item, path: template.path, written: { tree: written.tree } };
