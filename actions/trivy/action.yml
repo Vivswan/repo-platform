@@ -58,7 +58,9 @@ runs:
       run: '"$ACTION_BUN" "${{ github.action_path }}/ignore_check.ts"'
 
     # The database cache lives outside the workspace so the scan never
-    # walks it; the wrapper restores it by date.
+    # walks it; the wrapper restores it by date. skip-dirs: the platform
+    # checkout fleet-ci.yml makes beside the caller's files (actions/shared/
+    # platform.ts), whose lockfiles are never the caller's to fix.
     - name: Scan for fixable vulnerabilities and any misconfiguration at high and critical
       if: inputs.mode == 'blocking'
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -71,6 +73,7 @@ runs:
         ignore-unfixed: "true"
         exit-code: "1"
         trivyignores: ${{ steps.bypass.outputs.ignorefile }}
+        skip-dirs: .repo-platform-checkout
         cache-dir: ${{ runner.temp }}/trivy-cache
 
     - name: Scan everything at high and critical
@@ -85,6 +88,7 @@ runs:
         format: json
         output: ${{ runner.temp }}/trivy.json
         trivyignores: ${{ steps.bypass.outputs.ignorefile }}
+        skip-dirs: .repo-platform-checkout
         cache-dir: ${{ runner.temp }}/trivy-cache
 
     - name: Write the findings report
