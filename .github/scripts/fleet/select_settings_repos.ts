@@ -72,8 +72,8 @@ type ProbeResult<T> =
 
 // Enrollment = the token's actual grant (push_probe.ts; 200 only with push
 // permission; 401/403/404 = no grant; a transport failure reports 0).
-function probePush(slug: string, display: string): ProbeResult<true> {
-  const code = pushProbeStatus(slug, pat);
+async function probePush(slug: string, display: string): Promise<ProbeResult<true>> {
+  const code = await pushProbeStatus(slug, pat);
   if (code === 200) return { kind: "pass", value: true };
   if (code === 401 || code === 403 || code === 404) {
     notice(pushProbeSkipNotice(display));
@@ -132,13 +132,13 @@ const ATTEMPTS = 3;
 const RETRY_DELAY_MS = Number(env("PROBE_RETRY_DELAY_MS", "5000"));
 async function probe<T>(
   label: string,
-  fn: (slug: string, display: string) => ProbeResult<T>,
+  fn: (slug: string, display: string) => ProbeResult<T> | Promise<ProbeResult<T>>,
   slug: string,
   display: string,
 ): Promise<T | null> {
   let detail = "";
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    const result = fn(slug, display);
+    const result = await fn(slug, display);
     if (result.kind === "pass") return result.value;
     if (result.kind === "drop") return null;
     detail = scrubSlug(result.detail, slug, display);

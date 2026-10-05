@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -11,11 +11,13 @@ import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
+import type { LoopbackServer } from "../shared/loopback_server";
+import { spawnPushProbeServer } from "../shared/push_probe_server";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 
-// End-to-end harness against stub `gh` and `curl` on PATH; PROBE_RETRY_DELAY_MS is zeroed so the retry loop costs no wall time.
+// End-to-end harness against a stub `gh` on PATH and a loopback push advertisement; PROBE_RETRY_DELAY_MS is zeroed so the retry loop costs no wall time.
 // PRIVATE personas' every public line says "a private repository" while the masks cover the slug,
 // and the matrix output names no target at all: each row rides as its index and the plan's key.
 const PERSONAS: { name: string; private: boolean }[] = [
@@ -44,8 +46,9 @@ describe("select_settings_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_settings_repos.ts");
   const root = temp.dir("select-settings-");
   const bin = join(root, "bin");
+  let probes: LoopbackServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     mkdirSync(bin);
     const listing = PERSONAS.map(
       (p) =>
@@ -125,35 +128,18 @@ describe("select_settings_repos.ts", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
+    writeFileSync(join(bin, "sleep"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
     // The push advertisement answers 403 for a repository the token sees without push, 404 for one it cannot see at
     // all (the grant revoked, or the repository gone): both are "not in the fleet", never a transport failure to retry.
-    writeFileSync(
-      join(bin, "curl"),
-      [
-        "#!/usr/bin/env bash",
-        "# The probed URL is curl's last argument.",
-        'while [ "$#" -gt 1 ]; do shift; done',
-        'url="$1"',
-        'case "$url" in',
-        '  *"/Vivswan/deadprobe.git/"*) printf 500 ;;',
-        '  *"/Vivswan/locked.git/"*|*"/Vivswan/hidden-locked.git/"*) printf 403 ;;',
-        '  *"/Vivswan/ungranted.git/"*) printf 404 ;;',
-        '  *"/Vivswan/flaky.git/"*)',
-        '    if [ -e "$STUB_STATE/flaky-push" ]; then',
-        "      printf 200",
-        "    else",
-        '      touch "$STUB_STATE/flaky-push"',
-        "      printf 500",
-        "    fi",
-        "    ;;",
-        "  *) printf 200 ;;",
-        "esac",
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
-    );
-    writeFileSync(join(bin, "sleep"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    probes = await spawnPushProbeServer("stub-token", {
+      "Vivswan/deadprobe": [500],
+      "Vivswan/locked": [403],
+      "Vivswan/hidden-locked": [403],
+      "Vivswan/ungranted": [404],
+      "Vivswan/flaky": [500, 200],
+    });
   });
+  afterAll(() => probes.stop());
 
   interface Run {
     exitCode: number;
@@ -194,6 +180,7 @@ describe("select_settings_repos.ts", () => {
         GITHUB_OUTPUT: outputFile,
         GITHUB_STEP_SUMMARY: summaryFile,
         STUB_STATE: join(work, "state"),
+        GITHUB_SERVER_URL: `${probes.host}/${name}`,
         // The spread above carries CI's real event file; the dispatch
         // tests supply their own.
         GITHUB_EVENT_PATH: "",

@@ -14,7 +14,7 @@ import { capture, type RunResult } from "../shared/proc.ts";
 export const NETWORK_TIMEOUT_MS = 120_000;
 
 /** A killed child usually dies silently, so an expiry appends its own stderr line. The line names
- * only the program: the argv tail can carry a private slug or, for the curl push probe, the PAT. */
+ * only the program: the argv tail can carry a private slug. */
 export function captureNetwork(command: string[], timeoutMs = NETWORK_TIMEOUT_MS): RunResult {
   const result = capture(command, { timeoutMs });
   if (result.timedOut === true) {

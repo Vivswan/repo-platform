@@ -36,7 +36,7 @@ function refusal(
 
 describe("captureNetwork", () => {
   // A SIGKILLed child prints nothing, so the synthesized stderr line is the only trace of the deadline. It names the
-  // program and never the argv tail: a real tail carries a private slug or, for the curl push probe, the PAT itself.
+  // program and never the argv tail: a real tail carries a private slug.
   test.each<{
     reason: string;
     command: string[];
