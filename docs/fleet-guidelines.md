@@ -296,7 +296,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | comment block | a run of comment-only lines (below; markdown is prose) | never fails | 10 lines; 25 for the file header |
 
 - **A comment block** is a run of consecutive lines opening with a comment prefix (`#`, `//`, `/*`, `*`, `<!--`, `--`, `;`, `%`, `{#`, `"""`, `'''`), indentation aside, whatever the file's language. The reading is by line, never by grammar.
-- **The accepted cost:** a string, here-doc, or block-scalar line opening with one of those prefixes reads as a comment, and a `/* */` body line opening with anything else reads as code. Both caps are the warn tier, so a misread costs a warning, never a red check.
+- **The accepted cost:** a string, here-doc, or block-scalar line opening with one of those prefixes reads as a comment, and a `/* */` body line opening with anything else reads as code. A misread can raise a block warning the language would not, or merge a block into the header and hide one. Both caps are the warn tier: a warning either way, never a red check.
 - **What ends a block:** a blank line or a code line. A line opening with code is code, so an inline comment after it is not a block.
 - **The file header** is the first block, when nothing but a shebang, blank lines, or a generated region precedes it.
 
