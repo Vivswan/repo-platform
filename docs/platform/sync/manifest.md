@@ -38,7 +38,7 @@ The entry moves to the build when the sync wrote a change or the checker changed
 
 The fleet's `validate-managed-files` check judges a repository as [check.ts](../../../actions/validate-managed-files/check.ts) judges it at the commit the manifest records, byte to byte against what that platform tree writes, so a platform change reddens a repository only once it syncs.
 
-- **The action reads the recorded commit first** ([shared/recorded_commit.ts](../../../actions/shared/recorded_commit.ts)), checks out repo-platform at it inside the tree at `.repo-platform-judge`, installs that checkout's dependencies, runs its `check.ts` over the repository, and removes the checkout before the hygiene checks walk the tree.
+- **The action reads the recorded commit first** ([shared/recorded_commit.ts](../../../actions/shared/recorded_commit.ts)), clones repo-platform at it under the runner's temp directory, installs that clone's dependencies, and runs its `check.ts` over the repository.
 - **`check.ts` copies the repository to scratch** (what git lists when the target is a checkout's own root; every path but `.git` in any other tree), runs the tree's own writer over the copy with `--build` as the commit, and removes the copy.
 - **Every reason the writer would hold** the sync PR for is printed first (a link or a directory where a file is declared, a placeholder with no value). Then come every path whose bytes differ, the manifest's own line included, with a unified diff under each changed file.
 - **A pending registration change** is red until the sync that carries it lands.
@@ -47,8 +47,7 @@ The fleet's `validate-managed-files` check judges a repository as [check.ts](../
 | The action finds | The verdict |
 | --- | --- |
 | no full 40-hex `commit` on the manifest's own entry (a hand edit, since every sync writes it), or a manifest that does not parse | not judged, the reason naming the manifest and the remedy: revert the edit, or dispatch a sync |
-| a commit repo-platform's history lacks (the checkout fails) | not judged, the checkout step's outcome in the reason |
-| a repository path at `.repo-platform-judge`, where the check places its checkout | not judged: move it |
+| a commit repo-platform's history lacks (the clone fails) | not judged, the clone step's outcome in the reason |
 | `check.ts` exit 1 or 2 with output | findings: its output fenced under `#### repo-platform at <commit>`, with the remedy |
 | `check.ts` exit 1 or 2 with no output, any other exit, a signal, or the deadline | not judged: `ended without a verdict`, with the detail |
 | `check.ts` exit 0 | clean, unless a hygiene check finds something |
