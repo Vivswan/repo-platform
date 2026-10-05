@@ -14,7 +14,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createCssVariablesTheme, normalizeTheme } from "shiki";
-import { createMarkdownRenderer, defineConfigWithTheme, type MarkdownOptions } from "vitepress";
+import { defineConfigWithTheme, type MarkdownOptions } from "vitepress";
 import type { ThemeConfig } from "vitepress-carbon";
 // Carbon's base config wires the theme package into vite (alias, optimize
 // lists, the llms.txt plugin); the deep import is the path its own demo
@@ -26,7 +26,7 @@ import type { IncludeRoot } from "./conventions.ts";
 import { alertTitlesRule, CUSTOM_BLOCK_LABELS } from "./custom-blocks.ts";
 import { deriveRewrites, includeIndexPages, untitledPageTitle, walkMarkdown } from "./derive.ts";
 import { inlineTextRule } from "./inline-text.ts";
-import { landingTableRule } from "./landing-table.ts";
+import { landingLauncherRule } from "./landing-launcher.ts";
 import { mermaidRule } from "./mermaid.ts";
 import { rewriteLinksRule } from "./rewrite-links.ts";
 import { deriveSidebar, fileSource, sidebarTrees } from "./sidebar.ts";
@@ -104,8 +104,6 @@ const markdown: MarkdownOptions = {
   ),
   config(md) {
     inlineTextRule(md);
-    // Before the landing rule, so the curated table's hrefs are the routes
-    // its rows attach to.
     rewriteLinksRule(md, {
       docsDir: facts.docsDir,
       includes,
@@ -115,12 +113,10 @@ const markdown: MarkdownOptions = {
       repoUrl: facts.repoUrl,
       ref: facts.provenance.label,
     });
-    landingTableRule(md, rewrites);
-    // After the landing rule: the launcher replaces its table's tokens, so
-    // the panel gets no scroll wrapper (and no wrapper tab stop before its
-    // combobox). VitePress installs its own table_open renderer between
-    // preConfig and config, so the wrapper's rule must land here to move the
-    // tab stop from the table to the wrapper.
+    landingLauncherRule(md, rewrites);
+    // VitePress installs its own table_open renderer between preConfig and
+    // config, so the wrapper's rule must land here to move the tab stop from
+    // the table to the wrapper.
     tableWrapRule(md);
     headersRule(md);
     alertTitlesRule(md);
@@ -129,116 +125,104 @@ const markdown: MarkdownOptions = {
   container: CUSTOM_BLOCK_LABELS,
 };
 
-// The sidebar reads each landing page through VitePress's renderer, so the
-// config is async. createMarkdownRenderer keeps one instance per process:
-// the one made here is the one the pages render with, so it gets the
-// options VitePress would resolve, carbon's (its header levels) under ours.
-export default async () => {
-  const md = await createMarkdownRenderer(srcDir, { ...baseConfig.markdown, ...markdown }, base);
-  const source = fileSource(srcDir, md, { base, cleanUrls: false });
-  const sidebar: NonNullable<ThemeConfig["sidebar"]> = {};
-  const locales: Record<string, { label: string; lang: string }> = {
-    root: { label: "English", lang: "en" },
-  };
-  for (const tree of sidebarTrees(files)) {
-    sidebar[`/${tree.prefix}`] = deriveSidebar(
-      tree.files,
-      source,
-      { base, cleanUrls: false },
-      {
-        prefix: tree.prefix,
-        siteTitle: title,
-        indexPages,
-      },
-    );
-    if (tree.prefix === "") continue;
-    const dir = tree.prefix.slice(0, -1);
-    locales[dir] = { label: nativeName(dir), lang: dir };
-  }
-
-  return defineConfigWithTheme<FleetThemeConfig>({
-    extends: baseConfig,
-    title,
-    description: facts.description ?? title,
-    head: icon === undefined ? [] : [["link", { rel: "icon", href: `${base}${icon}` }]],
-    base,
-    srcDir,
-    locales,
-    rewrites,
-    ignoreDeadLinks: process.env.DOCS_SITE_IGNORE_DEAD_LINKS === "1",
-    // No lastUpdated: every tier builds from a materialized copy of the docs
-    // tree (never a git checkout - see buildVitepressTier), so git-derived
-    // timestamps do not exist by construction.
-    vite: {
-      plugins: [tokensCssPlugin()],
-      css: {
-        postcss: {
-          plugins: [
-            {
-              // Carbon's utils.css ships fonts nothing selects once the token layer sets the families, so both are dropped here.
-              //   @import of Google Fonts and cdnfonts  -> two third-party calls per page load
-              //   the bundled Mona Sans @font-face      -> carbon's transformHead preloads it, 137 KB per page
-              // A Once hook, not AtRule visitors: vite emits url() assets from its own Once hook, and PostCSS runs every Once before any visitor.
-              postcssPlugin: "fleet-drop-carbon-fonts",
-              Once(root) {
-                root.walkAtRules("import", (rule) => {
-                  if (/^(url\(\s*)?["']?https?:/.test(rule.params)) rule.remove();
-                });
-                root.walkAtRules("font-face", (rule) => {
-                  rule.walkDecls("font-family", (decl) => {
-                    if (/^["']?Mona Sans["']?$/.test(decl.value)) rule.remove();
-                  });
-                });
-              },
-            },
-          ],
-        },
-      },
-    },
-    markdown,
-    // filePath becomes the page's REPOSITORY path (docs/guide/README.md): the edit link's `:path` and the
-    // provenance line read it, and nothing on the node side reads it after this hook. A page with neither
-    // a title key nor an h1 is titled the way derive.ts titles its sidebar row, so the two agree.
-    //   README.md or index.md at any depth  -> fleetLanding, no outline: the theme lays it out as front matter, not an article
-    //   an include root's page              -> serves at its directory URL too, but stays an article
-    transformPageData(pageData) {
-      const source = {
-        filePath: sourcePathOf(facts.docsDir, includes, pageData.filePath),
-        ...(pageData.title === ""
-          ? { title: untitledPageTitle(pageData.filePath, pageData.frontmatter.name) }
-          : {}),
-      };
-      if (!isLandingFile(pageData.filePath, includePages)) return source;
-      return {
-        ...source,
-        frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false },
-      };
-    },
-    transformHtml(code) {
-      return code.replace("<html", `<html data-fleet-hue="${facts.hue}"`);
-    },
-    themeConfig: {
-      nav: versionNav(versions, current, origin),
-      sidebar,
-      search: { provider: "local" },
-      outline: "deep",
-      // carbon's default title is uppercase; the fleet reads sentence case
-      notFound: { title: "Page not found", linkText: "Go to the front page" },
-      docFooter: { prev: "Previous", next: "Next" },
-      // The translations menu goes to a locale's landing page, never to
-      // "the same page" there: a translation tree lags the root, and the
-      // corresponding page's URL is a 404 wherever it does.
-      i18nRouting: false,
-      // Carbon 1.6.0's Markdown menu prefixes the site base twice (route.path
-      // already carries it, then withBase()), so on every based fleet site its
-      // fetch 404s; llms.txt, from the same plugin, is unaffected and ships.
-      llms: { pageActions: false },
-      // `:path` is the page's repository path (transformPageData above), so
-      // the edit base ends at the repository root.
-      ...(editBase ? { editLink: { pattern: `${editBase}:path`, text: "Edit this page" } } : {}),
-      docsSiteVersions: versions,
-      docsSiteCurrent: current,
-      docsSiteFacts: facts,
-    },
-  });
+const source = fileSource(srcDir);
+const sidebar: NonNullable<ThemeConfig["sidebar"]> = {};
+const locales: Record<string, { label: string; lang: string }> = {
+  root: { label: "English", lang: "en" },
 };
+for (const tree of sidebarTrees(files)) {
+  sidebar[`/${tree.prefix}`] = deriveSidebar(tree.files, source, {
+    prefix: tree.prefix,
+    siteTitle: title,
+    indexPages,
+  });
+  if (tree.prefix === "") continue;
+  const dir = tree.prefix.slice(0, -1);
+  locales[dir] = { label: nativeName(dir), lang: dir };
+}
+
+export default defineConfigWithTheme<FleetThemeConfig>({
+  extends: baseConfig,
+  title,
+  description: facts.description ?? title,
+  head: icon === undefined ? [] : [["link", { rel: "icon", href: `${base}${icon}` }]],
+  base,
+  srcDir,
+  locales,
+  rewrites,
+  ignoreDeadLinks: process.env.DOCS_SITE_IGNORE_DEAD_LINKS === "1",
+  // No lastUpdated: every tier builds from a materialized copy of the docs
+  // tree (never a git checkout - see buildVitepressTier), so git-derived
+  // timestamps do not exist by construction.
+  vite: {
+    plugins: [tokensCssPlugin()],
+    css: {
+      postcss: {
+        plugins: [
+          {
+            // Carbon's utils.css ships fonts nothing selects once the token layer sets the families, so both are dropped here.
+            //   @import of Google Fonts and cdnfonts  -> two third-party calls per page load
+            //   the bundled Mona Sans @font-face      -> carbon's transformHead preloads it, 137 KB per page
+            // A Once hook, not AtRule visitors: vite emits url() assets from its own Once hook, and PostCSS runs every Once before any visitor.
+            postcssPlugin: "fleet-drop-carbon-fonts",
+            Once(root) {
+              root.walkAtRules("import", (rule) => {
+                if (/^(url\(\s*)?["']?https?:/.test(rule.params)) rule.remove();
+              });
+              root.walkAtRules("font-face", (rule) => {
+                rule.walkDecls("font-family", (decl) => {
+                  if (/^["']?Mona Sans["']?$/.test(decl.value)) rule.remove();
+                });
+              });
+            },
+          },
+        ],
+      },
+    },
+  },
+  markdown,
+  // filePath becomes the page's REPOSITORY path (docs/guide/README.md): the edit link's `:path` and the
+  // provenance line read it, and nothing on the node side reads it after this hook. A page with neither
+  // a title key nor an h1 is titled the way derive.ts titles its sidebar row, so the two agree.
+  //   README.md or index.md at any depth  -> fleetLanding, no outline: the theme lays it out as front matter, not an article
+  //   an include root's page              -> serves at its directory URL too, but stays an article
+  transformPageData(pageData) {
+    const source = {
+      filePath: sourcePathOf(facts.docsDir, includes, pageData.filePath),
+      ...(pageData.title === ""
+        ? { title: untitledPageTitle(pageData.filePath, pageData.frontmatter.name) }
+        : {}),
+    };
+    if (!isLandingFile(pageData.filePath, includePages)) return source;
+    return {
+      ...source,
+      frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false },
+    };
+  },
+  transformHtml(code) {
+    return code.replace("<html", `<html data-fleet-hue="${facts.hue}"`);
+  },
+  themeConfig: {
+    nav: versionNav(versions, current, origin),
+    sidebar,
+    search: { provider: "local" },
+    outline: "deep",
+    // carbon's default title is uppercase; the fleet reads sentence case
+    notFound: { title: "Page not found", linkText: "Go to the front page" },
+    docFooter: { prev: "Previous", next: "Next" },
+    // The translations menu goes to a locale's landing page, never to
+    // "the same page" there: a translation tree lags the root, and the
+    // corresponding page's URL is a 404 wherever it does.
+    i18nRouting: false,
+    // Carbon 1.6.0's Markdown menu prefixes the site base twice (route.path
+    // already carries it, then withBase()), so on every based fleet site its
+    // fetch 404s; llms.txt, from the same plugin, is unaffected and ships.
+    llms: { pageActions: false },
+    // `:path` is the page's repository path (transformPageData above), so
+    // the edit base ends at the repository root.
+    ...(editBase ? { editLink: { pattern: `${editBase}:path`, text: "Edit this page" } } : {}),
+    docsSiteVersions: versions,
+    docsSiteCurrent: current,
+    docsSiteFacts: facts,
+  },
+});

@@ -2,19 +2,6 @@
 
 import { dirTitle } from "../dir-title.ts";
 
-/** One row of the landing page's "I want to..." table, emitted by the
- *  landing-table markdown rule: the href is what VitePress's link rule left
- *  in the rendered page (`./new-repo.html#anchor`, `/base/abs.html`, or an
- *  external URL), resolved here against the landing URL. `target` is the
- *  link's target attribute where the rewrite rule set one (a public/
- *  asset, which VitePress's router must not take as a page). */
-export interface CuratedRow {
-  label: string;
-  href: string;
-  note: string | null;
-  target?: string;
-}
-
 export interface PageHeader {
   title: string;
   anchor: string;
@@ -37,9 +24,7 @@ export interface LauncherItem {
   label: string;
   href: string;
   note: string | null;
-  source: "curated" | "page" | "heading";
-  /** The anchor's target attribute, carried from the curated row. */
-  target?: string;
+  source: "page" | "heading";
 }
 
 export interface LauncherGroup {
@@ -53,8 +38,8 @@ export interface LauncherGroup {
 /** A directory group with more items than this starts folded. */
 export const FOLD_THRESHOLD = 8;
 
-/** A page group keeps its curated and page rows in view, so a curated row is never behind a fold; a directory group
- *  hides every row (headings ride along with their pages). */
+/** A page group keeps its page row in view and folds its headings; a directory group hides every row (headings ride
+ *  along with their pages). */
 export function splitRows(
   kind: LauncherGroup["kind"],
   items: LauncherItem[],
@@ -70,51 +55,6 @@ export function splitRows(
 function startsFolded(kind: LauncherGroup["kind"], items: LauncherItem[]): boolean {
   if (kind === "dir") return items.length > FOLD_THRESHOLD;
   return splitRows(kind, items).foldable.length > 1;
-}
-
-const SCHEME_RE = /^[a-z][a-z0-9+.-]*:|^\/\//i;
-
-/** The identity of a page across every way a link can spell it: no
- *  `.html`/`.md`, a directory index as its directory. `path` is a pathname
- *  alone (no query or hash: those are the link's, not the page's, and a
- *  `#` or `?` inside it is part of a file's name). */
-export function pageKey(path: string): string {
-  const bare = path.replace(/\.(html|md)$/, "").replace(/(^|\/)index$/, "$1");
-  return bare === "" ? "/" : bare;
-}
-
-export interface ResolvedHref {
-  /** The page key the href names, null for an external href. */
-  key: string | null;
-  /** The href as the browser should follow it: absolute site path plus
-   *  the query and hash as written for an internal link, the original for
-   *  an external. */
-  href: string;
-  /** The query and hash as written, to carry onto a matched page's URL. */
-  suffix: string;
-}
-
-export function resolveHref(href: string, landingUrl: string): ResolvedHref {
-  if (SCHEME_RE.test(href)) return { key: null, href, suffix: "" };
-  const { pathname } = new URL(href, `http://launcher.invalid${landingUrl}`);
-  const at = href.search(/[?#]/);
-  const suffix = at === -1 ? "" : href.slice(at);
-  return { key: decodedPath(pageKey(pathname)), href: `${pathname}${suffix}`, suffix };
-}
-
-/** A key as the page index spells it: every escape decoded, since the
- *  index spells a file's name as it is on disk (`z%26b` names `z&b.md`;
- *  the URL class also percent-encodes non-ASCII). Decoded AFTER the key's
- *  own trimming, so a decoded `#` or `?` never reads as a separator. For
- *  the identity key only: the navigable href keeps the author's escapes. A
- *  malformed escape stays as written and then only matches a page spelled
- *  the same way. */
-function decodedPath(pathname: string): string {
-  try {
-    return decodeURIComponent(pathname);
-  } catch {
-    return pathname;
-  }
 }
 
 /** A page's URL or route as a browser can follow it: the index and the
@@ -139,19 +79,13 @@ function pagePath(url: string, base: string): string {
     .replace(/\/$/, "");
 }
 
-/** Pages and subdirectories follow the index's order, which is the sidebar's (pages.data.ts); an href appears once,
- *  whichever source reached it first. */
-export function buildGroups(
-  curated: CuratedRow[],
-  pages: PageIndexEntry[],
-  locale: string,
-): LauncherGroup[] {
+/** Every page of the locale but its landing, in the index's order (the sidebar's, pages.data.ts): a root page is a
+ *  group of its own with its headings, a deeper page joins its directory's group. */
+export function buildGroups(pages: PageIndexEntry[], locale: string): LauncherGroup[] {
   const localePages = pages.filter((page) => page.locale === locale);
   const landingUrl = landingUrlOf(localePages);
   const base = landingUrlOf(pages.filter((page) => page.locale === "root"));
-  const byKey = new Map(localePages.map((page) => [pageKey(page.url), page]));
   const groups = new Map<string, LauncherGroup>();
-  const seen = new Set<string>();
 
   const group = (key: string, title: string, kind: LauncherGroup["kind"]): LauncherGroup => {
     let existing = groups.get(key);
@@ -161,54 +95,27 @@ export function buildGroups(
     }
     return existing;
   };
-  const add = (target: LauncherGroup, item: LauncherItem): void => {
-    if (seen.has(item.href)) return;
-    seen.add(item.href);
-    target.items.push(item);
-  };
 
-  for (const row of curated) {
-    const resolved = resolveHref(row.href, landingUrl);
-    // A row with a target is a public/ asset the rewrite rule made final:
-    // a page of the same stem (public/LICENSE beside LICENSE.md) is not it.
-    const page =
-      resolved.key === null || row.target !== undefined ? undefined : byKey.get(resolved.key);
-    const href = page ? `${navigable(page.url)}${resolved.suffix}` : resolved.href;
-    const target = page ? group(page.url, page.title, "page") : group(href, row.label, "page");
-    add(target, {
-      label: row.label,
-      href,
-      note: row.note,
-      source: "curated",
-      ...(row.target === undefined ? {} : { target: row.target }),
+  for (const page of localePages) {
+    if (page.url === landingUrl) continue;
+    const target =
+      page.dir === ""
+        ? group(page.url, page.title, "page")
+        : group(`dir:${page.dir}`, dirTitle(page.dir), "dir");
+    target.items.push({
+      label: page.title,
+      href: navigable(page.url),
+      note: pagePath(page.url, base),
+      source: "page",
     });
-  }
-
-  const headings = (target: LauncherGroup, page: PageIndexEntry): void => {
     for (const header of page.headers) {
-      add(target, {
+      target.items.push({
         label: header.title,
         href: `${navigable(page.url)}#${header.anchor}`,
         note: page.title,
         source: "heading",
       });
     }
-  };
-  const pageRow = (target: LauncherGroup, page: PageIndexEntry): void => {
-    add(target, {
-      label: page.title,
-      href: navigable(page.url),
-      note: pagePath(page.url, base),
-      source: "page",
-    });
-    headings(target, page);
-  };
-  const rest = localePages.filter((page) => page.url !== landingUrl);
-  for (const page of rest.filter((page) => page.dir === "" || groups.has(page.url))) {
-    pageRow(group(page.url, page.title, "page"), page);
-  }
-  for (const page of rest.filter((page) => page.dir !== "" && !groups.has(page.url))) {
-    pageRow(group(`dir:${page.dir}`, dirTitle(page.dir), "dir"), page);
   }
 
   return [...groups.values()].map((entry) => ({

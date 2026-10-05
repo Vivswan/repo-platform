@@ -102,7 +102,7 @@ const NEW_REPO: LauncherGroup = {
   kind: "page",
   folded: false,
   items: [
-    item("Create a new managed repository", "/repo/new-repo.html", "curated"),
+    item("New repo", "/repo/new-repo.html", "page"),
     item("The template check", "/repo/new-repo.html#the-template-check", "heading", "New repo"),
   ],
 };
@@ -295,13 +295,13 @@ describe("the rendered list", () => {
     page("/repo/guide/intro.html", "Intro", "guide", 1),
   );
 
-  // reka-ui's ListboxItem shape over the theme's own elements: the id and tabindex are reka's, the class, href and
-  // target ours; a fold row is the same option over a div.
+  // reka-ui's ListboxItem shape over the theme's own elements: the id and tabindex are reka's, the class and href
+  // ours; a fold row is the same option over a div.
   function outline(html: string): string[] {
     const option =
       'data-reka-collection-item id="reka-listbox-item-v-\\d+" role="option" tabindex="-1" aria-selected="false"';
     const OPTION_RE = new RegExp(
-      `<a class="fleet-launcher-link" href="([^"]*)"(?: target="[^"]*")? ${option}|<div class="fleet-launcher-fold" ${option} data-state="unchecked"><!--\\[-->([^<]*)<`,
+      `<a class="fleet-launcher-link" href="([^"]*)" ${option}|<div class="fleet-launcher-fold" ${option} data-state="unchecked"><!--\\[-->([^<]*)<`,
       "g",
     );
     return [...html.matchAll(OPTION_RE)].map(([, href, fold]) =>
@@ -333,8 +333,8 @@ describe("the rendered list", () => {
     };
   }
 
-  let stage: Promise<(rows: string, locale: string) => Promise<string>> | undefined;
-  function render(rows: string, locale: string): Promise<string> {
+  let stage: Promise<(locale: string) => Promise<string>> | undefined;
+  function render(locale: string): Promise<string> {
     stage ??= (async () => {
       const { vue, localeIndex } = await stubbed();
       const { renderToString } = await import(
@@ -343,27 +343,22 @@ describe("the rendered list", () => {
       const { default: FleetLauncher } = await import(
         resolve(ACTION_DIR, ".vitepress/theme/launcher.ts")
       );
-      return (rows: string, locale: string) => {
+      return (locale: string) => {
         localeIndex.value = locale;
-        return renderToString(vue.createSSRApp(FleetLauncher, { rows, mode: "panel" }));
+        return renderToString(vue.createSSRApp(FleetLauncher, { mode: "panel" }));
       };
     })();
-    return stage.then((run) => run(rows, locale));
+    return stage.then((run) => run(locale));
   }
 
   // Assistive-tech facts: list or button markup inside a listbox is demoted to presentation, so every
   // option is one element (reka's option over the theme's link or fold div, out of the Tab order); an ARIA
   // reference to a wrong id is silently nothing, so the wiring between the input, the listbox, and the group
-  // titles is pinned at the rendered boundary. A curated row's target reaches its own anchor alone.
-  test("renders the rows as reka-ui listbox options in document order, the groups labelled by their titles, the input controlling the list; an empty locale is an empty listbox", async () => {
-    const rows = JSON.stringify([
-      { label: "Manual", href: "/repo/manual/", note: null, target: "_self" },
-      { label: "Set things up", href: "./setup.html", note: null },
-    ]);
-    const html = await render(rows, "root");
+  // titles is pinned at the rendered boundary.
+  test("renders the index's rows as reka-ui listbox options in document order, the groups labelled by their titles, the input controlling the list; an empty locale is an empty listbox", async () => {
+    const html = await render("root");
 
     expect(outline(html)).toEqual([
-      "/repo/manual/",
       "/repo/setup.html",
       "/repo/setup.html#part-0",
       "/repo/long.html",
@@ -372,18 +367,16 @@ describe("the rendered list", () => {
       "/repo/guide/intro.html",
       "/repo/guide/intro.html#part-0",
     ]);
-    expect(groupStates(html)).toEqual([null, null, "false", "false", null]);
+    expect(groupStates(html)).toEqual([null, "false", "false", null]);
     expect(html).not.toMatch(/<(li|ol|ul|button)\b/);
-    expect(html.match(/role="option"/g)).toHaveLength(8);
+    expect(html.match(/role="option"/g)).toHaveLength(7);
     expect(html).toContain('role="combobox" aria-expanded="true"');
     const wiring = ariaWiring(html);
     expect(wiring.controls).toBe("the listbox");
-    expect(wiring.groups).toHaveLength(5);
+    expect(wiring.groups).toHaveLength(4);
     expect(wiring.groups.filter(([labelledby, title]) => labelledby !== title)).toEqual([]);
-    expect(html).toContain('href="/repo/manual/" target="_self"');
-    expect(html).not.toMatch(/href="\/repo\/setup\.html"[^>]*target=/);
 
-    const empty = await render("[]", "zh-cn");
+    const empty = await render("zh-cn");
     expect(outline(empty)).toEqual([]);
     expect(groupStates(empty)).toEqual([]);
     expect(empty).toContain('role="combobox" aria-expanded="false"');
@@ -414,7 +407,7 @@ describe("the mounted list", () => {
     const { createApp } = await domRenderer();
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const app = createApp(FleetLauncher, { rows: "[]", mode: "panel" });
+    const app = createApp(FleetLauncher, { mode: "panel" });
     try {
       app.mount(host);
       await vue.nextTick();

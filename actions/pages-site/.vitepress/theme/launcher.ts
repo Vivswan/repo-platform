@@ -1,5 +1,5 @@
-// The grouped list renders server-side from the curated rows and the build-time page index; browser APIs run only in
-// onMounted and handlers. reka-ui's Listbox owns the highlight; this file owns the rows and the full-text fallback.
+// The grouped list renders server-side from the build-time page index; browser APIs run only in onMounted and
+// handlers. reka-ui's Listbox owns the highlight; this file owns the rows and the full-text fallback.
 
 import type MiniSearch from "minisearch";
 import {
@@ -25,7 +25,6 @@ import {
 } from "vue";
 import {
   buildGroups,
-  type CuratedRow,
   filterGroups,
   type LauncherGroup,
   matchRanges,
@@ -131,8 +130,6 @@ function plainClick(event: MouseEvent): boolean {
 export default defineComponent({
   name: "FleetLauncher",
   props: {
-    /** The curated rows as JSON (`CuratedRow[]`), from the landing table. */
-    rows: { type: String, default: "[]" },
     mode: { type: String as PropType<LauncherMode>, default: "panel" },
   },
   emits: { close: () => true },
@@ -152,9 +149,7 @@ export default defineComponent({
     const searching = ref(false);
     const modifier = ref<"Cmd" | "Ctrl">("Cmd");
 
-    const groups = computed(() =>
-      buildGroups(JSON.parse(props.rows) as CuratedRow[], data, localeIndex.value),
-    );
+    const groups = computed(() => buildGroups(data, localeIndex.value));
     const tokens = computed(() => queryTokens(query.value));
     const structured = computed(() => filterGroups(groups.value, query.value));
     const shown = computed(() => {
@@ -261,11 +256,9 @@ export default defineComponent({
           class: "fleet-launcher-link",
           value: item.href,
           href: item.href,
-          ...(item.target === undefined ? {} : { target: item.target }),
           ...shared,
-          // Selection is the link's own click: VitePress's capturing handler routes internal links (a link with a
-          // target is left to the browser), and Enter on the highlighted row clicks it; this only lets the dialog
-          // go once the link is taken.
+          // Selection is the link's own click: VitePress's capturing handler routes it, and Enter on the highlighted
+          // row clicks it; this only lets the dialog go once the link is taken.
           onSelect: (event: Event) => event.preventDefault(),
           onClick: (event: MouseEvent) => {
             if (plainClick(event)) emit("close");

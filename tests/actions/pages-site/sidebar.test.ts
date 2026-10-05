@@ -1,33 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type { PageMeta } from "../../../actions/pages-site/.vitepress/derive.ts";
 import {
   deriveSidebar,
-  fileSource,
   type PageSource,
   type SidebarItem,
   sidebarOrder,
   sidebarTrees,
 } from "../../../actions/pages-site/.vitepress/sidebar.ts";
-import { tempDirs } from "../../shared/temp_dir.ts";
-import { SITE, vitepressRenderer } from "./vitepress_renderer.ts";
 
-const temp = tempDirs();
-const ROOT_SITE = { base: "/", cleanUrls: false };
-
-/** Table hrefs are spelled the way VitePress's link rule leaves them (`./b.html`, `/repo/ja/c.html`). */
-function source(
-  pages: Record<string, [string, number | null, string | null]>,
-  tables: Record<string, string[]> = {},
-): PageSource {
+function source(pages: Record<string, [string, number | null, string | null]>): PageSource {
   return {
     page(file): PageMeta {
       const page = pages[file];
       if (page === undefined) throw new Error(`no fixture page ${file}`);
       return { title: page[0], order: page[1], group: page[2] };
     },
-    tableLinks: (file) => tables[file] ?? [],
   };
 }
 
@@ -36,7 +23,7 @@ const plain = (title: string): [string, null, null] => [title, null, null];
 describe("deriveSidebar", () => {
   // The launcher's page index (pages.data.ts) copies this order through sidebarOrder, so the two must agree or the
   // launcher and the sidebar list pages differently, green; the root tree and each locale are walked in that order.
-  test("a tree saying nothing keeps today's shape: landing first, pages in file order, one collapsible group per directory titled from its folder; each locale is its own tree", () => {
+  test("a tree saying nothing reads: landing first, pages by title, one collapsible group per directory titled from its folder; each locale is its own tree", () => {
     const files = [
       "README.md",
       "api-reference/errors.md",
@@ -44,12 +31,14 @@ describe("deriveSidebar", () => {
       "guide/deep-dive.md",
       "release_notes/changes.md",
       "setup.md",
+      "zz-intro.md",
       "ja/README.md",
       "ja/z.md",
     ];
     const pages = source({
       "README.md": plain("Home"),
       "setup.md": plain("Getting started"),
+      "zz-intro.md": plain("About"),
       "guide/README.md": plain("Guide"),
       "guide/deep-dive.md": plain("deep dive"),
       "api-reference/errors.md": plain("error codes"),
@@ -68,12 +57,14 @@ describe("deriveSidebar", () => {
           "guide/deep-dive.md",
           "release_notes/changes.md",
           "setup.md",
+          "zz-intro.md",
         ],
       },
       { prefix: "ja/", files: ["ja/README.md", "ja/z.md"] },
     ]);
     const expected: SidebarItem[] = [
       { text: "Home", link: "/" },
+      { text: "About", link: "/zz-intro" },
       { text: "Getting started", link: "/setup" },
       {
         text: "Api Reference",
@@ -94,9 +85,10 @@ describe("deriveSidebar", () => {
         items: [{ text: "changes", link: "/release_notes/changes" }],
       },
     ];
-    expect(deriveSidebar(trees[0].files, pages, ROOT_SITE)).toEqual(expected);
-    expect(sidebarOrder(files, pages, ROOT_SITE)).toEqual([
+    expect(deriveSidebar(trees[0].files, pages)).toEqual(expected);
+    expect(sidebarOrder(files, pages)).toEqual([
       "README.md",
+      "zz-intro.md",
       "setup.md",
       "api-reference/errors.md",
       "guide/README.md",
@@ -107,73 +99,37 @@ describe("deriveSidebar", () => {
     ]);
   });
 
-  // Each table entry proves one piece of the ordering rule.
-  //   ./zulu.html#deep, named first                       -> zulu still ranks by order, and by title among equals ("Aardvark" before "Gamma")
-  //   ./alpha.html, named last                            -> placed last by the table, though first alphabetically
-  //   ./index.html, a repeat, an external href, ./guide/  -> place nothing
-  const RANKED_TREE = [
-    "README.md",
-    "alpha.md",
-    "beta.md",
-    "gamma.md",
-    "mike.md",
-    "omega.md",
-    "zulu.md",
-  ];
-  const ranked = source(
-    {
+  // The rule docs/modules/site.md states for fleet authors, who place pages by it: `order` ascending, then title. A
+  // precedence read the other way round, or a dropped title tie-break, reorders every fleet sidebar with nothing red,
+  // since VitePress renders whatever order it is handed. zulu.md ranks with gamma.md and sorts before it by title
+  // ("Aardvark" before "Gamma"); alpha.md is first by file name and last by title.
+  test("a page's `order` wins over its title, ranked pages lead the unranked, and the rest sort by title", () => {
+    const files = [
+      "README.md",
+      "alpha.md",
+      "beta.md",
+      "gamma.md",
+      "mike.md",
+      "omega.md",
+      "zulu.md",
+    ];
+    const ranked = source({
       "README.md": plain("Home"),
-      "alpha.md": plain("Alpha"),
+      "alpha.md": plain("Zebra"),
       "beta.md": plain("Beta"),
       "gamma.md": ["Gamma", 10, null],
       "mike.md": ["Mike", 5, null],
       "omega.md": plain("Omega"),
       "zulu.md": ["Aardvark", 10, null],
-    },
-    {
-      "README.md": [
-        "./zulu.html#deep",
-        "./omega.html",
-        "./beta.html",
-        "./index.html",
-        "https://example.com/alpha.html",
-        "./guide/",
-        "./alpha.html",
-        "./omega.html",
-      ],
-    },
-  );
-
-  // A precedence read the other way round, or a dropped title tie-break, reorders the sidebar of every page tree with
-  // nothing red: VitePress renders whatever order it is handed.
-  test("order wins over the landing table, the landing table wins over file order, and the rest keep file order", () => {
-    expect(deriveSidebar(RANKED_TREE, ranked, ROOT_SITE).map((item) => item.text)).toEqual([
+    });
+    expect(deriveSidebar(files, ranked).map((item) => item.text)).toEqual([
       "Home",
       "Mike",
       "Aardvark",
       "Gamma",
-      "Omega",
       "Beta",
-      "Alpha",
-    ]);
-  });
-
-  test("table hrefs resolve against the landing's served URL: with a base, in a locale, absolute", () => {
-    const files = ["ja/README.md", "ja/a.md", "ja/b.md", "ja/c.md"];
-    const pages = source(
-      {
-        "ja/README.md": plain("JA"),
-        "ja/a.md": plain("A"),
-        "ja/b.md": plain("B"),
-        "ja/c.md": plain("C"),
-      },
-      { "ja/README.md": ["/repo/ja/c.html", "./b.html#x"] },
-    );
-    expect(deriveSidebar(files, pages, SITE, { prefix: "ja/" }).map((item) => item.link)).toEqual([
-      "/ja/",
-      "/ja/c",
-      "/ja/b",
-      "/ja/a",
+      "Omega",
+      "Zebra",
     ]);
   });
 
@@ -188,7 +144,7 @@ describe("deriveSidebar", () => {
       "e.md": ["E", null, "Later"],
       "sub/x.md": plain("X"),
     });
-    expect(deriveSidebar(files, pages, ROOT_SITE)).toEqual([
+    expect(deriveSidebar(files, pages)).toEqual([
       { text: "Home", link: "/" },
       { text: "A", link: "/a" },
       {
@@ -202,7 +158,7 @@ describe("deriveSidebar", () => {
       { text: "Later", items: [{ text: "E", link: "/e" }] },
       { text: "Sub", collapsed: false, items: [{ text: "X", link: "/sub/x" }] },
     ]);
-    expect(sidebarOrder(files, pages, ROOT_SITE)).toEqual([
+    expect(sidebarOrder(files, pages)).toEqual([
       "README.md",
       "a.md",
       "b.md",
@@ -214,8 +170,8 @@ describe("deriveSidebar", () => {
   });
 
   // Without the landing test every page titled like the site would read Overview. When README.md and index.md both
-  // exist, index.md serves the directory route, so its table (not the README's) places the level.
-  test("a landing row titled like the site reads Overview, at any level; any other title stays; index.md's table places the level over a README's", () => {
+  // exist, index.md serves the directory route and the README keeps its own.
+  test("a landing row titled like the site reads Overview, at any level; any other title stays; a README beside an index.md keeps its route", () => {
     const files = [
       "README.md",
       "guide/README.md",
@@ -224,18 +180,15 @@ describe("deriveSidebar", () => {
       "guide/b.md",
       "other.md",
     ];
-    const pages = source(
-      {
-        "README.md": plain("my-repo"),
-        "guide/README.md": plain("my-repo"),
-        "guide/index.md": plain("Guide"),
-        "guide/a.md": plain("A"),
-        "guide/b.md": plain("B"),
-        "other.md": plain("my-repo"),
-      },
-      { "guide/README.md": ["./a.html"], "guide/index.md": ["./b.html"] },
-    );
-    expect(deriveSidebar(files, pages, ROOT_SITE, { siteTitle: "my-repo" })).toEqual([
+    const pages = source({
+      "README.md": plain("my-repo"),
+      "guide/README.md": plain("my-repo"),
+      "guide/index.md": plain("Guide"),
+      "guide/a.md": plain("A"),
+      "guide/b.md": plain("B"),
+      "other.md": plain("my-repo"),
+    });
+    expect(deriveSidebar(files, pages, { siteTitle: "my-repo" })).toEqual([
       { text: "Overview", link: "/" },
       { text: "my-repo", link: "/other" },
       {
@@ -244,12 +197,12 @@ describe("deriveSidebar", () => {
         items: [
           { text: "Overview", link: "/guide/README" },
           { text: "Guide", link: "/guide/" },
-          { text: "B", link: "/guide/b" },
           { text: "A", link: "/guide/a" },
+          { text: "B", link: "/guide/b" },
         ],
       },
     ]);
-    expect(deriveSidebar(files, pages, ROOT_SITE)[0]).toEqual({ text: "my-repo", link: "/" });
+    expect(deriveSidebar(files, pages)[0]).toEqual({ text: "my-repo", link: "/" });
   });
 
   test("an include root's page named README.md is an article: it honors its order and keeps its title, while the include's own README is the section's landing", () => {
@@ -266,7 +219,7 @@ describe("deriveSidebar", () => {
       "manuals/topic/detail.md": ["Detail", 1, null],
     });
     const options = { siteTitle: "my-repo", indexPages: ["manuals/topic/README.md"] };
-    expect(deriveSidebar(files, pages, ROOT_SITE, options)).toEqual([
+    expect(deriveSidebar(files, pages, options)).toEqual([
       { text: "Overview", link: "/" },
       {
         text: "Manuals",
@@ -284,7 +237,7 @@ describe("deriveSidebar", () => {
         ],
       },
     ]);
-    expect(sidebarOrder(files, pages, ROOT_SITE, options.indexPages)).toEqual([
+    expect(sidebarOrder(files, pages, options.indexPages)).toEqual([
       "README.md",
       "manuals/README.md",
       "manuals/topic/detail.md",
@@ -304,7 +257,7 @@ describe("deriveSidebar", () => {
       "q?dir/README.md": plain("Dir"),
       "q?dir/e#f.md": plain("Both"),
     });
-    expect(deriveSidebar(files, pages, ROOT_SITE)).toEqual([
+    expect(deriveSidebar(files, pages)).toEqual([
       { text: "Home", link: "/" },
       { text: "Hash", link: "/hash%23page" },
       { text: "Grouped", items: [{ text: "Query", link: "/query%3Fpage" }] },
@@ -314,101 +267,6 @@ describe("deriveSidebar", () => {
         items: [
           { text: "Dir", link: "/q%3Fdir/" },
           { text: "Both", link: "/q%3Fdir/e%23f" },
-        ],
-      },
-    ]);
-  });
-
-  test("the file source reads frontmatter from disk and the landing's table through VitePress's parse: a table inside a container is not the page's table, an escaped href names its file, and a subdirectory's README orders its level too", async () => {
-    const dir = temp.dir("sidebar-");
-    writeFileSync(
-      join(dir, "README.md"),
-      [
-        "---",
-        "title: Home",
-        "---",
-        "# Fixture",
-        "",
-        "::: tip",
-        "| Aside | Read |",
-        "|---|---|",
-        "| Not the goal table | [Alpha](alpha.md) |",
-        "",
-        ":::",
-        "",
-        "| Goal | Read |",
-        "|---|---|",
-        "| Escaped | [Ampersand](z%26b.md) |",
-        "| Start | [Setup](setup.md#install) |",
-        "| Dig in | [Deep](guide/deep.md) |",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(join(dir, "setup.md"), "# Setup\n");
-    writeFileSync(join(dir, "z&b.md"), "# Ampersand\n");
-    writeFileSync(join(dir, "zulu.md"), "---\norder: 1\ngroup: Basics\n---\n# Zulu\n");
-    writeFileSync(join(dir, "alpha.md"), "---\ngroup: Basics\n---\n# Alpha\n");
-    mkdirSync(join(dir, "guide"));
-    writeFileSync(
-      join(dir, "guide", "README.md"),
-      "# Guide\n\n| Step | Page |\n|---|---|\n| Second | [Deep](deep.md) |\n| First | [Start](./start.md) |\n",
-    );
-    writeFileSync(join(dir, "guide", "deep.md"), "# Deep\n");
-    writeFileSync(join(dir, "guide", "start.md"), "# Start\n");
-    const files = [
-      "README.md",
-      "alpha.md",
-      "guide/README.md",
-      "guide/deep.md",
-      "guide/start.md",
-      "setup.md",
-      "z&b.md",
-      "zulu.md",
-    ];
-    const pages = fileSource(dir, await vitepressRenderer(), SITE);
-    expect(pages.tableLinks("README.md")).toEqual([
-      "./z%26b.html",
-      "./setup.html#install",
-      "./guide/deep.html",
-    ]);
-    // A landing whose include VitePress expands names no links (the table
-    // the page shows may live in the included file), so its level keeps
-    // file order; the same directive naming a missing file changes nothing.
-    const including = temp.dir("sidebar-include-");
-    writeFileSync(join(including, "nav.md"), "| Goal | Read |\n|---|---|\n| Go | [B](b.md) |\n");
-    writeFileSync(join(including, "README.md"), "# Home\n\n<!-- @include: ./nav.md -->\n");
-    writeFileSync(join(including, "a.md"), "# A\n");
-    writeFileSync(join(including, "b.md"), "# B\n");
-    const includingPages = fileSource(including, await vitepressRenderer(), SITE);
-    expect(includingPages.tableLinks("README.md")).toEqual([]);
-    expect(
-      deriveSidebar(["README.md", "a.md", "b.md", "nav.md"], includingPages, SITE).map(
-        (item) => item.text,
-      ),
-    ).toEqual(["Home", "A", "B", "nav"]);
-    writeFileSync(
-      join(including, "README.md"),
-      "# Home\n\n<!-- @include: ./gone.md -->\n\n| Goal | Read |\n|---|---|\n| Go | [B](b.md) |\n",
-    );
-    expect(includingPages.tableLinks("README.md")).toEqual(["./b.html"]);
-    expect(deriveSidebar(files, pages, SITE)).toEqual([
-      { text: "Home", link: "/" },
-      {
-        text: "Basics",
-        items: [
-          { text: "Zulu", link: "/zulu" },
-          { text: "Alpha", link: "/alpha" },
-        ],
-      },
-      { text: "Ampersand", link: "/z&b" },
-      { text: "Setup", link: "/setup" },
-      {
-        text: "Guide",
-        collapsed: false,
-        items: [
-          { text: "Guide", link: "/guide/" },
-          { text: "Deep", link: "/guide/deep" },
-          { text: "Start", link: "/guide/start" },
         ],
       },
     ]);

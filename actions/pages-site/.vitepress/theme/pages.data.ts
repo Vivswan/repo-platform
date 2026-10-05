@@ -37,7 +37,7 @@ export default {
     const includes = JSON.parse(process.env.DOCS_SITE_INCLUDES || "[]") as IncludeRoot[];
     const indexPages = includeIndexPages(files, includes);
     return buildPageIndex(
-      sidebarOrder(files, fileSource(srcDir, md, site), site, indexPages),
+      sidebarOrder(files, fileSource(srcDir), indexPages),
       site,
       {
         title: (file) => readPage(srcDir, file).title,

@@ -288,11 +288,12 @@ const SETUP_MD =
 /** The sealed dead link: history cannot be fixed, so the tag carrying it builds lenient. */
 export const SEALED_DEAD_LINK = "A [dead link](missing-page).\n";
 
-/** The docs landing page: a landing table placing setup.md, and links into the skills mount once it exists. The
- *  HEAD page links a heading that does not exist, which vitepress never judges and lychee reports. */
+/** The docs landing page: an intro, then a section holding a link table the way a fleet README may still carry one,
+ *  and links into the skills mount once it exists. The HEAD page links a heading that does not exist, which vitepress
+ *  never judges and lychee reports. */
 function docsReadme(skills: string): string {
   return (
-    "# Fixture\n\nWelcome. See the [guide](guide/) and [setup](setup).\n\n" +
+    "# Fixture\n\nWelcome. See the [guide](guide/) and [setup](setup).\n\n## Goals\n\n" +
     "| Goal | Read |\n|---|---|\n| Set things up | [Setup](setup.md) |\n" +
     skills
   );
@@ -383,7 +384,7 @@ function write(repo: string, rel: string, content: string): void {
  *          docs/skills/README.md from before skills/ existed      mount's name, the missing root is a notice
  *  v0.2.0  the zh-cn locale, a favicon, skills/alpha;          -> the root and stable/ tiers
  *          the hand-written docs/skills/ page gone
- *  HEAD    the HEAD-only setup line, the sidebar-placement     -> latest/, the pages lychee judges
+ *  HEAD    the HEAD-only setup line, the ranked and grouped   -> latest/, the pages lychee judges
  *          pages, skills/beta and gamma with the skills
  *          landing, agents/one, the hook's dist */
 export function fleetRepo(repo: string): void {

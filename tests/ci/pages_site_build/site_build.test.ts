@@ -250,15 +250,15 @@ describe("the theme in the built pages", () => {
     };
     const others = (...labels: string[]) => labels.map((label) => `/fixture-repo/docs/${label}/`);
     expect(verdicts("docs/", "/fixture-repo/docs/")).toEqual({
-      routed: ["/fixture-repo/docs/setup.html"],
+      routed: ["/fixture-repo/docs/alerts.html"],
       left: others("latest", "stable", "v0.2.0", "v0.1.0"),
     });
     expect(verdicts("docs/latest/", "/fixture-repo/docs/latest/")).toEqual({
-      routed: ["/fixture-repo/docs/latest/", "/fixture-repo/docs/latest/setup.html"],
+      routed: ["/fixture-repo/docs/latest/", "/fixture-repo/docs/latest/zulu.html"],
       left: others("stable", "v0.2.0", "v0.1.0"),
     });
     expect(verdicts("docs/stable/", "/fixture-repo/docs/stable/")).toEqual({
-      routed: ["/fixture-repo/docs/stable/", "/fixture-repo/docs/stable/setup.html"],
+      routed: ["/fixture-repo/docs/stable/", "/fixture-repo/docs/stable/alerts.html"],
       left: others("latest", "v0.2.0", "v0.1.0"),
     });
     expect(latestAssets).toContain("onBeforeRouteChange=");
@@ -318,20 +318,42 @@ describe("the theme in the built pages", () => {
     expect(latestAssets).toContain(".fleet-mermaid{");
   });
 
-  test("places the landing table's row and the sidebar's groups in the launcher, mounts its button on every other page, and orders the sidebar by landing, ranked group, table placement, unplaced, directory", () => {
-    // The landing table and the sidebar both reaching the real page. The unit tests pin the order and the model
-    // over hand-written input and mount the launcher component alone; the theme's slot and the rendered group
-    // titles have no other home. The include roots sit among the directories under their title-cased mounts.
-    expect(latestIndex).toContain('fleet-launcher-label">Set things up<');
+  test("lists in the launcher exactly the pages of each tier's docs tree, root pages one group each and deeper pages by folder, keeps the landing's own table as a table, and orders the sidebar by landing, rank, title, directory", () => {
+    // The launcher's rows come from the build's page index, never from the landing page: the fixture README's link
+    // table names setup.md alone at every tier, yet latest lists the HEAD-only pages and the root tier, built from
+    // v0.2.0's tree without them, lists them nowhere. The unit tests pin the model and the order over hand-written
+    // input; the rendered group titles, the panel's seat between the intro and the first section, and the sidebar
+    // have no other home. The include roots sit among the directories under their title-cased mounts.
+    const groupTitles = (rel: string) =>
+      texts(readSite(site, `${rel}index.html`), ".fleet-launcher-group-title");
+    expect(groupTitles("docs/latest/")).toEqual([
+      "Zulu",
+      "Delta",
+      "Alerts",
+      "Bravo",
+      "Setup",
+      "Guide",
+      "Skills",
+      "Skills/Agents/One",
+      "Skills/Alpha",
+      "Skills/Beta",
+      "Skills/Gamma",
+    ]);
+    expect(groupTitles("docs/")).toEqual(["Alerts", "Setup", "Guide", "Skills/Alpha"]);
+    expect(texts(latestIndex, ".fleet-launcher-label")).not.toContain("Set things up");
+    expect(texts(latestIndex, ".vp-doc td")).toContain("Set things up");
+    expect(latestIndex).toMatch(
+      /<\/p>\s*<section[^>]*fleet-launcher-mode-panel[^>]*>[\s\S]*?<\/section>\s*<h2 id="goals"/,
+    );
     expect(readSite(site, "docs/latest/setup.html")).toContain('class="fleet-launcher-button"');
     expect(texts(latestIndex, ".VPSidebar .text")).toEqual([
       "Fixture",
       "Basics",
       "Zulu",
       "Delta",
-      "Setup",
       "Alerts",
       "Bravo",
+      "Setup",
       "Guide",
       "Guide",
       "Skills",
@@ -340,25 +362,12 @@ describe("the theme in the built pages", () => {
       "One",
       "one",
       "Alpha",
-      "Alpha skill",
       "Alpha reference",
+      "Alpha skill",
       "Beta",
       "beta",
       "Gamma",
       "SKILL",
-    ]);
-    expect(texts(latestIndex, ".fleet-launcher-group-title")).toEqual([
-      "Setup",
-      "Zulu",
-      "Delta",
-      "Alerts",
-      "Bravo",
-      "Guide",
-      "Skills",
-      "Skills/Agents/One",
-      "Skills/Alpha",
-      "Skills/Beta",
-      "Skills/Gamma",
     ]);
     expect(readSite(site, "docs/latest/delta.html")).not.toContain("group: Basics");
     expect(readSite(site, "docs/latest/zulu.html")).not.toContain("order: 1");

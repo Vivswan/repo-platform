@@ -1,5 +1,5 @@
 // Stamped before text_join: VitePress's text_join puts `&amp;` back as written so Vue can decode it, and the stamp wants the decoded text.
-// The landing-table rule and the page index read the stamp, so a label, a note, and a heading title all spell text one way.
+// The page index reads the stamp, so a heading title spells text one way wherever it shows.
 
 import type { Token } from "markdown-it";
 import type { MarkdownRenderer } from "vitepress";

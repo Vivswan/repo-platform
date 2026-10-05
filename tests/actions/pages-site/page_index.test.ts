@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { PageHeader } from "../../../actions/pages-site/.vitepress/theme/launcher-model.ts";
 import {
   type HeadersEnv,
+  renderedHeaders,
   sourceHeaders,
 } from "../../../actions/pages-site/.vitepress/theme/page-index.ts";
+import { vitepressRenderer } from "./vitepress_renderer.ts";
 
 const OWN_HEADING: PageHeader = { title: "Install!", anchor: "install", level: 2 };
 
@@ -127,5 +129,44 @@ describe("sourceHeaders", () => {
     };
     expect(sourceHeaders(stampingRenderer, source, {}, scope)).toEqual(expectedHeaders);
     expect(lookups).toEqual(expectedLookups);
+  });
+});
+
+describe("headersRule under VitePress's renderer", () => {
+  // The anchor plugin's ids and inlineTextRule's text are the external facts: a header the launcher shows must spell
+  // the heading as the reader sees it, and its anchor must be the id the heading was really emitted with.
+  test("a render stamps the page's headers with the titles and anchors VitePress emitted", async () => {
+    const md = await vitepressRenderer();
+    const src = [
+      "---",
+      "title: Guide",
+      "---",
+      "",
+      "# Title",
+      "",
+      "## title: Guide",
+      "",
+      "## Caf&eacute; `a &amp; b` :warning:",
+      "",
+      "### Sub *em* \\[x]",
+      "",
+      "#### Deep",
+      "",
+      "> ## Quoted",
+      "",
+    ].join("\n");
+    const env: HeadersEnv & Record<string, unknown> = {
+      relativePath: "page.md",
+      path: "/site/page.md",
+    };
+    const html = md.render(src, env);
+    const headers = renderedHeaders(env);
+    expect(headers).toEqual([
+      { title: "title: Guide", anchor: "title-guide", level: 2 },
+      // The emoji leaves a trailing space GitHub slugs to a hyphen too.
+      { title: "Caf\u00e9 a &amp; b \u26a0\ufe0f", anchor: "caf\u00e9-a-amp-b-", level: 2 },
+      { title: "Sub em [x]", anchor: "sub-em-x", level: 3 },
+    ]);
+    for (const header of headers) expect(html).toContain(`<h${header.level} id="${header.anchor}"`);
   });
 });
