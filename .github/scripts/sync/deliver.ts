@@ -17,7 +17,7 @@ import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, redactText } from "../shared/proc.ts";
 import { tokenUrl } from "../shared/token_url.ts";
-import { NO_MIGRATED_LIST, readMigrated } from "./migrate.ts";
+import { readMigrated } from "./migrate.ts";
 import { type DeliveryVerdict, VERDICT_FILE } from "./verdict.ts";
 import { REPLACED_HEADING, REVIEW_HEADING, type SyncReport } from "./writer/report.ts";
 
@@ -490,11 +490,9 @@ class Delivery {
     ]) {
       this.must(argv, `${commandLabel(argv)} failed in the target`);
     }
-    const migrated = readMigrated(this.runnerTemp);
-    if (migrated === null) this.fileFailure(NO_MIGRATED_LIST);
     const staged = stageWritten(
       summary,
-      migrated,
+      readMigrated(this.runnerTemp),
       (...args) => this.git(...args),
       (argv, reason) => this.must(argv, reason),
     );

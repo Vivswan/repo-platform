@@ -1,6 +1,6 @@
 # A plan job selects the targets into a keyed matrix; one apply job per row resolves its target
 # and runs the github-settings-as-code CLI on it, from its own rendered .github/settings.yml
-# (docs/settings.md). No push trigger: a merge reaches the fleet only through post-green.yml's
+# (docs/platform/settings-apply.md). No push trigger: a merge reaches the fleet only through post-green.yml's
 # call, behind the all-green gate.
 
 name: Settings Repos
@@ -52,9 +52,8 @@ permissions:
 
 # A CALLED run takes a per-run group: its caller (post-green.yml's settings-fleet job) already holds
 # settings-repos, and a called workflow waiting on its caller's lane deadlocks.
-# Neither lane cancels in progress (GitHub's default): the lane orders by arrival, so cancelling would let
-# an older commit's late run cancel the newer apply in flight. The selector stands that run down instead
-# (fleet/newest_main.ts).
+# Neither lane cancels in progress (GitHub's default): the lane orders by arrival, so cancel-in-progress would let an older
+# commit's late run cancel the newer apply, and the selector stands that run down instead (fleet/newest_main.ts).
 concurrency:
   group: ${{ inputs.sha != '' && format('settings-repos-called-{0}', github.run_id) || 'settings-repos' }}
 
@@ -108,10 +107,7 @@ jobs:
           ONLY_REPO: ${{ inputs.repos }}
         run: bun .github/scripts/fleet/select_settings_repos.ts
 
-  # One job per matrix row: an index for the job name, which never carries a repository name, and
-  # the plan's opaque key for the resolver. The `include` word lives here, not in the plan's output:
-  # the runner drops a job output that spells a masked name (sync/resolve_row.ts). An empty
-  # selection is a no-op, not a failure.
+  # The runner drops a job output that spells a masked name (sync/resolve_row.ts), so the `include` word lives here, not in the plan's output.
   apply:
     needs: plan
     if: needs.plan.outputs.count != '0'

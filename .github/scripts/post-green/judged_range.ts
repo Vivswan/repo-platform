@@ -1,5 +1,5 @@
 // The range is (base, judged commit], the base being the commit the stable tag named before this run moved it, so a
-// push whose mover was replaced at the lane is still read by its successor's run (docs/all-green.md).
+// push whose mover was replaced at the lane is still read by its successor's run (docs/platform/post-green.md).
 // BEFORE_SHA is that base, else the push's `before`, all zeros on branch creation.
 
 import { fail, requireEnv } from "../shared/gha.ts";

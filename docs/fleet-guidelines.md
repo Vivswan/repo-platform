@@ -17,7 +17,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | the managed files check; the writer's starter rule |
 | [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
-| [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
+| [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`, and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)) |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
 | [Pre-commit hooks only check](#pre-commit-hooks-only-check) | review |
@@ -63,6 +63,8 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - **What the delivery pins test refuses:** [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) refuses a numeric comment pinact reads as a version but does not verify (`# v7`, `# v7.0`, `# v7-beta`). Such a line passes pinact unverified, sha included.
 
+- **One sha per action repo-wide** is the same test's other refusal. Dependabot's grouped PR ([dependabot.yml](../.github/dependabot.yml)) moves every site it reaches at once, and the `files/` sources are outside its reach, so a bump PR here updates them by hand, commented examples included, and the test fails it until they match. The fleet receives them through the next sync.
+
 **Enforced by, in every managed repository:** [actions/zizmor](../actions/zizmor/action.yml) under the fleet policy.
 
 - **`unpinned-uses`:** hash-pin for everything but the platform's own actions, so a `@main` platform ref passes here where pinact refuses it.
@@ -70,11 +72,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Not judged, on purpose:**
 
-- **One sha per action repo-wide** is Dependabot's doing, not a check's, since its one grouped `github-actions` bump PR ([dependabot.yml](../.github/dependabot.yml)) moves every site at once.
-
-- **A commented example pin** (the toolchain blocks of the managed `checks.yml`) never executes, so pinact does not read it. The delivery pins test still reads its comment shape, so an example spells the full version too.
-
-- **The sync writer's `files/` sources** are outside Dependabot's reach and nothing compares them with the bumped pins. So a bump PR here updates them by hand, commented examples included; the fleet receives them through the next sync.
+- **A commented example pin** (the toolchain blocks of the managed `checks.yml`) never executes, so pinact does not read it. The delivery pins test still reads its comment shape and its sha, so an example spells the full version and rides the same sha too.
 
 ## Conventional Commits, squash-merged
 
@@ -188,7 +186,7 @@ if [ -f x ]; then cat x; fi
 
 ## Copilot review comments are advisory
 
-**Rule:** Copilot code review comments only on a defect it can demonstrate in the diff. Its comments are advisory, so rejecting one is a valid outcome: reply with the reason, then resolve the thread.
+**Rule:** Copilot code review comments only on a defect it can demonstrate in the diff. Rejecting one is a valid outcome ([Copilot code review](settings.md#copilot-code-review) owns why): reply with the reason, then resolve the thread.
 
 **Why:** speculative hardening and unenforced style opinions cost review time without catching a bug.
 
@@ -196,7 +194,7 @@ if [ -f x ]; then cat x; fi
 
 **Resolving the thread** is the UI's "Resolve conversation", or GraphQL `resolveReviewThread`. It is required: the managed `main` ruleset sets `required_review_thread_resolution`, so an unresolved thread blocks the merge whatever the reply says.
 
-**Enforced by:** that file for what earns a comment (written to every repository). The comments are advisory by the settings layers ([Copilot code review](settings.md#copilot-code-review)).
+**Enforced by:** that file for what earns a comment (written to every repository), and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)).
 
 ## No backwards-compatibility code
 
@@ -315,7 +313,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **The typos one-off:** `# typos: ignore` or `// typos: ignore` at the end of the line.
 
-- **zizmor's retry:** zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt runs once more and only the retry's result counts.
+- **zizmor's retry:** zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt of either pass runs once more and only the retry's result counts.
 
 - **Trivy on the schedule:** `trivy-nightly` runs instead, public repositories only, and reports without blocking. Both scans run at HIGH and CRITICAL, so a MEDIUM or LOW finding appears nowhere.
 

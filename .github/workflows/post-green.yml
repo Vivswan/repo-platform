@@ -1,4 +1,4 @@
-# The legs after the all-green gate (docs/all-green.md, "After the gate"; the trust model: docs/platform/build-provenance.md).
+# The legs after the all-green gate (docs/platform/post-green.md; the trust model: docs/platform/build-provenance.md).
 # Inside a called run github.event_name is the CALLER's event, so `!= 'workflow_dispatch'` is what gates the call-only legs.
 #
 # Every leg holds three invariants:
@@ -77,7 +77,7 @@ jobs:
         run: bun .github/scripts/post-green/move_stable.ts
 
   # Ordered behind the mover for its base, and run on every mover result: only this run is sure to read
-  # this commit's fleet-sync label (fleet_sync_marker.ts; docs/all-green.md, "Opting a PR into an immediate fleet sync").
+  # this commit's fleet-sync label (fleet_sync_marker.ts; docs/platform/post-green.md, "How the leg reads the label").
   read-directives:
     needs: [move-stable]
     if: github.event_name != 'workflow_dispatch' && !cancelled()
@@ -136,8 +136,8 @@ jobs:
 
   # Every target on every called run: the apply is idempotent and reads each target's own state, so no diff decides it.
   # Ordered behind sync-fleet whatever its result, so a synced repo is applied after its sync; holds the lane the called run keys around.
-  # Never cancelling: the lane orders by arrival, and an older commit's late run must wait and stand down in the selector
-  # (fleet/newest_main.ts), not cancel the newer apply in flight.
+  # Never cancelling: the lane orders by arrival, so an older commit's late run stands down in the selector (fleet/newest_main.ts)
+  # instead of cancelling the newer apply.
   settings-fleet:
     needs: [sync-fleet]
     if: github.event_name != 'workflow_dispatch' && !cancelled()

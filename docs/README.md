@@ -31,6 +31,8 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Add or remove a file the platform writes | [The file list: files.yml](platform/sync/files.md#filesyml) |
 | Read a sync PR's report, or find why a row held | [The writer: the report](platform/sync/writer.md#the-report) |
 | Check why the `stable` tag can be trusted | [Build provenance](platform/build-provenance.md) |
+| Find out why a merged PR's fleet-sync label did not sync, or which commits a post-green run read | [The post-green run: which commits a run reads](platform/post-green.md#which-commits-a-run-reads) |
+| Dispatch the central settings apply, or read a check-mode report | [The settings apply](platform/settings-apply.md) |
 | Change a managed workflow so it uses a new input of a platform action | [Build provenance: a new action input and its workflow land together](platform/build-provenance.md#a-new-action-input-and-its-workflow-land-together) |
 | Keep a private repo's name out of fleet logs, and find where its details land | [Private repositories](platform/sync/private-repositories.md) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
@@ -44,8 +46,8 @@ One list per folder, each in the sidebar's order.
 
 - [New repo](new-repo.md): scaffold a repository, register it with the fleet, and receive its first sync PR.
 - [Fleet guidelines](fleet-guidelines.md): the conventions every managed repository follows, each with what enforces it.
-- [All-green](all-green.md): the required check: ci.yml's own gate job judging every needed result.
-- [Settings](settings.md): the six-layer settings merge and how applies run.
+- [All-green](all-green.md): the required check: ci.yml's own gate job judging every needed result, the post-green hook, and the fleet-sync label from the PR's side.
+- [Settings](settings.md): the six-layer settings merge, the dialect, when the result is applied, and what the apply does to it.
 - [Toolchain pins](toolchains.md): the fleet-wide toolchain version pins and how to override one.
 - [Eject](eject.md): pausing sync PRs, or detaching a repository entirely.
 
@@ -61,6 +63,8 @@ One list per folder, each in the sidebar's order.
 ### Understand the platform (`docs/platform/`)
 
 - [Build provenance](platform/build-provenance.md): why the `stable` delivery tag is trustworthy, and what residual trust remains.
+- [The post-green run](platform/post-green.md): repo-platform's own legs after the gate: the tag mover, the fleet sync and settings calls, how the fleet-sync label is read, the default label, and the gate's residuals.
+- [The settings apply](platform/settings-apply.md): the central run that applies every rendered `.github/settings.yml`: its green-commit gate, newest wins, selection, private targets, check mode, and the token.
 - [Sync](platform/sync/README.md): the entry to the sync's contract: what the writer writes, where its code is, and this repository as a target of itself; one page per subject follows.
 - [The file list](platform/sync/files.md): the grammar of `files.yml`: entries, module data, what the loader refuses, upstream refs, placeholders, selection.
 - [The writer](platform/sync/writer.md): the command, how each class is written and what holds the PR, class flips, retirement, migrations, the report.

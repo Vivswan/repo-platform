@@ -3,7 +3,7 @@
 // A change on the delivered surface (DELIVERED_SURFACE below) moves what a sync delivers, and only a sync carries it; a change
 // off the surface is live at `stable` on the next green merge with no sync. So a pull request that touches it gets the public sync
 // by default: the label is added, one sticky comment says so, and a human removing it is final for that pull request
-// (docs/all-green.md). Information only: every failure is a warning and exit 0, and the job is outside all-green's needs.
+// (docs/platform/post-green.md). Information only: every failure is a warning and exit 0, and the job is outside all-green's needs.
 //
 // Usage: PR_NUMBER=<n> GITHUB_REPOSITORY=<owner/repo> bun .github/scripts/fleet/fleet_sync_default.ts
 
@@ -22,7 +22,7 @@ import { loadLayer } from "../sync/writer/settings_layers.ts";
 import { captureNetwork } from "./discovery.ts";
 
 /** The writer's data, its import closure, and its dependency versions, relative to the platform root; a directory ends in
- *  a slash. docs/all-green.md lists the same paths, and a test pins the two. bun.lock is on it because the settings library's
+ *  a slash. docs/platform/post-green.md lists the same paths, and a test pins the two. bun.lock is on it because the settings library's
  *  version decides the rendered settings.yml's key order; package.json because its postinstall decides which action-local
  *  dependencies the writer resolves. Whether a sync then moves a repository's judge is the writer's own stamp rule
  *  (sync/writer/judged_commit.ts). */
