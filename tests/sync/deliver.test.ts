@@ -114,6 +114,7 @@ function run(options: Options = {}): Run {
     written: [],
     retired: [],
     mirrors: [],
+    templates: {},
   };
   writeFileSync(join(runnerTemp, "summary.json"), JSON.stringify(summary));
   writeFileSync(join(runnerTemp, "sync.log"), REPORT);
@@ -828,6 +829,7 @@ describe("boundedReport", () => {
       retired: [{ path: "old.yml", outcome: "held", detail: "edited locally" }],
       notes: ["unknown module dropped: unknown-one"],
       mirrors: [],
+      templates: {},
     };
     const report = renderReport(buildReport(outcome));
     expect(report.length).toBeGreaterThan(BODY_CAP);
@@ -884,6 +886,7 @@ describe("boundedReport", () => {
       retired: [],
       notes: [],
       mirrors: [],
+      templates: {},
     };
     const report = renderReport(buildReport(outcome));
     expect(report).toContain("````diff\n");

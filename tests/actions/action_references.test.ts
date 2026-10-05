@@ -6,7 +6,7 @@
 
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { PLATFORM_OWNER, PLATFORM_SLUG } from "../../actions/shared/platform.ts";
 import { type Action, REPO_ROOT, type Step } from "../shared/action_step";
@@ -67,14 +67,23 @@ function writesKey(text: string, key: string, form: "run" | "script"): boolean {
   );
 }
 
+/** A key may leave through a shared module the script imports (the checks' one main writes `report=`), so each
+ *  script's relative imports are read with it, one level deep. */
+const RELATIVE_IMPORT = /from\s+["'](\.\.?\/[^"']+\.ts)["']/g;
+
 function scriptsOf(actionName: string, step: Step): { run: string; scripts: string[] } {
   const actionDir = join(ACTIONS_DIR, actionName);
   const run = String(step.run).replaceAll(ACTION_PATH, actionDir);
-  const scripts = [...run.matchAll(SCRIPT_TOKEN)]
+  const paths = [...run.matchAll(SCRIPT_TOKEN)]
     .map((m) => m[0].replace(/^["']|["']$/g, ""))
-    .filter((token) => resolve(token).startsWith(`${actionDir}/`))
-    .map((path) => readFileSync(path, "utf8"));
-  return { run, scripts };
+    .filter((token) => resolve(token).startsWith(`${actionDir}/`));
+  const scripts = paths.map((path) => readFileSync(path, "utf8"));
+  const imported = paths.flatMap((path, index) =>
+    [...scripts[index].matchAll(RELATIVE_IMPORT)].map((m) =>
+      readFileSync(resolve(dirname(path), m[1]), "utf8"),
+    ),
+  );
+  return { run, scripts: [...scripts, ...imported] };
 }
 
 /** A third-party action's outputs cannot be read offline; only the step id is judged for one. */
