@@ -120,6 +120,8 @@ Post-gate work rides downstream in the same run, `needs: [all-green]` on a push 
 
 **The lane rule:** the runs of neighbouring commits therefore overlap, and the legs that mutate shared state serialize on their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`, `pages`). On a lane, GitHub keeps one running plus one pending job and replaces the pending one with the newest, in arrival order rather than commit order.
 
+**The `pages` lane also cancels its running deploy** when a newer one arrives, so the newest arrival wins and never waits behind a deploy already running.
+
 Repo-platform's own run after the gate (the tag mover, the fleet sync and settings legs, the fleet token) is [platform/post-green.md](platform/post-green.md#the-run-leg-by-leg).
 
 ### The post-green hook in every managed repository
