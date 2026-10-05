@@ -45,4 +45,4 @@ The sync targets this repository like any other: its [.repo-platform.yml](../../
 
 - **Its `except`:** the paths whose file is this repository's own and cannot be the fleet's (its `ci.yml`, `dependabot.yml`, `.yamllint`, and the starters it does not take).
 - **Its CI** runs the [plan action](../../../actions/plan/action.yml) over the registration and then the [validate-managed-files action](../../../actions/validate-managed-files/action.yml) from the checkout, as fleet CI does: this checkout's action shell runs, the recorded commit's `check.ts` judges. A PR that changes `files/` stays green until this repository syncs itself.
-- **Its `.yamllint`** ignores `files`, so the writer's templates (placeholder tokens, not YAML) are outside the hygiene scan as they are outside yamllint.
+- **Its `.yamllint`** ignores `files`, so the writer's templates (placeholder tokens, not YAML) are outside yamllint.

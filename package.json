@@ -1,7 +1,7 @@
 {
   "name": "repo-platform",
   "private": true,
-  "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies, which the root postinstall installs so one root bun install covers every action package.",
+  "description": "Tooling manifest for repo-platform (biome, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies, which the root postinstall installs so one root bun install covers every action package.",
   "scripts": {
     "check": "bun run check:static && bun run docs:check && bun run test",
     "check:static": "bun scripts/bootstrap.ts --check && bun run lint && bun run typecheck && bun run typography && bun run file-size && bun run invariants",
@@ -21,7 +21,6 @@
     "@biomejs/biome": "2.5.11",
     "@types/bun": "1.4.2",
     "colorjs.io": "0.7.1",
-    "husky": "^9.1.7",
     "knip": "6.35.1",
     "typescript": "^7.0.2"
   },

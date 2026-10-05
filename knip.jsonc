@@ -49,20 +49,12 @@
       "project": ["**/*.{ts,mts}"]
     },
     "actions/pages-site": {
-      // The scripts action.yml runs; the vitepress plugin adds the config and theme, and vitepress
-      // consumes the data loaders' default exports, which is why entry exports are not judged here.
-      "entry": ["build.ts", "pages_exists.ts", ".vitepress/**/*.data.ts"],
+      // The scripts action.yml runs; the vitepress plugin adds the config and theme.
+      "entry": ["build.ts", "pages_exists.ts"],
       "project": ["**/*.{ts,mts,vue}"],
       "includeEntryExports": false,
-      // @localSearchIndex is vitepress's virtual module; shiki and markdown-it are imported directly but arrive through
-      // vitepress; the launcher test mounts the theme under happy-dom, importing it by path from this package's node_modules.
-      "ignoreDependencies": [
-        "@localSearchIndex",
-        "shiki",
-        "markdown-it",
-        "happy-dom",
-        "@happy-dom/global-registrator"
-      ]
+      // shiki and markdown-it are imported directly but arrive through vitepress.
+      "ignoreDependencies": ["shiki", "markdown-it"]
     }
   }
 }

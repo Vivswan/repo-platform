@@ -13,7 +13,7 @@ const ACTION_NAMES = readdirSync(ACTIONS_DIR)
 function metadataProblems(action: Action): string[] {
   const prose: [string, unknown][] = [
     ["name", action.name],
-    ["description", (action as { description?: unknown }).description],
+    ["description", action.description],
     ...Object.entries(action.inputs ?? {}).map(([key, spec]): [string, unknown] => [
       `inputs.${key}.description`,
       spec.description,
@@ -30,6 +30,7 @@ function metadataProblems(action: Action): string[] {
 
 const CONTROL_ACTION: Action = {
   name: "control",
+  description: "the control",
   inputs: { steps: { description: "pass ${{ toJSON(steps) }}", required: true } },
   outputs: { path: { description: "the path", value: "${{ steps.first.outputs.path }}" } },
   runs: { using: "composite", steps: [] },

@@ -1,10 +1,16 @@
 // A page's place comes from its own frontmatter (`order`, `group`) and its title: the fleet's repos carry only markdown.
-// The launcher's page index (theme/pages.data.ts) lists pages in the same order, so the two agree.
 
 import { deriveRewrites, detectLocales, type PageMeta, readPage, routeOf } from "./derive.ts";
 import { dirTitle } from "./dir-title.ts";
 import { isLandingFile } from "./source-path.ts";
-import { navigable } from "./theme/launcher-model.ts";
+
+/** A page's route as a browser can follow it: the sidebar spells a file's
+ *  name as it is on disk, so a `#`, `?`, `%`, space or non-ASCII character
+ *  in the name is escaped here, and only here, at the point of emitting a
+ *  link. */
+export function navigable(url: string): string {
+  return encodeURI(url).replace(/[#?]/g, (char) => (char === "#" ? "%23" : "%3F"));
+}
 
 export interface SidebarItem {
   text: string;
@@ -56,30 +62,6 @@ export function deriveSidebar(
     source,
   };
   return sidebarLevel(options.prefix ?? "", context, options.siteTitle ?? null);
-}
-
-export function sidebarOrder(
-  files: string[],
-  source: PageSource,
-  indexPages: readonly string[] = [],
-): string[] {
-  return sidebarTrees(files).flatMap((tree) => {
-    const context: LevelContext = {
-      files: tree.files,
-      rewrites: deriveRewrites(tree.files, indexPages),
-      includePages: new Set(indexPages),
-      source,
-    };
-    return levelOrder(tree.prefix, context);
-  });
-}
-
-function levelOrder(prefix: string, context: LevelContext): string[] {
-  const level = orderedLevel(prefix, context);
-  return [
-    ...level.pages.map((page) => page.file),
-    ...level.dirs.flatMap((dir) => levelOrder(`${prefix}${dir}/`, context)),
-  ];
 }
 
 interface LevelContext {
