@@ -452,10 +452,12 @@ jobs:
           allowed-skips: dependency-review
 
   # Needs-ordered behind the gate in the same run, so github.sha IS the judged commit.
+  # !cancelled(): the implicit success() reads the whole needs chain, so dependency-review's skip on a push skipped this job past a green gate.
   # No concurrency group: the called mover holds stable-tag-move, and a caller holding a lane its called job takes deadlocks the call.
   post-green:
     needs: [all-green]
     if: >-
+      !cancelled() &&
       needs.all-green.result == 'success' &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'

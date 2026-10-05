@@ -114,7 +114,7 @@ Anything that asks "is this commit green" reads the CHECK RUN, never the CI run'
 
 ## After the gate
 
-Post-gate work rides downstream in the same run, `needs: [all-green]` on a push to main, so `github.sha` IS the judged commit.
+Post-gate work rides downstream in the same run, `needs: [all-green]` on a push to main, so `github.sha` IS the judged commit. Every leg's condition leads with `!cancelled()`: a job's implicit `success()` reads the whole needs chain, so a gating job skipped by its condition would otherwise skip the legs past a green gate.
 
 **Every push to main gets its own complete run:** ci.yml's group is keyed by the commit on a push and by the ref on a pull request (where a newer push cancels the stale run). So no merge timing cancels or coalesces another commit's run. Keyed by the ref, GitHub kept one pending run per group and replaced it with the newest, which left a burst's middle commits unjudged.
 
