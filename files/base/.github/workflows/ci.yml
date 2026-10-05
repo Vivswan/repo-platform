@@ -197,6 +197,8 @@ jobs:
   #   needs post-green, publish-release  -> a release commit's own deploy serves its new tag
   #   !cancelled()                        -> those edges are orders, not gates: a skipped or red release still deploys
   #   no push clause                      -> every main run deploys, so the nightly schedule IS the rebuild and a dispatch IS the manual deploy
+  #   never cancelling                    -> an older commit's late run stands down at the deploy's write instead of cancelling the newer deploy
+  #   contents: write                     -> the pages record the deploy reads and writes (apply-forward)
   site:
     needs: [ci, all-green, post-green, publish-release]
     if: >-
@@ -206,7 +208,6 @@ jobs:
       contains(needs.ci.outputs.modules, '"site"')
     concurrency:
       group: pages
-      cancel-in-progress: true
     permissions:
       contents: write
       pages: write

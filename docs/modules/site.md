@@ -27,6 +27,7 @@ The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and 
 
 - **No workflow of its own and no tag trigger:** a tag created without a push lands on the nightly rebuild, or right away via dispatch.
 - **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
+- **The deploy only moves forward:** the lane orders runs by arrival, not by commit, so the deploy compares its commit with the one it last recorded and stands down green when the record is ahead (`superseded: pages last applied <sha>`); the rule, the record ref, and the race are [all-green.md](../all-green.md#after-the-gate)'s. The nightly and a dispatch deploy their commit the same way.
 
 **The release legs sit before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the release chain and then runs whatever its result, and a release commit's own deploy serves its new tag. Without the release-please module the release legs skip and the deploy follows the repo-owned post-green hook directly ([all-green.md](../all-green.md#after-the-gate)).
 
@@ -38,7 +39,9 @@ The called workflow is one job, in this order:
 | urls | always | computes the base path `/<repo>/` and the origin `https://<owner>.github.io` |
 | hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
 | pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes `versions.json` under the docs mount, and, once something was built, asks GitHub whether the Pages site exists (`pages-exists`); absent, the deploy skips with a warning ([below](#pages-enablement)) |
-| configure, upload, deploy | the Pages site exists | the one Pages artifact, deployed to the `github-pages` environment |
+| check | always | reads the `pages` record ([apply-forward action](../../actions/apply-forward/action.yml)); a recorded commit ahead of the judged one: a notice, and every step below stands down |
+| configure, upload, deploy | the Pages site exists and the check proceeds | the one Pages artifact, deployed to the `github-pages` environment |
+| record | the deploy succeeded | writes the judged commit to the `pages` record as a fast-forward |
 | link rot | the schedule alone, after a deploy | checks the site's external links with lychee, reads lychee's exit code as the verdict through the shared [lychee-verdict action](../../actions/lychee-verdict/action.yml), and files the tracking issue ([below](#link-rot)) |
 
 A repository with nothing to publish ends green with a notice (`nothing to publish`) and no deploy ([layout](#layout)).

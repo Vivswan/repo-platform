@@ -153,14 +153,17 @@ describe("reusable-site.yml", () => {
 
   // A Pages step gated on the assembly's `publish` alone runs against an absent site and fails the first deploy again,
   // silent until the next repository selects the module. Exact gates: a skipped or unset `pages-exists` reads as
-  // false downstream too.
-  test("the Pages steps and the link check run on the assembly's pages-exists verdict alone", () => {
-    const gate = "steps.site.outputs.pages-exists == 'true'";
+  // false downstream too, and so does the forward check's `proceed`, so a run behind the record ships nothing.
+  test("the Pages steps and the link check run on the assembly's pages-exists verdict and the forward check alone", () => {
+    const gate =
+      "steps.site.outputs.pages-exists == 'true' && steps.check.outputs.proceed == 'true'";
     const at = (action: string) =>
       steps.findIndex((candidate) => (candidate.uses ?? "").startsWith(`actions/${action}@`));
     const site = steps.findIndex((candidate) => candidate.id === "site");
+    const check = steps.findIndex((candidate) => candidate.id === "check");
     expect(site).toBeGreaterThanOrEqual(0);
-    expect(site).toBeLessThan(at("configure-pages"));
+    expect(site).toBeLessThan(check);
+    expect(check).toBeLessThan(at("configure-pages"));
     expect({
       configure: steps[at("configure-pages")].if,
       upload: steps[at("upload-pages-artifact")].if,

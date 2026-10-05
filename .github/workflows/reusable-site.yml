@@ -27,9 +27,9 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     # The hook step runs under this token too: a composite action declares
-    # no permissions of its own. issues: write is the link-rot issue's.
+    # no permissions of its own. issues: write is the link-rot issue's, contents: write the pages record's (apply-forward).
     permissions:
-      contents: read
+      contents: write
       pages: write
       id-token: write
       issues: write
@@ -75,29 +75,47 @@ jobs:
         with:
           site-dir: ${{ steps.hook.outputs.dist }}
 
-      - if: steps.site.outputs.pages-exists == 'true'
+      # A post-gate leg compares with the state it last applied, never with main's tip (docs/all-green.md): the deploy asks once,
+      # at the write, whether the pages record already names a commit ahead of this one and stands down green if so.
+      - name: Ask whether this commit is at or ahead of the one last deployed
+        id: check
+        uses: Vivswan/repo-platform/actions/apply-forward@stable
+        with:
+          mode: check
+          leg: pages
+          sha: ${{ inputs.sha }}
+
+      - if: steps.site.outputs.pages-exists == 'true' && steps.check.outputs.proceed == 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       # Artifacts belong to the RUN, not the attempt: a re-run after a failed prerequisite (post-green) re-runs this leg, and a second
       # github-pages artifact in the run makes deploy-pages refuse ("Multiple artifacts named github-pages").
       # The attempt number in the name keeps each attempt's upload and deploy a pair of their own.
-      - if: steps.site.outputs.pages-exists == 'true'
+      - if: steps.site.outputs.pages-exists == 'true' && steps.check.outputs.proceed == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ${{ steps.site.outputs.site-dir }}
           name: github-pages-${{ github.run_attempt }}
 
       - id: deployment
-        if: steps.site.outputs.pages-exists == 'true'
+        if: steps.site.outputs.pages-exists == 'true' && steps.check.outputs.proceed == 'true'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: github-pages-${{ github.run_attempt }}
+
+      - name: Record the deployed commit
+        if: steps.deployment.outcome == 'success'
+        uses: Vivswan/repo-platform/actions/apply-forward@stable
+        with:
+          mode: record
+          leg: pages
+          sha: ${{ inputs.sha }}
 
       # lychee reads .lycheeignore from its working directory alone, so the repository's own list (docs/modules/site.md) lands in the
       # site directory after the upload and the served site never carries it.
       - name: Stage the repository's .lycheeignore
         if: >-
-          github.event_name == 'schedule' && steps.site.outputs.pages-exists == 'true' &&
+          github.event_name == 'schedule' && steps.site.outputs.pages-exists == 'true' && steps.check.outputs.proceed == 'true' &&
           steps.site.outputs.link-rot-label != '' && hashFiles('.lycheeignore') != ''
         env:
           SITE_DIR: ${{ steps.site.outputs.site-dir }}
@@ -111,7 +129,9 @@ jobs:
       # the step when lychee extracted no link at all (excluded ones count).
       - name: Check external links
         id: links
-        if: github.event_name == 'schedule' && steps.site.outputs.pages-exists == 'true' && steps.site.outputs.link-rot-label != ''
+        if: >-
+          github.event_name == 'schedule' && steps.site.outputs.pages-exists == 'true' && steps.check.outputs.proceed == 'true' &&
+          steps.site.outputs.link-rot-label != ''
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           workingDirectory: ${{ steps.site.outputs.site-dir }}

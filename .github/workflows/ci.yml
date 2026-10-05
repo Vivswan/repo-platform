@@ -434,6 +434,13 @@ jobs:
           mode: after-propose
         env:
           GH_TOKEN: ${{ github.token }}
+      # check mode reads a record no leg writes, so it proceeds and the output goes unread.
+      - id: apply-forward
+        uses: ./actions/apply-forward
+        with:
+          mode: check
+          leg: action-load
+          sha: ${{ github.sha }}
 
   # THE gate: this job's own check run is the ruleset's required check (files/settings/override.yml),
   # and alls-green passes only when every needed result is success, or skipped for a job named in allowed-skips.
@@ -503,6 +510,8 @@ jobs:
   # Ordered behind post-green so the deploy runs after this run's mover, and a green move's theme
   # is what @stable serves it; !cancelled() keeps a red or skipped post-green from holding the site back. No push clause in
   # the if: the weekly schedule is the rebuild and link-rot check, a dispatch the manual deploy.
+  # Never cancelling: the lane orders by arrival, so an older commit's late run stands down at the deploy's write
+  # (reusable-site.yml) instead of cancelling the newer deploy. contents: write is the pages record's.
   site:
     needs: [all-green, post-green]
     if: >-
@@ -511,7 +520,6 @@ jobs:
       github.ref == 'refs/heads/main'
     concurrency:
       group: pages
-      cancel-in-progress: true
     permissions:
       contents: write
       pages: write

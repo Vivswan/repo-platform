@@ -124,7 +124,13 @@ Post-gate work rides downstream in the same run, `needs: [all-green]` on a push 
 
 **The lane rule:** the runs of neighbouring commits therefore overlap, and the legs that mutate shared state serialize on their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`, `pages`). On a lane, GitHub keeps one running plus one pending job and replaces the pending one with the newest, in arrival order rather than commit order.
 
-**The `pages` lane also cancels its running deploy** when a newer one arrives, so the newest arrival wins and never waits behind a deploy already running.
+**A post-gate leg compares with the state it last applied, never with main's tip, and a stand-down is green.** A later commit may skip the leg or run red, so a tip comparison would freeze that state at the previous run.
+
+- **The record:** the ref `refs/platform/applied/<leg>` in the repository the leg runs in, which no ruleset targets and no clone fetches. The job's `GITHUB_TOKEN` reads and writes it (`contents: write`), through the [apply-forward action](../actions/apply-forward/action.yml): `check` before the apply, `record` after it succeeded.
+- **The check:** the leg proceeds when no record exists, when the record is its commit (a rebuild), or when the record is an ancestor of its commit (GitHub's compare, so no local history is needed). A record ahead of the commit stands the leg down with one notice naming both.
+- **The race:** the record write is a fast-forward (`force: false`) after a fresh read, so of two runs racing it the one behind writes nothing and stands down, and the newer run's apply stands.
+- **A failed record write** is a red step after a finished apply, leaving the record stale: re-run the job, which applies and records again.
+- **Who uses it:** the `pages` lane ([site.md](modules/site.md#the-leg-and-its-triggers)), which never cancels a running deploy either. The settings rows still ask main's tip per target ([settings-apply.md](platform/settings-apply.md#newest-wins)) until they move onto the record.
 
 Repo-platform's own run after the gate (the tag mover, the fleet sync and settings legs, the fleet token) is [platform/post-green.md](platform/post-green.md#the-run-leg-by-leg).
 

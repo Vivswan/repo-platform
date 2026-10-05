@@ -11,31 +11,10 @@ import {
   requireEnv,
   warning,
 } from "../shared/action_runtime.ts";
+import { type IncludedResponse, parseIncludedResponse } from "../shared/gh_api.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 
 const GH_TIMEOUT_MS = 60_000;
-
-export interface PagesAnswer {
-  /** The HTTP status `gh api --include` printed, or null when it printed no status line. */
-  status: number | null;
-  /** The response body, one line. */
-  body: string;
-}
-
-/** `gh api --include` prints the status line, the headers (CRLF), a blank line, and the body, exit 1 off 2xx.
- *  The body is folded to one line the way the shell did it: CRs dropped, runs of newlines and spaces to one space. */
-export function parseIncludedResponse(stdout: string): PagesAnswer {
-  const status = /^HTTP\/[0-9.]+ (\d{3})\b/.exec(stdout);
-  const separator = /\r?\n\r?\n/.exec(stdout);
-  const body = separator === null ? "" : stdout.slice(separator.index + separator[0].length);
-  return {
-    status: status === null ? null : Number(status[1]),
-    body: body
-      .replaceAll("\r", "")
-      .replaceAll(/[\n ]+/g, " ")
-      .replace(/ $/, ""),
-  };
-}
 
 export type PagesVerdict =
   | { exists: true }
@@ -48,7 +27,7 @@ export const NO_SITE_YET =
 
 /** 200 -> exists; 404 -> no site yet, a warning; anything else, a missing status included, is an error naming
  *  what came back (`detail` stands in for the body when there was no response at all). */
-export function judgePagesAnswer(answer: PagesAnswer, detail: string): PagesVerdict {
+export function judgePagesAnswer(answer: IncludedResponse, detail: string): PagesVerdict {
   if (answer.status === 200) return { exists: true };
   if (answer.status === 404) return { exists: false, warning: NO_SITE_YET };
   const body = answer.status === null && answer.body === "" ? detail : answer.body;

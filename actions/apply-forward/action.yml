@@ -1,0 +1,65 @@
+name: Apply Forward
+description: |
+  Keeps a post-green leg moving forward: the leg applies a commit only when that commit is at or ahead of the one it last
+  applied, so an older commit's late run never puts older state back (docs/all-green.md, "After the gate").
+
+  A leg compares with the state it last applied, never with main's tip: a later commit may skip the leg or run red, and a
+  tip comparison would then freeze the state at the previous run. The record is the ref refs/platform/applied/<leg> in the
+  repository the leg runs in, read and written through the job token (contents: write), which no ruleset targets and no
+  clone fetches. Ancestry is GitHub's compare of the two commits, so the checkout's depth never matters.
+
+  mode check, before the apply: proceed is "true" when no record exists, when the record is this commit (a rebuild is
+  wanted), or when it is behind this commit; "false", with a notice naming both commits, when the record is ahead, so the
+  leg's steps stand down green. A record off this history (rewritten away) proceeds with a notice, since it could never
+  become an ancestor. recorded is the record's commit, empty when none exists.
+
+  mode record, after the apply succeeded: reads the record again and writes this commit as a fast-forward (force false),
+  or with force when the record is off this history. A record a newer run moved ahead in the meantime stands, with a
+  notice and proceed "false": that run's apply superseded this one. A write GitHub refuses gets one more pass, which
+  reads what stands now and judges it the same way; a second refusal is an error. recorded is the commit the record
+  holds after the step.
+
+  Either mode fails the step only when GitHub cannot be read or written; a stand-down is a successful no-op. An apply
+  whose record write failed leaves a red step and a stale record, and the job's re-run applies and records again.
+
+inputs:
+  mode:
+    description: check (before the apply) or record (after it)
+    required: true
+  leg:
+    description: The record's name, one per leg (pages)
+    required: true
+  sha:
+    description: The commit the leg applies
+    required: true
+
+outputs:
+  proceed:
+    description: 'check: "true" when the leg applies this commit; record: "true" when this commit was recorded, "false" when a newer run''s stands'
+    value: ${{ steps.forward.outputs.proceed }}
+  recorded:
+    description: 'check: the commit the record held, empty for none; record: the commit it holds after the step'
+    value: ${{ steps.forward.outputs.recorded }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Read the record
+      id: forward
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        GH_TOKEN: ${{ github.token }}
+        MODE: ${{ inputs.mode }}
+        LEG: ${{ inputs.leg }}
+        SHA: ${{ inputs.sha }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/apply_forward.ts"'
