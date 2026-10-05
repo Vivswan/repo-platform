@@ -49,6 +49,32 @@ describe("write_fleet_lint_tree.ts", () => {
       ).modules;
     expect(registered("all")).toEqual(Object.keys(FILES.modules));
     expect(registered("none")).toEqual([]);
+    // The sidecar the shell-complexity check maps written findings through states the writer's own selection and
+    // mapping: the none tree's AGENTS.md came from the base template (not the toolchain variant a module selects), and
+    // a split write never maps its lines.
+    const sources = (name: string) =>
+      JSON.parse(readFileSync(join(dest, name, ".shell-complexity-sources.json"), "utf-8")) as {
+        tree: string;
+        templates: Record<string, { path: string; lineMapped: boolean }>;
+      };
+    expect(sources("none").tree).toBe("none");
+    expect(sources("none").templates["AGENTS.md"]).toEqual({
+      path: "files/base/AGENTS.md",
+      lineMapped: false,
+    });
+    expect(sources("none").templates[".editorconfig"]).toEqual({
+      path: "files/base/.editorconfig",
+      lineMapped: false,
+    });
+    // A block anchor is removed even when no module fills it, so the lines after it shift.
+    expect(sources("none").templates[".github/workflows/checks.yml"]).toEqual({
+      path: "files/base/.github/workflows/checks.yml",
+      lineMapped: false,
+    });
+    expect(sources("all").templates[".github/workflows/ci.yml"]).toEqual({
+      path: "files/base/.github/workflows/ci.yml",
+      lineMapped: true,
+    });
     // The all tree lands the module workflows over the base ones; two equal trees lint one selection twice.
     expect(landed.none.filter((file) => !landed.all.includes(file))).toEqual([]);
     expect(landed.all.length).toBeGreaterThan(landed.none.length);

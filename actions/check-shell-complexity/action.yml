@@ -31,9 +31,12 @@ description: |
 
 inputs:
   skip:
-    description: >-
-      Directory names of the caller's own the check must not read, comma-separated, beside
-      the generic skip set; empty skips nothing more.
+    description: |
+      Directory names the check must not read, beyond the generic ones it always skips.
+
+      Comma-separated, spaces trimmed; directory components only, never file names.
+
+      Empty, the default, skips nothing more.
     required: false
     default: ""
 

@@ -114,8 +114,6 @@ export function judgeBodies(bodies: CollectedBody[]): Finding[] {
 }
 
 /** `judgeManaged`: the platform's own run over the fleet trees its writer lands, where the managed files are its own
- *  to fix; a fleet repository never judges them. */
-/** `judgeManaged`: the platform's own run over the fleet trees its writer lands, where the managed files are its own
  *  to fix; a fleet repository never judges them. `written`: that tree's name and each written file's template, so a
  *  finding points at the template that produced it rather than at a same-named file of the checkout. */
 export interface CheckOptions {

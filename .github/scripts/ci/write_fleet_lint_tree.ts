@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { must } from "../shared/proc.ts";
+import type { SyncReport } from "../sync/writer/report.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 const WRITER = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
@@ -51,6 +52,7 @@ export function writeTargets(dest: string, upstream?: string): Record<string, st
     // writer lands) only under a git root.
     must(["git", "init", "-q", target]);
     writeFileSync(join(target, REGISTRATION_PATH), registrationFor(modules));
+    const summary = join(dest, `${name}.summary.json`);
     must(
       [
         "bun",
@@ -68,14 +70,14 @@ export function writeTargets(dest: string, upstream?: string): Record<string, st
         "--private",
         "false",
         "--summary",
-        join(dest, `${name}.summary.json`),
+        summary,
         ...(upstream === undefined ? [] : ["--upstream", upstream]),
       ],
       { cwd: REPO_ROOT },
     );
     writeFileSync(
       join(target, SOURCES_FILE),
-      `${JSON.stringify({ tree: name, templates: templatesOf(filesText, target) }, null, 2)}\n`,
+      `${JSON.stringify({ tree: name, templates: templatesOf(summary) }, null, 2)}\n`,
     );
     written[name] = writtenWorkflows(target);
     if (written[name].length === 0) {
@@ -87,23 +89,19 @@ export function writeTargets(dest: string, upstream?: string): Record<string, st
 
 /** The sidecar the shell-complexity check reads (`--sources`) to report a written file's finding against its template. */
 export const SOURCES_FILE = ".shell-complexity-sources.json";
-const BLOCKS_LINE = /^\s*\{\{blocks\}\}\s*$/m;
 
-/** Each written file's template under files/, and whether the template's lines are the written file's: a spliced
- *  `{{blocks}}` shifts every line after it, so such a template maps its lines no further than the splice. */
+/** The mapping the writer states it applied, from its summary: each written path's template under files/ and whether
+ *  the template's lines are the written file's. */
 export function templatesOf(
-  filesText: string,
-  target: string,
+  summary: string,
 ): Record<string, { path: string; lineMapped: boolean }> {
-  const templates: Record<string, { path: string; lineMapped: boolean }> = {};
-  for (const entry of parseFilesConfig(filesText, "files.yml").files) {
-    if (!("source" in entry) || typeof entry.source !== "string") continue;
-    if (!existsSync(join(target, entry.path))) continue;
-    const template = join("files", entry.source);
-    const text = readFileSync(join(REPO_ROOT, template), "utf-8");
-    templates[entry.path] = { path: template, lineMapped: !BLOCKS_LINE.test(text) };
-  }
-  return templates;
+  const report = JSON.parse(readFileSync(summary, "utf-8")) as Pick<SyncReport, "templates">;
+  return Object.fromEntries(
+    Object.entries(report.templates).map(([written, { source, lineMapped }]) => [
+      written,
+      { path: join("files", source), lineMapped },
+    ]),
+  );
 }
 
 if (import.meta.main) {

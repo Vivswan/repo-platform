@@ -231,6 +231,7 @@ interface Summary {
   holdReasons: string[];
   modules: string[];
   written: { path: string; class: string; change: string; detail: string }[];
+  templates: Record<string, { source: string; lineMapped: boolean }>;
   retired: { path: string; outcome: string; detail: string }[];
   mirrors: { source: string; target: string; outcome: string; detail: string }[];
   notes: string[];
@@ -719,6 +720,12 @@ describe("sync.ts end to end", () => {
     expect(again.summary.written.map((row) => row.change)).toEqual(
       summary.written.map((row) => (row.change === "held" ? "held" : "unchanged")),
     );
+    // A starter left as it stands is the repository's content, not the template's: no template record for it.
+    const starters = again.summary.written
+      .filter((row) => row.class === "starter")
+      .map((row) => row.path);
+    expect(starters.length).toBeGreaterThan(0);
+    expect(starters.filter((path) => path in again.summary.templates)).toEqual([]);
     expect(again.summary.retired).toEqual([
       {
         path: ".github/workflows/release.yml",
