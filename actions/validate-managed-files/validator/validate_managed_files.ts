@@ -2,15 +2,10 @@
 import { resolve } from "node:path";
 import { checkConflictMarkers } from "./checks/conflict_markers.ts";
 import { checkReleasePlease } from "./checks/release_please.ts";
-import { checkYaml } from "./checks/yaml.ts";
 import { type Context, loadContext } from "./context.ts";
 import { type Finding, print, writeReport } from "./findings.ts";
 
-const CHECKS: ((ctx: Context) => Finding[])[] = [
-  checkReleasePlease,
-  checkYaml,
-  checkConflictMarkers,
-];
+const CHECKS: ((ctx: Context) => Finding[])[] = [checkReleasePlease, checkConflictMarkers];
 
 function usageError(message: string): never {
   console.error(`error: ${message}`);

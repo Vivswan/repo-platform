@@ -197,7 +197,7 @@ const REMEDY =
 const checkSection = (body: string, remedy = `\n\n${REMEDY}`) =>
   `#### repo-platform at ${SHORT}\n\n\`\`\`diff\n${body}\n\`\`\`${remedy}`;
 const REFUSED = "1 manifest record is not a shape the writer records";
-const HYGIENE = "#### Errors (1)\n\n- ci.yml: does not parse as YAML";
+const HYGIENE = "#### Errors (1)\n\n- docs/notes.md: carries conflict-marker lines";
 
 describe("the recorded commit's check and the hygiene checks reach the report as one verdict", () => {
   // check.ts speaks through its exit code and stdout, the hygiene validator through its exit code and findings
