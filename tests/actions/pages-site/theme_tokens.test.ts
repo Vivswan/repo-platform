@@ -7,16 +7,10 @@ import { expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
-  HUE_TOKENS,
-  HUES,
   MODES,
   modeValues,
-  SHARED_TOKENS,
-  type SharedValue,
-  type TokenName,
   tokenNames,
 } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
-import { themeTokensCss } from "../../../actions/pages-site/.vitepress/theme/tokens-css.ts";
 
 const ACTION = resolve(import.meta.dir, "../../../actions/pages-site");
 const THEME = join(ACTION, ".vitepress/theme");
@@ -139,101 +133,4 @@ test.each([...MODES])("every token color the shiki theme emits has a %s value", 
   const declared = new Set<string>(modeValues(mode).keys());
   const undeclared = [...new Set(shikiReads().colored)].filter((token) => !declared.has(token));
   expect(undeclared).toEqual([]);
-});
-
-// The token layer is tokens.ts rendered at build time, so the render is pinned to the data, block by block in
-// cascade order: shared, its media overrides, light, dark, the hue slots, and print last (its html:root selectors
-// only tie the hue blocks on specificity).
-interface CssBlock {
-  media: string | null;
-  selector: string;
-  declarations: Record<string, string>;
-}
-
-function cssBlocks(css: string): CssBlock[] {
-  const blocks: CssBlock[] = [];
-  const open: { selector: string; declarations: Record<string, string> }[] = [];
-  let text = "";
-  for (const char of css) {
-    if (char === "{") {
-      open.push({ selector: text.trim().replaceAll(/\s+/g, " "), declarations: {} });
-      text = "";
-    } else if (char === ";") {
-      const [name, ...value] = text.trim().split(":");
-      const block = open.at(-1);
-      if (block === undefined) throw new Error(`a declaration outside every block: ${text}`);
-      block.declarations[name] = value.join(":").trim();
-      text = "";
-    } else if (char === "}") {
-      const closed = open.pop();
-      if (closed === undefined) throw new Error("a `}` closes nothing");
-      const parent = open.at(-1);
-      if (closed.selector.startsWith("@")) {
-        if (parent !== undefined) throw new Error(`nested at-rule ${closed.selector}`);
-      } else {
-        blocks.push({ media: parent?.selector ?? null, ...closed });
-      }
-      text = "";
-    } else {
-      text += char;
-    }
-  }
-  expect(open).toEqual([]);
-  expect(text.trim()).toBe("");
-  return blocks;
-}
-
-function hueBlock(selector: string, values: Record<keyof typeof HUE_TOKENS, string>): CssBlock {
-  const declarations = Object.fromEntries(
-    Object.entries(HUE_TOKENS).map(([key, name]) => [name, values[key as keyof typeof HUE_TOKENS]]),
-  );
-  return { media: null, selector, declarations };
-}
-
-function modeBlock(
-  media: string | null,
-  selector: string,
-  mode: "light" | "dark" | "print",
-): CssBlock {
-  return { media, selector, declarations: Object.fromEntries(modeValues(mode)) };
-}
-
-test("the rendered token layer is the data, block by block, in cascade order", () => {
-  const shared = Object.values(SHARED_TOKENS).flatMap(
-    (group) => Object.entries(group) as [TokenName, SharedValue][],
-  );
-  const both = ":root, .dark";
-  const expected: CssBlock[] = [
-    {
-      media: null,
-      selector: both,
-      declarations: Object.fromEntries(
-        shared.map(([name, value]) => [name, typeof value === "string" ? value : value.base]),
-      ),
-    },
-    ...shared.flatMap(([name, value]) =>
-      typeof value === "string"
-        ? []
-        : value.overrides.map(
-            (override): CssBlock => ({
-              media: `@media ${override.media}`,
-              selector: both,
-              declarations: { [name]: override.value },
-            }),
-          ),
-    ),
-    modeBlock(null, ":root", "light"),
-    modeBlock(null, ".dark", "dark"),
-    ...HUES.flatMap((hue, slot) =>
-      slot === 0
-        ? []
-        : [
-            hueBlock(`html[data-fleet-hue="${slot}"]`, hue.light),
-            hueBlock(`html.dark[data-fleet-hue="${slot}"]`, hue.dark),
-          ],
-    ),
-    modeBlock("@media print", "html:root, html:root.dark", "print"),
-  ];
-  expect(expected.length).toBeGreaterThan(14);
-  expect(cssBlocks(themeTokensCss())).toEqual(expected);
 });

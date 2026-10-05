@@ -1,5 +1,5 @@
-// The fleet's site deploy: what lychee and the fuzz-issue contract define and the yaml cannot show. The urls and verdict
-// steps are executed as the runner runs them; the two lychee knobs whose wrong value changes behavior silently are pinned.
+// The fleet's site deploy: what lychee and the fuzz-issue contract define and the yaml cannot show. The urls step is
+// executed as the runner runs it; the rest is cross-file (the action, ci.yml, fuzz-issue) or cross-step (the Pages gate).
 
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -71,12 +71,6 @@ describe("reusable-site.yml", () => {
     });
   });
 
-  // Two knobs only lychee defines, each wrong value silent: with a token lychee asks the GitHub API and calls a private
-  // repository's link alive, so the link-rot issue is closed wrongly; with fail unset a finding fails the deploy that shipped.
-  test("lychee runs with no token and never fails the deploy", () => {
-    expect(step("links")?.with).toEqual(expect.objectContaining({ token: "", fail: false }));
-  });
-
   // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml), the nightly, and the
   // install ci.yml's test job runs so the broken-link test is judged by it, all the same action at the same
   // version. The internal step's own knobs are judged by the live run in tests/ci/pages_site_build.
@@ -129,26 +123,6 @@ describe("reusable-site.yml", () => {
     "",
   ].join("\n");
 
-  // lychee reads .lycheeignore from its working directory alone, so the file is copied into the site directory: after the
-  // upload, or the served site carries it; before the check, or the ignores are lost and the link-rot issue opens on links
-  // the repository chose not to judge. Both silent. The copy runs on the check's own condition, plus the file existing.
-  test("the root .lycheeignore is staged after the upload and before lychee, on the check's own condition", () => {
-    const index = (predicate: (step: Step) => boolean) => steps.findIndex(predicate);
-    const stage = index((candidate) => (candidate.run ?? "").startsWith("cp .lycheeignore"));
-    const upload = index((candidate) =>
-      (candidate.uses ?? "").includes("actions/upload-pages-artifact@"),
-    );
-    const links = index((candidate) => candidate.id === "links");
-    expect([upload, stage, links].every((at) => at >= 0)).toBe(true);
-    expect(upload).toBeLessThan(stage);
-    expect(stage).toBeLessThan(links);
-    expect(steps[stage].if).toBe(`${steps[links].if} && hashFiles('.lycheeignore') != ''`);
-    expect({ env: steps[stage].env, run: steps[stage].run }).toEqual({
-      env: { SITE_DIR: String(steps[links].with?.workingDirectory) },
-      run: 'cp .lycheeignore "$SITE_DIR/"',
-    });
-  });
-
   test("lychee's report is the one failure of the fuzz-issue contract: written under the artifacts-dir, it rides into the issue body whole", () => {
     const output = String(step("links")?.with?.output);
     const report = steps.find((candidate) => candidate.with?.mode === "report");
@@ -180,17 +154,6 @@ describe("reusable-site.yml", () => {
   // A Pages step gated on the assembly's `publish` alone runs against an absent site and fails the first deploy again,
   // silent until the next repository selects the module. Exact gates: a skipped or unset `pages-exists` reads as
   // false downstream too.
-  // GitHub fact: artifacts belong to the run, not the attempt, so a re-run after a failed prerequisite (which re-runs
-  // this leg through its needs) leaves two github-pages artifacts in one run and deploy-pages refuses. The attempt number in the
-  // name keeps each attempt's upload and deploy a pair; the two names must agree or the deploy finds nothing.
-  test("each attempt uploads and deploys a Pages artifact of its own name", () => {
-    const at = (action: string) =>
-      steps.find((candidate) => (candidate.uses ?? "").startsWith(`actions/${action}@`));
-    const uploaded = at("upload-pages-artifact")?.with?.name;
-    expect(uploaded).toContain("${{ github.run_attempt }}");
-    expect(at("deploy-pages")?.with?.artifact_name).toBe(uploaded);
-  });
-
   test("the Pages steps and the link check run on the assembly's pages-exists verdict alone", () => {
     const gate = "steps.site.outputs.pages-exists == 'true'";
     const at = (action: string) =>

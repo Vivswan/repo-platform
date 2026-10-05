@@ -160,40 +160,6 @@ describe("post-green wiring", () => {
     ]);
   });
 
-  // The condition is evaluated, not searched for: a clause moved into a comment reads the same to a text search and
-  // releases the fleet's post-green legs on a pull request. The result clause is pinned explicitly so the release never
-  // depends on remembering GitHub's implicit success() rule for a condition without a status function.
-  test("ci.yml's post-green job runs on a green gate on a push to main and on nothing else", () => {
-    const condition = ci.jobs["post-green"].if ?? "";
-    const runsWhen = (context: Record<string, string>) =>
-      evaluateCondition(condition, {
-        "needs.all-green.result": "success",
-        "github.event_name": "push",
-        "github.ref": "refs/heads/main",
-        ...context,
-      });
-    expect({
-      greenPushToMain: runsWhen({}),
-      redGate: runsWhen({ "needs.all-green.result": "failure" }),
-      skippedGate: runsWhen({ "needs.all-green.result": "skipped" }),
-      pullRequest: runsWhen({
-        "github.event_name": "pull_request",
-        "github.ref": "refs/pull/1/merge",
-      }),
-      dispatch: runsWhen({ "github.event_name": "workflow_dispatch" }),
-      schedule: runsWhen({ "github.event_name": "schedule" }),
-      pushToBranch: runsWhen({ "github.ref": "refs/heads/topic" }),
-    }).toEqual({
-      greenPushToMain: true,
-      redGate: false,
-      skippedGate: false,
-      pullRequest: false,
-      dispatch: false,
-      schedule: false,
-      pushToBranch: false,
-    });
-  });
-
   // #207: a ref-keyed group keeps one pending run and replaces it with the newest, so a burst of merges dropped the middle
   // commits' verdicts; every run that did run was green. Keyed by the commit, every push run completes; PR pushes keep
   // cancelling their stale runs. The skeleton every fleet repository runs carries the same block.

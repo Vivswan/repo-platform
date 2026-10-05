@@ -1,6 +1,6 @@
 // The tertiary ink is small type (the 12.5px provenance line, the code block's language label), so every text token must clear WCAG AA's 4.5:1.
-// theme_tokens.test.ts proves each token has a reader and that the render is the data; this pins the values themselves,
-// per mode and ground, the print sheet included.
+// theme_tokens.test.ts proves each token has a reader and each color a highlighted span can carry a value per mode; this
+// pins the values themselves, per mode and ground, the print sheet included.
 
 import { expect, test } from "bun:test";
 import Color from "colorjs.io";
