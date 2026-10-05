@@ -2,8 +2,6 @@
 // push made with the run token, so a careless swap to github.token leaves every refresh PR sitting unjudged, nothing red.
 // The commit identity is SYNC_IDENTITY: .github/scripts/shared/git_identity.ts names this test as its holder, and a drifted
 // identity is a different author on every automation commit.
-// The job's bun install runs husky's prepare, which points the checkout's hooks at the developer pre-commit hook; a
-// dropped HUSKY=0 shows up a week later, when the next schedule's commit fails the hook on a runner without uv.
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -17,7 +15,6 @@ interface Step {
 }
 
 interface Job {
-  env?: Record<string, unknown>;
   steps: Step[];
 }
 
@@ -35,8 +32,4 @@ test("refresh-upstream pushes its PR with the fleet PAT, never github.token, as 
     expect.objectContaining({ token: TOKEN, committer: SIGNATURE, author: SIGNATURE }),
   ]);
   expect(source).not.toContain("github.token");
-});
-
-test("refresh-upstream commits under HUSKY=0: the developer pre-commit hook never judges the pin bump on the runner", () => {
-  expect(refresh.env).toEqual(expect.objectContaining({ HUSKY: "0" }));
 });

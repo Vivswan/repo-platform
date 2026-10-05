@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
+// The developer setup: every package's dependencies, then the git hooks. The hooks are installed here and not by a
+// package.json `prepare`, so a runner's `bun install` (refresh-upstream.yml commits on one) leaves core.hooksPath alone.
 // --check is the pre-commit hook's form (check:static): a hook only checks and fails, and an install is not a check
-// (docs/fleet-guidelines.md, "Pre-commit hooks only check").
+// (docs/fleet-guidelines.md, "Pre-commit hooks only check"); it asks for node_modules, never for the hooks.
 //
 // Usage: bun scripts/bootstrap.ts [--check]
 
@@ -52,7 +54,7 @@ function fail(code: 1 | 2, message: string): 1 | 2 {
   return code;
 }
 
-function main(argv: string[]): number {
+async function main(argv: string[]): Promise<number> {
   const unknown = argv.find((arg) => arg !== "--check");
   if (unknown !== undefined) return fail(2, `unknown argument '${unknown}'`);
   const mismatch = runtimeMismatch(
@@ -70,7 +72,14 @@ function main(argv: string[]): number {
     console.log(`bootstrap: bun install --frozen-lockfile in ${dir}`);
     must(["bun", "install", "--frozen-lockfile", "--silent"], { cwd: join(REPO_ROOT, dir) });
   }
+  // husky is one of the packages the loop above installs, so it is loaded only now. It resolves `.git` and `.husky`
+  // against the working directory and hands a refusal back as its return value rather than throwing.
+  const { default: husky } = await import("husky");
+  process.chdir(REPO_ROOT);
+  const refused = husky();
+  if (refused !== "") return fail(1, refused.trim());
+  console.log("bootstrap: git hooks installed (core.hooksPath .husky/_)");
   return 0;
 }
 
-if (import.meta.main) process.exit(main(process.argv.slice(2)));
+if (import.meta.main) process.exit(await main(process.argv.slice(2)));
