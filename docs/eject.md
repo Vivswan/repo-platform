@@ -33,7 +33,7 @@ Leaving the fleet means revoking the fleet token's write access to the repo: rem
    | Part of ci.yml | What to do |
    |---|---|
    | the jobs you want | copy them out of `fleet-ci.yml` into ci.yml (the composite actions they call stay public), or write your own |
-   | the copied `plan`, `validate`, and `managed-files` steps | drop them: they read the registration you deleted |
+   | the copied `plan` and `validate` steps | drop them: they read the registration you deleted |
    | every copied step's condition | remove `steps.plan.outcome == 'success' &&` |
    | every copied job's `needs` list | remove `standard-checks` |
    | each `steps.plan.outputs.*` and `needs.standard-checks.outputs.*` condition and value | replace with your repo's literals (actionlint reports a read of the deleted step) |

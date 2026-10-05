@@ -1,4 +1,5 @@
-// The report step never fails, so a blocking verdict is readable in the PR conversation before the caller fails the job.
+// The report step fails on a blocking verdict only after writing the comment body and the `report` output, so the
+// sticky comment posts on !cancelled() before the job turns red.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -78,6 +79,7 @@ interface Scenario {
 interface Outcome {
   runExit: number | null;
   verdict: Integrity | null;
+  reportExit: number;
   outputs: string;
   summary: string;
   comment: string;
@@ -157,10 +159,10 @@ function play(scenario: Scenario): Outcome {
       RUN_URL,
     },
   });
-  expect(report.exitCode).toBe(0);
   return {
     runExit,
     verdict: existsSync(verdictFile) ? (JSON.parse(read(verdictFile)) as Integrity) : null,
+    reportExit: report.exitCode,
     outputs: read(outputs),
     summary: read(summary),
     comment: read(comment),
@@ -172,8 +174,8 @@ function play(scenario: Scenario): Outcome {
 const notJudged = (text: string) =>
   `${HEADING}Not judged: ${text}. See the [run log](${RUN_URL}). ${FAILS}\n`;
 const PASSED = `${HEADING}Passed - this repository is what repo-platform writes at the commit it was synced with.\n`;
-const BLOCKED = `integrity=failure\nreport=${REPORT.post}\n`;
-const CLEAN = `integrity=success\nreport=${REPORT.remove}\n`;
+const BLOCKED = { reportExit: 1, outputs: `report=${REPORT.post}\n` };
+const CLEAN = { reportExit: 0, outputs: `report=${REPORT.remove}\n` };
 /** The one interface between the action at stable and every recorded commit's check.ts. */
 const CHECK_ARGV = (checkout: string) => [
   "--target",
@@ -205,7 +207,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
     env: Record<string, string>;
     runExit: number;
     verdict: Integrity;
-    outputs: string;
+    gate: typeof BLOCKED;
     comment: string;
   }>([
     {
@@ -213,7 +215,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: {},
       runExit: 0,
       verdict: { kind: "clean" },
-      outputs: CLEAN,
+      gate: CLEAN,
       comment: PASSED,
     },
     {
@@ -221,7 +223,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: { CHECK_EXIT: "1", CHECK_STDOUT: DIFF },
       runExit: 1,
       verdict: { kind: "findings", findings: checkSection(DIFF) },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: `${HEADING}${checkSection(DIFF)}\n\n${FAILS}\n`,
     },
     {
@@ -229,7 +231,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: { CHECK_EXIT: "2", CHECK_STDOUT: REFUSED },
       runExit: 1,
       verdict: { kind: "findings", findings: checkSection(REFUSED, "") },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: `${HEADING}${checkSection(REFUSED, "")}\n\n${FAILS}\n`,
     },
     {
@@ -237,7 +239,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: { FAKE_EXIT: "1", FAKE_FINDINGS: `${HYGIENE}\n` },
       runExit: 1,
       verdict: { kind: "findings", findings: HYGIENE },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: `${HEADING}${HYGIENE}\n\n${FAILS}\n`,
     },
     {
@@ -245,7 +247,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: { CHECK_EXIT: "1", CHECK_STDOUT: DIFF, FAKE_EXIT: "1", FAKE_FINDINGS: `${HYGIENE}\n` },
       runExit: 1,
       verdict: { kind: "findings", findings: `${checkSection(DIFF)}\n\n${HYGIENE}` },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: `${HEADING}${checkSection(DIFF)}\n\n${HYGIENE}\n\n${FAILS}\n`,
     },
     {
@@ -256,7 +258,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
         kind: "not-judged",
         reason: `repo-platform's check at ${SHORT} ended without a verdict (error: Cannot find module 'yaml')`,
       },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: notJudged(
         `repo-platform's check at ${SHORT} ended without a verdict (error: Cannot find module 'yaml')`,
       ),
@@ -269,7 +271,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
         kind: "not-judged",
         reason: `repo-platform's check at ${SHORT} ended without a verdict (died on SIGKILL)`,
       },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: notJudged(
         `repo-platform's check at ${SHORT} ended without a verdict (died on SIGKILL)`,
       ),
@@ -279,7 +281,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: { CHECK_EXIT: "1", CHECK_STDOUT: DIFF, FAKE_EXIT: "1" },
       runExit: 1,
       verdict: { kind: "not-judged", reason: "the validator exited 1 without reporting a finding" },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: notJudged("the validator exited 1 without reporting a finding"),
     },
     {
@@ -287,7 +289,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: { FAKE_FINDINGS: "- x\n" },
       runExit: 1,
       verdict: { kind: "not-judged", reason: "the validator exited 0 yet reported findings" },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: notJudged("the validator exited 0 yet reported findings"),
     },
     {
@@ -295,7 +297,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: { FAKE_EXIT: "2", FAKE_SKIP_REPORT: "1" },
       runExit: 1,
       verdict: { kind: "not-judged", reason: "the validator exited 2 before reporting" },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: notJudged("the validator exited 2 before reporting"),
     },
     {
@@ -303,15 +305,15 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       env: { FAKE_SIGNAL: "SIGKILL" },
       runExit: 1,
       verdict: { kind: "not-judged", reason: "the validator died on SIGKILL" },
-      outputs: BLOCKED,
+      gate: BLOCKED,
       comment: notJudged("the validator died on SIGKILL"),
     },
-  ])("$reason", ({ env, runExit, verdict, outputs, comment }) => {
+  ])("$reason", ({ env, runExit, verdict, gate, comment }) => {
     const outcome = play({ env });
     expect(outcome).toEqual({
       runExit,
       verdict,
-      outputs,
+      ...gate,
       summary: `${NO_TAG}${outcome.comment}`,
       comment,
       checkArgv: CHECK_ARGV(outcome.checkout),
@@ -361,7 +363,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
     expect(outcome).toEqual({
       runExit: 1,
       verdict: { kind: "not-judged", reason: text },
-      outputs: BLOCKED,
+      ...BLOCKED,
       summary: notJudged(text),
       comment: notJudged(text),
       checkArgv: null,
@@ -389,7 +391,11 @@ describe("the recorded commit's check and the hygiene checks reach the report as
     },
   ])("the report alone fails closed on $reason", ({ scenario, text }) => {
     const outcome = play(scenario);
-    expect([outcome.outputs, outcome.summary]).toEqual([BLOCKED, notJudged(text)]);
+    expect([outcome.reportExit, outcome.outputs, outcome.summary]).toEqual([
+      BLOCKED.reportExit,
+      BLOCKED.outputs,
+      notJudged(text),
+    ]);
   });
 });
 
