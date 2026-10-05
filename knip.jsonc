@@ -14,9 +14,7 @@
         "migrations/**/*.ts",
         "tests/**/*.ts"
       ],
-      "project": ["**/*.{ts,mts}"],
-      // Local-only tools behind `command -v` guards in package.json scripts.
-      "ignoreBinaries": ["actionlint", "gitleaks", "uvx"]
+      "project": ["**/*.{ts,mts}"]
     },
     "actions/*": {
       // Action entrypoints run by path from action.yml, at the action root.
