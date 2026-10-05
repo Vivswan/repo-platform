@@ -18,14 +18,9 @@ import { addMask, fail, requireEnv } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
 import { tokenUrl } from "../shared/token_url.ts";
 
-/** A row's identity as the public matrix carries it: an HMAC of the slug under the fleet token and
- *  the run id. Without the token it names nothing, and the same repository keys differently in
- *  every run, so a private row rides the matrix and the step env unnamed.
- *
- *  The runner drops a job output that carries a masked value. The bare-name mask starts at
- *  shared/mask.ts's four characters, and the slug carries `/`, which the matrix
- *  never does, so the digest rides in three-character groups behind a separator no slug, URL, or
- *  base64 spelling of one contains.
+/** The runner drops a job output that carries a masked value: shared/mask.ts masks a bare name from four characters, and the
+ *  slug carries `/`, which the matrix never does, so the digest rides in three-character groups behind `~`, which no slug, URL,
+ *  or base64 spelling of one contains.
  *    private repository `beef`, raw digest `...becbeef8c...`  -> the whole matrix dropped, every row red */
 export function rowKeyOf(pat: string, runId: string): (repo: string) => string {
   return (repo) =>

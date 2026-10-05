@@ -116,9 +116,7 @@ jobs:
         id: plan
         run: bun .github/scripts/sync/verdict.ts plan
 
-  # One job per matrix row: an index for the job name, which never carries a repository name, and
-  # the plan's opaque key for the resolver. The `include` word lives here, not in the plan's output:
-  # the runner drops a job output that spells a masked name (sync/resolve_row.ts).
+  # The runner drops a job output that spells a masked name (sync/resolve_row.ts), so the `include` word lives here, not in the plan's output.
   # The target checkout and the writer continue on error so deliver.ts can
   # file the failure in the target; the job is red only before that point.
   sync:
