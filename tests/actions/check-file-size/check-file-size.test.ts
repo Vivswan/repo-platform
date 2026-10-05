@@ -316,6 +316,12 @@ describe("judgeFile line width", () => {
       [["hard", 1, 293, 256]],
     ],
     [
+      "a warn-wide line that is one assigned string literal warns: the one-literal exemption is gone",
+      "f.ts",
+      `const x = "${"a ".repeat(115)}";\n`,
+      [["warn", 1, 243, WARN.width]],
+    ],
+    [
       "an unmatched BEGIN GENERATED fences no width either",
       "f.ts",
       `// BEGIN GENERATED: x\n${wide(300)}\n`,
