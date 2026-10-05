@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -9,6 +9,8 @@ import {
 import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
+import type { LoopbackServer } from "../shared/loopback_server";
+import { spawnPushProbeServer } from "../shared/push_probe_server";
 import { tempDirs } from "../shared/temp_dir";
 
 const RUN_ID = "4242";
@@ -18,8 +20,8 @@ const outputFor = (rows: { repo: string; private: boolean }[]) =>
 
 const temp = tempDirs();
 
-// End-to-end harness for the sync fan-out selector against stub gh and curl on PATH (the bounds rationale is
-// select_settings_repos.test.ts's). The personas carry the facts the stubs cannot show:
+// End-to-end harness for the sync fan-out selector against a stub gh on PATH and a loopback push advertisement (the bounds
+// rationale is select_settings_repos.test.ts's). The personas carry the facts the stubs cannot show:
 //   private ones                  -> never reach the public log: skips counted, the rows file alone carries their slugs
 //   locked (403), ungranted (404) -> the push advertisement's "no grant" answers (401 has no persona): a notice each, never a retry or a failure
 //   deadprobe (500)               -> a transport answer fails the plan, so it is admitted only in the row expecting that
@@ -41,8 +43,9 @@ describe("select_sync_repos.ts", () => {
   const DEADPROBE = { repo: "Vivswan/deadprobe", private: false };
   const HIDDEN_NOMODS = { repo: "Vivswan/hidden-nomods", private: true };
   const BADLIST = { repo: "Vivswan/badlist", private: false };
+  let probes: LoopbackServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     mkdirSync(bin);
     writeFileSync(
       join(bin, "gh"),
@@ -77,26 +80,18 @@ describe("select_sync_repos.ts", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
-    writeFileSync(
-      join(bin, "curl"),
-      [
-        "#!/usr/bin/env bash",
-        'while [ "$#" -gt 1 ]; do shift; done',
-        'case "$1" in',
-        '  *"/Vivswan/hidden-locked.git/"*|*"/Vivswan/locked.git/"*) printf 403 ;;',
-        '  *"/Vivswan/ungranted.git/"*) printf 404 ;;',
-        '  *"/Vivswan/deadprobe.git/"*) printf 500 ;;',
-        "  *) printf 200 ;;",
-        "esac",
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
-    );
+    probes = await spawnPushProbeServer("stub-token", {
+      "Vivswan/hidden-locked": [403],
+      "Vivswan/locked": [403],
+      "Vivswan/ungranted": [404],
+      "Vivswan/deadprobe": [500],
+    });
 
     // The fixture root stands in for the checked-out repo (the script's
     // cwd); nothing in it is read.
     mkdirSync(fixture, { recursive: true });
   });
+  afterAll(() => probes.stop());
 
   interface Run {
     exitCode: number;
@@ -140,6 +135,7 @@ describe("select_sync_repos.ts", () => {
         GITHUB_EVENT_PATH: "",
         GITHUB_RUN_ID: RUN_ID,
         RUNNER_TEMP: join(work, "temp"),
+        GITHUB_SERVER_URL: `${probes.host}/${name}`,
         GITHUB_OUTPUT: outputFile,
         ...env,
       },

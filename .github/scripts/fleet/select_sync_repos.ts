@@ -76,7 +76,7 @@ for (const entry of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) 
   const slug = entry.repo;
   const display = entry.private ? PRIVATE_DISPLAY : slug;
   if (!scopeSelects(scope, slug, entry.private)) continue;
-  const probeCode = pushProbeStatus(slug, pat);
+  const probeCode = await pushProbeStatus(slug, pat);
   if (probeCode === 401 || probeCode === 403 || probeCode === 404) {
     notice(pushProbeSkipNotice(display));
     continue;
