@@ -19,6 +19,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`, and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)) |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
+| [The boundary repairs or refuses](#the-boundary-repairs-or-refuses) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
 | [Action and workflow descriptions](#action-and-workflow-descriptions) | `tests/actions/action_metadata.test.ts` in repo-platform (no expression delimiter); review for the shape |
 | [Pre-commit hooks only check](#pre-commit-hooks-only-check) | review |
@@ -213,6 +214,16 @@ if [ -f x ]; then cat x; fi
 
 - **A file the platform stops writing** leaves `files.yml`, and every target's next sync retires the recorded file ([platform/sync/writer.md](platform/sync/writer.md#retirement)).
 - **A transition the sync cannot carry by itself** is one rung in `migrations/`, the only home for transitional code.
+
+**Enforced by:** review.
+
+## The boundary repairs or refuses
+
+**Rule:** malformed input or state is resolved once, where it enters. When one unambiguous repair exists, apply it, continue, and report it where a user would want to know. When none exists, refuse there. Code past the boundary trusts what it receives. Nothing fails later on what the boundary could have repaired or refused. Nothing bends silently.
+
+**Why:** refusing what one repair would fix stops a repository for nothing. A defect carried past the boundary fails a later step far from its cause.
+
+**How:** a settings parser that drops a duplicate or empty entry and continues is right. Turning that drop into a refusal would be wrong. The comment on a healing step states the rule in one line and does not argue for it ([short comments](#short-comments)). A retired shape is not malformed input: it is a migration rung ([no backwards-compatibility code](#no-backwards-compatibility-code)).
 
 **Enforced by:** review.
 
