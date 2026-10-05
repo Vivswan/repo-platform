@@ -50,6 +50,6 @@ test("the test renderer installs every markdown rule config.mts installs, in the
   const helper = installedRules(
     readFileSync(join(import.meta.dir, "vitepress_renderer.ts"), "utf8"),
   );
-  expect(config.length).toBeGreaterThan(4);
+  expect(config).toContain("tableWrapRule");
   expect(helper).toEqual(config);
 });

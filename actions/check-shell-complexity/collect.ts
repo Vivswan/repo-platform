@@ -138,7 +138,7 @@ export function collectFile(relPath: string, text: string): Collected {
   }
 }
 
-/** A hook or tool script with no extension (`.husky/pre-commit`, `.profile`); its shebang names the shell. */
+/** A hook or tool script with no extension (`.githooks/pre-commit`, `.profile`); its shebang names the shell. */
 export function isExtensionless(relPath: string): boolean {
   return basename(relPath).lastIndexOf(".") <= 0;
 }

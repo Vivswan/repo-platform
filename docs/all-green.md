@@ -78,13 +78,13 @@ The jobs beside them gate nothing:
 
 - **The checks every repository runs** are the steps of one `standard-checks` job, because GitHub bills a job a rounded-up minute.
 
-- **Each check step** runs under `!cancelled()` once the plan resolved: one failure never hides another, a cancelled run stops them, and a failed plan runs none. The judge step last ([actions/judge-checks](../actions/judge-checks/action.yml)) fails the job naming every failed check in the log and step summary; a step that stood down is never a failure.
+- **Each check step** runs under `!cancelled()` once the plan resolved: one failure never hides another, a cancelled run stops them, and a failed plan runs none. Each step fails in place, and the job's page names the failed step; a step that stood down is never a failure.
 
 | Step | Runs on | Notes |
 | --- | --- | --- |
-| `plan` | every event, the schedule included | a failed plan skips every check step (the judge still runs and names it); its outputs gate knip and every job beside |
+| `plan` | every event, the schedule included | a failed plan fails the job and skips every check step; its outputs gate knip and every job beside |
 | `validate-managed-files` | every push and pull request | its report step fails in place on anything but a clean verdict; the sticky-comment steps after it run on `!cancelled()` |
-| `typography`, `file-size`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps)) |
+| `typography`, `file-size`, `shell-complexity`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps), [shell complexity](fleet-guidelines.md#shell-is-a-straight-line-of-commands)) |
 | `zizmor` | every push and pull request | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
 | `trivy` | every push and pull request | the blocking half of the [security scans](modules/security-scans.md) |
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |

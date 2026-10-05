@@ -92,8 +92,8 @@
 
 /* ---------- the full-size view ---------- */
 
-/* reka-ui's Dialog content, fixed over the nav (30) and the sidebar (60) as
- * the launcher's is; reka locks the page's scroll while it is open. Panzoom
+/* reka-ui's Dialog content, fixed over the nav (30) and the sidebar (60);
+ * reka locks the page's scroll while it is open. Panzoom
  * (mermaid-zoom-view.ts) owns the canvas transform and the stage's cursor,
  * overflow and touch-action. */
 .fleet-mermaid-view {

@@ -32,11 +32,11 @@ repo-platform: Standards files, CI, and settings for Vivswan's repositories, pus
 <!-- Add project-specific instructions below the END marker; they are this repository's own and survive every sync. -->
 <!-- END REPO-PLATFORM MANAGED -->
 
-Code is the source of truth; this file holds only what the code cannot say.
-
 ### What this is
 
-repo-platform manages standards files, CI, and settings across the owner's repositories: a file writer (`files.yml` + `files/`), reusable workflows, and composite actions, delivered to the fleet from the moving `stable` tag, which names a green main commit. Only this repository pushes to the fleet; managed repositories hold no sync workflow and no sync secret. It is a sync target of itself: the writer keeps its root copies of the files it ships, and the paths its `.repo-platform.yml` excepts (its own `ci.yml` among them) are its own.
+- repo-platform manages standards files, CI, and settings across the owner's repositories: a file writer (`files.yml` + `files/`), reusable workflows, and composite actions, delivered to the fleet from the moving `stable` tag, which names a green main commit.
+- Only this repository pushes to the fleet; managed repositories hold no sync workflow and no sync secret.
+- It is a sync target of itself: the writer keeps its root copies of the files it ships, and the paths its `.repo-platform.yml` excepts (its own `ci.yml` among them) are its own.
 
 ### Principles
 
@@ -49,7 +49,7 @@ repo-platform manages standards files, CI, and settings across the owner's repos
 
 ### Working on this repository
 
-- `bun run bootstrap` is the developer setup: every package's dependencies, then the git hooks under `.husky/`. A bare `bun install` installs no hook.
+- `bun run bootstrap` is the developer setup: every package's dependencies, then `core.hooksPath` to the tracked `.githooks/`. A bare `bun install` sets no hook.
 
 ### Decisions to keep
 

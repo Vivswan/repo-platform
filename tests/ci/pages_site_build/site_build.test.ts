@@ -232,7 +232,7 @@ describe("the theme in the built pages", () => {
   });
 
   test("hands the landing's other-version links to the browser and routes the tier's own pages", () => {
-    // The guard judges the links the build EMITTED (the facts card's versions, the launcher's first page row)
+    // The guard judges the links the build EMITTED (the facts card's versions, the sidebar's first page row)
     // under each tier's base, as the client does: a version link the router served itself was the SPA's 404
     // until a reload.
     const verdicts = (rel: string, base: string) => {
@@ -244,7 +244,7 @@ describe("the theme in the built pages", () => {
       const guard = tierRouteGuard(base, roots, { here: () => base, leave: (to) => left.push(to) });
       const links = [
         ...hrefs(html, ".fleet-facts-items a"),
-        ...hrefs(html, "a.fleet-launcher-link").slice(0, 1),
+        ...hrefs(html, ".VPSidebar a.link").slice(1, 2),
       ];
       return { routed: links.filter((href) => guard(href) === undefined), left };
     };
@@ -318,34 +318,25 @@ describe("the theme in the built pages", () => {
     expect(latestAssets).toContain(".fleet-mermaid{");
   });
 
-  test("lists in the launcher exactly the pages of each tier's docs tree, root pages one group each and deeper pages by folder, keeps the landing's own table as a table, and orders the sidebar by landing, rank, title, directory", () => {
-    // The launcher's rows come from the build's page index, never from the landing page: the fixture README's link
-    // table names setup.md alone at every tier, yet latest lists the HEAD-only pages and the root tier, built from
-    // v0.2.0's tree without them, lists them nowhere. The unit tests pin the model and the order over hand-written
-    // input; the rendered group titles, the panel's seat between the intro and the first section, and the sidebar
-    // have no other home. The include roots sit among the directories under their title-cased mounts.
-    const groupTitles = (rel: string) =>
-      texts(readSite(site, `${rel}index.html`), ".fleet-launcher-group-title");
-    expect(groupTitles("docs/latest/")).toEqual([
-      "Zulu",
-      "Delta",
-      "Alerts",
-      "Bravo",
-      "Setup",
-      "Guide",
-      "Skills",
-      "Skills/Agents/One",
-      "Skills/Alpha",
-      "Skills/Beta",
-      "Skills/Gamma",
-    ]);
-    expect(groupTitles("docs/")).toEqual(["Alerts", "Setup", "Guide", "Skills/Alpha"]);
-    expect(texts(latestIndex, ".fleet-launcher-label")).not.toContain("Set things up");
+  test("carries VitePress's search on every page with one index per tier built from that tier's own tree, keeps the landing's own table as a table, and orders the sidebar by landing, rank, title, directory", () => {
+    // The search button and the MiniSearch index are VitePress's, emitted under the action's build topology (a
+    // build root with no package.json, the action's node_modules behind a symlink); a vitepress bump or a root
+    // change that dropped either would leave every site without search while the build stayed green. The index
+    // is each tier's own: latest holds a HEAD-only page's prose and the root tier, built from v0.2.0's tree, does
+    // not. The unit tests pin the sidebar's order over hand-written input; the rendered sidebar and the landing's
+    // table have no other home. The include roots sit among the directories under their title-cased mounts.
+    const searchIndex = (rel: string) => {
+      const chunks = join(site, rel, "assets", "chunks");
+      const names = readdirSync(chunks).filter((name) => /^@localSearchIndexroot\./.test(name));
+      expect(names).toHaveLength(1);
+      return readFileSync(join(chunks, names[0]), "utf-8").toLowerCase();
+    };
+    expect(searchIndex("docs/latest/")).toContain("ranked");
+    expect(searchIndex("docs/")).not.toContain("ranked");
+    for (const page of [latestIndex, readSite(site, "docs/latest/setup.html")]) {
+      expect(select(page, "#local-search button.DocSearch-Button")).toHaveLength(1);
+    }
     expect(texts(latestIndex, ".vp-doc td")).toContain("Set things up");
-    expect(latestIndex).toMatch(
-      /<\/p>\s*<section[^>]*fleet-launcher-mode-panel[^>]*>[\s\S]*?<\/section>\s*<h2 id="goals"/,
-    );
-    expect(readSite(site, "docs/latest/setup.html")).toContain('class="fleet-launcher-button"');
     expect(texts(latestIndex, ".VPSidebar .text")).toEqual([
       "Fixture",
       "Basics",
@@ -448,11 +439,12 @@ describe("include roots inside the docs mount", () => {
     expect(readSite(site, "docs/latest/skills/index.html")).toContain('class="fleet-facts');
   });
 
-  test("serves the include pages at their directory URLs in the launcher's index, and links across the mounts in both directions", () => {
-    // The sidebar carries the same URL, so the index is read alone. The skill links the agent and the agent the
-    // skill in repository space; both resolve to the staged pages.
-    expect(latestAssets).toContain('"url":"/fixture-repo/docs/latest/skills/beta/"');
-    expect(latestAssets).not.toContain("skills/beta/SKILL.html");
+  test("serves the include pages at their directory URLs in the sidebar, and links across the mounts in both directions", () => {
+    // The sidebar is where the build spells an include page's URL for the reader. The skill links the agent and
+    // the agent the skill in repository space; both resolve to the staged pages.
+    const sidebarLinks = hrefs(latestIndex, ".VPSidebar a.link");
+    expect(sidebarLinks).toContain("/fixture-repo/docs/latest/skills/beta/");
+    expect(sidebarLinks.filter((href) => href.includes("skills/beta/SKILL"))).toEqual([]);
     const skill = readSite(site, "docs/latest/skills/alpha/index.html");
     const agent = readSite(site, "docs/latest/skills/agents/one/index.html");
     expect(hrefs(skill, ".vp-doc a")).toContain("./../agents/one/");

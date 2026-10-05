@@ -1,8 +1,8 @@
 // fleet-ci.yml is the fleet's gate-job home; the yaml is the source and the diff its review, so only what a green run cannot
 // show is pinned here: GitHub's step rule (a bare step implies success(), so a failed check would hide every later one), the
-// judge fed the job's own steps context (GitHub resolves an unpassed input to '' with no error), the schedule census the yaml
-// cannot express (the skeleton's `ci` caller is unconditional, so a step without a schedule clause runs nightly fleet-wide),
-// the output chain GitHub resolves to '' without an error, and two gates whose wrong spelling stays green on every run.
+// schedule census the yaml cannot express (the skeleton's `ci` caller is unconditional, so a step without a schedule clause
+// runs nightly fleet-wide), the output chain GitHub resolves to '' without an error, and two gates whose wrong spelling stays
+// green on every run.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
@@ -46,9 +46,9 @@ const clausesOf = (condition: string | undefined) =>
 
 describe("fleet-ci.yml", () => {
   // A step or job whose condition is not !cancelled() or always() is skipped by an earlier failure (a bare one implies
-  // success(), and so does a `&& success()` appended anywhere), so one red check would hide every later check, every job
-  // beside, and the judge; continue-on-error fails open instead. The checkout and the plan are the two bare steps:
-  // nothing after a failed plan may run, and the judge names the plan.
+  // success(), and so does a `&& success()` appended anywhere), so one red check would hide every later check and every job
+  // beside; continue-on-error fails open instead. The checkout and the plan are the two bare steps: nothing after a failed
+  // plan may run, and the plan's own red names it.
   // GitHub reads function names case-insensitively and allows blanks inside the parentheses.
   const STATUS_FUNCTION = /\b(success|failure|cancelled|always)\s*\(\s*\)/i;
   const independence = (condition: string | undefined) => {
@@ -57,10 +57,9 @@ describe("fleet-ci.yml", () => {
   };
   const INDEPENDENT = { first: "!cancelled()", laterStatusFunctions: [] };
 
-  test("a failing check still runs every later check, every job beside, and the judge; none fails open", () => {
-    const judge = checkSteps.at(-1);
+  test("a failing check still runs every later check and every job beside; none fails open", () => {
     const bare = checkSteps.slice(0, 2);
-    const checks = checkSteps.slice(2, -1);
+    const checks = checkSteps.slice(2);
     expect(checks.length).toBeGreaterThan(5);
     expect(bare.map((step) => [step.id, step.if, step["continue-on-error"]])).toEqual([
       ["checkout", undefined, undefined],
@@ -80,13 +79,6 @@ describe("fleet-ci.yml", () => {
     expect(beside.map(([name, job]) => ({ job: name, ...independence(job.if) }))).toEqual(
       beside.map(([name]) => ({ job: name, ...INDEPENDENT })),
     );
-    // The judge sees only its own steps as a composite, so the caller hands it the job's context; fed '' it would judge
-    // nothing, and its action refuses that rather than passing.
-    expect({ if: judge?.if, uses: judge?.uses, with: judge?.with }).toEqual({
-      if: "always()",
-      uses: `${PLATFORM_SLUG}/actions/judge-checks@stable`,
-      with: { steps: "${{ toJSON(steps) }}" },
-    });
   });
 
   // The merge ref GitHub checks out by default already contains main's tip, so the freshness check would pass for every
@@ -104,10 +96,10 @@ describe("fleet-ci.yml", () => {
     ]);
   });
 
-  // Which steps and jobs a scheduled run may reach: the checkout, the plan, the judge, and CodeQL on its weekly day (the
-  // nightly security scan rides fleet-nightly.yml). Every other step excludes the schedule outright or gates on the
-  // success of a step that does, and every other job's condition excludes it (the skip clause, or a PR-only guard), so a
-  // new step or job must take a side.
+  // Which steps and jobs a scheduled run may reach: the checkout, the plan, and CodeQL on its weekly day (the nightly
+  // security scan rides fleet-nightly.yml). Every other step excludes the schedule outright or gates on the success of a
+  // step that does, and every other job's condition excludes it (the skip clause, or a PR-only guard), so a new step or
+  // job must take a side.
   const SKIP_ON_SCHEDULE = "github.event_name != 'schedule'";
   const GATED_ON = /^steps\.([\w-]+)\.outcome == 'success'$/;
 
@@ -127,7 +119,7 @@ describe("fleet-ci.yml", () => {
       }
     }
     const reachable = checkSteps.filter((step) => !stoodDown.has(label(step))).map(label);
-    expect(reachable).toEqual(["checkout", "plan", "Judge the checks"]);
+    expect(reachable).toEqual(["checkout", "plan"]);
 
     const SCHEDULE_RUNS = new Set([CHECKS_JOB, "codeql"]);
     for (const [name, job] of Object.entries(fleetCi.jobs)) {

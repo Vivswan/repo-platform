@@ -13,12 +13,14 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Pinned actions](#pinned-actions) | pinact and `tests/workflows/delivery_pins.test.ts` in repo-platform (landing); zizmor in every fleet push and PR run; Dependabot bumps the pins |
 | [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` step; the settings override layer (squash-only); review for the type |
 | [Plain ASCII punctuation](#plain-ascii-punctuation) | the `typography` step |
-| [Shell is a straight line of commands](#shell-is-a-straight-line-of-commands) | the `shell-complexity` job of repo-platform's ci.yml; the fleet's `standard-checks` step is staged |
+| [Shell is a straight line of commands](#shell-is-a-straight-line-of-commands) | the `shell-complexity` step; repo-platform's own `shell-complexity` job judges its sync templates written |
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | the managed files check; the writer's starter rule |
 | [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
+| [AGENTS.md keeps what the skills do not](#agentsmd-keeps-what-the-skills-do-not) | review |
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`, and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)) |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
+| [The boundary repairs or refuses](#the-boundary-repairs-or-refuses) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
 | [Action and workflow descriptions](#action-and-workflow-descriptions) | `tests/actions/action_metadata.test.ts` in repo-platform (no expression delimiter); review for the shape |
 | [Pre-commit hooks only check](#pre-commit-hooks-only-check) | review |
@@ -152,7 +154,7 @@ if [ -f x ]; then cat x; fi
 - **Exempt:** a block that must stay shell goes in `.shell-complexity-allow.local` as `path # reason`, the reason mandatory; an entry whose file has no refused construct left fails as stale.
 - **Skipped and counted:** a file with the managed header (repo-platform owns it), and a yaml file that does not parse (the check warns). Vendored installs and build output are never read (`node_modules`, `vendor`, `third_party`, `dist`, `build`, `.venv`), nor the directories a caller names in the action's `skip` input (repo-platform names `files`, its sync templates, judged written).
 
-**Enforced by:** today, repo-platform's own `shell-complexity` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)), over this checkout and over the fleet trees its writer lands: the templates under `files/` are judged written, never raw, with the managed files included and each finding reported against its template. The `standard-checks` step for the fleet lands in a sibling PR once every shipped template and reusable workflow is clean.
+**Enforced by:** the `shell-complexity` step of fleet-ci.yml's `standard-checks` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)). repo-platform's own `shell-complexity` job runs the same action over this checkout and over the fleet trees its writer lands: the templates under `files/` are judged written, never raw, with the managed files included and each finding reported against its template.
 
 ## Markdown prose is never hard-wrapped
 
@@ -191,6 +193,12 @@ if [ -f x ]; then cat x; fi
 
 **Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [platform/sync/writer.md](platform/sync/writer.md#classes)); the managed files check on the region.
 
+## AGENTS.md keeps what the skills do not
+
+**Rule:** AGENTS.md holds what an agent cannot learn elsewhere: the repository's CI gates, its contracts and decisions, its toolchain entry points, and the managed block. It never restates a rule an installed agent skill owns outright (PR body shape, review rounds, attribution lines, comment and test standards). A convention a skill defers to the repository (Conventional Commits) stays.
+
+**Enforced by:** review.
+
 ## Copilot review comments are advisory
 
 **Rule:** Copilot code review comments only on a defect it can demonstrate in the diff. Rejecting one is a valid outcome ([Copilot code review](settings.md#copilot-code-review) owns why): reply with the reason, then resolve the thread.
@@ -213,6 +221,24 @@ if [ -f x ]; then cat x; fi
 
 - **A file the platform stops writing** leaves `files.yml`, and every target's next sync retires the recorded file ([platform/sync/writer.md](platform/sync/writer.md#retirement)).
 - **A transition the sync cannot carry by itself** is one rung in `migrations/`, the only home for transitional code.
+
+**Enforced by:** review.
+
+## The boundary repairs or refuses
+
+**Rule:** malformed input or state is resolved once, where it enters. Ownership follows the direction of data. What the tool only reads is never its own: a malformation there is refused, naming the key and the fix. What the tool also writes may be its own: one unambiguous repair is applied, reported where a user would want to know, and the tool continues. With no repair, refuse there.
+
+**Why:** a refusal in state the tool itself writes, where one repair exists, stops a repository for nothing. A repair of a value the user declared hides their mistake and rewrites their file. A defect carried past the boundary fails a later step far from its cause.
+
+**How:** read only (a user's settings file, CLI arguments, a caller's payload): refuse. Read and written (state the tool applies, config it renders, caches, generated artifacts): heal toward the declared intent. A quoted `"true"` is refused in the user's settings file and healed in a config file the tool renders. When the direction is unclear, ask the owner.
+
+**Healing runs toward the declaration, never away from it.** A settings-apply tool heals the live settings when they drift from the user's yaml. Healing the yaml from the live settings is the forbidden direction. The comment on a healing step states the rule in one line and does not argue for it ([short comments](#short-comments)).
+
+**A tool's block inside a user's file splits by the same test.** User-supplied values in the block are the user's: a malformation is reported, naming the key and the fix, never healed. The shape is the tool's: a [schema migration](#no-backwards-compatibility-code) may rewrite the block. In a block the tool renders whole, an edit is [replaced](#split-files-the-managed-region) toward the declaration and the diff is reported. Nothing outside the block is touched.
+
+**A failure that happens on its own needs no check in front of it.** The tool's own failure is the boundary's refusal. A missing package, a stale lockfile, a version conflict, or a wrong toolchain fails the build or the gate when it happens and is fixed then. A pre-check that restates the tool's failure is deleted. A test stays for behavior the code does not enforce.
+
+The specimen: a 500-line pre-commit script comparing installed packages against the lockfile, deleted. The one case it caught that does not fail by itself is an installed version drifting from the lock. That drift is accepted. CI's fresh install is the source of truth.
 
 **Enforced by:** review.
 
@@ -275,6 +301,8 @@ description: |
 
 A hook installs nothing: no runtime, no dependencies, no tools. Setup is the repository's bootstrap command (`bun run bootstrap` here), and a hook that finds a dependency missing fails naming that command.
 
+A hook is a tracked executable file, with `core.hooksPath` naming its folder, so every checkout and worktree has it with nothing generated. A hook folder a tool generates at install time exists only where that install ran, and a fresh worktree commits unchecked.
+
 A hook runs only the checks the repository's own toolchain provides (bun here; uv in a Python repository). A check that needs another runtime or a separately installed binary, yamllint, actionlint, and gitleaks among them, is CI's: the shipped workflow runs it on every pull request and push to main, for every repository alike.
 
 **Enforced by:** review; repo-platform ships no hook.
@@ -324,7 +352,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 **Enforced by:** the `file-size` step of fleet-ci.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It reads lines and nothing else: no parser, no grammar, no runtime dependency.
 
-- **What fails:** a hard-cap finding or an allowlist defect fails the step, and the judge fails the `standard-checks` job naming it. repo-platform's own ci.yml runs the same action as its standalone `file-size` job.
+- **What fails:** a hard-cap finding or an allowlist defect fails the step, and with it the `standard-checks` job. repo-platform's own ci.yml runs the same action as its standalone `file-size` job.
 
 - **Where findings go:** the step summary is written on every outcome (findings, clean, or an error that stopped the check). Findings also go to the log annotations, and on pull requests to one sticky PR comment, deleted when the tree is clean.
 
@@ -342,7 +370,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | yamllint | standard-checks | any finding (strict) | a `# yamllint disable-line rule:<name>` comment on the line (`.yamllint` itself is managed) |
 | gitleaks | standard-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
 | typography | standard-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
-| shell-complexity | repo-platform's ci.yml today; the `standard-checks` step is staged | a refused construct or an allowlist defect | the path in the repo-owned `.shell-complexity-allow.local` with a `# reason` |
+| shell-complexity | standard-checks | a refused construct or an allowlist defect | the path in the repo-owned `.shell-complexity-allow.local` with a `# reason` |
 | file-size | standard-checks | a hard-cap finding or an allowlist defect | the path in the repo-owned `.file-size-allow.local` with a `# reason`; the comment block's marker ([short comments](#short-comments)) |
 | commit-names | standard-checks | a subject commitlint refuses under config-conventional plus one scope ([the grammar](#conventional-commits-squash-merged)) | none: reword the commit |
 | typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (keys below), or a trailing `typos: ignore` comment for a one-off |

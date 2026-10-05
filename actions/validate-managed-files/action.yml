@@ -4,7 +4,7 @@ description: |
 
   The judge is the check.ts of the commit the repository was last synced with, run from a
   clone of repo-platform the action makes under the runner's temp directory. After it, the
-  action checks the repository's YAML, conflict-marker, and release-as hygiene.
+  action checks the repository's conflict-marker and release-as hygiene.
 
   The findings are posted as one sticky PR comment plus the step summary. A missing bun fails
   the action before anything runs. Past that the report step always runs, writes the summary
