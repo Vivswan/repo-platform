@@ -281,7 +281,7 @@ A hook runs only the checks the repository's own toolchain provides (bun here; u
 
 ## File size caps
 
-**Rule:** no file over its hard line cap, and in a source, test, workflow, or shell file no line over 256 code points, comment lines included. A `//` line past the cap is a width finding whatever block it sits in.
+**Rule:** no file over its hard line cap, and no comment block over its cap. Line length is the repo-owned formatter's or linter's to judge (biome, ruff, prettier, yamllint), not this check's.
 
 The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size.ts):
 
@@ -292,7 +292,6 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | workflow | yaml under `.github/workflows/`, and any `action.yml` or `action.yaml` | 1000 lines | 800 lines |
 | shell | `.sh`, `.bash`, `.zsh` | 1000 lines | 800 lines |
 | markdown | `.md` | 1300 lines | 1040 lines |
-| line width | every kind but markdown (one source line per paragraph is the fleet rule) | 256 code points | 150 code points |
 | comment block | a run of comment-only lines (below; markdown is prose) | never fails | 10 lines; 25 for the file header |
 
 - **A comment block** is a run of consecutive lines opening with a comment prefix (`#`, `//`, `/*`, `*`, `<!--`, `--`, `;`, `%`, `{#`, `"""`, `'''`), indentation aside, whatever the file's language. The reading is by line, never by grammar.
@@ -300,7 +299,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 - **What ends a block:** a blank line or a code line. A line opening with code is code, so an inline comment after it is not a block.
 - **The file header** is the first block, when nothing but a shebang, blank lines, or a generated region precedes it.
 
-**Why:** a file past these sizes is several files wearing one name, and a line past the width is unreadable in any review pane. The caps are generous on purpose: they catch drift, not style.
+**Why:** a file past these sizes is several files wearing one name. The caps are generous on purpose: they catch drift, not style.
 
 **Exempt by construction:**
 
@@ -310,9 +309,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **Managed:** a file carrying repo-platform's managed header (the repository cannot fix it; the summary counts them).
 
-- **One token:** a line that is one whitespace-free token (a URL, a sha, an expression) is unbreakable, so it passes both width tiers. A literal assigned on the same line is two tokens and does not.
-
-**How:** split the file, wrap the line, shorten the comment. Two per-finding bypasses exist, both repo-owned and visible in the diff: the comment block's marker ([short comments](#short-comments)) and the allowlist.
+**How:** split the file, shorten the comment. Two per-finding bypasses exist, both repo-owned and visible in the diff: the comment block's marker ([short comments](#short-comments)) and the allowlist.
 
 - **A file that must stay large** goes in `.file-size-allow.local`, one `path # reason` per line (blank lines and `#` comment lines are skipped), which exempts every finding on that path in both tiers.
 

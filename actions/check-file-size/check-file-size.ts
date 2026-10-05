@@ -22,23 +22,17 @@ export type CommentScope = "header" | "block";
 
 export interface Caps {
   lines: Readonly<Record<Kind, number>>;
-  /** Maximum line width, in code points, for every kind but PROSE. */
-  width: number;
 }
 
 export const HARD: Caps = {
   lines: { source: 2000, test: 3200, workflow: 1000, shell: 1000, markdown: 1300 },
-  width: 256,
 };
 const WARN_RATIO = 0.8;
-/** The annotating tier: line caps derived from HARD so the two can never
- *  disagree; the width cap stays well under the hard one, since a long
- *  shell or yaml string is what it exists to catch. */
+/** The annotating tier: derived from HARD so the two can never disagree. */
 export const WARN: Caps = {
   lines: Object.fromEntries(
     Object.entries(HARD.lines).map(([kind, cap]) => [kind, Math.round(cap * WARN_RATIO)]),
   ) as Caps["lines"],
-  width: 150,
 };
 /** Maximum comment block length, in lines, by scope: one annotating tier,
  *  never a failure, so not derived from any hard cap. Fleet-wide, like every
@@ -47,9 +41,7 @@ export const COMMENT_CAPS: Readonly<Record<CommentScope, number>> = { block: 10,
 /** The per-block exemption, on a comment line inside the block (a comment
  *  line directly above it is part of it); the reason after it is mandatory. */
 export const COMMENT_MARKER = "comment-cap: ignore";
-/** Prose has no width cap and no comment cap: the fleet writes one source
- *  line per paragraph, so its lines are long by design, and its `#` headings
- *  are not comments. */
+/** Prose has no comment cap: its `#` headings are not comments. */
 const PROSE: Kind = "markdown";
 
 export const ALLOWLIST_FILE = ".file-size-allow.local";
@@ -130,19 +122,11 @@ export function isGenerated(text: string): boolean {
   return headerLines(text).some((line) => COMMENT_LINE.test(line) && GENERATED_HEADER.test(line));
 }
 
-/** Lines without their terminators: a final newline adds no line, and a
- *  CRLF file's `\r` is not width. */
+/** Lines without their terminators: a final newline adds no line. */
 function splitLines(text: string): string[] {
   const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
   if (lines[lines.length - 1] === "") lines.pop();
   return lines;
-}
-
-/** A line wrapping cannot fix: one whitespace-free token (a URL, a sha, a
- *  path, an expression), indentation aside. */
-export function isUnbreakable(line: string): boolean {
-  const token = line.trim();
-  return token !== "" && !/\s/.test(token);
 }
 
 function generatedRegionMask(lines: string[]): boolean[] {
@@ -234,7 +218,6 @@ interface Measured {
 /** `line` is 1-based. */
 export type Finding =
   | (FindingBase & Measured & { measure: "lines" })
-  | (FindingBase & Measured & { measure: "width"; line: number })
   | (FindingBase &
       Measured & { measure: "comment"; tier: "warn"; line: number; scope: CommentScope })
   | (FindingBase & { measure: "marker"; tier: "warn"; line: number });
@@ -255,13 +238,6 @@ export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
     findings.push({ path, kind, ...lineCount, measure: "lines", value: counted });
   }
   if (kind === PROSE) return findings;
-  lines.forEach((line, index) => {
-    if (generated[index] || isUnbreakable(line)) return;
-    const width = [...line].length;
-    const over = exceeded(width, HARD.width, WARN.width);
-    if (over === null) return;
-    findings.push({ path, kind, ...over, measure: "width", line: index + 1, value: width });
-  });
   for (const { line, length, scope, markers } of commentBlocks(lines, generated)) {
     for (const marker of markers) {
       if (!REASONED.test(marker.reason)) {
@@ -290,8 +266,6 @@ export function describe(finding: Finding): string {
   switch (finding.measure) {
     case "lines":
       return `${finding.path}: ${finding.value} lines (cap ${finding.cap} for ${finding.kind})`;
-    case "width":
-      return `${finding.path}:${finding.line}: ${finding.value} chars (cap ${finding.cap})`;
     case "comment": {
       const scope = finding.scope === "header" ? " for a header" : "";
       return `${finding.path}:${finding.line}: ${finding.value} comment lines (cap ${finding.cap}${scope})`;
@@ -305,8 +279,6 @@ function sizeCells(finding: Finding): [size: string, cap: string] {
   switch (finding.measure) {
     case "lines":
       return [`${finding.value} lines`, `${finding.cap}`];
-    case "width":
-      return [`${finding.value} chars`, `${finding.cap}`];
     case "comment": {
       const scope = finding.scope === "header" ? " (header)" : "";
       return [`${finding.value} comment lines${scope}`, `${finding.cap}`];
@@ -399,7 +371,7 @@ export function report(outcome: Outcome): string {
     }
     parts.push(
       "",
-      `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+      `Split the file, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
     );
   }
   if (managedSkipped > 0) {
@@ -408,7 +380,7 @@ export function report(outcome: Outcome): string {
   return `${parts.join("\n")}\n`;
 }
 
-const REMEDY = `Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`;
+const REMEDY = `Split the file, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`;
 
 if (import.meta.main) {
   await runCheck<Verdict>({
