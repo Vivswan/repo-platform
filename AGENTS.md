@@ -49,7 +49,7 @@ repo-platform manages standards files, CI, and settings across the owner's repos
 
 ### Working on this repository
 
-- `bun run bootstrap` is the developer setup: every package's dependencies, then the git hooks under `.husky/`. A bare `bun install` installs no hook.
+- `bun run bootstrap` is the developer setup: every package's dependencies, then `core.hooksPath` to the tracked `.githooks/`. A bare `bun install` sets no hook.
 
 ### Decisions to keep
 

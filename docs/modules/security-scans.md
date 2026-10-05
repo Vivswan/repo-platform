@@ -10,7 +10,7 @@ Every managed repository is scanned by [Trivy](https://trivy.dev) through the sk
 
 | Half | Where | Runs on | Scans | Blocking? | Findings go to |
 |---|---|---|---|---|---|
-| Blocking | the `trivy` step of [fleet-ci.yml](../../.github/workflows/fleet-ci.yml)'s `standard-checks` job | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the step fails its job, so `all-green` fails | the step log and the job's judge summary |
+| Blocking | the `trivy` step of [fleet-ci.yml](../../.github/workflows/fleet-ci.yml)'s `standard-checks` job | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the step fails its job, so `all-green` fails | the step log |
 | Nightly | the `trivy-nightly` job in [fleet-nightly.yml](../../.github/workflows/fleet-nightly.yml) | the `schedule` trigger, public repositories only | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
 
 ## The blocking half
