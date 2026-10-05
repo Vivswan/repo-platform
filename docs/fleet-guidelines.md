@@ -13,7 +13,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Pinned actions](#pinned-actions) | pinact and `tests/workflows/delivery_pins.test.ts` in repo-platform (landing); zizmor in every fleet push and PR run; Dependabot bumps the pins |
 | [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` step; the settings override layer (squash-only); review for the type |
 | [Plain ASCII punctuation](#plain-ascii-punctuation) | the `typography` step |
-| [Shell is a straight line of commands](#shell-is-a-straight-line-of-commands) | the `shell-complexity` job of repo-platform's ci.yml; the fleet's `standard-checks` step is staged |
+| [Shell is a straight line of commands](#shell-is-a-straight-line-of-commands) | the `shell-complexity` step; repo-platform's own `shell-complexity` job judges its sync templates written |
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | the managed files check; the writer's starter rule |
 | [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
@@ -152,7 +152,7 @@ if [ -f x ]; then cat x; fi
 - **Exempt:** a block that must stay shell goes in `.shell-complexity-allow.local` as `path # reason`, the reason mandatory; an entry whose file has no refused construct left fails as stale.
 - **Skipped and counted:** a file with the managed header (repo-platform owns it), and a yaml file that does not parse (the check warns). Vendored installs and build output are never read (`node_modules`, `vendor`, `third_party`, `dist`, `build`, `.venv`), nor the directories a caller names in the action's `skip` input (repo-platform names `files`, its sync templates, judged written).
 
-**Enforced by:** today, repo-platform's own `shell-complexity` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)), over this checkout and over the fleet trees its writer lands: the templates under `files/` are judged written, never raw, with the managed files included and each finding reported against its template. The `standard-checks` step for the fleet lands in a sibling PR once every shipped template and reusable workflow is clean.
+**Enforced by:** the `shell-complexity` step of fleet-ci.yml's `standard-checks` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)). repo-platform's own `shell-complexity` job runs the same action over this checkout and over the fleet trees its writer lands: the templates under `files/` are judged written, never raw, with the managed files included and each finding reported against its template.
 
 ## Markdown prose is never hard-wrapped
 
@@ -327,7 +327,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **An extension without a working grammar** (today Swift, whose prebuilt grammar keeps scanner state across files) gets no comment judgement and no literal exemption, and the step summary names it as unjudged instead of guessing at it.
 
-- **What fails:** a hard-cap finding or an allowlist defect fails the step, and the judge fails the `standard-checks` job naming it. repo-platform's own ci.yml runs the same action as its standalone `file-size` job.
+- **What fails:** a hard-cap finding or an allowlist defect fails the step, and with it the `standard-checks` job. repo-platform's own ci.yml runs the same action as its standalone `file-size` job.
 
 - **Where findings go:** the step summary is written on every outcome (findings, clean, or an error that stopped the check). Findings also go to the log annotations, and on pull requests to one sticky PR comment, deleted when the tree is clean.
 
@@ -345,7 +345,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | yamllint | standard-checks | any finding (strict) | a `# yamllint disable-line rule:<name>` comment on the line (`.yamllint` itself is managed) |
 | gitleaks | standard-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
 | typography | standard-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
-| shell-complexity | repo-platform's ci.yml today; the `standard-checks` step is staged | a refused construct or an allowlist defect | the path in the repo-owned `.shell-complexity-allow.local` with a `# reason` |
+| shell-complexity | standard-checks | a refused construct or an allowlist defect | the path in the repo-owned `.shell-complexity-allow.local` with a `# reason` |
 | file-size | standard-checks | a hard-cap finding or an allowlist defect | the path in the repo-owned `.file-size-allow.local` with a `# reason`; the comment block's marker ([short comments](#short-comments)) |
 | commit-names | standard-checks | a subject commitlint refuses under config-conventional plus one scope ([the grammar](#conventional-commits-squash-merged)) | none: reword the commit |
 | typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (keys below), or a trailing `typos: ignore` comment for a one-off |
