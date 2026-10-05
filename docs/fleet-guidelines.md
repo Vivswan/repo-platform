@@ -20,6 +20,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [AGENTS.md keeps what the skills do not](#agentsmd-keeps-what-the-skills-do-not) | review |
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`, and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)) |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
+| [The boundary repairs or refuses](#the-boundary-repairs-or-refuses) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
 | [Action and workflow descriptions](#action-and-workflow-descriptions) | `tests/actions/action_metadata.test.ts` in repo-platform (no expression delimiter); review for the shape |
 | [Pre-commit hooks only check](#pre-commit-hooks-only-check) | review |
@@ -220,6 +221,24 @@ if [ -f x ]; then cat x; fi
 
 - **A file the platform stops writing** leaves `files.yml`, and every target's next sync retires the recorded file ([platform/sync/writer.md](platform/sync/writer.md#retirement)).
 - **A transition the sync cannot carry by itself** is one rung in `migrations/`, the only home for transitional code.
+
+**Enforced by:** review.
+
+## The boundary repairs or refuses
+
+**Rule:** malformed input or state is resolved once, where it enters. Ownership follows the direction of data. What the tool only reads is never its own: a malformation there is refused, naming the key and the fix. What the tool also writes may be its own: one unambiguous repair is applied, reported where a user would want to know, and the tool continues. With no repair, refuse there.
+
+**Why:** a refusal in state the tool itself writes, where one repair exists, stops a repository for nothing. A repair of a value the user declared hides their mistake and rewrites their file. A defect carried past the boundary fails a later step far from its cause.
+
+**How:** read only (a user's settings file, CLI arguments, a caller's payload): refuse. Read and written (state the tool applies, config it renders, caches, generated artifacts): heal toward the declared intent. A quoted `"true"` is refused in the user's settings file and healed in a config file the tool renders. When the direction is unclear, ask the owner.
+
+**Healing runs toward the declaration, never away from it.** A settings-apply tool heals the live settings when they drift from the user's yaml. Healing the yaml from the live settings is the forbidden direction. The comment on a healing step states the rule in one line and does not argue for it ([short comments](#short-comments)).
+
+**A tool's block inside a user's file splits by the same test.** User-supplied values in the block are the user's: a malformation is reported, naming the key and the fix, never healed. The shape is the tool's: a [schema migration](#no-backwards-compatibility-code) may rewrite the block. In a block the tool renders whole, an edit is [replaced](#split-files-the-managed-region) toward the declaration and the diff is reported. Nothing outside the block is touched.
+
+**A failure that happens on its own needs no check in front of it.** The tool's own failure is the boundary's refusal. A missing package, a stale lockfile, a version conflict, or a wrong toolchain fails the build or the gate when it happens and is fixed then. A pre-check that restates the tool's failure is deleted. A test stays for behavior the code does not enforce.
+
+The specimen: a 500-line pre-commit script comparing installed packages against the lockfile, deleted. The one case it caught that does not fail by itself is an installed version drifting from the lock. That drift is accepted. CI's fresh install is the source of truth.
 
 **Enforced by:** review.
 
