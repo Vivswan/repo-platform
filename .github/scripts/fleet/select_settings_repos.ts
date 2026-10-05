@@ -8,7 +8,7 @@
 import { appendFileSync } from "node:fs";
 import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
-import { addMask, env, error, fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { addMask, env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../sync/writer/settings_entry.ts";
@@ -25,7 +25,6 @@ import {
   selectedLine,
 } from "./discovery.ts";
 import { moduleRoster } from "./modules.ts";
-import { supersededBy, supersededNotice } from "./newest_main.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import {
   modulesAdmit,
@@ -39,7 +38,6 @@ import {
 const pat = requireEnv("PAT");
 const owner = requireEnv("OWNER");
 const runId = requireEnv("GITHUB_RUN_ID");
-const sha = requireEnv("GITHUB_SHA");
 
 const scope = parseScope(readDispatchRepo(), new Set(moduleRoster()));
 if (scope.kind === "error") {
@@ -50,21 +48,6 @@ if (scope.kind === "error") {
 function emitPlan(targets: DiscoveredRepo[]): void {
   setOutput("count", String(targets.length));
   setOutput("matrix", JSON.stringify(matrixRows(targets, rowKeyOf(pat, runId))));
-}
-
-// Newest wins (docs/platform/settings-apply.md): a run main moved past hands the apply an empty plan and exits green; the tip's own run or
-// the nightly applies. Asked before the first fleet read, so a superseded run names nothing and spins up no row; the row's
-// resolver asks again at the write, because a re-run of failed rows reuses this plan.
-let newer: string | null;
-try {
-  newer = supersededBy(sha);
-} catch (lookFailure) {
-  fail(lookFailure instanceof Error ? lookFailure.message : String(lookFailure));
-}
-if (newer !== null) {
-  notice(supersededNotice(sha, newer));
-  emitPlan([]);
-  process.exit(0);
 }
 
 // The step summary is not covered by the runner's masker, so callers pass already-scrubbed text.

@@ -9,9 +9,8 @@ import { supersededBy, supersededNotice } from "./newest_main.ts";
 
 const sha = requireEnv("GITHUB_SHA");
 
-// Newest wins is asked at the write (docs/platform/settings-apply.md), before the listing: the plan asked too, but a re-run of failed rows
-// reuses the plan's answer, and by then a newer commit's run may have applied. No TARGET skips the apply step, so the row
-// stands down green.
+// Newest wins is asked here, at the write (docs/platform/settings-apply.md): no TARGET skips the apply step, so a
+// superseded row stands down green.
 let newer: string | null;
 try {
   newer = supersededBy(sha);

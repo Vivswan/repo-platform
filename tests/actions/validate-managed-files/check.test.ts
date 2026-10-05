@@ -236,14 +236,15 @@ describe("check.ts over a repository the sync would change", () => {
     expect(run.leftovers).toEqual([]);
   });
 
-  test("a manifest without the commit field is red on the manifest line alone", () => {
+  test("a hand-edited commit field is red: the writer's refusal as a registration note, and the manifest line", () => {
     const target = synced();
     const manifest = readFileSync(join(target, MANIFEST_NAME), "utf-8");
-    writeFileSync(join(target, MANIFEST_NAME), manifest.replace(`, "commit": "${BUILD}"`, ""));
+    writeFileSync(join(target, MANIFEST_NAME), manifest.replace(BUILD, BUILD.slice(0, 12)));
     const run = check(target);
     expect(run.exitCode).toBe(1);
     // Finding lines only: a diff's lines open with a space, +, -, or @@.
     expect(run.stdout.split("\n").filter((line) => /^[^ +@-]/.test(line))).toEqual([
+      `registration: ${MANIFEST_NAME} names no full 40-hex commit in its own entry; every existing file is judged as unrecorded`,
       `${MANIFEST_NAME}: differs from what ${BUILD.slice(0, 12)} writes`,
     ]);
   });
