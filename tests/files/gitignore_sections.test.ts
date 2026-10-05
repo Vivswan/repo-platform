@@ -39,7 +39,6 @@ function ignoredByGit(section: string, rel: string, kind: "dir" | "file"): boole
 
 test.each<[string, string, "dir" | "file", boolean]>([
   ["base", "results.sarif", "file", true],
-  ["base", ".zizmor-fleet-policy.yml", "file", true],
   ["base", "trivy_envs.txt", "file", true],
   ["base", "typos-v1.50.1-x86_64-unknown-linux-musl.tar.gz", "file", true],
   ["base", "tools/typos-v1.50.1-x86_64-unknown-linux-musl.tar.gz", "file", false],

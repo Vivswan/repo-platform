@@ -303,7 +303,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | file-size | standard-checks | a hard-cap finding or an allowlist defect | the path in the repo-owned `.file-size-allow.local` with a `# reason`; the comment block's marker ([short comments](#short-comments)) |
 | commit-names | standard-checks | a subject commitlint refuses under config-conventional plus one scope ([the grammar](#conventional-commits-squash-merged)) | none: reword the commit |
 | typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (keys below), or a trailing `typos: ignore` comment for a one-off |
-| zizmor | standard-checks | a high finding (retry rule below); code scanning shows high findings only | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it |
+| zizmor | standard-checks | a high finding, by zizmor's own exit code; code scanning shows high findings only | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it |
 | knip | standard-checks (bun repos with a package.json to install from; a repo without one stands down with a notice) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
 | semgrep | semgrep (public repos) | an ERROR finding, a fatal analysis error, or a scan that did not complete (its exit status is named) | a `// nosemgrep: <rule-id>` comment (`# nosemgrep: <rule-id>` in YAML) on the finding's line or the line above it, with the reason beside it ([security-scans.md](modules/security-scans.md#semgrep)) |
 | dependency-review | dependency-review | a vulnerable dependency at or above high | none: upgrade or drop the dependency |
@@ -315,7 +315,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **The typos one-off:** `# typos: ignore` or `// typos: ignore` at the end of the line.
 
-- **zizmor's retry:** zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt of either pass runs once more and only the retry's result counts.
+- **zizmor's two passes:** one pinned zizmor under one rendered policy, a SARIF pass for code scanning (zizmor exits 0 in SARIF mode whatever it finds) and a plain pass whose exit is the verdict.
 
 - **Trivy on the schedule:** `trivy-nightly` runs instead, public repositories only, and reports without blocking. Both scans run at HIGH and CRITICAL, so a MEDIUM or LOW finding appears nowhere.
 

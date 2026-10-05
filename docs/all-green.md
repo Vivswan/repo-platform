@@ -85,7 +85,7 @@ The jobs beside them gate nothing:
 | `plan` | every event, the schedule included | a failed plan skips every check step (the judge still runs and names it); its outputs gate knip and every job beside |
 | `validate-managed-files` | every push and pull request | the action defers its verdict so the findings comment posts first; the `managed-files` step re-raises it |
 | `typography`, `file-size`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps)) |
-| `zizmor` | every push and pull request | SARIF upload on public repositories only; its retry rule is [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
+| `zizmor` | every push and pull request | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
 | `trivy` | every push and pull request | the blocking half of the [security scans](modules/security-scans.md) |
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
 

@@ -1,6 +1,5 @@
-# The fleet's zizmor policy: actions/zizmor renders it into every managed
-# repository's workspace, filling {{github_username}} with the caller's
-# repository owner.
+# The fleet's zizmor policy: actions/zizmor renders it into the runner's
+# temp dir, filling {{github_username}} with the caller's repository owner.
 rules:
   unpinned-uses:
     config:
