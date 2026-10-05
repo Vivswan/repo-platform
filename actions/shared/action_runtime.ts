@@ -20,17 +20,36 @@ function escapeData(message: string): string {
   return message.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
 }
 
+/** A property value escapes the separators too. */
+function escapeProperty(value: string): string {
+  return escapeData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
+}
+
+/** The command line as GitHub reads it, for a caller that prints it where it wants (stderr, a captured line). */
+export function workflowCommand(
+  kind: "notice" | "warning" | "error",
+  message: string,
+  file?: string,
+  line?: number,
+): string {
+  const properties = [
+    ...(file === undefined ? [] : [`file=${escapeProperty(file)}`]),
+    ...(line === undefined ? [] : [`line=${line}`]),
+  ];
+  const where = properties.length === 0 ? "" : ` ${properties.join(",")}`;
+  return `::${kind}${where}::${escapeData(message)}`;
+}
+
 export function notice(message: string): void {
-  console.log(`::notice::${escapeData(message)}`);
+  console.log(workflowCommand("notice", message));
 }
 
 export function warning(message: string): void {
-  console.log(`::warning::${escapeData(message)}`);
+  console.log(workflowCommand("warning", message));
 }
 
-export function error(message: string, file?: string): void {
-  const where = file === undefined ? "" : ` file=${escapeData(file)}`;
-  console.log(`::error${where}::${escapeData(message)}`);
+export function error(message: string, file?: string, line?: number): void {
+  console.log(workflowCommand("error", message, file, line));
 }
 
 /** The deadline wins over the exit code: a child that exited 0 while an orphan held its pipe open still hit the deadline. */

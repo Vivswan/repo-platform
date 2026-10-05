@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
   ALLOWLIST_FILE,
   COMMENT_CAPS,
@@ -15,7 +15,6 @@ import {
   type Grammars,
   HARD,
   isGenerated,
-  isManaged,
   judgeFile,
   type Kind,
   loadGrammars,
@@ -25,8 +24,11 @@ import {
   type Tier,
   WARN,
 } from "../../../actions/check-file-size/check-file-size.ts";
+import { isManaged } from "../../../actions/shared/managed_header.ts";
 import { loadAction, stepNamed } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
+import { checkout } from "../../shared/fixture_checkout.ts";
+import { fixtureGitEnv } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -34,22 +36,6 @@ const grammars = await loadGrammars();
 const ACTION_DIR = resolve(import.meta.dir, "../../../actions/check-file-size");
 const SCRIPT = join(ACTION_DIR, "check-file-size.ts");
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
-
-function git(root: string, ...args: string[]): void {
-  const proc = boundedSpawnSync(["git", "-C", root, ...args]);
-  if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr}`);
-}
-
-function checkout(tracked: Record<string, string>, untracked: Record<string, string> = {}): string {
-  const root = temp.dir("check-file-size-");
-  git(root, "init", "-q");
-  for (const [rel, text] of Object.entries({ ...tracked, ...untracked })) {
-    mkdirSync(dirname(join(root, rel)), { recursive: true });
-    writeFileSync(join(root, rel), text);
-  }
-  git(root, "add", "-A", ...Object.keys(tracked));
-  return root;
-}
 
 const lines = (count: number): string => `${Array.from({ length: count }, () => "x").join("\n")}\n`;
 const MANAGED = "# This file is managed by Vivswan/repo-platform.\n";
@@ -1157,7 +1143,7 @@ describe("grammars", () => {
     expect(judgeFile("f.ts", "source", chatty, none).map(describeFinding)).toEqual([
       `f.ts:${2 * BLOCK + 5}: 243 chars (cap ${WARN.width})`,
     ]);
-    const root = checkout({
+    const root = checkout(temp, "check-file-size-", {
       "a.ts": chatty,
       "b.ts": lines(3),
       "c.sh": "echo x\n",
@@ -1189,6 +1175,8 @@ describe("check", () => {
 
   test("judges tracked files only; ignored, untracked, generated, managed, goldens and exempt files never count", () => {
     const root = checkout(
+      temp,
+      "check-file-size-",
       {
         ".gitignore": "ignored/\n",
         "tests/goldens/all/.github/workflows/auto.yml": `${MANAGED}${WIDE}`,
@@ -1279,7 +1267,7 @@ describe("check", () => {
       },
     ],
   ])("allowlist: %s", (_name, tree, expected) => {
-    expect(summary(checkout(tree))).toEqual(expected);
+    expect(summary(checkout(temp, "check-file-size-", tree))).toEqual(expected);
   });
 });
 
@@ -1370,7 +1358,7 @@ describe("the CLI", () => {
     writeFileSync(outputPath, "");
     const proc = boundedSpawnSync(["bun", SCRIPT, root], {
       env: {
-        ...process.env,
+        ...fixtureGitEnv(),
         REPORT_PATH: reportPath,
         GITHUB_STEP_SUMMARY: summaryPath,
         GITHUB_OUTPUT: outputPath,
@@ -1393,7 +1381,7 @@ describe("the CLI", () => {
     [
       "findings: exit 1 on the hard finding alone, ::error:: and ::warning:: lines, the table hard first, the managed count and the unjudged line, as comment and summary",
       () =>
-        checkout({
+        checkout(temp, "check-file-size-", {
           "src/big.ts": lines(hardLines),
           "src/warm.sh": wide,
           "src/chatty.ts": `x\n${"// c\n".repeat(COMMENT_CAPS.block + 1)}x\n`,
@@ -1422,7 +1410,7 @@ describe("the CLI", () => {
     [
       "warnings only, an over-cap comment among them: exit 0 with the same three sinks",
       () =>
-        checkout({
+        checkout(temp, "check-file-size-", {
           "src/warm.sh": wide,
           "src/chatty.ts": `${"// h\n".repeat(30)}x\n`,
         }),
@@ -1441,7 +1429,11 @@ describe("the CLI", () => {
     ],
     [
       "a stale allowlist entry alone: exit 1 and the comment posted with the allowlist section; read as clean, the action would delete the comment while the run fails with no table",
-      () => checkout({ "src/fine.ts": lines(3), [ALLOWLIST_FILE]: "src/fine.ts # was big\n" }),
+      () =>
+        checkout(temp, "check-file-size-", {
+          "src/fine.ts": lines(3),
+          [ALLOWLIST_FILE]: "src/fine.ts # was big\n",
+        }),
       () => ({
         exitCode: 1,
         stdout: [""],
@@ -1456,7 +1448,11 @@ describe("the CLI", () => {
     ],
     [
       "clean: exit 0, a summary, no comment body (the action deletes the comment)",
-      () => checkout({ "src/fine.ts": lines(3), "src/managed.ts": `${MANAGED}${lines(3)}` }),
+      () =>
+        checkout(temp, "check-file-size-", {
+          "src/fine.ts": lines(3),
+          "src/managed.ts": `${MANAGED}${lines(3)}`,
+        }),
       () => ({
         exitCode: 0,
         stdout: ["File size check passed (0 warning(s), 1 managed file(s) skipped)."],
