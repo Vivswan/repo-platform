@@ -25,7 +25,6 @@ import {
   type Records,
   readRecord,
   readRecords,
-  recordedCommit,
   regionMarkers,
   renderManifest,
   writeManifest,
@@ -243,10 +242,9 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
     values: placeholderValues(registration, slug, options.private, config.defaults),
     upstream: await fetchUpstream(upstreamRefs(config.files), options.upstream),
   };
-  const { records, problem } = readRecords(options.target);
+  const { records, commit: recorded, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
   const manifestBefore = existingFile(options.target, MANIFEST_NAME);
-  const recorded = recordedCommit(records);
   // Read before the writes: a recorded commit the checkout cannot fetch fails the run before a byte moves. `files.yml`
   // sits at the platform root, which is the checkout the diff reads.
   const checkerMoved =

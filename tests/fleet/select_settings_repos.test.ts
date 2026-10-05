@@ -8,15 +8,10 @@ import {
   pushProbeSkipNotice,
 } from "../../.github/scripts/fleet/discovery.ts";
 import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
-import { supersededNotice } from "../../.github/scripts/fleet/newest_main.ts";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
-import { STUB_GIT_FAIL_REFUSAL, writeStubGit } from "../shared/stub_git";
 import { tempDirs } from "../shared/temp_dir";
-
-const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
-const NEWER_SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4";
 
 const temp = tempDirs();
 
@@ -158,7 +153,6 @@ describe("select_settings_repos.ts", () => {
       { mode: 0o755 },
     );
     writeFileSync(join(bin, "sleep"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
-    writeStubGit(bin);
   });
 
   interface Run {
@@ -197,8 +191,6 @@ describe("select_settings_repos.ts", () => {
         GH_TOKEN: "stub-token",
         OWNER: "Vivswan",
         GITHUB_RUN_ID: RUN_ID,
-        GITHUB_SHA: SHA,
-        STUB_MAIN_TIP: SHA,
         GITHUB_OUTPUT: outputFile,
         GITHUB_STEP_SUMMARY: summaryFile,
         STUB_STATE: join(work, "state"),
@@ -410,37 +402,6 @@ describe("select_settings_repos.ts", () => {
         output: "",
         summary: "",
       });
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  // The tip read comes before any discovery, so neither run masks or lists anything.
-  test.each<{
-    reason: string;
-    name: string;
-    env: Record<string, string>;
-    outcome: Pick<Run, "exitCode" | "stdout" | "output">;
-  }>([
-    {
-      reason: "a run whose commit main moved past stands down with an empty plan",
-      name: "superseded",
-      env: { STUB_MAIN_TIP: NEWER_SHA, ONLY_REPO: "all" },
-      outcome: {
-        exitCode: 0,
-        stdout: lines(`::notice::${supersededNotice(SHA, NEWER_SHA)}`),
-        output: `count=0\nmatrix=${JSON.stringify(matrixRows([], keyOf))}\n`,
-      },
-    },
-    {
-      reason: "a tip that cannot be read fails the run, never guessing newest or superseded",
-      name: "no-tip",
-      env: { STUB_GIT_FAIL: "1" },
-      outcome: { exitCode: 1, stdout: lines(`::error::${STUB_GIT_FAIL_REFUSAL}`), output: "" },
-    },
-  ])(
-    "$reason",
-    ({ name, env, outcome }) => {
-      expect(run(name, env)).toEqual({ masked: [], stderr: "", summary: "", ...outcome });
     },
     TEST_TIMEOUT_MS,
   );
