@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
-// The developer setup: every package's dependencies, then the git hooks. The hooks are installed here and not by a
-// package.json `prepare`, so a runner's `bun install` (refresh-upstream.yml commits on one) leaves core.hooksPath alone.
+// The developer setup: every package's dependencies, then core.hooksPath to the tracked hook folder. The setting is
+// written here and not by a package.json `prepare`, so a runner's `bun install` (refresh-upstream.yml commits on one)
+// leaves core.hooksPath alone.
 // --check is the pre-commit hook's form (check:static): a hook only checks and fails, and an install is not a check
 // (docs/fleet-guidelines.md, "Pre-commit hooks only check"); it asks for node_modules, never for the hooks.
 //
@@ -15,6 +16,19 @@ const REPO_ROOT = resolve(import.meta.dir, "..");
 
 /** The fleet's bun pin, the one spelling of the version (docs/toolchains.md). */
 export const BUN_PIN_FILE = "files/bun/.bun-version";
+
+/** The tracked hook folder. Git resolves a relative core.hooksPath against the root of the worktree a hook runs in, so
+ *  the one setting in the shared config serves every worktree, each of which has the folder because it is tracked. */
+export const HOOKS_PATH = ".githooks";
+
+/** A git hook exports GIT_DIR, GIT_INDEX_FILE, and GIT_WORK_TREE, which would route the write to the repository
+ *  running the hook; the root alone names the repository written. */
+export function installHooks(root: string): void {
+  must(["git", "config", "core.hooksPath", HOOKS_PATH], {
+    cwd: root,
+    env: { GIT_DIR: undefined, GIT_INDEX_FILE: undefined, GIT_WORK_TREE: undefined },
+  });
+}
 
 export function bunLockDirs(root: string): string[] {
   const found: string[] = [];
@@ -54,7 +68,7 @@ function fail(code: 1 | 2, message: string): 1 | 2 {
   return code;
 }
 
-async function main(argv: string[]): Promise<number> {
+function main(argv: string[]): number {
   const unknown = argv.find((arg) => arg !== "--check");
   if (unknown !== undefined) return fail(2, `unknown argument '${unknown}'`);
   const mismatch = runtimeMismatch(
@@ -72,14 +86,9 @@ async function main(argv: string[]): Promise<number> {
     console.log(`bootstrap: bun install --frozen-lockfile in ${dir}`);
     must(["bun", "install", "--frozen-lockfile", "--silent"], { cwd: join(REPO_ROOT, dir) });
   }
-  // husky is one of the packages the loop above installs, so it is loaded only now. It resolves `.git` and `.husky`
-  // against the working directory and hands a refusal back as its return value rather than throwing.
-  const { default: husky } = await import("husky");
-  process.chdir(REPO_ROOT);
-  const refused = husky();
-  if (refused !== "") return fail(1, refused.trim());
-  console.log("bootstrap: git hooks installed (core.hooksPath .husky/_)");
+  installHooks(REPO_ROOT);
+  console.log(`bootstrap: git hooks installed (core.hooksPath ${HOOKS_PATH})`);
   return 0;
 }
 
-if (import.meta.main) process.exit(await main(process.argv.slice(2)));
+if (import.meta.main) process.exit(main(process.argv.slice(2)));
