@@ -233,8 +233,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
         [...before, LISTING],
       ),
     },
-    // Newest wins at the write (the settings row alone): a re-run of failed rows reuses the plan's
-    // answer, so the row reads main's tip itself before listing anything.
+    // Newest wins is asked at the write, by the settings row alone: the row reads main's tip before listing anything.
     ...(newestWins
       ? [
           {

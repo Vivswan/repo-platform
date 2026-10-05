@@ -55,7 +55,7 @@ The managed region of `.gitignore` carries:
 - **Agent local state.**
 - **Secrets files:** dotenv files anywhere in the tree (`.env.example` excepted), and private key material.
 - **Scratch:** `*.tmp` files.
-- **CI workspace paths:** every path a fleet action or workflow creates inside the checked-out workspace, the validator's platform checkout among them.
+- **CI workspace paths:** every path a fleet action or workflow writes inside the checked-out workspace.
 
 ### Mirror copies of platform files
 
@@ -108,7 +108,7 @@ The `validate-managed-files` step judges the repository against what repo-platfo
 
 | Check | Blocks on |
 |---|---|
-| The recorded commit | a manifest whose own entry records no `commit`, or one that is not a full sha or that repo-platform does not hold (the checkout fails): not judged, the reason naming the remedy (merge the pending sync PR, or dispatch a sync). A commit repo-platform holds off `stable`'s history is judged, with a freshness warning |
+| The recorded commit | a manifest whose own entry records no full-sha `commit` (a hand edit: revert it, or dispatch a sync), or one that repo-platform does not hold (the clone fails): not judged, the reason naming the remedy. A commit repo-platform holds off `stable`'s history is judged, with a freshness warning |
 | The sync's bytes | any byte that differs from what the recorded commit's writer writes over a copy of the repository (an edited managed file, a deleted or unmarked region, a replaced mirror, a registration change the sync has not carried yet), each path with a unified diff whose `+` lines are the sync's; and every reason the writer would hold the sync PR for, or its refusal |
 | Release-please config | a `release-as` key in `release-please-config.json` ([the release pipeline](#the-release-pipeline-release-please)) |
 | YAML | a YAML file anywhere in the repository that does not parse, carries a duplicate mapping key, or is a multi-document stream |
@@ -116,7 +116,7 @@ The `validate-managed-files` step judges the repository against what repo-platfo
 
 - **Every finding blocks.** The verdict is ONE per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 
-- **The report step always runs,** reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
+- **The report step always runs,** reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. A bun that cannot be set up fails the action before anything runs.
 
 - **Freshness informs:** the job summary says whether `stable` has moved past the recorded commit; nothing fails for that, and a sync moves the commit under the stamp rule ([platform/sync/manifest.md](platform/sync/manifest.md#when-the-judged-commit-moves)).
 

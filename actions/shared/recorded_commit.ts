@@ -1,5 +1,5 @@
 // What the fleet action's read-commit step checks out repo-platform at; the
-// writer reads the same field from its parsed records (sync/writer/manifest.ts recordedCommit) under its own stamp rule.
+// writer reads the same field from its parsed records (sync/writer/manifest.ts readRecords) under its own stamp rule.
 // Every problem string is value-free, since the manifest is target-repository content and the action's log is public.
 //
 // DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal imports only.
@@ -33,13 +33,8 @@ export function recordedCommit(root: string): { commit: string } | { problem: st
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return { problem: `${MANIFEST_NAME} ${parsed.problem}; ${REVERT}` };
   const commit = parsed.files[MANIFEST_NAME]?.commit;
-  if (commit === undefined) {
-    return { problem: `no synced commit recorded; merge the pending sync PR or ${RESYNC}` };
-  }
   if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) {
-    return {
-      problem: `${MANIFEST_NAME} records a synced commit that is not a full 40-hex sha; ${REVERT}`,
-    };
+    return { problem: `${MANIFEST_NAME} names no full 40-hex commit in its own entry; ${REVERT}` };
   }
   return { commit };
 }

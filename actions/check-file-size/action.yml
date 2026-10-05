@@ -36,8 +36,8 @@ runs:
       run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
     # continue-on-error so the comment steps run first; the last step
-    # re-raises. The script records report=findings|clean|error itself;
-    # dying before that reads as error.
+    # re-raises. The script records report=findings|clean|error itself; a
+    # crash before that leaves it empty, which posts no comment.
     - name: Check file sizes
       id: check
       continue-on-error: true
@@ -45,11 +45,7 @@ runs:
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         REPORT_PATH: ${{ runner.temp }}/check-file-size-report.md
-      run: |
-        status=0
-        "$ACTION_BUN" "${{ github.action_path }}/check-file-size.ts" || status=$?
-        grep -q '^report=' "$GITHUB_OUTPUT" || echo "report=error" >> "$GITHUB_OUTPUT"
-        exit "$status"
+      run: '"$ACTION_BUN" "${{ github.action_path }}/check-file-size.ts"'
 
     # The comment is a convenience sink: the summary and annotations carry
     # the same table, so a token without pull-requests write (a fork or

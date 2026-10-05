@@ -1,11 +1,3 @@
 #!/bin/sh
 set -e
-
-# git exports GIT_DIR/GIT_INDEX_FILE into hooks, which redirects any git
-# subprocess the gates spawn (tests init scratch repos) at the real
-# repository; a leaked GIT_DIR once rewrote this repo's config to bare.
-for v in $(env | sed -n 's/^\(GIT_[A-Z_]*\)=.*/\1/p'); do unset "$v"; done
-
-# The static gates only: the site build and the test suite are CI's to judge on every push, and running them here too
-# cost each commit about four minutes for a verdict the push repeats minutes later.
 bun run check:static

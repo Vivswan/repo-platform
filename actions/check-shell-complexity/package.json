@@ -1,0 +1,14 @@
+{
+  "name": "check-shell-complexity",
+  "private": true,
+  "description": "Dependency manifest for the check-shell-complexity action: mvdan-sh is the mvdan/sh parser (shfmt's) built to JavaScript, which types every bash node; yaml reads the run steps with their source lines; dockerfile-ast reads RUN instructions.",
+  "dependencies": {
+    "dockerfile-ast": "0.7.1",
+    "mvdan-sh": "0.10.1",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "typescript": "^7.0.2"
+  }
+}

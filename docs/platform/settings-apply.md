@@ -45,20 +45,19 @@ A red nightly is the signal that drift is going unhealed, so the halt is a FAILE
 
 ## Newest wins
 
-**A superseded run stands down GREEN.** A run asks whether main's tip is still its own commit ([fleet/newest_main.ts](../../.github/scripts/fleet/newest_main.ts), one `git ls-remote`). When main moved on, it stands down with the notice `superseded by <sha>`; the tip's own run or the nightly applies.
+**A superseded run's rows stand down GREEN.** Each row asks whether main's tip is still its run's commit ([fleet/newest_main.ts](../../.github/scripts/fleet/newest_main.ts), one `git ls-remote`). When main moved on, the row stands down with the notice `superseded by <sha>`; the tip's own run or the nightly applies.
+
+**The plan's refusals are red whatever main's tip is:** a scope naming no repository, or a selected target carrying a hand-written `.github/settings.yml`, fails the run before any row exists.
 
 **Why it asks:** the `settings-repos` lane runs one apply at a time in ARRIVAL order, and CI durations vary, so an older commit's run can reach the lane after a newer one's. post-green.yml's `settings-fleet` job holds the lane on a call; the cron and dispatch runs hold it themselves. Neither cancels a run in progress.
 
-| Where it asks | Why there |
-| --- | --- |
-| The selector, before its first fleet read | The cheap exit: an empty plan, so a superseded run names nothing and spins up no row. |
-| Each row's resolver, before its listing | The guarantee, at the write: a re-run of failed rows reuses the plan's answer, and by then a newer run may have applied. No `TARGET` skips the apply step. |
+**Where it asks:** each row's resolver, before its listing, at the write. No `TARGET` skips the apply step, so a superseded row stands down green. A superseded run's rows each spin up and stand down; a re-run of failed rows asks afresh at each write.
 
-- **Guarantee:** no apply row writes after a row of a newer main commit's run did. An older run's rows wait their turn on the lane and stand down, or never spin up.
+- **Guarantee:** no apply row writes after a row of a newer main commit's run did. An older run's rows wait their turn on the lane and stand down.
 
 - **The one gap:** under [the lane rule](../all-green.md#after-the-gate), a burst can evict the newest commit's pending run behind an older one's. That older run stands down, and the next green push or the nightly applies.
 
-- **A failed look:** a `git ls-remote` that cannot answer fails the run or the row. A guessed "newest" would let a superseded run write; a guessed "superseded" would stand the newest run down.
+- **A failed look:** a `git ls-remote` that cannot answer fails the row. A guessed "newest" would let a superseded run write; a guessed "superseded" would stand the newest run down.
 
 ## How the apply works
 

@@ -10,7 +10,7 @@ import {
   readVerdict,
   writeVerdict,
 } from "../../../actions/validate-managed-files/src/verdict";
-import { loadAction, runBashStep, type Step, stepNamed } from "../../shared/action_step";
+import { loadAction, type Step, stepNamed } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../../shared/fixture_git";
 import { tempDirs } from "../../shared/temp_dir";
@@ -83,7 +83,6 @@ interface Outcome {
   comment: string;
   /** The argv the recorded commit's check.ts received; null when it never ran. */
   checkArgv: string[] | null;
-  platformRemoved: boolean;
   checkout: string;
 }
 
@@ -166,7 +165,6 @@ function play(scenario: Scenario): Outcome {
     summary: read(summary),
     comment: read(comment),
     checkArgv: existsSync(checkArgv) ? (JSON.parse(read(checkArgv)) as string[]) : null,
-    platformRemoved: !existsSync(platform),
     checkout,
   };
 }
@@ -317,38 +315,35 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       summary: `${NO_TAG}${outcome.comment}`,
       comment,
       checkArgv: CHECK_ARGV(outcome.checkout),
-      platformRemoved: true,
       checkout: outcome.checkout,
     });
   });
 
-  // Before the check can run, the recorded commit has to be read and checked out; each failure is the verdict, named.
-  // With no commit the checkout was skipped, so whatever stands at the platform path is the repository's and stays.
+  // Before the check can run, the recorded commit has to be read and cloned; each failure is the verdict, named.
   test.each<{
     reason: string;
     env: Record<string, string>;
     text: string;
     packageJson?: string;
-    platformRemoved?: boolean;
   }>([
     {
       reason: "no commit could be read",
       env: {
         COMMIT: "",
-        COMMIT_PROBLEM: "no synced commit recorded; merge the pending sync PR or dispatch a sync",
+        COMMIT_PROBLEM:
+          ".github/repo-platform-manifest.json names no full 40-hex commit in its own entry; revert the edit (git history has the stamped original) or dispatch a sync",
       },
-      text: "no synced commit recorded; merge the pending sync PR or dispatch a sync",
-      platformRemoved: false,
+      text: ".github/repo-platform-manifest.json names no full 40-hex commit in its own entry; revert the edit (git history has the stamped original) or dispatch a sync",
     },
     {
-      reason: "the checkout at the commit failed",
+      reason: "the clone at the commit failed",
       env: { PLATFORM_OUTCOME: "failure" },
-      text: `repo-platform could not be checked out at ${SHORT} (checkout step outcome: failure); the recorded commit must be one it holds`,
+      text: `repo-platform could not be cloned at ${SHORT} (clone step outcome: failure); the recorded commit must be one it holds`,
     },
     {
-      reason: "the checkout was skipped",
+      reason: "the clone was skipped",
       env: { PLATFORM_OUTCOME: "skipped" },
-      text: `repo-platform could not be checked out at ${SHORT} (checkout step outcome: skipped); the recorded commit must be one it holds`,
+      text: `repo-platform could not be cloned at ${SHORT} (clone step outcome: skipped); the recorded commit must be one it holds`,
     },
     {
       reason: "the private input is not a boolean",
@@ -361,22 +356,18 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       packageJson: "{",
       text: `installing repo-platform's dependencies at ${SHORT} failed`,
     },
-  ])(
-    "$reason: not judged before the check runs",
-    ({ env, text, packageJson, platformRemoved = true }) => {
-      const outcome = play({ env, packageJson });
-      expect(outcome).toEqual({
-        runExit: 1,
-        verdict: { kind: "not-judged", reason: text },
-        outputs: BLOCKED,
-        summary: notJudged(text),
-        comment: notJudged(text),
-        checkArgv: null,
-        platformRemoved,
-        checkout: outcome.checkout,
-      });
-    },
-  );
+  ])("$reason: not judged before the check runs", ({ env, text, packageJson }) => {
+    const outcome = play({ env, packageJson });
+    expect(outcome).toEqual({
+      runExit: 1,
+      verdict: { kind: "not-judged", reason: text },
+      outputs: BLOCKED,
+      summary: notJudged(text),
+      comment: notJudged(text),
+      checkArgv: null,
+      checkout: outcome.checkout,
+    });
+  });
 
   // A stale or planted verdict must never read as clean: the report trusts only a verdict the aligned validate
   // step wrote after a successful clear.
@@ -487,72 +478,24 @@ describe("freshness against the stable tag informs and never fails", () => {
         return made.commit;
       },
     });
-    expect([outcome.verdict?.kind, outcome.runExit, outcome.platformRemoved]).toEqual([
-      kind,
-      kind === "clean" ? 0 : 1,
-      true,
-    ]);
+    expect([outcome.verdict?.kind, outcome.runExit]).toEqual([kind, kind === "clean" ? 0 : 1]);
     expect(outcome.summary.startsWith(line)).toBe(true);
   });
 });
 
-// GitHub resolves these at run time and refuses none of them: a `path` the two scripts spell differently is a
-// checkout read_commit.ts never guards and run.ts never finds; a shallow fetch answers freshness's ancestry question
-// wrong; an install placed after the checkout leaves the checkout in the workspace when it fails. None is a YAML error.
-test("repo-platform is checked out whole, after the install and before the validator, into the path both scripts read", () => {
-  const steps = action.runs.steps;
-  const index = (id: string) => steps.findIndex((step) => step.id === id);
-  const env = (id: string) => (steps[index(id)] as Step & { env: Record<string, string> }).env;
-  const platform = steps[index("platform")] as Step & { with: Record<string, unknown> };
-  expect(index("install")).toBeLessThan(index("platform"));
-  expect(index("platform")).toBeLessThan(index("validate"));
-  // The validator runs the RECORDED commit's checkout (docs/platform/sync/manifest.md): `ref: stable` would judge a
-  // repository synced at commit A with commit B's validator, green. action_references checks only that a present
-  // reference resolves, not which one it is.
-  expect([platform.with.repository, platform.with.ref, platform.with["fetch-depth"]]).toEqual([
-    PLATFORM_SLUG,
-    "${{ steps.read-commit.outputs.commit }}",
-    0,
-  ]);
-  const dir = `\${{ github.workspace }}/${platform.with.path}`;
-  expect([env("read-commit").PLATFORM_DIR, env("validate").PLATFORM_DIR]).toEqual([dir, dir]);
-});
-
-// Two writers of one contract: the shell step that reports a missing bun must spell the outputs the caller and the
-// sticky-comment gates read (`integrity`, `report`) and the comment the way report.ts does for a not-judged verdict,
-// or a bun-setup flake posts nothing and the caller fails with no comment naming why. The step is executed as the
-// runner runs it, against report.ts's own wording.
-test("the no-bun step, executed, fails the verdict and posts the not-judged comment in report.ts's shape", () => {
-  const noBun = stepNamed(action, "Report a missing bun");
-  const root = temp.dir("validate-managed-no-bun-");
-  const summary = join(root, "summary.md");
-  writeFileSync(summary, "");
-  const run = runBashStep(noBun, {
-    fills: {
-      "${{ runner.temp }}": root,
-      "${{ github.server_url }}": "https://example.invalid",
-      "${{ github.repository }}": "o/r",
-      "${{ github.run_id }}": "1",
-    },
-    cwd: root,
-    root,
-    env: { GITHUB_STEP_SUMMARY: summary },
-  });
-  const reason = "the action's pinned bun is unavailable";
-  const body = `${HEADING}Not judged: ${reason}. See the [run log](https://example.invalid/o/r/actions/runs/1). ${FAILS}\n`;
-  expect({
-    exitCode: run.exitCode,
-    stdout: run.stdout,
-    outputs: run.outputs,
-    comment: read(join(root, "validate-managed-files-report.md")),
-    summary: read(summary),
-  }).toEqual({
-    exitCode: 0,
-    stdout: `::error::${reason}\n`,
-    outputs: { integrity: "failure", report: REPORT.post },
-    comment: body,
-    summary: body,
-  });
+// GitHub resolves these at run time and refuses none of them: a clone dir the two steps spell differently is a clone
+// run.ts never finds, a `--depth` on the fetch answers freshness's ancestry question wrong, and a clone of another
+// repository judges the tree with another check.ts.
+test("repo-platform is cloned whole, from its own slug, into the dir run.ts reads", () => {
+  const env = (id: string) =>
+    (action.runs.steps.find((step) => step.id === id) as Step & { env: Record<string, string> })
+      .env;
+  const clone = String(stepNamed(action, "Clone repo-platform at that commit").run);
+  expect([
+    clone.includes(`https://github.com/${PLATFORM_SLUG} `),
+    clone.includes("--depth"),
+  ]).toEqual([true, false]);
+  expect(env("validate").PLATFORM_DIR).toBe(env("platform").PLATFORM_DIR);
 });
 
 describe("verdict.ts", () => {

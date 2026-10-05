@@ -48,7 +48,7 @@ export function checkerChanged(root: string, from: string, to: string): boolean 
 }
 
 export interface StampInput {
-  /** The commit the manifest named before this run; null when it named none the writer can read. */
+  /** The commit the manifest named before this run; null when the target had no manifest the writer accepted. */
   recorded: string | null;
   build: string;
   /** checkerChanged between the recorded commit and the build. */
