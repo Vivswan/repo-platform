@@ -273,7 +273,7 @@ description: |
 
 **How:** either run the check-only form of each tool (`biome ci`) and let its failure stand, or run the write form (`biome format --write`) and fail the hook whenever it changed a file, naming the files. Never a git command that writes (`add`, `commit`, `stash`, `checkout`, `reset`, `push`, `config`); read-only queries such as `git diff --cached --name-only` are fine. A formatter-and-restage step, lint-staged and its kind, is out.
 
-A hook installs nothing: no runtime, no dependencies, no tools. Setup is the repository's bootstrap command (`bun run bootstrap` here), and a hook that finds a dependency missing fails naming that command.
+A hook installs nothing: no runtime, no dependencies, no tools. Setup is the repository's bootstrap command (`bun run bootstrap` here), and no step pre-checks it: a missing dependency fails the first check on its own, and a check for what fails by itself is not written. Scripts run installed launchers under bun (`bun node_modules/.bin/biome ci .`), never `bun x`, whose fallback downloads a package when none is installed.
 
 A hook is a tracked executable file, with `core.hooksPath` naming its folder, so every checkout and worktree has it with nothing generated. A hook folder a tool generates at install time exists only where that install ran, and a fresh worktree commits unchecked.
 

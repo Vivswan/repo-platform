@@ -111,7 +111,7 @@ jobs:
       - name: Install tooling
         run: bun install --frozen-lockfile --silent
       - name: Biome (lint + format check)
-        run: bun x biome ci .
+        run: bun run lint
 
   typography:
     runs-on: ubuntu-latest

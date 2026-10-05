@@ -1,13 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  bunLockDirs,
-  HOOKS_PATH,
-  installHooks,
-  missingNodeModules,
-  runtimeMismatch,
-} from "../../scripts/bootstrap";
+import { bunLockDirs, HOOKS_PATH, installHooks } from "../../scripts/bootstrap";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
@@ -31,7 +25,6 @@ describe("bunLockDirs", () => {
 
     const dirs = bunLockDirs(base);
     expect(dirs).toEqual(["actions/parent/nested", "actions/with-lock"]);
-    expect(missingNodeModules(base, dirs)).toEqual(["actions/parent/nested"]);
 
     writeFileSync(join(base, "bun.lock"), "");
     expect(bunLockDirs(base)).toEqual([".", "actions/parent/nested", "actions/with-lock"]);
@@ -109,28 +102,5 @@ describe("installHooks", () => {
     // The control: the same commit with hooks bypassed lands, so the refusal above was the hook's.
     fixtureGit(sibling, [...identity, "commit", "-q", "--no-verify", "-m", "gated"]);
     fixtureGit(base, ["worktree", "remove", "--force", sibling]);
-  });
-});
-
-describe("runtimeMismatch", () => {
-  // The named incident: a green run under 1.3 on a commit CI's 1.4 failed.
-  const MISMATCH = (local: string) =>
-    `local bun ${local} is not at the pinned 1.4 (files/bun/.bun-version)`;
-  test.each<[string, string, { verdict: string | null } | { throws: string }]>([
-    ["1.4.0", "1.4.0\n", { verdict: null }],
-    ["1.4.3", "1.4.0\n", { verdict: null }],
-    ["1.3.14", "1.4.0\n", { verdict: MISMATCH("1.3.14") }],
-    ["2.0.0", "1.4.0\n", { verdict: MISMATCH("2.0.0") }],
-    // A prerelease or an unreadable pin throws instead of reading a prefix.
-    ["1.4.0-canary.1", "1.4.0\n", { throws: "the local bun runtime" }],
-    ["1.4.0", "", { throws: "files/bun/.bun-version" }],
-  ])("local %s against the pin %s", (local, pinned, outcome) => {
-    if ("throws" in outcome) {
-      expect(() => runtimeMismatch(local, pinned)).toThrow(outcome.throws);
-      return;
-    }
-    const found = runtimeMismatch(local, pinned);
-    if (outcome.verdict === null) expect(found).toBeNull();
-    else expect(found).toStartWith(outcome.verdict);
   });
 });

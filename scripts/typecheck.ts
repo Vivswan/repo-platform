@@ -13,6 +13,8 @@ const REPO_ROOT = resolve(import.meta.dir, "..");
 if (import.meta.main) {
   for (const dir of bunLockDirs(REPO_ROOT)) {
     console.log(`typecheck: ${dir}`);
-    must(["bun", "x", "tsc", "-p", "."], { cwd: join(REPO_ROOT, dir) });
+    must([process.execPath, join(REPO_ROOT, dir, "node_modules", ".bin", "tsc"), "-p", "."], {
+      cwd: join(REPO_ROOT, dir),
+    });
   }
 }
