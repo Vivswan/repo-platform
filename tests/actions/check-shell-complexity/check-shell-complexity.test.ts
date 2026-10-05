@@ -545,10 +545,11 @@ describe("the check over a checkout", () => {
 
   const REMEDY = `move this block to a TypeScript script run by bun, or list the file in ${ALLOWLIST_FILE} with a # reason`;
 
-  test("the incident block is refused at its lines, an exempted action is not, and the report carries the table", () => {
+  test("the incident block is refused at its lines, an exempted action is not, and the report carries the table with its pipes escaped", () => {
     const root = checkout(temp, "check-shell-complexity-", {
       ".github/workflows/release.yml": INCIDENT,
       "actions/pin/action.yml": PIN_ACTION,
+      "scripts/a|b.sh": "#!/bin/bash\nif true; then\n  make || echo failed\nfi\n",
       [ALLOWLIST_FILE]: "actions/pin/action.yml # the pre-bun pin walk\n",
     });
     expect(run(root)).toEqual({
@@ -556,22 +557,24 @@ describe("the check over a checkout", () => {
       stdout: "",
       stderr: [
         `::error file=.github/workflows/release.yml,line=20::.github/workflows/release.yml:20: $(...) tested inside if; ${REMEDY}`,
-        `1 finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
+        `::error file=scripts/a|b.sh,line=3::scripts/a|b.sh:3: || inside if; ${REMEDY}`,
+        `2 finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
         "",
       ].join("\n"),
       output: "report=findings\n",
       report: [
         "## Shell complexity check",
         "",
-        "1 refused construct(s) (fails).",
+        "2 refused construct(s) (fails).",
         "",
         "| Where | Construct | Source |",
         "| --- | --- | --- |",
         "| `.github/workflows/release.yml:20` | `$(...) tested inside if` | workflow run step, bash/sh/zsh |",
+        "| `scripts/a\\|b.sh:3` | `\\|\\| inside if` | script file, bash/sh/zsh |",
         "",
         `Move each block to a TypeScript script run by bun, or list the file in \`${ALLOWLIST_FILE}\` with a \`# reason\` (a block that must stay shell).`,
         "",
-        "Bodies judged: 1 workflow run step, 1 composite action run step.",
+        "Bodies judged: 1 workflow run step, 1 composite action run step, 1 script file.",
         "",
       ].join("\n"),
     });

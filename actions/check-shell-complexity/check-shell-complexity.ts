@@ -218,7 +218,7 @@ function census(verdict: Verdict): string {
   return parts.join(" ");
 }
 
-/** A `||` construct is a table cell too. */
+/** A `||` construct, or a path with a `|` in it, is a table cell too. */
 function cell(text: string): string {
   return text.replaceAll("|", "\\|");
 }
@@ -241,7 +241,7 @@ export function report(outcome: Outcome): string {
         "| --- | --- | --- |",
         ...findings.map(
           (finding) =>
-            `| \`${where(finding)}\` | \`${cell(finding.construct)}\` | ${SOURCE_LABEL[finding.source]}, ${DIALECT_LABEL[finding.dialect]} |`,
+            `| \`${cell(where(finding))}\` | \`${cell(finding.construct)}\` | ${SOURCE_LABEL[finding.source]}, ${DIALECT_LABEL[finding.dialect]} |`,
         ),
       );
     }
