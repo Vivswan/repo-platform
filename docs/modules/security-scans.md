@@ -77,7 +77,7 @@ Public repositories also run [semgrep](https://semgrep.dev) as fleet-ci.yml's `s
 | `--severity ERROR` | only ERROR rules run, so WARNING and INFO findings appear nowhere, neither in the verdict nor in code scanning |
 | `--error` | exit 1 on a finding, so the scan step fails the job; a scan that failed exits 2 or higher and fails it too |
 
-Partial parses and timeouts are warn-level: semgrep's summary names them in the step log, and the step stays green.
+Partial parses and timeouts are warn-level: semgrep's summary names them in the step log, and the step stays green. One gap, reported upstream as [semgrep/semgrep#11960](https://github.com/semgrep/semgrep/issues/11960) and not guarded here: the exit reads the last structured error alone, so a scan with no findings whose error-level scan error is followed by a warn-level one exits 0.
 
 - **Bypass:** semgrep's own marker on the finding's line or the line above it, `// nosemgrep: <rule-id>` (`# nosemgrep: <rule-id>` in YAML), with the reason beside it. The marker applies to an ERROR finding; whether to mark one is the repository's own call.
 
