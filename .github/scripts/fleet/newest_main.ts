@@ -1,5 +1,5 @@
 // The settings lane orders its runs by arrival, so an older main commit's run can follow a newer one's (docs/platform/settings-apply.md,
-// "Newest wins"); the tip is read live because the plan job's checkout is one commit deep.
+// "Newest wins"); each apply row asks at its write, and the tip is read live because the apply job's checkout is one commit deep.
 
 import { gitRemoteRef } from "../shared/git_yes_no.ts";
 import type { RunOptions } from "../shared/proc.ts";
