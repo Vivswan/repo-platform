@@ -30,6 +30,10 @@ Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. 
 
 **Every self pin resolves:** [tests/workflows/delivery_pins.test.ts](../../tests/workflows/delivery_pins.test.ts) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout. A renamed or deleted action, or a pin off the delivery ref, fails CI here instead of the next fleet run.
 
+**Every manifest loads:** GitHub loads an action's manifest when the job starts, so a manifest error fails every caller before its first step. A local `./actions/<name>` loads only when its step runs, so this repository's gate runs every shipped action but one, the `action-load` job carrying those no other check runs ([all-green.md](../all-green.md#what-gates-what)), and a manifest GitHub cannot load fails here before `stable` moves.
+
+release-assets is the one unjudged: it reads a draft release by tag, and this repository cuts none ([tests/workflows/action_load.test.ts](../../tests/workflows/action_load.test.ts) holds the gate to the actions directory and names it).
+
 ## Who can write `refs/tags/stable`?
 
 | Writer | When | What gates the write |

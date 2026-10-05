@@ -97,6 +97,8 @@ The jobs beside them gate nothing:
 
 - **Repo-platform's own ci.yml** has no callers to hide behind: its gating jobs are the needs list itself.
 
+- **Its action-load check:** the `action-load` job runs the shipped actions no other gating job runs, with inputs that change nothing, so GitHub's own loader judges their manifests here before `stable` moves; the guarantee and its one exception are [build-provenance.md](platform/build-provenance.md#the-delivery-ref-is-a-tag-on-main)'s.
+
 - **Its skills checks:** `validate-skills` (structure, offline) and `skills-discovery` (the real `npx skills` listing, so its own job) run [Vivswan/skills' validate-skills action](https://github.com/Vivswan/skills/tree/main/.github/actions/validate-skills) on this repository's own skills catalog. The action is pinned by sha like every other third-party action ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)).
 
 - **Its docs shape and wording check:** the `docs-check` job runs [Vale](https://vale.sh) over README.md and every page under docs/ with the skills repository's styles, read from a checkout at the validate-skills sha: a paragraph or list item over 70 words, or a word or phrase from the unslop and natural-writing skills' lists, fails the job, naming the line. The binary is a pinned release verified by sha256, as pinact is.
