@@ -16,11 +16,9 @@ const DEFAULT_TARGETS = ["./tests"];
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 const LISTED_LEFTOVERS = 20;
 
-/** Leftovers are evidence only when every afterAll had its chance.
- *  A short-option cluster holding `t` counts as a filter: over-detecting costs a verdict, under-detecting a false red.
- *
- *  signal death  -> the child died before its hooks
- *  name filter   -> bun runs no hook in a file the filter empties (tests/shared/temp_dir.test.ts pins it) */
+/** bun runs no afterAll hook in a file a name filter empties (tests/shared/temp_dir.test.ts pins it), and a signal-killed child may have
+ *  died before its hooks, so leftovers are judged only on a full run that exited on its own.
+ *  A short-option cluster holding `t` counts as a filter: over-detecting costs a verdict, under-detecting a false red. */
 export function leftoversJudgeable(args: string[], signalCode: string | null): boolean {
   if (signalCode !== null) return false;
   for (const arg of args) {
