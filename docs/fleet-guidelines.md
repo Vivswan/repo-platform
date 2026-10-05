@@ -11,7 +11,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 |---|---|
 | [Sticky PR comments](#sticky-pr-comments) | review |
 | [Pinned actions](#pinned-actions) | pinact and `tests/workflows/delivery_pins.test.ts` in repo-platform (landing); zizmor in every fleet push and PR run; Dependabot bumps the pins |
-| [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` step; the settings override layer (squash-only) |
+| [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` step; the settings override layer (squash-only); review for the type |
 | [Plain ASCII punctuation](#plain-ascii-punctuation) | the `typography` step |
 | [Shell is a straight line of commands](#shell-is-a-straight-line-of-commands) | the `shell-complexity` job of repo-platform's ci.yml; the fleet's `standard-checks` step is staged |
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
@@ -80,6 +80,8 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Rule:** PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/) as [commitlint](https://commitlint.js.org/)'s config-conventional judges them, with one scope per subject. PRs squash-merge, so the PR title becomes the commit subject.
 
+**Type:** the type names what the change does to behavior, not the shape of the diff. Observable behavior that moved for a user or an integrator makes it a `fix`, a `feat`, or a `perf`, even when the work began as a refactor or is mostly a move. `refactor` means the existing tests pass unchanged and no observable behavior moved.
+
 **Refused:**
 
 - a scope list (`fix(sync,writer): ...`: split the change or pick the scope that names it)
@@ -88,7 +90,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Exempt:** merge, revert, reapply, fixup, squash, amend, and bare version-number subjects (commitlint's default ignores, applied to the subject line). No line has a length cap.
 
-**Why:** release-please derives versions and changelogs from the subjects.
+**Why:** release-please derives versions and changelogs from the subjects. Its default changelog sections list `feat`, `fix`, and `perf` and hide `refactor`, `chore`, `test`, and `docs`, so a non-breaking fix titled `refactor` vanishes from the release notes. One merged fix titled that way is already missing from a fleet repository's release notes.
 
 **How:** `fix(sync): ...`, `feat(writer)!: ...`, `docs: ...`.
 
@@ -97,6 +99,8 @@ Conventions every managed repository follows, whether the file is managed by syn
 - **On the PR title:** the [`pr-title` check](settings.md#the-pr-title-ruleset) (pr-title module).
 - **On the commit subjects:** the `commit-names` step of fleet-ci.yml's `standard-checks` job (in repo-platform's own ci.yml, a `commit-names` job).
 - **Squash-only merging with the PR title as subject:** the [settings override layer](settings.md), applied to every managed repository.
+
+**Review only, the type:** before landing, read the diff's shape against the title's purpose. A `refactor` whose existing test now expects a different output has the wrong title.
 
 ## Plain ASCII punctuation
 
