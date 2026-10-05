@@ -403,6 +403,42 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./actions/trivy
 
+  # GitHub loads an action's manifest when the job starts, so a manifest error fails every caller before its first step.
+  # A local `uses: ./actions/<name>` is the exception: it loads when its step runs, and a skipped step loads nothing. So the
+  # actions no other gating job runs run here, with inputs that change nothing, and the judge last, as the fleet
+  # runs it; tests/workflows/action_load.test.ts holds the job to the actions directory.
+  action-load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: lychee-verdict
+        uses: ./actions/lychee-verdict
+        with:
+          exit-code: "0"
+      # Resolve mode over a stream no issue carries closes nothing, and the token could not.
+      - id: fuzz-issue
+        uses: ./actions/fuzz-issue
+        with:
+          mode: resolve
+          label: action-load
+          stream: generic
+      # after-propose fails only on a merged release PR left pending, and this repository cuts no releases.
+      - id: release-health
+        uses: ./actions/release-health
+        with:
+          mode: after-propose
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: ./actions/judge-checks
+        if: always()
+        with:
+          steps: ${{ toJSON(steps) }}
+
   # THE gate: this job's own check run is the ruleset's required check (files/settings/override.yml),
   # and alls-green passes only when every needed result is success, or skipped for a job named in allowed-skips.
   #   needs          -> every gating job (tests/workflows/all_green_gate.test.ts compares the list with the job set)
@@ -433,6 +469,7 @@ jobs:
       - semgrep
       - bun-setup-smoke
       - trivy
+      - action-load
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
