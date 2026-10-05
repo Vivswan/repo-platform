@@ -92,10 +92,10 @@ runs:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/fuzz-issue.ts"'
 
-    # Every gh call names the repository: the nightly starter's report job
-    # runs this action without a checkout. gh lists newest first, and humans
-    # can label extra issues into the stream, so one open issue per label is
-    # a goal, not an invariant.
+    # Every gh call names the repository: the starters' report jobs run
+    # this action without a checkout.
+    # gh lists newest first, and humans can label extra issues into the
+    # stream, so one open issue per label is a goal, not an invariant.
     - name: Find the stream's open issue
       if: inputs.mode == 'report'
       id: open
