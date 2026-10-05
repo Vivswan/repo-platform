@@ -38,6 +38,7 @@ function evaluateCondition(expression: string, context: Record<string, string>):
       return inner;
     }
     if (token.startsWith("'")) return token.slice(1, -1);
+    if (token === "always()") return true;
     if (token === "cancelled()") return false;
     return context[token] ?? "";
   };
@@ -75,12 +76,14 @@ function evaluateCondition(expression: string, context: Record<string, string>):
  * of every job that ran. "A failure or skip applies to all jobs in the dependency chain from the
  * point of failure or skip onwards", even through a job a status function let continue.
  *   an unrun need                       -> result `skipped`, empty outputs
- *   a condition with no status function -> implicit success() over the WHOLE ancestry */
+ *   a condition with no status function -> implicit success() over the WHOLE ancestry
+ *   the run's ref                       -> main's head unless given (ci.yml's push trigger is filtered to main) */
 function jobsRunning(
   jobs: Record<string, Job>,
   event: string,
   outputs: Record<string, string>,
   failed: string[] = [],
+  ref = "refs/heads/main",
 ): string[] {
   const ran = new Set<string>();
   const ancestors = (id: string): Set<string> => {
@@ -103,7 +106,7 @@ function jobsRunning(
       continue;
     }
     if (failed.includes(id)) continue;
-    const context: Record<string, string> = { "github.event_name": event };
+    const context: Record<string, string> = { "github.event_name": event, "github.ref": ref };
     for (const need of needs) {
       context[`needs.${need}.result`] = ran.has(need)
         ? "success"
@@ -205,5 +208,10 @@ describe("post-green wiring", () => {
         "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
       });
     }
+  });
+
+  test("ci.yml: a push to main skips dependency-review alone, and every leg behind the gate runs (post-green skipped past a green gate, stable stalled)", () => {
+    const ran = jobsRunning(ci.jobs, "push", {});
+    expect(Object.keys(ci.jobs).filter((job) => !ran.includes(job))).toEqual(["dependency-review"]);
   });
 });
