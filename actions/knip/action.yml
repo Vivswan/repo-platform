@@ -7,6 +7,14 @@ description: |
   names, or a knip key in package.json. A configured entry or project list replaces the
   default list.
 
+  The run reads that configuration, adds the platform checkout fleet-ci.yml leaves in the
+  workspace to its `ignoreWorkspaces`, and hands knip the result from the runner's temp dir,
+  so knip's entry and project globs never reach the checkout, whatever the repository's
+  .gitignore says. A knip.ts or knip.js configuration is a program the run cannot rewrite:
+  knip then runs it as written, under a warning. Configuration hints are not printed, since
+  the written configuration carries a key knip would hint about; the repository's own knip
+  run shows them.
+
   The caller installs the toolchain and the dependencies first, since knip resolves imports
   through node_modules.
 
@@ -16,6 +24,21 @@ description: |
 runs:
   using: composite
   steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first. The script imports node builtins
+    # and actions/shared alone, so there is nothing to install.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@stable
+      with:
+        from: ${{ github.action_path }}
+
+    # One knip for the fleet: the version pinned here is the one this repository's own
+    # configuration is exercised against (tests/actions/knip holds it to package.json).
     - name: Find unused files, exports, and dependencies
       shell: bash
-      run: npx --yes knip@6.35.1
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        KNIP_VERSION: "6.35.1"
+      run: '"$ACTION_BUN" "${{ github.action_path }}/run.ts"'
