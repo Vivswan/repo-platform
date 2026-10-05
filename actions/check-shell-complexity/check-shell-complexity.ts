@@ -150,8 +150,8 @@ export function check(root: string, options: CheckOptions = { judgeManaged: fals
     script: 0,
   };
   let managedSkipped = 0;
-  // An extensionless file is shell only by its shebang, and only a tracked one is read: husky's generated hooks under
-  // .husky/_/ are untracked.
+  // An extensionless file is shell only by its shebang, and only a tracked one is read: a hook or tool script a tool
+  // generates into the checkout is not the repository's.
   const tracked = new Set(repositoryFiles(root, { untracked: false }));
   for (const relPath of repositoryFiles(root, { untracked: true })) {
     if (!isJudged(relPath, skip)) continue;
