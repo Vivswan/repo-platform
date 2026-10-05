@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 
-// Comments and literals are exactly what the file's tree-sitter grammar tokenizes; every other token, ERROR included, is code.
+// A comment line is one COMMENT_LINE matches (actions/shared/managed_header.ts): read by prefix, whatever the language,
+// never by grammar. The caps that reading feeds are the warn tier, so a string line opening with `//` costs a warning.
 // Policy: docs/fleet-guidelines.md.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Language, Parser, type Tree } from "web-tree-sitter";
 import { workflowCommand } from "../shared/action_runtime.ts";
 import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
 import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
@@ -22,7 +22,7 @@ export type CommentScope = "header" | "block";
 
 export interface Caps {
   lines: Readonly<Record<Kind, number>>;
-  /** Maximum line width, in code points, for the kinds in WIDTH_KINDS. */
+  /** Maximum line width, in code points, for every kind but PROSE. */
   width: number;
 }
 
@@ -47,9 +47,10 @@ export const COMMENT_CAPS: Readonly<Record<CommentScope, number>> = { block: 10,
 /** The per-block exemption, on a comment line inside the block (a comment
  *  line directly above it is part of it); the reason after it is mandatory. */
 export const COMMENT_MARKER = "comment-cap: ignore";
-/** Prose (markdown) has no width cap: the fleet writes one source line per
- *  paragraph, so its lines are long by design. */
-export const WIDTH_KINDS: ReadonlySet<Kind> = new Set(["source", "test", "workflow", "shell"]);
+/** Prose has no width cap and no comment cap: the fleet writes one source
+ *  line per paragraph, so its lines are long by design, and its `#` headings
+ *  are not comments. */
+const PROSE: Kind = "markdown";
 
 export const ALLOWLIST_FILE = ".file-size-allow.local";
 
@@ -78,13 +79,6 @@ const SOURCE_EXTENSIONS = new Set([
   "hpp",
 ]);
 const SHELL_EXTENSIONS = new Set(["sh", "bash", "zsh"]);
-/** Every extension whose files get comment and literal judgement. Markdown is prose and needs no grammar. */
-const JUDGED_EXTENSIONS: ReadonlySet<string> = new Set([
-  ...SOURCE_EXTENSIONS,
-  ...SHELL_EXTENSIONS,
-  "yml",
-  "yaml",
-]);
 const TEST_DIRS = new Set(["test", "tests", "__tests__"]);
 /** Test files by name: the JS/Python/Go conventions, and Rust's sibling
  *  test modules (`foo_tests.rs`, `tests.rs`, `proptests.rs`). */
@@ -167,353 +161,64 @@ function generatedRegionMask(lines: string[]): boolean[] {
   return mask;
 }
 
-// The per-language surface is this table and nothing else.
-// JS's html_comment is null: `<!-- a -->` and a line-start `-->` both run to the line end, so `-->` is text.
-interface Delimiters {
-  open: string;
-  close: string;
-}
-interface GrammarSpec {
-  wasm: string;
-  comments: Readonly<Record<string, Delimiters | null>>;
-  /** Token types the warn width tier leaves alone. */
-  literals: readonly string[];
-}
-
-const PACKAGES = join(import.meta.dir, "node_modules");
-// tree-sitter-wasms 0.1.13 loads only under web-tree-sitter 0.25.x: 0.26 rejects its dylink format.
-const prebuilt = (name: string): string =>
-  join(PACKAGES, "tree-sitter-wasms", "out", `tree-sitter-${name}.wasm`);
-const STARRED: Delimiters = { open: "/*", close: "*/" };
-const JS: Omit<GrammarSpec, "wasm"> = {
-  comments: { comment: STARRED, html_comment: null },
-  literals: ["string", "template_string", "template_literal_type", "regex"],
-};
-const C_LIKE: Omit<GrammarSpec, "wasm"> = {
-  comments: { comment: STARRED },
-  literals: ["string_literal", "raw_string_literal", "char_literal"],
-};
-const GRAMMARS = {
-  typescript: { wasm: prebuilt("typescript"), ...JS },
-  tsx: { wasm: prebuilt("tsx"), ...JS },
-  javascript: { wasm: prebuilt("javascript"), ...JS },
-  python: { wasm: prebuilt("python"), comments: { comment: null }, literals: ["string"] },
-  rust: {
-    wasm: prebuilt("rust"),
-    comments: { line_comment: null, block_comment: STARRED },
-    literals: C_LIKE.literals,
-  },
-  go: {
-    wasm: prebuilt("go"),
-    comments: C_LIKE.comments,
-    literals: ["interpreted_string_literal", "raw_string_literal", "rune_literal"],
-  },
-  c: { wasm: prebuilt("c"), ...C_LIKE },
-  cpp: { wasm: prebuilt("cpp"), ...C_LIKE },
-  java: {
-    wasm: prebuilt("java"),
-    comments: { line_comment: null, block_comment: STARRED },
-    literals: ["string_literal", "character_literal"],
-  },
-  kotlin: {
-    wasm: prebuilt("kotlin"),
-    comments: { line_comment: null, multiline_comment: STARRED },
-    literals: ["string_literal", "character_literal"],
-  },
-  // The tree-sitter-wasms bash build imports libc isalpha, which the loader lacks: `case` and `[[` crash the parse.
-  bash: {
-    wasm: join(PACKAGES, "tree-sitter-bash", "tree-sitter-bash.wasm"),
-    comments: { comment: null },
-    literals: ["string", "raw_string", "ansi_c_string", "regex"],
-  },
-  // The tree-sitter-wasms yaml build crashes at parse time under every loader that accepts the others.
-  yaml: {
-    wasm: join(PACKAGES, "@tree-sitter-grammars", "tree-sitter-yaml", "tree-sitter-yaml.wasm"),
-    comments: { comment: null },
-    literals: ["double_quote_scalar", "single_quote_scalar"],
-  },
-} satisfies Record<string, GrammarSpec>;
-type GrammarName = keyof typeof GRAMMARS;
-
-/** Why a judged extension has no grammar. Its files get no comment judgement and no literal exemption. */
-export interface Unjudged {
-  reason: string;
-}
-
-// C headers go to C++, the superset.
-const EXTENSION_GRAMMAR: Readonly<Record<string, GrammarName | Unjudged>> = {
-  ts: "typescript",
-  mts: "typescript",
-  cts: "typescript",
-  tsx: "tsx",
-  js: "javascript",
-  jsx: "javascript",
-  mjs: "javascript",
-  cjs: "javascript",
-  py: "python",
-  pyi: "python",
-  rs: "rust",
-  go: "go",
-  swift: {
-    reason:
-      "the prebuilt Swift grammar keeps scanner state across files, so a raw string in one file changes how the next file tokenizes",
-  },
-  kt: "kotlin",
-  java: "java",
-  c: "c",
-  h: "cpp",
-  cpp: "cpp",
-  cc: "cpp",
-  cxx: "cpp",
-  hh: "cpp",
-  hpp: "cpp",
-  sh: "bash",
-  bash: "bash",
-  zsh: "bash",
-  yml: "yaml",
-  yaml: "yaml",
-};
-
-export interface Grammar {
-  /** One parser per grammar per run. */
-  parser: Parser;
-  /** Comment node type to the delimiters that end a marker's reason, or null. */
-  comments: ReadonlyMap<string, Delimiters | null>;
-  literals: ReadonlySet<string>;
-}
-
-/** By judged extension: its grammar, or why it has none. */
-export type Grammars = ReadonlyMap<string, Grammar | Unjudged>;
-
-/** Every grammar's wasm, for the guard that its imports resolve against the runtime. */
-export const GRAMMAR_WASMS: readonly string[] = Object.values(GRAMMARS).map((spec) => spec.wasm);
-
-async function loadGrammar(spec: GrammarSpec): Promise<Grammar | Unjudged> {
-  try {
-    const parser = new Parser();
-    parser.setLanguage(await Language.load(spec.wasm));
-    return {
-      parser,
-      comments: new Map(Object.entries(spec.comments)),
-      literals: new Set(spec.literals),
-    };
-  } catch (error) {
-    return { reason: `${spec.wasm}: ${error instanceof Error ? error.message : String(error)}` };
-  }
-}
-
-export async function loadGrammars(): Promise<Grammars> {
-  await Parser.init();
-  const loaded = new Map<GrammarName, Grammar | Unjudged>();
-  const grammars = new Map<string, Grammar | Unjudged>();
-  for (const ext of [...JUDGED_EXTENSIONS].sort()) {
-    const name = EXTENSION_GRAMMAR[ext] ?? { reason: "no grammar maps this extension" };
-    if (typeof name !== "string") {
-      grammars.set(ext, name);
-      continue;
-    }
-    const grammar = loaded.get(name) ?? (await loadGrammar(GRAMMARS[name]));
-    loaded.set(name, grammar);
-    grammars.set(ext, grammar);
-  }
-  return grammars;
-}
-
-/** A shebang is `#!` and an interpreter path. Rust's `#![...]` attribute is code. */
+/** A shebang is `#!` and an interpreter path. Rust's `#![...]` attribute is not one. */
 const SHEBANG = /^#!\s*\//;
-
-interface Token {
-  // Named and anonymous are tree-sitter's leaf classes: an identifier is named, punctuation and keywords are anonymous.
-  kind: "comment" | "literal" | "key" | "named" | "anonymous" | "shebang";
-  /** The grammar's node type. */
-  type: string;
-  startRow: number;
-  /** The last row it puts a character on. */
-  endRow: number;
-  /** Set for comments (read for the exemption markers) and for row-0 tokens (read for the shebang). */
-  text?: string;
-}
-
-// Some grammars put the `key` field on a wrapper spanning exactly the literal (yaml's flow_node).
-interface Ancestor {
-  field: string | null;
-  startIndex: number;
-  endIndex: number;
-}
-
-/** The tree's tokens in document order. Whitespace and zero-width (MISSING) leaves are dropped. */
-function tokenize(tree: Tree, grammar: Grammar): Token[] {
-  const tokens: Token[] = [];
-  const ancestors: Ancestor[] = [];
-  const cursor = tree.walk();
-  let descend = true;
-  for (;;) {
-    if (descend) {
-      const type = cursor.nodeType;
-      const field = cursor.currentFieldName;
-      const startIndex = cursor.startIndex;
-      const endIndex = cursor.endIndex;
-      // Only named nodes can be comments or literals: TypeScript's `string` type keyword is an anonymous node of that type.
-      const named = cursor.nodeIsNamed;
-      const whole = named && (grammar.comments.has(type) || grammar.literals.has(type));
-      if (!whole && cursor.gotoFirstChild()) {
-        ancestors.push({ field, startIndex, endIndex });
-        continue;
-      }
-      const start = cursor.startPosition;
-      const end = cursor.endPosition;
-      if (startIndex !== endIndex && type.trim() !== "") {
-        let kind: Token["kind"] = !named
-          ? "anonymous"
-          : grammar.comments.has(type)
-            ? "comment"
-            : grammar.literals.has(type)
-              ? "literal"
-              : "named";
-        if (kind === "literal" && isKey(field, ancestors, startIndex, endIndex)) kind = "key";
-        const endRow = end.column === 0 && end.row > start.row ? end.row - 1 : end.row;
-        const token: Token = { kind, type, startRow: start.row, endRow };
-        if (kind === "comment" || start.row === 0) token.text = cursor.nodeText;
-        if (start.row === 0 && kind !== "literal" && SHEBANG.test(token.text ?? "")) {
-          token.kind = "shebang";
-        }
-        tokens.push(token);
-      }
-    }
-    if (cursor.gotoNextSibling()) {
-      descend = true;
-      continue;
-    }
-    if (!cursor.gotoParent()) break;
-    ancestors.pop();
-    descend = false;
-  }
-  cursor.delete();
-  return tokens;
-}
-
-function isKey(
-  field: string | null,
-  ancestors: readonly Ancestor[],
-  startIndex: number,
-  endIndex: number,
-): boolean {
-  if (field === "key") return true;
-  for (let i = ancestors.length - 1; i >= 0; i--) {
-    const wrapper = ancestors[i];
-    if (wrapper.startIndex !== startIndex || wrapper.endIndex !== endIndex) return false;
-    if (wrapper.field === "key") return true;
-  }
-  return false;
-}
-
-// A row takes its strongest token's kind, so a blank row inside a block comment is comment.
-type RowKind = "blank" | "shebang" | "comment" | "code";
-const ROW_RANK: Readonly<Record<RowKind, number>> = { blank: 0, shebang: 1, comment: 2, code: 3 };
-const ROW_KIND: Readonly<Record<Token["kind"], RowKind>> = {
-  comment: "comment",
-  shebang: "shebang",
-  literal: "code",
-  key: "code",
-  named: "code",
-  anonymous: "code",
-};
-
-interface Analysis {
-  rows: RowKind[];
-  // Rows the warn width tier leaves alone.
-  literalRows: boolean[];
-  comments: Token[];
-}
-
-// Rows past `rowCount` are dropped: the parser sees an empty row after a final newline.
-function analyze(grammar: Grammar, text: string, rowCount: number): Analysis {
-  const tree = grammar.parser.parse(text);
-  if (tree === null) throw new Error("tree-sitter returned no tree");
-  let tokens: Token[];
-  try {
-    tokens = tokenize(tree, grammar);
-  } finally {
-    tree.delete();
-  }
-  const rows: RowKind[] = Array.from({ length: rowCount }, () => "blank");
-  const rowTokens: Token[][] = Array.from({ length: rowCount }, () => []);
-  for (const token of tokens) {
-    const kind = ROW_KIND[token.kind];
-    for (let row = token.startRow; row <= Math.min(token.endRow, rowCount - 1); row++) {
-      if (ROW_RANK[kind] > ROW_RANK[rows[row]]) rows[row] = kind;
-      rowTokens[row].push(token);
-    }
-  }
-  const literalRows = rowTokens.map((onRow) => {
-    const at = onRow.findIndex((token) => token.kind === "literal");
-    if (at === -1 || onRow.some((token) => token.kind === "comment")) return false;
-    const before = onRow[at - 1];
-    if (before !== undefined && before.kind !== "anonymous") return false;
-    return onRow.slice(at + 1).every((token) => token.kind === "anonymous");
-  });
-  return { rows, literalRows, comments: tokens.filter((token) => token.kind === "comment") };
-}
 
 interface CommentBlock {
   /** The block's first line, 1-based. */
   line: number;
   length: number;
   scope: CommentScope;
-  /** Every exemption marker in the block: its 1-based line and the reason
-   *  after it (empty for a bare marker, which exempts nothing). */
+  /** Every exemption marker in the block: its 1-based line and the text after
+   *  it on that line, up to the next marker. */
   markers: { line: number; reason: string }[];
 }
 
 const MARKER = new RegExp(`\\b${COMMENT_MARKER}\\b`, "g");
+/** A reason has a letter or digit in it, in any script: a closing delimiter alone after the marker is none. */
+const REASONED = /[\p{L}\p{N}]/u;
 
-// The closer applies only when the token opens with its pair: JS's `comment` type covers `//` and `/* */` alike.
-function commentBlocks(analysis: Analysis, grammar: Grammar, skip: boolean[]): CommentBlock[] {
-  const { rows, comments } = analysis;
+/** A shebang is neither code nor comment, and a generated line ends a run
+ *  without demoting the header after it. */
+function commentBlocks(lines: readonly string[], skip: readonly boolean[]): CommentBlock[] {
   const blocks: CommentBlock[] = [];
-  const blockAt: (CommentBlock | undefined)[] = rows.map(() => undefined);
   let start = -1;
   let headerAhead = true;
   const end = (at: number): void => {
     if (start === -1) return;
-    const block: CommentBlock = {
+    const markers: CommentBlock["markers"] = [];
+    for (let row = start; row < at; row++) {
+      const matches = [...lines[row].matchAll(MARKER)];
+      matches.forEach((match, i) => {
+        const from = match.index + match[0].length;
+        markers.push({
+          line: row + 1,
+          reason: lines[row].slice(from, matches[i + 1]?.index).trim(),
+        });
+      });
+    }
+    blocks.push({
       line: start + 1,
       length: at - start,
       scope: headerAhead ? "header" : "block",
-      markers: [],
-    };
-    blocks.push(block);
-    for (let row = start; row < at; row++) blockAt[row] = block;
+      markers,
+    });
     start = -1;
     headerAhead = false;
   };
-  rows.forEach((kind, row) => {
-    if (skip[row] || kind === "blank") {
+  lines.forEach((line, row) => {
+    if (skip[row] || line.trim() === "") {
       end(row);
-    } else if (kind === "code") {
+    } else if (row === 0 && SHEBANG.test(line)) {
+      return;
+    } else if (COMMENT_LINE.test(line)) {
+      if (start === -1) start = row;
+    } else {
       end(row);
       headerAhead = false;
-    } else if (kind === "comment" && start === -1) {
-      start = row;
     }
   });
-  end(rows.length);
-  for (const { type, startRow, text = "" } of comments) {
-    const delimiters = grammar.comments.get(type) ?? null;
-    const closers =
-      delimiters !== null && text.startsWith(delimiters.open) ? [delimiters.close] : [];
-    const matches = [...text.matchAll(MARKER)];
-    matches.forEach((match, i) => {
-      const row = startRow + (text.slice(0, match.index).match(/\n/g)?.length ?? 0);
-      const block = blockAt[row];
-      if (block === undefined) return;
-      const from = match.index + match[0].length;
-      const stops = ["\n", ...closers].map((stop) => text.indexOf(stop, from));
-      stops.push(matches[i + 1]?.index ?? -1);
-      const until = Math.min(...stops.filter((stop) => stop !== -1), text.length);
-      block.markers.push({ line: row + 1, reason: text.slice(from, until).trim() });
-    });
-  }
+  end(lines.length);
   return blocks;
 }
 
@@ -540,48 +245,42 @@ function exceeded(value: number, hard: number, warn: number): { tier: Tier; cap:
   return null;
 }
 
-export function judgeFile(path: string, kind: Kind, text: string, grammars: Grammars): Finding[] {
+export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
   const findings: Finding[] = [];
   const lines = splitLines(text);
   const generated = generatedRegionMask(lines);
-  const found = grammars.get(extensionOf(path));
-  const grammar = found !== undefined && "parser" in found ? found : null;
-  const analysis = grammar === null ? null : analyze(grammar, text, lines.length);
   const counted = generated.filter((inRegion) => !inRegion).length;
   const lineCount = exceeded(counted, HARD.lines[kind], WARN.lines[kind]);
   if (lineCount !== null) {
     findings.push({ path, kind, ...lineCount, measure: "lines", value: counted });
   }
-  if (WIDTH_KINDS.has(kind)) {
-    lines.forEach((line, index) => {
-      if (generated[index] || isUnbreakable(line)) return;
-      const width = [...line].length;
-      const over = exceeded(width, HARD.width, WARN.width);
-      if (over === null || (over.tier === "warn" && analysis?.literalRows[index])) return;
-      findings.push({ path, kind, ...over, measure: "width", line: index + 1, value: width });
-    });
-  }
-  if (analysis !== null && grammar !== null) {
-    for (const { line, length, scope, markers } of commentBlocks(analysis, grammar, generated)) {
-      for (const marker of markers) {
-        if (marker.reason === "") {
-          findings.push({ path, kind, tier: "warn", measure: "marker", line: marker.line });
-        }
+  if (kind === PROSE) return findings;
+  lines.forEach((line, index) => {
+    if (generated[index] || isUnbreakable(line)) return;
+    const width = [...line].length;
+    const over = exceeded(width, HARD.width, WARN.width);
+    if (over === null) return;
+    findings.push({ path, kind, ...over, measure: "width", line: index + 1, value: width });
+  });
+  for (const { line, length, scope, markers } of commentBlocks(lines, generated)) {
+    for (const marker of markers) {
+      if (!REASONED.test(marker.reason)) {
+        findings.push({ path, kind, tier: "warn", measure: "marker", line: marker.line });
       }
-      if (markers.some((marker) => marker.reason !== "")) continue;
-      const cap = COMMENT_CAPS[scope];
-      if (length > cap) {
-        findings.push({
-          path,
-          kind,
-          tier: "warn",
-          measure: "comment",
-          line,
-          value: length,
-          cap,
-          scope,
-        });
-      }
+    }
+    if (markers.some((marker) => REASONED.test(marker.reason))) continue;
+    const cap = COMMENT_CAPS[scope];
+    if (length > cap) {
+      findings.push({
+        path,
+        kind,
+        tier: "warn",
+        measure: "comment",
+        line,
+        value: length,
+        cap,
+        scope,
+      });
     }
   }
   return findings;
@@ -629,30 +328,14 @@ export interface Verdict {
   allowlistErrors: string[];
   /** Files skipped for carrying the platform's managed header: a fleet repository cannot fix such a file. */
   managedSkipped: number;
-  unjudged: { extension: string; files: number; reason: string }[];
 }
 
-export function check(root: string, grammars: Grammars): Verdict {
+export function check(root: string): Verdict {
   const allow = loadAllowlist(root, ALLOWLIST_FILE, REASON_RULE);
   const { allowed } = allow;
   const findings: Finding[] = [];
   const found = new Set<string>();
   let managedSkipped = 0;
-  const unjudged = new Map<string, Verdict["unjudged"][number]>();
-
-  const judge = (relPath: string, kind: Kind, text: string): void => {
-    const extension = extensionOf(relPath);
-    const grammar = grammars.get(extension);
-    if (grammar !== undefined && "reason" in grammar) {
-      const entry = unjudged.get(extension) ?? { extension, files: 0, reason: grammar.reason };
-      entry.files += 1;
-      unjudged.set(extension, entry);
-    }
-    const judged = judgeFile(relPath, kind, text, grammars);
-    if (judged.length === 0) return;
-    found.add(relPath);
-    if (!allowed.has(relPath)) findings.push(...judged);
-  };
   for (const relPath of repositoryFiles(root, { untracked: false })) {
     const kind = classify(relPath);
     if (kind === null) continue;
@@ -662,7 +345,10 @@ export function check(root: string, grammars: Grammars): Verdict {
       managedSkipped += 1;
       continue;
     }
-    judge(relPath, kind, text);
+    const judged = judgeFile(relPath, kind, text);
+    if (judged.length === 0) continue;
+    found.add(relPath);
+    if (!allowed.has(relPath)) findings.push(...judged);
   }
   const allowlistErrors = [
     ...allow.failures,
@@ -677,7 +363,6 @@ export function check(root: string, grammars: Grammars): Verdict {
     ),
     allowlistErrors,
     managedSkipped,
-    unjudged: [...unjudged.values()].sort((a, b) => a.extension.localeCompare(b.extension)),
   };
 }
 
@@ -696,7 +381,7 @@ export function report(outcome: Outcome): string {
     parts.push(`The check did not run to completion: ${outcome.message}`);
     return `${parts.join("\n")}\n`;
   }
-  const { failures, warnings, allowlistErrors, managedSkipped, unjudged } = outcome.verdict;
+  const { failures, warnings, allowlistErrors, managedSkipped } = outcome.verdict;
   if (outcome.state === "clean") {
     parts.push("Every file is under its caps.");
   } else {
@@ -720,12 +405,6 @@ export function report(outcome: Outcome): string {
   if (managedSkipped > 0) {
     parts.push("", `${managedSkipped} managed file(s) skipped; ${PLATFORM_NAME} owns them.`);
   }
-  for (const { extension, files, reason } of unjudged) {
-    parts.push(
-      "",
-      `${files} \`.${extension}\` file(s) not judged for comment blocks or literal lines (no working grammar: ${reason}).`,
-    );
-  }
   return `${parts.join("\n")}\n`;
 }
 
@@ -734,7 +413,7 @@ const REMEDY = `Split the file, wrap the line, shorten or exempt the comment, or
 if (import.meta.main) {
   await runCheck<Verdict>({
     name: "check-file-size",
-    check: async (root) => check(root, await loadGrammars()),
+    check,
     outcomeOf,
     report,
     warnings: (verdict) =>

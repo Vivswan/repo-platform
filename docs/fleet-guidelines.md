@@ -295,8 +295,9 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | line width | every kind but markdown (one source line per paragraph is the fleet rule) | 256 code points | 150 code points |
 | comment block | a run of comment-only lines (below; markdown is prose) | never fails | 10 lines; 25 for the file header |
 
-- **A comment block** is a run of lines holding nothing but comment tokens as the file's grammar tokenizes them. A multi-line comment counts every line between its delimiters, and a string or here-doc holding comment syntax is code.
-- **What ends a block:** a blank line or a code line. A line with code on it is code, so an inline comment after it is not a block.
+- **A comment block** is a run of consecutive lines opening with a comment prefix (`#`, `//`, `/*`, `*`, `<!--`, `--`, `;`, `%`, `{#`, `"""`, `'''`), indentation aside, whatever the file's language. The reading is by line, never by grammar.
+- **The accepted cost:** a string, here-doc, or block-scalar line opening with one of those prefixes reads as a comment, and a `/* */` body line opening with anything else reads as code. Both caps are the warn tier, so a misread costs a warning, never a red check.
+- **What ends a block:** a blank line or a code line. A line opening with code is code, so an inline comment after it is not a block.
 - **The file header** is the first block, when nothing but a shebang, blank lines, or a generated region precedes it.
 
 **Why:** a file past these sizes is several files wearing one name, and a line past the width is unreadable in any review pane. The caps are generous on purpose: they catch drift, not style.
@@ -311,8 +312,6 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **One token:** a line that is one whitespace-free token (a URL, a sha, an expression) is unbreakable, so it passes both width tiers. A literal assigned on the same line is two tokens and does not.
 
-- **One literal:** a line that is one string, template, or regex literal with nothing but punctuation and keywords beside it (assigned, returned, keyed, a sole argument, a line inside a multi-line literal) passes the warn width tier only, since wrapping it means splitting the literal.
-
 **How:** split the file, wrap the line, shorten the comment. Two per-finding bypasses exist, both repo-owned and visible in the diff: the comment block's marker ([short comments](#short-comments)) and the allowlist.
 
 - **A file that must stay large** goes in `.file-size-allow.local`, one `path # reason` per line (blank lines and `#` comment lines are skipped), which exempts every finding on that path in both tiers.
@@ -323,9 +322,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **Packaging:** a repository that packages from its root (an npm package with no `files` field, for one) lists the allowlist in its packaging ignore file (`.npmignore`), or it ships as content.
 
-**Enforced by:** the `file-size` step of fleet-ci.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It parses every judged file with web-tree-sitter and prebuilt wasm grammars for TypeScript, JavaScript, Python, Rust, Go, Kotlin, Java, C, C++, shell, and yaml.
-
-- **An extension without a working grammar** (today Swift, whose prebuilt grammar keeps scanner state across files) gets no comment judgement and no literal exemption, and the step summary names it as unjudged instead of guessing at it.
+**Enforced by:** the `file-size` step of fleet-ci.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It reads lines and nothing else: no parser, no grammar, no runtime dependency.
 
 - **What fails:** a hard-cap finding or an allowlist defect fails the step, and the judge fails the `standard-checks` job naming it. repo-platform's own ci.yml runs the same action as its standalone `file-size` job.
 
