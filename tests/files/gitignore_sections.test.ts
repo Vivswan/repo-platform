@@ -1,4 +1,4 @@
-// The platform-authored gitignore sections, judged by git itself: the workspace paths a fleet step creates are
+// The platform-authored gitignore sections, judged by git itself: the workspace paths a fleet step writes are
 // root-anchored so a nested source folder of the same name is not swallowed, the secrets and scratch rules are not
 // so a nested service's are, and the fuzz failure directory rides the fuzzer module alone because only its starter
 // produces it.
@@ -152,8 +152,9 @@ function workspaceCheckouts(): WorkspaceCheckout[] {
 
 test("every checkout path a fleet action or workflow creates inside the workspace is ignored, root-anchored", () => {
   const census = workspaceCheckouts();
-  // Armed: the validator's platform checkout is the first member of the class, so an empty census is a broken scan.
-  expect(census.filter((entry) => entry.judge === "base section").length).toBeGreaterThan(0);
+  // Armed by this repository's own workflows (the sync's build checkout, the docs-check job's skills checkout): an
+  // empty census is a broken scan. No shipped action or workflow checks out into the caller's workspace today.
+  expect(census.length).toBeGreaterThan(0);
   const start = BASE.indexOf(CI_WORKSPACE_SECTION);
   expect(start).toBeGreaterThanOrEqual(0);
   const section = BASE.slice(start).split(/\n(?=## )/)[0];
