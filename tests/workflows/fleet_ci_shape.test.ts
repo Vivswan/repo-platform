@@ -104,24 +104,6 @@ describe("fleet-ci.yml", () => {
     ]);
   });
 
-  // The action defers its verdict to the integrity output and stays green; only `!= 'success'` re-raises on 'failure' AND
-  // on an output that resolved empty (a broken mapping). A positive spelling (`== 'true'`) never fires on either: green.
-  // The re-raise fires only where the action ran: on the nightly (the action stood down) the absent output must not.
-  test("validate-managed-files re-raises on anything but a literal success, only where it ran", () => {
-    const validate = checkSteps.find((step) => step.id === "validate");
-    expect(validate?.uses).toContain("/actions/validate-managed-files@");
-    const reraise = checkSteps.find((step) => step.id === "managed-files");
-    expect({
-      if: reraise?.if,
-      lastLine: reraise?.run?.trim().split("\n").at(-1),
-      "continue-on-error": reraise?.["continue-on-error"],
-    }).toEqual({
-      if: "${{ !cancelled() && steps.validate.outcome == 'success' && steps.validate.outputs.integrity != 'success' }}",
-      lastLine: "exit 1",
-      "continue-on-error": undefined,
-    });
-  });
-
   // Which steps and jobs a scheduled run may reach: the checkout, the plan, the judge, and CodeQL on its weekly day (the
   // nightly security scan rides fleet-nightly.yml). Every other step excludes the schedule outright or gates on the
   // success of a step that does, and every other job's condition excludes it (the skip clause, or a PR-only guard), so a

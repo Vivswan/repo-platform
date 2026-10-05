@@ -6,10 +6,10 @@ description: |
   clone of repo-platform the action makes under the runner's temp directory. After it, the
   action checks the repository's YAML, conflict-marker, and release-as hygiene.
 
-  The findings are posted as one sticky PR comment plus the step summary, and the one verdict
-  is the `integrity` output. A missing bun fails the action before anything runs. Past that it
-  never fails on its own: the report step always runs, so the comment is already posted when
-  the caller fails last on `integrity`.
+  The findings are posted as one sticky PR comment plus the step summary. A missing bun fails
+  the action before anything runs. Past that the report step always runs, writes the summary
+  and the comment body, and fails on anything but a clean verdict. The comment steps after it
+  run on !cancelled(), so a red check still posts its comment before the job ends.
 
   The calling job needs pull-requests: write for the comment, and nothing else beyond
   contents: read.
@@ -20,13 +20,6 @@ inputs:
       The repository's visibility, `true` or `false`, as the plan action
       resolved it: the visibility side of files.yml's `when` clauses.
     required: true
-
-outputs:
-  integrity:
-    description: >-
-      The report step's reading of the one verdict: success for a clean verdict, failure for
-      findings, an unjudged run, or a missing or malformed verdict. Nothing else sets it.
-    value: ${{ steps.report.outputs.integrity }}
 
 runs:
   using: composite
@@ -108,7 +101,7 @@ runs:
         VERDICT_FILE: ${{ runner.temp }}/validate-managed-files-verdict.json
       run: '"$ACTION_BUN" "$ACTION_PATH/src/run.ts"'
 
-    # The ONE place the verdict is read and `integrity` is set, whatever
+    # The ONE place the verdict is read and the step fails on it, whatever
     # happened above, once there is a bun to read it with.
     - name: Report the findings
       id: report
@@ -124,10 +117,10 @@ runs:
 
     # The comment is a convenience sink: the summary carries the same body,
     # so a token without pull-requests write (a fork or Dependabot PR) must
-    # not turn the verdict red. The caller fails on `integrity`, never here.
+    # not turn the verdict red. The report step fails the job, never these.
     - name: Post the findings as a sticky PR comment
       id: post-comment
-      if: github.event_name == 'pull_request' && steps.report.outputs.report == 'findings'
+      if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.report.outputs.report == 'findings' }}
       continue-on-error: true
       uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
       with:
@@ -137,7 +130,7 @@ runs:
 
     - name: Remove a stale sticky comment
       id: delete-comment
-      if: github.event_name == 'pull_request' && steps.report.outputs.report == 'clean'
+      if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.report.outputs.report == 'clean' }}
       continue-on-error: true
       uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
       with:

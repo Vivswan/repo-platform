@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-// The ONE reader of the verdict: the `integrity` output, the step summary, and the sticky comment body come from the
-// same parsed value. Never fails the job; the caller re-raises `integrity` last.
+// The ONE reader of the verdict: the step summary, the sticky comment body, and the `report` output come from the
+// same parsed value, written before the exit that fails the step on anything but clean.
 
 import { appendFileSync, writeFileSync } from "node:fs";
 import { env, requireEnv } from "../../shared/action_runtime.ts";
@@ -17,9 +17,7 @@ const verdict: Integrity =
         kind: "not-judged",
         reason: `the scratch root could not be cleared (clear step outcome: ${clearOutcome || "none"})`,
       };
-// Exported before anything else can go wrong: this line IS the gate.
 const outputFile = requireEnv("GITHUB_OUTPUT");
-appendFileSync(outputFile, `integrity=${verdict.kind === "clean" ? "success" : "failure"}\n`);
 const runUrl = requireEnv("RUN_URL");
 const summaryFile = requireEnv("GITHUB_STEP_SUMMARY");
 const commentFile = requireEnv("COMMENT_FILE");
@@ -48,3 +46,4 @@ appendFileSync(summaryFile, `${body}\n`);
 // left (clean) - a clean repository has nothing worth a comment.
 writeFileSync(commentFile, `${body}\n`);
 appendFileSync(outputFile, `report=${blocking ? "findings" : "clean"}\n`);
+process.exit(blocking ? 1 : 0);

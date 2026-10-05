@@ -67,19 +67,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # The action DEFERS its failure so the findings comment posts first; the managed-files step re-raises it.
       - id: validate
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: Vivswan/repo-platform/actions/validate-managed-files@stable
         with:
           private: ${{ steps.plan.outputs.private }}
-      # Fail-closed: != 'success' re-raises on 'failure' AND on an output
-      # that resolved empty (a broken mapping must never read as green).
-      - id: managed-files
-        if: ${{ !cancelled() && steps.validate.outcome == 'success' && steps.validate.outputs.integrity != 'success' }}
-        run: |
-          echo "::error::validate-managed-files failed; see the findings on this PR (or the job summary) and the step log above."
-          exit 1
 
       - id: typography
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}

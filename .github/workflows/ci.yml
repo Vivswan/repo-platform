@@ -213,16 +213,9 @@ jobs:
           private: ${{ github.event.repository.private }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # The action DEFERS its failure so the findings comment posts first; the next step re-raises it, fail-closed:
-      # != 'success' re-raises on 'failure' AND on an output that resolved empty.
       - uses: ./actions/validate-managed-files
-        id: validate
         with:
           private: ${{ steps.plan.outputs.private }}
-      - if: ${{ steps.validate.outputs.integrity != 'success' }}
-        run: |
-          echo "::error::validate-managed-files failed; see the findings on this PR (or the job summary) and the step log above."
-          exit 1
 
   script-tests:
     runs-on: ubuntu-latest

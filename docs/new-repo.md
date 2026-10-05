@@ -116,7 +116,7 @@ The `validate-managed-files` step judges the repository against what repo-platfo
 
 - **Every finding blocks.** The verdict is ONE per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 
-- **The report step always runs,** reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. A bun that cannot be set up fails the action before anything runs.
+- **The report step always runs,** reads the verdict once, writes it to the job summary and the comment body, and fails on anything but clean, a missing or malformed verdict included. The sticky-comment steps after it run on `!cancelled()`, so the comment is posted before the job ends. A bun that cannot be set up fails the action before anything runs.
 
 - **Freshness informs:** the job summary says whether `stable` has moved past the recorded commit; nothing fails for that, and a sync moves the commit under the stamp rule ([platform/sync/manifest.md](platform/sync/manifest.md#when-the-judged-commit-moves)).
 
