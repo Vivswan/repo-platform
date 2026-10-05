@@ -225,6 +225,10 @@ if [ -f x ]; then cat x; fi
 
 **How:** a settings parser that drops a duplicate or empty entry and continues is right. Turning that drop into a refusal would be wrong. The comment on a healing step states the rule in one line and does not argue for it ([short comments](#short-comments)). A retired shape is not malformed input: it is a migration rung ([no backwards-compatibility code](#no-backwards-compatibility-code)).
 
+**A failure that happens on its own needs no check in front of it.** The tool's own failure is the boundary's refusal. A missing package, a stale lockfile, a version conflict, or a wrong toolchain fails the build or the gate when it happens and is fixed then. A pre-check that restates the tool's failure is deleted. A test stays for behavior the code does not enforce.
+
+The specimen: a 500-line pre-commit script comparing installed packages against the lockfile, deleted. The one case it caught that does not fail by itself is an installed version drifting from the lock. That drift is accepted. CI's fresh install is the source of truth.
+
 **Enforced by:** review.
 
 ## Short comments
