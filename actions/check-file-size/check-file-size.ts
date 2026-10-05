@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
 // A comment line is one COMMENT_LINE matches (actions/shared/managed_header.ts): read by prefix, whatever the language,
-// never by grammar. The caps that reading feeds are the warn tier, so a string line opening with `//` costs a warning.
+// never by grammar. The caps that reading feeds are the warn tier, so a string line opening with `//` counts toward a
+// warning at most.
 // Policy: docs/fleet-guidelines.md.
 
 import { readFileSync } from "node:fs";

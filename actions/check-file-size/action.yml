@@ -7,7 +7,7 @@ description: |
   The caps and the file kinds are check-file-size.ts.
 
   A comment block is a run of lines opening with a comment prefix, whatever the language. So a
-  string line opening with `//` costs a warning, never a red check.
+  string line opening with `//` counts toward a block warning, never a red check.
 
   Findings are written once, as one table, and reported through the sinks the fleet rule sets
   for any check that reports findings:
