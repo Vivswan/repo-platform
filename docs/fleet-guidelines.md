@@ -63,7 +63,9 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - **What the delivery pins test refuses:** [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) refuses a numeric comment pinact reads as a version but does not verify (`# v7`, `# v7.0`, `# v7-beta`). Such a line passes pinact unverified, sha included.
 
-- **One sha per action repo-wide** is the same test's other refusal. Dependabot's grouped PR ([dependabot.yml](../.github/dependabot.yml)) moves every site it reaches at once, and the `files/` sources are outside its reach, so a bump PR here updates them by hand, commented examples included, and the test fails it until they match. The fleet receives them through the next sync.
+- **One sha per action repo-wide** is the same test's other refusal. Dependabot's grouped PR ([dependabot.yml](../files/base/.github/dependabot.yml)) moves every site it reaches at once, and the `files/` sources are outside its reach, so a bump PR here updates them by hand, commented examples included, and the test fails it until they match. The fleet receives them through the next sync.
+
+- **Which sites Dependabot reaches:** the entry lists `/.github/actions/*` beside `/`, since `/` alone reads `.github/workflows`, so the pins inside a composite action (the site-build hook) are bumped in the same PR.
 
 **Enforced by, in every managed repository:** [actions/zizmor](../actions/zizmor/action.yml) under the fleet policy.
 
