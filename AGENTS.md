@@ -32,11 +32,11 @@ repo-platform: Standards files, CI, and settings for Vivswan's repositories, pus
 <!-- Add project-specific instructions below the END marker; they are this repository's own and survive every sync. -->
 <!-- END REPO-PLATFORM MANAGED -->
 
-Code is the source of truth; this file holds only what the code cannot say.
-
 ### What this is
 
-repo-platform manages standards files, CI, and settings across the owner's repositories: a file writer (`files.yml` + `files/`), reusable workflows, and composite actions, delivered to the fleet from the moving `stable` tag, which names a green main commit. Only this repository pushes to the fleet; managed repositories hold no sync workflow and no sync secret. It is a sync target of itself: the writer keeps its root copies of the files it ships, and the paths its `.repo-platform.yml` excepts (its own `ci.yml` among them) are its own.
+- repo-platform manages standards files, CI, and settings across the owner's repositories: a file writer (`files.yml` + `files/`), reusable workflows, and composite actions, delivered to the fleet from the moving `stable` tag, which names a green main commit.
+- Only this repository pushes to the fleet; managed repositories hold no sync workflow and no sync secret.
+- It is a sync target of itself: the writer keeps its root copies of the files it ships, and the paths its `.repo-platform.yml` excepts (its own `ci.yml` among them) are its own.
 
 ### Principles
 

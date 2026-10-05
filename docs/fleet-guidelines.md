@@ -17,6 +17,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | the managed files check; the writer's starter rule |
 | [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
+| [AGENTS.md keeps what the skills do not](#agentsmd-keeps-what-the-skills-do-not) | review |
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`, and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)) |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
@@ -190,6 +191,12 @@ if [ -f x ]; then cat x; fi
 **How:** put local content above the BEGIN marker or below the END marker.
 
 **Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [platform/sync/writer.md](platform/sync/writer.md#classes)); the managed files check on the region.
+
+## AGENTS.md keeps what the skills do not
+
+**Rule:** AGENTS.md holds what an agent cannot learn elsewhere: the repository's CI gates, its contracts and decisions, its toolchain entry points, and the managed block. It never restates a rule an installed agent skill owns outright (PR body shape, review rounds, attribution lines, comment and test standards). A convention a skill defers to the repository (Conventional Commits) stays.
+
+**Enforced by:** review.
 
 ## Copilot review comments are advisory
 
