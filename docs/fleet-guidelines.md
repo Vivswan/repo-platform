@@ -309,7 +309,7 @@ A hook runs only the checks the repository's own toolchain provides (bun here; u
 
 ## File size caps
 
-**Rule:** no file over its hard line cap, and in a source, test, workflow, or shell file no line over 256 code points, comment lines included. A `//` line past the cap is a width finding whatever block it sits in.
+**Rule:** no file over its hard line cap, no line over 256 code points in a source, test, workflow, or shell file (comment lines included), and no comment block over its cap. Below the width cap, line length is the repo-owned formatter's or linter's to judge (biome, ruff, prettier, yamllint).
 
 The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size.ts):
 
@@ -320,11 +320,12 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | workflow | yaml under `.github/workflows/`, and any `action.yml` or `action.yaml` | 1000 lines | 800 lines |
 | shell | `.sh`, `.bash`, `.zsh` | 1000 lines | 800 lines |
 | markdown | `.md` | 1300 lines | 1040 lines |
-| line width | every kind but markdown (one source line per paragraph is the fleet rule) | 256 code points | 150 code points |
+| line width | every kind but markdown (one source line per paragraph is the fleet rule) | 256 code points | none |
 | comment block | a run of comment-only lines (below; markdown is prose) | never fails | 10 lines; 25 for the file header |
 
-- **A comment block** is a run of lines holding nothing but comment tokens as the file's grammar tokenizes them. A multi-line comment counts every line between its delimiters, and a string or here-doc holding comment syntax is code.
-- **What ends a block:** a blank line or a code line. A line with code on it is code, so an inline comment after it is not a block.
+- **A comment block** is a run of consecutive lines opening with a comment prefix (`#`, `//`, `/*`, `*`, `<!--`, `--`, `;`, `%`, `{#`, `"""`, `'''`), indentation aside, whatever the file's language. The reading is by line, never by grammar.
+- **The accepted cost:** a string, here-doc, or block-scalar line opening with one of those prefixes reads as a comment, and a `/* */` body line opening with anything else reads as code. A misread can raise a block warning the language would not, or merge a block into the header and hide one. Both caps are the warn tier: a warning either way, never a red check.
+- **What ends a block:** a blank line or a code line. A line opening with code is code, so an inline comment after it is not a block.
 - **The file header** is the first block, when nothing but a shebang, blank lines, or a generated region precedes it.
 
 **Why:** a file past these sizes is several files wearing one name, and a line past the width is unreadable in any review pane. The caps are generous on purpose: they catch drift, not style.
@@ -337,9 +338,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **Managed:** a file carrying repo-platform's managed header (the repository cannot fix it; the summary counts them).
 
-- **One token:** a line that is one whitespace-free token (a URL, a sha, an expression) is unbreakable, so it passes both width tiers. A literal assigned on the same line is two tokens and does not.
-
-- **One literal:** a line that is one string, template, or regex literal with nothing but punctuation and keywords beside it (assigned, returned, keyed, a sole argument, a line inside a multi-line literal) passes the warn width tier only, since wrapping it means splitting the literal.
+- **One token:** a line that is one whitespace-free token (a URL, a sha, an expression) is unbreakable, so it passes the width cap. A literal assigned on the same line is two tokens and does not.
 
 **How:** split the file, wrap the line, shorten the comment. Two per-finding bypasses exist, both repo-owned and visible in the diff: the comment block's marker ([short comments](#short-comments)) and the allowlist.
 
@@ -351,9 +350,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **Packaging:** a repository that packages from its root (an npm package with no `files` field, for one) lists the allowlist in its packaging ignore file (`.npmignore`), or it ships as content.
 
-**Enforced by:** the `file-size` step of fleet-ci.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It parses every judged file with web-tree-sitter and prebuilt wasm grammars for TypeScript, JavaScript, Python, Rust, Go, Kotlin, Java, C, C++, shell, and yaml.
-
-- **An extension without a working grammar** (today Swift, whose prebuilt grammar keeps scanner state across files) gets no comment judgement and no literal exemption, and the step summary names it as unjudged instead of guessing at it.
+**Enforced by:** the `file-size` step of fleet-ci.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It reads lines and nothing else: no parser, no grammar, no runtime dependency.
 
 - **What fails:** a hard-cap finding or an allowlist defect fails the step, and with it the `standard-checks` job. repo-platform's own ci.yml runs the same action as its standalone `file-size` job.
 

@@ -21,16 +21,6 @@
       "entry": ["*.ts", "!*[._]{test,spec}.ts"],
       "project": ["**/*.{ts,mts}"]
     },
-    "actions/check-file-size": {
-      "entry": ["*.ts", "!*[._]{test,spec}.ts"],
-      "project": ["**/*.{ts,mts}"],
-      // The grammar packages are loaded as wasm files by path, never imported.
-      "ignoreDependencies": [
-        "tree-sitter-wasms",
-        "tree-sitter-bash",
-        "@tree-sitter-grammars/tree-sitter-yaml"
-      ]
-    },
     "actions/validate-commit-names": {
       "entry": ["*.ts", "!*[._]{test,spec}.ts"],
       "project": ["**/*.{ts,mts}"],
