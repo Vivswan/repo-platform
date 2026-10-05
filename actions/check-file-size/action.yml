@@ -1,9 +1,11 @@
 name: Check File Size
 description: |
-  Caps file length and comment block length in the caller's checkout.
+  Caps file length, line width, and comment block length in the caller's checkout.
 
-  Two tiers for length: a sensible size warns, a hard cap fails. One tier for a comment
-  block: it warns only, and a comment line `comment-cap: ignore <reason>` exempts its block.
+  Two tiers for length: a sensible size warns, a hard cap fails. One tier for width: a line
+  over 256 code points fails. One tier for a comment block: it warns only, and a comment line
+  `comment-cap: ignore <reason>` exempts its block.
+
   The caps and the file kinds are check-file-size.ts.
 
   A comment block is a run of lines opening with a comment prefix, whatever the language. So a
