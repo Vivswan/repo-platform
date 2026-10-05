@@ -415,12 +415,12 @@ describe("the collector", () => {
       },
     ],
     [
-      ".husky/pre-commit",
+      ".githooks/pre-commit",
       "#!/bin/sh\nfor x in a; do echo $x; done\n",
       {
         bodies: [
           body(
-            ".husky/pre-commit",
+            ".githooks/pre-commit",
             1,
             "script",
             "bash",

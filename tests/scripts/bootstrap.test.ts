@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { bunLockDirs, missingNodeModules, runtimeMismatch } from "../../scripts/bootstrap";
+import {
+  bunLockDirs,
+  HOOKS_PATH,
+  installHooks,
+  missingNodeModules,
+  runtimeMismatch,
+} from "../../scripts/bootstrap";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 
 const root = join(import.meta.dir, "../..");
@@ -50,6 +58,58 @@ test("every bun.lock names the package.json beside it", () => {
           .name,
     ),
   );
+});
+
+describe("installHooks", () => {
+  // Git runs a hook only from an executable file and skips the rest without a word, and a tracked file's mode is what
+  // every checkout gets. The content is the hook's own, so only the bit is pinned.
+  test("the tracked pre-commit hook is executable", () => {
+    expect(fixtureGit(root, ["ls-files", "-s", `${HOOKS_PATH}/pre-commit`])).toStartWith("100755 ");
+  });
+
+  // The named incident: a generated hook folder existed only where an install had run, so a fresh worktree committed
+  // unchecked, and a stale checkout's absolute path ran its hooks in every sibling. The one relative setting is
+  // written to the shared config and resolved against each worktree's own root, so the sibling runs its own file.
+  test("a worktree added later, which never ran bootstrap, runs its own tracked hook", () => {
+    const identity = ["-c", "user.name=t", "-c", "user.email=t@example.com"];
+    const sentinel = (where: string) => `#!/bin/sh\necho hook-ran-in-${where} >&2\nexit 1\n`;
+    const base = temp.dir("bootstrap-hooks-");
+    const sibling = temp.dir("bootstrap-hooks-worktree-");
+    const decoy = temp.dir("bootstrap-hooks-decoy-");
+    for (const repo of [base, decoy]) fixtureGit(repo, ["init", "-q", "-b", "main"]);
+    mkdirSync(join(base, HOOKS_PATH));
+    writeFileSync(join(base, HOOKS_PATH, "pre-commit"), sentinel("base"), { mode: 0o755 });
+    fixtureGit(base, ["add", "-A"]);
+    fixtureGit(base, [...identity, "commit", "-q", "-m", "init"]);
+
+    // A hook's exported GIT_DIR once rewrote this repository's config; the decoy is where a leaked one points.
+    process.env.GIT_DIR = join(decoy, ".git");
+    try {
+      installHooks(base);
+    } finally {
+      delete process.env.GIT_DIR;
+    }
+    expect(fixtureGit(base, ["config", "--get", "core.hooksPath"])).toBe(HOOKS_PATH);
+    const leaked = boundedSpawnSync(["git", "-C", decoy, "config", "--get", "core.hooksPath"], {
+      env: fixtureGitEnv(),
+    });
+    expect([leaked.exitCode, leaked.stdout]).toEqual([1, ""]);
+
+    fixtureGit(base, ["worktree", "add", "-q", sibling]);
+    writeFileSync(join(sibling, HOOKS_PATH, "pre-commit"), sentinel("sibling"));
+    writeFileSync(join(sibling, "note.txt"), "x\n");
+    fixtureGit(sibling, ["add", "note.txt"]);
+    const gated = boundedSpawnSync(
+      ["git", "-C", sibling, ...identity, "commit", "-q", "-m", "gated"],
+      {
+        env: fixtureGitEnv(),
+      },
+    );
+    expect([gated.exitCode, gated.stderr.trim()]).toEqual([1, "hook-ran-in-sibling"]);
+    // The control: the same commit with hooks bypassed lands, so the refusal above was the hook's.
+    fixtureGit(sibling, [...identity, "commit", "-q", "--no-verify", "-m", "gated"]);
+    fixtureGit(base, ["worktree", "remove", "--force", sibling]);
+  });
 });
 
 describe("runtimeMismatch", () => {
