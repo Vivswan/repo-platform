@@ -108,7 +108,7 @@ The `validate-managed-files` step judges the repository against what repo-platfo
 
 | Check | Blocks on |
 |---|---|
-| The recorded commit | a manifest whose own entry records no `commit`, or one that is not a full sha or that repo-platform does not hold (the checkout fails): not judged, the reason naming the remedy (merge the pending sync PR, or dispatch a sync). A commit repo-platform holds off `stable`'s history is judged, with a freshness warning |
+| The recorded commit | a manifest whose own entry records no full-sha `commit` (a hand edit: revert it, or dispatch a sync), or one that repo-platform does not hold (the checkout fails): not judged, the reason naming the remedy. A commit repo-platform holds off `stable`'s history is judged, with a freshness warning |
 | The sync's bytes | any byte that differs from what the recorded commit's writer writes over a copy of the repository (an edited managed file, a deleted or unmarked region, a replaced mirror, a registration change the sync has not carried yet), each path with a unified diff whose `+` lines are the sync's; and every reason the writer would hold the sync PR for, or its refusal |
 | Release-please config | a `release-as` key in `release-please-config.json` ([the release pipeline](#the-release-pipeline-release-please)) |
 | YAML | a YAML file anywhere in the repository that does not parse, carries a duplicate mapping key, or is a multi-document stream |
