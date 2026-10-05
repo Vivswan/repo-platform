@@ -68,7 +68,7 @@ const EXTENSIONS = new Set([
 ]);
 
 /** Extensionless text files (hooks, licenses) are checked too; "forbidden
- *  everywhere" must include .husky/pre-commit and friends. */
+ *  everywhere" must include .githooks/pre-commit and friends. */
 function isCheckable(name: string): boolean {
   const dot = name.lastIndexOf(".");
   if (dot === -1) return true;

@@ -111,8 +111,9 @@ The `validate-managed-files` step judges the repository against what repo-platfo
 | The recorded commit | a manifest whose own entry records no full-sha `commit` (a hand edit: revert it, or dispatch a sync), or one that repo-platform does not hold (the clone fails): not judged, the reason naming the remedy. A commit repo-platform holds off `stable`'s history is judged, with a freshness warning |
 | The sync's bytes | any byte that differs from what the recorded commit's writer writes over a copy of the repository (an edited managed file, a deleted or unmarked region, a replaced mirror, a registration change the sync has not carried yet), each path with a unified diff whose `+` lines are the sync's; and every reason the writer would hold the sync PR for, or its refusal |
 | Release-please config | a `release-as` key in `release-please-config.json` ([the release pipeline](#the-release-pipeline-release-please)) |
-| YAML | a YAML file anywhere in the repository that does not parse, carries a duplicate mapping key, or is a multi-document stream |
 | Conflict markers | a line opening with `<<<<<<< ` or `>>>>>>> `, or reading `=======`, in a source, config, or markdown file (the validator's text suffixes); a fenced example of the markers counts |
+
+YAML syntax and duplicate mapping keys are the `yamllint` step's, in the same job ([what gates what](all-green.md#what-gates-what)).
 
 - **Every finding blocks.** The verdict is ONE per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 
