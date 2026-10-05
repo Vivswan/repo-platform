@@ -6,14 +6,11 @@ import {
   alertTitlesRule,
   CUSTOM_BLOCK_LABELS,
 } from "../../../actions/pages-site/.vitepress/custom-blocks.ts";
-import { inlineTextRule } from "../../../actions/pages-site/.vitepress/inline-text.ts";
-import { landingLauncherRule } from "../../../actions/pages-site/.vitepress/landing-launcher.ts";
 import { mermaidRule } from "../../../actions/pages-site/.vitepress/mermaid.ts";
 import { rewriteLinksRule } from "../../../actions/pages-site/.vitepress/rewrite-links.ts";
 import { tableWrapRule } from "../../../actions/pages-site/.vitepress/table-wrap.ts";
-import { headersRule } from "../../../actions/pages-site/.vitepress/theme/page-index.ts";
 
-export type Md = Parameters<typeof landingLauncherRule>[0];
+export type Md = Parameters<typeof rewriteLinksRule>[0];
 
 export const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 
@@ -45,11 +42,8 @@ export async function vitepressRenderer(): Promise<Md> {
       headers: { level: [2, 3] },
       container: CUSTOM_BLOCK_LABELS,
       config(md: Md) {
-        inlineTextRule(md);
         rewriteLinksRule(md, LINK_SCOPE);
-        landingLauncherRule(md, REWRITES);
         tableWrapRule(md);
-        headersRule(md);
         alertTitlesRule(md);
         mermaidRule(md);
       },

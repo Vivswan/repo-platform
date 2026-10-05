@@ -32,15 +32,6 @@ export function walkMarkdown(srcDir: string, prefix = ""): string[] {
   return files;
 }
 
-/** VitePress's include directive expands only a regular file, so every stat failure is false. */
-export function isRegularFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
-
 export function includeIndexPages(
   files: string[],
   includes: { mount: string; page: string }[],

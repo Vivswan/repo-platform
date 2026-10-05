@@ -145,10 +145,6 @@ The docs mount carries the tag rules:
 
 - **Sidebar and nav** derive from the file tree and each page's frontmatter: `title` (else the h1, else the file name), `order` (a number, ascending; pages without one follow, by title), `group` (a heading placed where the group's first member falls). A directory reads as its folder name with each word capitalized, after the level's pages.
 
-- **The search launcher** lists every page of the docs tree but the landing, from an index the build writes, in the sidebar's order: a root page is a group of its own with its h2 and h3 headings, a deeper page sits under its folder's. A page expanding an `@include` directive lists no headings.
-
-- **The launcher's panel** sits on the landing page before the first `##` section (at the end of a page without one); every other page carries the nav's search button.
-
 - **A landing page titled exactly like the site** reads Overview in the sidebar.
 
 - **Links** are written as they read on GitHub: a link inside `docs/` (or into another staged root, below) becomes the page's route, a link to any other repository file becomes that file on GitHub at the version being read, and absolute URLs pass through. Heading anchors are GitHub's.
@@ -175,7 +171,7 @@ The theme is one for the whole fleet, owned by [actions/pages-site/.vitepress/th
 
 - **Wide tables:** a top-level table wider than the doc column scrolls horizontally inside the column. An inline-code token in a cell stays whole up to half the column and wraps inside past that, so one long token no longer squeezes its neighbour to a column of single words; two long tokens in one row beside prose still can.
 
-- **Search:** local full-text search on every page.
+- **Search:** VitePress's local search, from the nav's search button or Cmd K / Ctrl K on every page: full-text over every page, with fuzzy and prefix matching.
 
 - **Edit link:** an "Edit this page" link on default-branch tiers.
 
