@@ -14,7 +14,10 @@
         "migrations/**/*.ts",
         "tests/**/*.ts"
       ],
-      "project": ["**/*.{ts,mts}"]
+      "project": ["**/*.{ts,mts}"],
+      // The lint scripts run `bun node_modules/.bin/biome` so its node-shebang launcher runs under bun; knip reads only
+      // `bun x biome` or a bare `biome` as a use.
+      "ignoreDependencies": ["@biomejs/biome"]
     },
     "actions/*": {
       // Action entrypoints run by path from action.yml, at the action root.

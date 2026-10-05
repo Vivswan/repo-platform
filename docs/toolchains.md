@@ -11,7 +11,7 @@ One version per toolchain, fleet-wide, spelled once: a version dotfile under `fi
 
 | Toolchain | Pin | Readers |
 |---|---|---|
-| bun | [files/bun/.bun-version](../files/bun/.bun-version) | the fleet's synced `.bun-version`; this repository's workflows (`bun-version-file: files/bun/.bun-version`); every composite action's bun-setup step, through this repository's own synced root copy; `scripts/bootstrap.ts`, which refuses a local bun at another MAJOR.MINOR; `@types/bun` in every package declaring it, pinned exactly to it |
+| bun | [files/bun/.bun-version](../files/bun/.bun-version) | the fleet's synced `.bun-version`; this repository's workflows (`bun-version-file: files/bun/.bun-version`); every composite action's bun-setup step, through this repository's own synced root copy; `@types/bun` in every package declaring it, pinned exactly to it |
 | deno | [files/deno/.dvmrc](../files/deno/.dvmrc) | the fleet's synced `.dvmrc` |
 
 Modules without a pin: uv floats on its setup action's default, and the rust blocks' setup action installs the toolchain the repository's `rust-toolchain.toml` names (stable when there is none), so rust version selection stays repository-owned.
