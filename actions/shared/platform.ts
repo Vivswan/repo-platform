@@ -37,3 +37,9 @@ export const SYNC_PR_TITLE_PREFIX = `chore: sync ${PLATFORM_NAME} build`;
 
 /** A human's label on a pull request: the repository's sync-branch workflow syncs the branch and takes the label off. */
 export const SYNC_LABEL = `${PLATFORM_NAME}:sync`;
+
+/** Where fleet-ci.yml checks this repository out, inside the caller's workspace, at the called workflow's own commit, so its
+ *  `uses: ./<this>/actions/<name>` steps run the commit the workflow file came from. GitHub resolves an `@stable` action
+ *  when its job runs and the workflow when the run starts, and a tag move between the two mixed commits once. The
+ *  workflow hides the directory from git (`.git/info/exclude`); a check that walks the tree itself skips it by name. */
+export const PLATFORM_CHECKOUT_DIR = `.${PLATFORM_NAME}-checkout`;

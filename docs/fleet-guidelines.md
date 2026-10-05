@@ -54,7 +54,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Exceptions:**
 
-- **The platform's own channel:** `Vivswan/repo-platform/...@stable` references stay on the moving `stable` tag on purpose. It is the green-gated delivery channel ([build-provenance](platform/build-provenance.md)), so a pinned sha there would freeze the fleet on one green commit.
+- **The platform's own channel:** `Vivswan/repo-platform/...@stable` references stay on the moving `stable` tag on purpose. It is the green-gated delivery channel ([build-provenance](platform/build-provenance.md)), so a pinned sha there would freeze the fleet on one green commit. Inside fleet-ci.yml the actions are `./.repo-platform-checkout/actions/<name>`, a checkout at the workflow's own commit, so one run reads one commit ([one commit per run](platform/build-provenance.md#one-commit-per-fleet-ci-run)).
 
 - **An action that publishes no version tags** is pinned to a branch commit with the branch in the comment, `uses: <owner>/<action>@<40-hex sha> # main`, the sha alone naming the version. [.github/pinact.yaml](../.github/pinact.yaml) skips each such action at a full sha only; the same action at a moving ref is judged like any other. Today that is `Vivswan/skills`, whose validate-skills action repo-platform's own ci.yml runs on its skills catalog.
 

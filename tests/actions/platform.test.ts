@@ -15,6 +15,7 @@ import {
   GENERATED_NOTICE,
   MANAGED_HEADER_PATTERN,
   MANIFEST_NAME,
+  PLATFORM_CHECKOUT_DIR,
   REGISTRATION_PATH,
   SYNC_LABEL,
   SYNC_PR_TITLE_PREFIX,
@@ -41,6 +42,7 @@ describe("the platform slug and every string the fleet observes derived from it"
       syncPrTitle: prTitle("0123456789abcdef0123456789abcdef01234567"),
       syncLabel: SYNC_LABEL,
       deliveryRef: DELIVERY_REF,
+      platformCheckoutDir: PLATFORM_CHECKOUT_DIR,
     }).toEqual({
       registration: ".repo-platform.yml",
       manifest: ".github/repo-platform-manifest.json",
@@ -61,6 +63,7 @@ describe("the platform slug and every string the fleet observes derived from it"
       syncPrTitle: "chore: sync repo-platform build 0123456789ab",
       syncLabel: "repo-platform:sync",
       deliveryRef: "stable",
+      platformCheckoutDir: ".repo-platform-checkout",
     });
   });
 
