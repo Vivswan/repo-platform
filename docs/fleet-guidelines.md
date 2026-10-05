@@ -231,6 +231,10 @@ if [ -f x ]; then cat x; fi
 
 **How:** either run the check-only form of each tool (`biome ci`) and let its failure stand, or run the write form (`biome format --write`) and fail the hook whenever it changed a file, naming the files. Never a git command that writes (`add`, `commit`, `stash`, `checkout`, `reset`, `push`, `config`); read-only queries such as `git diff --cached --name-only` are fine. A formatter-and-restage step, lint-staged and its kind, is out.
 
+A hook installs nothing: no runtime, no dependencies, no tools. Setup is the repository's bootstrap command (`bun run bootstrap` here), and a hook that finds a dependency missing fails naming that command.
+
+A hook runs only the checks the repository's own toolchain provides (bun here; uv in a Python repository). A check that needs another runtime or a separately installed binary, yamllint, actionlint, and gitleaks among them, is CI's: the shipped workflow runs it on every pull request and push to main, for every repository alike.
+
 **Enforced by:** review; repo-platform ships no hook.
 
 ## File size caps
