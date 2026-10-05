@@ -25,7 +25,6 @@ import {
   type Records,
   readRecord,
   readRecords,
-  recordedCommit,
   regionMarkers,
   renderManifest,
   writeManifest,
@@ -243,10 +242,9 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
     values: placeholderValues(registration, slug, options.private, config.defaults),
     upstream: await fetchUpstream(upstreamRefs(config.files), options.upstream),
   };
-  const { records, problem } = readRecords(options.target);
+  const { records, commit: recorded, problem } = readRecords(options.target);
   if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
   const manifestBefore = existingFile(options.target, MANIFEST_NAME);
-  const recorded = recordedCommit(records);
   // Read before the writes: a recorded commit the checkout cannot fetch fails the run before a byte moves. `files.yml`
   // sits at the platform root, which is the checkout the diff reads.
   const checkerMoved =
@@ -330,6 +328,8 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
   const written = new Map<string, Buffer>();
   const rows: WrittenRow[] = [];
   const replaced: SyncReport["replaced"] = [];
+  // A Map, so a written path named `__proto__` stays an own key of the report's object.
+  const templates = new Map<string, SyncReport["templates"][string]>();
   for (const entry of entries) {
     // The class writers hold a link in the way; anything else they refuse
     // loudly, and the sync must still end in a report.
@@ -375,6 +375,22 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
       change: outcome.change,
       detail: outcome.change === "held" ? outcome.reason : (result.detail ?? ""),
     });
+    // The mapping this write applied, for a reader judging the written file against its template. A starter found
+    // current is the repository's own content, neither rendered nor compared, so only one this run created is the
+    // template's. A split write adds region markers and a block anchor is removed, filled or not, so neither keeps
+    // the template's lines.
+    const fromTemplate = entry.class !== "starter" || outcome.change === "created";
+    if (
+      outcome.change !== "held" &&
+      fromTemplate &&
+      "source" in entry &&
+      typeof entry.source === "string"
+    ) {
+      templates.set(entry.path, {
+        source: entry.source,
+        lineMapped: entry.class !== "split" && entry.blocks === undefined,
+      });
+    }
     if (outcome.change === "replaced local edits") {
       replaced.push({ path: entry.path, diff: unifiedDiff(entry.path, outcome.replaced, content) });
     }
@@ -432,6 +448,7 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
     modules: selected,
     private: options.private,
     written: rows,
+    templates: Object.fromEntries(templates),
     replaced,
     retired,
     notes,

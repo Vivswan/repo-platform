@@ -19,11 +19,20 @@ export interface ReplacedEdit {
   diff: string;
 }
 
+/** The template a written file came from, tree-relative under files/, and whether its lines are the written file's:
+ *  a split write adds region markers and a block splice shifts what follows, so neither maps. */
+export interface TemplateRecord {
+  source: string;
+  lineMapped: boolean;
+}
+
 export interface SyncOutcome {
   build: string;
   modules: string[];
   private: boolean;
   written: WrittenRow[];
+  /** By written path, for every sourced entry this run wrote or found current. */
+  templates: Record<string, TemplateRecord>;
   replaced: ReplacedEdit[];
   retired: RetireRow[];
   notes: string[];

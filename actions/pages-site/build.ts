@@ -18,7 +18,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { type IncludeRoot, isUnwalkedEntry, LANDING_FILES } from "./.vitepress/conventions.ts";
@@ -178,7 +177,7 @@ function readConfig(): Config {
   // realpath'd: a scratch base behind a symlink (macOS /tmp) gives the
   // build two spellings of one directory, and path-keyed route resolution
   // inside vitepress falls apart on the mismatch.
-  const scratch = join(realpathSync(env("RUNNER_TEMP", tmpdir())), "pages-site");
+  const scratch = join(realpathSync(requireEnv("RUNNER_TEMP")), "pages-site");
   const served = join(scratch, "served");
   return {
     ...parseSiteConfig(requireEnv("CONFIG")),

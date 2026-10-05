@@ -1,7 +1,9 @@
-# Copilot runs this job (it MUST be named copilot-setup-steps) to prepare
-# its environment; the push/PR triggers exist so edits to this file are
-# validated in CI. Seeded once by the fleet sync,
-# never overwritten by a later sync.
+# Prepares the environment Copilot runs in.
+#
+# This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
+#
+# Copilot runs this job, which must be named copilot-setup-steps. The push and PR triggers exist so edits to this
+# file are validated in CI.
 
 name: Copilot Setup Steps
 

@@ -13,6 +13,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Pinned actions](#pinned-actions) | pinact and `tests/workflows/delivery_pins.test.ts` in repo-platform (landing); zizmor in every fleet push and PR run; Dependabot bumps the pins |
 | [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` step; the settings override layer (squash-only) |
 | [Plain ASCII punctuation](#plain-ascii-punctuation) | the `typography` step |
+| [Shell is a straight line of commands](#shell-is-a-straight-line-of-commands) | the `shell-complexity` job of repo-platform's ci.yml; the fleet's `standard-checks` step is staged |
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | the managed files check; the writer's starter rule |
 | [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
@@ -62,6 +63,8 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - **What the delivery pins test refuses:** [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) refuses a numeric comment pinact reads as a version but does not verify (`# v7`, `# v7.0`, `# v7-beta`). Such a line passes pinact unverified, sha included.
 
+- **One sha per action repo-wide** is the same test's other refusal. Dependabot's grouped PR ([dependabot.yml](../.github/dependabot.yml)) moves every site it reaches at once, and the `files/` sources are outside its reach, so a bump PR here updates them by hand, commented examples included, and the test fails it until they match. The fleet receives them through the next sync.
+
 **Enforced by, in every managed repository:** [actions/zizmor](../actions/zizmor/action.yml) under the fleet policy.
 
 - **`unpinned-uses`:** hash-pin for everything but the platform's own actions, so a `@main` platform ref passes here where pinact refuses it.
@@ -69,11 +72,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Not judged, on purpose:**
 
-- **One sha per action repo-wide** is Dependabot's doing, not a check's, since its one grouped `github-actions` bump PR ([dependabot.yml](../.github/dependabot.yml)) moves every site at once.
-
-- **A commented example pin** (the toolchain blocks of the managed `checks.yml`) never executes, so pinact does not read it. The delivery pins test still reads its comment shape, so an example spells the full version too.
-
-- **The sync writer's `files/` sources** are outside Dependabot's reach and nothing compares them with the bumped pins. So a bump PR here updates them by hand, commented examples included; the fleet receives them through the next sync.
+- **A commented example pin** (the toolchain blocks of the managed `checks.yml`) never executes, so pinact does not read it. The delivery pins test still reads its comment shape and its sha, so an example spells the full version and rides the same sha too.
 
 ## Conventional Commits, squash-merged
 
@@ -106,6 +105,47 @@ Conventions every managed repository follows, whether the file is managed by syn
 **How:** `"..."`, `'...'`, `-`; a file that must carry non-ASCII goes in `.typography-allow.local`.
 
 **Enforced by:** the `typography` step of `standard-checks` ([actions/check-typography](../actions/check-typography/action.yml)).
+
+## Shell is a straight line of commands
+
+**Rule:** an inline shell body (a workflow or composite-action `run:` step, a moon task `script`, a Containerfile `RUN`, a `*.sh`, `*.ps1`, or `*.bat` file, a tracked extensionless file whose shebang names a shell) may carry one level of a construct. A construct inside another, or a function at any depth, is a TypeScript script run by bun.
+
+- **Depth 1, allowed:** an `if`, `for`, `while`, `until`, `case`, `||` chain, or tested command substitution whose body holds only plain commands.
+- **Depth 2, refused:** any construct inside another: an `if` inside a `for`, a `case` inside an `if`, a `||` inside an `if` body, a tested `$(...)` inside a loop or an `if`.
+- **A function is refused at any depth:** a function is a script asking to be TypeScript.
+
+Refused:
+
+```bash
+for f in *; do
+  if [ -f "$f" ]; then cat "$f"; fi
+done
+```
+
+Allowed:
+
+```bash
+if [ -f x ]; then cat x; fi
+```
+
+**Why:** bash-only defects cost review rounds: `set -e` does not reach a failed command inside a tested `$(...)`, macOS ships bash 3.2, and `grep`'s locale and PCRE behaviour differ by runner. A script has types, a test, and one runtime.
+
+**How:** the constructs the depth rule counts, per dialect:
+
+| Dialect | Parsed by | Constructs |
+| --- | --- | --- |
+| bash, sh, zsh (an unset `shell:` is bash, or pwsh on a Windows `runs-on`) | mvdan/sh, shfmt's parser, as bash | `if`, `case`, `for`, `while`, `until`, a `\|\|` chain, a `$(...)` fed to `test`, `[`, or `[[`; a function is refused outright |
+| PowerShell (`pwsh`, `powershell`, `*.ps1`, `*.psm1`) | PowerShell's own parser, through `pwsh` | `if`, `switch`, `for`, `foreach`, `while`, `do`, `try`, a `\|\|` chain; a function is refused outright |
+| cmd (`shell: cmd`, `*.bat`, `*.cmd`) | tokens, after dropping `rem` and `::` lines: no parser exists for cmd | `if`, `for`, `\|\|`, counted by keyword rather than structure: one passes, two or more are refused, so a three-way `\|\|` chain is refused where bash passes it; a `goto`, a `:label`, or a `call :label` is refused outright |
+
+- **Allowed at any depth:** commands joined by newlines, `&&`, or pipes; redirects; `set -e` and `set -o pipefail`; assignments, `${X:-default}` included; `echo "k=$(v)" >> "$GITHUB_OUTPUT"`.
+- **cmd over-reports:** a token scan cannot tell a keyword inside a quoted argument from the real thing, so it counts both; the allow-list is the remedy.
+- **zsh parses as bash:** mvdan/sh's zsh support is experimental, so a zsh-only expansion is a "does not parse" finding; the allow-list is the remedy.
+- **pwsh must be on the runner** when a PowerShell body exists; the step fails naming it, never skips.
+- **Exempt:** a block that must stay shell goes in `.shell-complexity-allow.local` as `path # reason`, the reason mandatory; an entry whose file has no refused construct left fails as stale.
+- **Skipped and counted:** a file with the managed header (repo-platform owns it), and a yaml file that does not parse (the check warns). Vendored installs and build output are never read (`node_modules`, `vendor`, `third_party`, `dist`, `build`, `.venv`), nor the directories a caller names in the action's `skip` input (repo-platform names `files`, its sync templates, judged written).
+
+**Enforced by:** today, repo-platform's own `shell-complexity` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)), over this checkout and over the fleet trees its writer lands: the templates under `files/` are judged written, never raw, with the managed files included and each finding reported against its template. The `standard-checks` step for the fleet lands in a sibling PR once every shipped template and reusable workflow is clean.
 
 ## Markdown prose is never hard-wrapped
 
@@ -257,6 +297,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | yamllint | standard-checks | any finding (strict) | a `# yamllint disable-line rule:<name>` comment on the line (`.yamllint` itself is managed) |
 | gitleaks | standard-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
 | typography | standard-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
+| shell-complexity | repo-platform's ci.yml today; the `standard-checks` step is staged | a refused construct or an allowlist defect | the path in the repo-owned `.shell-complexity-allow.local` with a `# reason` |
 | file-size | standard-checks | a hard-cap finding or an allowlist defect | the path in the repo-owned `.file-size-allow.local` with a `# reason`; the comment block's marker ([short comments](#short-comments)) |
 | commit-names | standard-checks | a subject commitlint refuses under config-conventional plus one scope ([the grammar](#conventional-commits-squash-merged)) | none: reword the commit |
 | typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (keys below), or a trailing `typos: ignore` comment for a one-off |

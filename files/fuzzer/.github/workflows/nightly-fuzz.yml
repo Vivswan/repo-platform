@@ -1,6 +1,7 @@
-# Nightly fuzzing starter: written once by {{github_username}}/repo-platform,
-# never overwritten by a later sync. Replace the placeholder fuzz step;
-# follow the failure-report contract in docs/modules/fuzzer.md and the issue
+# Runs the nightly fuzzing, as the starter written once by {{github_username}}/repo-platform and never overwritten
+# by a later sync.
+#
+# Replace the placeholder fuzz step. Follow the failure-report contract in docs/modules/fuzzer.md, and the issue
 # filing, replay, and auto-close steps keep working.
 name: Nightly Fuzz
 
@@ -54,9 +55,7 @@ jobs:
           SEED: ${{ inputs.seed }}
           ITERATIONS: ${{ inputs.iterations || '1000' }}
         run: |
-          if [ -z "$SEED" ]; then
-            SEED="$RANDOM$RANDOM"
-          fi
+          SEED="${SEED:-$RANDOM$RANDOM}"
           echo "fuzzing with seed $SEED, $ITERATIONS iterations"
           # Replace with your fuzzer: seeded with $SEED for $ITERATIONS iterations, writing one
           # .fuzz-failures/<name>/report.md per crash (the contract: docs/modules/fuzzer.md).

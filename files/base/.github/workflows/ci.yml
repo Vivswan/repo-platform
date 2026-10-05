@@ -1,8 +1,10 @@
 # This file is managed by {{github_username}}/repo-platform.
 # Local edits are replaced on the next sync.
 #
-# The same file in every repository: the legs after the gate are static jobs gated on the plan's module output,
-# so a change to fleet-ci.yml@stable changes this repository's CI with no PR here.
+# Runs the fleet's CI and the legs after its gate, the same file in every repository.
+#
+# The legs after the gate are static jobs gated on the plan's module output, so a change to fleet-ci.yml@stable
+# changes this repository's CI with no PR here.
 
 name: CI
 

@@ -7,8 +7,9 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { capture } from "../../.github/scripts/shared/proc.ts";
 import { parseFilesConfig } from "../../actions/plan/files_config.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -21,15 +22,15 @@ const CI_WORKSPACE_SECTION = "## CI workspace paths (repo-platform)";
 
 function ignoredByGit(section: string, rel: string, kind: "dir" | "file"): boolean {
   const repo = temp.dir("gitignore-sections-");
-  expect(capture(["git", "-C", repo, "init", "-q"], {}).exitCode).toBe(0);
+  fixtureGit(repo, ["init", "-q"]);
   writeFileSync(join(repo, ".gitignore"), section);
   const abs = join(repo, rel);
   mkdirSync(dirname(abs), { recursive: true });
   if (kind === "dir") mkdirSync(abs);
   else writeFileSync(abs, "");
-  const probe = capture(
+  const probe = boundedSpawnSync(
     ["git", "-C", repo, "-c", "core.excludesFile=/dev/null", "check-ignore", "-q", rel],
-    {},
+    { env: fixtureGitEnv() },
   );
   // 0 ignored, 1 not ignored; anything else is a broken probe, never a verdict.
   expect([0, 1]).toContain(probe.exitCode);
