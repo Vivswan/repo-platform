@@ -1,6 +1,4 @@
-// A directory's display title, shared by the sidebar derivation and the
-// launcher's directory groups so both name a folder the same way. Browser-
-// safe: the launcher's client bundle imports it.
+// A directory's display title, as the sidebar names a folder.
 
 /** Every word capitalized, so a folder name sits beside the Title Case page titles around it.
  *    `api-reference`         -> `Api Reference`

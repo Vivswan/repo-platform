@@ -22,15 +22,12 @@ import "./provenance.css";
 import "./landing.css";
 import "./facts.css";
 import "./not-found.css";
-import "./launcher.css";
 import "./image-zoom.css";
 import "./print.css";
 import "./motion.css";
 import FactsPanel from "./facts-panel.ts";
 import ImageZoom from "./image-zoom.ts";
-import FleetLauncher from "./launcher.ts";
 import MermaidDiagrams from "./mermaid.ts";
-import NavLauncher from "./nav-launcher.ts";
 import Provenance from "./provenance.ts";
 import { tierRouteGuard } from "./tier-routes.ts";
 
@@ -41,7 +38,6 @@ export default {
   // skips every slot, while a sibling runs on every page.
   Layout: () => [
     h(VPCarbon.Layout!, null, {
-      "nav-bar-content-before": () => h(NavLauncher),
       "aside-top": () => h(FactsPanel),
       "doc-after": () => h(Provenance),
     }),
@@ -50,7 +46,6 @@ export default {
   ],
   async enhanceApp(ctx) {
     await VPCarbon.enhanceApp?.(ctx);
-    ctx.app.component("FleetLauncher", FleetLauncher);
     if (inBrowser) {
       // The built pages carry data-fleet-hue from config.mts's
       // transformHtml (so the hue is there before any script runs);

@@ -2,7 +2,7 @@
 
 This directory is the ONE home of the fleet's docs-site look: every managed repository's docs site builds with these files, and none of them exists in any fleet repository (fleet repos carry only markdown). Changes here ship on the next `stable` tag move, and every site picks them up on its next deploy (each site's nightly rebuild makes that automatic - no per-repo work).
 
-The base skin is [vitepress-carbon](https://github.com/brenoepics/vitepress-carbon) (GitHub-monochrome, token-based), pinned exact in `../../package.json` next to the exact `vitepress`, `reka-ui`, and `@vueuse/core` pins - all bumped only by deliberate commits here, never by a floating range.
+The base skin is [vitepress-carbon](https://github.com/brenoepics/vitepress-carbon) (GitHub-monochrome, token-based), pinned exact in `../../package.json` next to the exact `vitepress` and `reka-ui` pins - all bumped only by deliberate commits here, never by a floating range.
 
 ## The customization contract
 
@@ -35,7 +35,7 @@ This directory, `theme/`:
 | `print.css` | the print sheet |
 | `motion.css` | the reduced-motion stop |
 | `image-zoom.css` | the image lightbox's stacking |
-| `index.ts` | the theme entry: carbon as base, fonts, mounts, `FleetLauncher` registration (rules below) |
+| `index.ts` | the theme entry: carbon as base, fonts, mounts (rules below) |
 | `tier-routes.ts` | the router guard that makes a cross-tier route a full page load |
 | `facts-panel.ts` | the project facts card on landing pages |
 | `provenance.ts` | the provenance line: each page's ref, commit, and source file |
@@ -45,14 +45,6 @@ This directory, `theme/`:
 | `mermaid-zoom.ts` | the Zoom button and the `shown` state the view follows |
 | `mermaid-zoom-view.ts` | the full-size diagram view, on Panzoom 4.6.2 (pinned exact) |
 | `image-zoom.ts` | the image lightbox (`ImageZoom`), on medium-zoom 1.1.0 (pinned exact) |
-| `pages.data.ts` | the launcher's page-and-heading index, built once per site build |
-| `page-index.ts` | builds that index; its `headersRule` stamps each page's headings |
-| `launcher.ts` | the search launcher component (`FleetLauncher`) |
-| `nav-launcher.ts` | the nav's launcher button, its dialog, and the Cmd K, Ctrl K, `/` shortcut |
-| `launcher.css` | the launcher's panel, nav button, and dialog |
-| `launcher-model.ts` | the launcher's pure model: grouping, folding, matching |
-| `launcher-view.ts` | the launcher's pure view helpers |
-| `local-search.d.ts` | the type of VitePress's `@localSearchIndex` virtual module |
 | `css.d.ts` | the type stand-in for CSS imports |
 
 The parent directory, `.vitepress/`:
@@ -60,8 +52,6 @@ The parent directory, `.vitepress/`:
 | File | Role |
 | --- | --- |
 | `../config.mts` | site structure, the `DOCS_SITE_*` env contract, the facts contract, the markdown rules |
-| `../landing-launcher.ts` | seats the `FleetLauncher` panel on each root landing page, before its first section |
-| `../inline-text.ts` | stamps plain text on every inline token |
 | `../rewrite-links.ts` | resolves relative links in repository space, as they read on GitHub |
 | `../table-wrap.ts` | wraps each top-level table in its scroll wrapper |
 | `../mermaid.ts` | the mermaid fence rule: a fence becomes a mount |
@@ -80,20 +70,17 @@ Rules a change keeps:
 - **Carbon is never edited:** a palette change is a set of values in `tokens.ts`, and a new hue is an entry in `HUES`, never a hex elsewhere.
 - **Reading rules:** running prose at line-height 1.65 or more, left-aligned, emphasis by weight (never italics), sentence-case labels, the hue as the only accent. `prefers-reduced-motion` stays honored.
 - **Import order:** `print.css` is imported after every component file, so its overrides win ties, and `motion.css` last. `motion.css` holds the theme's only `!important` rules.
-- **`index.ts` keeps its mounts:** it exports a VitePress `Theme` with three slot mounts (`NavLauncher` in `nav-bar-content-before`, `FactsPanel` in `aside-top`, `Provenance` in `doc-after`). `MermaidDiagrams` and `ImageZoom` render BESIDE carbon's `Layout`, since the doc slots skip a `layout: page` or `home` page and `layout: false` skips every slot.
-- **`index.ts` keeps its wiring:** `ctx.app.component("FleetLauncher", ...)`, since the landing rule emits that tag and an unregistered tag renders empty. The `@fontsource-variable` fonts are self-hosted and imported before the CSS; remote font links are banned.
+- **`index.ts` keeps its mounts:** it exports a VitePress `Theme` with two slot mounts (`FactsPanel` in `aside-top`, `Provenance` in `doc-after`). `MermaidDiagrams` and `ImageZoom` render BESIDE carbon's `Layout`, since the doc slots skip a `layout: page` or `home` page and `layout: false` skips every slot.
+- **`index.ts` keeps its fonts:** the `@fontsource-variable` fonts are self-hosted and imported before the CSS; remote font links are banned.
 - **`index.ts` in the browser:** it stamps `data-fleet-hue` on `<html>` when the attribute is missing, for `vitepress dev`, and installs `tier-routes.ts`'s guard as `ctx.router.onBeforeRouteChange`.
-- **Seven markdown rules:** `../config.mts`'s `markdown.config` installs, in this order, `inlineTextRule`, `rewriteLinksRule`, `landingLauncherRule`, `tableWrapRule`, `headersRule`, `alertTitlesRule`, `mermaidRule`. Keep all seven: the page index's header reader throws without `headersRule`, and without the others source-file links, the landing's panel, tables, alerts, labels and diagram fences render unprocessed.
+- **Four markdown rules:** `../config.mts`'s `markdown.config` installs, in this order, `rewriteLinksRule`, `tableWrapRule`, `alertTitlesRule`, `mermaidRule`. Keep all four: without them source-file links, tables, alerts, labels and diagram fences render unprocessed.
 - **Links from a fleet repository:** without `rewriteLinksRule`, a link from `<repo>/docs/` to `<repo>/README.md` or `<repo>/.github/workflows/ci.yml` renders as `README.html` or `<repo>/.github/...` and 404s on the site while passing VitePress's dead-link check. `<repo>` is the fleet repository's root.
 - **The env contract:** adjust `themeConfig` freely, but the `DOCS_SITE_*` env contract at the top of `../config.mts` belongs to the pages-site action. `../version-nav.ts` keeps reading `DOCS_SITE_VERSIONS`, `DOCS_SITE_CURRENT`, and `DOCS_SITE_ORIGIN`.
-- **Listbox, not Combobox:** the launcher panel is always mounted, and reka-ui's Combobox content aria-hides the rest of the page while mounted.
-- **Dialogs are modal through reka-ui:** the diagram view and the search dialog get the focus trap, Escape, the body scroll lock, `aria-hidden` on the rest of the page, and focus back on close.
-- **Launcher states:** each has a non-color cue at 3:1 or better against the panel; matches are bold, never colored.
+- **Search is VitePress's own:** `../config.mts` sets `search: { provider: "local" }` and the theme adds nothing to it; `nav.css` styles the button VitePress renders.
+- **Dialogs are modal through reka-ui:** the diagram view gets the focus trap, Escape, the body scroll lock, `aria-hidden` on the rest of the page, and focus back on close.
 - **A new mermaid text surface** adds its pair to `theme_contrast.test.ts`, which lists the pairs by hand.
-- **The launcher's data and rules:** `pages.data.ts` keeps exporting `data: PageIndexEntry[]`, the build-time index the launcher lists; the docs tree's files are its page list, no landing page's links. Grouping, folding, and matching rules change in `launcher-model.ts`, never in the component.
 - **The sidebar's ordering rule** is documented for fleet authors in `docs/modules/site.md` (Docs conventions); change `../sidebar.ts` and that page together.
 - **Anchors:** changing `../anchors.ts`'s algorithm changes every site's anchors at once.
-- **`local-search.d.ts` is hand-written:** a VitePress bump is checked against the local-search plugin's `load()` output by hand.
 
 Tests that guard the theme (each file owns its scenarios):
 
@@ -103,7 +90,7 @@ Tests that guard the theme (each file owns its scenarios):
 | `theme_tokens.test.ts` | a live var() reader per declared token, and a value per mode for every color a highlighted span can carry |
 | `theme_layout.test.ts` | the diagram view and the image lightbox in headless Chrome |
 | `mermaid_labels.test.ts` | every mermaid label inside its box, in headless Chrome |
-| `mermaid_render.test.ts` | no mermaid download without a mount; no reka-ui or vueuse in the render pass's import graph |
+| `mermaid_render.test.ts` | no mermaid download without a mount |
 | `tier_routes.test.ts` | the tier guard, which stays pure and browser-free |
 | `tests/ci/pages_site_build` | no page references the mermaid chunk |
 

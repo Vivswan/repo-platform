@@ -71,7 +71,7 @@ test.each([
   expect(failing[0]).toEndWith(message);
 });
 
-// The hue band is a hover tint on the page ground (pager links, the launcher's rows), so the ink under it must clear AA on the composite.
+// The hue band is a hover tint on the page ground (pager links), so the ink under it must clear AA on the composite.
 // The tertiary ink does not, which is why a hovered pager label lifts to the secondary ink.
 function tinted(band: string, ground: string): Color {
   const tint = new Color(band);
