@@ -10,6 +10,7 @@ export type Step = Record<string, unknown>;
 
 export interface Action {
   name: string;
+  description: string;
   inputs?: Record<string, { description: string; required?: boolean; default?: string }>;
   outputs?: Record<string, { description: string; value: string }>;
   runs: { using: string; steps: Step[] };
