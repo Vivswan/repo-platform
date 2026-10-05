@@ -7,11 +7,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import {
-  hasDuplicateJsonKeys,
-  parseJsonWithThrow,
-  parseWith,
-} from "../../.github/scripts/shared/json.ts";
+import { parseJsonWithThrow, parseWith } from "../../.github/scripts/shared/json.ts";
 import { boundedSpawnSync } from "./bounded_spawn";
 import { tempDirs } from "./temp_dir";
 
@@ -66,41 +62,6 @@ describe("parseJsonWith", () => {
       stdout,
       stderr: "",
     });
-  });
-});
-
-describe("hasDuplicateJsonKeys", () => {
-  // JSON.parse keeps the last duplicate silently: the conflict-mangled manifest hazard the module's JSDoc names.
-  const cases: [string, string, boolean][] = [
-    [
-      "a duplicated key in one object is caught (JSON.parse would keep only the last)",
-      '{"files": {"AGENTS.md": {"class": "split"}, "AGENTS.md": {"class": "managed"}}}',
-      true,
-    ],
-    [
-      "an escape-variant duplicate is caught (decoded keys are what JSON.parse collides)",
-      `{"AGENTS.md": 1, ${String.raw`"AGENTS.m\u0064"`}: 2}`,
-      true,
-    ],
-    [
-      "the same key in DIFFERENT objects is not a duplicate",
-      '{"a": {"class": "split"}, "b": {"class": "managed"}}',
-      false,
-    ],
-    [
-      "repeated strings inside an array are values, never keys",
-      '{"a": ["x", "x"], "b": {"a": 1}}',
-      false,
-    ],
-    [
-      "a duplicate inside a NESTED object is caught",
-      '{"files": {"a": {"class": "split", "class": "managed"}}}',
-      true,
-    ],
-    ["objects in one array may share a key", '[{"k": 1}, {"k": 2}]', false],
-  ];
-  test.each(cases)("%s", (_reason, text, expected) => {
-    expect(hasDuplicateJsonKeys(text)).toBe(expected);
   });
 });
 

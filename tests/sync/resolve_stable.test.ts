@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
@@ -55,14 +56,8 @@ interface Outcome {
 
 function run(scenario: Scenario): Outcome {
   const root = temp.dir("resolve-build-");
-  const bin = join(root, "bin");
-  mkdirSync(bin);
-  const ghLog = join(root, "gh.log");
-  writeFileSync(
-    join(bin, "gh"),
-    `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(ghLog)}\nprintf '%s' '${verdict(scenario.conclusion ?? "success")}'\n`,
-    { mode: 0o755 },
-  );
+  const gh = argvStub(root, "gh", [`printf '%s' '${verdict(scenario.conclusion ?? "success")}'`]);
+  const bin = gh.bin;
   const origin = join(root, "origin.git");
   fixtureGit(root, ["init", "--quiet", "--bare", "-b", "main", "origin.git"]);
   const work = join(root, "work");
@@ -141,11 +136,7 @@ function run(scenario: Scenario): Outcome {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
     outputs,
-    ghCalls: existsSync(ghLog)
-      ? readFileSync(ghLog, "utf-8")
-          .split("\n")
-          .filter((line) => line !== "")
-      : [],
+    ghCalls: gh.calls().map((call) => call.slice(1).join(" ")),
     shas,
   };
 }

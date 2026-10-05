@@ -100,7 +100,7 @@ Tests that guard the theme (each file owns its scenarios):
 | Test | Guards |
 | --- | --- |
 | `theme_contrast.test.ts` | every text and code token, and every mermaid text variable, at 4.5:1 on its ground |
-| `theme_tokens.test.ts` | the rendered token layer against `tokens.ts`, and a var() reader per token |
+| `theme_tokens.test.ts` | a live var() reader per declared token, and a value per mode for every color a highlighted span can carry |
 | `theme_layout.test.ts` | the diagram view and the image lightbox in headless Chrome |
 | `mermaid_labels.test.ts` | every mermaid label inside its box, in headless Chrome |
 | `mermaid_render.test.ts` | no mermaid download without a mount; no reka-ui or vueuse in the render pass's import graph |

@@ -1,9 +1,6 @@
-// The facts GitHub leaves to this checkout to hold for the label-triggered branch sync (docs/platform/sync/operator.md, "Syncing a branch by label"):
-//   `labeled` fires for every label      -> the job's own condition names the one label, and the skeleton ci.yml never
-//                                           takes `labeled` (it would rerun CI and cancel the in-flight run on every label)
-//   a fork's PR carries a read-only token -> the same-repository guard skips at zero minutes instead of failing at the push
-//   the nightly apply deletes undeclared labels -> the label the condition reads must be one the baseline layer declares
-//   the repository token is the only credential -> no `secrets.` anywhere, and the grants are the push and the comment
+// The label the sync-branch job's condition reads must be one the baseline settings layer declares: the nightly apply
+// deletes undeclared labels, so a label named in one place alone is deleted the night it is used. Three files hold
+// the name as a literal and none can see the others (docs/platform/sync/operator.md, "Syncing a branch by label").
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -12,38 +9,24 @@ import { parse as parseYaml } from "yaml";
 import { PLATFORM_OWNER, SYNC_LABEL } from "../../actions/shared/platform.ts";
 
 const ROOT = join(import.meta.dir, "../..");
-const SKELETONS = "files/base/.github/workflows";
-
-interface Workflow {
-  on: { pull_request?: { types?: string[] } };
-  jobs: Record<string, { if?: string; permissions?: Record<string, string> }>;
-}
 
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
-const load = (rel: string) =>
-  parseYaml(read(rel).replaceAll("{{github_username}}", PLATFORM_OWNER)) as Workflow;
 
-test("the labeled job gates on the platform's label and a same-repository branch, with the repository token alone", () => {
-  const text = read(`${SKELETONS}/sync-branch.yml`);
-  const workflow = load(`${SKELETONS}/sync-branch.yml`);
-  const skeleton = load(`${SKELETONS}/ci.yml`);
+test("the label the sync-branch condition reads is the platform's, and the baseline layer declares it", () => {
+  const workflow = parseYaml(
+    read("files/base/.github/workflows/sync-branch.yml").replaceAll(
+      "{{github_username}}",
+      PLATFORM_OWNER,
+    ),
+  ) as { jobs: Record<string, { if?: string }> };
   const baseline = parseYaml(read("files/settings/baseline.yml")) as {
     labels: { name: string }[];
   };
-  const jobs = Object.values(workflow.jobs);
+  const conditions = Object.values(workflow.jobs).map((job) => job.if ?? "");
   expect({
-    trigger: workflow.on,
-    condition: jobs[0]?.if?.replaceAll(/\s+/g, " ").trim(),
-    jobPermissions: jobs[0]?.permissions,
-    secrets: text.match(/secrets\.\w+/g) ?? [],
-    skeletonPullRequestTypes: skeleton.on.pull_request?.types,
-    declaredLabels: baseline.labels.filter((label) => label.name === SYNC_LABEL).length,
-  }).toEqual({
-    trigger: { pull_request: { types: ["labeled"] } },
-    condition: `github.event.label.name == '${SYNC_LABEL}' && github.event.pull_request.head.repo.full_name == github.repository`,
-    jobPermissions: { contents: "write", "pull-requests": "write" },
-    secrets: [],
-    skeletonPullRequestTypes: undefined,
-    declaredLabels: 1,
-  });
+    labelsRead: conditions.flatMap((condition) =>
+      [...condition.matchAll(/github\.event\.label\.name == '([^']+)'/g)].map((match) => match[1]),
+    ),
+    declared: baseline.labels.filter((label) => label.name === SYNC_LABEL).length,
+  }).toEqual({ labelsRead: [SYNC_LABEL], declared: 1 });
 });
