@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 
-// The local twin of ci.yml's docs-check job; the build inputs are set here the way the pages-site action's step sets them, so an
-// exported copy of one cannot change the build, and the site configuration is the plan's reading of this repository's registration,
-// as in every deploy. RUNNER_TEMP is per run and removed in the finally: the action's scratch is otherwise one fixed path under the
-// system tmpdir that it never cleans and that concurrent worktrees would wipe from under each other.
+// The local twin of ci.yml's docs-check job. It plays the runner's part: the build's inputs set as the pages-site action's step
+// sets them, the site configuration the plan's reading of this repository's registration, and a per-run RUNNER_TEMP removed after.
 //
 // Usage: bun scripts/docs_check.ts
 

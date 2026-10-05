@@ -1,12 +1,13 @@
-// The two facts GitHub's `uses:` resolution and pinact leave to this checkout to hold:
+// The three facts GitHub's `uses:` resolution, pinact, and Dependabot leave to this checkout to hold:
 //   a self pin's stem is fetched at the ref per caller, so a moved or deleted action 404s every fleet run at once;
-//   pinact verifies only a full `# vX.Y.Z` comment against its commit, so `# v7` passes it unverified, sha included.
+//   pinact verifies only a full `# vX.Y.Z` comment against its commit, so `# v7` passes it unverified, sha included;
+//   Dependabot reaches the root and actions/** alone, so one sha per action repo-wide holds only if the files/** pins are held to theirs.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { DELIVERY_REF, PLATFORM_NAME } from "../../actions/shared/platform";
+import { DELIVERY_REF, PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform";
 import { REPO_ROOT } from "../shared/action_step";
 import {
   extractUsesPins,
@@ -51,6 +52,26 @@ export function pinactJudgesComment(comment: string): boolean {
 
 export function unverifiablePins(pins: Pin[]): Pin[] {
   return pins.filter((pin) => pin.version !== null && !pinactJudgesComment(pin.version));
+}
+
+/** The third-party pins whose action is pinned at more than one ref, as `action: ref (files)` lines, one per ref.
+ *  GitHub reads `owner/repo` case-insensitively, so the grouping does too. A self pin rides the delivery ref under every
+ *  spelling (judged below), so it is left out here. */
+export function splitPins(pins: Pin[]): string[] {
+  const self = `${PLATFORM_OWNER}/${PLATFORM_NAME}`.toLowerCase();
+  const byAction = new Map<string, Map<string, string[]>>();
+  for (const pin of pins) {
+    const action = pin.action.toLowerCase();
+    if (action === self) continue;
+    const refs = byAction.get(action) ?? new Map<string, string[]>();
+    refs.set(pin.ref, [...(refs.get(pin.ref) ?? []), pin.file]);
+    byAction.set(action, refs);
+  }
+  return [...byAction]
+    .filter(([, refs]) => refs.size > 1)
+    .flatMap(([action, refs]) =>
+      [...refs].map(([ref, files]) => `${action}: ${ref} (${[...new Set(files)].join(", ")})`),
+    );
 }
 
 /** The workflows a `uses:` can call: the files DIRECTLY under .github/workflows whose triggers include workflow_call. */
@@ -136,6 +157,35 @@ describe("version comments pinact leaves unverified", () => {
     expect(
       unverifiablePins(pins).map((pin) => `${pin.file}: ${pin.action}@${pin.ref} # ${pin.version}`),
     ).toEqual([]);
+  });
+});
+
+describe("one sha per action across the root and the shipped sources", () => {
+  const pin = (file: string, action: string, ref: string): Pin => ({
+    file,
+    action,
+    ref,
+    version: null,
+  });
+
+  // The control: a shipped pin behind the root's is reported under its action with both files, whatever the owner's case;
+  // the self pin's refs are not compared.
+  test("a split action is reported per ref; agreeing and self pins are not", () => {
+    const root = pin(".github/workflows/ci.yml", "actions/checkout", SHA);
+    const shipped = pin("files/base/.github/workflows/ci.yml", "Actions/Checkout", "0".repeat(40));
+    const agreeing = pin("files/bun/x.yml", "oven-sh/setup-bun", "1".repeat(40));
+    const self = pin("files/base/ci.yml", `${PLATFORM_OWNER}/${PLATFORM_NAME}`, DELIVERY_REF);
+    const selfMoved = pin("docs/x.md", `${PLATFORM_OWNER}/${PLATFORM_NAME}`, "main");
+    expect(splitPins([root, shipped, agreeing, root, self, selfMoved])).toEqual([
+      `actions/checkout: ${SHA} (.github/workflows/ci.yml)`,
+      `actions/checkout: ${"0".repeat(40)} (files/base/.github/workflows/ci.yml)`,
+    ]);
+  });
+
+  test("every pin site names one ref per action", () => {
+    const pins = PIN_SITES.flatMap((rel) => extractUsesPins(read(rel), rel));
+    expect(pins.length).toBeGreaterThan(0);
+    expect(splitPins(pins)).toEqual([]);
   });
 });
 

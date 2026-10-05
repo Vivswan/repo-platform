@@ -23,7 +23,7 @@ import {
   stageWritten,
   tail,
 } from "./deliver.ts";
-import { NO_MIGRATED_LIST, readMigrated } from "./migrate.ts";
+import { readMigrated } from "./migrate.ts";
 import type { SyncReport } from "./writer/report.ts";
 
 /** The first line of the sticky comment; the finder matches it, so it never changes shape. */
@@ -211,11 +211,9 @@ class BranchDelivery {
     ]) {
       this.must(argv, `${argv.slice(3).join(" ")} failed in the branch checkout`);
     }
-    const migrated = readMigrated(this.runnerTemp);
-    if (migrated === null) fail(NO_MIGRATED_LIST);
     const changed = stageWritten(
       summary,
-      migrated,
+      readMigrated(this.runnerTemp),
       (...args) => this.git(...args),
       (argv, reason) => this.must(argv, reason),
     );

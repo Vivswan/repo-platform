@@ -89,17 +89,15 @@ jobs:
           # the floor so CI honors the same config local runs do.
           GITLEAKS_VERSION: "8.30.1"
 
-  # The PR-only condition sits on the steps, not the job: the gate requires success from every needed
-  # job, so a job-level skip would fail every push and schedule run.
+  # Only a pull request has a dependency diff to review; the gate's allowed-skips names this job.
   dependency-review:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request'
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: ./actions/dependency-review
-        if: github.event_name == 'pull_request'
 
   yamllint:
     runs-on: ubuntu-latest
@@ -291,11 +289,10 @@ jobs:
         with:
           bun-version-file: files/bun/.bun-version
       # The docs-discipline probe's path check: a page naming a path a managed repository holds resolves through the shipped base tree.
-      # The probe takes files, and the runner's bash has no globstar, so each docs level is spelled.
       - name: Probe every path the pages name
         run: >-
-          bun .skills/skills/docs-discipline/scripts/docs-probe.mts --base files/base
-          README.md docs/*.md docs/modules/*.md docs/platform/*.md docs/platform/sync/*.md
+          git ls-files 'README.md' 'docs/*.md'
+          | xargs bun .skills/skills/docs-discipline/scripts/docs-probe.mts --base files/base
 
   # A caller job's permissions are the ceiling for the called workflow, so the scan grants sit here.
   codeql-javascript:
@@ -394,9 +391,10 @@ jobs:
       - uses: ./actions/trivy
 
   # THE gate: this job's own check run is the ruleset's required check (files/settings/override.yml),
-  # and alls-green passes only when every needed result is success: a skipped or cancelled gating job fails it.
-  #   needs        -> every gating job (tests/workflows/all_green_gate.test.ts compares the list with the job set)
-  #   if: always() -> the judgment must run over failures
+  # and alls-green passes only when every needed result is success, or skipped for a job named in allowed-skips.
+  #   needs          -> every gating job (tests/workflows/all_green_gate.test.ts compares the list with the job set)
+  #   if: always()   -> the judgment must run over failures
+  #   allowed-skips  -> every needed job with a condition (the same test compares the two)
   all-green:
     needs:
       - actionlint
@@ -428,6 +426,7 @@ jobs:
       - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
           jobs: ${{ toJSON(needs) }}
+          allowed-skips: dependency-review
 
   # Needs-ordered behind the gate in the same run, so github.sha IS the judged commit.
   # No concurrency group: the called mover holds stable-tag-move, and a caller holding a lane its called job takes deadlocks the call.
