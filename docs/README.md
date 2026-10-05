@@ -2,42 +2,6 @@
 
 repo-platform manages standards files, CI workflows, and repository settings across Vivswan's repositories from one place: a writer copies each repo's files from one file list, push-based sync PRs keep them current, and reusable workflows run the fleet's CI. Code is the source of truth, so each page links to the file that owns a behavior instead of restating it.
 
-## I want to...
-
-| Goal | Read |
-|---|---|
-| Create a new managed repository | [New repo](new-repo.md) |
-| Read a `validate-managed-files` result: what blocks, what is not judged | [New repo: the managed files check](new-repo.md#the-managed-files-check) |
-| Get a PR auto-formatted, or make bot fix commits re-run CI | [New repo: fix commits](new-repo.md#fix-commits-and-re-triggering-ci) |
-| Add or remove a module, and get its files as the sync PR that follows | [New repo: changing the module selection](new-repo.md#changing-the-module-selection) |
-| Ship a release, or verify a release asset's provenance | [New repo: the release pipeline](new-repo.md#the-release-pipeline-release-please) |
-| Know which conventions every managed repo follows, and what enforces each | [Fleet guidelines](fleet-guidelines.md) |
-| Find out why my PR is pending or red | [All-green: quick triage](all-green.md#quick-triage-why-is-my-pr-red-or-waiting) |
-| Change a repository's settings or labels | [Settings](settings.md) |
-| Understand the `pr-title` required check | [Settings: the pr-title ruleset](settings.md#the-pr-title-ruleset) |
-| Publish a site to GitHub Pages: the repo's own website, its docs/, or both | [Site](modules/site.md) |
-| Fill in the site-build hook that builds my website | [Site: the hook](modules/site.md#the-hook-githubactionssite-buildactionyml) |
-| Translate docs (zh-cn/, ja/, ...) | [Site: docs conventions](modules/site.md#docs-conventions) |
-| Move slow or flaky checks into a nightly run | [Nightly: customizing the starter](modules/nightly.md#customizing-the-starter) |
-| Write the fuzz step the nightly-fuzz starter needs | [Fuzzer: customizing the starter](modules/fuzzer.md#customizing-the-starter) |
-| Adopt the Rust lint floor in a repository that already has a `Cargo.toml` | [Rust: how a repository takes it](modules/rust.md#how-a-repository-takes-it) |
-| See which toolchain versions the fleet pins | [Toolchains: the pins](toolchains.md#the-pins) |
-| Use a different toolchain version in one repo | [Toolchains: overriding](toolchains.md#overriding-per-toolchain) |
-| Silence a Trivy finding that blocks my PR, or read the nightly security issue | [Security scans](modules/security-scans.md) |
-| Mark a semgrep finding, or see which rules the fleet excludes | [Security scans: semgrep](modules/security-scans.md#semgrep) |
-| Understand the issue a red night filed | [Tracking issues: lifecycle](modules/tracking-issues.md#issue-lifecycle) |
-| Ship a release while a tracking issue is open | [Tracking issues: release gating](modules/tracking-issues.md#release-gating) |
-| Rename a tracking label without breaking the stream | [Tracking issues: renaming the label](modules/tracking-issues.md#renaming-the-label) |
-| Add or remove a file the platform writes | [The file list: files.yml](platform/sync/files.md#filesyml) |
-| Read a sync PR's report, or find why a row held | [The writer: the report](platform/sync/writer.md#the-report) |
-| Check why the `stable` tag can be trusted | [Build provenance](platform/build-provenance.md) |
-| Find out why a merged PR's fleet-sync label did not sync, or which commits a post-green run read | [The post-green run: which commits a run reads](platform/post-green.md#which-commits-a-run-reads) |
-| Dispatch the central settings apply, or read a check-mode report | [The settings apply](platform/settings-apply.md) |
-| Change a managed workflow so it uses a new input of a platform action | [Build provenance: a new action input and its workflow land together](platform/build-provenance.md#a-new-action-input-and-its-workflow-land-together) |
-| Keep a private repo's name out of fleet logs, and find where its details land | [Private repositories](platform/sync/private-repositories.md) |
-| Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
-| Detach a repository from management | [Eject](eject.md) |
-
 ## The pages
 
 One list per folder, each in the sidebar's order.

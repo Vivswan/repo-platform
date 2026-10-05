@@ -6,7 +6,7 @@ import type { Token } from "markdown-it";
 import type { MarkdownRenderer } from "vitepress";
 import { deriveRewrites, detectLocales, routeOf } from "../derive.ts";
 import { plainTextOf } from "../inline-text.ts";
-import { isLandingPath } from "../landing-table.ts";
+import { isLandingPath } from "../landing-launcher.ts";
 import type { PageHeader, PageIndexEntry } from "./launcher-model.ts";
 
 export interface HeadersEnv {
@@ -105,7 +105,7 @@ export interface PageReads {
   headers(file: string, relativePath: string): PageHeader[];
 }
 
-/** Spelled the way VitePress writes links, so a curated href resolves to the same page key. */
+/** Spelled the way VitePress writes links. */
 export function pageUrl(file: string, rewrites: Record<string, string>, site: SiteUrls): string {
   const route = routeOf(file, rewrites);
   const suffix = route.endsWith("/") || site.cleanUrls ? "" : ".html";

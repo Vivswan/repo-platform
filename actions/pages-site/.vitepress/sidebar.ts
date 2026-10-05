@@ -1,22 +1,10 @@
-// A page's place comes from its own frontmatter (`order`, `group`) and from the level's landing table: the fleet's repos carry only markdown.
+// A page's place comes from its own frontmatter (`order`, `group`) and its title: the fleet's repos carry only markdown.
 // The launcher's page index (theme/pages.data.ts) lists pages in the same order, so the two agree.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import type { MarkdownEnv, MarkdownRenderer } from "vitepress";
-import {
-  deriveRewrites,
-  detectLocales,
-  isRegularFile,
-  type PageMeta,
-  readPage,
-  routeOf,
-} from "./derive.ts";
+import { deriveRewrites, detectLocales, type PageMeta, readPage, routeOf } from "./derive.ts";
 import { dirTitle } from "./dir-title.ts";
-import type { CuratedEnv } from "./landing-table.ts";
 import { isLandingFile } from "./source-path.ts";
-import { navigable, pageKey, resolveHref } from "./theme/launcher-model.ts";
-import { expandsIncludes, pageUrl, type SiteUrls } from "./theme/page-index.ts";
+import { navigable } from "./theme/launcher-model.ts";
 
 export interface SidebarItem {
   text: string;
@@ -28,34 +16,10 @@ export interface SidebarItem {
 /** What the sidebar reads from a page's markdown; injectable for tests. */
 export interface PageSource {
   page(file: string): PageMeta;
-  /** The hrefs of the page's first link-column table, as VitePress's link
-   *  rule normalized them (`./setup.html#install`, `/base/abs.html`). */
-  tableLinks(file: string): string[];
 }
 
-/** `md` must be the instance the pages render with, so containers and links parse exactly as they will on the page.
- *  A landing whose include directive VitePress would expand names NO links, as the page index lists no headings for such
- *  a page: the directive expands only inside the page transform, so the source as written may not hold the table the
- *  page shows, and file order is the honest fallback. */
-export function fileSource(
-  srcDir: string,
-  md: Pick<MarkdownRenderer, "render">,
-  site: SiteUrls,
-): PageSource {
-  return {
-    page: (file) => readPage(srcDir, file),
-    tableLinks(file) {
-      const env: MarkdownEnv & CuratedEnv = {
-        path: join(srcDir, file),
-        relativePath: file,
-        cleanUrls: site.cleanUrls,
-      };
-      const source = readFileSync(env.path, "utf-8");
-      if (expandsIncludes(source, { file: env.path, srcDir, isFile: isRegularFile })) return [];
-      md.render(source, env);
-      return (env.curatedLinks ?? []).flatMap((link) => link.attrGet("href") ?? []);
-    },
-  };
+export function fileSource(srcDir: string): PageSource {
+  return { page: (file) => readPage(srcDir, file) };
 }
 
 export function sidebarTrees(files: string[]): { prefix: string; files: string[] }[] {
@@ -80,11 +44,9 @@ export interface SidebarOptions {
   indexPages?: readonly string[];
 }
 
-/** `site` is what the table's hrefs resolve against: the URLs VitePress writes carry the base. */
 export function deriveSidebar(
   files: string[],
   source: PageSource,
-  site: SiteUrls,
   options: SidebarOptions = {},
 ): SidebarItem[] {
   const context: LevelContext = {
@@ -92,7 +54,6 @@ export function deriveSidebar(
     rewrites: deriveRewrites(files, options.indexPages),
     includePages: new Set(options.indexPages),
     source,
-    site,
   };
   return sidebarLevel(options.prefix ?? "", context, options.siteTitle ?? null);
 }
@@ -100,7 +61,6 @@ export function deriveSidebar(
 export function sidebarOrder(
   files: string[],
   source: PageSource,
-  site: SiteUrls,
   indexPages: readonly string[] = [],
 ): string[] {
   return sidebarTrees(files).flatMap((tree) => {
@@ -109,7 +69,6 @@ export function sidebarOrder(
       rewrites: deriveRewrites(tree.files, indexPages),
       includePages: new Set(indexPages),
       source,
-      site,
     };
     return levelOrder(tree.prefix, context);
   });
@@ -129,7 +88,6 @@ interface LevelContext {
   /** The include roots' page files: articles, whatever they are named. */
   includePages: ReadonlySet<string>;
   source: PageSource;
-  site: SiteUrls;
 }
 
 function sidebarLevel(
@@ -172,7 +130,7 @@ interface Level {
   dirs: string[];
 }
 
-/** The landing read is the one serving the directory route: index.md when both spellings exist. */
+/** The level's order as docs/modules/site.md states it for authors. */
 function orderedLevel(prefix: string, context: LevelContext): Level {
   const here = context.files.filter((file) => file.startsWith(prefix));
   const local = (file: string) => file.slice(prefix.length);
@@ -190,44 +148,14 @@ function orderedLevel(prefix: string, context: LevelContext): Level {
         landing: isLandingFile(file, context.includePages),
       }),
     );
+  const byTitle = (a: LevelPage, b: LevelPage) => a.meta.title.localeCompare(b.meta.title);
   const landings = pages.filter((page) => page.landing);
-  const landing = landings.find((page) => local(page.file) === "index.md") ?? landings[0];
   const rest = pages.filter((page) => !page.landing);
   const ranked = rest
     .filter((page) => page.meta.order !== null)
-    .sort(
-      (a, b) =>
-        (a.meta.order ?? 0) - (b.meta.order ?? 0) || a.meta.title.localeCompare(b.meta.title),
-    );
-  const unranked = rest.filter((page) => page.meta.order === null);
-  const linked = landing === undefined ? [] : tablePlaced(landing, unranked, context);
-  return {
-    pages: grouped([
-      ...landings,
-      ...ranked,
-      ...linked,
-      ...unranked.filter((page) => !linked.includes(page)),
-    ]),
-    dirs,
-  };
-}
-
-/** Matched the way the launcher attaches a curated row to its page: both sides as page keys of served URLs. */
-function tablePlaced(
-  landing: LevelPage,
-  candidates: LevelPage[],
-  context: LevelContext,
-): LevelPage[] {
-  const url = (page: LevelPage) => pageUrl(page.file, context.rewrites, context.site);
-  const byKey = new Map(candidates.map((page) => [pageKey(url(page)), page]));
-  const landingUrl = url(landing);
-  const placed: LevelPage[] = [];
-  for (const href of context.source.tableLinks(landing.file)) {
-    const { key } = resolveHref(href, landingUrl);
-    const page = key === null ? undefined : byKey.get(key);
-    if (page !== undefined && !placed.includes(page)) placed.push(page);
-  }
-  return placed;
+    .sort((a, b) => (a.meta.order ?? 0) - (b.meta.order ?? 0) || byTitle(a, b));
+  const unranked = rest.filter((page) => page.meta.order === null).sort(byTitle);
+  return { pages: grouped([...landings, ...ranked, ...unranked]), dirs };
 }
 
 function grouped(pages: LevelPage[]): LevelPage[] {

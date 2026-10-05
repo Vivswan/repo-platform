@@ -120,10 +120,9 @@ export function setOutput(name: string, value: string): void {
 }
 
 /** The docs landing page (docs/modules/site.md, "Docs conventions"): README.md
- *  is the directory index the way GitHub renders it, and the fleet's
- *  sidebar and launcher key on it, so an index.md standing in for it is
- *  refused on the content being edited today (historical tags keep the
- *  index.html check alone). */
+ *  is the directory index the way GitHub renders it, so an index.md standing
+ *  in for it is refused on the content being edited today (historical tags
+ *  keep the index.html check alone). */
 export function assertDocsLanding(docsTree: string): void {
   if (!existsSync(join(docsTree, "README.md"))) {
     throw new Error(

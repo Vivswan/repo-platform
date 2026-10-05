@@ -60,7 +60,7 @@ The parent directory, `.vitepress/`:
 | File | Role |
 | --- | --- |
 | `../config.mts` | site structure, the `DOCS_SITE_*` env contract, the facts contract, the markdown rules |
-| `../landing-table.ts` | turns the landing page's link table into the `FleetLauncher` panel |
+| `../landing-launcher.ts` | seats the `FleetLauncher` panel on each root landing page, before its first section |
 | `../inline-text.ts` | stamps plain text on every inline token |
 | `../rewrite-links.ts` | resolves relative links in repository space, as they read on GitHub |
 | `../table-wrap.ts` | wraps each top-level table in its scroll wrapper |
@@ -81,16 +81,16 @@ Rules a change keeps:
 - **Reading rules:** running prose at line-height 1.65 or more, left-aligned, emphasis by weight (never italics), sentence-case labels, the hue as the only accent. `prefers-reduced-motion` stays honored.
 - **Import order:** `print.css` is imported after every component file, so its overrides win ties, and `motion.css` last. `motion.css` holds the theme's only `!important` rules.
 - **`index.ts` keeps its mounts:** it exports a VitePress `Theme` with three slot mounts (`NavLauncher` in `nav-bar-content-before`, `FactsPanel` in `aside-top`, `Provenance` in `doc-after`). `MermaidDiagrams` and `ImageZoom` render BESIDE carbon's `Layout`, since the doc slots skip a `layout: page` or `home` page and `layout: false` skips every slot.
-- **`index.ts` keeps its wiring:** `ctx.app.component("FleetLauncher", ...)`, since the landing-table rule emits that tag and an unregistered tag renders empty. The `@fontsource-variable` fonts are self-hosted and imported before the CSS; remote font links are banned.
+- **`index.ts` keeps its wiring:** `ctx.app.component("FleetLauncher", ...)`, since the landing rule emits that tag and an unregistered tag renders empty. The `@fontsource-variable` fonts are self-hosted and imported before the CSS; remote font links are banned.
 - **`index.ts` in the browser:** it stamps `data-fleet-hue` on `<html>` when the attribute is missing, for `vitepress dev`, and installs `tier-routes.ts`'s guard as `ctx.router.onBeforeRouteChange`.
-- **Seven markdown rules:** `../config.mts`'s `markdown.config` installs, in this order, `inlineTextRule`, `rewriteLinksRule`, `landingTableRule`, `tableWrapRule`, `headersRule`, `alertTitlesRule`, `mermaidRule`. Keep all seven: the page index's header reader throws without `headersRule`, and without the others source-file links, tables, alerts, labels and diagram fences render unprocessed.
+- **Seven markdown rules:** `../config.mts`'s `markdown.config` installs, in this order, `inlineTextRule`, `rewriteLinksRule`, `landingLauncherRule`, `tableWrapRule`, `headersRule`, `alertTitlesRule`, `mermaidRule`. Keep all seven: the page index's header reader throws without `headersRule`, and without the others source-file links, the landing's panel, tables, alerts, labels and diagram fences render unprocessed.
 - **Links from a fleet repository:** without `rewriteLinksRule`, a link from `<repo>/docs/` to `<repo>/README.md` or `<repo>/.github/workflows/ci.yml` renders as `README.html` or `<repo>/.github/...` and 404s on the site while passing VitePress's dead-link check. `<repo>` is the fleet repository's root.
 - **The env contract:** adjust `themeConfig` freely, but the `DOCS_SITE_*` env contract at the top of `../config.mts` belongs to the pages-site action. `../version-nav.ts` keeps reading `DOCS_SITE_VERSIONS`, `DOCS_SITE_CURRENT`, and `DOCS_SITE_ORIGIN`.
 - **Listbox, not Combobox:** the launcher panel is always mounted, and reka-ui's Combobox content aria-hides the rest of the page while mounted.
 - **Dialogs are modal through reka-ui:** the diagram view and the search dialog get the focus trap, Escape, the body scroll lock, `aria-hidden` on the rest of the page, and focus back on close.
 - **Launcher states:** each has a non-color cue at 3:1 or better against the panel; matches are bold, never colored.
 - **A new mermaid text surface** adds its pair to `theme_contrast.test.ts`, which lists the pairs by hand.
-- **The launcher's data and rules:** `pages.data.ts` keeps exporting `data: PageIndexEntry[]`, which the launcher reads. Grouping, folding, and matching rules change in `launcher-model.ts`, never in the component.
+- **The launcher's data and rules:** `pages.data.ts` keeps exporting `data: PageIndexEntry[]`, the build-time index the launcher lists; the docs tree's files are its page list, no landing page's links. Grouping, folding, and matching rules change in `launcher-model.ts`, never in the component.
 - **The sidebar's ordering rule** is documented for fleet authors in `docs/modules/site.md` (Docs conventions); change `../sidebar.ts` and that page together.
 - **Anchors:** changing `../anchors.ts`'s algorithm changes every site's anchors at once.
 - **`local-search.d.ts` is hand-written:** a VitePress bump is checked against the local-search plugin's `load()` output by hand.

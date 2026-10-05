@@ -1,7 +1,6 @@
-// launcher.css hides the button while a landing panel is on the page, so a landing page without a curated table keeps
-// its search. The keyboard shortcut (Cmd K, Ctrl K, and `/` outside a field) is a capturing window listener that
-// stops carbon's own search hotkeys; the same listener, with a pointerdown twin, keeps the page's input modality for
-// the launcher's focus ring.
+// launcher.css hides the button while a landing panel is on the page. The keyboard shortcut (Cmd K, Ctrl K, and `/`
+// outside a field) is a capturing window listener that stops carbon's own search hotkeys; the same listener, with a
+// pointerdown twin, keeps the page's input modality for the launcher's focus ring.
 
 import { useEventListener } from "@vueuse/core";
 import {
@@ -125,7 +124,6 @@ export default defineComponent({
               () => [
                 h(VisuallyHidden, null, () => h(DialogTitle, null, () => LABEL)),
                 h(FleetLauncher, {
-                  rows: "[]",
                   mode: "dialog",
                   onClose: () => {
                     opened.value = false;

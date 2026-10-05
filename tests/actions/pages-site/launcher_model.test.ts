@@ -1,14 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildGroups,
-  type CuratedRow,
   filterGroups,
   type LauncherGroup,
   matchRanges,
   type PageIndexEntry,
   queryTokens,
-  type ResolvedHref,
-  resolveHref,
   splitRows,
 } from "../../../actions/pages-site/.vitepress/theme/launcher-model.ts";
 import { buildPageIndex } from "../../../actions/pages-site/.vitepress/theme/page-index.ts";
@@ -28,39 +25,23 @@ const apiPage = (name: string): PageIndexEntry =>
     h(`${name} limits`, "limits", 3),
   ]);
 
+/** In the index's order: landings first, then the sidebar's order. */
 const PAGES: PageIndexEntry[] = [
-  page("/repo/", "repo-platform documentation", "", "root", [h("I want to...", "i-want-to")]),
+  page("/repo/", "repo-platform documentation", "", "root", [h("The pages", "the-pages")]),
   page("/repo/ja/", "ドキュメント", "", "ja"),
-  page("/repo/all-green.html", "All-green", "", "root", [h("Quick triage", "quick-triage")]),
-  apiPage("alpha"),
-  apiPage("beta"),
-  apiPage("gamma"),
   page("/repo/new-repo.html", "New repo", "", "root", [
     h("The template check", "the-template-check"),
     h("Fix commits", "fix-commits", 3),
   ]),
+  page("/repo/all-green.html", "All-green", "", "root", [h("Quick triage", "quick-triage")]),
   page("/repo/settings.html", "Settings", "", "root", [
     h("The pr-title ruleset", "the-pr-title-ruleset"),
   ]),
-  page("/repo/ja/new-repo.html", "新しいリポジトリ", "", "ja", [h("テンプレート", "template")]),
+  page("/repo/z#b.html", "Hash", "", "root"),
   page("/repo/api/", "API", "api", "root"),
-];
-
-const CURATED: CuratedRow[] = [
-  { label: "Create a new managed repository", href: "new-repo.md", note: null },
-  {
-    label: "Understand the pr-title check",
-    href: "settings.md#the-pr-title-ruleset",
-    note: "Settings",
-  },
-  { label: "Upstream tracker", href: "https://example.com/tracker", note: null },
-  { label: "Read the alpha limits", href: "./api/alpha.md#limits", note: null },
-];
-
-const CURATED_TARGET: CuratedRow[] = [
-  { label: "Manual", href: "/repo/manual/", note: null, target: "_self" },
-  { label: "Raw", href: "/repo/new-repo", note: null, target: "_self" },
-  { label: "New", href: "./new-repo.html", note: null },
+  apiPage("alpha"),
+  apiPage("beta"),
+  page("/repo/ja/new-repo.html", "新しいリポジトリ", "", "ja", [h("テンプレート", "template")]),
 ];
 
 const ROOT_GROUPS: LauncherGroup[] = [
@@ -70,12 +51,7 @@ const ROOT_GROUPS: LauncherGroup[] = [
     kind: "page",
     folded: true,
     items: [
-      {
-        label: "Create a new managed repository",
-        href: "/repo/new-repo.html",
-        note: null,
-        source: "curated",
-      },
+      { label: "New repo", href: "/repo/new-repo.html", note: "new-repo", source: "page" },
       {
         label: "The template check",
         href: "/repo/new-repo.html#the-template-check",
@@ -86,56 +62,6 @@ const ROOT_GROUPS: LauncherGroup[] = [
         label: "Fix commits",
         href: "/repo/new-repo.html#fix-commits",
         note: "New repo",
-        source: "heading",
-      },
-    ],
-  },
-  {
-    key: "/repo/settings.html",
-    title: "Settings",
-    kind: "page",
-    folded: false,
-    items: [
-      {
-        label: "Understand the pr-title check",
-        href: "/repo/settings.html#the-pr-title-ruleset",
-        note: "Settings",
-        source: "curated",
-      },
-      { label: "Settings", href: "/repo/settings.html", note: "settings", source: "page" },
-    ],
-  },
-  {
-    key: "https://example.com/tracker",
-    title: "Upstream tracker",
-    kind: "page",
-    folded: false,
-    items: [
-      {
-        label: "Upstream tracker",
-        href: "https://example.com/tracker",
-        note: null,
-        source: "curated",
-      },
-    ],
-  },
-  {
-    key: "/repo/api/alpha.html",
-    title: "API alpha",
-    kind: "page",
-    folded: false,
-    items: [
-      {
-        label: "Read the alpha limits",
-        href: "/repo/api/alpha.html#limits",
-        note: null,
-        source: "curated",
-      },
-      { label: "API alpha", href: "/repo/api/alpha.html", note: "api/alpha", source: "page" },
-      {
-        label: "alpha usage",
-        href: "/repo/api/alpha.html#usage",
-        note: "API alpha",
         source: "heading",
       },
     ],
@@ -156,12 +82,35 @@ const ROOT_GROUPS: LauncherGroup[] = [
     ],
   },
   {
+    key: "/repo/settings.html",
+    title: "Settings",
+    kind: "page",
+    folded: false,
+    items: [
+      { label: "Settings", href: "/repo/settings.html", note: "settings", source: "page" },
+      {
+        label: "The pr-title ruleset",
+        href: "/repo/settings.html#the-pr-title-ruleset",
+        note: "Settings",
+        source: "heading",
+      },
+    ],
+  },
+  {
+    key: "/repo/z#b.html",
+    title: "Hash",
+    kind: "page",
+    folded: false,
+    items: [{ label: "Hash", href: "/repo/z%23b.html", note: "z#b", source: "page" }],
+  },
+  {
     key: "dir:api",
     title: "Api",
     kind: "dir",
     folded: false,
     items: [
-      ...["beta", "gamma"].flatMap((name) => [
+      { label: "API", href: "/repo/api/", note: "api", source: "page" },
+      ...["alpha", "beta"].flatMap((name) => [
         {
           label: `API ${name}`,
           href: `/repo/api/${name}.html`,
@@ -181,16 +130,16 @@ const ROOT_GROUPS: LauncherGroup[] = [
           source: "heading" as const,
         },
       ]),
-      { label: "API", href: "/repo/api/", note: "api", source: "page" },
     ],
   },
 ];
 
 describe("buildGroups", () => {
-  // The dedupe and ordering contract: a page a curated row reaches joins that row's group instead of listing
-  // twice, and a curated row never folds behind the headings.
-  test("curated rows lead in table order, then root pages, then directory groups; a page row's note is its site path, a heading row's its page; only headings fold", () => {
-    const groups = buildGroups(CURATED, PAGES, "root");
+  // The index is the one source: every page of the locale but its landing shows once, in the index's order, a
+  // root page as its own group and a deeper page under its directory's; a page row's note is its site path, a
+  // heading row's its page. A `#` in a file name reads as a fragment to the router unless it leaves escaped.
+  test("lists the index's pages in its order, root pages one group each and deeper pages by directory, hrefs escaped; only a page group's headings fold", () => {
+    const groups = buildGroups(PAGES, "root");
     expect(groups).toEqual(ROOT_GROUPS);
     expect(splitRows(groups[0].kind, groups[0].items)).toEqual({
       kept: [ROOT_GROUPS[0].items[0]],
@@ -198,29 +147,6 @@ describe("buildGroups", () => {
     });
   });
 
-  // A `#` or `?` in a file name reads as a fragment or query to the router unless it leaves escaped.
-  test("a file named with characters a URL reserves is reached by its escaped href and emitted escaped, on every row that links it", () => {
-    const pages = [
-      page("/repo/", "Docs", "", "root"),
-      page("/repo/z#b.html", "Hash", "", "root", [h("Part", "part")]),
-    ];
-    const curated: CuratedRow[] = [{ label: "Go", href: "./z%23b.html#part", note: null }];
-    expect(buildGroups(curated, pages, "root")).toEqual([
-      {
-        key: "/repo/z#b.html",
-        title: "Hash",
-        kind: "page",
-        folded: false,
-        items: [
-          { label: "Go", href: "/repo/z%23b.html#part", note: null, source: "curated" },
-          { label: "Hash", href: "/repo/z%23b.html", note: "z#b", source: "page" },
-        ],
-      },
-    ]);
-  });
-
-  // The landing table of a real site reaches most pages, so the fold rule
-  // must hold with a curated row in the group: only the headings fold.
   const heads = (count: number) => Array.from({ length: count }, (_, i) => h(`H${i}`, `h${i}`));
   const site = (headers: PageIndexEntry["headers"], dirPages = 0): PageIndexEntry[] => [
     page("/repo/", "Docs", "", "root"),
@@ -229,25 +155,11 @@ describe("buildGroups", () => {
       page(`/repo/api/p${i}.html`, `P${i}`, "api", "root"),
     ),
   ];
-  const curated: CuratedRow[] = [{ label: "Start", href: "guide.md#h0", note: null }];
-  test.each<[string, CuratedRow[], PageIndexEntry[], [string, boolean][]]>([
-    ["one heading stays in view", [], site(heads(1)), [["Guide", false]]],
-    ["two headings fold", [], site(heads(2)), [["Guide", true]]],
-    [
-      "a curated row leaves the page group's headings folding",
-      curated,
-      site(heads(3)),
-      [["Guide", true]],
-    ],
-    [
-      "a curated row taking the only other heading leaves one",
-      curated,
-      site(heads(2)),
-      [["Guide", false]],
-    ],
+  test.each<[string, PageIndexEntry[], [string, boolean][]]>([
+    ["one heading stays in view", site(heads(1)), [["Guide", false]]],
+    ["two headings fold", site(heads(2)), [["Guide", true]]],
     [
       "a directory at the threshold stays open",
-      [],
       site([], 8),
       [
         ["Guide", false],
@@ -256,165 +168,47 @@ describe("buildGroups", () => {
     ],
     [
       "a directory past the threshold folds",
-      [],
       site([], 9),
       [
         ["Guide", false],
         ["Api", true],
       ],
     ],
-  ])("%s", (_, rows, pages, expected) => {
-    const groups = buildGroups(rows, pages, "root");
-    expect(groups.map((group) => [group.title, group.folded])).toEqual(expected);
+  ])("%s", (_, pages, expected) => {
+    expect(buildGroups(pages, "root").map((group) => [group.title, group.folded])).toEqual(
+      expected,
+    );
   });
 
-  // A wrong landing URL resolves every locale row to the root page, green.
-  test("a locale sees only its pages and resolves hrefs against its own landing; its page notes keep the locale prefix", () => {
-    const curated: CuratedRow[] = [{ label: "新規", href: "new-repo.md#template", note: null }];
-    expect(buildGroups(curated, PAGES, "ja")).toEqual([
+  // A locale read against the root's landing would list the root's pages, green.
+  test("a locale sees only its pages, their notes keeping the locale prefix", () => {
+    expect(buildGroups(PAGES, "ja")).toEqual([
       {
         key: "/repo/ja/new-repo.html",
         title: "新しいリポジトリ",
         kind: "page",
         folded: false,
         items: [
-          { label: "新規", href: "/repo/ja/new-repo.html#template", note: null, source: "curated" },
           {
             label: "新しいリポジトリ",
             href: "/repo/ja/new-repo.html",
             note: "ja/new-repo",
             source: "page",
           },
-        ],
-      },
-    ]);
-  });
-
-  test("a matched href keeps its query and hash; an unmatched internal one becomes absolute; clean URLs match the same markdown hrefs", () => {
-    const curated: CuratedRow[] = [
-      { label: "Print", href: "new-repo.md?mode=print#x", note: null },
-      { label: "Japanese intro", href: "./ja/intro.html", note: null },
-    ];
-    expect(buildGroups(curated, [PAGES[0], PAGES[6]], "root")).toEqual([
-      {
-        key: "/repo/new-repo.html",
-        title: "New repo",
-        kind: "page",
-        folded: true,
-        items: [
           {
-            label: "Print",
-            href: "/repo/new-repo.html?mode=print#x",
-            note: null,
-            source: "curated",
-          },
-          { label: "New repo", href: "/repo/new-repo.html", note: "new-repo", source: "page" },
-          {
-            label: "The template check",
-            href: "/repo/new-repo.html#the-template-check",
-            note: "New repo",
-            source: "heading",
-          },
-          {
-            label: "Fix commits",
-            href: "/repo/new-repo.html#fix-commits",
-            note: "New repo",
+            label: "テンプレート",
+            href: "/repo/ja/new-repo.html#template",
+            note: "新しいリポジトリ",
             source: "heading",
           },
         ],
       },
-      {
-        key: "/repo/ja/intro.html",
-        title: "Japanese intro",
-        kind: "page",
-        folded: false,
-        items: [
-          { label: "Japanese intro", href: "/repo/ja/intro.html", note: null, source: "curated" },
-        ],
-      },
     ]);
-    const clean = [
-      page("/repo/", "Docs", "", "root"),
-      page("/repo/new-repo", "New repo", "", "root"),
-    ];
-    expect(
-      buildGroups([{ label: "Start", href: "new-repo.md", note: null }], clean, "root"),
-    ).toEqual([
-      {
-        key: "/repo/new-repo",
-        title: "New repo",
-        kind: "page",
-        folded: false,
-        items: [{ label: "Start", href: "/repo/new-repo", note: null, source: "curated" }],
-      },
-    ]);
-  });
-});
-
-describe("resolveHref", () => {
-  // URL-standard facts: the identity key percent-decodes while the href keeps the author's escapes, and
-  // a protocol-relative `//host` is external.
-  const cases: [string, string, ResolvedHref][] = [
-    [
-      "new-repo.md#x",
-      "/repo/",
-      { key: "/repo/new-repo", href: "/repo/new-repo.md#x", suffix: "#x" },
-    ],
-    [
-      "./api/index.md?v=2",
-      "/repo/ja/",
-      { key: "/repo/ja/api/", href: "/repo/ja/api/index.md?v=2", suffix: "?v=2" },
-    ],
-    [
-      "../new-repo.html",
-      "/repo/ja/",
-      { key: "/repo/new-repo", href: "/repo/new-repo.html", suffix: "" },
-    ],
-    [
-      "/repo/all-green.md",
-      "/repo/ja/",
-      { key: "/repo/all-green", href: "/repo/all-green.md", suffix: "" },
-    ],
-    [
-      "#quick-triage",
-      "/repo/",
-      { key: "/repo/", href: "/repo/#quick-triage", suffix: "#quick-triage" },
-    ],
-    ["%E6%96%B0.md", "/repo/", { key: "/repo/新", href: "/repo/%E6%96%B0.md", suffix: "" }],
-    // A reserved character escaped in the href names the file spelled with
-    // it: the key decodes every escape, the href keeps them.
-    ["z%26b.md", "/repo/", { key: "/repo/z&b", href: "/repo/z%26b.md", suffix: "" }],
-    ["z%23b.md", "/repo/", { key: "/repo/z#b", href: "/repo/z%23b.md", suffix: "" }],
-    ["z%3Fb.md#x", "/repo/", { key: "/repo/z?b", href: "/repo/z%3Fb.md#x", suffix: "#x" }],
-    [
-      "download.zip?q=a%2526b#x%20y",
-      "/repo/",
-      {
-        key: "/repo/download.zip",
-        href: "/repo/download.zip?q=a%2526b#x%20y",
-        suffix: "?q=a%2526b#x%20y",
-      },
-    ],
-    [
-      "settings.md#設定",
-      "/repo/",
-      { key: "/repo/settings", href: "/repo/settings.md#設定", suffix: "#設定" },
-    ],
-    [
-      "https://example.com/x.md",
-      "/repo/",
-      { key: null, href: "https://example.com/x.md", suffix: "" },
-    ],
-    ["mailto:me@example.com", "/repo/", { key: null, href: "mailto:me@example.com", suffix: "" }],
-    ["//cdn.example.com/x", "/repo/", { key: null, href: "//cdn.example.com/x", suffix: "" }],
-  ];
-  test.each(cases)("%s against %s", (href, landing, expected) => {
-    expect(resolveHref(href, landing)).toEqual(expected);
   });
 });
 
 describe("filterGroups", () => {
-  const groups = buildGroups(CURATED, PAGES, "root");
+  const groups = buildGroups(PAGES, "root");
 
   // A filter that ORed its tokens, matched labels alone, or kept a folded group folded would show the user the wrong
   // rows with nothing red: the listbox renders whatever comes back. Tokens AND across label, note, and group title; a
@@ -422,7 +216,7 @@ describe("filterGroups", () => {
   test("tokens AND across label, note, and group title; a match unfolds; groups without a match drop out; an empty query is the input", () => {
     expect(filterGroups(groups, "   ")).toBe(groups);
 
-    const folded = buildGroups([], [PAGES[0], ...PAGES.slice(3, 6)], "root");
+    const folded = buildGroups([PAGES[0], ...["alpha", "beta", "gamma"].map(apiPage)], "root");
     expect(folded[0].folded).toBe(true);
     expect(filterGroups(folded, "API gamma lim")).toEqual([
       {
@@ -457,8 +251,8 @@ describe("filterGroups", () => {
 
     expect(filterGroups(groups, "triage")).toEqual([
       {
-        ...ROOT_GROUPS[4],
-        items: [ROOT_GROUPS[4].items[1]],
+        ...ROOT_GROUPS[1],
+        items: [ROOT_GROUPS[1].items[1]],
       },
     ]);
   });
@@ -563,32 +357,5 @@ describe("buildPageIndex", () => {
       { title: () => "", headers: () => [] },
     ).map((entry) => entry.url);
     expect(urls).toEqual(["/", "/all-green", "/api/overview"]);
-  });
-});
-
-describe("buildGroups row targets", () => {
-  // public/LICENSE beside LICENSE.md is real in the fleet: the asset row must not join the page's group.
-  test("a curated row's target is carried onto its item and onto nothing else, and its href is never a page's", () => {
-    const groups = buildGroups(CURATED_TARGET, PAGES, "root");
-    const items = groups.flatMap((group) => group.items);
-    expect(items.find((item) => item.href === "/repo/manual/")).toEqual({
-      label: "Manual",
-      href: "/repo/manual/",
-      note: null,
-      source: "curated",
-      target: "_self",
-    });
-    // public/new-repo beside new-repo.md: the asset keeps its own href and
-    // group, while the page link joins the page.
-    expect(groups.find((group) => group.key === "/repo/new-repo")?.items).toEqual([
-      { label: "Raw", href: "/repo/new-repo", note: null, source: "curated", target: "_self" },
-    ]);
-    expect(groups.find((group) => group.key === "/repo/new-repo.html")?.items[0]).toEqual({
-      label: "New",
-      href: "/repo/new-repo.html",
-      note: null,
-      source: "curated",
-    });
-    expect(items.filter((item) => "target" in item)).toHaveLength(2);
   });
 });

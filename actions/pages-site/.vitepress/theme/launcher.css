@@ -509,8 +509,8 @@
   color: var(--fleet-hue);
 }
 
-/* A page with the panel on it (a landing page with a curated table) has
- * its search in the page; the nav entry would be a second one. */
+/* A page with the panel on it (a root landing page) has its search in the
+ * page; the nav entry would be a second one. */
 body:has(.fleet-launcher-mode-panel) .VPNavBar .fleet-launcher-button {
   display: none;
 }

@@ -143,9 +143,13 @@ The docs mount carries the tag rules:
 
 - **The landing page:** `docs/README.md` is the landing page and must exist; each directory's `README.md` is its index. Without it, [the docs PR check](#the-docs-pr-check) fails on every PR, naming the missing landing page, until it exists, unless the docs half is off.
 
-- **Sidebar and nav** derive from the file tree and each page's frontmatter: `title` (else the h1, else the file name), `order` (a number, ascending), `group` (a heading placed where the group's first member falls). A directory reads as its folder name with each word capitalized.
+- **Sidebar and nav** derive from the file tree and each page's frontmatter: `title` (else the h1, else the file name), `order` (a number, ascending; pages without one follow, by title), `group` (a heading placed where the group's first member falls). A directory reads as its folder name with each word capitalized, after the level's pages.
 
-- **The search launcher:** a table in `docs/README.md` whose one column is bare links to pages becomes the search launcher's curated rows (label from the first other cell, note from the rest). Without one the launcher lists every page and heading. A landing page titled exactly like the site reads Overview in the sidebar.
+- **The search launcher** lists every page of the docs tree but the landing, from an index the build writes, in the sidebar's order: a root page is a group of its own with its h2 and h3 headings, a deeper page sits under its folder's. A page expanding an `@include` directive lists no headings.
+
+- **The launcher's panel** sits on the landing page before the first `##` section (at the end of a page without one); every other page carries the nav's search button.
+
+- **A landing page titled exactly like the site** reads Overview in the sidebar.
 
 - **Links** are written as they read on GitHub: a link inside `docs/` (or into another staged root, below) becomes the page's route, a link to any other repository file becomes that file on GitHub at the version being read, and absolute URLs pass through. Heading anchors are GitHub's.
 

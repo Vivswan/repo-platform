@@ -182,16 +182,13 @@ describe("the page index under the action's build topology", () => {
       const unreadable = readFileSync(join(dist, "unreadable.html"), "utf-8");
       expect(unreadable).toContain('<h2 id="install"');
       expect(unreadable).not.toContain('id="install-1"');
-      // The landing rule fires on the README landing in the page build
-      // (post-rewrite path): the table is gone and the curated label renders
-      // only as a launcher row. In the search index (pre-rewrite path) the
-      // label is absent, since the rule fired there too; the heading and the
-      // guide's prose (a MiniSearch term in the index) are the controls that
-      // both were built at all.
+      // The landing rule fires on the README landing in the page build (post-rewrite path): the panel is on the
+      // page and the table stays a table, its text in the search index like any other prose; the guide's prose (a
+      // MiniSearch term in the index) is the control that the index was built at all.
       const landing = readFileSync(join(dist, "index.html"), "utf-8");
       expect(landing).toContain("I want to...");
-      expect(landing).not.toMatch(/<td>\s*Frobnicate/);
-      expect(landing).toContain('class="fleet-launcher-label">Frobnicate the widgets<');
+      expect(landing).toMatch(/<td>\s*Frobnicate the widgets/);
+      expect(landing).toContain("fleet-launcher-mode-panel");
       const chunks = join(dist, "assets", "chunks");
       // One chunk per locale (`@localSearchIndex<locale>.<hash>.js`); the
       // locale-to-loader map is its own `@localSearchIndex.<hash>.js` chunk.
@@ -200,7 +197,7 @@ describe("the page index under the action's build topology", () => {
         .map((name) => readFileSync(join(chunks, name), "utf-8").toLowerCase());
       expect(searchIndexes).toHaveLength(1);
       expect(searchIndexes[0]).toContain('["steps",');
-      expect(searchIndexes[0]).not.toContain("frobnicate");
+      expect(searchIndexes[0]).toContain("frobnicate");
     },
     harnessBound(200_000),
   );
