@@ -41,27 +41,25 @@ export interface Effective {
   /** What the module binds as the repository's configuration: the knip.ts or knip.js knip found, or knip's resolution
    *  of a data configuration (a JSON file, package.json's knip key, nothing). */
   own: { kind: "code"; path: string } | { kind: "data"; config: Config };
-  /** knip's layering of package.json's knip key and the file, with the checkout. */
-  ignoreWorkspaces: string[];
 }
 
 export async function effectiveConfig(cwd: string): Promise<Effective> {
-  const resolved = await createOptions({ cwd, args: KNIP_ARGS });
-  const { configFilePath, parsedConfig } = resolved;
+  const { cwd: root, configFilePath, parsedConfig } = await createOptions({ cwd, args: KNIP_ARGS });
   return {
-    cwd: resolved.cwd,
+    cwd: root,
     own:
       configFilePath !== undefined && /\.[jt]s$/.test(configFilePath)
         ? { kind: "code", path: configFilePath }
         : { kind: "data", config: parsedConfig },
-    ignoreWorkspaces: [
-      ...new Set([...(parsedConfig.ignoreWorkspaces ?? []), PLATFORM_CHECKOUT_DIR]),
-    ],
   };
 }
 
-/** `own.default ?? own` is how knip's loader reads a configuration module, and `export *` keeps the file's own exports
- *  out of the report, as knip's `skipExportsAnalysis` does for its configuration file. */
+/** `await (own.default ?? own)` is how knip's loader reads a configuration module (a promise resolves, a function is
+ *  called), and `export *` keeps the file's own exports out of the report, as knip's `skipExportsAnalysis` does for its
+ *  configuration file. The checkout joins the list the configuration yields under knip's own runtime, else
+ *  package.json's, layered by knip's own expression (`Object.assign({}, manifest.knip, file)`): a function deciding by
+ *  runtime is read where knip reads it, and nothing resolved here rides into the run. The module heals nothing: a
+ *  configuration that is no object, or a list that is no list, is left as it came, for knip to refuse. */
 export function knipModule(effective: Effective, dir: string): string {
   const inside = relative(effective.cwd, dir);
   if (inside.startsWith("..") || isAbsolute(inside)) {
@@ -74,16 +72,24 @@ export function knipModule(effective: Effective, dir: string): string {
           `export * from ${JSON.stringify(effective.own.path)};`,
         ]
       : [`const own = ${JSON.stringify(effective.own.config, null, 2)};`];
+  const checkout = JSON.stringify(PLATFORM_CHECKOUT_DIR);
   const path = join(dir, MODULE_NAME);
   writeFileSync(
     path,
     [
       ...own,
+      `import manifest from ${JSON.stringify(join(effective.cwd, "package.json"))};`,
       "export default async (args) => {",
-      "  const config = own.default ?? own;",
+      "  const config = await (own.default ?? own);",
+      '  const resolved = typeof config === "function" ? await config(args) : config;',
+      '  if (typeof resolved !== "object" || resolved === null || Array.isArray(resolved)) return resolved;',
+      "  const layered = Object.assign({}, manifest.knip, resolved).ignoreWorkspaces;",
       "  return {",
-      '    ...(typeof config === "function" ? await config(args) : config),',
-      `    ignoreWorkspaces: ${JSON.stringify(effective.ignoreWorkspaces)},`,
+      "    ...resolved,",
+      "    ignoreWorkspaces:",
+      `      layered === undefined ? [${checkout}]`,
+      `      : Array.isArray(layered) ? [...new Set([...layered, ${checkout}])]`,
+      "      : layered,",
       "  };",
       "};",
       "",

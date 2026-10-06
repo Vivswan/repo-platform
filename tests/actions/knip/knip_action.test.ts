@@ -94,13 +94,23 @@ describe("actions/knip", () => {
       // Under knip's default project globs, so knip.ts and its import are project files: knip keeps them referenced
       // through its configuration-file entry, and the written module keeps that edge or they are reported unused. The
       // RegExp has no JSON form (knip's schema refuses the `{}` a serialization leaves), and the named export is
-      // exempt from exports analysis as knip exempts its configuration file's.
+      // exempt from exports analysis as knip exempts its configuration file's. The exclusions are read where knip
+      // runs, under node: the manifest's list applies when the function sets none there, whatever it set under bun.
       reason:
-        "a knip.ts exporting a function and a named RegExp list, importing a sibling TypeScript module, under knip's default project globs",
+        "a knip.ts exporting a promise of a function and a named RegExp list, importing a sibling TypeScript module, setting exclusions under bun alone over a manifest list, under knip's default project globs",
       files: {
+        "package.json": JSON.stringify({
+          ...MANIFEST,
+          knip: { ignoreWorkspaces: ["packages/node-only"] },
+        }),
         "knip.ts":
-          'import { entry } from "./config/entry.ts";\nexport const ignored = [/^@types\\//];\nexport default () => ({ entry, ignoreDependencies: ignored });\n',
-        "config/entry.ts": 'export const entry = ["src/main.ts", "**/*.test.ts"];\n',
+          'import { entry } from "./config/entry.ts";\nexport const ignored = [/^@types\\//];\nexport default Promise.resolve(() => ({ entry, ignoreDependencies: ignored, ...(process.versions.bun ? { ignoreWorkspaces: ["packages/bun-only"] } : {}) }));\n',
+        "config/entry.ts": 'export const entry = ["src/main.ts", "**/*.test.ts", "tools/*.ts"];\n',
+        // An entry only the knip.ts list names: a module that lost the configuration reports it unused.
+        "tools/build.ts": "export const built = 1;\n",
+        "packages/node-only/package.json": JSON.stringify({ name: "node-only", private: true }),
+        "packages/node-only/tool.test.ts":
+          'import { y } from "not-listed-either";\nexport const t = y;\n',
       },
       excludeLine: true,
     },
@@ -125,6 +135,29 @@ describe("actions/knip", () => {
       });
     },
   );
+
+  // The module reads the configuration where knip runs, so a shape knip's schema never saw here can reach it there;
+  // the module leaves it as it came, and knip refuses it, where a spread would have made an object of a list or
+  // patterns of a string's characters.
+  test.each([
+    {
+      shape: "a string under ignoreWorkspaces",
+      yields: '{ ignoreWorkspaces: process.versions.bun ? [] : "packages/legacy" }',
+      refusal: "ignoreWorkspaces",
+    },
+    {
+      shape: "a list as the whole configuration",
+      yields: "process.versions.bun ? {} : []",
+      refusal: "Expected an object as configuration",
+    },
+  ])("$shape, yielded under node alone, reaches knip as it came", async ({ yields, refusal }) => {
+    const repo = fixture({ "knip.ts": `export default () => (${yields});\n` }, true);
+    const run = knip(repo, knipArguments(knipModule(await effectiveConfig(repo), actionDir(repo))));
+    expect({ exitCode: run.exitCode, refused: run.stderr.includes(refusal) }).toEqual({
+      exitCode: 2,
+      refused: true,
+    });
+  });
 
   test("the written module yields knip's own resolution of the repository's configuration, the checkout under ignoreWorkspaces once; what knip refuses stays refused; a module outside the repository is refused", async () => {
     const layered = realpathSync(temp.dir("knip-config-"));
