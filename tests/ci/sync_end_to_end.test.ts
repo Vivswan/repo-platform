@@ -367,7 +367,7 @@ describe("sync.ts end to end", () => {
     expect(read("constructor")).toBe("platform notes\n");
     // The report's diff is fed the bytes the writer replaced, not a re-read.
     expect(stdout).toContain(
-      "#### `constructor`\n\n```diff\n--- constructor\n+++ constructor\n@@\n-local notes\n+platform notes",
+      "#### `constructor`\n\n```diff\n--- constructor\n+++ constructor\n@@ -1,1 +1,1 @@\n-local notes\n+platform notes",
     );
     // An unrecorded, marker-less file selected as split gets the region above it, for review.
     expect(read(".dockerignore")).toBe(
@@ -546,7 +546,7 @@ describe("sync.ts end to end", () => {
       expect(read(path)).toBe(read("AGENTS.md"));
     }
     expect(stdout).toContain(
-      "#### `.github/copilot-instructions.md`\n\n```diff\n--- .github/copilot-instructions.md\n+++ .github/copilot-instructions.md\n@@\n-# my own copilot notes\n-\n+../AGENTS.md",
+      "#### `.github/copilot-instructions.md`\n\n```diff\n--- .github/copilot-instructions.md\n+++ .github/copilot-instructions.md\n@@ -1,1 +1,1 @@\n-# my own copilot notes\n+../AGENTS.md\n\\ No newline at end of file",
     );
   });
 

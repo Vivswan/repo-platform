@@ -824,7 +824,7 @@ describe("boundedReport", () => {
       })),
       replaced: Array.from({ length: 3 }, (_, i) => ({
         path: `src/file-${i}.ts`,
-        diff: `--- src/file-${i}.ts\n+++ src/file-${i}.ts\n@@\n-${"y".repeat(30_000)}\n+${"z".repeat(30_000)}`,
+        diff: `--- src/file-${i}.ts\n+++ src/file-${i}.ts\n@@ -1,1 +1,1 @@\n-${"y".repeat(30_000)}\n+${"z".repeat(30_000)}`,
       })),
       retired: [{ path: "old.yml", outcome: "held", detail: "edited locally" }],
       notes: ["unknown module dropped: unknown-one"],
@@ -880,7 +880,7 @@ describe("boundedReport", () => {
       replaced: [
         {
           path: "README.md",
-          diff: `--- README.md\n+++ README.md\n@@\n \`\`\`\n-old\n+${"x".repeat(70_000)}\n \`\`\``,
+          diff: `--- README.md\n+++ README.md\n@@ -1,3 +1,3 @@\n \`\`\`\n-old\n+${"x".repeat(70_000)}\n \`\`\``,
         },
       ],
       retired: [],
@@ -892,7 +892,7 @@ describe("boundedReport", () => {
     expect(report).toContain("````diff\n");
     const bounded = boundedReport(report);
     expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
-    expect(bounded).toContain("@@\n ```\n-old\n````\n\n> [!WARNING]");
+    expect(bounded).toContain("@@ -1,3 +1,3 @@\n ```\n-old\n````\n\n> [!WARNING]");
     expect(bounded.endsWith(review)).toBe(true);
   });
 });

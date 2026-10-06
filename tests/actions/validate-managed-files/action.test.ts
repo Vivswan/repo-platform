@@ -189,7 +189,7 @@ const CHECK_ARGV = (checkout: string) => [
 ];
 const NO_TAG = "The stable tag was not fetched, so freshness is unknown.\n\n";
 
-const DIFF = `.typography-allow: differs from what ${SHORT} writes\n--- .typography-allow\n+++ .typography-allow\n@@\n-x\n+`;
+const DIFF = `.typography-allow: differs from what ${SHORT} writes\n--- .typography-allow\n+++ .typography-allow\n@@ -1,1 +1,1 @@\n-x\n+`;
 const REMEDY =
   "Each path named differs from what repo-platform writes at the commit this repository was synced with " +
   "(the + lines are the sync's). Restore it from git history, or run the sync: on a pull request, the " +
