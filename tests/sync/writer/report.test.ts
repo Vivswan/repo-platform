@@ -89,7 +89,7 @@ describe("unifiedDiff", () => {
       diff: [
         "--- f",
         "+++ f",
-        "@@",
+        "@@ -1,11 +1,11 @@",
         " a",
         " b",
         " c",
@@ -106,15 +106,15 @@ describe("unifiedDiff", () => {
       ].join("\n"),
     },
     {
-      // Header (2) + hunk marker (1) + 30 deletions + 30 insertions = 63 lines.
+      // Header (2) + hunk header (1) + 30 deletions + 30 insertions = 63 lines.
       reason: "the line cap keeps the head and counts exactly what was cut",
       before: Array.from({ length: 30 }, (_, i) => `x${i}`),
       after: Array.from({ length: 30 }, (_, i) => `y${i}`),
       cap: 10,
-      diff: `${["--- f", "+++ f", "@@", "-x0", "-x1", "-x2", "-x3", "-x4", "-x5", "-x6"].join("\n")}\n... (53 more diff lines)`,
+      diff: `${["--- f", "+++ f", "@@ -1,30 +1,30 @@", "-x0", "-x1", "-x2", "-x3", "-x4", "-x5", "-x6"].join("\n")}\n... (53 more diff lines)`,
     },
   ])("$reason", ({ before, after, cap, diff }) => {
-    expect(unifiedDiff("f", before.join("\n"), after.join("\n"), cap)).toBe(diff);
+    expect(unifiedDiff("f", `${before.join("\n")}\n`, `${after.join("\n")}\n`, cap)).toBe(diff);
   });
 });
 
@@ -123,7 +123,7 @@ describe("renderReport", () => {
   // platform wrote that content itself, so the warning claims only what the rows show: no record vouched for it.
   test("the replaced-edits warning names what the rows show, on a re-declared starter", () => {
     const path = ".github/settings.yml";
-    const diff = `--- ${path}\n+++ ${path}\n@@\n-description: stale\n+description: rendered`;
+    const diff = `--- ${path}\n+++ ${path}\n@@ -1,1 +1,1 @@\n-description: stale\n+description: rendered`;
     const text = renderReport(
       buildReport({
         ...QUIET,
@@ -184,7 +184,7 @@ describe("renderReport", () => {
     const text = renderReport(
       buildReport({
         ...QUIET,
-        replaced: [{ path: forged, diff: "--- a\n+++ a\n@@\n-x\n+y" }],
+        replaced: [{ path: forged, diff: "--- a\n+++ a\n@@ -1,1 +1,1 @@\n-x\n+y" }],
         notes: [
           `placeholder \`{{${forged}}}\` has no value: set project.description in .repo-platform.yml`,
         ],
@@ -218,7 +218,7 @@ describe("renderReport", () => {
   // alone; the fence is one backtick longer than any run the diff quotes, however the run is framed.
   test("a replaced diff quoting a fence line, even behind a bare CR, stays inside its own fence", () => {
     const diff =
-      "--- a\n+++ a\n@@\n ```\n ### Forged\n+### Kept\n-old\r````\r### Forged\n@@\n-x\n+y";
+      "--- a\n+++ a\n@@ -1,3 +1,3 @@\n ```\n ### Forged\n+### Kept\n-old\r````\r### Forged\n@@ -9,1 +9,1 @@\n-x\n+y";
     const text = renderReport(buildReport({ ...QUIET, replaced: [{ path: "a", diff }] }));
     expect(text).toContain(`#### \`a\`\n\n\`\`\`\`\`diff\n${diff}\n\`\`\`\`\`\n`);
     expect(text).not.toContain("\n```diff\n");

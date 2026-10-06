@@ -259,7 +259,8 @@ describe("the refresh", () => {
     "",
   ].join("\n");
   const DOTFILES = { "files/bun/.bun-version": "1.4.0\n", "files/deno/.dvmrc": "2.9.5\n" };
-  const NODE_DIFF = "--- Node.gitignore\n+++ Node.gitignore\n@@\n node_modules/\n+.bun/";
+  const NODE_DIFF =
+    "--- Node.gitignore\n+++ Node.gitignore\n@@ -1,1 +1,2 @@\n node_modules/\n+.bun/";
 
   const plant = () => {
     const root = temp.dir("refresh-upstream-");

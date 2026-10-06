@@ -132,9 +132,10 @@ async function commitDiffs(
   const before = await fetchUpstream(refs(pin.sha), host, fetch);
   const after = await fetchUpstream(refs(to), host, fetch);
   const diffs = new Map<string, string>();
+  // normalizeUpstream drops the final newline the renderer puts back, so the diff is of the rendered lines.
   for (const [old, next] of refs(pin.sha).map((ref, i) => [ref, refs(to)[i]] as const)) {
     if (before.body(old) !== after.body(next)) {
-      diffs.set(old.path, unifiedDiff(old.path, before.body(old), after.body(next)));
+      diffs.set(old.path, unifiedDiff(old.path, `${before.body(old)}\n`, `${after.body(next)}\n`));
     }
   }
   return diffs;

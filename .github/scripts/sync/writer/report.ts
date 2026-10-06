@@ -1,5 +1,6 @@
 // `hold` is decided here alone, from the rows, so no writer can forget to raise it.
 
+import { createTwoFilesPatch, FILE_HEADERS_ONLY } from "diff";
 import type { FileClass } from "../../../../actions/plan/files_config.ts";
 import type { MirrorRow } from "./mirrors.ts";
 import type { RetireRow } from "./retire.ts";
@@ -80,36 +81,6 @@ export const DIFF_LINE_CAP = 40;
 const CONTEXT = 3;
 const DIFF_CELL_CAP = 4_000_000;
 
-type Op = { kind: " " | "-" | "+"; text: string };
-
-function diffOps(a: string[], b: string[]): Op[] {
-  const table: Uint32Array[] = new Array(a.length + 1);
-  for (let i = a.length; i >= 0; i--) {
-    const row = new Uint32Array(b.length + 1);
-    for (let j = b.length - 1; j >= 0; j--) {
-      row[j] =
-        i < a.length && a[i] === b[j]
-          ? table[i + 1][j + 1] + 1
-          : Math.max(i < a.length ? table[i + 1][j] : 0, row[j + 1]);
-    }
-    table[i] = row;
-  }
-  const ops: Op[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      ops.push({ kind: " ", text: a[i++] });
-      j++;
-    } else if (i < a.length && (j === b.length || table[i + 1][j] >= table[i][j + 1])) {
-      ops.push({ kind: "-", text: a[i++] });
-    } else {
-      ops.push({ kind: "+", text: b[j++] });
-    }
-  }
-  return ops;
-}
-
 /** Capped: the PR body has a size limit and the texts are target content. */
 export function unifiedDiff(
   path: string,
@@ -117,36 +88,17 @@ export function unifiedDiff(
   after: string,
   cap = DIFF_LINE_CAP,
 ): string {
-  const a = before.split("\n");
-  const b = after.split("\n");
-  if (a.length * b.length > DIFF_CELL_CAP) {
-    return `--- ${path}\n+++ ${path}\n(diff too large to show: ${a.length} lines replaced by ${b.length})`;
+  const a = before.split("\n").length;
+  const b = after.split("\n").length;
+  if (a * b > DIFF_CELL_CAP) {
+    return `--- ${path}\n+++ ${path}\n(diff too large to show: ${a} lines replaced by ${b})`;
   }
-  const ops = diffOps(a, b);
-  const keep = new Array<boolean>(ops.length).fill(false);
-  ops.forEach((op, index) => {
-    if (op.kind === " ") return;
-    for (
-      let k = Math.max(0, index - CONTEXT);
-      k <= Math.min(ops.length - 1, index + CONTEXT);
-      k++
-    ) {
-      keep[k] = true;
-    }
+  const patch = createTwoFilesPatch(path, path, before, after, undefined, undefined, {
+    context: CONTEXT,
+    headerOptions: FILE_HEADERS_ONLY,
   });
-  const lines = [`--- ${path}`, `+++ ${path}`];
-  let inHunk = false;
-  ops.forEach((op, index) => {
-    if (!keep[index]) {
-      inHunk = false;
-      return;
-    }
-    if (!inHunk) {
-      lines.push("@@");
-      inHunk = true;
-    }
-    lines.push(`${op.kind}${op.text}`);
-  });
+  // formatPatch ends the text with one newline of its own.
+  const lines = patch.slice(0, -1).split("\n");
   if (lines.length <= cap) return lines.join("\n");
   return `${lines.slice(0, cap).join("\n")}\n... (${lines.length - cap} more diff lines)`;
 }
