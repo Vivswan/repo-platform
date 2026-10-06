@@ -1,6 +1,7 @@
 // Pure planning for the site (docs/modules/site.md); build.ts owns all I/O.
 // That split lets the tests force every layout row without a git repository or a build.
 
+import { z } from "zod";
 import {
   type DocsConfig,
   type IncludeRoot,
@@ -9,6 +10,7 @@ import {
   includePageProblem,
   includeWithoutDocsProblem,
   relPathProblem,
+  type SiteConfigJson,
   urlSegmentProblem,
 } from "./.vitepress/conventions.ts";
 
@@ -63,41 +65,45 @@ export function validateRelPath(value: string, what: string): void {
   if (problem !== null) throw new Error(`${what} '${value}' ${problem}`);
 }
 
-function parseIncludes(value: unknown, where: string): IncludeRoot[] {
-  if (!Array.isArray(value)) throw new Error(`${where} must be a list of {path, mount, page}`);
-  const includes = value.map((entry, index): IncludeRoot => {
-    const at = `${where}[${index}]`;
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      throw new Error(`${at} must be an object {path, mount, page}`);
-    }
-    const { path, mount, page, ...rest } = entry as Record<string, unknown>;
-    const extra = Object.keys(rest);
-    if (extra.length > 0) throw new Error(`${at} has unknown keys: ${extra.join(", ")}`);
-    for (const [key, text] of Object.entries({ path, mount, page })) {
-      if (typeof text !== "string") throw new Error(`${at}.${key} must be a string`);
-    }
-    const root: IncludeRoot = {
-      path: path as string,
-      mount: mount as string,
-      page: page as string,
-    };
-    for (const [key, problem] of [
-      ["path", relPathProblem(root.path)],
-      ["mount", includeMountProblem(root.mount)],
-      ["page", includePageProblem(root.page)],
-    ] as const) {
-      if (problem !== null) throw new Error(`${at}.${key} '${root[key]}' ${problem}`);
-    }
-    return root;
+const judged = (problem: (value: string) => string | null) =>
+  z.string().superRefine((value, ctx) => {
+    const message = problem(value);
+    if (message !== null) ctx.addIssue({ code: "custom", message });
   });
-  const problem = includeListProblem(includes);
-  if (problem !== null) throw new Error(`${where} ${problem}`);
-  return includes;
-}
+// These reach the step outputs and the page title as one line each.
+const oneLine = z.string().refine((value) => !/[\r\n]/.test(value), {
+  message: "must be one line - it contains a line break",
+});
 
-/** Parse and validate the config input (a JSON object). Refusals are the
- *  interface: a configuration the assembler would misbuild must never
- *  reach it. */
+/** conventions.ts's SiteConfigJson read back. Refusals are the interface: a configuration the assembler would
+ *  misbuild must never reach it. */
+const siteConfigSchema: z.ZodType<SiteConfigJson> = z
+  .strictObject({
+    // The plan's schema already requires project.name; a hand-written document meets the same bar here.
+    site_title: oneLine.min(1),
+    docs_path: judged(urlSegmentProblem).nullable(),
+    include: z
+      .array(
+        z.strictObject({
+          path: judged(relPathProblem),
+          mount: judged(includeMountProblem),
+          page: judged(includePageProblem),
+        }),
+      )
+      .superRefine((roots, ctx) => {
+        const message = includeListProblem(roots);
+        if (message !== null) ctx.addIssue({ code: "custom", message });
+      }),
+    link_rot_label: oneLine,
+    link_rot_color: oneLine,
+    link_rot_description: oneLine,
+  })
+  .superRefine((config, ctx) => {
+    const message = includeWithoutDocsProblem(config.docs_path, config.include);
+    if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
+  });
+
+/** Parse the config input (a JSON object); every issue is reported, one line each, as the plan's readers spell them. */
 export function parseSiteConfig(json: string): SiteConfig {
   let data: unknown;
   try {
@@ -107,52 +113,21 @@ export function parseSiteConfig(json: string): SiteConfig {
       `the config input is not valid JSON (${error instanceof Error ? error.message : String(error)}): ${json}`,
     );
   }
-  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+  const result = siteConfigSchema.safeParse(data);
+  if (!result.success) {
     throw new Error(
-      "the config input must be a JSON object {site_title, docs_path, include, link_rot_label, link_rot_color, link_rot_description}",
+      `the config input:\n${result.error.issues
+        .map((issue) => `  - ${issue.path.join(".") || "(top level)"}: ${issue.message}`)
+        .join("\n")}`,
     );
   }
-  const {
-    site_title,
-    docs_path,
-    include,
-    link_rot_label,
-    link_rot_color,
-    link_rot_description,
-    ...rest
-  } = data as Record<string, unknown>;
-  const extra = Object.keys(rest);
-  if (extra.length > 0) throw new Error(`the config input has unknown keys: ${extra.join(", ")}`);
-  // These reach the step outputs and the page title as one line each.
-  for (const [key, text] of Object.entries({
-    site_title,
-    link_rot_label,
-    link_rot_color,
-    link_rot_description,
-  })) {
-    if (typeof text !== "string") throw new Error(`config.${key} must be a string`);
-    if (/[\r\n]/.test(text)) {
-      throw new Error(`config.${key} must be one line - it contains a line break`);
-    }
-  }
-  // The plan's schema already requires project.name; a hand-written document meets the same bar here.
-  if (site_title === "") throw new Error("config.site_title must not be empty");
-  if (docs_path !== null && typeof docs_path !== "string") {
-    throw new Error("config.docs_path must be a string, or null for no docs half");
-  }
-  const roots = parseIncludes(include, "config.include");
-  const docsProblem = includeWithoutDocsProblem(docs_path, roots);
-  if (docsProblem !== null) throw new Error(`config.include ${docsProblem}`);
-  if (docs_path !== null) {
-    const pathProblem = urlSegmentProblem(docs_path);
-    if (pathProblem !== null) throw new Error(`config.docs_path '${docs_path}' ${pathProblem}`);
-  }
+  const config = result.data;
   return {
-    siteTitle: site_title as string,
-    docs: docs_path === null ? null : { path: docs_path, include: roots },
-    linkRotLabel: link_rot_label as string,
-    linkRotColor: link_rot_color as string,
-    linkRotDescription: link_rot_description as string,
+    siteTitle: config.site_title,
+    docs: config.docs_path === null ? null : { path: config.docs_path, include: config.include },
+    linkRotLabel: config.link_rot_label,
+    linkRotColor: config.link_rot_color,
+    linkRotDescription: config.link_rot_description,
   };
 }
 
@@ -181,15 +156,10 @@ const VERSION_TAG_RE = /^v\d+\.\d+\.\d+$/;
  *  the tags release-please (or `git tag`) creates for releases;
  *  prereleases and other tag shapes are not versions of the site. */
 export function versionTags(tagLines: string[]): string[] {
-  const triple = (tag: string) => tag.slice(1).split(".").map(Number);
   return tagLines
     .map((line) => line.trim())
     .filter((tag) => VERSION_TAG_RE.test(tag))
-    .sort((a, b) => {
-      const [aMajor, aMinor, aPatch] = triple(a);
-      const [bMajor, bMinor, bPatch] = triple(b);
-      return bMajor - aMajor || bMinor - aMinor || bPatch - aPatch;
-    });
+    .sort((a, b) => Bun.semver.order(b.slice(1), a.slice(1)));
 }
 
 /** The mount's artifact prefix: "/" -> "", "/docs/" -> "docs/". */
