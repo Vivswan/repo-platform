@@ -1,9 +1,9 @@
-// Headless Chrome over its DevTools protocol, for the tests that judge the theme in a real layout over a built site.
-// CHROME_BIN, else the platform's install; one browser socket with flat sessions, one Tab per scenario.
+// Headless Chrome through puppeteer-core, for the tests that judge the theme in a real layout over a built site.
+// CHROME_BIN, else the platform's install: puppeteer-core drives the browser it is pointed at and downloads none.
 
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { Subprocess } from "bun";
+import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import { harnessBound } from "../../shared/harness_bound.ts";
 
 function chromePath(): string {
@@ -20,211 +20,57 @@ function chromePath(): string {
   return found;
 }
 
-interface Message {
-  id?: number;
-  method?: string;
-  params?: Record<string, unknown>;
-  sessionId?: string;
-  result?: Record<string, unknown>;
-  error?: { message: string };
-}
-
-type Listener = (params: Record<string, unknown>, sessionId: string | undefined) => void;
-
-export class Chrome {
-  private nextId = 1;
-  private readonly pending = new Map<
-    number,
-    { resolve: (result: Record<string, unknown>) => void; reject: (error: Error) => void }
-  >();
-  private readonly listeners = new Map<string, Set<Listener>>();
-
-  private constructor(
-    private readonly process: Subprocess<"ignore", "ignore", "pipe">,
-    private readonly socket: WebSocket,
-  ) {
-    socket.addEventListener("message", (event) => {
-      const message: Message = JSON.parse(String(event.data));
-      if (message.id !== undefined) {
-        const waiter = this.pending.get(message.id);
-        this.pending.delete(message.id);
-        if (message.error) waiter?.reject(new Error(message.error.message));
-        else waiter?.resolve(message.result ?? {});
-        return;
-      }
-      for (const listener of this.listeners.get(message.method ?? "") ?? []) {
-        listener(message.params ?? {}, message.sessionId);
-      }
-    });
-  }
-
-  static async launch(userDataDir: string): Promise<Chrome> {
+/** puppeteer's own deadlines (the launch, a protocol command, a page's waits) are harness bounds here like every
+ *  other, so a loaded runner fails on the scenario's scaled bound and never on an unscaled one of puppeteer's. */
+export function launchChrome(userDataDir: string): Promise<Browser> {
+  return puppeteer.launch({
+    executablePath: chromePath(),
+    userDataDir,
+    headless: true,
+    // The layout cases measure the reading column in the 1400px window, not puppeteer's 800x600 default viewport.
+    defaultViewport: null,
+    args: ["--disable-gpu", "--window-size=1400,1200"],
     // Chrome keeps scratch of its own (com.google.Chrome.*) under TMPDIR, and its URL fetcher's survives Browser.close;
     // pointed at the profile directory, it goes when the test removes that, never as a leftover the test launcher judges.
-    const child = Bun.spawn(
-      [
-        chromePath(),
-        "--headless=new",
-        "--remote-debugging-port=0",
-        `--user-data-dir=${userDataDir}`,
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--disable-gpu",
-        "--hide-scrollbars",
-        "--window-size=1400,1200",
-        "about:blank",
-      ],
-      {
-        env: { ...process.env, TMPDIR: userDataDir },
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "pipe",
-      },
-    );
-    // Chrome is owned from the spawn on: a launch that fails past it must not leave it running.
-    try {
-      const url = await new Promise<string>((resolve, reject) => {
-        let text = "";
-        const decoder = new TextDecoder();
-        void (async () => {
-          for await (const chunk of child.stderr) {
-            text += decoder.decode(chunk, { stream: true });
-            const match = /DevTools listening on (ws:\/\/\S+)/.exec(text);
-            if (match !== null) resolve(match[1]);
-          }
-          reject(new Error(`chrome exited before announcing its DevTools socket:\n${text}`));
-        })();
-      });
-      const socket = new WebSocket(url);
-      await new Promise<void>((resolve, reject) => {
-        socket.addEventListener("open", () => resolve());
-        socket.addEventListener("error", () => reject(new Error(`no DevTools socket at ${url}`)));
-      });
-      return new Chrome(child, socket);
-    } catch (error) {
-      child.kill("SIGKILL");
-      await child.exited;
-      throw error;
-    }
-  }
-
-  send(
-    method: string,
-    params: Record<string, unknown> = {},
-    sessionId?: string,
-  ): Promise<Record<string, unknown>> {
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, method, params, sessionId }));
-    });
-  }
-
-  on(method: string, listener: Listener): void {
-    const set = this.listeners.get(method) ?? new Set();
-    set.add(listener);
-    this.listeners.set(method, set);
-  }
-
-  async close(): Promise<void> {
-    void this.send("Browser.close").catch(() => undefined);
-    const exited = await Promise.race([
-      this.process.exited,
-      Bun.sleep(harnessBound(5_000)).then(() => null),
-    ]);
-    if (exited === null) {
-      this.process.kill("SIGKILL");
-      await this.process.exited;
-    }
-    this.socket.close();
-  }
+    env: { ...process.env, TMPDIR: userDataDir },
+    timeout: harnessBound(30_000),
+    protocolTimeout: harnessBound(180_000),
+  });
 }
 
-/** A fresh tab; `onNewDocument` runs in the page before any of its own scripts. */
-export class Tab {
-  private constructor(
-    private readonly chrome: Chrome,
-    readonly sessionId: string,
-    private readonly targetId: string,
-  ) {}
+export async function newPage(browser: Browser): Promise<Page> {
+  const page = await browser.newPage();
+  page.setDefaultTimeout(harnessBound(30_000));
+  return page;
+}
 
-  static async open(chrome: Chrome, onNewDocument?: string): Promise<Tab> {
-    const { targetId } = (await chrome.send("Target.createTarget", { url: "about:blank" })) as {
-      targetId: string;
-    };
-    const { sessionId } = (await chrome.send("Target.attachToTarget", {
-      targetId,
-      flatten: true,
-    })) as { sessionId: string };
-    const tab = new Tab(chrome, sessionId, targetId);
-    await tab.send("Page.enable");
-    if (onNewDocument !== undefined) {
-      await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: onNewDocument });
-    }
-    return tab;
-  }
+/** Chrome gone within the bound: puppeteer's close waits for the exit a Chrome that acknowledged Browser.close may
+ *  never make, and the profile directory is removed right after this. */
+export async function closeChrome(browser: Browser): Promise<void> {
+  const closed = browser.close();
+  const exited = await Promise.race([
+    closed.then(() => true),
+    Bun.sleep(harnessBound(5_000)).then(() => false),
+  ]);
+  if (exited) return;
+  browser.process()?.kill("SIGKILL");
+  await closed;
+}
 
-  send(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-    return this.chrome.send(method, params, this.sessionId);
-  }
+/** A page-side expression's awaited value; the page scripts are strings, which puppeteer types as unknown. */
+export function evaluate<T = unknown>(page: Page, expression: string): Promise<T> {
+  return page.evaluate(expression) as Promise<T>;
+}
 
-  navigate(url: string): Promise<Record<string, unknown>> {
-    return this.send("Page.navigate", { url });
-  }
-
-  async evaluate<T>(expression: string): Promise<T> {
-    const { result, exceptionDetails } = (await this.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-    })) as {
-      result: { value: T };
-      exceptionDetails?: { text: string; exception?: { description?: string } };
-    };
-    if (exceptionDetails !== undefined) {
-      throw new Error(
-        `page script failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`,
-      );
-    }
-    return result.value;
-  }
-
-  /** One key press as the browser sees it (a synthetic KeyboardEvent never reaches a dialog's cancel);
-   *  `modifiers` is the protocol's bit set (1 Alt, 2 Ctrl, 4 Meta, 8 Shift). */
-  async press(key: string, code: number, modifiers = 0): Promise<void> {
-    for (const type of ["keyDown", "keyUp"]) {
-      await this.send("Input.dispatchKeyEvent", {
-        type,
-        key,
-        code: key,
-        windowsVirtualKeyCode: code,
-        nativeVirtualKeyCode: code,
-        modifiers,
-      });
-    }
-  }
-
-  /** The role and name assistive technology receives for the first element `selector` matches. */
-  async accessibleNode(selector: string): Promise<{ role: string; name: string }> {
-    const { root } = (await this.send("DOM.getDocument", { depth: 0 })) as {
-      root: { nodeId: number };
-    };
-    const { nodeId } = (await this.send("DOM.querySelector", {
-      nodeId: root.nodeId,
-      selector,
-    })) as { nodeId: number };
-    const { nodes } = (await this.send("Accessibility.getPartialAXTree", {
-      nodeId,
-      fetchRelatives: false,
-    })) as { nodes: { role?: { value: string }; name?: { value: string } }[] };
-    return { role: nodes[0]?.role?.value ?? "", name: nodes[0]?.name?.value ?? "" };
-  }
-
-  close(): Promise<Record<string, unknown>> {
-    return this.chrome.send("Target.closeTarget", { targetId: this.targetId });
-  }
+/** The role and name assistive technology receives for the first element `selector` matches. */
+export async function accessibleNode(
+  page: Page,
+  selector: string,
+): Promise<{ role: string; name: string }> {
+  const element = await page.$(selector);
+  if (element === null) throw new Error(`no element matches ${selector}`);
+  const node = await page.accessibility.snapshot({ root: element, interestingOnly: false });
+  return { role: node?.role ?? "", name: node?.name ?? "" };
 }
 
 /** The built site as Pages would serve it: the repository's base stripped, a directory to its index. */
