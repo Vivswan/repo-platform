@@ -1,38 +1,31 @@
 import { describe, expect, test } from "bun:test";
-import {
-  classify,
-  isExempt,
-  isMarkdown,
-  type LineKind,
-  scanMarkdown,
-} from "../../../scripts/check/check_markdown_wrap";
+import { isExempt, isMarkdown, scanMarkdown } from "../../../scripts/check/check_markdown_wrap";
 
-describe("classify", () => {
-  // The scanner tracks continuation lines by kind, so a misread kind hides a wrapped paragraph or flags a
-  // structural line.
-  test.each<[string, LineKind]>([
-    ["Plain sentence.", "prose"],
-    ["", "blank"],
-    ["   ", "blank"],
-    ["## Heading", "structural"],
-    ["====", "structural"],
-    ["<details>", "structural"],
-    ["</details>", "structural"],
-    ["<https://example.com>", "prose"],
-    ["<user@example.com>", "prose"],
-    ["[ref]: https://example.com", "structural"],
-    ["<!-- a comment -->", "structural"],
-    ["---", "structural"],
-    ["- bullet text", "list"],
-    ["1. numbered item", "list"],
+describe("block boundaries", () => {
+  // The scanner reads a paragraph token's line span, so a line the parser does not read as a new block
+  // continues the paragraph above it: a misread boundary hides a wrapped paragraph or flags a structural line.
+  test.each<[string, boolean]>([
+    ["Plain sentence.", true],
+    ["", false],
+    ["   ", false],
+    ["## Heading", false],
+    ["====", false],
+    ["<details>", false],
+    ["</details>", false],
+    ["<https://example.com>", true],
+    ["<user@example.com>", true],
+    ["<!-- a comment -->", false],
+    ["---", false],
+    ["- bullet text", false],
+    ["1. numbered item", false],
     // Table rows are the scanner's concern (header + delimiter context); a lone pipe-led line is prose.
-    ["| ordinary prose", "prose"],
-    ["> quoted prose", "prose"],
-    [">", "blank"],
-    ["> - quoted bullet", "list"],
-    ["> > nested quote text", "prose"],
-  ])("%j is %s", (line, kind) => {
-    expect(classify(line)).toBe(kind);
+    ["| ordinary prose", true],
+    ["> quoted prose", false],
+    [">", false],
+    ["> - quoted bullet", false],
+    ["> > nested quote text", false],
+  ])("%j after a paragraph line continues it: %s", (line, continues) => {
+    expect(scanMarkdown(`A paragraph line.\n${line}`).hits).toEqual(continues ? [2] : []);
   });
 });
 
@@ -159,15 +152,18 @@ describe("scanMarkdown", () => {
       expected: clean([2]),
     },
     {
-      // Deleting the span instead of masking it to a space would turn this
-      // line into `<!--`, silently skipping the wrapped continuation.
-      reason: "masking a code span cannot splice its surroundings into a comment opener",
+      reason: "a code span between the pieces of a comment opener leaves the line prose",
       text: "prose with a spliced <`x`!-- token\nwrapped continuation",
       expected: clean([2]),
     },
     {
       reason: "a setext underline is structural",
       text: "Title\n=====\n\nprose",
+      expected: clean([]),
+    },
+    {
+      reason: "link reference definitions are structural",
+      text: "[ref]: https://example.com\n[other]: https://example.org\n\nprose",
       expected: clean([]),
     },
     {
@@ -191,8 +187,29 @@ describe("scanMarkdown", () => {
       expected: { hits: [], unterminated: "fence" },
     },
     {
+      reason: "a fence opened on the last line is unterminated, not its own closer",
+      text: "prose\n\n```",
+      expected: { hits: [], unterminated: "fence" },
+    },
+    {
+      reason: "a closer indented four spaces is content, so the fence stays open",
+      text: "```\ncode\n    ```",
+      expected: { hits: [], unterminated: "fence" },
+    },
+    {
+      reason:
+        "a comment opened inside another HTML block is that block's content, not a blind spot",
+      text: "<div>\n<!-- opened\nnever closed",
+      expected: clean([]),
+    },
+    {
+      reason: "a comment marker inside an inline tag's attribute is prose, not a comment block",
+      text: 'prose <span title="<!--">visible</span>',
+      expected: clean([]),
+    },
+    {
       reason: "an unterminated comment is reported, not silently swallowed",
-      text: "prose <!-- opened\nnever closed",
+      text: "<!-- opened\nnever closed",
       expected: { hits: [], unterminated: "comment" },
     },
     {
@@ -206,14 +223,20 @@ describe("scanMarkdown", () => {
       expected: clean([2]),
     },
     {
+      reason: "a frontmatter delimiter with trailing spaces still closes it",
+      text: "---\nname: skill\ndescription: prose\n---  \n\nParagraph.",
+      expected: clean([]),
+    },
+    {
       reason: "frontmatter must close before the first blank line",
       text: "---\nparagraph\n\nprose\nwrapped\n---",
       expected: clean([5]),
     },
     {
-      reason: "a comment opened mid-prose skips its interior",
+      reason:
+        "a comment opened mid-prose is paragraph text, so its interior lines are continuations",
       text: "text <!-- comment\ninterior\n--> \nafter.",
-      expected: clean([]),
+      expected: clean([2, 3, 4]),
     },
     {
       reason: "prose resumes tracking after a fence closes",
