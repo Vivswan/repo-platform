@@ -6,126 +6,54 @@
 
 import { lstatSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import MarkdownIt from "markdown-it";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 
-export type LineKind = "blank" | "structural" | "list" | "prose";
+// Without `html`, a comment or a bare tag line (<details>) is paragraph text instead of its own block.
+const md = new MarkdownIt({ html: true });
 
-export function quoteDepth(raw: string): { depth: number; rest: string } {
-  let rest = raw;
-  let depth = 0;
-  while (/^\s*>/.test(rest)) {
-    rest = rest.replace(/^\s*> ?/, "");
-    depth++;
-  }
-  return { depth, rest };
+/** The house frontmatter closes before the first blank line, so a lone `---` opener is a thematic break, not a
+ *  block swallowing the file. The block is blanked, not cut, so token maps keep the file's line numbers. */
+function blankFrontmatter(lines: string[]): void {
+  const close = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  const blank = lines.findIndex((line) => line.trim() === "");
+  if (lines[0].trim() === "---" && close !== -1 && close < blank) lines.fill("", 0, close + 1);
 }
 
-export function classify(raw: string): LineKind {
-  const t = quoteDepth(raw).rest.trim();
-  if (t === "") return "blank";
-  if (/^#{1,6}\s/.test(t)) return "structural"; // ATX heading
-  if (/^=+$/.test(t)) return "structural"; // setext heading underline
-  if (/^\[[^\]]+\]:\s/.test(t)) return "structural"; // link reference definition
-  if (t.startsWith("<!--")) return "structural"; // comment (opener; interior is skipped)
-  if (HTML_TAG_LINE.test(t)) return "structural"; // bare HTML tag line (<details>, ...)
-  if (/^([*_-][ \t]*){3,}$/.test(t)) return "structural"; // thematic break / setext level 2
-  if (/^([-*+]|\d+[.)])\s/.test(t)) return "list";
-  return "prose";
-}
-
-const TABLE_DELIMITER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/;
-
-/** A line that is exactly one HTML tag (<details>, </summary>, <br/>).
- *  The name must end before a space, slash, or `>`, so autolinks like
- *  <https://example.com> and <user@example.com> stay prose. */
-const HTML_TAG_LINE = /^<\/?[a-zA-Z][a-zA-Z0-9-]*(\s[^>]*)?\/?>$/;
-
-/** Inline code spans are masked first, so a literal `<!--` in a span cannot swallow the rest of the file.
- *  The mask is a space, not a deletion: deleting changes adjacency, and `` <`x`!-- `` would splice into `<!--`. */
-function opensComment(raw: string): boolean {
-  const masked = raw.replace(/(`+)(.*?)\1/g, " ");
-  const last = masked.lastIndexOf("<!--");
-  return last !== -1 && !masked.includes("-->", last + 4);
-}
+/** A paragraph, an indented code block, or a setext heading's text is one source line in this dialect; every
+ *  further non-blank line its token spans is a wrapped continuation (the setext underline is markup). */
+const PROSE_TOKENS = new Set(["paragraph_open", "code_block", "heading_open"]);
 
 export function scanMarkdown(content: string): {
   hits: number[];
   unterminated: "fence" | "comment" | null;
 } {
   const lines = content.split("\n");
+  // A final newline: every fence content line then carries its LF, and a blank line always follows the frontmatter.
+  if (lines[lines.length - 1] !== "") lines.push("");
+  blankFrontmatter(lines);
   const hits: number[] = [];
-  // Frontmatter needs its closing delimiter before the first blank line
-  // (YAML headers do not span blank lines); a lone opening `---` is a
-  // thematic break, not a frontmatter block swallowing the file.
-  const firstBlank = lines.findIndex((line) => line.trim() === "");
-  const frontmatterEnd = firstBlank === -1 ? lines.length : firstBlank;
-  let inFrontmatter =
-    lines[0]?.trim() === "---" &&
-    lines.slice(1, frontmatterEnd).some((line) => line.trim() === "---");
-  let fence: { char: string; len: number } | null = null;
-  let inComment = false;
-  let table: { depth: number } | null = null;
-  let prev: LineKind = inFrontmatter ? "structural" : "blank";
-  let prevDepth = 0;
-  for (let index = 0; index < lines.length; index++) {
-    const raw = lines[index];
-    const { depth, rest } = quoteDepth(raw);
-    const structural = () => {
-      prev = "structural";
-      prevDepth = depth;
-    };
-    if (inFrontmatter) {
-      if (index > 0 && raw.trim() === "---") inFrontmatter = false;
-      structural();
-      continue;
-    }
-    if (inComment) {
-      if (raw.includes("-->")) inComment = false;
-      if (opensComment(raw)) inComment = true;
-      structural();
-      continue;
-    }
-    const fenceMark = rest.match(/^ {0,3}(`{3,}|~{3,})/);
-    if (fence !== null) {
-      const closer = rest.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
-      if (closer && closer[1][0] === fence.char && closer[1].length >= fence.len) {
-        fence = null;
+  let unterminated: "fence" | "comment" | null = null;
+  for (const token of md.parse(lines.join("\n"), {})) {
+    if (token.map === null) continue;
+    const [start, stop] = token.map;
+    if (PROSE_TOKENS.has(token.type)) {
+      const end = token.type === "heading_open" ? stop - 1 : stop;
+      for (let line = start + 1; line < end; line++) {
+        if (lines[line].trim() !== "") hits.push(line + 1);
       }
-      structural();
-      continue;
+    } else if (token.type === "fence") {
+      // A closer is the last mapped line and never content, so a closed fence holds two lines fewer than its map
+      // spans; one that runs to the end of its container holds one fewer.
+      if (token.content.split("\n").length - 1 === stop - start - 1) unterminated = "fence";
+    } else if (token.type === "html_block" && /^\s*<!--/.test(token.content)) {
+      // A comment block ends on the line holding its closer; without one it runs to EOF and hides every line after.
+      if (!token.content.includes("-->")) unterminated = "comment";
     }
-    if (fenceMark) {
-      fence = { char: fenceMark[1][0], len: fenceMark[1].length };
-      structural();
-      continue;
-    }
-    if (table !== null && (!rest.includes("|") || depth !== table.depth)) table = null;
-    const next = quoteDepth(lines[index + 1] ?? "");
-    if (
-      table === null &&
-      rest.includes("|") &&
-      next.depth === depth &&
-      TABLE_DELIMITER.test(next.rest)
-    ) {
-      table = { depth };
-    }
-    if (table !== null) {
-      if (opensComment(raw)) inComment = true;
-      structural();
-      continue;
-    }
-    const kind = classify(raw);
-    // A deeper blockquote opens a new quote, so only the same or a shallower depth continues the previous line.
-    if (kind === "prose" && (prev === "prose" || prev === "list") && depth <= prevDepth) {
-      hits.push(index + 1);
-    }
-    if (opensComment(raw)) inComment = true;
-    prev = kind;
-    prevDepth = depth;
   }
-  return { hits, unterminated: fence !== null ? "fence" : inComment ? "comment" : null };
+  return { hits, unterminated };
 }
 
 export function isMarkdown(path: string): boolean {

@@ -21,6 +21,7 @@
     "@biomejs/biome": "2.5.11",
     "@types/bun": "1.4.2",
     "colorjs.io": "0.7.1",
+    "markdown-it": "15.0.2",
     "puppeteer-core": "25.12.0",
     "typescript": "^7.0.2"
   },
