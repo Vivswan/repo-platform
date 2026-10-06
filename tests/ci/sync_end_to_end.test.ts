@@ -1039,8 +1039,7 @@ describe("sync.ts refusing at the command line or the registration", () => {
     {
       reason: "the retired --previous-files flag",
       extra: ["--previous-files", join(FIXTURES, "files.yml")],
-      error:
-        'unknown or valueless argument "--previous-files" - allowed flags: --files, --tree, --target, --build, --repository, --private, --summary, --upstream',
+      error: "Unknown option '--previous-files'",
     },
     {
       reason: "a registration naming a module files.yml does not offer",

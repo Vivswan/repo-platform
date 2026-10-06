@@ -1,35 +1,25 @@
+import { parseArgs } from "node:util";
 import { fail } from "../../shared/gha.ts";
 
-function isAllowed<K extends string>(flag: string, allowed: readonly K[]): flag is K {
-  return allowed.some((candidate) => candidate === flag);
-}
-
-function hasRequired<R extends string, O extends string>(
-  flags: Partial<Record<R | O, string>>,
-  required: readonly R[],
-): flags is Record<R, string> & Partial<Record<O, string>> {
-  // Own-property check: an inherited key like "toString" must not count.
-  return required.every((flag) => Object.hasOwn(flags, flag));
-}
-
+/** `--flag value` pairs under node's strict parser, so an unknown flag or a valueless one is refused by name; then every
+ *  required flag must be present. Flags are named bare (`target`, spelled `--target` on the command line). */
 export function parseFlags<R extends string, O extends string = never>(
   argv: string[],
   required: readonly R[],
   optional: readonly O[] = [],
 ): Record<R, string> & Partial<Record<O, string>> {
-  const allowed: readonly (R | O)[] = [...required, ...optional];
-  const flags: Partial<Record<R | O, string>> = {};
-  for (let i = 0; i < argv.length; i += 2) {
-    const flag = argv[i];
-    const value = argv[i + 1];
-    if (!isAllowed(flag, allowed) || value === undefined) {
-      fail(`unknown or valueless argument "${flag}" - allowed flags: ${allowed.join(", ")}`);
-    }
-    flags[flag] = value;
+  const options = Object.fromEntries(
+    [...required, ...optional].map((flag) => [flag, { type: "string" }] as const),
+  );
+  let values: Record<string, string | undefined>;
+  try {
+    values = parseArgs({ args: argv, options, strict: true }).values;
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
   }
-  if (!hasRequired(flags, required)) {
-    const missing = required.filter((flag) => !Object.hasOwn(flags, flag));
-    fail(`missing required flags: ${missing.join(", ")}`);
+  const missing = required.filter((flag) => values[flag] === undefined);
+  if (missing.length > 0) {
+    fail(`missing required flags: ${missing.map((flag) => `--${flag}`).join(", ")}`);
   }
-  return flags;
+  return values as Record<R, string> & Partial<Record<O, string>>;
 }

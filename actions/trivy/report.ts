@@ -115,7 +115,7 @@ export function reportBody(report: TargetReport): string {
     `Nightly Trivy scan, ${severitySummary(report.findings)}. Replay from the repository root:`,
     "",
     "```",
-    `trivy fs --scanners ${SCANNERS} --severity ${SCAN_SEVERITY} --ignorefile ${IGNORE_FILE} ${shellWord(report.target)}`,
+    `trivy fs --scanners ${SCANNERS} --severity ${SCAN_SEVERITY} --ignorefile ${IGNORE_FILE} ${Bun.$.escape(report.target)}`,
     "```",
     "",
     ...report.findings.slice(0, MAX_ROWS).map((f) => `- ${f.severity} ${f.line}`),
@@ -124,10 +124,6 @@ export function reportBody(report: TargetReport): string {
     lines.push(`- and ${count - MAX_ROWS} more; the run's artifact carries the full JSON`);
   lines.push("");
   return lines.join("\n");
-}
-
-export function shellWord(path: string): string {
-  return /^[A-Za-z0-9._/@:+=-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
 }
 
 export const MAX_NAME = 100;

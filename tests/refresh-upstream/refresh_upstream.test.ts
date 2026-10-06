@@ -155,7 +155,7 @@ describe("the release pins", () => {
     else expect(() => tagVersion(tag, template, "o/a")).toThrow(outcome.throws);
   });
 
-  // A prerelease accepted here makes compareVersions NaN, so decideBump can neither see a downgrade nor read current: it always bumps.
+  // The dotfile is what the setup actions' version-file inputs read verbatim, so every other shape is refused here rather than ordered.
   test.each([
     ["2.9.5", "no trailing newline"],
     ["1.4.0-canary.1\n", "a prerelease"],

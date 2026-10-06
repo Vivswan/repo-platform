@@ -733,9 +733,10 @@ describe("check build", () => {
         expect(existsSync(page)).toBe(false);
       } else {
         expect(result.exitCode).toBe(0);
-        // The link check is the action's next step; the build hands it the dist as its own served root.
+        // The link check is the action's next step; the build hands it the dist as its own served root, each path
+        // quoted the way Bun.$.escape quotes for bash.
         expect(result.stdout).toContain(
-          `(output) link-check-args=--root-dir '${join(buildDir, ".vitepress", "dist")}' --files-from '${dirname(buildDir)}/link-check-inputs.txt'`,
+          `(output) link-check-args=--root-dir ${Bun.$.escape(join(buildDir, ".vitepress", "dist"))} --files-from ${Bun.$.escape(`${dirname(buildDir)}/link-check-inputs.txt`)}`,
         );
         expect(readFileSync(page, "utf-8")).toContain("<p>Plain text here.</p>");
         // The token layer reaches the bundle only through the virtual module config.mts serves.

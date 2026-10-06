@@ -24,10 +24,14 @@ export function literalPrefix(pattern: string): string {
 }
 
 export function segmentPattern(segment: string): RegExp {
-  const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   // A mirror glob segment from the repository's registration, escaped.
   // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-  return new RegExp(`^${segment.split("*").map(literal).join("[^/]*")}$`);
+  return new RegExp(
+    `^${segment
+      .split("*")
+      .map((text) => RegExp.escape(text))
+      .join("[^/]*")}$`,
+  );
 }
 
 /** Probing stops at a symbolic link, or at a prefix pathProblem refuses, and the rest of the pattern rides along literally

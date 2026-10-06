@@ -18,24 +18,24 @@ function run(snippet: string): { exitCode: number; stdout: string } {
 describe("parseFlags refuses", () => {
   test.each<[string, string, string]>([
     [
-      // The parsed record is a plain object: an `in` check would let toString satisfy a required flag nobody passed.
+      // parseArgs's values object has no prototype: an inherited key like toString never satisfies a required flag nobody passed.
       "an inherited object key as a required flag's value",
       'parseFlags([], ["toString"]);',
-      "::error::missing required flags: toString\n",
+      "::error::missing required flags: --toString\n",
     ],
     [
-      "an unknown flag, naming the allowed set",
-      'parseFlags(["--nope", "1"], ["--a"]);',
-      '::error::unknown or valueless argument "--nope" - allowed flags: --a\n',
+      "an unknown flag, naming it",
+      'parseFlags(["--nope", "1"], ["a"]);',
+      "::error::Unknown option '--nope'\n",
     ],
     [
       "a trailing flag with no value, naming that flag",
-      'parseFlags(["--a"], ["--a"]);',
-      '::error::unknown or valueless argument "--a" - allowed flags: --a\n',
+      'parseFlags(["--a"], ["a"]);',
+      "::error::Option '--a <value>' argument missing\n",
     ],
     [
       "a missing required flag, naming exactly the missing ones",
-      'parseFlags(["--a", "1"], ["--a", "--b", "--c"]);',
+      'parseFlags(["--a", "1"], ["a", "b", "c"]);',
       "::error::missing required flags: --b, --c\n",
     ],
   ])("%s", (_reason, snippet, expectedStdout) => {

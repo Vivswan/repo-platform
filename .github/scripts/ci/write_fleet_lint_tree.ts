@@ -4,6 +4,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { parseArgs } from "node:util";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { must } from "../shared/proc.ts";
@@ -105,16 +106,18 @@ export function templatesOf(
 }
 
 if (import.meta.main) {
-  const [dest, flag, upstream, ...rest] = process.argv.slice(2);
-  const shape =
-    dest !== undefined &&
-    rest.length === 0 &&
-    (flag === undefined ? upstream === undefined : flag === "--upstream" && upstream !== undefined);
-  if (!shape) {
+  const { values, positionals } = parseArgs({
+    args: process.argv.slice(2),
+    options: { upstream: { type: "string" } },
+    allowPositionals: true,
+  });
+  if (positionals.length !== 1) {
     console.error("usage: write_fleet_lint_tree.ts <dest> [--upstream <raw-content host>]");
     process.exit(2);
   }
-  for (const [name, workflows] of Object.entries(writeTargets(resolve(dest), upstream))) {
+  for (const [name, workflows] of Object.entries(
+    writeTargets(resolve(positionals[0]), values.upstream),
+  )) {
     console.log(`${name}: ${workflows.length} workflow(s): ${workflows.join(", ")}`);
   }
 }

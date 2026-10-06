@@ -72,13 +72,17 @@ export function runnerTemp(temp: TempDirs, repository: string): RunnerTemp {
 }
 
 /** The `link-check-args` output a deploy of `repository` emits for `runner`'s layout: the artifact's root, the page
- *  list in the scratch directory, and the site's own links remapped into the artifact. */
+ *  list in the scratch directory, and the site's own links remapped into the artifact. Each value is quoted the way
+ *  `Bun.$.escape` quotes for bash, the origin spelled the way `RegExp.escape` spells it (the fixture owner's hyphen is
+ *  a hex escape); the live lychee run is what proves bash and Rust read both. */
 export function deployLinkCheckArgs(runner: RunnerTemp, repository: string): string {
   const [owner, repo] = repository.split("/");
   const scratch = dirname(dirname(runner.site));
+  const own = RegExp.escape(`https://${owner.toLowerCase()}.github.io/${repo}`);
   return (
-    `--root-dir '${dirname(runner.site)}' --files-from '${join(scratch, "link-check-inputs.txt")}' ` +
-    `--remap '^https://${owner.toLowerCase()}\\.github\\.io/${repo}([/?#]|$) file://${runner.site}$1'`
+    `--root-dir ${Bun.$.escape(dirname(runner.site))} ` +
+    `--files-from ${Bun.$.escape(join(scratch, "link-check-inputs.txt"))} ` +
+    `--remap ${Bun.$.escape(`^${own}([/?#]|$) file://${runner.site}$1`)}`
   );
 }
 
