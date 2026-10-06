@@ -1,0 +1,12 @@
+{
+  "name": "knip",
+  "private": true,
+  "description": "Dependency manifest for the knip action: the one knip the fleet runs, whose loader reads the repository's configuration and whose CLI runs it.",
+  "dependencies": {
+    "knip": "6.35.1"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "typescript": "^7.0.2"
+  }
+}
