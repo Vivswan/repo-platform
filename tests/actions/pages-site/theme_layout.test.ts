@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Browser, CDPSession, Page } from "puppeteer-core";
 import {
   buildSite,
   commitAll,
@@ -18,7 +19,14 @@ import {
 } from "../../ci/pages_site_build/fixtures.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
-import { Chrome, serve, Tab } from "./headless_chrome.ts";
+import {
+  accessibleNode,
+  closeChrome,
+  evaluate,
+  launchChrome,
+  newPage,
+  serve,
+} from "./headless_chrome.ts";
 
 const REPOSITORY = "fixture-owner/fixture-repo";
 const BASE = "/fixture-repo";
@@ -208,12 +216,12 @@ const MEASURE_TABLES = `(() => {
   });
 })()`;
 
-let chrome: Chrome | undefined;
+let browser: Browser | undefined;
 let server: ReturnType<typeof Bun.serve> | undefined;
 
 // Registered before tempDirs() so Chrome is gone before its profile directory is removed.
 afterAll(async () => {
-  await chrome?.close();
+  if (browser !== undefined) await closeChrome(browser);
   server?.stop(true);
 }, harnessBound(15_000));
 const temp = tempDirs();
@@ -233,7 +241,7 @@ beforeAll(async () => {
   });
   if (result.exitCode !== 0) throw new Error(`the fixture build failed: ${describeRun(result)}`);
   server = serve(runner.site, BASE);
-  chrome = await Chrome.launch(temp.dir("theme-layout-chrome-"));
+  browser = await launchChrome(temp.dir("theme-layout-chrome-"));
 }, TEST_TIMEOUT_MS);
 
 /** Carbon's config starts every site dark and VitePress stores that choice, so the system preference reaches the
@@ -241,18 +249,27 @@ beforeAll(async () => {
  *  own mode). The view test starts as that reader on a light system, whatever the host prefers. */
 const FOLLOW_SYSTEM = 'localStorage.setItem("vitepress-theme-appearance", "auto")';
 
-function preferScheme(tab: Tab, value: "light" | "dark"): Promise<Record<string, unknown>> {
-  return tab.send("Emulation.setEmulatedMedia", {
+async function preferScheme(cdp: CDPSession, value: "light" | "dark"): Promise<void> {
+  await cdp.send("Emulation.setEmulatedMedia", {
     features: [{ name: "prefers-color-scheme", value }],
   });
 }
 
-async function openPage(followSystem: "light" | null = null): Promise<Tab> {
-  const tab = await Tab.open(chrome!, followSystem === null ? undefined : FOLLOW_SYSTEM);
-  if (followSystem !== null) await preferScheme(tab, followSystem);
-  await tab.navigate(`http://127.0.0.1:${server!.port}${PAGE}`);
-  await tab.evaluate(WHEN_RENDERED);
-  return tab;
+/** A fresh page and the one session its media emulation goes through: Chromium replaces a session's whole emulated
+ *  media set on every setEmulatedMedia, so puppeteer's emulateMediaType and emulateMediaFeatures, one key each,
+ *  would drop each other's state. */
+async function openPage(
+  followSystem: "light" | null = null,
+): Promise<{ page: Page; cdp: CDPSession }> {
+  const page = await newPage(browser!);
+  const cdp = await page.createCDPSession();
+  if (followSystem !== null) {
+    await page.evaluateOnNewDocument(FOLLOW_SYSTEM);
+    await preferScheme(cdp, followSystem);
+  }
+  await page.goto(`http://127.0.0.1:${server!.port}${PAGE}`);
+  await evaluate(page, WHEN_RENDERED);
+  return { page, cdp };
 }
 
 // A synthetic click on the button is the reader's; the wheel, the drag, and Escape go through the browser's input
@@ -260,10 +277,10 @@ async function openPage(followSystem: "light" | null = null): Promise<Tab> {
 test(
   "the zoom button opens the diagram at its natural size in a modal view that zooms and pans by wheel, drag, and keys, follows a theme flip, and hands focus back on Escape",
   async () => {
-    const tab = await openPage("light");
+    const { page, cdp } = await openPage("light");
     try {
-      await tab.evaluate(PROBES);
-      const opened = await tab.evaluate<{
+      await evaluate(page, PROBES);
+      const opened = await evaluate<{
         label: string;
         open: boolean;
         column: number;
@@ -272,7 +289,7 @@ test(
         locked: string;
         focusInside: boolean;
         stage: { x: number; y: number; width: number; height: number };
-      }>("window.__probe.open()");
+      }>(page, "window.__probe.open()");
       expect(opened).toEqual({
         label: "Zoom the diagram",
         open: true,
@@ -285,118 +302,96 @@ test(
       });
       expect(opened.natural).toBeGreaterThan(opened.column * 2);
 
-      const zoomedIn = await tab.evaluate<number>('window.__probe.press("Zoom in")');
-      const zoomedOut = await tab.evaluate<number>('window.__probe.press("Zoom out")');
-      const reset = await tab.evaluate<number>('window.__probe.press("Reset")');
+      const zoomedIn = await evaluate<number>(page, 'window.__probe.press("Zoom in")');
+      const zoomedOut = await evaluate<number>(page, 'window.__probe.press("Zoom out")');
+      const reset = await evaluate<number>(page, 'window.__probe.press("Reset")');
       expect(zoomedIn).toBeGreaterThan(opened.natural);
       expect(zoomedOut).toBeLessThan(zoomedIn);
       expect(reset).toBe(opened.natural);
 
       const { stage } = opened;
       const center = { x: stage.x + stage.width / 2, y: stage.y + stage.height / 2 };
-      await tab.send("Input.dispatchMouseEvent", {
-        type: "mouseWheel",
-        ...center,
-        deltaX: 0,
-        deltaY: -120,
-      });
+      await page.mouse.move(center.x, center.y);
+      await page.mouse.wheel({ deltaY: -120 });
       // A 280px viewport: the bar wraps onto a second row, so no button loses its label or the bar.
-      await tab.send("Emulation.setDeviceMetricsOverride", {
-        width: 280,
-        height: 600,
-        deviceScaleFactor: 1,
-        mobile: false,
-      });
-      expect(await tab.evaluate<Record<string, unknown>>(BAR_AT_280)).toEqual({
+      await page.setViewport({ width: 280, height: 600 });
+      expect(await evaluate<Record<string, unknown>>(page, BAR_AT_280)).toEqual({
         buttons: 4,
         allInside: true,
         labelsFit: true,
         rows: 2,
       });
-      await tab.send("Emulation.clearDeviceMetricsOverride");
-      const wheeled = await tab.evaluate<number>("window.__probe.width()");
+      await page.setViewport(null);
+      const wheeled = await evaluate<number>(page, "window.__probe.width()");
       expect(wheeled).toBeGreaterThan(reset);
 
-      const before = await tab.evaluate<[number, number]>("window.__probe.corner()");
-      await tab.send("Input.dispatchMouseEvent", {
-        type: "mousePressed",
-        ...center,
-        button: "left",
-        buttons: 1,
-        clickCount: 1,
-      });
-      await tab.send("Input.dispatchMouseEvent", {
-        type: "mouseMoved",
-        x: center.x + 100,
-        y: center.y + 50,
-        button: "left",
-        buttons: 1,
-      });
-      await tab.send("Input.dispatchMouseEvent", {
-        type: "mouseReleased",
-        x: center.x + 100,
-        y: center.y + 50,
-        button: "left",
-        clickCount: 1,
-      });
-      const after = await tab.evaluate<[number, number]>("window.__probe.corner()");
+      const before = await evaluate<[number, number]>(page, "window.__probe.corner()");
+      await page.mouse.down();
+      await page.mouse.move(center.x + 100, center.y + 50);
+      await page.mouse.up();
+      const after = await evaluate<[number, number]>(page, "window.__probe.corner()");
       expect([after[0] - before[0], after[1] - before[1]]).toEqual([100, 50]);
 
       // A notch is a notch: a page-unit wheel zooms exactly as far as the 120px pixel-unit one did.
-      const pageWheeled = await tab.evaluate<number>("window.__probe.pageWheel()");
+      const pageWheeled = await evaluate<number>(page, "window.__probe.pageWheel()");
       expect(pageWheeled / wheeled).toBeCloseTo(wheeled / reset, 2);
 
       // Without a pointer the stage takes focus and the arrows scroll it (right reveals the right side, so the
       // copy shifts left); minus zooms out. ARIA lets no name onto a generic element, so the stage's key
       // instructions reach assistive technology only under a role that takes one.
-      expect(await tab.evaluate<string>("window.__probe.focusStage()")).toBe(
+      expect(await evaluate<string>(page, "window.__probe.focusStage()")).toBe(
         "fleet-mermaid-view-stage",
       );
-      const stageNode = await tab.accessibleNode(".fleet-mermaid-view-stage");
+      const stageNode = await accessibleNode(page, ".fleet-mermaid-view-stage");
       expect(stageNode.role).not.toBe("generic");
       expect(stageNode.name).toMatch(/arrow keys/);
       // The view's own name comes through reka's hidden title, not an aria-label on the content.
-      expect(await tab.accessibleNode(".fleet-mermaid-view")).toEqual({
+      expect(await accessibleNode(page, ".fleet-mermaid-view")).toEqual({
         role: "dialog",
         name: "Diagram at full size",
       });
-      const beforeKeys = await tab.evaluate<[number, number]>("window.__probe.corner()");
-      await tab.press("ArrowRight", 39);
-      const afterKeys = await tab.evaluate<[number, number]>("window.__probe.corner()");
+      const beforeKeys = await evaluate<[number, number]>(page, "window.__probe.corner()");
+      await page.keyboard.press("ArrowRight");
+      const afterKeys = await evaluate<[number, number]>(page, "window.__probe.corner()");
       expect(afterKeys[0]).toBeLessThan(beforeKeys[0]);
       expect(afterKeys[1]).toBe(beforeKeys[1]);
-      await tab.press("-", 189);
-      expect(await tab.evaluate<number>("window.__probe.width()")).toBeLessThan(pageWheeled);
+      await page.keyboard.press("-");
+      expect(await evaluate<number>(page, "window.__probe.width()")).toBeLessThan(pageWheeled);
       // A chord stays the browser's (Alt+ArrowLeft is Back), so it moves nothing.
-      const beforeChord = await tab.evaluate<[number, number]>("window.__probe.corner()");
-      await tab.press("ArrowLeft", 37, 1);
-      expect(await tab.evaluate<[number, number]>("window.__probe.corner()")).toEqual(beforeChord);
+      const beforeChord = await evaluate<[number, number]>(page, "window.__probe.corner()");
+      await page.keyboard.down("Alt");
+      await page.keyboard.press("ArrowLeft");
+      await page.keyboard.up("Alt");
+      expect(await evaluate<[number, number]>(page, "window.__probe.corner()")).toEqual(
+        beforeChord,
+      );
 
       // The system appearance flipping under an open view: the pass redraws the mount, and the view follows.
-      const ids = await tab.evaluate<{ column: string; view: string }>("window.__probe.ids()");
+      const ids = await evaluate<{ column: string; view: string }>(page, "window.__probe.ids()");
       expect(ids.view).toBe(ids.column);
-      const beforeFlip = await tab.evaluate<number>("window.__probe.width()");
-      await preferScheme(tab, "dark");
-      await tab.evaluate(WHEN_REDRAWN(ids.column));
-      const flipped = await tab.evaluate<{ column: string; view: string; open: boolean }>(
+      const beforeFlip = await evaluate<number>(page, "window.__probe.width()");
+      await preferScheme(cdp, "dark");
+      await evaluate(page, WHEN_REDRAWN(ids.column));
+      const flipped = await evaluate<{ column: string; view: string; open: boolean }>(
+        page,
         "window.__probe.ids()",
       );
       expect(flipped).toEqual({ column: flipped.column, view: flipped.column, open: true });
       expect(flipped.column).not.toBe(ids.column);
-      expect(await tab.evaluate<number>("window.__probe.width()")).toBe(beforeFlip);
+      expect(await evaluate<number>(page, "window.__probe.width()")).toBe(beforeFlip);
 
-      await tab.send("Emulation.setEmulatedMedia", { media: "print" });
-      expect(await tab.evaluate<string>(VIEW_ON_PAPER)).toBe("none");
-      await tab.send("Emulation.setEmulatedMedia", { media: "" });
+      await cdp.send("Emulation.setEmulatedMedia", { media: "print" });
+      expect(await evaluate<string>(page, VIEW_ON_PAPER)).toBe("none");
+      await cdp.send("Emulation.setEmulatedMedia", { media: "" });
 
-      await tab.press("Escape", 27);
-      expect(await tab.evaluate<Record<string, unknown>>("window.__probe.closed()")).toEqual({
+      await page.keyboard.press("Escape");
+      expect(await evaluate<Record<string, unknown>>(page, "window.__probe.closed()")).toEqual({
         open: false,
         focusOnOpener: true,
         locked: "visible",
       });
     } finally {
-      await tab.close();
+      await page.close();
     }
   },
   SCENARIO_TIMEOUT_MS,
@@ -408,20 +403,22 @@ test(
 test(
   "the view closes when the reader leaves its page through history",
   async () => {
-    const tab = await openPage();
+    const { page, cdp } = await openPage();
     try {
-      await tab.evaluate("document.querySelector('a[href*=\"other\"]').click()");
-      await tab.evaluate(WHEN_TITLED("Other"));
-      await tab.evaluate("history.back()");
-      await tab.evaluate(WHEN_TITLED("Fixture"));
-      await tab.evaluate(WHEN_RENDERED);
-      await tab.evaluate(PROBES);
-      expect(await tab.evaluate<{ open: boolean }>("window.__probe.open()")).toMatchObject({
+      await evaluate(page, "document.querySelector('a[href*=\"other\"]').click()");
+      await evaluate(page, WHEN_TITLED("Other"));
+      await evaluate(page, "history.back()");
+      await evaluate(page, WHEN_TITLED("Fixture"));
+      await evaluate(page, WHEN_RENDERED);
+      await evaluate(page, PROBES);
+      expect(await evaluate<{ open: boolean }>(page, "window.__probe.open()")).toMatchObject({
         open: true,
       });
-      await tab.evaluate("history.forward()");
-      await tab.evaluate(WHEN_TITLED("Other"));
-      expect(await tab.evaluate<Record<string, unknown>>("window.__probe.closed()")).toMatchObject({
+      await evaluate(page, "history.forward()");
+      await evaluate(page, WHEN_TITLED("Other"));
+      expect(
+        await evaluate<Record<string, unknown>>(page, "window.__probe.closed()"),
+      ).toMatchObject({
         open: false,
         locked: "visible",
       });
@@ -429,18 +426,18 @@ test(
       // A finished lightbox left through history: the content update starts medium-zoom's fading close, and the
       // page stays inert under the fade until the close lands. The fade is the 300ms one: under reduced motion it is
       // 1ms and the sample would land after the close.
-      await tab.send("Emulation.setEmulatedMedia", {
+      await cdp.send("Emulation.setEmulatedMedia", {
         features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
       });
-      await tab.evaluate(WHEN_TITLED("Fixture", "history.back()"));
-      await tab.evaluate(WHEN_ATTACHED);
-      expect(await tab.evaluate<Record<string, boolean>>(LEAVE_OPEN_LIGHTBOX)).toEqual({
+      await evaluate(page, WHEN_TITLED("Fixture", "history.back()"));
+      await evaluate(page, WHEN_ATTACHED);
+      expect(await evaluate<Record<string, boolean>>(page, LEAVE_OPEN_LIGHTBOX)).toEqual({
         inertDuringFade: true,
         inertAfterClose: false,
         overlayAfterClose: false,
       });
     } finally {
-      await tab.close();
+      await page.close();
     }
   },
   SCENARIO_TIMEOUT_MS,
@@ -657,17 +654,17 @@ const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
 test(
   "an article image opens by click or Enter in a lightbox over the nav, larger than inline, page inert, focus back after; a linked or unnamed image does not; the original prints; Escape closes it, under reduced motion too",
   async () => {
-    const tab = await openPage();
+    const { page, cdp } = await openPage();
     try {
       // The control: with no lightbox up the same probe finds something behind the (absent) overlay to focus.
-      expect(await tab.evaluate<boolean>(FOCUS_BEHIND_OVERLAY)).toBe(true);
+      expect(await evaluate<boolean>(page, FOCUS_BEHIND_OVERLAY)).toBe(true);
       for (const motion of ["no-preference", "reduce"]) {
         const features = [{ name: "prefers-reduced-motion", value: motion }];
-        await tab.send("Emulation.setEmulatedMedia", { features });
-        const lightbox = await tab.evaluate<Lightbox>(OPEN_LIGHTBOX);
-        await tab.send("Emulation.setEmulatedMedia", { media: "print", features });
-        lightbox.printedOriginal = await tab.evaluate<string>(PRINTED_ORIGINAL);
-        await tab.send("Emulation.setEmulatedMedia", { media: "", features });
+        await cdp.send("Emulation.setEmulatedMedia", { features });
+        const lightbox = await evaluate<Lightbox>(page, OPEN_LIGHTBOX);
+        await cdp.send("Emulation.setEmulatedMedia", { media: "print", features });
+        lightbox.printedOriginal = await evaluate<string>(page, PRINTED_ORIGINAL);
+        await cdp.send("Emulation.setEmulatedMedia", { media: "", features });
         expect(lightbox).toEqual({
           inline: lightbox.inline,
           zoomed: lightbox.zoomed,
@@ -684,26 +681,26 @@ test(
           ],
           layoutInert: true,
         });
-        expect(await tab.evaluate<boolean>(FOCUS_BEHIND_OVERLAY)).toBe(false);
+        expect(await evaluate<boolean>(page, FOCUS_BEHIND_OVERLAY)).toBe(false);
         expect(lightbox.zoomed).toBeGreaterThan(lightbox.inline * 1.5);
         expect(lightbox.overlay.color).not.toBe("rgba(0, 0, 0, 0)");
-        await tab.press("Escape", 27);
-        expect(await tab.evaluate<Record<string, unknown>>(WHEN_LIGHTBOX_CLOSED)).toEqual({
+        await page.keyboard.press("Escape");
+        expect(await evaluate<Record<string, unknown>>(page, WHEN_LIGHTBOX_CLOSED)).toEqual({
           overlay: false,
           hidden: false,
           motion,
           layoutInert: false,
         });
         // The probe focused then clicked, a pointer's order on a focusable image; the close hands focus back.
-        expect(await tab.evaluate<boolean>(FOCUS_ON_IMAGE)).toBe(true);
+        expect(await evaluate<boolean>(page, FOCUS_ON_IMAGE)).toBe(true);
       }
-      expect(await tab.evaluate<boolean>(FOCUS_IMAGE)).toBe(true);
-      expect(await tab.accessibleNode(".vp-doc img")).toEqual({
+      expect(await evaluate<boolean>(page, FOCUS_IMAGE)).toBe(true);
+      expect(await accessibleNode(page, ".vp-doc img")).toEqual({
         role: "button",
         name: "A picture",
       });
-      const keyOpened = tab.evaluate<Record<string, unknown>>(KEY_OPENED);
-      await tab.press("Enter", 13);
+      const keyOpened = evaluate<Record<string, unknown>>(page, KEY_OPENED);
+      await page.keyboard.press("Enter");
       // The original is what medium-zoom clones (a srcset image gets a second, later copy), so it carries no
       // button attributes while it is hidden behind its copy.
       expect(await keyOpened).toEqual({
@@ -714,34 +711,34 @@ test(
       });
       // The second image, behind the overlay, refuses focus, so the Enter lands on the body and the pending focus
       // return is untouched.
-      expect(await tab.evaluate<boolean>(FOCUS_SECOND_IMAGE)).toBe(false);
-      await tab.press("Enter", 13);
-      await tab.press("Escape", 27);
-      expect(await tab.evaluate<Record<string, unknown>>(WHEN_LIGHTBOX_CLOSED)).toEqual({
+      expect(await evaluate<boolean>(page, FOCUS_SECOND_IMAGE)).toBe(false);
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Escape");
+      expect(await evaluate<Record<string, unknown>>(page, WHEN_LIGHTBOX_CLOSED)).toEqual({
         overlay: false,
         hidden: false,
         motion: "reduce",
         layoutInert: false,
       });
       // medium-zoom hid the original while its copy was up, which drops focus to <body>.
-      expect(await tab.evaluate<boolean>(FOCUS_ON_IMAGE)).toBe(true);
+      expect(await evaluate<boolean>(page, FOCUS_ON_IMAGE)).toBe(true);
 
       // Leaving the page inside a healthy open: the content update frees the page, then the open finishes over the
       // new page and takes it back until Escape closes the lightbox.
-      await tab.send("Emulation.setEmulatedMedia", {
+      await cdp.send("Emulation.setEmulatedMedia", {
         features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
       });
-      expect(await tab.evaluate<Record<string, boolean>>(RACE_OPEN_WITH_NAVIGATION)).toEqual({
+      expect(await evaluate<Record<string, boolean>>(page, RACE_OPEN_WITH_NAVIGATION)).toEqual({
         inert: true,
         navigated: true,
       });
-      await tab.press("Escape", 27);
-      expect(await tab.evaluate<Record<string, unknown>>(WHEN_OVERLAY_GONE)).toEqual({
+      await page.keyboard.press("Escape");
+      expect(await evaluate<Record<string, unknown>>(page, WHEN_OVERLAY_GONE)).toEqual({
         overlay: false,
         layoutInert: false,
       });
     } finally {
-      await tab.close();
+      await page.close();
     }
   },
   SCENARIO_TIMEOUT_MS,
@@ -753,10 +750,11 @@ test(
 test(
   "a lightbox closed by scrolling away hands focus back without scrolling the image into view",
   async () => {
-    const tab = await openPage();
+    const { page } = await openPage();
     try {
-      await tab.evaluate(WHEN_ATTACHED);
-      const scrolled = await tab.evaluate<{ target: number; scrollY: number; focused: boolean }>(
+      await evaluate(page, WHEN_ATTACHED);
+      const scrolled = await evaluate<{ target: number; scrollY: number; focused: boolean }>(
+        page,
         SCROLL_CLOSE,
       );
       expect(scrolled).toEqual({
@@ -765,7 +763,7 @@ test(
         focused: true,
       });
     } finally {
-      await tab.close();
+      await page.close();
     }
   },
   SCENARIO_TIMEOUT_MS,
@@ -776,22 +774,23 @@ test(
 test(
   "a lightbox stuck mid-open frees the page on the next content update",
   async () => {
-    const tab = await openPage();
+    const { page } = await openPage();
     try {
-      await tab.evaluate(WHEN_ATTACHED);
-      expect(await tab.evaluate<Record<string, boolean>>(OPEN_BROKEN)).toEqual({
+      await evaluate(page, WHEN_ATTACHED);
+      expect(await evaluate<Record<string, boolean>>(page, OPEN_BROKEN)).toEqual({
         inert: true,
         overlay: true,
         opened: false,
       });
-      await tab.evaluate(
+      await evaluate(
+        page,
         WHEN_TITLED("Other", "document.querySelector('a[href*=\"other\"]').click()"),
       );
       expect(
-        await tab.evaluate<boolean>('document.querySelector(".Layout").hasAttribute("inert")'),
+        await evaluate<boolean>(page, 'document.querySelector(".Layout").hasAttribute("inert")'),
       ).toBe(false);
     } finally {
-      await tab.close();
+      await page.close();
     }
   },
   SCENARIO_TIMEOUT_MS,
@@ -803,9 +802,9 @@ test(
 test(
   "a prose cell beside a long code token keeps a readable width, a table of many code columns scrolls in its wrapper, and on paper both fit the page",
   async () => {
-    const tab = await openPage();
+    const { page, cdp } = await openPage();
     try {
-      const [crush, wide] = await tab.evaluate<Column[]>(MEASURE_TABLES);
+      const [crush, wide] = await evaluate<Column[]>(page, MEASURE_TABLES);
       expect(crush.cells).toHaveLength(2);
       expect(crush.cells[1]).toBeGreaterThanOrEqual(14 * REM);
       expect(crush.cells[0] + crush.cells[1]).toBeLessThanOrEqual(crush.wrapper);
@@ -813,10 +812,10 @@ test(
       expect(crush.scrolls).toBe(false);
       expect(wide.scrolls).toBe(true);
       expect(wide.codeLines).toBe(1);
-      await tab.send("Emulation.setEmulatedMedia", { media: "print" });
-      expect(await tab.evaluate<boolean[]>(MEASURE_PRINT)).toEqual([true, true]);
+      await cdp.send("Emulation.setEmulatedMedia", { media: "print" });
+      expect(await evaluate<boolean[]>(page, MEASURE_PRINT)).toEqual([true, true]);
     } finally {
-      await tab.close();
+      await page.close();
     }
   },
   SCENARIO_TIMEOUT_MS,

@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Browser, HTTPRequest, Page } from "puppeteer-core";
 import { SHARED_TOKENS } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 import {
   buildSite,
@@ -22,7 +23,7 @@ import {
 } from "../../ci/pages_site_build/fixtures.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
-import { Chrome, serve, Tab } from "./headless_chrome.ts";
+import { closeChrome, evaluate, launchChrome, newPage, serve } from "./headless_chrome.ts";
 
 const REPOSITORY = "fixture-owner/fixture-repo";
 const PAGE = "/fixture-repo/latest/";
@@ -156,48 +157,47 @@ const MEASURE = `(() => {
 /** The face requests routed per `fonts`: served untouched, refused failed, held parked until `release`, after
  *  which later ones pass straight through. */
 async function interceptFaces(
-  chrome: Chrome,
-  tab: Tab,
+  page: Page,
   fonts: "held" | "refused",
 ): Promise<{ requested: Promise<void>; release(): Promise<void> }> {
-  const held: string[] = [];
+  const held: HTTPRequest[] = [];
   let released = false;
   let requested!: () => void;
   const firstRequest = new Promise<void>((resolve) => {
     requested = resolve;
   });
-  chrome.on("Fetch.requestPaused", (params, session) => {
-    if (session !== tab.sessionId) return;
-    const requestId = params.requestId as string;
+  await page.setRequestInterception(true);
+  page.on("request", (request) => {
+    if (!request.url().endsWith(".woff2")) {
+      void request.continue();
+      return;
+    }
     if (fonts === "refused") {
-      void tab.send("Fetch.failRequest", { requestId, errorReason: "Failed" });
+      void request.abort("failed");
     } else if (released) {
-      void tab.send("Fetch.continueRequest", { requestId });
+      void request.continue();
     } else {
-      held.push(requestId);
+      held.push(request);
     }
     requested();
-  });
-  await tab.send("Fetch.enable", {
-    patterns: [{ urlPattern: "*.woff2", requestStage: "Request" }],
   });
   return {
     requested: firstRequest,
     async release() {
       released = true;
-      for (const requestId of held.splice(0)) {
-        await tab.send("Fetch.continueRequest", { requestId });
+      for (const request of held.splice(0)) {
+        await request.continue();
       }
     },
   };
 }
 
-let chrome: Chrome | undefined;
+let browser: Browser | undefined;
 let server: ReturnType<typeof Bun.serve> | undefined;
 
 // Registered before tempDirs() so Chrome is gone before its profile directory is removed.
 afterAll(async () => {
-  await chrome?.close();
+  if (browser !== undefined) await closeChrome(browser);
   server?.stop(true);
 }, harnessBound(15_000));
 const temp = tempDirs();
@@ -215,23 +215,25 @@ beforeAll(async () => {
   });
   if (result.exitCode !== 0) throw new Error(`the fixture build failed: ${describeRun(result)}`);
   server = serve(runner.site, "/fixture-repo");
-  chrome = await Chrome.launch(temp.dir("mermaid-labels-chrome-"));
+  browser = await launchChrome(temp.dir("mermaid-labels-chrome-"));
 }, TEST_TIMEOUT_MS);
 
 async function settle(fonts: "served" | "held" | "refused"): Promise<Settled> {
-  const tab = await Tab.open(chrome!, TIMELINE_SCRIPT);
-  const faces = fonts === "served" ? null : await interceptFaces(chrome!, tab, fonts);
+  const page = await newPage(browser!);
+  await page.evaluateOnNewDocument(TIMELINE_SCRIPT);
+  const faces = fonts === "served" ? null : await interceptFaces(page, fonts);
   try {
-    await tab.navigate(`http://127.0.0.1:${server!.port}${PAGE}`);
+    // Not the load event: a held face may hold that too, and its release waits on this navigation.
+    await page.goto(`http://127.0.0.1:${server!.port}${PAGE}`, { waitUntil: "domcontentloaded" });
     if (faces !== null && fonts === "held") {
       await faces.requested;
-      await tab.evaluate(WHEN_MERMAID_FETCHED);
+      await evaluate(page, WHEN_MERMAID_FETCHED);
       await faces.release();
     }
-    await tab.evaluate(WHEN_SETTLED);
-    return await tab.evaluate<Settled>(MEASURE);
+    await evaluate(page, WHEN_SETTLED);
+    return await evaluate<Settled>(page, MEASURE);
   } finally {
-    await tab.close();
+    await page.close();
   }
 }
 
