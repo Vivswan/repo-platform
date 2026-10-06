@@ -100,56 +100,64 @@ describe("parseSiteConfig", () => {
       { parsed: { siteTitle: "Site", docs: null, ...linkRot } },
     ],
     ["malformed JSON", "not json", { error: "the config input is not valid JSON" }],
-    ["a list", "[]", { error: "must be a JSON object" }],
-    ["an unknown key", config({ docs_dir: "docs" }), { error: "unknown keys: docs_dir" }],
+    ["a list", "[]", { error: "(top level): Invalid input: expected object, received array" }],
+    [
+      "an unknown key",
+      config({ docs_dir: "docs" }),
+      { error: '(top level): Unrecognized key: "docs_dir"' },
+    ],
     [
       "a non-string title",
       config({ site_title: 3 }),
-      { error: "config.site_title must be a string" },
+      { error: "site_title: Invalid input: expected string, received number" },
     ],
     [
       "an empty title",
       config({ site_title: "" }),
-      { error: "config.site_title must not be empty" },
+      { error: "site_title: Too small: expected string to have >=1 characters" },
     ],
     [
       "a title with a line break",
       config({ site_title: "Docs\npublish=false" }),
-      { error: "config.site_title must be one line" },
+      { error: "site_title: must be one line" },
     ],
     [
       "a label with a carriage return",
       config({ link_rot_label: "rot\rx" }),
-      { error: "config.link_rot_label must be one line" },
+      { error: "link_rot_label: must be one line" },
     ],
     [
       "a docs path with a slash",
       config({ docs_path: "a/b" }),
-      { error: "config.docs_path 'a/b' must be one plain lowercase URL segment" },
+      { error: "docs_path: must be one plain lowercase URL segment" },
     ],
     [
       "an empty docs path",
       config({ docs_path: "" }),
-      { error: "config.docs_path '' must be one plain lowercase URL segment" },
+      { error: "docs_path: must be one plain lowercase URL segment" },
     ],
     [
       "a dot docs path",
       config({ docs_path: ".." }),
-      { error: "config.docs_path '..' must be one plain lowercase URL segment" },
+      { error: "docs_path: must be one plain lowercase URL segment" },
     ],
-    ["a non-list include", config({ include: {} }), { error: "config.include must be a list" }],
+    [
+      "a non-list include",
+      config({ include: {} }),
+      { error: "include: Invalid input: expected array, received object" },
+    ],
     [
       "include roots beside a null docs path",
       config({ docs_path: null }),
       {
         error:
-          "config.include names roots to render into the docs, but a null docs path turns the docs half off",
+          "include: names roots to render into the docs, but a null docs path turns the docs half off",
       },
     ],
     [
       "an include root escaping the tree",
       config({ include: [{ ...skills, path: "../x" }] }),
-      { error: "config.include[0].path '../x' must be a plain relative path" },
+      { error: "include.0.path: must be a plain relative path" },
     ],
   ])("%s", (_reason, json, outcome) => {
     if ("error" in outcome) expect(() => parseSiteConfig(json)).toThrow(outcome.error);
