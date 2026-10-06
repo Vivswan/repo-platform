@@ -69,7 +69,8 @@ runs:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         REPORT_PATH: ${{ runner.temp }}/check-shell-complexity-report.md
         SKIP: ${{ inputs.skip }}
-      run: '"$ACTION_BUN" "${{ github.action_path }}/check-shell-complexity.ts" --skip "$SKIP"'
+      # `--skip=` attaches the value, so a directory name starting with a dash is never read as the next flag.
+      run: '"$ACTION_BUN" "${{ github.action_path }}/check-shell-complexity.ts" --skip="$SKIP"'
 
     # The comment is a convenience sink: the summary and annotations carry
     # the same table, so a token without pull-requests write (a fork or

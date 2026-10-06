@@ -142,10 +142,8 @@ export function readDispatchRepo(): string {
 // scrub keyed to one casing must catch every other. The replacement is a
 // thunk, so a `$` in it is never substitution syntax.
 function replaceAllFoldingCase(text: string, needle: string, replacement: string): string {
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // The needle is regex-escaped on the line above, so it is never pattern syntax.
   // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-  return text.replace(new RegExp(escaped, "gi"), () => replacement);
+  return text.replace(new RegExp(RegExp.escape(needle), "gi"), () => replacement);
 }
 
 /** A public row (display IS the slug) is skipped: its bare-name pass would EXPAND bare names into

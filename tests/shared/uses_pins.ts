@@ -35,16 +35,12 @@ export interface SelfPin {
   ref: string;
 }
 
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /** A self pin is a `uses:` naming this repository under any owner slot (a placeholder or a literal), so a mistyped owner is judged
  *  rather than skipped. Only the `uses:` keyword marks a pin: prose spells the shape with an ellipsis. */
 export function sourceSelfPins(text: string, file: string): SelfPin[] {
   const ownerSlot = String.raw`(\{\{\s*[a-z_]+\s*\}\}|[A-Za-z0-9-]+)`;
   const token = new RegExp(
-    String.raw`uses:\s*['"]?${ownerSlot}/(${escapeRegExp(PLATFORM_NAME)}/[A-Za-z0-9_./-]+)@([^\s"'\x60]*)`,
+    String.raw`uses:\s*['"]?${ownerSlot}/(${RegExp.escape(PLATFORM_NAME)}/[A-Za-z0-9_./-]+)@([^\s"'\x60]*)`,
     "gi",
   );
   return [...text.matchAll(token)].map((match) => ({

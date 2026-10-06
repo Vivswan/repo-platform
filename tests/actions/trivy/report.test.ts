@@ -139,11 +139,11 @@ describe("reportBody", () => {
       "- LOW DS-0026 line 1: No HEALTHCHECK defined. Add HEALTHCHECK instruction in your Dockerfile https://avd.aquasec.com/misconfig/ds-0026",
       "",
     ]);
-    // A wrong quoting is a replay command that fails on the operator's machine.
+    // A wrong quoting is a replay command that fails on the operator's machine; Bun.$.escape double-quotes a spaced word.
     expect(
       reportBody({ target: "it's/my app/bun.lock", findings: [{ severity: "LOW", line: "x" }] }),
     ).toContain(
-      "\ntrivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml 'it'\\''s/my app/bun.lock'\n",
+      '\ntrivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml "it\'s/my app/bun.lock"\n',
     );
   });
 

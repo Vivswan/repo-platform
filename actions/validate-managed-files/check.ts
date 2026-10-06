@@ -146,17 +146,17 @@ function finding(
 async function main(argv: string[]): Promise<number> {
   const flags = parseFlags(
     argv,
-    ["--target", "--repository", "--private", "--build"] as const,
-    ["--upstream"] as const,
+    ["target", "repository", "private", "build"] as const,
+    ["upstream"] as const,
   );
-  if (flags["--private"] !== "true" && flags["--private"] !== "false") {
+  if (flags.private !== "true" && flags.private !== "false") {
     fail("--private must be true or false");
   }
-  if (!/^[0-9a-f]{40}$/.test(flags["--build"])) {
+  if (!/^[0-9a-f]{40}$/.test(flags.build)) {
     fail("--build must be the platform commit's full sha (40 lowercase hex characters)");
   }
-  const target = resolve(flags["--target"]);
-  const short = flags["--build"].slice(0, 12);
+  const target = resolve(flags.target);
+  const short = flags.build.slice(0, 12);
   const scratch = mkdtempSync(join(tmpdir(), `${PLATFORM_NAME}-check-`));
   try {
     const before = treeOf(target, listPaths(target));
@@ -167,10 +167,10 @@ async function main(argv: string[]): Promise<number> {
         files: join(PLATFORM_ROOT, "files.yml"),
         tree: join(PLATFORM_ROOT, "files"),
         target: scratch,
-        build: flags["--build"],
-        repository: flags["--repository"],
-        private: flags["--private"] === "true",
-        upstream: flags["--upstream"] ?? RAW_HOST,
+        build: flags.build,
+        repository: flags.repository,
+        private: flags.private === "true",
+        upstream: flags.upstream ?? RAW_HOST,
       });
     } catch (error) {
       const lines =

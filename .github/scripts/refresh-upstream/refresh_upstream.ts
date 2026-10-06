@@ -153,10 +153,9 @@ function versionFrom(value: unknown, pattern: RegExp, what: string): string {
  *  canary, a foreign prefix) is refused, so it can never land in the dotfile. */
 export function tagVersion(tag: unknown, template: string, what: string): string {
   const [before, after] = template.split(PIN_VERSION_TOKEN);
-  const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return versionFrom(
     tag,
-    new RegExp(`^${literal(before)}(\\d+\\.\\d+\\.\\d+)${literal(after)}$`),
+    new RegExp(`^${RegExp.escape(before)}(\\d+\\.\\d+\\.\\d+)${RegExp.escape(after)}$`),
     what,
   );
 }
@@ -166,20 +165,11 @@ export function pinnedVersion(text: string, where: string): string {
   return versionFrom(text, /^(\d+\.\d+\.\d+)\n$/, where);
 }
 
-function compareVersions(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] !== pb[i]) return pa[i] - pb[i];
-  }
-  return 0;
-}
-
 /** GitHub's /releases/latest is most-recent-by-DATE, so a backport patch on an older line can surface as "latest". A genuine
  *  rollback is a deliberate hand edit, never an automated downgrade, and a run that saw one cannot tell whether main is
  *  behind upstream, so it aborts instead of reporting "nothing moved" (the workflow's PR step would close a valid PR on that). */
 export function decideBump(pinned: string, fetched: string, what: string): "bump" | "current" {
-  const order = compareVersions(fetched, pinned);
+  const order = Bun.semver.order(fetched, pinned);
   if (order < 0) {
     throw new Error(
       `${what}: upstream latest ${fetched} is OLDER than the pinned ${pinned} ` +

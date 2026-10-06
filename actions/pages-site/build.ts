@@ -496,11 +496,6 @@ function walkHtml(dir: string, prefix = ""): string[] {
   return pages;
 }
 
-/** Quoted for lychee-action, which evals its args in bash. */
-function quoted(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
 /** The arguments the action's link-check step (action.yml) hands lychee on top of its own: the pages built from HEAD as
  *  the inputs, resolved under the served root. `origin` is the deployed site's (`https://owner.github.io`): a link spelled
  *  with it under the base is the site's own and is remapped into the artifact. Null when the layout is not the deployed
@@ -525,13 +520,17 @@ function linkCheckArgs(
   const literal = (path: string) => path.replace(/[[\]*?]/g, "[$&]");
   const inputs = join(cfg.scratch, "link-check-inputs.txt");
   writeFileSync(inputs, `${pages.map((page) => literal(join(layout.site, page))).join("\n")}\n`);
-  const args = [`--root-dir ${quoted(layout.served)}`, `--files-from ${quoted(inputs)}`];
+  // Each value is quoted for lychee-action, which evals its args in bash.
+  const args = [
+    `--root-dir ${Bun.$.escape(layout.served)}`,
+    `--files-from ${Bun.$.escape(inputs)}`,
+  ];
   if (layout.origin !== null) {
     // The delimiter after the base is captured and carried into the file URL (Rust regex has no lookahead), so a
     // sibling site on the same origin stays external.
     const own = `${new URL(layout.origin).origin}${layout.rootBase.slice(0, -1)}`;
-    const pattern = `^${own.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([/?#]|$)`;
-    args.push(`--remap ${quoted(`${pattern} ${Bun.pathToFileURL(layout.site).href}$1`)}`);
+    const pattern = `^${RegExp.escape(own)}([/?#]|$)`;
+    args.push(`--remap ${Bun.$.escape(`${pattern} ${Bun.pathToFileURL(layout.site).href}$1`)}`);
   }
   return args.join(" ");
 }

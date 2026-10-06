@@ -6,8 +6,10 @@
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { parseArgs as parseArgv } from "node:util";
 import { must } from "../shared/proc.ts";
 
+/** The command's own flags are never read: everything after the first `--` is the command, verbatim. */
 export function parseArgs(argv: string[]): {
   withCheckout: boolean;
   dest: string;
@@ -17,11 +19,17 @@ export function parseArgs(argv: string[]): {
   if (separator === -1 || separator === argv.length - 1) {
     throw new Error("usage: [--with-checkout] <dest> -- <command> [args...]");
   }
-  const own = argv.slice(0, separator);
-  const withCheckout = own[0] === "--with-checkout";
-  const positional = withCheckout ? own.slice(1) : own;
-  if (positional.length !== 1) throw new Error(`expected one <dest>, got ${positional.length}`);
-  return { withCheckout, dest: positional[0], command: argv.slice(separator + 1) };
+  const { values, positionals } = parseArgv({
+    args: argv.slice(0, separator),
+    options: { "with-checkout": { type: "boolean" } },
+    allowPositionals: true,
+  });
+  if (positionals.length !== 1) throw new Error(`expected one <dest>, got ${positionals.length}`);
+  return {
+    withCheckout: values["with-checkout"] ?? false,
+    dest: positionals[0],
+    command: argv.slice(separator + 1),
+  };
 }
 
 /** The written trees in name order (`all`, `none`), after the checkout when asked. */

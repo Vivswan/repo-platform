@@ -5,6 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 import { workflowCommand } from "../shared/action_runtime.ts";
 import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
 import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
@@ -257,31 +258,27 @@ export function report(outcome: Outcome): string {
   return `${parts.join("\n")}\n`;
 }
 
-const JUDGE_MANAGED_FLAG = "--judge-managed";
-const SOURCES_FLAG = "--sources";
-const SKIP_FLAG = "--skip";
-
-/** `--judge-managed` and `--sources <file>` are this check's; the root argument is the shared main's. */
+/** `--judge-managed`, `--sources <file>`, and `--skip <names>` are this check's; the root positional is the shared main's. */
 function parseFlags(argv: string[]): { options: CheckOptions; rest: string[] } {
-  const rest: string[] = [];
-  const options: CheckOptions = { judgeManaged: false };
-  for (let at = 0; at < argv.length; at++) {
-    if (argv[at] === JUDGE_MANAGED_FLAG) options.judgeManaged = true;
-    else if (argv[at] === SOURCES_FLAG) {
-      const file = argv[++at];
-      if (file === undefined) throw new Error(`${SOURCES_FLAG} needs a file`);
-      options.written = JSON.parse(readFileSync(file, "utf-8")) as WrittenTree;
-    } else if (argv[at] === SKIP_FLAG) {
-      // Comma-separated, the action input's shape; an empty value (the input unset) skips nothing.
-      const names = argv[++at];
-      if (names === undefined) throw new Error(`${SKIP_FLAG} needs directory names`);
-      options.skip = names
-        .split(",")
-        .map((name) => name.trim())
-        .filter((name) => name !== "");
-    } else rest.push(argv[at]);
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      "judge-managed": { type: "boolean" },
+      sources: { type: "string" },
+      skip: { type: "string" },
+    },
+    allowPositionals: true,
+  });
+  const options: CheckOptions = { judgeManaged: values["judge-managed"] ?? false };
+  if (values.sources !== undefined) {
+    options.written = JSON.parse(readFileSync(values.sources, "utf-8")) as WrittenTree;
   }
-  return { options, rest };
+  // Comma-separated, the action input's shape; an empty value (the input unset) skips nothing.
+  options.skip = values.skip
+    ?.split(",")
+    .map((name) => name.trim())
+    .filter((name) => name !== "");
+  return { options, rest: positionals };
 }
 
 if (import.meta.main) {

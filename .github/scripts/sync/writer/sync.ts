@@ -459,36 +459,36 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
 async function main(argv: string[]): Promise<number> {
   const flags = parseFlags(
     argv,
-    ["--files", "--tree", "--target", "--build", "--repository", "--private"] as const,
-    ["--summary", "--upstream"] as const,
+    ["files", "tree", "target", "build", "repository", "private"] as const,
+    ["summary", "upstream"] as const,
   );
-  if (flags["--private"] !== "true" && flags["--private"] !== "false") {
+  if (flags.private !== "true" && flags.private !== "false") {
     fail("--private must be true or false");
   }
   // The build is recorded as given (in full in the PR body, its first 12 characters in the sync commit's subject), so
   // only the canonical full sha is accepted.
-  if (!/^[0-9a-f]{40}$/.test(flags["--build"])) {
+  if (!/^[0-9a-f]{40}$/.test(flags.build)) {
     fail(
-      `--build must be the build commit's full sha (40 lowercase hex characters), got ${JSON.stringify(flags["--build"])}`,
+      `--build must be the build commit's full sha (40 lowercase hex characters), got ${JSON.stringify(flags.build)}`,
     );
   }
   let report: SyncReport;
   try {
     report = await runSync({
-      files: flags["--files"],
-      tree: flags["--tree"],
-      target: flags["--target"],
-      build: flags["--build"],
-      repository: flags["--repository"],
-      private: flags["--private"] === "true",
-      upstream: flags["--upstream"] ?? RAW_HOST,
+      files: flags.files,
+      tree: flags.tree,
+      target: flags.target,
+      build: flags.build,
+      repository: flags.repository,
+      private: flags.private === "true",
+      upstream: flags.upstream ?? RAW_HOST,
     });
   } catch (error) {
     if (error instanceof MirrorFailure) fail(error.lines);
     fail(error instanceof Error ? error.message : String(error));
   }
-  if (flags["--summary"] !== undefined) {
-    writeFileSync(flags["--summary"], `${JSON.stringify(report, null, 2)}\n`);
+  if (flags.summary !== undefined) {
+    writeFileSync(flags.summary, `${JSON.stringify(report, null, 2)}\n`);
   }
   console.log(renderReport(report));
   return 0;
