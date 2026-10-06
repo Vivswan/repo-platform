@@ -3,14 +3,13 @@
   "ignoreExportsUsedInFile": true,
   // Every script runs by path (package.json scripts, workflows, bun test), so the entry globs are
   // wide and entry exports are judged too, or a dead export in a shared library would never surface.
-  // An action whose scripts need no package of their own (actions/knip, actions/semgrep) is read as part of the root.
+  // An action whose scripts need no package of their own (actions/semgrep) is read as part of the root.
   "includeEntryExports": true,
   "workspaces": {
     ".": {
       "entry": [
         "scripts/**/*.ts",
         ".github/scripts/**/*.ts",
-        "actions/knip/*.ts",
         "actions/semgrep/*.ts",
         "migrations/**/*.ts",
         "tests/**/*.ts"
