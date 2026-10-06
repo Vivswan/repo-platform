@@ -25,8 +25,8 @@ describe("parseSiteConfig include roots", () => {
   // signal: public/ is copied as static files, a locale-shaped mount is read as a translation tree, a dot-prefixed
   // segment is never walked, and index.md is already the directory's page.
   test.each([
-    ["not a list", { path: "skills" }, "must be a list of {path, mount, page}"],
-    ["an unknown key", [{ ...SKILLS, title: "x" }], "unknown keys: title"],
+    ["not a list", { path: "skills" }, "include: Invalid input: expected array, received object"],
+    ["an unknown key", [{ ...SKILLS, title: "x" }], 'include.0: Unrecognized key: "title"'],
     ["a traversing path", [{ ...SKILLS, path: "../skills" }], "plain relative path"],
     ["a locale-shaped mount", [{ ...SKILLS, mount: "de" }], "reads as a locale directory"],
     ["a dot-prefixed mount", [{ ...SKILLS, mount: ".skills" }], "lowercase URL segments"],
