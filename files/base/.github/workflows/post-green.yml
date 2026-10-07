@@ -4,8 +4,8 @@
 # This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
 #
 # Every green push to main gets its own run of this hook, unless the queue replaced that run. Main runs queue in one
-# lane in arrival order, and a burst replaces the pending run, never the running one. Of competing pushes the newest
-# runs; a schedule or dispatch arriving while a push is pending replaces it too (docs/all-green.md, "After the gate").
+# lane in arrival order, and a burst replaces the pending run, never the running one. Of competing runs the latest
+# to arrive runs, a schedule or dispatch included (docs/all-green.md, "After the gate").
 #
 # Replace the no-op job with this repository's work, since it costs a runner allocation on every green push until
 # you do.
