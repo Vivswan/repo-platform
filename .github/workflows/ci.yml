@@ -19,6 +19,7 @@ permissions:
 # Pull-request runs keep a per-PR lane, where a newer push cancels the stale run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
+  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
