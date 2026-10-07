@@ -46,8 +46,8 @@
       "entry": ["build.ts", "pages_exists.ts"],
       "project": ["**/*.{ts,mts,vue}"],
       "includeEntryExports": false,
-      // shiki and markdown-it are imported directly but arrive through vitepress.
-      "ignoreDependencies": ["shiki", "markdown-it"]
+      // shiki is imported directly but arrives through vitepress.
+      "ignoreDependencies": ["shiki"]
     }
   }
 }
