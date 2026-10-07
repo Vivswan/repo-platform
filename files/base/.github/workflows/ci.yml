@@ -21,11 +21,11 @@ on:
 permissions:
   contents: read
 
-# A ref-keyed group keeps one pending run and cancels the older one, so a burst of merges would leave intermediate commits unjudged.
-#   push          -> keyed by the commit: every merge to main gets its own complete run and verdict
-#   pull_request  -> keyed by the ref: a newer push cancels the stale run
+# One lane per ref, the shape of GitHub's Pages starter. GitHub holds one pending run per lane and replaces it with the newest.
+#   push, schedule, dispatch on main -> queue in refs/heads/main: queued runs deploy in arrival order; the middle of three quick pushes gets no verdict (docs/all-green.md's triage says when to re-run it)
+#   pull_request                     -> a per-PR lane: a newer push cancels the stale run
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -197,6 +197,7 @@ jobs:
   #   needs post-green, publish-release  -> a release commit's own deploy serves its new tag
   #   !cancelled()                        -> those edges are orders, not gates: a skipped or red release still deploys
   #   no push clause                      -> every main run deploys, so the nightly schedule IS the rebuild and a dispatch IS the manual deploy
+  #   no job lane                         -> the run lane above queues main runs, so no two deploys overlap
   site:
     needs: [ci, all-green, post-green, publish-release]
     if: >-
@@ -204,11 +205,8 @@ jobs:
       needs.all-green.result == 'success' &&
       github.ref == 'refs/heads/main' &&
       contains(needs.ci.outputs.modules, '"site"')
-    concurrency:
-      group: pages
-      cancel-in-progress: true
     permissions:
-      contents: write
+      contents: read
       pages: write
       id-token: write
       issues: write

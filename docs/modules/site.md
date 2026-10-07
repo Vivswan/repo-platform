@@ -26,7 +26,8 @@ The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and 
 | a manual dispatch | the manual deploy |
 
 - **No workflow of its own and no tag trigger:** a tag created without a push lands on the nightly rebuild, or right away via dispatch.
-- **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
+- **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site.
+- **One deploy at a time:** ci.yml's one lane per ref queues main runs, so no two deploys overlap and queued runs deploy in arrival order. A push during a deploy waits for that run; a third push replaces the waiting one, and that middle commit gets no run of its own ([all-green.md](../all-green.md#after-the-gate)).
 
 **The release legs sit before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the release chain and then runs whatever its result, and a release commit's own deploy serves its new tag. Without the release-please module the release legs skip and the deploy follows the repo-owned post-green hook directly ([all-green.md](../all-green.md#after-the-gate)).
 

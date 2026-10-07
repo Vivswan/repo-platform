@@ -13,10 +13,12 @@ on:
 permissions:
   contents: read
 
-# Keyed by the commit on a push: a ref-keyed group holds one pending run, so in a burst of merges the displaced commit never gets a verdict.
-# Pull-request runs stay keyed by the ref so a newer push cancels the stale run.
+# One lane per ref, the shape of GitHub's Pages starter: a push to main, the schedule, and a dispatch on main queue in
+# refs/heads/main, so queued runs deploy in arrival order. GitHub holds one pending run per lane and replaces it with
+# the newest, so the middle of three quick pushes gets no verdict (docs/all-green.md's triage says when to re-run it).
+# Pull-request runs keep a per-PR lane, where a newer push cancels the stale run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -503,17 +505,15 @@ jobs:
   # Ordered behind post-green so the deploy runs after this run's mover, and a green move's theme
   # is what @stable serves it; !cancelled() keeps a red or skipped post-green from holding the site back. No push clause in
   # the if: the weekly schedule is the rebuild and link-rot check, a dispatch the manual deploy.
+  # No job lane: the run lane above queues main runs, so no two deploys overlap.
   site:
     needs: [all-green, post-green]
     if: >-
       !cancelled() &&
       needs.all-green.result == 'success' &&
       github.ref == 'refs/heads/main'
-    concurrency:
-      group: pages
-      cancel-in-progress: true
     permissions:
-      contents: write
+      contents: read
       pages: write
       id-token: write
       issues: write

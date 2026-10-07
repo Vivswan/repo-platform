@@ -160,17 +160,17 @@ describe("post-green wiring", () => {
     ]);
   });
 
-  // #207: a ref-keyed group keeps one pending run and replaces it with the newest, so a burst of merges dropped the middle
-  // commits' verdicts; every run that did run was green. Keyed by the commit, every push run completes; PR pushes keep
-  // cancelling their stale runs. The skeleton every fleet repository runs carries the same block.
-  test("ci.yml and the skeleton key a push run by its commit and never cancel it; only pull-request lanes cancel", () => {
+  // One lane per ref (GitHub's Pages starter shape): main runs queue, so queued runs deploy in arrival order. Under
+  // per-commit lanes they overlapped and a slower older run deployed after a newer one. GitHub holds one pending run
+  // per lane and replaces it with the newest, the accepted cost: the middle of three quick pushes gets no verdict. PR
+  // pushes keep cancelling their stale runs. The skeleton every fleet repository runs carries the same block.
+  test("ci.yml and the skeleton queue the runs of one ref in one lane; only pull-request lanes cancel", () => {
     const skeleton = parseYaml(
       read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
     ) as { concurrency: Concurrency };
     for (const doc of [ci, skeleton]) {
       expect(doc.concurrency).toEqual({
-        group:
-          "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}",
+        group: "${{ github.workflow }}-${{ github.ref }}",
         "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
       });
     }

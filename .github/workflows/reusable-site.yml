@@ -4,7 +4,7 @@
 # One job on purpose: the repo-owned site-build hook hands its output directory to the fleet's assembly in the same
 # workspace, so the Pages artifact is the only artifact.
 #
-# Callers own `concurrency: pages`. This workflow declares none.
+# The caller's run lane (one per ref) serializes the deploy: no two main runs overlap. This workflow declares no lane.
 
 name: Reusable Site
 
