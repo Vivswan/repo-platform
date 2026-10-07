@@ -90,7 +90,7 @@ test("the stable tag is undeletable and otherwise unruled, so the lease move sta
   expect(stableTag?.bypass_actors).toEqual([]);
 });
 
-test("the strict flag rides with the check listed again and no bypass actor, beside main's admin bypass", () => {
+test("the strict flag rides with the check listed again and main's admin bypass, so the merge box offers it", () => {
   const upToDate = readRulesets(OWN_OVERLAY).find((r) => r.name === "main-up-to-date");
   // A disabled ruleset, or a scope that misses the default branch, leaves every merge unprotected without a word from GitHub.
   expect([upToDate?.target, upToDate?.enforcement, upToDate?.conditions]).toEqual([
@@ -104,15 +104,16 @@ test("the strict flag rides with the check listed again and no bypass actor, bes
     do_not_enforce_on_create: true,
     required_status_checks: [{ context: CHECK_NAME, integration_id: GITHUB_ACTIONS_APP_ID }],
   });
-  // The stale merges this rule refuses are admin merges: main keeps its admin bypass for direct pushes, so a bypass
-  // here would pass them silently. The fleet's own flag stays false, or sync and Dependabot pull requests would stall
-  // behind every merge.
-  expect(upToDate?.bypass_actors).toEqual([]);
+  // The owner's decision: admins bypass here as on main, or GitHub hides the merge box's bypass checkbox while this
+  // ruleset's strict check is pending. A stale merge is still refused for everyone else and for a merge made without
+  // ticking the bypass. The fleet's own flag stays false, or sync and Dependabot pull requests would stall behind
+  // every merge.
   const main = readRulesets(OVERRIDE).find((r) => r.name === "main");
   expect(requiredChecks(main)?.strict_required_status_checks_policy).toBe(false);
   expect(main?.bypass_actors).toEqual([
     { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" },
   ]);
+  expect(upToDate?.bypass_actors).toEqual(main?.bypass_actors);
 });
 
 test("no declared layer, nor the overlay, declares an Integration bypass actor", () => {

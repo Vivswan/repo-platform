@@ -55,9 +55,14 @@ rulesets:
           required_status_checks:
             - context: all-green
               integration_id: 15368
-    # EMPTY on purpose: the stale merges this rule refuses are admin merges, which main's admin bypass would let through.
-    # A direct push to main is refused unless the commit already carries a passing all-green run; a PR merge does, its head carries one.
-    bypass_actors: []
+    # Admins may bypass, by the owner's decision: GitHub hides the merge box's bypass checkbox while one ruleset on main
+    # has no bypass actor and its strict check is pending, and the owner wants that checkbox. The rule still refuses a stale
+    # merge for everyone else and for any merge made without ticking the bypass. The same bypass lets an admin's direct
+    # push to main through without a passing all-green run; the main ruleset already allowed that.
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
 
 # Holds REPO_PLATFORM_TOKEN once the post-green jobs declare this environment: then only a declaring job in a main run can
 # read the fleet PAT, and GitHub itself holds the rule. No wait timer and no reviewers: GitHub's defaults, left undeclared.
