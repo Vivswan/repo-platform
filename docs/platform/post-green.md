@@ -71,9 +71,9 @@ The leg reads a range: from the commit the `stable` tag named before this run mo
 ::notice::<the tag's previous commit>..<third merge> opted in: syncing public now
 ```
 
-Why a range: the mover legs of neighbouring commits queue on the `stable-tag-move` lane under [the lane rule](../all-green.md#after-the-gate). A commit whose mover was replaced there never syncs from its own run, and its successor's own `before..sha` would miss it.
+Why a range: main runs queue in one lane under [the lane rule](../all-green.md#after-the-gate), and a burst replaces the pending run, never the running one. A commit whose run was replaced never syncs from its own run, and its successor's own `before..sha` would miss it.
 
-The tag's previous commit is a durable base: the range from it covers every commit since the last move, replaced movers included, so an opt-in survives its own mover being replaced at the lane.
+The tag's previous commit is a durable base: the range from it covers every commit since the last move, replaced runs included, so an opt-in survives its own run being replaced in the lane.
 
 - **When the mover reports no previous commit** (the tag did not move: it already named the sha or a newer commit, it did not exist yet, or the mover went red), the base is the push payload's `before`. A replay at the tag's own commit is such a case.
 

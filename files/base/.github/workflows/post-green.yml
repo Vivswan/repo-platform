@@ -3,8 +3,8 @@
 #
 # This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
 #
-# Every green push to main gets its own run of this hook, and the runs of neighbouring commits overlap, so a job
-# here may finish after a newer commit's did.
+# Every green push to main gets its own run of this hook, and main runs queue in one lane in arrival order: a burst
+# replaces the pending run, never the running one, so a replaced commit's run never happens while the newest push always runs.
 #
 # Replace the no-op job with this repository's work, since it costs a runner allocation on every green push until
 # you do.
@@ -12,8 +12,8 @@
 # A job acts on the repository's current state, idempotently, never on "what this commit changed" or "the newest
 # commit".
 #
-# A concurrency group on a job is keyed per commit (inputs.sha), since a shared lane replaces the pending run and
-# the release leg needs this hook.
+# A concurrency group on a job here serializes nothing between commits (main runs queue), so key it per commit
+# (inputs.sha): it then never waits on another run, and the release leg that needs this hook is never held.
 
 name: Post Green
 
