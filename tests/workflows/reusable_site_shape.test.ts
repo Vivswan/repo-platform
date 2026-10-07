@@ -151,16 +151,21 @@ describe("reusable-site.yml", () => {
     );
   });
 
-  // A Pages step gated on the assembly's `publish` alone runs against an absent site and fails the first deploy again,
-  // silent until the next repository selects the module. Exact gates: a skipped or unset `pages-exists` reads as
-  // false downstream too.
-  test("the Pages steps and the link check run on the assembly's pages-exists verdict alone", () => {
-    const gate = "steps.site.outputs.pages-exists == 'true'";
+  // The gate names a step id of this file and an output declared in another (actions/pages-site/action.yml). Either
+  // one misspelled reads as false, so every Pages step skips and the deploy is silently off until a repository
+  // notices its site never updates. Exact gates: a skipped or unset `publish` reads as false downstream too.
+  test("the Pages steps and the link check gate on the assembly step's declared publish output alone", () => {
+    const assembly = steps.find((candidate) =>
+      (candidate.uses ?? "").startsWith("Vivswan/repo-platform/actions/pages-site@"),
+    );
+    const declared = Object.keys(loadAction("actions/pages-site/action.yml").outputs ?? {});
+    expect(declared).toEqual(expect.arrayContaining(["publish", "link-rot-label"]));
+    const read = (output: string) => `steps.${assembly?.id}.outputs.${output}`;
+    const gate = `${read("publish")} == 'true'`;
     const at = (action: string) =>
       steps.findIndex((candidate) => (candidate.uses ?? "").startsWith(`actions/${action}@`));
-    const site = steps.findIndex((candidate) => candidate.id === "site");
-    expect(site).toBeGreaterThanOrEqual(0);
-    expect(site).toBeLessThan(at("configure-pages"));
+    expect(assembly?.id).toBeDefined();
+    expect(steps.indexOf(assembly as Step)).toBeLessThan(at("configure-pages"));
     expect({
       configure: steps[at("configure-pages")].if,
       upload: steps[at("upload-pages-artifact")].if,
@@ -170,7 +175,7 @@ describe("reusable-site.yml", () => {
       configure: gate,
       upload: gate,
       deploy: gate,
-      links: `github.event_name == 'schedule' && ${gate} && steps.site.outputs.link-rot-label != ''`,
+      links: `github.event_name == 'schedule' && ${gate} && ${read("link-rot-label")} != ''`,
     });
   });
 });
