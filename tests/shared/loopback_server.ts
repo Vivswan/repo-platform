@@ -20,3 +20,11 @@ export async function spawnLoopback(argv: string[], label: string): Promise<Loop
   }
   return { host: `http://127.0.0.1:${text.trim()}`, stop: () => proc.kill() };
 }
+
+/** A loopback host nothing listens on (a port just released), for a subject whose connection must be refused. */
+export function deadLoopback(): string {
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() });
+  const host = `http://127.0.0.1:${server.port}`;
+  server.stop(true);
+  return host;
+}
