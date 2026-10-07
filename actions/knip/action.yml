@@ -7,13 +7,15 @@ description: |
   names, a knip.ts or knip.js among them, or a knip key in package.json. A configured entry
   or project list replaces the default list.
 
-  The run resolves that configuration with knip's own loader and writes a module beside this
-  action, inside the caller's workspace so knip analyzes it, which imports a knip.ts or knip.js
-  as the repository wrote it, or carries knip's resolution of a JSON one, with the platform
-  checkout fleet-ci.yml leaves in the workspace negated in the repository's configured entry
-  and project lists (knip's own `!<dir>/**` form, which draws no hint). knip runs on that
-  module, so a configured entry glob never reaches the checkout, however git hides it; knip's
-  own globs honor the exclude line the workflow writes. The module is removed after the run.
+  The run resolves that configuration with knip's own loader and writes a file of imports and
+  exports beside this action, inside the caller's workspace so knip follows its imports: the
+  action's knip_layer.ts, a knip.ts or knip.js as the repository wrote it (or knip's resolution
+  of a JSON one, as a literal), and the repository's package.json. Its default export is the
+  layering of the three, with the platform checkout fleet-ci.yml leaves in the workspace negated in the
+  repository's configured entry and project lists (knip's own `!<dir>/**` form, which draws no
+  hint). knip runs on that file, so a configured entry glob never reaches the checkout, however
+  git hides it; knip's own globs honor the exclude line the workflow writes. The file is removed
+  after the run.
 
   The caller installs the toolchain and the dependencies first, since knip resolves imports
   through node_modules.
