@@ -37,8 +37,8 @@ The called workflow is one job, in this order:
 | checkout | always | the judged commit, full history (the tag list is the version set) |
 | urls | always | computes the base path `/<repo>/` and the origin `https://<owner>.github.io` |
 | hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
-| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes `versions.json` under the docs mount, and, once something was built, asks GitHub whether the Pages site exists (`pages-exists`); absent, the deploy skips with a warning ([below](#pages-enablement)) |
-| configure, upload, deploy | the Pages site exists | the one Pages artifact, deployed to the `github-pages` environment |
+| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, and writes `versions.json` under the docs mount |
+| configure, upload, deploy | something was built (`publish`) | the one Pages artifact, deployed to the `github-pages` environment; red on configure-pages's error while the Pages site does not exist yet ([below](#pages-enablement)) |
 | link rot | the schedule alone, after a deploy | checks the site's external links with lychee, reads lychee's exit code as the verdict through the shared [lychee-verdict action](../../actions/lychee-verdict/action.yml), and files the tracking issue ([below](#link-rot)) |
 
 A repository with nothing to publish ends green with a notice (`nothing to publish`) and no deploy ([layout](#layout)).
@@ -47,7 +47,7 @@ A repository with nothing to publish ends green with a notice (`nothing to publi
 
 **Nothing to do:** the module's settings layer creates the Pages site on the next fleet settings apply ([settings.md](../settings.md)), which runs daily.
 
-- **A deploy before that apply** skips its Pages steps and ends green with one warning (`no Pages site yet`): the job token can read the site but never create one. No manual toggle is needed, and no red run needs a rerun.
+- **A deploy before that apply** fails red on configure-pages's own error (`Get Pages site failed`): the job token can read the site but never create one. The red run needs no action and no rerun.
 - **The nightly rebuild** deploys once the site exists; the next main push does the same.
 
 **The `github-pages` environment is the module's,** declared by its settings layer ([settings.md](../settings.md)). A required-reviewers rule there parks every deploy "waiting for review" with later runs queued behind it. Once the repository's rendered settings carry the declaration (the next sync), the daily apply removes such a rule or an extra branch pattern.

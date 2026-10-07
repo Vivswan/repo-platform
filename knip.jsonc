@@ -43,7 +43,7 @@
     },
     "actions/pages-site": {
       // The scripts action.yml runs; the vitepress plugin adds the config and theme.
-      "entry": ["build.ts", "pages_exists.ts"],
+      "entry": ["build.ts"],
       "project": ["**/*.{ts,mts,vue}"],
       "includeEntryExports": false,
       // shiki is imported directly but arrives through vitepress.
