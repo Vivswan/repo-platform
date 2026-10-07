@@ -1,8 +1,9 @@
-// knip, at the version the action pins, honors git's excludes in its default and plugin globs and in neither form
-// (`.git/info/exclude`, a `.gitignore` line) for a repository's own configured pattern (external; the fleet
-// repository with `**/*.test.ts` in its knip.json went red on the platform checkout's imports). The end-to-end rows run
-// the action's knip over a fixture: the control names a file in the checkout; under the written module, only a
-// dependency the checkout alone imports is reported, unused, so knip analyzed nothing there.
+// knip, at the version the action pins, globs a repository's own configured `entry` with git's excludes off (an entry
+// a repository names is analyzed however git hides it), where its project and plugin globs honor the `.git/info/exclude`
+// line fleet-ci.yml writes (external; the fleet repository with `**/*.test.ts` in its knip.json went red on the
+// platform checkout's imports). The end-to-end rows run the action's knip over a fixture carrying that line: the
+// control names a file in the checkout; under the written module, only a dependency the checkout alone imports is
+// reported, unused, so knip analyzed nothing there, and stderr is empty, so the module drew no configuration hint.
 
 import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
@@ -15,6 +16,7 @@ import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 const CHECKOUT = PLATFORM_CHECKOUT_DIR;
+const NEGATION = `!${CHECKOUT}/**`;
 const OWN_FINDING = "Unused dependencies (1)\ncolorjs.io  package.json";
 
 function write(root: string, files: Record<string, string>): void {
@@ -33,19 +35,23 @@ const MANIFEST = {
 };
 
 // Real paths throughout: node's process.cwd() is one, and knip maps a file to a workspace by string prefix.
-function fixture(files: Record<string, string>, excludeLine: boolean): string {
+function fixture(files: Record<string, string>): string {
   const repo = realpathSync(temp.dir("knip-fixture-"));
   write(repo, {
     "package.json": JSON.stringify(MANIFEST),
     "bun.lock": "",
     "src/main.ts": "export const one = 1;\n",
+    // A test of the repository's own, so its `**/*.test.ts` entry matches a file once the checkout is negated: a
+    // pattern matching nothing is a hint, and a hint fails the run.
+    "src/main.test.ts":
+      'import { one } from "./main.ts";\nif (one !== 1) throw new Error("one");\n',
     [`${CHECKOUT}/package.json`]: JSON.stringify({ name: "platform", private: true }),
     [`${CHECKOUT}/tests/theme.test.ts`]:
       'import Color from "colorjs.io";\nimport { x } from "not-listed";\nexport const c = new Color(x);\n',
     ...files,
   });
   fixtureGit(repo, ["init", "-q"]);
-  if (excludeLine) appendFileSync(join(repo, ".git/info/exclude"), `/${CHECKOUT}/\n`);
+  appendFileSync(join(repo, ".git/info/exclude"), `/${CHECKOUT}/\n`);
   return repo;
 }
 
@@ -65,21 +71,18 @@ const knip = (cwd: string, args: string[]) =>
     env: { ...process.env, TMPDIR: temp.dir("knip-child-tmp-") },
   });
 
+async function withModule(repo: string) {
+  return knip(repo, knipArguments(knipModule(await effectiveConfig(repo), actionDir(repo))));
+}
+
 describe("actions/knip", () => {
-  test.each<{ reason: string; files: Record<string, string>; excludeLine: boolean }>([
+  test.each<{ reason: string; files: Record<string, string> }>([
     {
       reason:
         "the incident: the repository's own entry glob reaches the checkout past the exclude line",
       files: {
         "knip.json": '{"entry": ["src/main.ts", "**/*.test.ts"], "project": ["src/**/*.ts"]}',
       },
-      excludeLine: true,
-    },
-    {
-      reason:
-        "no configuration and nothing in git hiding the directory: the defaults and the bun plugin reach it",
-      files: {},
-      excludeLine: false,
     },
     {
       reason: "a jsonc file layered over package.json's knip key",
@@ -88,62 +91,108 @@ describe("actions/knip", () => {
         ".knip.jsonc":
           '{\n  // the repository\'s entries\n  "entry": ["src/main.ts", "**/*.test.ts",],\n}\n',
       },
-      excludeLine: true,
+    },
+    {
+      // knip reads the root workspace's lists under `workspaces["."]` when that key exists and ignores the top-level
+      // ones, so the negation belongs there, or the configured entry reaches the checkout as in the incident.
+      reason: "the root workspace configured under workspaces['.']",
+      files: {
+        "knip.json":
+          '{"project": ["never/**"], "workspaces": {".": {"entry": ["src/main.ts", "**/*.test.ts"], "project": ["src/**/*.ts"]}}}',
+      },
     },
     {
       // Under knip's default project globs, so knip.ts and its import are project files: knip keeps them referenced
       // through its configuration-file entry, and the written module keeps that edge or they are reported unused. The
       // RegExp has no JSON form (knip's schema refuses the `{}` a serialization leaves), and the named export is
-      // exempt from exports analysis as knip exempts its configuration file's. The exclusions are read where knip
-      // runs, under node: the manifest's list applies when the function sets none there, whatever it set under bun.
+      // exempt from exports analysis as knip exempts its configuration file's. The entry list is read where knip
+      // runs, under node: the manifest's list applies when the function sets none there, whatever it set under bun,
+      // so tools/build.ts is an entry, and the checkout's negation joins the manifest's list.
       reason:
-        "a knip.ts exporting a promise of a function and a named RegExp list, importing a sibling TypeScript module, setting exclusions under bun alone over a manifest list, under knip's default project globs",
+        "a knip.ts exporting a promise of a function and a named RegExp list, importing a sibling TypeScript module, setting an entry list under bun alone over a manifest list, under knip's default project globs",
       files: {
         "package.json": JSON.stringify({
           ...MANIFEST,
-          knip: { ignoreWorkspaces: ["packages/node-only"] },
+          dependencies: { ...MANIFEST.dependencies, "left-pad": "1.3.0" },
+          knip: { entry: ["src/main.ts", "**/*.test.ts", "tools/*.ts"] },
         }),
         "knip.ts":
-          'import { entry } from "./config/entry.ts";\nexport const ignored = [/^@types\\//];\nexport default Promise.resolve(() => ({ entry, ignoreDependencies: ignored, ...(process.versions.bun ? { ignoreWorkspaces: ["packages/bun-only"] } : {}) }));\n',
-        "config/entry.ts": 'export const entry = ["src/main.ts", "**/*.test.ts", "tools/*.ts"];\n',
-        // An entry only the knip.ts list names: a module that lost the configuration reports it unused.
+          'import { options } from "./config/options.ts";\nexport const ignored = [/^left-/];\nexport default Promise.resolve(() => ({ ...options, ignoreDependencies: ignored, ...(process.versions.bun ? { entry: ["src/main.ts"] } : {}) }));\n',
+        "config/options.ts": "export const options = { ignoreExportsUsedInFile: true };\n",
+        // An entry only the manifest's list names: a module that resolved the function under bun reports it unused.
         "tools/build.ts": "export const built = 1;\n",
-        "packages/node-only/package.json": JSON.stringify({ name: "node-only", private: true }),
-        "packages/node-only/tool.test.ts":
-          'import { y } from "not-listed-either";\nexport const t = y;\n',
       },
-      excludeLine: true,
     },
   ])(
-    "end to end, $reason: red on the checkout as the repository is; with the written module, red on the repository's own unused dependency alone",
-    async ({ files, excludeLine }) => {
-      const repo = fixture(files, excludeLine);
+    "end to end, $reason: red on the checkout as the repository is; with the written module, red on the repository's own unused dependency alone, no hint",
+    async ({ files }) => {
+      const repo = fixture(files);
       const control = knip(repo, []);
-      const fixed = knip(
-        repo,
-        knipArguments(knipModule(await effectiveConfig(repo), actionDir(repo))),
-      );
+      const fixed = await withModule(repo);
       expect({
         control: {
           exitCode: control.exitCode,
           namesTheCheckout: control.stdout.includes(`  ${CHECKOUT}/`),
         },
-        fixed: { exitCode: fixed.exitCode, stdout: fixed.stdout.trim() },
+        fixed: { exitCode: fixed.exitCode, stdout: fixed.stdout.trim(), stderr: fixed.stderr },
       }).toEqual({
         control: { exitCode: 1, namesTheCheckout: true },
-        fixed: { exitCode: 1, stdout: OWN_FINDING },
+        fixed: { exitCode: 1, stdout: OWN_FINDING, stderr: "" },
       });
     },
   );
 
-  // The module reads the configuration where knip runs, so a shape knip's schema never saw here can reach it there;
-  // the module leaves it as it came, and knip refuses it, where a spread would have made an object of a list or
-  // patterns of a string's characters.
+  // The premise the module rests on, pinned at the action's knip version: with no configured entry the module adds
+  // nothing, and knip's default globs and the bun plugin's `**/*.test.ts` honor the exclude line. A knip that stopped
+  // honoring it would go red on the checkout here before the fleet does.
+  test("no configuration: the module adds nothing, and the exclude line alone keeps the defaults and the bun plugin out of the checkout", async () => {
+    const repo = fixture({});
+    const run = await withModule(repo);
+    expect({ exitCode: run.exitCode, stdout: run.stdout.trim(), stderr: run.stderr }).toEqual({
+      exitCode: 1,
+      stdout: OWN_FINDING,
+      stderr: "",
+    });
+  });
+
+  // A repository with nothing unused, so a configuration hint is the run's only fault and the exit code is the hint's
+  // alone. The flag could revert to suppressing hints, or the module could draw one again, with every row above still
+  // green: this pair is where either shows.
   test.each([
     {
-      shape: "a string under ignoreWorkspaces",
-      yields: '{ ignoreWorkspaces: process.versions.bun ? [] : "packages/legacy" }',
-      refusal: "ignoreWorkspaces",
+      verdict: "a hint in the repository's own configuration fails the run, named on stderr",
+      config: '{"entry": ["src/main.ts"], "ignoreDependencies": ["never-used"]}',
+      exitCode: 1,
+      hinted: true,
+    },
+    {
+      verdict: "the written module draws no hint of its own: the run passes",
+      config: '{"entry": ["src/main.ts", "**/*.test.ts"]}',
+      exitCode: 0,
+      hinted: false,
+    },
+  ])("$verdict", async ({ config, exitCode, hinted }) => {
+    const repo = fixture({
+      "knip.json": config,
+      "src/main.ts": 'import Color from "colorjs.io";\nexport const red = new Color("red");\n',
+    });
+    const run = await withModule(repo);
+    expect({
+      exitCode: run.exitCode,
+      stdout: run.stdout.trim(),
+      hinted:
+        run.stderr.includes("Remove from ignoreDependencies") && run.stderr.includes("never-used"),
+    }).toEqual({ exitCode, stdout: "", hinted });
+  });
+
+  // The module reads the configuration where knip runs, so a shape knip's schema never saw here can reach it there;
+  // the module leaves it as it came, and knip refuses it, where a spread would have made patterns of a string's
+  // characters or an object of a list.
+  test.each([
+    {
+      shape: "a number under entry",
+      yields: "{ entry: process.versions.bun ? [] : 42 }",
+      refusal: "entry",
     },
     {
       shape: "a list as the whole configuration",
@@ -151,25 +200,32 @@ describe("actions/knip", () => {
       refusal: "Expected an object as configuration",
     },
   ])("$shape, yielded under node alone, reaches knip as it came", async ({ yields, refusal }) => {
-    const repo = fixture({ "knip.ts": `export default () => (${yields});\n` }, true);
-    const run = knip(repo, knipArguments(knipModule(await effectiveConfig(repo), actionDir(repo))));
+    const repo = fixture({ "knip.ts": `export default () => (${yields});\n` });
+    const run = await withModule(repo);
     expect({ exitCode: run.exitCode, refused: run.stderr.includes(refusal) }).toEqual({
       exitCode: 2,
       refused: true,
     });
   });
 
-  test("the written module yields knip's own resolution of the repository's configuration, the checkout under ignoreWorkspaces once; what knip refuses stays refused; a module outside the repository is refused", async () => {
+  test("the written module yields knip's own resolution of the configuration, the checkout negated once in the root workspace's entry and project where knip reads them; what knip refuses stays refused; a module outside the repository too", async () => {
     const layered = realpathSync(temp.dir("knip-config-"));
     write(layered, {
       "package.json": JSON.stringify({
         name: "x",
-        knip: { project: ["src/**/*.ts"], ignoreWorkspaces: ["old", CHECKOUT] },
+        knip: { project: ["src/**/*.ts", NEGATION], ignoreWorkspaces: ["old"] },
       }),
-      ".knip.jsonc": '{\n  // a comment\n  "entry": ["src/main.ts",],\n}\n',
+      ".knip.jsonc": '{\n  // a comment\n  "entry": "src/main.ts",\n}\n',
     });
     const effective = await effectiveConfig(layered);
     const modulePath = knipModule(effective, actionDir(layered));
+    const nested = realpathSync(temp.dir("knip-config-"));
+    write(nested, {
+      "package.json": JSON.stringify({ name: "x" }),
+      "knip.json":
+        '{"project": ["src/**/*.ts"], "workspaces": {".": {"entry": ["src/main.ts"]}, "packages/*": {"entry": ["index.ts"]}}}',
+    });
+    const nestedModulePath = knipModule(await effectiveConfig(nested), actionDir(nested));
     const refused = realpathSync(temp.dir("knip-config-"));
     write(refused, {
       "package.json": JSON.stringify({ name: "x" }),
@@ -182,9 +238,16 @@ describe("actions/knip", () => {
     );
     const outside = temp.dir("knip-runner-temp-");
     expect(await (await import(modulePath)).default({})).toEqual({
+      project: ["src/**/*.ts", NEGATION],
+      ignoreWorkspaces: ["old"],
+      entry: ["src/main.ts", NEGATION],
+    });
+    expect(await (await import(nestedModulePath)).default({})).toEqual({
       project: ["src/**/*.ts"],
-      ignoreWorkspaces: ["old", CHECKOUT],
-      entry: ["src/main.ts"],
+      workspaces: {
+        ".": { entry: ["src/main.ts", NEGATION] },
+        "packages/*": { entry: ["index.ts"] },
+      },
     });
     expect(() => knipModule(effective, outside)).toThrow(
       `${outside} is outside ${layered}, where knip analyzes files`,

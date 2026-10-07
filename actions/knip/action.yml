@@ -10,17 +10,17 @@ description: |
   The run resolves that configuration with knip's own loader and writes a module beside this
   action, inside the caller's workspace so knip analyzes it, which imports a knip.ts or knip.js
   as the repository wrote it, or carries knip's resolution of a JSON one, with the platform
-  checkout fleet-ci.yml leaves in the workspace added to `ignoreWorkspaces`. knip runs on that
-  module, so its entry and project globs never reach the checkout, whatever the repository's
-  .gitignore says, and the module is removed after the run. Configuration hints are not
-  printed, since the module carries a key knip would hint about; the repository's own knip run
-  shows them.
+  checkout fleet-ci.yml leaves in the workspace negated in the repository's configured entry
+  and project lists (knip's own `!<dir>/**` form, which draws no hint). knip runs on that
+  module, so a configured entry glob never reaches the checkout, however git hides it; knip's
+  own globs honor the exclude line the workflow writes. The module is removed after the run.
 
   The caller installs the toolchain and the dependencies first, since knip resolves imports
   through node_modules.
 
-  A finding fails the step. The only bypass is an ignore entry in the repository's own knip
-  configuration, with a reason.
+  A finding fails the step, and so does a configuration hint (a stale `ignore*` entry, a pattern
+  matching nothing): the fix is in the repository's own knip configuration. The only bypass for
+  a finding is an ignore entry there, with a reason.
 
 runs:
   using: composite
