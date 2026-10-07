@@ -3,8 +3,8 @@ description: |
   Assembles the fleet's GitHub Pages site from the repository's own website, its docs/, or both.
 
   The layout and the versioning rules (the two parts and where each mounts, the docs tiers from the
-  vX.Y.Z tags, the include roots, the link check, the pages-exists question, a null docs_path, and
-  check mode) are docs/modules/site.md's.
+  vX.Y.Z tags, the include roots, the link check, a null docs_path, and check mode) are
+  docs/modules/site.md's.
 
   The website arrives prebuilt by the repository's site-build hook as the site-dir input. The
   configuration is the config input, or the repository's registration read through the plan action
@@ -38,12 +38,6 @@ outputs:
   site-dir:
     description: The assembled site directory to upload as the Pages artifact (empty when publish is false or in check mode)
     value: ${{ steps.assemble.outputs.site-dir }}
-  pages-exists:
-    description: >-
-      "true" when the repository has a Pages site to deploy to, "false" with a warning when the
-      settings apply has not created it yet, empty when publish is false or in check mode. The
-      caller skips its Pages steps on "false", and any other answer from GitHub fails the action.
-    value: ${{ steps.pages.outputs.exists }}
   link-rot-label:
     description: The nightly external-link check's tracking label from the configuration ("" disables the check)
     value: ${{ steps.assemble.outputs.link-rot-label }}
@@ -114,13 +108,3 @@ runs:
           --fallback-extensions html,htm
           ${{ steps.assemble.outputs.link-check-args }}
         output: ${{ runner.temp }}/pages-site/link-check.md
-
-    # Why the deploy asks: pages_exists.ts's header; the three answers: its judgePagesAnswer.
-    - name: Ask whether the Pages site exists
-      id: pages
-      if: steps.assemble.outputs.publish == 'true'
-      shell: bash
-      env:
-        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
-        GH_TOKEN: ${{ github.token }}
-      run: '"$ACTION_BUN" "${{ github.action_path }}/pages_exists.ts"'
