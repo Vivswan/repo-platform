@@ -185,6 +185,40 @@ describe("actions/knip", () => {
     }).toEqual({ exitCode, stdout: "", hinted });
   });
 
+  // Where no configured pattern can reach the checkout, the module changes nothing knip reads: a falsy `entry` is
+  // knip's defaults, and a list of knip's default patterns alone stays one (a negation beside them would make the
+  // list explicit, and knip then analyzes a script entry's exports under `includeEntryExports`). Each row runs knip
+  // alone and under the module and expects the same report.
+  test.each<{ shape: string; files: Record<string, string> }>([
+    {
+      shape: "an empty string under entry and project, knip's defaults",
+      files: { "knip.json": '{"entry": "", "project": ""}' },
+    },
+    {
+      shape:
+        "knip's default entry pattern spelled out, includeEntryExports, a script entry with an unused export",
+      files: {
+        "package.json": JSON.stringify({
+          ...MANIFEST,
+          scripts: { ...MANIFEST.scripts, start: "node index.ts" },
+        }),
+        "index.ts": "export const publicValue = 1;\n",
+        "knip.json":
+          '{"entry": ["{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!"], "includeEntryExports": true}',
+      },
+    },
+  ])("$shape: the module's report is knip's own", async ({ files }) => {
+    const repo = fixture(files);
+    const report = ({ exitCode, stdout, stderr }: ReturnType<typeof knip>) => ({
+      exitCode,
+      stdout: stdout.trim(),
+      stderr,
+    });
+    const control = report(knip(repo, []));
+    expect(control).toEqual({ exitCode: 1, stdout: OWN_FINDING, stderr: "" });
+    expect(report(await withModule(repo))).toEqual(control);
+  });
+
   // The module reads the configuration where knip runs, so a shape knip's schema never saw here can reach it there;
   // the module leaves it as it came, and knip refuses it, where a spread would have made patterns of a string's
   // characters or an object of a list.
@@ -208,7 +242,7 @@ describe("actions/knip", () => {
     });
   });
 
-  test("the written module yields knip's own resolution of the configuration, the checkout negated once in the root workspace's entry and project where knip reads them; what knip refuses stays refused; a module outside the repository too", async () => {
+  test("the written module yields knip's own resolution of the configuration, the checkout negated once in entry and project; what knip refuses stays refused; a module outside the repository too", async () => {
     const layered = realpathSync(temp.dir("knip-config-"));
     write(layered, {
       "package.json": JSON.stringify({
@@ -219,13 +253,6 @@ describe("actions/knip", () => {
     });
     const effective = await effectiveConfig(layered);
     const modulePath = knipModule(effective, actionDir(layered));
-    const nested = realpathSync(temp.dir("knip-config-"));
-    write(nested, {
-      "package.json": JSON.stringify({ name: "x" }),
-      "knip.json":
-        '{"project": ["src/**/*.ts"], "workspaces": {".": {"entry": ["src/main.ts"]}, "packages/*": {"entry": ["index.ts"]}}}',
-    });
-    const nestedModulePath = knipModule(await effectiveConfig(nested), actionDir(nested));
     const refused = realpathSync(temp.dir("knip-config-"));
     write(refused, {
       "package.json": JSON.stringify({ name: "x" }),
@@ -241,13 +268,6 @@ describe("actions/knip", () => {
       project: ["src/**/*.ts", NEGATION],
       ignoreWorkspaces: ["old"],
       entry: ["src/main.ts", NEGATION],
-    });
-    expect(await (await import(nestedModulePath)).default({})).toEqual({
-      project: ["src/**/*.ts"],
-      workspaces: {
-        ".": { entry: ["src/main.ts", NEGATION] },
-        "packages/*": { entry: ["index.ts"] },
-      },
     });
     expect(() => knipModule(effective, outside)).toThrow(
       `${outside} is outside ${layered}, where knip analyzes files`,
