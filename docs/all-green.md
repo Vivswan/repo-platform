@@ -124,6 +124,8 @@ Post-gate work rides downstream in the same run, `needs: [all-green]` on a push 
 
 **The queue's cost:** GitHub holds one running plus one pending run per lane and replaces the pending one with the newest. Of three quick pushes, the middle commit's run is cancelled: no verdict and no post-green run of its own, though the newest commit contains it. A hand re-run of it deploys its site too ([the triage entry](#quick-triage-why-is-my-pr-red-or-waiting)). A long post-green leg delays the next commit's verdict.
 
+**A schedule or dispatch replaces a pending push run too,** and runs none of its push-only legs: the post-green hook, the release chain, repo-platform's stable move. The replaced commit then needs the re-run the triage entry describes.
+
 **The job lanes:** main runs never overlap, so the legs that mutate shared state hold their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`) against the same workflow's own cron or dispatched run alone. On a lane, GitHub keeps one running plus one pending job and replaces the pending one with the newest.
 
 Repo-platform's own run after the gate (the tag mover, the fleet sync and settings legs, the fleet token) is [platform/post-green.md](platform/post-green.md#the-run-leg-by-leg).
