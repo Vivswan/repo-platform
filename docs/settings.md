@@ -207,11 +207,11 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 | Ruleset | What it does |
 |---|---|
 | `stable-tag` | only blocks deleting the `stable` tag ([build-provenance.md](platform/build-provenance.md#who-can-write-refstagsstable)) |
-| `main-up-to-date` | requires a pull request branch to be up to date before merging, with no bypass actor |
+| `main-up-to-date` | requires a pull request branch to be up to date before merging; admins may bypass, as on `main` |
 
 - **Why `stable-tag` blocks only deletion** is [build-provenance.md's](platform/build-provenance.md#who-can-write-refstagsstable).
 
-- **What `main-up-to-date` refuses:** a stale merge, for admins too (`gh pr update-branch` first), and a direct push to main unless the commit already carries a passing `all-green` run ([all-green.md](all-green.md)). The fleet does not carry it: sync and Dependabot pull requests would stall behind every merge.
+- **What `main-up-to-date` refuses:** a stale merge (`gh pr update-branch` first), and a direct push to main unless the commit already carries a passing `all-green` run ([all-green.md](all-green.md)). Admins may bypass both, by the owner's decision: with no bypass actor here, GitHub hid the merge box's bypass checkbox while this ruleset's strict check was pending. The fleet does not carry it: sync and Dependabot pull requests would stall behind every merge.
 
 - **A stricter mover-only ruleset over the executable ref is not expressible:** GitHub rejects an Integration bypass actor on a user-owned repository's ruleset (422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization").
 
