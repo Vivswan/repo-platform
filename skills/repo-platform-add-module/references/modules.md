@@ -35,7 +35,7 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 
   | Gate | Fails when |
   | --- | --- |
-  | Freshness | the job refreshes a PR behind its base in its own run (release-please propose, then GitHub's update-branch only when the regenerated body is unchanged) and fails only when the head cannot move: a merged release PR still pending, a conflict, a refused push |
+  | Freshness | the base moved after the run's checkout, a merged release PR is still pending, GitHub refuses the merge (a conflict, a refused push), or the head stays unchanged after the update-branch wait; a PR behind its base first gets release-please's propose, then GitHub's update-branch only when the regenerated body is unchanged |
   | Health | a tracking issue of a selected stream (`fuzzer`, `nightly`, `site`) or the fleet `security-nightly` stream is open |
   | Health | a `release-blocker` issue is open |
   | Health | a Dependabot alert at or above the threshold (default `high`) is open; alerts the token cannot read skip that gate |
