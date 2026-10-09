@@ -105,7 +105,7 @@ describe(`the ${SECRET} readers`, () => {
       return Object.values(doc.jobs).some(
         (job) =>
           job.environment === ENVIRONMENT ||
-          (job.uses?.startsWith("./") === true && reachesEnvironment(job.uses.slice(2), seen)),
+          (job.uses?.startsWith("$/") === true && reachesEnvironment(job.uses.slice(2), seen)),
       );
     };
     const calls = workflows.flatMap(({ rel, doc }) =>
@@ -115,7 +115,7 @@ describe(`the ${SECRET} readers`, () => {
           site: `${rel} job ${id}`,
           secrets: job.secrets,
           needsInherit:
-            job.uses?.startsWith("./") === true && reachesEnvironment(job.uses.slice(2)),
+            job.uses?.startsWith("$/") === true && reachesEnvironment(job.uses.slice(2)),
         })),
     );
     expect(calls.filter((call) => call.needsInherit).length).toBeGreaterThan(0);

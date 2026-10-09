@@ -72,7 +72,7 @@ jobs:
     steps:
       # The release PR's CI health check can be stale by merge time, so the same gate re-runs here; release mode
       # self-scopes to release-cut pushes and, on an ordinary push, reads whether main still stands at the judged commit.
-      - uses: Vivswan/repo-platform/actions/release-health@stable
+      - uses: $/actions/release-health
         id: health
         with:
           mode: release
@@ -99,7 +99,7 @@ jobs:
       # release-please's propose phase silently ABORTS - green - while a
       # merged PR still wears "autorelease: pending". Checked AFTER the
       # action so its recovery phase runs first.
-      - uses: Vivswan/repo-platform/actions/release-health@stable
+      - uses: $/actions/release-health
         id: after-propose
         if: steps.health.outputs.release-cut == 'false'
         with:

@@ -72,7 +72,7 @@ jobs:
       # apply, and a deploy before that fails on configure-pages's own error (docs/modules/site.md, "Pages enablement").
       - name: Assemble the site
         id: site
-        uses: Vivswan/repo-platform/actions/pages-site@stable
+        uses: $/actions/pages-site
         with:
           site-dir: ${{ steps.hook.outputs.dist }}
 
@@ -151,13 +151,13 @@ jobs:
       - name: Read the link-rot verdict
         id: rot
         if: steps.links.outcome == 'success'
-        uses: Vivswan/repo-platform/actions/lychee-verdict@stable
+        uses: $/actions/lychee-verdict
         with:
           exit-code: ${{ steps.links.outputs.exit_code }}
 
       - name: File or update the link-rot issue
         if: steps.rot.outputs.found == 'true'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@stable
+        uses: $/actions/fuzz-issue
         with:
           mode: report
           label: ${{ steps.site.outputs.link-rot-label }}
@@ -169,7 +169,7 @@ jobs:
 
       - name: Close the link-rot issue on a clean night
         if: steps.rot.outputs.found == 'false'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@stable
+        uses: $/actions/fuzz-issue
         with:
           mode: resolve
           label: ${{ steps.site.outputs.link-rot-label }}

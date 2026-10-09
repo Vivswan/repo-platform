@@ -76,7 +76,7 @@ The jobs beside them gate nothing:
 
 - **Inside fleet-ci.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green.
 
-- **Every platform action it calls** runs from a checkout of repo-platform at the workflow's own commit, which no check judges ([build-provenance](platform/build-provenance.md#one-commit-per-fleet-ci-run)).
+- **Every platform action it calls** is a `$/` path, this repository at the workflow's own commit ([build-provenance](platform/build-provenance.md#one-commit-per-run)).
 
 - **The checks every repository runs** are the steps of one `standard-checks` job, because GitHub bills a job a rounded-up minute.
 

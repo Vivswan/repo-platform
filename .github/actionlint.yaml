@@ -7,7 +7,6 @@ paths:
     ignore:
       # actionlint's permission-scope list lacks `vulnerability-alerts` (rhysd/actionlint#666); drop when it knows the scope.
       - 'unknown permission scope "vulnerability-alerts"'
-  .github/workflows/fleet-ci.yml:
-    ignore:
-      # actionlint's `job` context type lacks `workflow_sha` as of v1.7.12 (GitHub added the property later); drop when it knows it.
-      - 'property "workflow_sha" is not defined in object type'
+      # actionlint's `uses:` grammar lacks GitHub's `$/` self-repository path as of v1.7.12 (rhysd/actionlint#711); drop when it knows it.
+      - 'specifying action "\$/.+" in invalid format because ref is missing'
+      - 'reusable workflow call "\$/.+" at "uses" is not following the format'

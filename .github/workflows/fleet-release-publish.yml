@@ -30,7 +30,7 @@ jobs:
     steps:
       # A stale bundle from a prior attempt is deleted from the RELEASE, so
       # no later skip path can publish it.
-      - uses: Vivswan/repo-platform/actions/release-assets@stable
+      - uses: $/actions/release-assets
         id: assets
         with:
           tag: ${{ inputs.tag }}
