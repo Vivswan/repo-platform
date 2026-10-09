@@ -520,3 +520,15 @@ jobs:
     uses: $/.github/workflows/reusable-site.yml
     with:
       sha: ${{ github.sha }}
+
+  # Scratch probe: fleet-ci.yml fetched by full reference, as a fleet repository fetches it, so its `$/` paths resolve
+  # from a fetched file, never the workspace. The grant is the skeleton's `ci` caller's.
+  probe-fleet-ci:
+    uses: Vivswan/repo-platform/.github/workflows/fleet-ci.yml@7fe092b7245298d5f2ae7eccb42dad7e1089c9e3
+    permissions:
+      contents: write
+      pull-requests: write
+      security-events: write
+      actions: read
+      issues: read
+      vulnerability-alerts: read
