@@ -5,12 +5,10 @@
 # The caller judges the call's one result: a job that fails here fails the call, a skipped job leaves it green, and
 # no job is name-addressed.
 #
-# GitHub resolves this file's `@stable` when the run starts and an action's `@stable` when its job runs, so a tag move
-# between the two once ran an old workflow against new actions. Every job calling a platform action therefore checks
-# this repository out at `job.workflow_sha` (this file's own commit) into .repo-platform-checkout/ inside the caller's
-# workspace, hides that directory from git, and calls the actions as `./.repo-platform-checkout/actions/<name>`
-# (tests/workflows/fleet_ci_shape.test.ts; actions/shared/platform.ts names the directory).
-# A `./` workflow ref resolves against this repository (reusable-codeql.yml).
+# GitHub resolves this file's `@stable` when the run starts and an action's `@stable` when its job runs, and a tag move
+# between the two once ran an old workflow against new actions. So every platform action and workflow here is a `$/`
+# path: this repository at this file's own commit, whoever fetched it, with nothing checked out for it
+# (docs/platform/build-provenance.md; tests/workflows/delivery_pins.test.ts holds the form).
 #
 # GitHub checks a job's permissions against the skeleton ci.yml's caller grant before the job's `if` runs
 # (tests/workflows/caller_ceilings.test.ts). A job needing more than that grant lives in fleet-nightly.yml behind
@@ -64,17 +62,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - id: platform
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Vivswan/repo-platform
-          ref: ${{ job.workflow_sha }}
-          path: .repo-platform-checkout
-          persist-credentials: false
-      - id: hide-platform
-        run: echo "/.repo-platform-checkout/" >> .git/info/exclude
       - id: plan
-        uses: ./.repo-platform-checkout/actions/plan
+        uses: $/actions/plan
         with:
           private: ${{ github.event.repository.private }}
         env:
@@ -82,32 +71,32 @@ jobs:
 
       - id: validate
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: ./.repo-platform-checkout/actions/validate-managed-files
+        uses: $/actions/validate-managed-files
         with:
           private: ${{ steps.plan.outputs.private }}
 
       - id: typography
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: ./.repo-platform-checkout/actions/check-typography
+        uses: $/actions/check-typography
       - id: file-size
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: ./.repo-platform-checkout/actions/check-file-size
+        uses: $/actions/check-file-size
       - id: shell-complexity
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: ./.repo-platform-checkout/actions/check-shell-complexity
+        uses: $/actions/check-shell-complexity
       - id: commit-names
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: ./.repo-platform-checkout/actions/validate-commit-names
+        uses: $/actions/validate-commit-names
       - id: actionlint
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
       - id: yamllint
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: ./.repo-platform-checkout/actions/yamllint
+        uses: $/actions/yamllint
       # Allowlist in the repo-owned _typos.toml, layered under the fleet's.
       - id: typos
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: ./.repo-platform-checkout/actions/typos
+        uses: $/actions/typos
       # Allowlist false positives in the repo-owned .gitleaks.toml;
       # comments off: findings land in the log and summary, not PR comments.
       - id: gitleaks
@@ -125,7 +114,7 @@ jobs:
       # instead of skipping silently.
       - id: zizmor
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: ./.repo-platform-checkout/actions/zizmor
+        uses: $/actions/zizmor
         with:
           upload-sarif: ${{ steps.plan.outputs.private != 'true' }}
 
@@ -133,7 +122,7 @@ jobs:
       # .trivyignore.yaml, statement and expiry per entry.
       - id: trivy
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: ./.repo-platform-checkout/actions/trivy
+        uses: $/actions/trivy
 
       # knip resolves imports through node_modules, so the repository's own bun installs first, and last among the
       # checks, so trivy and the base checks judge the checkout before node_modules exists.
@@ -153,7 +142,7 @@ jobs:
         run: bun install --frozen-lockfile
       - id: knip
         if: ${{ !cancelled() && steps.bun-install.outcome == 'success' }}
-        uses: ./.repo-platform-checkout/actions/knip
+        uses: $/actions/knip
       - name: Note why knip stood down
         if: ${{ !cancelled() && steps.bun.outcome == 'success' && steps.bun-install.outcome == 'skipped' }}
         run: echo "::notice::knip stood down, this repository has no package.json to install from"
@@ -170,15 +159,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Vivswan/repo-platform
-          ref: ${{ job.workflow_sha }}
-          path: .repo-platform-checkout
-          persist-credentials: false
-      - run: echo "/.repo-platform-checkout/" >> .git/info/exclude
       # The severity threshold and the upstream pin live in the wrapper.
-      - uses: ./.repo-platform-checkout/actions/dependency-review
+      - uses: $/actions/dependency-review
 
   # Public only: code scanning is where the findings go (the sentinel and != 'true' as above).
   semgrep:
@@ -194,14 +176,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Vivswan/repo-platform
-          ref: ${{ job.workflow_sha }}
-          path: .repo-platform-checkout
-          persist-credentials: false
-      - run: echo "/.repo-platform-checkout/" >> .git/info/exclude
-      - uses: ./.repo-platform-checkout/actions/semgrep
+      - uses: $/actions/semgrep
 
   # On the nightly schedule it runs on the week's Monday alone (the plan's weekly output).
   codeql:
@@ -218,7 +193,7 @@ jobs:
       contents: read
       security-events: write
       actions: read
-    uses: ./.github/workflows/reusable-codeql.yml
+    uses: $/.github/workflows/reusable-codeql.yml
     with:
       language: ${{ matrix.language }}
 
@@ -231,15 +206,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Vivswan/repo-platform
-          ref: ${{ job.workflow_sha }}
-          path: .repo-platform-checkout
-          persist-credentials: false
-      - run: echo "/.repo-platform-checkout/" >> .git/info/exclude
       - if: hashFiles('docs/**') != ''
-        uses: ./.repo-platform-checkout/actions/pages-site
+        uses: $/actions/pages-site
         with:
           check: "true"
       - if: hashFiles('docs/**') == ''
@@ -279,14 +247,7 @@ jobs:
           # PR head, not the default merge ref - the merge ref already
           # contains main's tip, so it would always pass.
           ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Vivswan/repo-platform
-          ref: ${{ job.workflow_sha }}
-          path: .repo-platform-checkout
-          persist-credentials: false
-      - run: echo "/.repo-platform-checkout/" >> .git/info/exclude
-      - uses: ./.repo-platform-checkout/actions/release-health
+      - uses: $/actions/release-health
         id: health
         with:
           mode: pull-request
@@ -302,7 +263,7 @@ jobs:
         with:
           token: ${{ github.token }}
           skip-github-release: true
-      - uses: ./.repo-platform-checkout/actions/release-health
+      - uses: $/actions/release-health
         if: ${{ !cancelled() && steps.health.outputs.behind == 'true' && steps.refresh.outcome == 'success' }}
         with:
           mode: after-refresh

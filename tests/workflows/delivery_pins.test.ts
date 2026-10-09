@@ -7,13 +7,20 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { DELIVERY_REF, PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform";
+import {
+  DELIVERY_REF,
+  MANAGED_HEADER_PATTERN,
+  PLATFORM_NAME,
+  PLATFORM_OWNER,
+} from "../../actions/shared/platform";
+import { actionManifestPaths } from "../../scripts/lib/action_steps";
 import { REPO_ROOT } from "../shared/action_step";
 import {
   extractUsesPins,
   ownsPlatform,
   type Pin,
   type SelfPin,
+  selfPaths,
   sourceSelfPins,
 } from "../shared/uses_pins";
 
@@ -32,14 +39,16 @@ function walk(rel: string): string[] {
 
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
 
+const MANIFESTS = actionManifestPaths(join(REPO_ROOT, "actions"));
 /** The sources the fleet executes: the writer's tree, this repository's workflows, and the action manifests. */
-const PIN_SITES = [
-  ...walk("files"),
-  ...walk(".github/workflows"),
-  ...walk("actions").filter((rel) => /\/action\.ya?ml$/.test(rel)),
-];
+const PIN_SITES = [...walk("files"), ...walk(".github/workflows"), ...MANIFESTS];
 /** Plus the docs and skills, whose examples spell the shape a reader copies. */
 const SELF_PIN_SITES = [...PIN_SITES, ...walk("docs"), ...walk("skills")];
+
+const callable = callableWorkflowNames(
+  walk(".github/workflows").map((path) => ({ path, text: read(path) })),
+);
+const exists = (rel: string) => existsSync(join(REPO_ROOT, rel));
 
 /** True when pinact settles the line itself: a full version it verifies, or no version comment at all (its code 005). False is
  *  the gap: a comment pinact reads as a version but leaves unverified, sha included. The branches follow pinact's classifier order. */
@@ -90,22 +99,28 @@ export function callableWorkflowNames(files: { path: string; text: string }[]): 
     .sort();
 }
 
-/** GitHub's resolution: a `.github/workflows/` stem is the file itself and must be callable.
- *  Any other stem is a directory read by either manifest spelling. */
+/** GitHub's resolution of a path inside this repository: a `.github/workflows/` path is the file itself and must be
+ *  callable; any other path is a directory read by either manifest spelling. */
+export function resolves(
+  path: string,
+  exists: (rel: string) => boolean,
+  callable: readonly string[],
+): boolean {
+  const workflows = ".github/workflows/";
+  if (path.startsWith(workflows))
+    return callable.includes(path.slice(workflows.length)) && exists(path);
+  return [`${path}/action.yml`, `${path}/action.yaml`].some(exists);
+}
+
+/** The stem's first segment is the platform name in whatever case the pin spelled it; the path after it is what GitHub fetches. */
 export function unresolvedSelfPins(
   pins: SelfPin[],
   exists: (rel: string) => boolean,
   callable: readonly string[],
 ): SelfPin[] {
-  const workflows = ".github/workflows/";
-  return pins.filter((pin) => {
-    // The stem's first segment is the platform name in whatever case the pin spelled it; the path after it is what GitHub fetches.
-    const path = pin.stem.slice(`${PLATFORM_NAME}/`.length);
-    if (path.startsWith(workflows)) {
-      return !callable.includes(path.slice(workflows.length)) || !exists(path);
-    }
-    return ![`${path}/action.yml`, `${path}/action.yaml`].some(exists);
-  });
+  return pins.filter(
+    (pin) => !resolves(pin.stem.slice(`${PLATFORM_NAME}/`.length), exists, callable),
+  );
 }
 
 const SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1";
@@ -190,10 +205,6 @@ describe("one sha per action across the root and the shipped sources", () => {
 });
 
 describe("self pins resolve at the delivery ref", () => {
-  const workflows = walk(".github/workflows").map((path) => ({ path, text: read(path) }));
-  const callable = callableWorkflowNames(workflows);
-  const exists = (rel: string) => existsSync(join(REPO_ROOT, rel));
-
   // The controls that arm the sweep below: GitHub's resolution rule (a `.github/workflows/` stem must be callable and
   // present; any other stem needs action.yml or action.yaml), the roster's workflow_call spellings, and the owner
   // spellings a self pin may carry (a mistyped owner is a self pin on a repository that does not exist, not a third party).
@@ -251,5 +262,63 @@ describe("self pins resolve at the delivery ref", () => {
     expect(unresolvedSelfPins(pins, exists, callable).map(describe)).toEqual([]);
     expect(pins.filter((pin) => pin.ref !== DELIVERY_REF).map(describe)).toEqual([]);
     expect(pins.filter((pin) => !ownsPlatform(pin.owner)).map(describe)).toEqual([]);
+  });
+});
+
+// GitHub resolves `$/` against the file's own repository at its running commit, `./` against the caller's workspace, and
+// `...@stable` at the tag when the job runs, and `$/` takes no `@ref`. Every form is green in this repository's own CI, so
+// the form is held here: `$/` between platform files; the tag pin in a starter, which runs where `$/` would name the fleet
+// repository (docs/platform/build-provenance.md). A managed root copy is judged under files/.
+describe("platform files reference each other by `$/`; the starters pin the delivery ref", () => {
+  const WORKSPACE_PATH = /uses:\s*['"]?(\.\/(?:actions|\.github\/workflows)\/[^\s'"]+)/g;
+  const platformSites = [...walk(".github/workflows"), ...MANIFESTS].filter(
+    (rel) => !MANAGED_HEADER_PATTERN.test(read(rel)),
+  );
+  const judge = (rel: string, text: string) => ({
+    byTag: sourceSelfPins(text, rel).map((pin) => `${pin.stem}@${pin.ref}`),
+    byWorkspacePath: [...text.matchAll(WORKSPACE_PATH)].map((match) => match[1]),
+    unresolved: selfPaths(text, rel)
+      .filter((self) => !resolves(self.path, exists, callable))
+      .map((self) => self.path),
+  });
+
+  // The control: a tag pin, a workspace path under either platform root, a `$/` path carrying an @ref, and a `$/` path to
+  // no action or to a workflow nothing can call are each reported; the caller's own action and a resolving `$/` path are not.
+  test("a tag pin, a workspace path under a platform root, a `$/` path with an @ref, and a `$/` path to nothing are each refused; the caller's own action and a resolving path pass", () => {
+    const text = [
+      "      - uses: Vivswan/repo-platform/actions/plan@stable",
+      "      - uses: ./actions/plan",
+      "    uses: ./.github/workflows/reusable-codeql.yml",
+      "      - uses: ./.github/actions/site-build",
+      "      - uses: $/actions/plan",
+      "      - uses: $/actions/plan@stable",
+      "      - uses: $/actions/does-not-exist",
+      "    uses: $/.github/workflows/reusable-codeql.yml",
+      "    uses: $/.github/workflows/ci.yml",
+    ].join("\n");
+    expect(judge("f", text)).toEqual({
+      byTag: ["repo-platform/actions/plan@stable"],
+      byWorkspacePath: ["./actions/plan", "./.github/workflows/reusable-codeql.yml"],
+      unresolved: ["actions/plan@stable", "actions/does-not-exist", ".github/workflows/ci.yml"],
+    });
+  });
+
+  test("every platform workflow and manifest names a platform file by `$/` alone, each path resolving", () => {
+    const paths = platformSites.flatMap((rel) => selfPaths(read(rel), rel));
+    expect(paths.length).toBeGreaterThan(30);
+    const judged = Object.fromEntries(platformSites.map((rel) => [rel, judge(rel, read(rel))]));
+    expect(judged).toEqual(
+      Object.fromEntries(
+        platformSites.map((rel) => [rel, { byTag: [], byWorkspacePath: [], unresolved: [] }]),
+      ),
+    );
+  });
+
+  test("no starter names a platform file by `$/`", () => {
+    const starters = walk("files");
+    expect(starters.length).toBeGreaterThan(0);
+    expect(
+      starters.flatMap((rel) => selfPaths(read(rel), rel).map((self) => `${rel}: $/${self.path}`)),
+    ).toEqual([]);
   });
 });

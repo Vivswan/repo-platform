@@ -54,7 +54,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Exceptions:**
 
-- **The platform's own channel:** `Vivswan/repo-platform/...@stable` references stay on the moving `stable` tag on purpose. It is the green-gated delivery channel ([build-provenance](platform/build-provenance.md)), so a pinned sha there would freeze the fleet on one green commit. Inside fleet-ci.yml the actions are `./.repo-platform-checkout/actions/<name>`, a checkout at the workflow's own commit, so one run reads one commit ([one commit per run](platform/build-provenance.md#one-commit-per-fleet-ci-run)).
+- **The platform's own channel:** `Vivswan/repo-platform/...@stable` references in the starters stay on the moving `stable` tag on purpose. It is the green-gated delivery channel ([build-provenance](platform/build-provenance.md)), so a pinned sha there would freeze the fleet on one green commit. Between platform files the reference is GitHub's `$/` path, which resolves at the running commit, so one run reads one commit ([one commit per run](platform/build-provenance.md#one-commit-per-run)).
 
 - **An action that publishes no version tags** is pinned to a branch commit with the branch in the comment, `uses: <owner>/<action>@<40-hex sha> # main`, the sha alone naming the version. [.github/pinact.yaml](../.github/pinact.yaml) skips each such action at a full sha only; the same action at a moving ref is judged like any other. Today that is `Vivswan/skills`, whose validate-skills action repo-platform's own ci.yml runs on its skills catalog.
 
@@ -397,7 +397,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 - **Entrypoints anywhere else:** tests run by name through a launcher script, git hooks, scripts run by path, composite actions outside `.github/`.
 - **Package.json scripts** that run a tool CI installs itself.
 - **A configured `entry` list replaces** knip's default `index`, `cli`, and `main` patterns rather than extending them, so a repo that keeps one of those repeats it.
-- **A configuration hint fails the fleet run** (the knip action passes `--treat-config-hints-as-errors`): an `ignore*` entry nothing matches any more, a pattern matching no file, a `workspaces` key with no package. knip prints the hint under "Configuration hints" and names the fleet run's configuration module as the file; the fix is in the repo's own knip configuration, the one that module imports ([build-provenance.md](platform/build-provenance.md#one-commit-per-fleet-ci-run)).
+- **A configuration hint fails the fleet run** (the knip action passes `--treat-config-hints-as-errors`): an `ignore*` entry nothing matches any more, a pattern matching no file, a `workspaces` key with no package. knip prints the hint under "Configuration hints" with the file it came from; the fix is in the repo's own knip configuration.
 
 **What the typos fleet config settles before a repository's bypass applies:** it ignores hex digests and the one-off marker above, and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file; a spelling variant a repository keeps goes in its own `_typos.toml`.
 

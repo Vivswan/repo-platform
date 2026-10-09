@@ -1,14 +1,13 @@
 // fleet-ci.yml is the fleet's gate-job home; the yaml is the source and the diff its review, so only what a green run cannot
 // show is pinned here: GitHub's step rule (a bare step implies success(), so a failed check would hide every later one), the
 // schedule census the yaml cannot express (the skeleton's `ci` caller is unconditional, so a step without a schedule clause
-// runs nightly fleet-wide), the output chain GitHub resolves to '' without an error, two gates whose wrong spelling stays
-// green on every run, and the one commit every platform action must come from (GitHub resolves a tag twice).
+// runs nightly fleet-wide), the output chain GitHub resolves to '' without an error, and two gates whose wrong spelling stays
+// green on every run.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { PLATFORM_CHECKOUT_DIR, PLATFORM_SLUG } from "../../actions/shared/platform.ts";
 
 interface Step {
   id?: string;
@@ -36,8 +35,8 @@ const CHECKS_JOB = "standard-checks";
 const checksJob = fleetCi.jobs[CHECKS_JOB];
 const checkSteps = checksJob?.steps ?? [];
 const label = (step: Step) => step.id ?? step.name ?? step.uses ?? "";
-/** The action a `uses:` names under the platform checkout, or undefined for any other reference. */
-const PLATFORM_ACTION_PREFIX = `./${PLATFORM_CHECKOUT_DIR}/actions/`;
+/** The action a `uses:` names by its `$/` path, or undefined for any other reference. */
+const PLATFORM_ACTION_PREFIX = "$/actions/";
 const platformAction = (uses: string | undefined): string | undefined =>
   uses?.startsWith(PLATFORM_ACTION_PREFIX) ? uses.slice(PLATFORM_ACTION_PREFIX.length) : undefined;
 /** GitHub accepts `${{ }}` around an `if:`, so it is stripped before the clauses are read. */
@@ -51,7 +50,7 @@ const clausesOf = (condition: string | undefined) =>
 describe("fleet-ci.yml", () => {
   // A step or job whose condition is not !cancelled() or always() is skipped by an earlier failure (a bare one implies
   // success(), and so does a `&& success()` appended anywhere), so one red check would hide every later check and every job
-  // beside; continue-on-error fails open instead. The two checkouts, the exclude line, and the plan are the bare steps:
+  // beside; continue-on-error fails open instead. The checkout and the plan are the bare steps:
   // nothing after a failed plan may run, and the plan's own red names it.
   // GitHub reads function names case-insensitively and allows blanks inside the parentheses.
   const STATUS_FUNCTION = /\b(success|failure|cancelled|always)\s*\(\s*\)/i;
@@ -60,7 +59,7 @@ describe("fleet-ci.yml", () => {
     return { first, laterStatusFunctions: rest.filter((clause) => STATUS_FUNCTION.test(clause)) };
   };
   const INDEPENDENT = { first: "!cancelled()", laterStatusFunctions: [] };
-  const BARE_STEPS = ["checkout", "platform", "hide-platform", "plan"];
+  const BARE_STEPS = ["checkout", "plan"];
 
   test("a failing check still runs every later check and every job beside; none fails open", () => {
     const bare = checkSteps.slice(0, BARE_STEPS.length);
@@ -146,14 +145,14 @@ describe("fleet-ci.yml", () => {
     });
   });
 
-  // Which steps and jobs a scheduled run may reach: the checkouts, the plan, and CodeQL on its weekly day (the nightly
+  // Which steps and jobs a scheduled run may reach: the checkout, the plan, and CodeQL on its weekly day (the nightly
   // security scan rides fleet-nightly.yml). Every other step excludes the schedule outright or gates on the success of a
   // step that does, and every other job's condition excludes it (the skip clause, or a PR-only guard), so a new step or
   // job must take a side.
   const SKIP_ON_SCHEDULE = "github.event_name != 'schedule'";
   const GATED_ON = /^steps\.([\w-]+)\.outcome == 'success'$/;
 
-  test("on the nightly schedule only the checkouts, the plan, and (weekly) codeql can run", () => {
+  test("on the nightly schedule only the checkout, the plan, and (weekly) codeql can run", () => {
     const stoodDown = new Set<string>();
     for (let grew = true; grew; ) {
       grew = false;
@@ -261,64 +260,5 @@ describe("fleet-ci.yml", () => {
       gaps: [],
       skeletonReadsWalked: true,
     });
-  });
-
-  // GitHub resolves this workflow's `@stable` when the run starts and an action's `@stable` when its job runs. The tag
-  // moved between the two (twelve commits at once, runs queued for minutes), so a workflow at 2d04c160 ran
-  // validate-managed-files at da84bd00, whose outputs the old guard no longer found, and standard-checks went red right
-  // after "Validation passed". So no step here names a platform action by tag: each is a local path under the checkout
-  // of this repository at `job.workflow_sha`, made in that job after the caller's own checkout (a later checkout at
-  // the root would clean it away), hidden from git, and before the first such step.
-  const PLATFORM_CHECKOUT = {
-    repository: PLATFORM_SLUG,
-    ref: "${{ job.workflow_sha }}",
-    path: PLATFORM_CHECKOUT_DIR,
-    "persist-credentials": false,
-  };
-  const HIDE_PLATFORM = `echo "/${PLATFORM_CHECKOUT_DIR}/" >> .git/info/exclude`;
-  const isCheckout = (step: Step) => /^actions\/checkout@/.test(step.uses ?? "");
-
-  test("every platform action runs from the platform checkout at the workflow's own commit, made and hidden in the same job before it", () => {
-    const jobs = Object.entries(fleetCi.jobs).filter(([, job]) => job.steps !== undefined);
-    const shape = jobs.map(([name, job]) => {
-      const steps = job.steps ?? [];
-      const byTag = steps
-        .map((step) => step.uses ?? "")
-        .filter((uses) => /repo-platform/i.test(uses) && uses.includes("@"));
-      const local = steps.map((step) => step.uses ?? "").filter((uses) => uses.startsWith("./"));
-      const firstAction = steps.findIndex((step) => platformAction(step.uses) !== undefined);
-      const caller = steps.findIndex((step) => isCheckout(step) && !step.with?.repository);
-      const platform = steps.findIndex((step) => isCheckout(step) && step.with?.repository);
-      const hide = steps.findIndex((step) => step.run === HIDE_PLATFORM);
-      return {
-        job: name,
-        byTag,
-        localOutsideTheCheckout: local.filter((uses) => platformAction(uses) === undefined),
-        missingActions: local.filter((uses) => {
-          const action = platformAction(uses);
-          return action !== undefined && !existsSync(join(ROOT, "actions", action, "action.yml"));
-        }),
-        platformCheckout: steps[platform]?.with,
-        order:
-          firstAction > 0 &&
-          caller >= 0 &&
-          caller < platform &&
-          platform < hide &&
-          hide < firstAction
-            ? "caller checkout, platform checkout, hide, first action"
-            : [caller, platform, hide, firstAction].join(","),
-      };
-    });
-    expect(jobs.length).toBeGreaterThan(3);
-    expect(shape).toEqual(
-      jobs.map(([name]) => ({
-        job: name,
-        byTag: [],
-        localOutsideTheCheckout: [],
-        missingActions: [],
-        platformCheckout: PLATFORM_CHECKOUT,
-        order: "caller checkout, platform checkout, hide, first action",
-      })),
-    );
   });
 });

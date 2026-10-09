@@ -155,9 +155,7 @@ describe("reusable-site.yml", () => {
   // one misspelled reads as false, so every Pages step skips and the deploy is silently off until a repository
   // notices its site never updates. Exact gates: a skipped or unset `publish` reads as false downstream too.
   test("the Pages steps and the link check gate on the assembly step's declared publish output alone", () => {
-    const assembly = steps.find((candidate) =>
-      (candidate.uses ?? "").startsWith("Vivswan/repo-platform/actions/pages-site@"),
-    );
+    const assembly = steps.find((candidate) => candidate.uses === "$/actions/pages-site");
     const declared = Object.keys(loadAction("actions/pages-site/action.yml").outputs ?? {});
     expect(declared).toEqual(expect.arrayContaining(["publish", "link-rot-label"]));
     const read = (output: string) => `steps.${assembly?.id}.outputs.${output}`;

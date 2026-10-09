@@ -19,7 +19,7 @@ How the `stable` tag gets moved, how a sync verifies the commit it names before 
 | What the fleet reads | Where it sits at the commit | Who reads it |
 | --- | --- | --- |
 | `files.yml` and `files/` | the repository root | the sync writer ([platform/sync/README.md](sync/README.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../../actions/plan/reserved_labels.ts)), validate-managed-files |
-| `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | fleet-ci.yml, from a checkout at its own commit ([one commit per run](#one-commit-per-fleet-ci-run)); every other managed workflow's `uses:` at the tag |
+| `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | every platform workflow and composite, by `$/` path at its own commit ([one commit per run](#one-commit-per-run)); every managed workflow's `uses:` at the tag |
 | `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` |
 
 Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. Two constraints follow for every path on `main`:
@@ -30,27 +30,31 @@ Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. 
 
 **Every self pin resolves:** [tests/workflows/delivery_pins.test.ts](../../tests/workflows/delivery_pins.test.ts) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout. A renamed or deleted action, or a pin off the delivery ref, fails CI here instead of the next fleet run.
 
-**Every manifest loads:** GitHub loads an action's manifest when the job starts, so a manifest error fails every caller before its first step. A local `./actions/<name>` loads only when its step runs, so this repository's gate runs every shipped action but one, the `action-load` job carrying those no other check runs ([all-green.md](../all-green.md#what-gates-what)), and a manifest GitHub cannot load fails here before `stable` moves.
+**Every manifest loads:** GitHub loads an action's manifest when the job starts, so a manifest error fails every caller before its first step. Only a job naming an action loads it, so this repository's gate runs every shipped action but one, the `action-load` job carrying those no other check names ([all-green.md](../all-green.md#what-gates-what)), and a manifest GitHub cannot load fails here before `stable` moves.
 
 release-assets is the one unjudged: it reads a draft release by tag, and this repository cuts none ([tests/workflows/action_load.test.ts](../../tests/workflows/action_load.test.ts) holds the gate to the actions directory and names it).
 
-## One commit per fleet-ci run
+## One commit per run
 
 GitHub resolves a reusable workflow's `@stable` when the run starts and a composite action's `@stable` when its job runs. The tag moves between the two whenever main lands while runs sit queued, so a workflow at one commit once ran actions at another: an output the old guard read as empty failed `standard-checks` right after "Validation passed".
 
-So [fleet-ci.yml](../../.github/workflows/fleet-ci.yml) names no action by tag. Each job calling one first checks this repository out at `job.workflow_sha`, the commit the called workflow file came from, into `.repo-platform-checkout/` in the caller's workspace, then calls `./.repo-platform-checkout/actions/<name>` from there. The name is `PLATFORM_CHECKOUT_DIR` in [actions/shared/platform.ts](../../actions/shared/platform.ts).
+So no platform file names another by tag. Between platform files the reference is GitHub's `$/` path ([the self-repository reference](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax), runner 2.336 or newer), which resolves against the repository holding the file at the commit the run fetched it from, with nothing checked out for it:
 
-The checkout is new state in the caller's tree, and no check judges it:
+```yaml
+# .github/workflows/fleet-ci.yml, fetched at the tag by a fleet repository's ci.yml
+- uses: $/actions/plan                          # this repository, at fleet-ci.yml's own commit
+# actions/plan/action.yml, fetched by that step
+- uses: $/actions/bun-setup                     # the same commit, however deep the composition
+# fleet-ci.yml's codeql job
+uses: $/.github/workflows/reusable-codeql.yml   # the same commit
+```
 
-| How a check lists files | Reaches the checkout? | What keeps it out |
+| Who names a platform file | Form | Why |
 | --- | --- | --- |
-| `git ls-files` (typography, shell-complexity, file-size, the validator's writer comparison, semgrep) | no: a nested checkout is one `<dir>/` entry to git | nothing needed ([tests/actions/repository_files.test.ts](../../tests/actions/repository_files.test.ts) holds the git fact) |
-| git history or the API (commit-names, gitleaks, dependency-review, release-health), one root path (plan, actionlint, pages-site), or its own job with no platform checkout (CodeQL) | no | nothing needed |
-| a walk honoring git's excludes (zizmor, typos) | yes | the `.git/info/exclude` line the job writes right after the checkout (typos also skips a hidden directory); the managed `.gitignore` carries the same line from the next sync on |
-| its own globs (knip) | yes: knip's defaults and plugins honor git's excludes, a repository's configured `entry` pattern (`**/*.test.ts`) honors neither the exclude line nor a `.gitignore` line (knip globs a configured entry with git's excludes off) | the knip action's written configuration, the repository's own with the directory negated (`!<dir>/**`, knip's own form for an ignored workspace, which its hints skip) in the root workspace's configured `entry` and `project` lists ([actions/knip/run.ts](../../actions/knip/run.ts)); `ignoreWorkspaces` would keep it out too but draws a hint, and a hint fails the run; a plugin's configuration-file glob is not negated, and only a repository's own `**/` pattern there reaches the directory |
-| its own walk (trivy, yamllint, the validator's hygiene walk) | yes | trivy's `skip-dirs`, yamllint's own file list (`--list-files`) minus the directory, the walk skipping the name |
+| a platform workflow or composite (`.github/workflows/`, `actions/`) | `$/<path>` | the file's own commit, whoever fetched it |
+| a starter (`files/`) | `<owner>/repo-platform/<path>@stable` | the starter is copied into a fleet repository, where `$/` would name that repository |
 
-[tests/workflows/fleet_ci_shape.test.ts](../../tests/workflows/fleet_ci_shape.test.ts) holds the shape: no platform action by tag, and in every job the caller's checkout, the platform checkout, and the exclude line, in that order, before the first action.
+[tests/workflows/delivery_pins.test.ts](../../tests/workflows/delivery_pins.test.ts) holds every reference to its row, and refuses a `./actions/<name>` or `./.github/workflows/<name>` path in a platform file: that form resolves against the caller's workspace, which holds nothing of this repository.
 
 ## Who can write `refs/tags/stable`?
 
@@ -128,7 +132,6 @@ So a workflow never runs ahead of the actions it calls: the sync PR that carries
 | `uses: ...@stable` execution trusts the ref. | A user-repo ruleset cannot restrict other writers to one workflow; it blocks deletion only. | Sync consumption re-verifies main history and the green check at the commit; nothing re-verifies for `uses:` (below). |
 | Actor provenance is advisory. | Nothing records which run moved the tag; a lightweight tag carries no message. | The check at the commit is the anchor, not the mover's identity. |
 | A sync copies from the commit the tag names as it stands. | No freshness wait exists (the lag, below). | resolve_build.ts runs the green gate and the ancestry check on that commit, and a sync PR, when one opens, records the commit it copied. |
-| A composite action's own `uses: .../bun-setup@stable` (and pages-site's plan) resolves when that step runs, one commit per run notwithstanding. | GitHub resolves a `./` path against the caller's workspace, never the action's directory, and this repository's own ci.yml runs the actions from its root, where no platform checkout exists. | bun-setup's contract is one input and one output path, changed with every caller in one PR; the window is the job's own queue time. |
 
 **The ref-trust residual in full:** the tag can only ever name a commit that exists on the server, and repo-platform's own CI gates every commit on `main`. Neither bound covers `uses:`: an out-of-band move to a red or off-main commit still reaches the fleet's `uses:` execution.
 

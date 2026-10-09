@@ -1,6 +1,6 @@
-// GitHub's loader judges a local action's manifest only when a step runs it (a `./actions/<name>` step whose `if:` is false
-// loads nothing), and no offline check reads the manifests with that loader. So every shipped action is run by a step of
-// a gating job in ci.yml on every push and pull request, or the fleet is the first to load it, via `stable`.
+// GitHub's loader judges an action's manifest when a job naming it starts, and no offline check reads the manifests with
+// that loader. So every shipped action is named by a step of a gating job in ci.yml on every push and pull request, or
+// the fleet is the first to load it, via `stable`.
 //   dependency-review -> pull requests only: its upstream action refuses every other event
 //   release-assets    -> never: it reads a draft release by tag, and this repository cuts no releases
 
@@ -49,7 +49,7 @@ test("every shipped action is run, so loaded, by a gating job's step on every pu
   const runs = new Map<string, Set<string>>(shipped.map((name) => [name, new Set()]));
   for (const job of gating) {
     for (const step of ci.jobs[job].steps ?? []) {
-      const dir = /^\.\/(actions\/.+)$/.exec(step.uses ?? "")?.[1];
+      const dir = /^\$\/(actions\/.+)$/.exec(step.uses ?? "")?.[1];
       if (dir !== undefined) runs.get(dir)?.add(runsOn(ci.jobs[job], step));
     }
   }

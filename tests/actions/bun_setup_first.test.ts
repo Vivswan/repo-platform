@@ -14,7 +14,7 @@ type Step = Record<string, unknown>;
 
 const setupStep = {
   id: "action-bun",
-  uses: "Vivswan/repo-platform/actions/bun-setup@stable",
+  uses: "$/actions/bun-setup",
   from: "${{ github.action_path }}",
 };
 
