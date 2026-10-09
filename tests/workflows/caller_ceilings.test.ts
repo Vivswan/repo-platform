@@ -141,9 +141,11 @@ test("every called job's permissions fit its caller job's ceiling", () => {
       }
     }
   }
-  // One resolved pair per caller root proves the derivation reached both, so an empty root cannot pass quietly.
+  // One resolved pair per caller root proves the derivation reached both, and the nested pair that it descended through
+  // a platform call, so an empty root or a flat walk cannot pass quietly.
   const controls = [
-    "files/base/.github/workflows/ci.yml job 'ci' -> .github/workflows/fleet-ci.yml",
+    "files/base/.github/workflows/ci.yml job 'platform' -> .github/workflows/fleet.yml",
+    ".github/workflows/fleet.yml job 'ci' -> .github/workflows/fleet-ci.yml",
     ".github/workflows/ci.yml job 'post-green' -> .github/workflows/post-green.yml",
   ];
   const sites = CALLS.map((call) => call.site);
@@ -151,6 +153,48 @@ test("every called job's permissions fit its caller job's ceiling", () => {
     resolved: controls,
     overCeiling: [],
   });
+});
+
+// The skeleton grants every platform call one fixed block, the union of what the jobs behind those calls ask. The test
+// above refuses a job over the block; nothing refuses a block over the jobs, so an unused scope (a `packages: write` no
+// platform job asked) would sit granted fleet-wide. A call job's own grant is a ceiling, not a need: the union reads the
+// running jobs below it.
+test("the skeleton's platform calls share one block, and the block is exactly the union of what the jobs behind them ask", () => {
+  const SKELETON = "files/base/.github/workflows/ci.yml";
+  const platformCalls = CALLS.filter(
+    (call) => call.site.startsWith(`${SKELETON} job`) && PLATFORM_CALL.test(call.job.uses ?? ""),
+  );
+  const union: Record<string, string> = {};
+  const seen = new Set<string>();
+  const absorb = (callerRel: string, workflow: Workflow) => {
+    for (const [id, job] of Object.entries(workflow.jobs)) {
+      const calledRel = job.uses === undefined ? null : calledPath(job.uses, dirname(callerRel));
+      if (calledRel !== null) {
+        if (!seen.has(calledRel)) {
+          seen.add(calledRel);
+          absorb(calledRel, load(calledRel));
+        }
+        continue;
+      }
+      const grant = job.permissions ?? workflow.permissions;
+      if (!isMapping(grant)) throw new Error(`${callerRel} job '${id}': grant is ${String(grant)}`);
+      for (const [scope, level] of Object.entries(grant)) {
+        if ((RANK[level] ?? Infinity) > (RANK[union[scope] ?? "none"] ?? -1)) union[scope] = level;
+      }
+    }
+  };
+  for (const call of platformCalls) {
+    const calledRel = calledPath(call.job.uses ?? "", dirname(SKELETON)) ?? "";
+    if (!seen.has(calledRel)) {
+      seen.add(calledRel);
+      absorb(calledRel, call.called);
+    }
+  }
+  const blocks = new Set(platformCalls.map((call) => JSON.stringify(call.ceiling)));
+  expect({
+    calls: platformCalls.length > 1,
+    blocks: [...blocks].map((block) => JSON.parse(block) as Permissions),
+  }).toEqual({ calls: true, blocks: [union] });
 });
 
 // The sync and settings lanes are single-writer only while the cron run and the post-green call spell ONE literal: the

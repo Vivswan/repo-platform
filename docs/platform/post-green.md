@@ -119,11 +119,11 @@ The opt-in waits for the weekly sync cron (or a hand dispatch) when:
 
 The legs, what each does for a repository, and the release leg's known limits are [all-green.md's](../all-green.md#the-static-legs). What the managed ci.yml spells to get them:
 
-- **`release` and `site` gate on fleet-ci's `modules` output,** each naming its own module: `contains(needs.ci.outputs.modules, '"release-please"')` and `contains(needs.ci.outputs.modules, '"site"')`, a substring test on the compact JSON array, hence the quoted name.
+- **`release` and `site` gate on the `platform` call's `modules` output,** each naming its own module: `contains(needs.platform.outputs.modules, '"release-please"')` and `contains(needs.platform.outputs.modules, '"site"')`, a substring test on the compact JSON array, hence the quoted name.
 
 - **The release hooks** gate on the `release` job's outputs.
 
-- A job reads outputs only from its direct dependencies, so `ci` sits in the needs list of `release` and `site`.
+- A job reads outputs only from its direct dependencies, so `platform` sits in the needs list of `release` and `site`.
 
 - **The cut's lane is keyed by the judged sha,** so no other run shares it and nothing can cancel a pending cut; a re-run of the same commit waits, then finds the release already cut.
 
@@ -131,7 +131,7 @@ The legs, what each does for a repository, and the release leg's known limits ar
 
 ## Residuals, stated
 
-- **A PR can still gut a called workflow's content** (checks.yml is repo-owned) or hand-condition the managed `ci` caller away. validate-managed-files blocks any edit to the managed ci.yml, the caller's condition included, and review owns the rest - the same same-repo residual every check has.
+- **A PR can still gut a called workflow's content** (checks.yml is repo-owned) or hand-condition the managed `platform` caller away. validate-managed-files blocks any edit to the managed ci.yml, the caller's condition included, and review owns the rest - the same same-repo residual every check has.
 
 - **Any workflow in this repository could mint a look-alike `all-green` check run** (the Actions app pin does not distinguish jobs). The repo is its own sole workflow author; review owns that surface.
 

@@ -28,7 +28,7 @@ Leaving the fleet means revoking the fleet token's write access to the repo: rem
    git rm .repo-platform.yml .github/repo-platform-manifest.json
    ```
 
-2. Rewrite `.github/workflows/ci.yml`: the managed file is a thin caller of repo-platform's `fleet-ci.yml` reusable, and that call is all-or-nothing. Its `plan` step goes red once `.repo-platform.yml` (the registration it reads) is gone, and no input turns it off. Replace the `ci` job:
+2. Rewrite `.github/workflows/ci.yml`: the managed file is a thin caller of repo-platform's `fleet.yml` reusable (whose `ci` job is `fleet-ci.yml`), and that call is all-or-nothing. Its `plan` step goes red once `.repo-platform.yml` (the registration it reads) is gone, and no input turns it off. Replace the `platform` job:
 
    | Part of ci.yml | What to do |
    |---|---|
@@ -37,17 +37,17 @@ Leaving the fleet means revoking the fleet token's write access to the repo: rem
    | every copied step's condition | remove `steps.plan.outcome == 'success' &&` |
    | every copied job's `needs` list | remove `standard-checks` |
    | each `steps.plan.outputs.*` and `needs.standard-checks.outputs.*` condition and value | replace with your repo's literals (actionlint reports a read of the deleted step) |
-   | the `release` leg | it needs `ci` and reads `needs.ci.outputs.*` in its condition and inputs (`modules`, `tracking-labels`): delete it, or replace each such read with your repo's literals |
-   | the `site` job | it needs `ci`, reads `needs.ci.outputs.modules` in its condition, and calls `reusable-site.yml`, which configures the deploy from `.repo-platform.yml` and takes no input but the commit `sha`. Delete it, or replace it with your own deploy that runs `.github/actions/site-build` (the hook is already yours), passes the pages-site action its `config` by hand, and uploads the output |
+   | the `release` leg | it needs `platform` and reads `needs.platform.outputs.*` in its condition and inputs (`modules`, `tracking-labels`): delete it, or replace each such read with your repo's literals |
+   | the `site` job | it needs `platform`, reads `needs.platform.outputs.modules` in its condition, and calls `reusable-site.yml`, which configures the deploy from `.repo-platform.yml` and takes no input but the commit `sha`. Delete it, or replace it with your own deploy that runs `.github/actions/site-build` (the hook is already yours), passes the pages-site action its `config` by hand, and uploads the output |
    | every job you remove | rewire each surviving job's `needs` to jobs that still exist (actionlint reports a dangling one) |
-   | the `nightly` caller | it runs `fleet-nightly.yml` on the schedule in a public repository, and its plan job reads the registration too: delete the job, or inline the scan with literal configuration |
+   | fleet.yml's `trivy-nightly` job | it runs on the schedule in a public repository, and its plan step reads the registration too: leave it out of your copy, or inline the scan with literal configuration |
    | ci.yml's `all-green` job | it keeps judging whatever its needs list names; drop it too if you drop the `all-green` required check from your branch protection |
 
 3. (Optional) Inline the reusable workflows. Skip this if repo-platform continues to exist: the pinned references keep working unchanged. Otherwise:
 
    | Reference | Replacement |
    |---|---|
-   | each thin caller (`auto-assign.yml`, the `site` job's `reusable-site.yml` call, the `ci` job's `fleet-ci.yml` call) | a copy of the corresponding `reusable-*.yml`/fleet job from repo-platform |
+   | each thin caller (`auto-assign.yml`, the `site` job's `reusable-site.yml` call, the `platform` job's `fleet.yml` call) | a copy of the corresponding `reusable-*.yml`/fleet job from repo-platform |
    | the `all-green` job | nothing: it already runs a third-party action |
    | `uses: Vivswan/repo-platform/actions/...` steps | vendored copies of the action scripts |
    | CodeQL (runs inside fleet-ci's `codeql` matrix) | inline repo-platform's `reusable-codeql.yml` too if you want CodeQL without repo-platform |
