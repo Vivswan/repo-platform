@@ -71,7 +71,7 @@ To unblock:
 
 - **Fix the failure** and let the next green night close the issue, or hand-close it once fixed. Closing re-triggers nothing: re-run the release PR's failed `release-pr` job afterwards (the pre-flight reads issue state fresh at release time).
 
-- **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([release-health action](../../actions/release-health/action.yml)). It never waves through the freshness check: a release PR behind main is refused whatever its labels.
+- **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([release-health action](../../actions/release-health/action.yml)). It never waves through freshness: a release PR behind main refreshes itself in its own run, whatever its labels, and the owner approves the new head's run ([all-green.md](../all-green.md#what-gates-what)).
 
 ## Renaming the label
 

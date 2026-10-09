@@ -9,8 +9,16 @@ description: |
 
   Modes:
     - pull-request: on a release-please PR's CI, in a full-history checkout of the PR head.
-      First requires the head to contain the base branch's tip, since a stale release PR cuts
-      a release missing commits already on it, then runs the gates.
+      First reads whether the head contains the base branch's tip into the `behind` output (a
+      stale release PR cuts a release missing commits already on it, so the caller refreshes
+      it in the same run), then runs the gates.
+    - after-refresh: on that CI, after release-please's propose ran against a stale head, in the
+      same checkout. Green naming the new head when the head moved and the base branch still
+      stands where the checkout fetched it (a base that moved may carry a commit the refresh
+      never saw: red, and that commit's own run refreshes the PR). Unmoved beside a merged
+      release PR still pending fails (release-please proposed nothing). Unmoved otherwise means
+      the PR body was unchanged, so no changelog line is lost: GitHub's update-branch merges the
+      base branch, and a head still unmoved fails.
     - release: on the main-push release path. Gates a release-PR merge and tells the caller
       which push it was through `release-cut`. An ordinary push is not gated, and
       `head-current` says whether the branch still stands at the judged commit.
@@ -18,18 +26,20 @@ description: |
       worn "autorelease: pending" for over 30 minutes, since release-please then proposes
       nothing, green.
 
-  The release-override label on the release PR turns gate failures into warnings. The
-  freshness and pending checks are never overridden.
+  The release-override label on the release PR turns gate failures into warnings. Freshness is
+  never overridden (a stale head is refreshed, not waved through), nor is the pending check.
 
   Needs GH_TOKEN in the environment with issues read, pull-requests read, and
   vulnerability-alerts read (an unreadable alerts endpoint fails the gate), and gh >= 2.51 on
-  the runner (GitHub-hosted runners ship current gh).
+  the runner (GitHub-hosted runners ship current gh). After-refresh mode's branch update needs
+  contents write and pull-requests write.
 
 inputs:
   mode:
     description: >-
-      pull-request (on the release PR's CI), release (on the main-push release
-      path), or after-propose (after release-please proposed)
+      pull-request (on the release PR's CI), after-refresh (there, after release-please's
+      propose), release (on the main-push release path), or after-propose (after
+      release-please proposed)
     required: true
   tracking-labels:
     description: >-
@@ -39,6 +49,9 @@ inputs:
     default: ""
 
 outputs:
+  behind:
+    description: 'Pull-request mode only: "true" when the PR head lacks the base branch tip, "false" when it contains it.'
+    value: ${{ steps.freshness.outputs.behind }}
   release-cut:
     description: 'Release mode only: "true" when the judged commit is a release-PR merge, "false" otherwise.'
     value: ${{ steps.check.outputs.release-cut }}
@@ -62,7 +75,8 @@ runs:
 
     # The merge ref GitHub checks out by default already contains the base
     # tip, so the caller checks out the PR head; GITHUB_BASE_REF names the base.
-    - name: Require the release PR to contain the tip of its base branch
+    - name: Read whether the release PR contains the tip of its base branch
+      id: freshness
       if: inputs.mode == 'pull-request'
       shell: bash
       env:

@@ -245,9 +245,16 @@ jobs:
       - if: hashFiles('docs/**') == ''
         run: echo "::notice::docs-check stood down, this repository has no docs/ directory"
 
-  # The release PR's two gates run in release-health's pull-request mode. Freshness fails when the PR head lacks main's
-  # tip at CHECK time: a stale release PR cuts a release missing commits already on main (other PRs stay mergeable while
-  # behind). Health can go stale between check and release, so the release path re-runs the same action as its pre-flight.
+  # The release PR's gates run in release-health's pull-request mode. A head behind main would cut a release missing
+  # commits already on it, so a stale PR heals in its own run, whatever the gates said (a bare step implies success(),
+  # which would leave a PR behind a red gate stale; the gate's red stands either way):
+  #   health: behind? -> release-please propose rebuilds the branch from main and force-pushes
+  #                   -> after-refresh (only after a propose that succeeded): head moved -> green, naming the new head
+  #                        head unmoved -> a merged release PR still pending: red (release-please proposed nothing)
+  #                                        else the PR body was unchanged: GitHub's update-branch merges main
+  #
+  # The merge is safe only there (an unchanged body means the commits the PR lacks add no changelog line); a changed body
+  # is always release-please's rebuild. Health can go stale between check and release, so the release path re-runs it.
   release-pr:
     needs: [standard-checks]
     if: >-
@@ -255,11 +262,14 @@ jobs:
       github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # contents write: release-please and update-branch push the release branch. pull-requests write: release-please
+    # edits the release PR. The skeleton's `ci` caller grants both, and the pull_request event keeps them on the job
+    # token for a branch of the same repository (a release PR is never a fork PR, where the token is read-only).
     # vulnerability-alerts read is the Dependabot alerts API key; without it the security gate fails.
     permissions:
-      contents: read
+      contents: write
       issues: read
-      pull-requests: read
+      pull-requests: write
       vulnerability-alerts: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -277,9 +287,24 @@ jobs:
           persist-credentials: false
       - run: echo "/.repo-platform-checkout/" >> .git/info/exclude
       - uses: ./.repo-platform-checkout/actions/release-health
+        id: health
         with:
           mode: pull-request
           # Empty disables the tracking gates (no stream module selected).
           tracking-labels: ${{ needs.standard-checks.outputs.tracking-labels }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needs no checkout: release-please reads main through the API and targets the repository's default branch, not
+      # this event's merge ref. The pin is fleet-release.yml's (tests/workflows/delivery_pins.test.ts holds them equal).
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: refresh
+        if: ${{ !cancelled() && steps.health.outputs.behind == 'true' }}
+        with:
+          token: ${{ github.token }}
+          skip-github-release: true
+      - uses: ./.repo-platform-checkout/actions/release-health
+        if: ${{ !cancelled() && steps.health.outputs.behind == 'true' && steps.refresh.outcome == 'success' }}
+        with:
+          mode: after-refresh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

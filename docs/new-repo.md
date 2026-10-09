@@ -218,7 +218,7 @@ Around the cut itself:
 
 - **The release PR is `GITHUB_TOKEN`'s:** GitHub lets a workflow open one only where the repository allows Actions to create and approve pull requests. The module's settings layer ([files/release-please/settings.yml](../files/release-please/settings.yml)) grants it, and the central apply sets it once the rendered settings land. Until then the release job is red with `GitHub Actions is not permitted to create or approve pull requests`.
 
-- **The release-PR hook:** a run in which release-please creates or refreshes the release PR (a run finding no unreleased releasable commits triggers neither) calls the repo-owned `update-release-pr.yml` hook with the PR's number and head branch. Regenerating files that must ride in the release commit and updating version references go there. Its pushes with the default `GITHUB_TOKEN` do not re-trigger the PR's checks.
+- **The release-PR hook:** a run in which release-please creates or refreshes the release PR (a run finding no unreleased releasable commits triggers neither) calls the repo-owned `update-release-pr.yml` hook with the PR's number and head branch. Regenerating files that must ride in the release commit and updating version references go there. Its pushes with the default `GITHUB_TOKEN` give the PR a new run held for approval, like every release-PR head ([all-green.md](all-green.md#what-gates-what)).
 
 - **A workflow-file change between merge and cut:** `github.token` cannot tag an older commit once a later commit changed a workflow file on main (that ref creation needs `workflows: write`, which it never holds). So a workflow-file change landing on main between the release merge and its cut turns the `release` job red.
 
