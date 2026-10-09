@@ -72,6 +72,14 @@ runs:
       with:
         from: ${{ github.action_path }}
 
+    - name: Probe where $/ resolved
+      shell: bash
+      env:
+        PROBE_REPOSITORY: ${{ github.action_repository }}
+        PROBE_REF: ${{ github.action_ref }}
+        PROBE_PATH: ${{ github.action_path }}
+      run: echo "probe repository=$PROBE_REPOSITORY ref=$PROBE_REF path=$PROBE_PATH"
+
     - name: Install the action's dependencies
       shell: bash
       env:
