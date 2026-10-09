@@ -9,7 +9,7 @@
     ".github/agents.md": {"class": "mirror", "kind": "symlink", "hash": "79909577a70fc4971a7fcfd3cbec6a1af7182ca2dadc87f2979dce5e28f93ca0"},
     ".github/copilot-instructions.md": {"class": "mirror", "kind": "symlink", "hash": "79909577a70fc4971a7fcfd3cbec6a1af7182ca2dadc87f2979dce5e28f93ca0"},
     ".github/instructions/review.instructions.md": {"class": "managed", "hash": "89d5c9bc2bea185a076b37a4cefb5ffea25a37f050c4e39512b875b95e2db380"},
-    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "9a9a08a88e51e98e79bf0c6754badad1d8cb5f83"},
+    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "23b8a0ef7fb565d9da884e370c9020098510af25"},
     ".github/settings.local.yml": {"class": "starter"},
     ".github/settings.yml": {"class": "managed", "hash": "c8789f5df064070088bd2192b90774c85512ece0a3439211323ae2e0f9502f55"},
     ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "42534cbfecfcc71acbee7f232d2c2b6c03b523e8158fdbac354d25a27aaf6510"},
