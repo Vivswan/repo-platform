@@ -17,7 +17,7 @@ repo-platform dogfoods the docs half: this guide and the rest of `docs/` are the
 
 ## The leg and its triggers
 
-The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and `publish-release`, and runs on every run of ci.yml on main whose gate passed:
+The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release`, and runs on every run of ci.yml on main whose gate passed:
 
 | Trigger | The deploy it is |
 |---|---|
@@ -28,7 +28,9 @@ The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and 
 - **No workflow of its own and no tag trigger:** a tag created without a push lands on the nightly rebuild, or right away via dispatch.
 - **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
 
-**The release legs sit before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the release chain and then runs whatever its result, and a release commit's own deploy serves its new tag. Without the release-please module the release legs skip and the deploy follows the repo-owned post-green hook directly ([all-green.md](../all-green.md#after-the-gate)).
+**The release leg sits before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the tag and then runs whatever the release's result, and a release commit's own deploy serves its new tag ([all-green.md](../all-green.md#after-the-gate)).
+
+- **Without the release-please module** the release leg skips, and the deploy still runs after it: GitHub resolves that skip only once the leg's own need, the repo-owned post-green hook, has finished.
 
 The called workflow is one job, in this order:
 
@@ -235,7 +237,7 @@ The registration is read on every run, so the flip needs no sync.
 
 fleet-ci.yml's `docs-check` job builds `docs/` strictly on every pull request of a repository selecting `site` that carries a `docs/` directory (and has not turned the docs half off). It uses the same include roots the deploy reads from the registration, so a dead link fails the PR instead of the deploy.
 
-- **A gating job:** it is one of the gating jobs behind `all-green`. The deploy would go red on the same link after the merge, and a job inside the `ci` call can never hang as an expected check the way a paths-filtered workflow could.
+- **A gating job:** it is one of the gating jobs behind `all-green`. The deploy would go red on the same link after the merge, and a job inside the `platform` call can never hang as an expected check the way a paths-filtered workflow could.
 
 - **Every PR runs it:** a PR that changes no docs still runs it, quickly, over the unchanged tree.
 

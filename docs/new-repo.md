@@ -89,7 +89,7 @@ CI is split so the platform can keep improving its half while each repo keeps it
 
 | File | Owner | Contents |
 |---|---|---|
-| `.github/workflows/ci.yml` | managed - sync updates it, don't edit; one byte-identical file for the whole fleet | a `checks` job calling checks.yml, a `ci` job calling repo-platform's [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@stable` (which reads the module selection from `.repo-platform.yml`), the `all-green` gate, and the static legs after it ([all-green.md](all-green.md#after-the-gate)) |
+| `.github/workflows/ci.yml` | managed - sync updates it, don't edit; one byte-identical file for the whole fleet | a `checks` job calling checks.yml, a `platform` job calling repo-platform's [fleet.yml](../.github/workflows/fleet.yml)`@stable` (which reads the module selection from `.repo-platform.yml`), the `all-green` gate, and the static legs after it ([all-green.md](all-green.md#after-the-gate)) |
 | `.github/workflows/checks.yml` | repo-owned (a starter, written once) | the repository's own test and lint jobs (multiple jobs, matrices, and further local reusable workflows all work); they run inside the gate through the `checks` job |
 | `.github/workflows/post-green.yml` | repo-owned (a starter, written once) | the repository's own green-gated work, seeded as a no-op ([its contract](all-green.md#the-post-green-hook-in-every-managed-repository)) |
 | `.github/workflows/update-release.yml`, `update-release-pr.yml` | repo-owned (a starter, written once) | the release hooks ci.yml's release legs call; seeded as no-ops in every repository, module or not ([the release pipeline](#the-release-pipeline-release-please)) |
@@ -97,7 +97,7 @@ CI is split so the platform can keep improving its half while each repo keeps it
 
 **A starter is written once** and never touched by a sync after that, so when the platform INTRODUCES a starter at a path a repository already owns a file at, the writer leaves the repository's file alone and reports the row `unchanged`. Check the kept file against the interface its callers expect (the [sync-PR skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md) has the triage row).
 
-**The `ci` job's checks** are listed in [what gates what](all-green.md#what-gates-what), each with where it runs, and [the all-green convention](all-green.md) says how the required `all-green` check judges both callers.
+**The `platform` job's checks** are listed in [what gates what](all-green.md#what-gates-what), each with where it runs, and [the all-green convention](all-green.md) says how the required `all-green` check judges both gating jobs.
 
 ### The managed files check
 

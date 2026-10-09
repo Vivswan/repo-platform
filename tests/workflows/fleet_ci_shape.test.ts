@@ -1,8 +1,7 @@
-// fleet-ci.yml is the fleet's gate-job home; the yaml is the source and the diff its review, so only what a green run cannot
-// show is pinned here: GitHub's step rule (a bare step implies success(), so a failed check would hide every later one), the
-// schedule census the yaml cannot express (the skeleton's `ci` caller is unconditional, so a step without a schedule clause
-// runs nightly fleet-wide), the output chain GitHub resolves to '' without an error, and two gates whose wrong spelling stays
-// green on every run.
+// fleet-ci.yml is the fleet's gate-job home, nested as fleet.yml's `ci` job. Pinned here is what a green run cannot
+// show: GitHub's step rule (a bare step implies success()), the schedule census (the `platform` caller is unconditional,
+// so a step without a schedule clause runs nightly fleet-wide), the output chain GitHub resolves to '' without an error,
+// and two gates whose wrong spelling stays green.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
@@ -20,6 +19,7 @@ interface Step {
 }
 interface Job {
   if?: string;
+  uses?: string;
   outputs?: Record<string, string>;
   steps?: Step[];
 }
@@ -29,8 +29,11 @@ interface Workflow {
 }
 
 const ROOT = join(import.meta.dir, "../..");
-const source = readFileSync(join(ROOT, ".github/workflows/fleet-ci.yml"), "utf8");
-const fleetCi = parseYaml(source) as Workflow;
+const WORKFLOWS = ".github/workflows";
+const loadWorkflow = (name: string) =>
+  parseYaml(readFileSync(join(ROOT, WORKFLOWS, name), "utf8")) as Workflow;
+const fleetCi = loadWorkflow("fleet-ci.yml");
+const fleet = loadWorkflow("fleet.yml");
 const CHECKS_JOB = "standard-checks";
 const checksJob = fleetCi.jobs[CHECKS_JOB];
 const checkSteps = checksJob?.steps ?? [];
@@ -145,14 +148,14 @@ describe("fleet-ci.yml", () => {
     });
   });
 
-  // Which steps and jobs a scheduled run may reach: the checkout, the plan, and CodeQL on its weekly day (the nightly
-  // security scan rides fleet-nightly.yml). Every other step excludes the schedule outright or gates on the success of a
-  // step that does, and every other job's condition excludes it (the skip clause, or a PR-only guard), so a new step or
-  // job must take a side.
+  // Which steps and jobs a scheduled run may reach: the checkout, the plan, CodeQL on its weekly day, and fleet.yml's
+  // trivy-nightly, which runs on the schedule ALONE (without its clause every push would file the security issue). Every
+  // other step and job excludes the schedule or gates on one that does, so a new step or job must take a side.
   const SKIP_ON_SCHEDULE = "github.event_name != 'schedule'";
+  const ONLY_ON_SCHEDULE = "github.event_name == 'schedule'";
   const GATED_ON = /^steps\.([\w-]+)\.outcome == 'success'$/;
 
-  test("on the nightly schedule only the checkout, the plan, and (weekly) codeql can run", () => {
+  test("on the nightly schedule only the checkout, the plan, (weekly) codeql, and trivy-nightly can run; trivy-nightly runs then alone", () => {
     const stoodDown = new Set<string>();
     for (let grew = true; grew; ) {
       grew = false;
@@ -184,12 +187,28 @@ describe("fleet-ci.yml", () => {
     expect(fleetCi.jobs.codeql?.if).toContain(
       `(github.event_name != 'schedule' || needs.${CHECKS_JOB}.outputs.weekly == 'true')`,
     );
+    // fleet.yml: the call carries no condition (the gate's allowed-skips names checks alone), and every job beside it is
+    // the schedule's.
+    const fleetJobs = Object.entries(fleet.jobs);
+    const sides = fleetJobs.map(([name, job]) =>
+      job.uses === undefined
+        ? [name, clausesOf(job.if).includes(ONLY_ON_SCHEDULE) ? "schedule only" : `when ${job.if}`]
+        : [name, job.if === undefined ? "unconditional call" : `call when ${job.if}`],
+    );
+    expect(sides).toEqual(
+      fleetJobs.map(([name, job]) => [
+        name,
+        job.uses === undefined ? "schedule only" : "unconditional call",
+      ]),
+    );
+    expect(sides.length).toBeGreaterThan(1);
   });
 
-  // GitHub resolves a read of an output nobody sets to '' with no error, so the skeleton's `contains(needs.ci.outputs.modules,
-  // '"site"')` would skip its leg forever, green, and a module job here would do the same. Every read is walked to the step
-  // that sets it and on to the action declaring the output, under ONE name the whole way (a workflow_call output wired to a
-  // job output of another name is a swap nothing else catches), so a rename or a swap anywhere on the chain fails here.
+  // GitHub resolves a read of an output nobody sets to '' with no error, so a misspelled output skips the skeleton's leg
+  // forever, green. Every read is walked to the step that sets it, under ONE name the whole way:
+  //   skeleton needs.platform.outputs.X -> fleet.yml workflow_call X -> jobs.ci (a call) -> fleet-ci.yml workflow_call X
+  //     -> jobs.standard-checks.outputs.X -> steps.plan.outputs.X -> actions/plan declares X
+  // A wire to another name is a swap nothing else catches, so it fails here too.
   const actionOutputs = (uses: string): string[] | null => {
     const name = platformAction(uses);
     if (name === undefined) return null;
@@ -206,10 +225,17 @@ describe("fleet-ci.yml", () => {
     if (declared === null) return null;
     return declared.includes(output) ? null : `'${step.uses}' declares no output '${output}'`;
   };
-  /** Why `needs.<job>.outputs.<name>` resolves to nothing, or null when the job wires it to a step that sets it. */
-  const jobOutputGap = (jobName: string, output: string): string | null => {
-    const job = fleetCi.jobs[jobName];
+  /** Why `needs.<job>.outputs.<name>` resolves to nothing, or null when the job wires it to a step that sets it; a call
+   *  job's outputs are the called workflow's. */
+  const jobOutputGap = (workflow: Workflow, jobName: string, output: string): string | null => {
+    const job = workflow.jobs[jobName];
     if (job === undefined) return `no job '${jobName}'`;
+    if (job.uses !== undefined) {
+      const called = /^\$\/\.github\/workflows\/(.+)$/.exec(job.uses)?.[1];
+      return called === undefined
+        ? `job '${jobName}' calls ${job.uses}, not a platform workflow`
+        : callOutputGap(loadWorkflow(called), output);
+    }
     const value = job.outputs?.[output];
     if (value === undefined) return `job '${jobName}' declares no output '${output}'`;
     const wired = /^\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
@@ -219,41 +245,43 @@ describe("fleet-ci.yml", () => {
       return `job '${jobName}' output '${output}' is wired to steps.${wired[1]}.outputs.${wired[2]}, another name`;
     return stepOutputGap(job, wired[1], wired[2]);
   };
+  /** Why a caller's `needs.<call>.outputs.<name>` resolves to nothing, or null when the called workflow wires it through. */
+  const callOutputGap = (called: Workflow, output: string): string | null => {
+    const value = called.on.workflow_call.outputs?.[output]?.value;
+    if (value === undefined) return `workflow_call declares no output '${output}'`;
+    const wired = /^\$\{\{ jobs\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
+    if (wired === null) return `workflow_call output '${output}' is ${value}, not one job output`;
+    if (wired[2] !== output)
+      return `workflow_call output '${output}' is wired to jobs.${wired[1]}.outputs.${wired[2]}, another name`;
+    return jobOutputGap(called, wired[1], wired[2]);
+  };
 
-  test("every output read resolves to a step that sets it: the skeleton's, the jobs', and the steps'", () => {
+  test("every output read resolves to a step that sets it: the skeleton's through fleet.yml's nested call, the jobs', and the steps'", () => {
     const gaps: string[] = [];
     const skeleton = readFileSync(join(ROOT, "files/base/.github/workflows/ci.yml"), "utf8");
     const skeletonReads = new Set(
-      [...skeleton.matchAll(/needs\.ci\.outputs\.([\w-]+)/g)].map((match) => match[1]),
+      [...skeleton.matchAll(/needs\.platform\.outputs\.([\w-]+)/g)].map((match) => match[1]),
     );
-    const called = fleetCi.on.workflow_call.outputs;
     for (const output of skeletonReads) {
-      const value = called[output]?.value;
-      if (value === undefined) {
-        gaps.push(
-          `skeleton reads needs.ci.outputs.${output}, which workflow_call does not declare`,
-        );
-        continue;
-      }
-      const wired = /^\$\{\{ jobs\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
-      const gap =
-        wired === null
-          ? `is ${value}, not one job output`
-          : wired[2] !== output
-            ? `is wired to jobs.${wired[1]}.outputs.${wired[2]}, another name`
-            : jobOutputGap(wired[1], wired[2]);
-      if (gap !== null) gaps.push(`workflow_call output '${output}': ${gap}`);
+      const gap = callOutputGap(fleet, output);
+      if (gap !== null) gaps.push(`skeleton reads needs.platform.outputs.${output}: ${gap}`);
     }
-    for (const [jobName, job] of Object.entries(fleetCi.jobs)) {
-      const text = JSON.stringify(job);
-      for (const [, needed, output] of text.matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-        const gap = jobOutputGap(needed, output);
-        if (gap !== null)
-          gaps.push(`job '${jobName}' reads needs.${needed}.outputs.${output}: ${gap}`);
-      }
-      for (const [, id, output] of text.matchAll(/steps\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-        const gap = stepOutputGap(job, id, output);
-        if (gap !== null) gaps.push(`job '${jobName}' reads steps.${id}.outputs.${output}: ${gap}`);
+    for (const [file, workflow] of [
+      ["fleet.yml", fleet],
+      ["fleet-ci.yml", fleetCi],
+    ] as const) {
+      for (const [jobName, job] of Object.entries(workflow.jobs)) {
+        const text = JSON.stringify(job);
+        for (const [, needed, output] of text.matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
+          const gap = jobOutputGap(workflow, needed, output);
+          if (gap !== null)
+            gaps.push(`${file} job '${jobName}' reads needs.${needed}.outputs.${output}: ${gap}`);
+        }
+        for (const [, id, output] of text.matchAll(/steps\.([\w-]+)\.outputs\.([\w-]+)/g)) {
+          const gap = stepOutputGap(job, id, output);
+          if (gap !== null)
+            gaps.push(`${file} job '${jobName}' reads steps.${id}.outputs.${output}: ${gap}`);
+        }
       }
     }
     expect({ gaps, skeletonReadsWalked: [...skeletonReads].length > 0 }).toEqual({

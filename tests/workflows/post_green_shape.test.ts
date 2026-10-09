@@ -5,6 +5,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { data, Evaluator, Lexer, Parser } from "@actions/expressions";
+import { truthy } from "@actions/expressions/result";
 import { parse as parseYaml } from "yaml";
 
 const root = join(import.meta.dir, "../..");
@@ -19,57 +21,45 @@ interface Concurrency {
   "cancel-in-progress": string | boolean;
 }
 
-/** A missing context read is the empty string, as an unrun job's output is in Actions. */
+// The status functions are the workflow runner's, not the expression language's: a job whose condition passed is judged
+// here only when its chain ran or a status function let it continue, so always() reads true and cancelled() false.
+const STATUS_FUNCTIONS = new Map(
+  [
+    ["always", true],
+    ["cancelled", false],
+  ].map(([name, value]) => [
+    String(name),
+    {
+      name: String(name),
+      minArgs: 0,
+      maxArgs: 0,
+      call: () => new data.BooleanData(Boolean(value)),
+    },
+  ]),
+);
+
+/** GitHub's own expression language over a context of dotted keys; a key nobody set reads as null, as an unrun job's
+ *  output does in Actions. */
 function evaluateCondition(expression: string, context: Record<string, string>): boolean {
-  const tokens = expression.match(/'[^']*'|[A-Za-z_][\w.-]*(?:\(\))?|==|!=|&&|\|\||[()!]/g) ?? [];
-  if (tokens.join("").replace(/\s/g, "") !== expression.replace(/\s/g, "")) {
-    throw new Error(`unsupported expression: ${expression}`);
+  const contexts = new data.Dictionary();
+  for (const [path, value] of Object.entries(context)) {
+    const keys = path.split(".");
+    let node = contexts;
+    for (const key of keys.slice(0, -1)) {
+      const child = node.get(key) ?? new data.Dictionary();
+      if (!(child instanceof data.Dictionary)) throw new Error(`${path}: ${key} is not a mapping`);
+      if (node.get(key) === undefined) node.add(key, child);
+      node = child;
+    }
+    node.add(keys[keys.length - 1], new data.StringData(value));
   }
-  let at = 0;
-  const peek = () => tokens[at];
-  const next = () => tokens[at++];
-  const value = (): string | boolean => {
-    const token = next();
-    if (token === undefined) throw new Error(`unexpected end of ${expression}`);
-    if (token === "!") return !value();
-    if (token === "(") {
-      const inner = or();
-      if (next() !== ")") throw new Error(`unbalanced parentheses in ${expression}`);
-      return inner;
-    }
-    if (token.startsWith("'")) return token.slice(1, -1);
-    if (token === "always()") return true;
-    if (token === "cancelled()") return false;
-    return context[token] ?? "";
-  };
-  const comparison = (): string | boolean => {
-    const left = value();
-    if (peek() === "==" || peek() === "!=") {
-      const op = next();
-      const right = value();
-      return op === "==" ? left === right : left !== right;
-    }
-    return left;
-  };
-  const and = (): boolean => {
-    let result = Boolean(comparison());
-    while (peek() === "&&") {
-      next();
-      result = Boolean(comparison()) && result;
-    }
-    return result;
-  };
-  const or = (): boolean => {
-    let result = and();
-    while (peek() === "||") {
-      next();
-      result = and() || result;
-    }
-    return result;
-  };
-  const result = or();
-  if (at !== tokens.length) throw new Error(`trailing tokens in ${expression}`);
-  return result;
+  const tokens = new Lexer(expression).lex().tokens;
+  const tree = new Parser(
+    tokens,
+    contexts.pairs().map((pair) => pair.key),
+    [...STATUS_FUNCTIONS.values()],
+  ).parse();
+  return truthy(new Evaluator(tree, contexts, STATUS_FUNCTIONS).evaluate());
 }
 
 /** Simulates GitHub's own rules, which the body mirrors; `outputs` stands in for the step outputs
@@ -179,5 +169,43 @@ describe("post-green wiring", () => {
   test("ci.yml: a push to main skips dependency-review alone, and every leg behind the gate runs (post-green skipped past a green gate, stable stalled)", () => {
     const ran = jobsRunning(ci.jobs, "push", {});
     expect(Object.keys(ci.jobs).filter((job) => !ran.includes(job))).toEqual(["dependency-review"]);
+  });
+
+  // The skeleton's legs read outputs from `platform` and gate on the results they name, and a needs edge GitHub reads as
+  // an order (the site behind the release) is one it also reads as an implicit success() gate without the leading
+  // !cancelled(). Either slip leaves a leg skipped forever on some event, green: the nightly rebuild, a release commit's
+  // deploy, or the deploy after a red hook.
+  test("the skeleton: every leg runs on a release commit's push; the schedule rebuilds the site alone; a red hook skips the release and the deploy still runs", () => {
+    const skeleton = parseYaml(
+      read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
+    ) as { jobs: Record<string, Job> };
+    const every = Object.keys(skeleton.jobs).sort();
+    const released = {
+      modules: '["release-please","site"]',
+      release_created: "true",
+      prs_created: "true",
+      tag_name: "v1.2.3",
+    };
+    const runs = (
+      event: string,
+      outputs: Record<string, string>,
+      failed?: string[],
+      ref?: string,
+    ) => jobsRunning(skeleton.jobs, event, outputs, failed, ref).sort();
+    expect({
+      releasePush: runs("push", released),
+      plainPush: runs("push", { modules: "[]" }),
+      schedule: runs("schedule", released),
+      dispatch: runs("workflow_dispatch", released),
+      pullRequest: runs("pull_request", released, [], "refs/pull/7/merge"),
+      redHook: runs("push", released, ["post-green"]),
+    }).toEqual({
+      releasePush: every,
+      plainPush: ["all-green", "checks", "platform", "post-green"],
+      schedule: ["all-green", "platform", "site"],
+      dispatch: ["all-green", "checks", "platform", "site"],
+      pullRequest: ["all-green", "checks", "platform"],
+      redHook: ["all-green", "checks", "platform", "site"],
+    });
   });
 });

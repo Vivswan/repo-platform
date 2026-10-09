@@ -14,7 +14,7 @@ Every repository in the fleet - repo-platform included - gates merges on a requi
 
 | ci.yml | `allowed-skips` | Why |
 | --- | --- | --- |
-| the managed skeleton | `checks` alone | so a schedule night passes on `ci` and an all-skipped run cannot pass |
+| the managed skeleton | `checks` alone | so a schedule night passes on `platform` and an all-skipped run cannot pass |
 | repo-platform's own | `dependency-review` alone | since only a pull request has a dependency diff to review |
 
 **The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, which [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) holds to the root's sha, landed in the fleet by the next sync round.
@@ -40,9 +40,9 @@ Each entry is what you see, what it means, and what to do.
 - **Means:** the concurrency group cancelled this run for a newer one at the same head, or someone cancelled it.
 - **Do:** the newer run at the head carries the verdict; if none exists or the merge box still reads this run, re-run the newest CI run at the head.
 
-**`all-green` failed with `ci` skipped.**
+**`all-green` failed with `platform` skipped.**
 
-- **Means:** fleet-ci's `standard-checks` job did not run, so the caller skipped and the gate never lets it.
+- **Means:** the platform call did not run (its `ci` job is fleet-ci.yml, whose `standard-checks` job is the plan), so the caller skipped and the gate never lets it.
 - **Do:** a run that verified nothing must not merge; check why the caller skipped.
 
 **`pr-title` waiting (repos with the pr-title module).**
@@ -57,24 +57,21 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | Gating job | What it does |
 | --- | --- |
 | `checks` | calls the repo-owned checks.yml; skipped on the nightly schedule run |
-| `ci` | calls [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@stable` with no inputs: the `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels |
+| `platform` | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. Its `ci` job is [fleet-ci.yml](../.github/workflows/fleet-ci.yml): the `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels. Its `trivy-nightly` job is the schedule's |
 | `all-green` | needs both |
 
-**The nightly schedule run** is shared by the two fleet callers. In the `ci` caller, CodeQL reruns on the plan's `weekly` day and the other checks stand down; the `nightly` caller runs the Trivy scan and files its tracking issue.
+**The nightly schedule run** is the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, the other checks stand down, and `trivy-nightly` runs the Trivy scan and files its tracking issue. Public repositories only: a private repository pays for every job that runs, and a skipped job bills nothing.
 
-The jobs beside them gate nothing:
+**One ceiling for every platform call:** `platform`, `release`, `publish-release`, and `site` carry the same fixed `permissions:` block, the union of what any job behind those calls asks, and each called job narrows itself to its own need.
 
-| Non-gating job | What it is |
-| --- | --- |
-| the `post-green` caller and the static legs | gate-downstream ([after the gate](#after-the-gate)) |
-| the schedule-only `nightly` caller of [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml)`@stable` | the nightly [security scan](modules/security-scans.md), public repositories only |
+- GitHub validates a called job's grant against its caller's before the job's `if` runs, so one job over the block fails every fleet run at once.
+- [tests/workflows/caller_ceilings.test.ts](../tests/workflows/caller_ceilings.test.ts) holds every called job under the block and the block to exactly that union, so no scope is granted that nothing asks.
 
-- **Why `nightly` has its own caller:** it runs on the schedule alone and files the tracking issue.
-- **Why public only:** a private repository pays for every job that runs, and a skipped job bills nothing.
+**The jobs beside them gate nothing:** the `post-green` caller and the static legs are gate-downstream ([after the gate](#after-the-gate)).
 
-**The membership rule:** what gates a managed repository is being a job in fleet-ci.yml or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
+**The membership rule:** what gates a managed repository is being a job in fleet.yml (fleet-ci.yml's included) or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
 
-- **Inside fleet-ci.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green.
+- **Inside fleet-ci.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green. `trivy-nightly` fails on a scan or configuration error alone, never on a finding; such a night's gate is red, and the site rebuild waits for the next.
 
 - **Every platform action it calls** is a `$/` path, this repository at the workflow's own commit ([build-provenance](platform/build-provenance.md#one-commit-per-run)).
 
@@ -163,8 +160,9 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 ### The static legs
 
 ```text
-checks + ci -> all-green -> post-green (repo-owned hook) -> release -> update-release (hook) -> publish-release -> site
-                                                                  \-> update-release-pr (hook)
+checks + platform -> all-green -> post-green (repo-owned hook) -> release -> update-release (hook) -> publish-release
+                             \                                          \-> update-release-pr (hook)
+                              \-> site, ordered behind release
 ```
 
 **The legs after the hook are STATIC:** every managed ci.yml carries the same `release`, `update-release`, `publish-release`, `update-release-pr`, and `site` jobs, present in every run, and each skips where its module is not selected.
@@ -172,7 +170,7 @@ checks + ci -> all-green -> post-green (repo-owned hook) -> release -> update-re
 - Adding a module needs no change to ci.yml ([changing the module selection](new-repo.md#changing-the-module-selection)).
 - How each leg's condition is spelled in the managed ci.yml, and which lanes the release cut holds, is [platform/post-green.md](platform/post-green.md#how-the-static-legs-gate).
 
-**The `release` leg** needs the gate AND the hook, so the repo's post-green work lands before the tag is minted. It then calls [fleet-release.yml](../.github/workflows/fleet-release.yml)`@stable` with the judged sha and fleet-ci's `tracking-labels` output. The called job takes two paths off release-health's `release-cut` output:
+**The `release` leg** needs the hook, which itself ran only past a green gate, so the repo's post-green work lands before the tag is minted. It then calls [fleet-release.yml](../.github/workflows/fleet-release.yml)`@stable` with the judged sha and the `platform` call's `tracking-labels` output. The called job takes two paths off release-health's `release-cut` output:
 
 | Push | Path |
 | --- | --- |
@@ -191,7 +189,7 @@ checks + ci -> all-green -> post-green (repo-owned hook) -> release -> update-re
 
 - The leg has no push clause: it runs on every main run whose gate passed, so the nightly schedule is the rebuild and a dispatch is the manual deploy, and no site workflow of its own exists.
 
-- It is ordered behind `publish-release` as an ORDER and not a gate: its condition leads with `!cancelled()`, so it waits for the release legs and then deploys whatever their result (a red hook skips the release; the deploy still runs). A release commit's own deploy serves its new tag.
+- It is ordered behind `release` as an ORDER and not a gate: its condition leads with `!cancelled()`, so it waits for the tag and then deploys whatever the release's result (a red hook skips the release; the deploy still runs). A release commit's own deploy serves its new tag.
 
 ### Opting a PR into an immediate fleet sync
 

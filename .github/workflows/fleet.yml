@@ -1,0 +1,99 @@
+# Runs the fleet's CI and its nightly scan, called by the one `platform` job of every managed ci.yml, so an edit here
+# changes fleet CI with no per-repo diff trail. This repository's own gate is the counterweight.
+#
+# The caller judges the call's one result: a job that fails here fails the call, a skipped job leaves it green, and
+# no job is name-addressed.
+#
+# The skeleton grants every platform call ONE fixed ceiling, and GitHub checks a called job's permissions against it
+# before the job's `if` runs (tests/workflows/caller_ceilings.test.ts). Each job here asks for what it needs and
+# nothing more; a job asking past the ceiling fails every fleet run at once.
+#
+# fleet-ci.yml stays callable while a ci.yml the sync has not replaced yet still calls it, so its jobs ride here as
+# one call; the rung that deletes fleet-ci.yml and fleet-nightly.yml inlines them. Every platform path is `$/`:
+# this repository at this file's own commit (docs/platform/build-provenance.md).
+
+name: Fleet
+
+on:
+  workflow_call:
+    outputs:
+      modules:
+        description: The repository's module selection in canonical order, a compact JSON array.
+        value: ${{ jobs.ci.outputs.modules }}
+      tracking-labels:
+        description: Comma-separated nightly tracking-issue labels of the selected stream modules.
+        value: ${{ jobs.ci.outputs.tracking-labels }}
+
+permissions:
+  contents: read
+
+jobs:
+  # The checks every repository runs and the module jobs. This grant is the ceiling of the jobs inside, the union of
+  # what each asks.
+  ci:
+    uses: $/.github/workflows/fleet-ci.yml
+    permissions:
+      contents: write
+      pull-requests: write
+      security-events: write
+      actions: read
+      issues: read
+      vulnerability-alerts: read
+
+  # The nightly half of the security scan (docs/modules/security-scans.md). A finding never fails it: findings become
+  # the security-nightly issue that release-health blocks on, and a clean night closes it. A scan or configuration
+  # error does, and that night's call and gate are red with it. Public repositories only: a private repository pays
+  # for every job that runs, and a skipped job bills nothing.
+  trivy-nightly:
+    if: github.event_name == 'schedule' && !github.event.repository.private
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: $/actions/plan
+        id: plan
+        with:
+          private: ${{ github.event.repository.private }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: $/actions/trivy
+        id: scan
+        with:
+          mode: nightly
+      - name: Upload the findings report
+        if: steps.scan.outputs.found == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-findings-${{ github.run_attempt }}
+          path: ${{ steps.scan.outputs.report-dir }}
+          if-no-files-found: ignore
+      - name: File or update the security issue
+        if: steps.scan.outputs.found == 'true'
+        uses: $/actions/fuzz-issue
+        with:
+          mode: report
+          label: ${{ steps.plan.outputs.security-label }}
+          title: Nightly security scan findings
+          artifacts-dir: ${{ steps.scan.outputs.report-dir }}
+          artifact-name: trivy-findings-${{ github.run_attempt }}
+          label-color: ${{ steps.plan.outputs.security-label-color }}
+          label-description: ${{ steps.plan.outputs.security-label-description }}
+          stream: generic
+      - name: Close the security issue on a clean night
+        if: steps.scan.outputs.found == 'false'
+        uses: $/actions/fuzz-issue
+        with:
+          mode: resolve
+          label: ${{ steps.plan.outputs.security-label }}
+          stream: generic
+      # Personal-account code scanning is public-only.
+      - name: Upload the SARIF to code scanning
+        if: steps.plan.outputs.private == 'false'
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+          category: trivy
