@@ -100,6 +100,52 @@ describe("fleet-ci.yml", () => {
     ]);
   });
 
+  // Freshness no longer fails the job, so a stale release PR is green unless the heal runs; GitHub resolves a gate on a
+  // literal other than the 'true' freshness.ts writes (tests/actions/release-health/freshness.test.ts pins those bytes)
+  // to false with no error, and a bare step implies success(), so without !cancelled() a red health gate would leave the
+  // PR stale (Copilot's finding on #493). Nothing but the first stale release PR in a fleet repository would show a wrong
+  // gate, a verdict before the propose whose head it reads or after a failed one (it would merge main instead), a propose
+  // that also tries a release off this PR event (skip-github-release), or a missing write grant (release-please's 403),
+  // weeks later and in another repository. One sha per action across the workflows is tests/workflows/delivery_pins.test.ts's.
+  test("a stale release PR heals whatever the gates said: propose, then the verdict after a successful propose, under the push grants", () => {
+    const job = fleetCi.jobs["release-pr"] as
+      | (Job & { permissions?: Record<string, string> })
+      | undefined;
+    const steps = job?.steps ?? [];
+    const healthAt = steps.findIndex((step) => platformAction(step.uses) === "release-health");
+    const health = steps[healthAt];
+    const propose = steps.findIndex((step) =>
+      (step.uses ?? "").startsWith("googleapis/release-please-action@"),
+    );
+    const verdict = steps.findIndex((step) => step.with?.mode === "after-refresh");
+    const BEHIND = `steps.${health?.id}.outputs.behind == 'true'`;
+    expect({
+      propose: { if: clausesOf(steps[propose]?.if), with: steps[propose]?.with },
+      verdict: {
+        action: platformAction(steps[verdict]?.uses),
+        if: clausesOf(steps[verdict]?.if),
+        afterPropose: healthAt >= 0 && healthAt < propose && propose < verdict,
+      },
+      permissions: job?.permissions,
+    }).toEqual({
+      propose: {
+        if: ["!cancelled()", BEHIND],
+        with: { token: "${{ github.token }}", "skip-github-release": true },
+      },
+      verdict: {
+        action: "release-health",
+        if: ["!cancelled()", BEHIND, `steps.${steps[propose]?.id}.outcome == 'success'`],
+        afterPropose: true,
+      },
+      permissions: {
+        contents: "write",
+        issues: "read",
+        "pull-requests": "write",
+        "vulnerability-alerts": "read",
+      },
+    });
+  });
+
   // Which steps and jobs a scheduled run may reach: the checkouts, the plan, and CodeQL on its weekly day (the nightly
   // security scan rides fleet-nightly.yml). Every other step excludes the schedule outright or gates on the success of a
   // step that does, and every other job's condition excludes it (the skip clause, or a PR-only guard), so a new step or

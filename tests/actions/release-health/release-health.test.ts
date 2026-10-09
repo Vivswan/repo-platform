@@ -18,6 +18,8 @@ import {
   type ReleaseLookup,
   runHealthCheck,
   securityGate,
+  UPDATE_BRANCH_POLL_MS,
+  UPDATE_BRANCH_POLLS,
 } from "../../../actions/release-health/release-health.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
@@ -41,6 +43,10 @@ interface Fixture {
   headSha?: string;
   /** The merged PRs still labelled pending, as `gh pr list --state merged` answers them (after-propose mode). */
   mergedPending?: Array<{ number: number; mergedAt: string }>;
+  /** What each successive read of the release PR's head answers (after-refresh mode); `null` is a payload with no sha. */
+  prHeads?: Array<string | null>;
+  /** What GitHub's update-branch answers instead of 202 (after-refresh mode). */
+  updateBranchError?: string;
 }
 
 const REPO = "o/r";
@@ -79,6 +85,17 @@ function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
       }
       return JSON.stringify((fixture.alerts ?? []).map((number) => ({ number })));
     }
+    if (args[0] === "api" && args[1] === `repos/${REPO}/pulls/12/update-branch`) {
+      if (fixture.updateBranchError) {
+        throw new Error(fixture.updateBranchError);
+      }
+      return JSON.stringify({ message: "Updating pull request branch." });
+    }
+    if (args[0] === "api" && args[1] === `repos/${REPO}/pulls/12`) {
+      const sha = fixture.prHeads?.shift();
+      if (sha === undefined) throw new Error("gh api failed (1): HTTP 502: Bad Gateway");
+      return JSON.stringify(sha === null ? {} : { head: { sha } });
+    }
     if (args[0] === "api" && args.some((arg) => arg.includes("/pulls"))) {
       return JSON.stringify(fixture.commitPulls ?? [[]]);
     }
@@ -101,7 +118,8 @@ function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
 
 // The payload snapshot carries the override label so that every pull-request row proves the live `gh pr view`
 // decides, never the snapshot: a label applied after a failing run to re-run it is absent from the payload,
-// and one removed since is still in it.
+// and one removed since is still in it. The head is the one the run was started for (after-refresh mode).
+const JUDGED = "1111111111111111111111111111111111111111";
 const eventDir = temp.dir("release-health-");
 const eventPath = join(eventDir, "event.json");
 writeFileSync(
@@ -110,6 +128,8 @@ writeFileSync(
     pull_request: {
       number: 12,
       labels: [{ name: "autorelease: pending" }, { name: "release-override" }],
+      head: { sha: JUDGED },
+      base: { ref: "main" },
     },
   }),
 );
@@ -738,4 +758,208 @@ describe("runHealthCheck", () => {
   ])("after-propose mode: $reason", async ({ fixture, expected }) => {
     expect(await run(afterProposeConfig(), fixture)).toEqual(expected);
   });
+
+  // fleet-ci.yml runs this mode after release-please's propose on a stale release PR. release-please pushes nothing when
+  // the regenerated PR body equals the current one (an equal body means the commits the PR lacks add no changelog line),
+  // and GitHub's update-branch answers 202 and merges afterwards: so the head is read before and after, the PUT is sent
+  // with the judged head as its precondition, and a failed read or a refused PUT propagates instead of reading as moved
+  // (a "moved" verdict is what tells the owner the PR is safe to approve).
+  const afterRefreshConfig = (): Config =>
+    parseConfig({
+      GITHUB_REPOSITORY: REPO,
+      MODE: "after-refresh",
+      GITHUB_EVENT_PATH: eventPath,
+    } as NodeJS.ProcessEnv);
+  const MOVED = "2222222222222222222222222222222222222222";
+  /** main as the run's checkout fetched it, before release-please ran; the branch-head read must still answer it. */
+  const TIP = "3333333333333333333333333333333333333333";
+  const PR_HEAD_CALL = ["api", "repos/o/r/pulls/12"];
+  const UPDATE_BRANCH_CALL = [
+    "api",
+    "repos/o/r/pulls/12/update-branch",
+    "--method",
+    "PUT",
+    "-f",
+    `expected_head_sha=${JUDGED}`,
+  ];
+  const REFRESHED = `::notice::release PR #12 refreshed to ${MOVED}; approve its run from the merge box`;
+  const MAIN_MOVED =
+    "::error::main moved to 4444444 since this run checked it out at 3333333; this run cannot tell whether the refresh saw that commit, and its own green run refreshes the release PR";
+  const MERGING =
+    "release-please left PR #12 at 1111111: its body is unchanged, so the commits it lacks add no changelog line and merging main loses none; asking GitHub to update the branch";
+  const STILL_BEHIND =
+    "::error::Release PR is behind main and GitHub's branch update has not moved it within 60 s; its version and changelog would miss commits already on main. Do not merge; release-please refreshes the PR after the next green run on main.";
+  const polls = (n: number) => Array.from({ length: n }, () => PR_HEAD_CALL);
+  const waits = (n: number) => Array.from({ length: n }, () => UPDATE_BRANCH_POLL_MS);
+  async function runAfterRefresh(fixture: Fixture): Promise<Run & { sleeps: number[] }> {
+    const gh = fakeGh(fixture);
+    const lines: string[] = [];
+    const sleeps: number[] = [];
+    const exit = await runHealthCheck(
+      afterRefreshConfig(),
+      gh.run,
+      (line) => lines.push(line),
+      () => {},
+      NOW,
+      async (ms) => {
+        sleeps.push(ms);
+      },
+      () => TIP,
+    );
+    return { exit, lines, outputs: [], calls: gh.calls, sleeps };
+  }
+  test.each<{ reason: string; fixture: Fixture; expected: Run & { sleeps: number[] } }>([
+    {
+      reason:
+        "release-please moved the head: the notice names the new head and nothing else is sent",
+      fixture: { prHeads: [MOVED], headSha: TIP },
+      expected: {
+        exit: 0,
+        lines: [REFRESHED],
+        outputs: [],
+        calls: [PR_HEAD_CALL, HEAD_CALL],
+        sleeps: [],
+      },
+    },
+    {
+      reason:
+        "release-please moved nothing: update-branch is sent with the judged head, and the head read after it decides",
+      fixture: { prHeads: [JUDGED, JUDGED, MOVED], mergedPending: [], headSha: TIP },
+      expected: {
+        exit: 0,
+        lines: [MERGING, REFRESHED],
+        outputs: [],
+        calls: [PR_HEAD_CALL, PENDING_CALL, HEAD_CALL, UPDATE_BRANCH_CALL, ...polls(2), HEAD_CALL],
+        sleeps: waits(2),
+      },
+    },
+    {
+      reason: "neither moved the head: the refusal, red, after the whole wait",
+      fixture: {
+        prHeads: Array.from({ length: UPDATE_BRANCH_POLLS + 1 }, () => JUDGED),
+        mergedPending: [],
+        headSha: TIP,
+      },
+      expected: {
+        exit: 1,
+        lines: [MERGING, STILL_BEHIND],
+        outputs: [],
+        calls: [
+          PR_HEAD_CALL,
+          PENDING_CALL,
+          HEAD_CALL,
+          UPDATE_BRANCH_CALL,
+          ...polls(UPDATE_BRANCH_POLLS),
+        ],
+        sleeps: waits(UPDATE_BRANCH_POLLS),
+      },
+    },
+    // A commit landing on main after this run's checkout may have escaped release-please's compare (the run cannot tell),
+    // so neither a rebuilt head nor a merge is reported refreshed over it: red, and that commit's own run refreshes the PR.
+    {
+      reason: "main moved after release-please rebuilt the head: red, the newer run's refresh wins",
+      fixture: { prHeads: [MOVED], headSha: "4444444444444444444444444444444444444444" },
+      expected: {
+        exit: 1,
+        lines: [MAIN_MOVED],
+        outputs: [],
+        calls: [PR_HEAD_CALL, HEAD_CALL],
+        sleeps: [],
+      },
+    },
+    {
+      reason: "main moved before the merge would be sent: red, no update-branch",
+      fixture: {
+        prHeads: [JUDGED],
+        mergedPending: [],
+        headSha: "4444444444444444444444444444444444444444",
+      },
+      expected: {
+        exit: 1,
+        lines: [MAIN_MOVED],
+        outputs: [],
+        calls: [PR_HEAD_CALL, PENDING_CALL, HEAD_CALL],
+        sleeps: [],
+      },
+    },
+    // release-please aborts its whole propose while any merged release PR wears the pending label, so an unmoved head
+    // then says nothing about the body: no merge, red naming the PR(s), whatever their age.
+    {
+      reason:
+        "an unmoved head beside a merged pending release PR is release-please's abort, never a merge",
+      fixture: { prHeads: [JUDGED], mergedPending: [{ number: 40, mergedAt: MERGED }] },
+      expected: {
+        exit: 1,
+        lines: [
+          "::error::Release PR is behind main, and release-please proposes nothing while merged release PR(s) #40 wear 'autorelease: pending'. Re-run this job once the cut has relabelled them 'autorelease: tagged'.",
+        ],
+        outputs: [],
+        calls: [PR_HEAD_CALL, PENDING_CALL],
+        sleeps: [],
+      },
+    },
+  ])("after-refresh mode: $reason", async ({ fixture, expected }) => {
+    expect(await runAfterRefresh(fixture)).toEqual(expected);
+  });
+
+  test.each<{ reason: string; fixture: Fixture; rejects: string; calls: string[][] }>([
+    {
+      reason: "a refused update-branch (422: the head moved under us)",
+      fixture: {
+        prHeads: [JUDGED],
+        mergedPending: [],
+        headSha: TIP,
+        updateBranchError:
+          "gh api repos/o/r/pulls/12/update-branch failed (1): HTTP 422: expected head sha didn't match current head ref.",
+      },
+      rejects:
+        "gh api repos/o/r/pulls/12/update-branch failed (1): HTTP 422: expected head sha didn't match current head ref.",
+      calls: [PR_HEAD_CALL, PENDING_CALL, HEAD_CALL, UPDATE_BRANCH_CALL],
+    },
+    // The owner's rule: a merge GitHub cannot make cleanly fails the job with GitHub's message, with no retry, no local
+    // merge, and no conflict resolution.
+    {
+      reason: "a refused update-branch (422: merge conflict)",
+      fixture: {
+        prHeads: [JUDGED],
+        mergedPending: [],
+        headSha: TIP,
+        updateBranchError:
+          "gh api repos/o/r/pulls/12/update-branch failed (1): HTTP 422: merge conflict between base and head",
+      },
+      rejects:
+        "gh api repos/o/r/pulls/12/update-branch failed (1): HTTP 422: merge conflict between base and head",
+      calls: [PR_HEAD_CALL, PENDING_CALL, HEAD_CALL, UPDATE_BRANCH_CALL],
+    },
+    {
+      reason: "a failed head read",
+      fixture: { prHeads: [] },
+      rejects: "gh api failed (1): HTTP 502: Bad Gateway",
+      calls: [PR_HEAD_CALL],
+    },
+    {
+      reason: "a head payload carrying no sha",
+      fixture: { prHeads: [null] },
+      rejects: "repos/o/r/pulls/12 carries no head sha",
+      calls: [PR_HEAD_CALL],
+    },
+  ])(
+    "after-refresh mode: $reason propagates, never read as moved",
+    async ({ fixture, rejects, calls }) => {
+      const gh = fakeGh(fixture);
+      const lines: string[] = [];
+      const attempt = runHealthCheck(
+        afterRefreshConfig(),
+        gh.run,
+        (line) => lines.push(line),
+        () => {},
+        NOW,
+        async () => {},
+        () => TIP,
+      );
+      expect([await rejection(attempt), gh.calls, lines.filter((l) => l.startsWith("::"))]).toEqual(
+        [rejects, calls, []],
+      );
+    },
+  );
 });

@@ -23,28 +23,48 @@ const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
 const job = (
   parseYaml(read(".github/workflows/fleet-release.yml")) as { jobs: Record<string, Job> }
 ).jobs["release-please"];
+const releasePrJob = (
+  parseYaml(read(".github/workflows/fleet-ci.yml")) as { jobs: Record<string, Job> }
+).jobs["release-pr"];
 // The skeleton's `uses:` lines carry the owner placeholder, which YAML reads as a flow mapping.
 const skeleton = parseYaml(
   read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
 ) as { jobs: Record<string, Job> };
 
 // A mistyped output name in action.yml (release_cut) reads as empty to every consumer: cut, head, propose, and the guard all
-// skip, and the run is green. Set equality on purpose: an output nobody reads is dead surface.
-test("every release-health output is the check step's own, and every output the release job reads exists", () => {
+// skip, and the run is green; so does `behind` to fleet-ci.yml's heal. Each output is wired to a step of the action under
+// its own name, and the script that step runs names the output it writes (a wire to a step that never emits it reads as
+// empty the same way). Set equality over both consumers on purpose: an output nobody reads is dead surface.
+test("every release-health output is written by the script of the step it is wired to, and the two consumers read exactly that set", () => {
   const action = loadAction("actions/release-health/action.yml");
   const outputs = Object.entries(action.outputs ?? {}).map(([name, { value }]) => ({
     name,
     value,
   }));
   expect(outputs.length).toBeGreaterThan(0);
-  const check = action.runs.steps.find((step) => step.id === "check");
-  expect(String(check?.run)).toContain("release-health.ts");
-  expect(outputs).toEqual(
-    outputs.map(({ name }) => ({ name, value: `\${{ steps.check.outputs.${name} }}` })),
+  const scriptOf = (id: string): string | null => {
+    const step = action.runs.steps.find((candidate) => candidate.id === id);
+    const script = /([\w-]+\.ts)"/.exec(String(step?.run ?? ""))?.[1];
+    return script === undefined ? null : read(`actions/release-health/${script}`);
+  };
+  const sources = outputs.map(({ name, value }) => {
+    const wired = /^\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
+    const script = wired === null || wired[2] !== name ? null : scriptOf(wired[1]);
+    const written =
+      script !== null && (script.includes(`"${name}"`) || script.includes(`${name}=`));
+    return { name, source: written ? `steps.${wired?.[1]}` : value };
+  });
+  expect(sources).toEqual(
+    sources.map(({ name }) => ({
+      name,
+      source: expect.stringMatching(/^steps\.[\w-]+$/) as string,
+    })),
   );
-  const reads = [...JSON.stringify(job.steps).matchAll(/steps\.health\.outputs\.([\w-]+)/g)].map(
-    (match) => match[1],
-  );
+  const reads = [
+    ...JSON.stringify([job.steps, releasePrJob.steps]).matchAll(
+      /steps\.health\.outputs\.([\w-]+)/g,
+    ),
+  ].map((match) => match[1]);
   expect(reads.length).toBeGreaterThan(0);
   expect(new Set(reads)).toEqual(new Set(outputs.map(({ name }) => name)));
 });

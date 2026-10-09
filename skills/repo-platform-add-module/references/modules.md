@@ -31,11 +31,11 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Starters: `release-please-config.json`, `.release-please-manifest.json`. The hooks `update-release.yml` and `update-release-pr.yml` are base starters and run only when this module is selected.
 - Managed: the release variant of `.typography-allow`. The `release`, `update-release`, `publish-release`, and `update-release-pr` legs of `ci.yml` run on a push to main once selected.
 - Pipeline: `release` cuts a draft through release-please (the fleet-release workflow) -> the repo-owned `update-release.yml` hook, a placeholder until you add assets or notes -> `publish-release` (fleet-release-publish) attaches one `attestation.json` per release for a public repo with assets, publishes others unattested, and flips the draft live. `update-release-pr` calls the repo-owned hook for files that ride in the release commit.
-- Gates: fleet CI's `release-pr` job runs on release-please PRs (branches `release-please--*`), freshness first, then health. The cut re-runs the same gate, and `release-override` on the release PR bypasses it.
+- Gates: fleet CI's `release-pr` job runs on release-please PRs (branches `release-please--*`), freshness first, then health. The cut re-runs the health gate, and `release-override` on the release PR bypasses health alone; freshness heals instead of failing.
 
   | Gate | Fails when |
   | --- | --- |
-  | Freshness | the PR does not contain the tip of its base branch |
+  | Freshness | the base moved after the run's checkout, a merged release PR is still pending, GitHub refuses the merge (a conflict, a refused push), or the head stays unchanged after the update-branch wait; a PR behind its base first gets release-please's propose, then GitHub's update-branch only when the regenerated body is unchanged |
   | Health | a tracking issue of a selected stream (`fuzzer`, `nightly`, `site`) or the fleet `security-nightly` stream is open |
   | Health | a `release-blocker` issue is open |
   | Health | a Dependabot alert at or above the threshold (default `high`) is open; alerts the token cannot read skip that gate |

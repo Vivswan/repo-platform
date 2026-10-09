@@ -1,12 +1,23 @@
 // A stale release PR cuts a release missing commits already on the base branch: its version and changelog were computed
 // before them. The merge ref GitHub checks out by default already contains the base tip, so the caller checks out the PR
-// HEAD with full history. An errored look (no origin/<base>, a shallow checkout) throws; it is never read as "behind".
+// HEAD with full history. The verdict is the `behind` output, which fleet-ci.yml reads as the literal 'true' to run
+// release-please's refresh in the same run; a stale head is never a failure here. An errored look (no origin/<base>, a
+// shallow checkout) throws; it is never read as either verdict.
 
-import { capture, error, failureDetail, requireEnv, succeeded } from "../shared/action_runtime.ts";
+import { appendFileSync } from "node:fs";
+import {
+  capture,
+  error,
+  failureDetail,
+  requireEnv,
+  succeeded,
+  warning,
+} from "../shared/action_runtime.ts";
 
 const GIT_HANG_BOUND_MS = 60_000;
 
-function baseTip(base: string): string {
+/** The base tip as this run's checkout fetched it; release-health.ts's after-refresh mode reads it as the main release-please saw. */
+export function baseTip(base: string): string {
   const read = capture(["git", "rev-parse", "--verify", `origin/${base}^{commit}`], {
     timeoutMs: GIT_HANG_BOUND_MS,
   });
@@ -30,15 +41,18 @@ function headContains(sha: string): boolean {
 
 function main(): number {
   const base = requireEnv("GITHUB_BASE_REF");
+  const outputFile = requireEnv("GITHUB_OUTPUT");
   const tip = baseTip(base);
-  if (headContains(tip)) {
+  const behind = !headContains(tip);
+  appendFileSync(outputFile, `behind=${behind}\n`);
+  if (!behind) {
     console.log(`release PR contains the ${base} tip (${tip})`);
     return 0;
   }
-  error(
-    `Release PR is behind ${base} (tip ${tip}); its version and changelog would miss commits already on ${base}. Do not merge; release-please refreshes the PR after the next green run on ${base}.`,
+  warning(
+    `Release PR is behind ${base} (tip ${tip}); its version and changelog would miss commits already on ${base}. release-please refreshes it from ${base} in this run.`,
   );
-  return 1;
+  return 0;
 }
 
 if (import.meta.main) {

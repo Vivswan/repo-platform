@@ -8,10 +8,22 @@
  * After-propose mode runs once release-please proposed: its propose phase aborts GREEN ("untagged, merged release PRs
  * outstanding") while a merged release PR still wears the pending label, so the guard runs after it, once
  * release-please's own recovery phase has had its turn, and fails naming the parked PRs.
+ *
+ * After-refresh mode runs on the release PR's own CI once release-please's propose ran against a head behind main
+ * (fleet-ci.yml's release-pr job). The verdict is the head, read against the main this run checked out:
+ *
+ *   main moved since the checkout        -> red: that commit's own run refreshes the PR (fleet-release.yml's head-current)
+ *   head moved                           -> green, naming the new head
+ *   head unmoved, a merged PR pending    -> red: release-please proposed nothing
+ *   head unmoved, the PR body unchanged  -> the commits the PR lacks add no changelog line, so GitHub's update-branch
+ *                                           merges main and the head is read again; still unmoved is red
+ *
+ * A changed body is always release-please's rebuild: a merge there would leave the changelog without those commits.
  */
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { LABEL_RE } from "../shared/label.ts";
+import { baseTip } from "./freshness.ts";
 
 /** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
 export type GhRunner = (args: string[]) => Promise<string>;
@@ -48,7 +60,8 @@ const PENDING_GRACE_MINUTES = 30;
 export type ModeContext =
   | { mode: "pull-request"; eventPath: string }
   | { mode: "release"; sha: string; ref: string }
-  | { mode: "after-propose" };
+  | { mode: "after-propose" }
+  | { mode: "after-refresh"; eventPath: string };
 
 export interface Config {
   context: ModeContext;
@@ -91,9 +104,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
 
   const mode = env.MODE ?? "";
   let context: ModeContext;
-  if (mode === "pull-request") {
+  if (mode === "pull-request" || mode === "after-refresh") {
     if (!env.GITHUB_EVENT_PATH) {
-      throw new Error("GITHUB_EVENT_PATH is required in pull-request mode");
+      throw new Error(`GITHUB_EVENT_PATH is required in ${mode} mode`);
     }
     context = { mode, eventPath: env.GITHUB_EVENT_PATH };
   } else if (mode === "release") {
@@ -107,7 +120,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
   } else if (mode === "after-propose") {
     context = { mode };
   } else {
-    throw new Error(`unknown MODE '${mode}' (expected pull-request, release, or after-propose)`);
+    throw new Error(
+      `unknown MODE '${mode}' (expected pull-request, release, after-propose, or after-refresh)`,
+    );
   }
 
   return { context, repo, trackingLabels: parseTrackingLabels(env) };
@@ -232,13 +247,11 @@ export async function branchHead(run: GhRunner, repo: string, ref: string): Prom
   return sha;
 }
 
-/** gh's mergedAt is an ISO instant; one it cannot read is a broken listing, never a fresh merge. */
-export async function stalePendingGuard(
+/** The merged release PRs still labelled pending, as `gh pr list --state merged` answers them. */
+export async function mergedPendingPrs(
   run: GhRunner,
   repo: string,
-  now: Date,
-  out: (line: string) => void,
-): Promise<number> {
+): Promise<Array<{ number: number; mergedAt: string }>> {
   const json = await run([
     "pr",
     "list",
@@ -253,7 +266,17 @@ export async function stalePendingGuard(
     "--json",
     "number,mergedAt",
   ]);
-  const merged = JSON.parse(json) as Array<{ number: number; mergedAt: string }>;
+  return JSON.parse(json) as Array<{ number: number; mergedAt: string }>;
+}
+
+/** gh's mergedAt is an ISO instant; one it cannot read is a broken listing, never a fresh merge. */
+export async function stalePendingGuard(
+  run: GhRunner,
+  repo: string,
+  now: Date,
+  out: (line: string) => void,
+): Promise<number> {
+  const merged = await mergedPendingPrs(run, repo);
   // gh's mergedAt carries whole seconds, so the cutoff does too: a merge exactly 30 minutes old is not yet stale.
   const cutoff = Math.floor(now.getTime() / 1000) * 1000 - PENDING_GRACE_MINUTES * 60_000;
   const stale = merged.filter((pr) => {
@@ -355,15 +378,128 @@ export async function securityGate(
   };
 }
 
+/** GitHub answers update-branch with 202 and merges afterwards, so the head is re-read this many times, this far apart. */
+export const UPDATE_BRANCH_POLLS = 30;
+export const UPDATE_BRANCH_POLL_MS = 2_000;
+
+export interface JudgedPullRequest {
+  number: number;
+  /** The head the run was started for, before release-please's propose. */
+  headSha: string;
+  base: string;
+}
+
+/** The payload is the one source of the judged head: a run cannot read it from the API after propose moved the branch. */
+export function judgedPullRequest(eventPath: string): JudgedPullRequest {
+  const payload = JSON.parse(readFileSync(eventPath, "utf8")) as {
+    pull_request?: { number?: number; head?: { sha?: string }; base?: { ref?: string } };
+  };
+  const pr = payload.pull_request;
+  if (!pr?.number || !pr.head?.sha || !pr.base?.ref) {
+    throw new Error(
+      `${eventPath} carries no pull_request with a number, a head sha, and a base ref`,
+    );
+  }
+  return { number: pr.number, headSha: pr.head.sha, base: pr.base.ref };
+}
+
+export async function pullRequestHead(
+  run: GhRunner,
+  repo: string,
+  number: number,
+): Promise<string> {
+  const json = await run(["api", `repos/${repo}/pulls/${number}`]);
+  const sha = (JSON.parse(json) as { head?: { sha?: string } }).head?.sha;
+  if (!sha) {
+    throw new Error(`repos/${repo}/pulls/${number} carries no head sha`);
+  }
+  return sha;
+}
+
+/**
+ * The precondition `expected_head_sha` is the judged head, so a branch another run moved meanwhile is refused (422) and
+ * never merged twice; the refusal propagates like any failed gh call, and the head is read again only after the PUT.
+ * `checkoutTip` is the base as this run's full-history checkout fetched it, before release-please ran. A base that has
+ * moved past it may carry a commit the refresh never saw (this run cannot tell), so no head is reported refreshed over
+ * it (the same guard as fleet-release.yml's head-current), and that commit's own run refreshes the PR.
+ */
+export async function refreshVerdict(
+  run: GhRunner,
+  repo: string,
+  eventPath: string,
+  out: (line: string) => void,
+  sleep: (ms: number) => Promise<void>,
+  checkoutTip: (base: string) => string,
+): Promise<number> {
+  const { number, headSha: judged, base } = judgedPullRequest(eventPath);
+  const tip = checkoutTip(base);
+  const baseMoved = async (): Promise<boolean> => {
+    const head = await branchHead(run, repo, base);
+    if (head === tip) return false;
+    out(
+      `::error::${base} moved to ${head.slice(0, 7)} since this run checked it out at ${tip.slice(0, 7)}; this run cannot tell whether the refresh saw that commit, and its own green run refreshes the release PR`,
+    );
+    return true;
+  };
+  const refreshed = async (head: string): Promise<number> => {
+    if (await baseMoved()) return 1;
+    out(`::notice::release PR #${number} refreshed to ${head}; approve its run from the merge box`);
+    return 0;
+  };
+  const afterPropose = await pullRequestHead(run, repo, number);
+  if (afterPropose !== judged) {
+    return refreshed(afterPropose);
+  }
+  // release-please proposes nothing at all while a merged release PR wears the pending label, so an unmoved head then
+  // says nothing about the body; merging main would go green with a changelog missing what landed since.
+  const pending = await mergedPendingPrs(run, repo);
+  if (pending.length > 0) {
+    const list = pending.map((pr) => `#${pr.number}`).join(", ");
+    out(
+      `::error::Release PR is behind ${base}, and release-please proposes nothing while merged release PR(s) ${list} wear '${PENDING_LABEL}'. Re-run this job once the cut has relabelled them '${TAGGED_LABEL}'.`,
+    );
+    return 1;
+  }
+  if (await baseMoved()) return 1;
+  out(
+    `release-please left PR #${number} at ${judged.slice(0, 7)}: its body is unchanged, so the commits it lacks add no changelog line and merging ${base} loses none; asking GitHub to update the branch`,
+  );
+  await run([
+    "api",
+    `repos/${repo}/pulls/${number}/update-branch`,
+    "--method",
+    "PUT",
+    "-f",
+    `expected_head_sha=${judged}`,
+  ]);
+  for (let poll = 0; poll < UPDATE_BRANCH_POLLS; poll++) {
+    await sleep(UPDATE_BRANCH_POLL_MS);
+    const head = await pullRequestHead(run, repo, number);
+    if (head !== judged) {
+      return refreshed(head);
+    }
+  }
+  const waited = (UPDATE_BRANCH_POLLS * UPDATE_BRANCH_POLL_MS) / 1000;
+  out(
+    `::error::Release PR is behind ${base} and GitHub's branch update has not moved it within ${waited} s; its version and changelog would miss commits already on ${base}. Do not merge; release-please refreshes the PR after the next green run on ${base}.`,
+  );
+  return 1;
+}
+
 export async function runHealthCheck(
   cfg: Config,
   run: GhRunner,
   out: (line: string) => void,
   setOutput: (name: string, value: string) => void,
   now: Date = new Date(),
+  sleep: (ms: number) => Promise<void> = Bun.sleep,
+  checkoutTip: (base: string) => string = baseTip,
 ): Promise<number> {
   if (cfg.context.mode === "after-propose") {
     return stalePendingGuard(run, cfg.repo, now, out);
+  }
+  if (cfg.context.mode === "after-refresh") {
+    return refreshVerdict(run, cfg.repo, cfg.context.eventPath, out, sleep, checkoutTip);
   }
   let override: Override;
   if (cfg.context.mode === "release") {

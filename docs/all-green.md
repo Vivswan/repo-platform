@@ -93,7 +93,16 @@ The jobs beside them gate nothing:
 
 - **Beside it, one job each:** `semgrep` and `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix, on public repositories with an analyzable toolchain), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts.
 
-- **The `release-pr` job** runs [release-health](../actions/release-health/action.yml) in pull-request mode on the PR head: the head must contain the base tip (a stale release PR would cut a release missing commits already on main), then the health gates run.
+- **The `release-pr` job** runs [release-health](../actions/release-health/action.yml) in pull-request mode on the PR head, then the health gates. A head behind main would cut a release missing commits already on it, so the job refreshes the PR in place (release-please's propose, or GitHub's update-branch where propose pushed nothing because the PR body was unchanged) and ends green naming the new head. The owner approves the new head's run from the merge box.
+
+- **What stays red there,** each with its remedy:
+
+| Red | What happens next |
+| --- | --- |
+| a health gate fails | the refresh still runs, and the gate's red stands |
+| main moved past this run's checkout | that commit's own run refreshes the PR |
+| a merged release PR still wears `autorelease: pending` | release-please proposes nothing until the cut relabels it |
+| GitHub cannot merge main cleanly (update-branch answers 422: a conflict, or the head moved under the run) | the job fails with GitHub's message, never retrying or resolving it |
 
 - **Bypassing a check:** each check's per-finding bypass is the table in [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check).
 
