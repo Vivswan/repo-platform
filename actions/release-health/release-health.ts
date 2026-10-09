@@ -10,7 +10,7 @@
  * release-please's own recovery phase has had its turn, and fails naming the parked PRs.
  *
  * After-refresh mode runs on the release PR's own CI once release-please's propose ran against a head behind main
- * (fleet-ci.yml's release-pr job). The verdict is the head, read against the main this run checked out:
+ * (fleet.yml's release-pr job). The verdict is the head, read against the main this run checked out:
  *
  *   main moved since the checkout        -> red: that commit's own run refreshes the PR (fleet-release.yml's head-current)
  *   head moved                           -> green, naming the new head

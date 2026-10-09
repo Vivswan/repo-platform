@@ -91,7 +91,7 @@ describe("deliveredBySync", () => {
     ["actions/plan/plan.ts", true],
     ["bun.lock", true],
     ["package.json", true],
-    [".github/workflows/fleet-ci.yml", false],
+    [".github/workflows/fleet.yml", false],
     [".github/scripts/fleet/fleet_sync_default.ts", false],
     [".github/settings.local.yml", false],
     ["docs/sync.md", false],
@@ -205,7 +205,7 @@ describe("plan", () => {
     },
     {
       reason: "the delivered paths left the diff: the bot's label and note go",
-      pr: pr({ changed: [".github/workflows/fleet-ci.yml"], labels: [PUBLIC], history: BOT_ADDED }),
+      pr: pr({ changed: [".github/workflows/fleet.yml"], labels: [PUBLIC], history: BOT_ADDED }),
       expected: cleared("remove", "no path here reaches the fleet through a sync"),
     },
     {
@@ -340,7 +340,7 @@ describe("main", () => {
   }
 
   const trigger = [[file("files/base/AGENTS.md"), file("docs/sync.md"), file("files.yml")]];
-  const workflow = [[file(".github/workflows/fleet-ci.yml")]];
+  const workflow = [[file(".github/workflows/fleet.yml")]];
   const botAdded = [ev("labeled", BOT_LOGIN, PUBLIC)];
 
   test("a fresh pull request gets the label and the note; the next run finds both current", () => {

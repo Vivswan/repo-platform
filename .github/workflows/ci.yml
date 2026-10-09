@@ -195,7 +195,7 @@ jobs:
       - name: Check the invariants
         run: bun run invariants
 
-  # This repository judged as fleet CI judges every repository (fleet-ci.yml's plan and validate steps): the plan over
+  # This repository judged as fleet CI judges every repository (fleet.yml's plan and validate steps): the plan over
   # the registration, then the action from this checkout, which reads the manifest's recorded commit and runs that
   # commit's check.ts over the tree. A PR that changes files/ stays green until this repository syncs itself.
   managed-files:

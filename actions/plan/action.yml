@@ -8,7 +8,7 @@ description: |
   the vocabulary in canonical order. Any invalid registration fails closed.
 
   Modes:
-    - default: what fleet-ci.yml's jobs key on (the module selection in canonical order, the
+    - default: what fleet.yml's jobs key on (the module selection in canonical order, the
       visibility, the CodeQL languages, the tracking labels)
     - site: the site configuration the pages-site action consumes, as one JSON document (the
       site title, the docs mount path or null for no docs half, the include roots, the
@@ -19,7 +19,7 @@ description: |
 
 inputs:
   mode:
-    description: default (the fleet-ci job outputs) or site (the pages-site configuration).
+    description: default (the fleet.yml job outputs) or site (the pages-site configuration).
     required: false
     default: default
   private:

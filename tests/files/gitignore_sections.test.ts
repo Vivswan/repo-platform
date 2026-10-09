@@ -151,8 +151,8 @@ function workspaceCheckouts(): WorkspaceCheckout[] {
 
 test("every checkout path a fleet action or workflow creates inside the workspace is ignored, root-anchored", () => {
   const census = workspaceCheckouts();
-  // Armed by this repository's own workflows (the sync's build checkout, the docs-check job's skills checkout) and by
-  // fleet-ci.yml's platform checkout in every job calling a platform action: an empty census is a broken scan.
+  // Armed by this repository's own workflows (the sync's build checkout, the docs-check job's skills checkout): an empty
+  // census is a broken scan.
   expect(census.length).toBeGreaterThan(0);
   const start = BASE.indexOf(CI_WORKSPACE_SECTION);
   expect(start).toBeGreaterThanOrEqual(0);

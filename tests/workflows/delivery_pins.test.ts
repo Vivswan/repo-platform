@@ -225,8 +225,8 @@ describe("self pins resolve at the delivery ref", () => {
         "      - uses: {{github_username}}/repo-platform/actions/does-not-exist@stable",
         "    uses: {{ github_username_lower }}/repo-platform/.github/workflows/ci.yml@stable",
         "    uses: Vivswan/repo-platform/.github/workflows/reusable-ghost.yml@stable",
-        "    uses: Vivswan/repo-platform/.github/workflows/fleet-ci.yml@stable",
-        "    uses: Vivswan/Repo-Platform/.github/workflows/fleet-ci.yml@stable",
+        "    uses: Vivswan/repo-platform/.github/workflows/fleet.yml@stable",
+        "    uses: Vivswan/Repo-Platform/.github/workflows/fleet.yml@stable",
       ].join("\n"),
       "f",
     );

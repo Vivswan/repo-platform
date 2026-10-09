@@ -123,7 +123,7 @@ YAML syntax and duplicate mapping keys are the `yamllint` step's, in the same jo
 
 ### Changing the module selection
 
-A module change is one PR when the branch sync carries the files onto it ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch)). CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` step reads the new list on the next run. The sync writes the module's DATA files (its workflows, starters, and toolchain pins) and the manifest stamp onto the PR's branch as one commit:
+A module change is one PR when the branch sync carries the files onto it ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch)). CI itself needs nothing written: ci.yml is the same file for every selection, and fleet.yml's `plan` step reads the new list on the next run. The sync writes the module's DATA files (its workflows, starters, and toolchain pins) and the manifest stamp onto the PR's branch as one commit:
 
 ```text
 PR edits modules: in .repo-platform.yml
@@ -146,9 +146,9 @@ PR edits modules: in .repo-platform.yml
 
 - **A module the recorded commit does not know yet** (added to the platform after this repository's last sync) is the writer's refusal instead, `unknown module(s)`, with the same way out: the sync runs at `stable`, knows the module, and moves the judge.
 
-- **The other red to expect:** a module whose fleet-ci jobs read a file the sync has not written yet (a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the branch sync writes that file onto the PR.
+- **The other red to expect:** a module whose fleet.yml jobs read a file the sync has not written yet (a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the branch sync writes that file onto the PR.
 
-- **Enforced by:** [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` step. The sync side is a dispatch of sync-repos.yml onto the PR's branch or the `repo-platform:sync` label ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)), or a dispatch after the merge ([the manual run](#the-manual-run)).
+- **Enforced by:** [actions/plan](../actions/plan/action.yml), called by fleet.yml's `plan` step. The sync side is a dispatch of sync-repos.yml onto the PR's branch or the `repo-platform:sync` label ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)), or a dispatch after the merge ([the manual run](#the-manual-run)).
 
 **The one edit no sync can carry** is a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say). The writer refuses the declaration that now conflicts, so no sync, the branch sync included, restamps the record until it is gone. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules.
 

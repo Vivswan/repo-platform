@@ -1,11 +1,14 @@
-// fleet-ci.yml is the fleet's gate-job home, nested as fleet.yml's `ci` job. Pinned here is what a green run cannot
-// show: GitHub's step rule (a bare step implies success()), the schedule census (the `platform` caller is unconditional,
-// so a step without a schedule clause runs nightly fleet-wide), the output chain GitHub resolves to '' without an error,
-// and two gates whose wrong spelling stays green.
+// fleet.yml is the fleet's gate-job home, every job of the skeleton's one `platform` call. Pinned here is what a green
+// run cannot show: GitHub's step rule (a bare step implies success()), the schedule census (the `platform` caller is
+// unconditional, so a step without a schedule clause runs nightly fleet-wide), the output chain GitHub resolves to ''
+// without an error, and two gates whose wrong spelling stays green.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Lexer, Parser } from "@actions/expressions";
+import { Logical } from "@actions/expressions/ast";
+import { TokenType } from "@actions/expressions/lexer";
 import { parse as parseYaml } from "yaml";
 
 interface Step {
@@ -19,6 +22,7 @@ interface Step {
 }
 interface Job {
   if?: string;
+  needs?: string[];
   uses?: string;
   outputs?: Record<string, string>;
   steps?: Step[];
@@ -32,28 +36,58 @@ const ROOT = join(import.meta.dir, "../..");
 const WORKFLOWS = ".github/workflows";
 const loadWorkflow = (name: string) =>
   parseYaml(readFileSync(join(ROOT, WORKFLOWS, name), "utf8")) as Workflow;
-const fleetCi = loadWorkflow("fleet-ci.yml");
 const fleet = loadWorkflow("fleet.yml");
 const CHECKS_JOB = "standard-checks";
-const checksJob = fleetCi.jobs[CHECKS_JOB];
+const checksJob = fleet.jobs[CHECKS_JOB];
 const checkSteps = checksJob?.steps ?? [];
 const label = (step: Step) => step.id ?? step.name ?? step.uses ?? "";
 /** The action a `uses:` names by its `$/` path, or undefined for any other reference. */
 const PLATFORM_ACTION_PREFIX = "$/actions/";
 const platformAction = (uses: string | undefined): string | undefined =>
   uses?.startsWith(PLATFORM_ACTION_PREFIX) ? uses.slice(PLATFORM_ACTION_PREFIX.length) : undefined;
-/** GitHub accepts `${{ }}` around an `if:`, so it is stripped before the clauses are read. */
-const clausesOf = (condition: string | undefined) =>
-  (condition ?? "")
-    .trim()
-    .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1")
-    .split("&&")
-    .map((clause) => clause.trim());
+/** GitHub accepts `${{ }}` around an `if:`, so it is stripped before the condition is parsed. */
+const unwrapped = (condition: string | undefined) =>
+  (condition ?? "").trim().replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1");
+// The status functions and hashFiles are the runner's, not the expression language's, so the parser is told their names.
+const RUNNER_FUNCTIONS = ["success", "failure", "cancelled", "always", "hashFiles"].map((name) => ({
+  name,
+  minArgs: 0,
+  maxArgs: 255,
+}));
+const CONTEXTS = ["github", "needs", "steps", "inputs", "matrix", "secrets"];
+/** The top-level conjuncts of a condition as GitHub's own parser reads them (so an `&&` inside a string literal or a
+ *  parenthesis splits nothing), each as its source text; a condition that is not an `&&` chain is one clause. */
+const clausesOf = (condition: string | undefined): string[] => {
+  const source = unwrapped(condition);
+  if (source === "") return [""];
+  const { tokens: lexed } = new Lexer(source).lex();
+  const tree = new Parser(lexed, CONTEXTS, RUNNER_FUNCTIONS).parse();
+  const conjuncts =
+    tree instanceof Logical && tree.operator.type === TokenType.AND ? tree.args.length : 1;
+  const tokens = lexed.filter((token) => token.type !== TokenType.EOF);
+  const lineStarts = [0, ...[...source.matchAll(/\n/g)].map((match) => match.index + 1)];
+  const offset = ({ line, column }: { line: number; column: number }) => lineStarts[line] + column;
+  const clauses: string[] = [];
+  let depth = 0;
+  let from = tokens[0];
+  for (const [at, token] of tokens.entries()) {
+    if (token.type === TokenType.LEFT_PAREN) depth += 1;
+    if (token.type === TokenType.RIGHT_PAREN) depth -= 1;
+    const splits = depth === 0 && token.type === TokenType.AND && conjuncts > 1;
+    if (!splits && at < tokens.length - 1) continue;
+    const to = splits ? tokens[at - 1] : token;
+    clauses.push(source.slice(offset(from.range.start), offset(to.range.end)));
+    from = tokens[at + 1];
+  }
+  if (clauses.length !== conjuncts)
+    throw new Error(`${source}: ${clauses.length} clauses sliced, the parser read ${conjuncts}`);
+  return clauses;
+};
 
-describe("fleet-ci.yml", () => {
+describe("fleet.yml", () => {
   // A step or job whose condition is not !cancelled() or always() is skipped by an earlier failure (a bare one implies
   // success(), and so does a `&& success()` appended anywhere), so one red check would hide every later check and every job
-  // beside; continue-on-error fails open instead. The checkout and the plan are the bare steps:
+  // that needs it; continue-on-error fails open instead. The checkout and the plan are the bare steps:
   // nothing after a failed plan may run, and the plan's own red names it.
   // GitHub reads function names case-insensitively and allows blanks inside the parentheses.
   const STATUS_FUNCTION = /\b(success|failure|cancelled|always)\s*\(\s*\)/i;
@@ -64,7 +98,7 @@ describe("fleet-ci.yml", () => {
   const INDEPENDENT = { first: "!cancelled()", laterStatusFunctions: [] };
   const BARE_STEPS = ["checkout", "plan"];
 
-  test("a failing check still runs every later check and every job beside; none fails open", () => {
+  test("a failing check still runs every later check and every job that needs it; none fails open", () => {
     const bare = checkSteps.slice(0, BARE_STEPS.length);
     const checks = checkSteps.slice(BARE_STEPS.length);
     expect(checks.length).toBeGreaterThan(5);
@@ -80,17 +114,17 @@ describe("fleet-ci.yml", () => {
     ).toEqual(
       checks.map((step) => ({ step: label(step), ...INDEPENDENT, "continue-on-error": undefined })),
     );
-    const beside = Object.entries(fleetCi.jobs).filter(([name]) => name !== CHECKS_JOB);
-    expect(beside.length).toBeGreaterThan(3);
-    expect(beside.map(([name, job]) => ({ job: name, ...independence(job.if) }))).toEqual(
-      beside.map(([name]) => ({ job: name, ...INDEPENDENT })),
+    const dependent = Object.entries(fleet.jobs).filter(([, job]) => job.needs !== undefined);
+    expect(dependent.length).toBeGreaterThan(3);
+    expect(dependent.map(([name, job]) => ({ job: name, ...independence(job.if) }))).toEqual(
+      dependent.map(([name]) => ({ job: name, ...INDEPENDENT })),
     );
   });
 
   // The merge ref GitHub checks out by default already contains main's tip, so the freshness check would pass for every
   // PR, stale ones included; only the PR head makes it a check. release-health's pull-request mode runs it first.
   test("release-pr checks out the PR head, never the merge ref, before release-health", () => {
-    const steps = fleetCi.jobs["release-pr"]?.steps ?? [];
+    const steps = fleet.jobs["release-pr"]?.steps ?? [];
     const health = steps.findIndex((step) => platformAction(step.uses) === "release-health");
     expect(health).toBeGreaterThan(0);
     expect(steps[health]?.with?.mode).toBe("pull-request");
@@ -110,7 +144,7 @@ describe("fleet-ci.yml", () => {
   // that also tries a release off this PR event (skip-github-release), or a missing write grant (release-please's 403),
   // weeks later and in another repository. One sha per action across the workflows is tests/workflows/delivery_pins.test.ts's.
   test("a stale release PR heals whatever the gates said: propose, then the verdict after a successful propose, under the push grants", () => {
-    const job = fleetCi.jobs["release-pr"] as
+    const job = fleet.jobs["release-pr"] as
       | (Job & { permissions?: Record<string, string> })
       | undefined;
     const steps = job?.steps ?? [];
@@ -148,9 +182,9 @@ describe("fleet-ci.yml", () => {
     });
   });
 
-  // Which steps and jobs a scheduled run may reach: the checkout, the plan, CodeQL on its weekly day, and fleet.yml's
-  // trivy-nightly, which runs on the schedule ALONE (without its clause every push would file the security issue). Every
-  // other step and job excludes the schedule or gates on one that does, so a new step or job must take a side.
+  // Which steps and jobs a scheduled run may reach: the checkout, the plan, CodeQL on its weekly day, and trivy-nightly,
+  // which runs on the schedule ALONE (without its clause every push would file the security issue). Every other step
+  // and job excludes the schedule or gates on one that does, so a new step or job must take a side.
   const SKIP_ON_SCHEDULE = "github.event_name != 'schedule'";
   const ONLY_ON_SCHEDULE = "github.event_name == 'schedule'";
   const GATED_ON = /^steps\.([\w-]+)\.outcome == 'success'$/;
@@ -174,40 +208,36 @@ describe("fleet-ci.yml", () => {
     expect(reachable).toEqual(BARE_STEPS);
 
     const SCHEDULE_RUNS = new Set([CHECKS_JOB, "codeql"]);
-    for (const [name, job] of Object.entries(fleetCi.jobs)) {
+    const SCHEDULE_ALONE = new Set(["trivy-nightly"]);
+    const sides = Object.entries(fleet.jobs).map(([name, job]) => {
       const clauses = clausesOf(job.if);
-      const skips = clauses.includes(SKIP_ON_SCHEDULE);
-      if (SCHEDULE_RUNS.has(name)) {
-        expect([name, skips]).toEqual([name, false]);
-        continue;
-      }
-      const excluded = skips || clauses.includes("github.event_name == 'pull_request'");
-      expect([name, excluded]).toEqual([name, true]);
-    }
-    expect(fleetCi.jobs.codeql?.if).toContain(
-      `(github.event_name != 'schedule' || needs.${CHECKS_JOB}.outputs.weekly == 'true')`,
-    );
-    // fleet.yml: the call carries no condition (the gate's allowed-skips names checks alone), and every job beside it is
-    // the schedule's.
-    const fleetJobs = Object.entries(fleet.jobs);
-    const sides = fleetJobs.map(([name, job]) =>
-      job.uses === undefined
-        ? [name, clausesOf(job.if).includes(ONLY_ON_SCHEDULE) ? "schedule only" : `when ${job.if}`]
-        : [name, job.if === undefined ? "unconditional call" : `call when ${job.if}`],
-    );
+      const side = clauses.includes(ONLY_ON_SCHEDULE)
+        ? "schedule only"
+        : clauses.includes(SKIP_ON_SCHEDULE) ||
+            clauses.includes("github.event_name == 'pull_request'")
+          ? "never on the schedule"
+          : "every event";
+      return [name, side];
+    });
     expect(sides).toEqual(
-      fleetJobs.map(([name, job]) => [
+      Object.keys(fleet.jobs).map((name) => [
         name,
-        job.uses === undefined ? "schedule only" : "unconditional call",
+        SCHEDULE_RUNS.has(name)
+          ? "every event"
+          : SCHEDULE_ALONE.has(name)
+            ? "schedule only"
+            : "never on the schedule",
       ]),
     );
-    expect(sides.length).toBeGreaterThan(1);
+    expect(fleet.jobs.codeql?.if).toContain(
+      `(github.event_name != 'schedule' || needs.${CHECKS_JOB}.outputs.weekly == 'true')`,
+    );
   });
 
   // GitHub resolves a read of an output nobody sets to '' with no error, so a misspelled output skips the skeleton's leg
   // forever, green. Every read is walked to the step that sets it, under ONE name the whole way:
-  //   skeleton needs.platform.outputs.X -> fleet.yml workflow_call X -> jobs.ci (a call) -> fleet-ci.yml workflow_call X
-  //     -> jobs.standard-checks.outputs.X -> steps.plan.outputs.X -> actions/plan declares X
+  //   skeleton needs.platform.outputs.X -> fleet.yml workflow_call X -> jobs.standard-checks.outputs.X
+  //     -> steps.plan.outputs.X -> actions/plan declares X
   // A wire to another name is a swap nothing else catches, so it fails here too.
   const actionOutputs = (uses: string): string[] | null => {
     const name = platformAction(uses);
@@ -256,7 +286,7 @@ describe("fleet-ci.yml", () => {
     return jobOutputGap(called, wired[1], wired[2]);
   };
 
-  test("every output read resolves to a step that sets it: the skeleton's through fleet.yml's nested call, the jobs', and the steps'", () => {
+  test("every output read resolves to a step that sets it: the skeleton's through fleet.yml's workflow_call, the jobs', and the steps'", () => {
     const gaps: string[] = [];
     const skeleton = readFileSync(join(ROOT, "files/base/.github/workflows/ci.yml"), "utf8");
     const skeletonReads = new Set(
@@ -266,22 +296,17 @@ describe("fleet-ci.yml", () => {
       const gap = callOutputGap(fleet, output);
       if (gap !== null) gaps.push(`skeleton reads needs.platform.outputs.${output}: ${gap}`);
     }
-    for (const [file, workflow] of [
-      ["fleet.yml", fleet],
-      ["fleet-ci.yml", fleetCi],
-    ] as const) {
-      for (const [jobName, job] of Object.entries(workflow.jobs)) {
-        const text = JSON.stringify(job);
-        for (const [, needed, output] of text.matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-          const gap = jobOutputGap(workflow, needed, output);
-          if (gap !== null)
-            gaps.push(`${file} job '${jobName}' reads needs.${needed}.outputs.${output}: ${gap}`);
-        }
-        for (const [, id, output] of text.matchAll(/steps\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-          const gap = stepOutputGap(job, id, output);
-          if (gap !== null)
-            gaps.push(`${file} job '${jobName}' reads steps.${id}.outputs.${output}: ${gap}`);
-        }
+    for (const [jobName, job] of Object.entries(fleet.jobs)) {
+      const text = JSON.stringify(job);
+      for (const [, needed, output] of text.matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
+        const gap = jobOutputGap(fleet, needed, output);
+        if (gap !== null)
+          gaps.push(`fleet.yml job '${jobName}' reads needs.${needed}.outputs.${output}: ${gap}`);
+      }
+      for (const [, id, output] of text.matchAll(/steps\.([\w-]+)\.outputs\.([\w-]+)/g)) {
+        const gap = stepOutputGap(job, id, output);
+        if (gap !== null)
+          gaps.push(`fleet.yml job '${jobName}' reads steps.${id}.outputs.${output}: ${gap}`);
       }
     }
     expect({ gaps, skeletonReadsWalked: [...skeletonReads].length > 0 }).toEqual({

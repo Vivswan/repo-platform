@@ -41,11 +41,11 @@ GitHub resolves a reusable workflow's `@stable` when the run starts and a compos
 So no platform file names another by tag. Between platform files the reference is GitHub's `$/` path ([the self-repository reference](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax), runner 2.336 or newer), which resolves against the repository holding the file at the commit the run fetched it from, with nothing checked out for it:
 
 ```yaml
-# .github/workflows/fleet-ci.yml, fetched at the tag by a fleet repository's ci.yml
-- uses: $/actions/plan                          # this repository, at fleet-ci.yml's own commit
+# .github/workflows/fleet.yml, fetched at the tag by a fleet repository's ci.yml
+- uses: $/actions/plan                          # this repository, at fleet.yml's own commit
 # actions/plan/action.yml, fetched by that step
 - uses: $/actions/bun-setup                     # the same commit, however deep the composition
-# fleet-ci.yml's codeql job
+# fleet.yml's codeql job
 uses: $/.github/workflows/reusable-codeql.yml   # the same commit
 ```
 

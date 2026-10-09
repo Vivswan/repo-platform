@@ -145,7 +145,7 @@ test("every called job's permissions fit its caller job's ceiling", () => {
   // a platform call, so an empty root or a flat walk cannot pass quietly.
   const controls = [
     "files/base/.github/workflows/ci.yml job 'platform' -> .github/workflows/fleet.yml",
-    ".github/workflows/fleet.yml job 'ci' -> .github/workflows/fleet-ci.yml",
+    ".github/workflows/fleet.yml job 'codeql' -> .github/workflows/reusable-codeql.yml",
     ".github/workflows/ci.yml job 'post-green' -> .github/workflows/post-green.yml",
   ];
   const sites = CALLS.map((call) => call.site);

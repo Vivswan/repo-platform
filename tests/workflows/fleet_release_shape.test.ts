@@ -24,7 +24,7 @@ const job = (
   parseYaml(read(".github/workflows/fleet-release.yml")) as { jobs: Record<string, Job> }
 ).jobs["release-please"];
 const releasePrJob = (
-  parseYaml(read(".github/workflows/fleet-ci.yml")) as { jobs: Record<string, Job> }
+  parseYaml(read(".github/workflows/fleet.yml")) as { jobs: Record<string, Job> }
 ).jobs["release-pr"];
 // The skeleton's `uses:` lines carry the owner placeholder, which YAML reads as a flow mapping.
 const skeleton = parseYaml(
@@ -32,7 +32,7 @@ const skeleton = parseYaml(
 ) as { jobs: Record<string, Job> };
 
 // A mistyped output name in action.yml (release_cut) reads as empty to every consumer: cut, head, propose, and the guard all
-// skip, and the run is green; so does `behind` to fleet-ci.yml's heal. Each output is wired to a step of the action under
+// skip, and the run is green; so does `behind` to fleet.yml's heal. Each output is wired to a step of the action under
 // its own name, and the script that step runs names the output it writes (a wire to a step that never emits it reads as
 // empty the same way). Set equality over both consumers on purpose: an output nobody reads is dead surface.
 test("every release-health output is written by the script of the step it is wired to, and the two consumers read exactly that set", () => {

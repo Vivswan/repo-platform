@@ -1,7 +1,7 @@
 // git answers `merge-base --is-ancestor` with 0, 1, or an error exit, and the shell this replaces read every non-zero
 // as "behind" (a missing origin/<base> failed earlier, in git's own words): the three answers are pinned here against a
 // hand-made history, with the script run as the action runs it. The verdict leaves the script as the `behind` output,
-// which fleet-ci.yml reads as the literal 'true' to run the refresh: a lost or misspelled output reads as "not behind"
+// which fleet.yml reads as the literal 'true' to run the refresh: a lost or misspelled output reads as "not behind"
 // there, and the stale PR passes green with no refresh, so the bytes written to GITHUB_OUTPUT are pinned too.
 
 import { expect, test } from "bun:test";
