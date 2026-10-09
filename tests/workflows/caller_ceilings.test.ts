@@ -39,9 +39,9 @@ const ROOT = join(import.meta.dir, "../..");
 const RANK: Record<string, number> = { none: 0, read: 1, write: 2 };
 
 // The skeleton is the fleet's ci.yml: its `./` calls resolve against the starters beside it, its @stable calls against
-// this repository's workflows.
+// this repository's workflows, whose own `$/` calls resolve against the workflows beside them.
 const CALLER_ROOTS = [".github/workflows", "files/base/.github/workflows"];
-const LOCAL_CALL = /^\.\/\.github\/workflows\/(.+)$/;
+const LOCAL_CALL = /^[.$]\/\.github\/workflows\/(.+)$/;
 const PLATFORM_CALL = new RegExp(`^${PLATFORM_SLUG}/(\\.github/workflows/.+)@`);
 // A called run keyed per run_id, falling back to the cron's lane: the caller passes the input the branch reads and holds the literal.
 const FALLBACK_LANE =

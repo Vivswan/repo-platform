@@ -91,14 +91,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The severity threshold and the upstream pin live in the wrapper.
-      - uses: ./actions/dependency-review
+      - uses: $/actions/dependency-review
 
   yamllint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/yamllint
+      - uses: $/actions/yamllint
 
   biome:
     runs-on: ubuntu-latest
@@ -118,7 +118,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/check-typography
+      - uses: $/actions/check-typography
 
   # This checkout first, then the fleet trees the writer lands (the templates under files/ are not yaml until written),
   # where the managed files are this repository's own to fix, so they are judged rather than skipped.
@@ -131,7 +131,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/check-shell-complexity
+      - uses: $/actions/check-shell-complexity
         with:
           # The sync templates: judged through the written trees below, not raw.
           skip: files
@@ -157,7 +157,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/check-file-size
+      - uses: $/actions/check-file-size
 
   commit-names:
     runs-on: ubuntu-latest
@@ -166,7 +166,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: ./actions/validate-commit-names
+      - uses: $/actions/validate-commit-names
 
   typecheck:
     runs-on: ubuntu-latest
@@ -207,13 +207,13 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/plan
+      - uses: $/actions/plan
         id: plan
         with:
           private: ${{ github.event.repository.private }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: ./actions/validate-managed-files
+      - uses: $/actions/validate-managed-files
         with:
           private: ${{ steps.plan.outputs.private }}
 
@@ -230,7 +230,7 @@ jobs:
         run: bun install --frozen-lockfile --silent
       # Running the typos action installs its pinned release into $RUNNER_TEMP, which the end-to-end cases need on PATH.
       - name: Install typos by running the action
-        uses: ./actions/typos
+        uses: $/actions/typos
       - name: Put the installed typos on PATH
         run: echo "$RUNNER_TEMP" >>"$GITHUB_PATH"
       # The link-check step installs the pinned lychee on PATH, which the site tests' live link check then runs.
@@ -278,11 +278,11 @@ jobs:
           repository: Vivswan/skills
           ref: d2d8205778dc643c45162730d51ea24adf618722
           path: .skills
-      - uses: ./actions/plan
+      - uses: $/actions/plan
         id: plan
         with:
           mode: site
-      - uses: ./actions/pages-site
+      - uses: $/actions/pages-site
         with:
           check: "true"
           config: ${{ steps.plan.outputs.config }}
@@ -315,7 +315,7 @@ jobs:
       contents: read
       security-events: write
       actions: read
-    uses: ./.github/workflows/reusable-codeql.yml
+    uses: $/.github/workflows/reusable-codeql.yml
     with:
       language: javascript-typescript
 
@@ -328,14 +328,14 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/zizmor
+      - uses: $/actions/zizmor
 
   typos:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/typos
+      - uses: $/actions/typos
 
   # knip.jsonc at the root is this repository's own configuration.
   knip:
@@ -348,7 +348,7 @@ jobs:
           bun-version-file: files/bun/.bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
-      - uses: ./actions/knip
+      - uses: $/actions/knip
 
   semgrep:
     runs-on: ubuntu-latest
@@ -358,7 +358,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/semgrep
+      - uses: $/actions/semgrep
 
   bun-setup-smoke:
     runs-on: ubuntu-latest
@@ -373,12 +373,12 @@ jobs:
         run: bun .github/scripts/ci/bun_setup_smoke.ts plant
       - name: Set up the current bun (already on PATH)
         id: first
-        uses: ./actions/bun-setup
+        uses: $/actions/bun-setup
         with:
           from: ${{ runner.temp }}/bun-setup-smoke/current
       - name: Set up an earlier release (not the bun on PATH)
         id: second
-        uses: ./actions/bun-setup
+        uses: $/actions/bun-setup
         with:
           from: ${{ runner.temp }}/bun-setup-smoke/previous
       - name: Judge both calls
@@ -401,11 +401,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/trivy
+      - uses: $/actions/trivy
 
-  # GitHub loads an action's manifest when the job starts, so a manifest error fails every caller before its first step.
-  # A local `uses: ./actions/<name>` is the exception: it loads when its step runs, and a skipped step loads nothing. So the
-  # actions no other gating job runs run here, with inputs that change nothing;
+  # GitHub loads an action's manifest when the job starts, so a manifest error fails every caller before its first step,
+  # and only a job naming the action loads it. So the actions no other gating job names run here, with inputs that
+  # change nothing;
   # tests/workflows/action_load.test.ts holds the job to the actions directory.
   action-load:
     runs-on: ubuntu-latest
@@ -417,19 +417,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: lychee-verdict
-        uses: ./actions/lychee-verdict
+        uses: $/actions/lychee-verdict
         with:
           exit-code: "0"
       # Resolve mode over a stream no issue carries closes nothing, and the token could not.
       - id: fuzz-issue
-        uses: ./actions/fuzz-issue
+        uses: $/actions/fuzz-issue
         with:
           mode: resolve
           label: action-load
           stream: generic
       # after-propose fails only on a merged release PR left pending, and this repository cuts no releases.
       - id: release-health
-        uses: ./actions/release-health
+        uses: $/actions/release-health
         with:
           mode: after-propose
         env:
@@ -491,7 +491,7 @@ jobs:
       contents: write
       checks: read
       pull-requests: read
-    uses: ./.github/workflows/post-green.yml
+    uses: $/.github/workflows/post-green.yml
     # A called workflow inherits down only what it received: the fleet legs' environment secret needs the whole
     # chain to inherit (post-green.yml's callers, actions/runner#4453).
     # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit
@@ -517,6 +517,6 @@ jobs:
       pages: write
       id-token: write
       issues: write
-    uses: ./.github/workflows/reusable-site.yml
+    uses: $/.github/workflows/reusable-site.yml
     with:
       sha: ${{ github.sha }}

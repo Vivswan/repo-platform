@@ -28,7 +28,7 @@ runs:
     # and actions/shared alone, so there is nothing to install.
     - name: Set up the action's bun
       id: action-bun
-      uses: Vivswan/repo-platform/actions/bun-setup@stable
+      uses: $/actions/bun-setup
       with:
         from: ${{ github.action_path }}
 

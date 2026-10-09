@@ -7,16 +7,6 @@ description: |
   names, a knip.ts or knip.js among them, or a knip key in package.json. A configured entry
   or project list replaces the default list.
 
-  The run resolves that configuration with knip's own loader and writes a file of imports and
-  exports beside this action, inside the caller's workspace so knip follows its imports: the
-  action's knip_layer.ts, a knip.ts or knip.js as the repository wrote it (or knip's resolution
-  of a JSON one, as a literal), and the repository's package.json. Its default export is the
-  layering of the three, with the platform checkout fleet-ci.yml leaves in the workspace negated in the
-  repository's configured entry and project lists (knip's own `!<dir>/**` form, which draws no
-  hint). knip runs on that file, so a configured entry glob never reaches the checkout, however
-  git hides it; knip's own globs honor the exclude line the workflow writes. The file is removed
-  after the run.
-
   The caller installs the toolchain and the dependencies first, since knip resolves imports
   through node_modules.
 
@@ -32,13 +22,11 @@ runs:
     # setup-bun can put another bun first.
     - name: Set up the action's bun
       id: action-bun
-      uses: Vivswan/repo-platform/actions/bun-setup@stable
+      uses: $/actions/bun-setup
       with:
         from: ${{ github.action_path }}
 
-    # One knip for the fleet, pinned in package.json: its loader reads the repository's
-    # configuration and its CLI runs, and tests/actions/knip exercises this repository's own
-    # configuration against the same one.
+    # One knip for the fleet, pinned in package.json; tests/actions/knip runs the same one.
     - name: Install knip
       shell: bash
       working-directory: ${{ github.action_path }}
@@ -48,8 +36,7 @@ runs:
       # --silent: a failed install must name itself in the caller's log.
       run: '"$ACTION_BUN" install --frozen-lockfile --production'
 
+    # Under node, as `npx knip` runs it; a configuration hint fails the run.
     - name: Find unused files, exports, and dependencies
       shell: bash
-      env:
-        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
-      run: '"$ACTION_BUN" "${{ github.action_path }}/run.ts"'
+      run: node "$GITHUB_ACTION_PATH/node_modules/.bin/knip" --treat-config-hints-as-errors

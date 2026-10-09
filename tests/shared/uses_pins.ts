@@ -51,6 +51,15 @@ export function sourceSelfPins(text: string, file: string): SelfPin[] {
   }));
 }
 
+/** Every `uses:` naming a file of this repository by GitHub's `$/` path, which resolves against the repository holding
+ *  the file at the commit the run fetched it from. */
+export function selfPaths(text: string, file: string): { file: string; path: string }[] {
+  return [...text.matchAll(/uses:\s*['"]?\$\/([A-Za-z0-9_./-]+)/g)].map((match) => ({
+    file,
+    path: match[1],
+  }));
+}
+
 /** The owner a self pin may name: this repository's owner in any case, or the writer's `github_username` placeholder in either spelling. */
 export function ownsPlatform(owner: string): boolean {
   return (

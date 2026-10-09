@@ -5,6 +5,8 @@
   // wide and entry exports are judged too, or a dead export in a shared library would never surface.
   // An action whose scripts need no package of their own (actions/semgrep) is read as part of the root.
   "includeEntryExports": true,
+  // actions/knip ships a manifest alone, the knip the fleet runs; nothing there is code to analyze.
+  "ignoreWorkspaces": ["actions/knip"],
   "workspaces": {
     ".": {
       "entry": [

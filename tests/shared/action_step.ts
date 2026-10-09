@@ -4,7 +4,7 @@ import { parse as parseYaml } from "yaml";
 import { boundedSpawnSync } from "./bounded_spawn";
 
 export const REPO_ROOT = join(import.meta.dir, "../..");
-const RUNNER_BASH = ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c"];
+export const RUNNER_BASH = ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c"];
 
 export type Step = Record<string, unknown>;
 

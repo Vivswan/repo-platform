@@ -14,9 +14,6 @@ runs:
       shell: bash
       run: python3 -m pip install --quiet --requirement "$GITHUB_ACTION_PATH/requirements.txt"
 
-    # yamllint's own file selection (its yaml-files patterns and the repository's ignore list) minus the platform
-    # checkout fleet-ci.yml makes beside the caller's files (actions/shared/platform.ts), which it would otherwise
-    # read under the caller's config.
     - name: Lint YAML
       shell: bash
-      run: yamllint --list-files . | grep -v '^\./\.repo-platform-checkout/' | tr '\n' '\0' | xargs -0 yamllint -s
+      run: yamllint -s .

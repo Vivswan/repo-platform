@@ -8,11 +8,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import {
-  PLATFORM_CHECKOUT_DIR,
-  PLATFORM_OWNER,
-  PLATFORM_SLUG,
-} from "../../actions/shared/platform.ts";
+import { PLATFORM_OWNER, PLATFORM_SLUG } from "../../actions/shared/platform.ts";
 import { type Action, REPO_ROOT, type Step } from "../shared/action_step";
 
 const ACTIONS_DIR = join(REPO_ROOT, "actions");
@@ -29,9 +25,7 @@ const STEP_REF = /\bsteps\.([\w-]+)\.(?:outputs\.([\w-]+)|outcome|conclusion)\b/
 const INPUT_REF = /\binputs\.([\w-]+)/g;
 const ACTION_PATH = "${{ github.action_path }}";
 const SCRIPT_TOKEN = /\S+\.ts\b/g;
-const OWN_ACTION = new RegExp(
-  `^(?:\\./actions/|\\./${PLATFORM_CHECKOUT_DIR}/actions/|${PLATFORM_SLUG}/actions/)([\\w-]+)(?:@|$)`,
-);
+const OWN_ACTION = new RegExp(`^(?:\\$/actions/|${PLATFORM_SLUG}/actions/)([\\w-]+)(?:@|$)`);
 
 interface Caller {
   uses: string;
