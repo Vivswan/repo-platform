@@ -21,7 +21,7 @@ jobs:
       security-events: write
       actions: read
     steps:
-      # Visibility is the caller's to gate: fleet-ci.yml's plan empties a private repository's CodeQL languages, and this
+      # Visibility is the caller's to gate: fleet.yml's plan empties a private repository's CodeQL languages, and this
       # repository's own ci.yml calls it as a public repository.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

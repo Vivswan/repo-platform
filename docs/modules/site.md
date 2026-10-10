@@ -235,7 +235,7 @@ The registration is read on every run, so the flip needs no sync.
 
 ## The docs PR check
 
-fleet-ci.yml's `docs-check` job builds `docs/` strictly on every pull request of a repository selecting `site` that carries a `docs/` directory (and has not turned the docs half off). It uses the same include roots the deploy reads from the registration, so a dead link fails the PR instead of the deploy.
+fleet.yml's `docs-check` job builds `docs/` strictly on every pull request of a repository selecting `site` that carries a `docs/` directory (and has not turned the docs half off). It uses the same include roots the deploy reads from the registration, so a dead link fails the PR instead of the deploy.
 
 - **A gating job:** it is one of the gating jobs behind `all-green`. The deploy would go red on the same link after the merge, and a job inside the `platform` call can never hang as an expected check the way a paths-filtered workflow could.
 

@@ -151,7 +151,7 @@ Push any commit to main after the merge and read the run. The jobs are the same 
 | Job | On a PR | On a push to main |
 | --- | --- | --- |
 | `checks` | runs (your checks.yml) | runs |
-| `ci` | runs (fleet-ci: plan, base checks, CodeQL where public and a selected toolchain declares a language, module checks) | runs |
+| `platform` | runs (fleet.yml: plan, base checks, CodeQL where public and a selected toolchain declares a language, module checks) | runs |
 | `all-green` | the required check | judged |
 | `post-green` | skipped | runs your hook |
 | `release`, `update-release`, `publish-release`, `update-release-pr` | skipped | run only with `release-please` selected |

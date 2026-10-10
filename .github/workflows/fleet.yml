@@ -1,16 +1,8 @@
-# Runs the fleet's CI and its nightly scan, called by the one `platform` job of every managed ci.yml, so an edit here
-# changes fleet CI with no per-repo diff trail. This repository's own gate is the counterweight.
-#
-# The caller judges the call's one result: a job that fails here fails the call, a skipped job leaves it green, and
-# no job is name-addressed.
-#
-# The skeleton grants every platform call ONE fixed ceiling, and GitHub checks a called job's permissions against it
-# before the job's `if` runs (tests/workflows/caller_ceilings.test.ts). Each job here asks for what it needs and
-# nothing more; a job asking past the ceiling fails every fleet run at once.
-#
-# fleet-ci.yml stays callable while a ci.yml the sync has not replaced yet still calls it, so its jobs ride here as
-# one call; the rung that deletes fleet-ci.yml and fleet-nightly.yml inlines them. Every platform path is `$/`:
-# this repository at this file's own commit (docs/platform/build-provenance.md).
+# Every managed ci.yml's `platform` job calls this workflow, so an edit here changes fleet CI with no per-repo diff
+# trail. Every platform path is `$/`, this repository at this file's own commit, so one run never mixes two commits
+# (docs/platform/build-provenance.md). The skeleton grants the call ONE fixed permissions ceiling, checked against
+# each job before its `if` runs, so a job asking past it fails every fleet run at once
+# (tests/workflows/caller_ceilings.test.ts).
 
 name: Fleet
 
@@ -19,26 +11,254 @@ on:
     outputs:
       modules:
         description: The repository's module selection in canonical order, a compact JSON array.
-        value: ${{ jobs.ci.outputs.modules }}
+        value: ${{ jobs.standard-checks.outputs.modules }}
       tracking-labels:
         description: Comma-separated nightly tracking-issue labels of the selected stream modules.
-        value: ${{ jobs.ci.outputs.tracking-labels }}
+        value: ${{ jobs.standard-checks.outputs.tracking-labels }}
 
 permissions:
   contents: read
 
 jobs:
-  # The checks every repository runs and the module jobs. This grant is the ceiling of the jobs inside, the union of
-  # what each asks.
-  ci:
-    uses: $/.github/workflows/fleet-ci.yml
+  # One job for the plan and every check that runs in every repository. GitHub bills a job a rounded-up minute, so as
+  # separate jobs of 4 to 30 seconds the checks billed five to six minutes per push for about two minutes of work.
+  #
+  # The check steps run under `!cancelled()`, so one red check hides no other. Each fails in place, and the job's page
+  # names the failed step. A skipped step stood down and is never a failure.
+  #
+  # On an event without a repository object the visibility input is empty, and the plan action's `private` input
+  # owns what happens then.
+  standard-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
+      # The sticky findings comments of validate-managed-files, file-size, and shell-complexity.
       pull-requests: write
+      # zizmor's SARIF upload.
+      security-events: write
+    outputs:
+      modules: ${{ steps.plan.outputs.modules }}
+      private: ${{ steps.plan.outputs.private }}
+      codeql-languages: ${{ steps.plan.outputs.codeql-languages }}
+      tracking-labels: ${{ steps.plan.outputs.tracking-labels }}
+      weekly: ${{ steps.plan.outputs.weekly }}
+    steps:
+      # fetch-depth 0: commit-names walks history and gitleaks scans the event's range.
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: plan
+        uses: $/actions/plan
+        with:
+          private: ${{ github.event.repository.private }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: validate
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: $/actions/validate-managed-files
+        with:
+          private: ${{ steps.plan.outputs.private }}
+
+      - id: typography
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: $/actions/check-typography
+      - id: file-size
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: $/actions/check-file-size
+      - id: shell-complexity
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: $/actions/check-shell-complexity
+      - id: commit-names
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: $/actions/validate-commit-names
+      - id: actionlint
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+      - id: yamllint
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: $/actions/yamllint
+      # Allowlist in the repo-owned _typos.toml, layered under the fleet's.
+      - id: typos
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: $/actions/typos
+      # Allowlist false positives in the repo-owned .gitleaks.toml;
+      # comments off: findings land in the log and summary, not PR comments.
+      - id: gitleaks
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          # The action's default binary predates .gitleaks.toml's
+          # minVersion floor and skips that check silently; pin past it.
+          GITLEAKS_VERSION: "8.30.1"
+
+      # SARIF uploads on public repositories only (a private personal repository has no code scanning);
+      # != 'true' so an empty visibility output uploads, where a private repository fails loudly
+      # instead of skipping silently.
+      - id: zizmor
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: $/actions/zizmor
+        with:
+          upload-sarif: ${{ steps.plan.outputs.private != 'true' }}
+
+      # Blocks for every visibility (docs/modules/security-scans.md); the only bypass is the repository's
+      # .trivyignore.yaml, statement and expiry per entry.
+      - id: trivy
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
+        uses: $/actions/trivy
+
+      # knip resolves imports through node_modules, so the repository's own bun installs first, and last among the
+      # checks, so trivy and the base checks judge the checkout before node_modules exists.
+      #
+      # knip runs its defaults, overridden by whatever knip configuration the repository carries (a configured entry
+      # or project list replaces the default list, it does not extend it). A repository committed right after
+      # selecting the module has no package.json yet, so knip stands down then.
+      - id: bun
+        if: >-
+          !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' &&
+          contains(steps.plan.outputs.modules, '"bun"')
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - id: bun-install
+        if: ${{ !cancelled() && steps.bun.outcome == 'success' && hashFiles('package.json') != '' }}
+        run: bun install --frozen-lockfile
+      - id: knip
+        if: ${{ !cancelled() && steps.bun-install.outcome == 'success' }}
+        uses: $/actions/knip
+      - name: Note why knip stood down
+        if: ${{ !cancelled() && steps.bun.outcome == 'success' && steps.bun-install.outcome == 'skipped' }}
+        run: echo "::notice::knip stood down, this repository has no package.json to install from"
+
+  # Every job needing standard-checks runs under `!cancelled()`: a bare job skips when a dependency fails, so a red check
+  # would hide its verdict (tests/workflows/fleet_shape.test.ts).
+  #
+  # Public only: the dependency-graph API is free just there. A successful plan publishes `modules` (at least `[]`) and
+  # a failed one publishes nothing, so `modules != ''` skips the job after a failed plan; `private != 'true'` then runs
+  # the check on an empty visibility, where a private repository fails loudly instead of skipping silently.
+  dependency-review:
+    needs: [standard-checks]
+    if: >-
+      !cancelled() && needs.standard-checks.outputs.modules != '' &&
+      needs.standard-checks.outputs.private != 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The severity threshold and the upstream pin live in the wrapper.
+      - uses: $/actions/dependency-review
+
+  # Public only: code scanning is where the findings go (the sentinel and != 'true' as above).
+  semgrep:
+    needs: [standard-checks]
+    if: >-
+      !cancelled() && needs.standard-checks.outputs.modules != '' &&
+      needs.standard-checks.outputs.private != 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # The SARIF upload only.
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: $/actions/semgrep
+
+  # On the nightly schedule it runs on the week's Monday alone (the plan's weekly output).
+  codeql:
+    needs: [standard-checks]
+    if: >-
+      !cancelled() &&
+      needs.standard-checks.outputs.codeql-languages != '[]' && needs.standard-checks.outputs.codeql-languages != '' &&
+      (github.event_name != 'schedule' || needs.standard-checks.outputs.weekly == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(needs.standard-checks.outputs.codeql-languages) }}
+    permissions:
+      contents: read
       security-events: write
       actions: read
+    uses: $/.github/workflows/reusable-codeql.yml
+    with:
+      language: ${{ matrix.language }}
+
+  # A dead internal link fails the PR here instead of the site leg after the merge. The hashFiles
+  # guard sits on the step: GitHub does not allow hashFiles in a job-level if.
+  docs-check:
+    needs: [standard-checks]
+    if: ${{ !cancelled() && contains(needs.standard-checks.outputs.modules, '"site"') && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: hashFiles('docs/**') != ''
+        uses: $/actions/pages-site
+        with:
+          check: "true"
+      - if: hashFiles('docs/**') == ''
+        run: echo "::notice::docs-check stood down, this repository has no docs/ directory"
+
+  # The release PR's gates run in release-health's pull-request mode. A head behind main would cut a release missing
+  # commits already on it, so a stale PR heals in its own run, whatever the gates said (a bare step implies success(),
+  # which would leave a PR behind a red gate stale; the gate's red stands either way):
+  #   health: behind? -> release-please propose rebuilds the branch from main and force-pushes
+  #                   -> after-refresh (only after a propose that succeeded): head moved -> green, naming the new head
+  #                        head unmoved -> a merged release PR still pending: red (release-please proposed nothing)
+  #                                        else the PR body was unchanged: GitHub's update-branch merges main
+  #
+  # The merge is safe only there (an unchanged body means the commits the PR lacks add no changelog line); a changed body
+  # is always release-please's rebuild. Health can go stale between check and release, so the release path re-runs it.
+  release-pr:
+    needs: [standard-checks]
+    if: >-
+      !cancelled() && contains(needs.standard-checks.outputs.modules, '"release-please"') &&
+      github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # contents write: release-please and update-branch push the release branch. pull-requests write: release-please
+    # edits the release PR. The skeleton's `platform` caller grants both, and the pull_request event keeps them on the
+    # job token for a branch of the same repository (a release PR is never a fork PR, where the token is read-only).
+    # vulnerability-alerts read is the Dependabot alerts API key; without it the security gate fails.
+    permissions:
+      contents: write
       issues: read
+      pull-requests: write
       vulnerability-alerts: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: the freshness check needs origin/main.
+          fetch-depth: 0
+          # PR head, not the default merge ref - the merge ref already
+          # contains main's tip, so it would always pass.
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: $/actions/release-health
+        id: health
+        with:
+          mode: pull-request
+          # Empty disables the tracking gates (no stream module selected).
+          tracking-labels: ${{ needs.standard-checks.outputs.tracking-labels }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needs no checkout: release-please reads main through the API and targets the repository's default branch, not
+      # this event's merge ref. The pin is fleet-release.yml's (tests/workflows/delivery_pins.test.ts holds them equal).
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: refresh
+        if: ${{ !cancelled() && steps.health.outputs.behind == 'true' }}
+        with:
+          token: ${{ github.token }}
+          skip-github-release: true
+      - uses: $/actions/release-health
+        if: ${{ !cancelled() && steps.health.outputs.behind == 'true' && steps.refresh.outcome == 'success' }}
+        with:
+          mode: after-refresh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # The nightly half of the security scan (docs/modules/security-scans.md). A finding never fails it: findings become
   # the security-nightly issue that release-health blocks on, and a clean night closes it. A scan or configuration

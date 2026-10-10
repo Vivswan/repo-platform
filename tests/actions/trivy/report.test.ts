@@ -187,7 +187,7 @@ describe("directoryName", () => {
   });
 });
 
-// The executed entry point: the output keys are action.yml's outputs map; `found=true` is the literal fleet-nightly's
+// The executed entry point: the output keys are action.yml's outputs map; `found=true` is the literal trivy-nightly's
 // upload and file-issue gates read, `found=false` the one its close-issue gate reads.
 describe("the report step", () => {
   const run = (results: unknown) => {

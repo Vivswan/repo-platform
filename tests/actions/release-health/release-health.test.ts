@@ -759,7 +759,7 @@ describe("runHealthCheck", () => {
     expect(await run(afterProposeConfig(), fixture)).toEqual(expected);
   });
 
-  // fleet-ci.yml runs this mode after release-please's propose on a stale release PR. release-please pushes nothing when
+  // fleet.yml runs this mode after release-please's propose on a stale release PR. release-please pushes nothing when
   // the regenerated PR body equals the current one (an equal body means the commits the PR lacks add no changelog line),
   // and GitHub's update-branch answers 202 and merges afterwards: so the head is read before and after, the PUT is sent
   // with the judged head as its precondition, and a failed read or a refused PUT propagates instead of reading as moved

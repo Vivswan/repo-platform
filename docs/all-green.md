@@ -42,7 +42,7 @@ Each entry is what you see, what it means, and what to do.
 
 **`all-green` failed with `platform` skipped.**
 
-- **Means:** the platform call did not run (its `ci` job is fleet-ci.yml, whose `standard-checks` job is the plan), so the caller skipped and the gate never lets it.
+- **Means:** the platform call did not run (its `standard-checks` job is the plan), so the caller skipped and the gate never lets it.
 - **Do:** a run that verified nothing must not merge; check why the caller skipped.
 
 **`pr-title` waiting (repos with the pr-title module).**
@@ -57,7 +57,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | Gating job | What it does |
 | --- | --- |
 | `checks` | calls the repo-owned checks.yml; skipped on the nightly schedule run |
-| `platform` | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. Its `ci` job is [fleet-ci.yml](../.github/workflows/fleet-ci.yml): the `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels. Its `trivy-nightly` job is the schedule's |
+| `platform` | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. The `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels. Its `trivy-nightly` job is the schedule's |
 | `all-green` | needs both |
 
 **The nightly schedule run** is the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, the other checks stand down, and `trivy-nightly` runs the Trivy scan and files its tracking issue. Public repositories only: a private repository pays for every job that runs, and a skipped job bills nothing.
@@ -69,9 +69,9 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 **The jobs beside them gate nothing:** the `post-green` caller and the static legs are gate-downstream ([after the gate](#after-the-gate)).
 
-**The membership rule:** what gates a managed repository is being a job in fleet.yml (fleet-ci.yml's included) or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
+**The membership rule:** what gates a managed repository is being a job in fleet.yml or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
 
-- **Inside fleet-ci.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green. `trivy-nightly` fails on a scan or configuration error alone, never on a finding; such a night's gate is red, and the site rebuild waits for the next.
+- **Inside fleet.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green. `trivy-nightly` fails on a scan or configuration error alone, never on a finding; such a night's gate is red, and the site rebuild waits for the next.
 
 - **Every platform action it calls** is a `$/` path, this repository at the workflow's own commit ([build-provenance](platform/build-provenance.md#one-commit-per-run)).
 

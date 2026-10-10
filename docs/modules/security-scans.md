@@ -4,13 +4,13 @@ order: 225
 
 # Security scans
 
-This page covers the fleet's Trivy and semgrep scans; every other check fleet-ci.yml runs has its row in [fleet-guidelines.md](../fleet-guidelines.md#how-to-bypass-a-check).
+This page covers the fleet's Trivy and semgrep scans; every other check fleet.yml runs has its row in [fleet-guidelines.md](../fleet-guidelines.md#how-to-bypass-a-check).
 
 Every managed repository is scanned by [Trivy](https://trivy.dev) through the skeleton ci.yml's `platform` call, with zero Trivy files in the repository (public repositories also run [semgrep](#semgrep)). The configuration lives in the [trivy action](../../actions/trivy/action.yml), and the scan runs in two halves:
 
 | Half | Where | Runs on | Scans | Blocking? | Findings go to |
 |---|---|---|---|---|---|
-| Blocking | the `trivy` step of [fleet-ci.yml](../../.github/workflows/fleet-ci.yml)'s `standard-checks` job | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the step fails its job, so `all-green` fails | the step log |
+| Blocking | the `trivy` step of [fleet.yml](../../.github/workflows/fleet.yml)'s `standard-checks` job | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the step fails its job, so `all-green` fails | the step log |
 | Nightly | the `trivy-nightly` job in [fleet.yml](../../.github/workflows/fleet.yml) | the `schedule` trigger, public repositories only | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
 
 ## The blocking half
@@ -52,11 +52,11 @@ misconfigurations:
 
 ## The nightly half
 
-The nightly scan is the `trivy-nightly` job of fleet.yml, beside the checks' `ci` call. It files its issue under `issues: write`, a scope of the one fixed ceiling the skeleton grants every platform call ([all-green.md](../all-green.md#what-gates-what)).
+The nightly scan is the `trivy-nightly` job of fleet.yml, beside the check jobs. It files its issue under `issues: write`, a scope of the one fixed ceiling the skeleton grants every platform call ([all-green.md](../all-green.md#what-gates-what)).
 
 - **Never red on a finding:** the `platform` call stays green whatever the scan finds. A scan or configuration error (an ignore entry without its `expired_at`) fails the job, and with it that night's gate and site rebuild.
 
-- **Trigger:** the managed ci.yml's `schedule` event, on which `trivy-nightly` runs and fleet-ci's `trivy` step stands down. Public repositories only: the job skips in a private repository, which pays for every job that runs and nothing for a skipped one.
+- **Trigger:** the managed ci.yml's `schedule` event, on which `trivy-nightly` runs and fleet.yml's `trivy` step stands down. Public repositories only: the job skips in a private repository, which pays for every job that runs and nothing for a skipped one.
 
 - **The cron's cadence,** and which other jobs stand down on it, belong to the skeleton ci.yml and the per-job conditions, not to the scan.
 
@@ -68,7 +68,7 @@ The nightly scan is the `trivy-nightly` job of fleet.yml, beside the checks' `ci
 
 ## Semgrep
 
-Public repositories also run [semgrep](https://semgrep.dev) as fleet-ci.yml's `semgrep` job, through the [semgrep action](../../actions/semgrep/action.yml): the registry needs no token, but code scanning needs a public repository.
+Public repositories also run [semgrep](https://semgrep.dev) as fleet.yml's `semgrep` job, through the [semgrep action](../../actions/semgrep/action.yml): the registry needs no token, but code scanning needs a public repository.
 
 - **Rules:** the registry's `p/default` set at `--severity ERROR`, with one rule excluded permanently: `github-actions-mutable-action-tag`, because zizmor's `unpinned-uses` owns action pinning (one tool per finding class).
 

@@ -120,7 +120,7 @@ describe("planCi", () => {
     "security-label-description": "Automated nightly security scan findings",
   };
 
-  // The output names are fleet-ci's `needs.plan.outputs` contract; the module order is files.yml's whatever the
+  // The output names are fleet.yml's `needs.plan.outputs` contract; the module order is files.yml's whatever the
   // registration's, the tracking labels follow it with the registration's spellings winning per key, and the fleet
   // security label rides last on every repository, an empty one included.
   test.each<{ reason: string; text: string; now: Date; outputs: Record<string, string> }>([
@@ -439,12 +439,12 @@ describe("plan.ts as a child", () => {
   const SITE_CONFIG = (title: string, include: string) =>
     `config={"site_title":"${title}","docs_path":"docs","include":${include},"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}\n`;
 
-  // The row names are the outputs fleet-ci's plan step hands its jobs: a renamed or missing row leaves them unselected, green.
-  // fleet-ci passes no `mode`, so the default-mode row runs under the manifest's declared default.
+  // The row names are the outputs fleet.yml's plan step hands its jobs: a renamed or missing row leaves them unselected, green.
+  // fleet.yml passes no `mode`, so the default-mode row runs under the manifest's declared default.
   const MODE_DEFAULT = String(loadAction("actions/plan/action.yml").inputs?.mode.default);
   test.each<{ reason: string; registration: string; env: Record<string, string>; output: string }>([
     {
-      reason: "default mode, the mode fleet-ci gets by omitting the input",
+      reason: "default mode, the mode fleet.yml gets by omitting the input",
       registration: `modules: [bun, fuzzer, release-please]\n${PROJECT}`,
       env: { PRIVATE: "false", MODE: MODE_DEFAULT },
       output: [
@@ -483,7 +483,7 @@ describe("plan.ts as a child", () => {
       output: SITE_CONFIG("Site", '[{"path":"skills","mount":"skills","page":"SKILL.md"}]'),
     },
   ])(
-    "$reason writes every row fleet-ci reads, and echoes them",
+    "$reason writes every row fleet.yml reads, and echoes them",
     ({ registration, env, output }) => {
       const result = run({ ".repo-platform.yml": registration }, env);
       expect([result.exitCode, result.output, result.stdout.trimEnd()]).toEqual([
@@ -501,7 +501,7 @@ describe("plan.ts as a child", () => {
     return path;
   };
 
-  // Every refusal is a workflow error naming the document, and no row is written: fleet-ci's jobs read empty outputs
+  // Every refusal is a workflow error naming the document, and no row is written: fleet.yml's jobs read empty outputs
   // as nothing to do. The reserved roster is derived from the files/ tree at run time (FILES_TREE), so a label the
   // settings layers manage is refused whichever layer declares it; site mode reads the registration through the same
   // parse, so a refused key fails the plan before a deploy could read it as nothing.

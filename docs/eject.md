@@ -28,11 +28,11 @@ Leaving the fleet means revoking the fleet token's write access to the repo: rem
    git rm .repo-platform.yml .github/repo-platform-manifest.json
    ```
 
-2. Rewrite `.github/workflows/ci.yml`: the managed file is a thin caller of repo-platform's `fleet.yml` reusable (whose `ci` job is `fleet-ci.yml`), and that call is all-or-nothing. Its `plan` step goes red once `.repo-platform.yml` (the registration it reads) is gone, and no input turns it off. Replace the `platform` job:
+2. Rewrite `.github/workflows/ci.yml`: the managed file is a thin caller of repo-platform's `fleet.yml` reusable, and that call is all-or-nothing. Its `plan` step goes red once `.repo-platform.yml` (the registration it reads) is gone, and no input turns it off. Replace the `platform` job:
 
    | Part of ci.yml | What to do |
    |---|---|
-   | the jobs you want | copy them out of `fleet-ci.yml` into ci.yml (the composite actions they call stay public), or write your own |
+   | the jobs you want | copy them out of `fleet.yml` into ci.yml (the composite actions they call stay public), or write your own |
    | the copied `plan` and `validate` steps | drop them: they read the registration you deleted |
    | every copied step's condition | remove `steps.plan.outcome == 'success' &&` |
    | every copied job's `needs` list | remove `standard-checks` |
@@ -50,7 +50,7 @@ Leaving the fleet means revoking the fleet token's write access to the repo: rem
    | each thin caller (`auto-assign.yml`, the `site` job's `reusable-site.yml` call, the `platform` job's `fleet.yml` call) | a copy of the corresponding `reusable-*.yml`/fleet job from repo-platform |
    | the `all-green` job | nothing: it already runs a third-party action |
    | `uses: Vivswan/repo-platform/actions/...` steps | vendored copies of the action scripts |
-   | CodeQL (runs inside fleet-ci's `codeql` matrix) | inline repo-platform's `reusable-codeql.yml` too if you want CodeQL without repo-platform |
+   | CodeQL (runs inside fleet.yml's `codeql` matrix) | inline repo-platform's `reusable-codeql.yml` too if you want CodeQL without repo-platform |
    | the `pr-title.yml` workflow (one more `uses: Vivswan/repo-platform/actions/...` step: the `validate-commit-names` action with the PR title as its `title` input) | vendor it like the others, or delete the workflow and drop its required check from the `pr-title` ruleset |
 
 4. (Optional) Strip the marker comments from `.gitignore`. The content keeps working either way.

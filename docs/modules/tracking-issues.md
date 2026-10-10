@@ -34,7 +34,7 @@ Each stream is identified by a label, set as a registration key (`labels.fuzzer`
 
   The rendered `.github/settings.yml` declares the label automatically: the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](../settings.md)).
 
-The registration grammar and fleet-ci's `plan` step enforce:
+The registration grammar and fleet.yml's `plan` step enforce:
 
 - **No reserved name:** no label name the fleet layers already manage (the settings baseline, the release labels, the dependabot labels; GitHub label names are case-insensitive). Reusing one would let a green night close unrelated issues carrying it and make every settings apply fight over the label's color and description.
 
@@ -65,7 +65,7 @@ With the release-please module also selected, an open tracking issue blocks rele
 | the release PR's `release-pr` CI job | fails early and visibly; it blocks that PR on every refresh |
 | the release pipeline's authoritative pre-flight | blocks the cut itself; it self-scopes to release-cut pushes, so ordinary main runs are never blocked |
 
-**How the labels reach the gate:** fleet-ci's `plan` step outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open.
+**How the labels reach the gate:** fleet.yml's `plan` step outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open.
 
 To unblock:
 

@@ -1,6 +1,6 @@
 // A stale release PR cuts a release missing commits already on the base branch: its version and changelog were computed
 // before them. The merge ref GitHub checks out by default already contains the base tip, so the caller checks out the PR
-// HEAD with full history. The verdict is the `behind` output, which fleet-ci.yml reads as the literal 'true' to run
+// HEAD with full history. The verdict is the `behind` output, which fleet.yml reads as the literal 'true' to run
 // release-please's refresh in the same run; a stale head is never a failure here. An errored look (no origin/<base>, a
 // shallow checkout) throws; it is never read as either verdict.
 

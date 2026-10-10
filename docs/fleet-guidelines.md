@@ -100,7 +100,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 **Enforced by:** one judge, actions/validate-commit-names.
 
 - **On the PR title:** the [`pr-title` check](settings.md#the-pr-title-ruleset) (pr-title module).
-- **On the commit subjects:** the `commit-names` step of fleet-ci.yml's `standard-checks` job (in repo-platform's own ci.yml, a `commit-names` job).
+- **On the commit subjects:** the `commit-names` step of fleet.yml's `standard-checks` job (in repo-platform's own ci.yml, a `commit-names` job).
 - **Squash-only merging with the PR title as subject:** the [settings override layer](settings.md), applied to every managed repository.
 
 **Review only, the type:** before landing, read the diff's shape against the title's purpose. A `refactor` whose existing test now expects a different output has the wrong title.
@@ -154,7 +154,7 @@ if [ -f x ]; then cat x; fi
 - **Exempt:** a block that must stay shell goes in `.shell-complexity-allow.local` as `path # reason`, the reason mandatory; an entry whose file has no refused construct left fails as stale.
 - **Skipped and counted:** a file with the managed header (repo-platform owns it), and a yaml file that does not parse (the check warns). Vendored installs and build output are never read (`node_modules`, `vendor`, `third_party`, `dist`, `build`, `.venv`), nor the directories a caller names in the action's `skip` input (repo-platform names `files`, its sync templates, judged written).
 
-**Enforced by:** the `shell-complexity` step of fleet-ci.yml's `standard-checks` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)). repo-platform's own `shell-complexity` job runs the same action over this checkout and over the fleet trees its writer lands: the templates under `files/` are judged written, never raw, with the managed files included and each finding reported against its template.
+**Enforced by:** the `shell-complexity` step of fleet.yml's `standard-checks` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)). repo-platform's own `shell-complexity` job runs the same action over this checkout and over the fleet trees its writer lands: the templates under `files/` are judged written, never raw, with the managed files included and each finding reported against its template.
 
 ## Markdown prose is never hard-wrapped
 
@@ -350,7 +350,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **Packaging:** a repository that packages from its root (an npm package with no `files` field, for one) lists the allowlist in its packaging ignore file (`.npmignore`), or it ships as content.
 
-**Enforced by:** the `file-size` step of fleet-ci.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It reads lines and nothing else: no parser, no grammar, no runtime dependency.
+**Enforced by:** the `file-size` step of fleet.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It reads lines and nothing else: no parser, no grammar, no runtime dependency.
 
 - **What fails:** a hard-cap finding or an allowlist defect fails the step, and with it the `standard-checks` job. repo-platform's own ci.yml runs the same action as its standalone `file-size` job.
 
@@ -362,7 +362,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 **Why:** a per-finding bypass records what was accepted and why, beside the code it excuses, and covers only that finding; a switch hides every future finding too.
 
-**How:** the table below, one row per check fleet-ci.yml runs. zizmor runs the fleet policy alone; knip runs on its own defaults, which the repo-owned `knip.json` overrides where it sets a key; `_typos.toml` extends the fleet allowlist.
+**How:** the table below, one row per check fleet.yml runs. zizmor runs the fleet policy alone; knip runs on its own defaults, which the repo-owned `knip.json` overrides where it sets a key; `_typos.toml` extends the fleet allowlist.
 
 | Check | Where it runs | Blocks on | Bypass |
 |---|---|---|---|
