@@ -15,7 +15,7 @@ all-green -> post-green -> site
 
 **The `post-green` job** calls [post-green.yml](../../.github/workflows/post-green.yml), whose `move-stable` leg moves the `stable` tag, the fleet's delivery ref, to the judged commit in that run - re-verifying main history and the check at the commit before the push ([build-provenance.md](build-provenance.md)).
 
-- post-green.yml's only other way in is a `workflow_dispatch` with a green main commit's `sha`, which runs the mover alone: the self-heal for a tag move that failed or was evicted after its gate passed (the next push heals it too; a sync meanwhile renders the commit the tag still names).
+- post-green.yml's only other way in is a `workflow_dispatch` with a green main commit's `sha`, which runs the mover alone: the self-heal for a tag move that failed or was cancelled after its gate passed (the next push heals it too; a sync meanwhile renders the commit the tag still names).
 - The file's header has the coalescing contract every leg there must satisfy.
 
 **The mover** ([post-green/move_stable.ts](../../.github/scripts/post-green/move_stable.ts)) re-verifies main history and the check at the sha, reads where the tag sits, and moves it with a lease push, the compare-and-swap that makes a racing mover lose loudly.
@@ -71,9 +71,9 @@ The leg reads a range: from the commit the `stable` tag named before this run mo
 ::notice::<the tag's previous commit>..<third merge> opted in: syncing public now
 ```
 
-Why a range: the mover legs of neighbouring commits queue on the `stable-tag-move` lane under [the lane rule](../all-green.md#after-the-gate). A commit whose mover was replaced there never syncs from its own run, and its successor's own `before..sha` would miss it.
+Why a range: a commit whose run never reached the sync (a red mover, a hand-cancelled run) never syncs from its own run, and its successor's own `before..sha` would miss it.
 
-The tag's previous commit is a durable base: the range from it covers every commit since the last move, replaced movers included, so an opt-in survives its own mover being replaced at the lane.
+The tag's previous commit is a durable base: the range from it covers every commit since the last move, runs whose mover never moved included, so an opt-in survives its own run going red or being cancelled before the move.
 
 - **When the mover reports no previous commit** (the tag did not move: it already named the sha or a newer commit, it did not exist yet, or the mover went red), the base is the push payload's `before`. A replay at the tag's own commit is such a case.
 
@@ -83,11 +83,11 @@ The tag's previous commit is a durable base: the range from it covers every comm
 
 - **Several opt-ins in the range union:** any `all` wins, otherwise `public`.
 
-- **Refused labels by commit:** the judged commit's refused labels turn the leg red. An older commit's (its own run was red, or its mover was replaced at the lane) are a warning naming the commit and contribute nothing, and the next merge's correct label still syncs.
+- **Refused labels by commit:** the judged commit's refused labels turn the leg red. An older commit's (its own run was red or cancelled) are a warning naming the commit and contribute nothing, and the next merge's correct label still syncs.
 
-- **A merge never loses its own run** ([after the gate](../all-green.md#after-the-gate)), but its mover leg is replaced when a third mover queues on the `stable-tag-move` lane while one runs and one waits. A running mover is never cancelled, and the surviving run's range still reads its label.
+- **A merge keeps its own run** short of 100 pending ([after the gate](../all-green.md#after-the-gate)): main runs wait in arrival order, so the movers of neighbouring commits never compete on the `stable-tag-move` lane, which only a hand-dispatched mover shares. A run that went red or was cancelled before its mover moved the tag still has its label read by the next run's range.
 
-- **The `sync-repos` lane** replaces a pending sync the same way. When the tag had already moved past that merge, no later range covers its label: the next fleet-wide sync-repos.yml run (its cron, or a dispatch) heals it.
+- **The `sync-repos` lane** likewise meets only the cron or a dispatched sync. When the tag had already moved past a merge whose run went red or was cancelled, no later range covers its label: the next fleet-wide sync-repos.yml run (its cron, or a dispatch) heals it.
 
 - **A failed lookup:** a pull request lookup that fails (the API down, a token without read access), or two pull requests claiming the commit as their merge, turns the leg red for the whole range, never a quiet `armed=false`.
 

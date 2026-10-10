@@ -18,6 +18,7 @@ interface Job {
 }
 interface Concurrency {
   group: string;
+  queue: string;
   "cancel-in-progress": string | boolean;
 }
 
@@ -150,17 +151,18 @@ describe("post-green wiring", () => {
     ]);
   });
 
-  // #207: a ref-keyed group keeps one pending run and replaces it with the newest, so a burst of merges dropped the middle
-  // commits' verdicts; every run that did run was green. Keyed by the commit, every push run completes; PR pushes keep
-  // cancelling their stale runs. The skeleton every fleet repository runs carries the same block.
-  test("ci.yml and the skeleton key a push run by its commit and never cancel it; only pull-request lanes cancel", () => {
+  // One lane per ref (GitHub's Pages starter shape): main runs wait in arrival order, so queued runs deploy in order.
+  // Under per-commit lanes they overlapped and a slower older run deployed after a newer one. queue: max lets up to
+  // 100 runs wait, so every commit keeps its own run and verdict short of that cap; the pull-request lane stays single
+  // and cancels the stale run. The skeleton every fleet repository runs carries the same block.
+  test("ci.yml and the skeleton queue the runs of one ref in one lane; only pull-request lanes cancel", () => {
     const skeleton = parseYaml(
       read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
     ) as { concurrency: Concurrency };
     for (const doc of [ci, skeleton]) {
       expect(doc.concurrency).toEqual({
-        group:
-          "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}",
+        group: "${{ github.workflow }}-${{ github.ref }}",
+        queue: "${{ github.event_name == 'pull_request' && 'single' || 'max' }}",
         "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
       });
     }

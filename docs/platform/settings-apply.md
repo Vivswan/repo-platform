@@ -55,7 +55,7 @@ A red nightly is the signal that drift is going unhealed, so the halt is a FAILE
 
 - **Guarantee:** no apply row writes after a row of a newer main commit's run did. An older run's rows wait their turn on the lane and stand down.
 
-- **The one gap:** under [the lane rule](../all-green.md#after-the-gate), a burst can evict the newest commit's pending run behind an older one's. That older run stands down, and the next green push or the nightly applies.
+- **Under [the lane rule](../all-green.md#after-the-gate):** main runs wait in arrival order and none is cancelled short of 100 pending, so an older run still running when a newer commit lands stands down at its writes, and that newer commit's run applies after it, or the nightly does.
 
 - **A failed look:** a `git ls-remote` that cannot answer fails the row. A guessed "newest" would let a superseded run write; a guessed "superseded" would stand the newest run down.
 

@@ -37,8 +37,8 @@ Each entry is what you see, what it means, and what to do.
 
 **`all-green` failed with every job `cancelled`.**
 
-- **Means:** the concurrency group cancelled this run for a newer one at the same head, or someone cancelled it.
-- **Do:** the newer run at the head carries the verdict; if none exists or the merge box still reads this run, re-run the newest CI run at the head.
+- **Means:** on a pull request, a newer push cancelled this run; on main, someone cancelled it (the queue cancels nothing short of 100 pending runs).
+- **Do:** on a pull request, the newest run at the head carries the verdict. On main, re-run it, then dispatch CI on main when a newer commit has deployed since, because the re-run deploys that older commit's site.
 
 **`all-green` failed with `platform` skipped.**
 
@@ -126,11 +126,11 @@ Anything that asks "is this commit green" reads the CHECK RUN, never the CI run'
 
 Post-gate work rides downstream in the same run, `needs: [all-green]` on a push to main, so `github.sha` IS the judged commit. Every leg's condition leads with `!cancelled()`: a job's implicit `success()` reads the whole needs chain, so a gating job skipped by its condition would otherwise skip the legs past a green gate.
 
-**Every push to main gets its own complete run:** ci.yml's group is keyed by the commit on a push and by the ref on a pull request (where a newer push cancels the stale run). So no merge timing cancels or coalesces another commit's run. Keyed by the ref, GitHub kept one pending run per group and replaced it with the newest, which left a burst's middle commits unjudged.
+**Main runs queue in one lane:** ci.yml's group is one lane per ref (`<workflow>-<ref>`), the shape of GitHub's Pages starter. A push to main, the schedule, and a dispatch on main share `refs/heads/main` and wait in arrival order (`queue: max`, up to 100 pending), so none is cancelled. A pull request keeps a per-PR lane (`queue: single`), where a newer push cancels the stale run.
 
-**The lane rule:** the runs of neighbouring commits therefore overlap, and the legs that mutate shared state serialize on their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`, `pages`). On a lane, GitHub keeps one running plus one pending job and replaces the pending one with the newest, in arrival order rather than commit order.
+**The queue's cost is latency:** a run waits for every run ahead of it, so a long post-green leg delays the next commit's verdict, and a burst of merges is judged one run at a time. Every commit still gets its own run and verdict, short of 100 pending (past that, GitHub cancels new arrivals); the schedule and a dispatch join the queue and evict nothing.
 
-**The `pages` lane also cancels its running deploy** when a newer one arrives, so the newest arrival wins and never waits behind a deploy already running.
+**The job lanes:** main runs never overlap, so the legs that mutate shared state hold their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`) against the same workflow's own cron or dispatched run alone. On a lane, GitHub keeps one running plus one pending job and replaces the pending one with the newest.
 
 Repo-platform's own run after the gate (the tag mover, the fleet sync and settings legs, the fleet token) is [platform/post-green.md](platform/post-green.md#the-run-leg-by-leg).
 
@@ -140,7 +140,7 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 
 - The caller passes every repository secret through and holds no concurrency lane of its own: the repo's jobs take theirs, and a caller holding a lane a called job needs deadlocks the call against itself.
 
-- A lane on any job the `release` job needs (the repo's post-green hook included) must be keyed per commit: under [the lane rule](#after-the-gate), a burst of merges can evict the release commit's pending job and strand its tag until a re-run.
+- Main runs queue, so a job lane in the hook serializes nothing between commits; a job that takes one keys it per commit (`inputs.sha`, as the starter's comments say), so it never waits on another run.
 
 **The caller grants `GITHUB_TOKEN` two scopes,** the ceiling for every hook job (a called job cannot raise above its caller), and no knob narrows them per repository:
 
@@ -151,9 +151,9 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 
 **The starter ships one no-op job** (a workflow_call cannot ship empty), and that job costs a runner allocation on every green push to main until the repository REPLACES it. Replace the no-op, do not append beside it.
 
-**Every hook job must be state-based and idempotent,** since the runs of neighbouring commits overlap ([after the gate](#after-the-gate)): act on the repository's current state, never on "what this commit changed".
+**Every hook job must be state-based and idempotent:** a re-run of a push's run replays it on a repository that has moved on (a dispatch runs no hook, since the leg is push-only), so act on the repository's current state, never on "what this commit changed".
 
-**Never key a concurrency group in the hook on `github.workflow`:** inside a called workflow it resolves to the caller's name, so `<workflow>-<sha>` on a push is the lane the calling run already holds, and a job waiting on it deadlocks the run.
+**Never key a concurrency group in the hook on `github.workflow`:** inside a called workflow it resolves to the caller's name, so `<workflow>-<ref>` on main is the lane the calling run already holds, and a job waiting on it deadlocks the run.
 
 **A failing hook job blocks the release, never the merge.**
 
@@ -185,7 +185,7 @@ checks + platform -> all-green -> post-green (repo-owned hook) -> release -> upd
 
 **Its outputs drive the release hooks** `update-release`, `publish-release`, and `update-release-pr`; [the release pipeline](new-repo.md#the-release-pipeline-release-please) owns what each one does, and why the two repo-owned hooks are seeded in every repository whatever its modules.
 
-**The `site` leg** calls [reusable-site.yml](../.github/workflows/reusable-site.yml)`@stable` with the judged sha, holding the `pages` lane ([site.md](modules/site.md)). The called workflow runs the repo-owned `.github/actions/site-build` hook from the checkout and reads the docs configuration from the repository's registration.
+**The `site` leg** calls [reusable-site.yml](../.github/workflows/reusable-site.yml)`@stable` with the judged sha; the run lane queues main runs, so no two deploys overlap ([site.md](modules/site.md)). The called workflow runs the repo-owned `.github/actions/site-build` hook from the checkout and reads the docs configuration from the repository's registration.
 
 - The leg has no push clause: it runs on every main run whose gate passed, so the nightly schedule is the rebuild and a dispatch is the manual deploy, and no site workflow of its own exists.
 

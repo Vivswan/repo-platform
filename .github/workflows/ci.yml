@@ -13,10 +13,13 @@ on:
 permissions:
   contents: read
 
-# Keyed by the commit on a push: a ref-keyed group holds one pending run, so in a burst of merges the displaced commit never gets a verdict.
-# Pull-request runs stay keyed by the ref so a newer push cancels the stale run.
+# One lane per ref, the shape of GitHub's Pages starter: a push to main, the schedule, and a dispatch on main wait in
+# refs/heads/main in arrival order (queue: max, up to 100 pending), so every commit gets its own run (short of 100
+# pending) and queued runs deploy in arrival order; the cost is latency behind a slow run. Pull-request runs keep a
+# per-PR lane (queue: single), where a newer push cancels the stale run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -28,7 +31,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # -ignore, here and over the written trees: no actionlint release knows concurrency.queue (rhysd/actionlint#687), which
+      # ci.yml carries and GitHub runs; the action splits flags on whitespace, so the regex spells its spaces as \s. Remove when actionlint knows the key.
       - uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+        with:
+          flags: -ignore unexpected\skey\s"queue"\sfor\s"concurrency"\ssection
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: files/bun/.bun-version
@@ -37,7 +44,7 @@ jobs:
       - name: Write the fleet's workflows
         run: bun .github/scripts/ci/write_fleet_lint_tree.ts "$RUNNER_TEMP/fleet-lint"
       - name: actionlint the written workflows
-        run: bun .github/scripts/ci/run_in_fleet_lint_trees.ts "$RUNNER_TEMP/fleet-lint" -- actionlint -color
+        run: bun .github/scripts/ci/run_in_fleet_lint_trees.ts "$RUNNER_TEMP/fleet-lint" -- actionlint -color -ignore 'unexpected\skey\s"queue"\sfor\s"concurrency"\ssection'
       # The archive's sha256 is the pin: the release's checksums file comes from the same place as the archive.
       - name: Install the pinned pinact release
         env:
@@ -503,15 +510,13 @@ jobs:
   # Ordered behind post-green so the deploy runs after this run's mover, and a green move's theme
   # is what @stable serves it; !cancelled() keeps a red or skipped post-green from holding the site back. No push clause in
   # the if: the weekly schedule is the rebuild and link-rot check, a dispatch the manual deploy.
+  # No job lane: the run lane above queues main runs, so no two deploys overlap.
   site:
     needs: [all-green, post-green]
     if: >-
       !cancelled() &&
       needs.all-green.result == 'success' &&
       github.ref == 'refs/heads/main'
-    concurrency:
-      group: pages
-      cancel-in-progress: true
     permissions:
       contents: write
       pages: write
