@@ -26,7 +26,8 @@ The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release
 | a manual dispatch | the manual deploy |
 
 - **No workflow of its own and no tag trigger:** a tag created without a push lands on the nightly rebuild, or right away via dispatch.
-- **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
+- **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site.
+- **One deploy at a time:** ci.yml's one lane per ref queues main runs, so no two deploys overlap and queued runs deploy in arrival order. A push during a deploy waits for that run and every run ahead of it (`queue: max`); none is cancelled short of 100 pending ([all-green.md](../all-green.md#after-the-gate)).
 
 **The release leg sits before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the tag and then runs whatever the release's result, and a release commit's own deploy serves its new tag ([all-green.md](../all-green.md#after-the-gate)).
 
