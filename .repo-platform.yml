@@ -12,6 +12,7 @@ except:
   - .github/workflows/checks.yml
   - .github/workflows/update-release.yml
   - .github/workflows/update-release-pr.yml
+  - .github/workflows/release-gate.yml
   - .github/actions/site-build/action.yml
   - .github/workflows/copilot-setup-steps.yml
   - .github/workflows/auto-format.yml

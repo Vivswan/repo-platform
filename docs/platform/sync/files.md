@@ -124,7 +124,7 @@ The loader refuses, all problems at once. Each line is the place, then the condi
 
 What the committed `files.yml` uses today, so a reader knows which forms are live. The loader accepts more ([files.yml](#filesyml)).
 
-The file list is [files.yml](../../../files.yml) itself: its `files` entries name each path and its `class`, and its `mirrors` list names the fleet's mirror targets. Two starter roles the list does not spell: `update-release.yml` and `update-release-pr.yml` are the release hooks, and the rust module's `Cargo.toml` is the workspace root.
+The file list is [files.yml](../../../files.yml) itself: its `files` entries name each path and its `class`, and its `mirrors` list names the fleet's mirror targets. Three starter roles the list does not spell: `update-release.yml` and `update-release-pr.yml` are the release hooks, `release-gate.yml` is the release acceptance hook, and the rust module's `Cargo.toml` is the workspace root.
 
 The tables below cover the `when` forms and `blocks` keys in use.
 

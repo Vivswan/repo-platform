@@ -11,7 +11,8 @@ Like the fuzzer starter it is written once and then repo-owned: the checks are r
 | Part of the starter | What it is |
 |---|---|
 | `checks` job | yours |
-| `report` job | the machinery: `needs: [checks]` with `if: always()` |
+| `release-gate` job | calls the repo-owned release-gate.yml, the release acceptance tier ci.yml runs on the release PR ([its contract](../all-green.md#the-release-gate-hook-in-every-managed-repository)) |
+| `report` job | the machinery: `needs: [checks, release-gate]` with `if: always()` |
 | Triggers | a nightly cron (06:59 UTC, offset from the fuzzer starter's 09:11 UTC) plus a bare `workflow_dispatch` |
 
 **What a night does:**
@@ -19,7 +20,7 @@ Like the fuzzer starter it is written once and then repo-owned: the checks are r
 - **A red night** files or updates the tracking issue: a generic nightly-failure report naming the workflow, the date, the failing commit, and the run.
 - **A green night** closes it.
 
-**What red means:** the `checks` job failed OR was cancelled. A job hitting its `timeout-minutes` becomes cancelled, so a hang still counts as red.
+**What red means:** the `checks` or `release-gate` job failed OR was cancelled. A job hitting its `timeout-minutes` becomes cancelled, so a hang still counts as red.
 
 A human cancelling an in-flight run files an issue too, because the report job cannot tell a timeout from a hand cancel. That trade is deliberate: a spurious issue the next green night closes beats a hang going silent.
 

@@ -37,3 +37,7 @@ export const SYNC_PR_TITLE_PREFIX = `chore: sync ${PLATFORM_NAME} build`;
 
 /** A human's label on a pull request: the repository's sync-branch workflow syncs the branch and takes the label off. */
 export const SYNC_LABEL = `${PLATFORM_NAME}:sync`;
+
+/** release-please names its release PR branch `release-please--branches--<target>`; fleet.yml's release-pr job and the
+ *  skeleton's release-gate job spell this prefix in YAML, tests/workflows/fleet_shape.test.ts holds them to it. */
+export const RELEASE_BRANCH_PREFIX = "release-please--";

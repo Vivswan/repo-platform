@@ -37,7 +37,7 @@ Resolution: the name is `pr-title`. Fix `.repo-platform.yml`, merge, dispatch th
 
 An adopted repository already carried `.github/workflows/checks.yml`. Its Written row reads `starter`, `unchanged`: a starter is written only when absent, so the repo's file stays untouched.
 
-Resolution: check the kept file exposes what `ci.yml` calls (`on: workflow_call` with no inputs for `checks.yml`; a `sha` input for `post-green.yml`; `tag` for `update-release.yml`; `pr_number` and `head_branch` for `update-release-pr.yml`). A hook lacking its input fails the calling job on the first run.
+Resolution: check the kept file exposes what `ci.yml` calls (`on: workflow_call` with no inputs for `checks.yml` and none required for `release-gate.yml`; a `sha` input for `post-green.yml`; `tag` for `update-release.yml`; `pr_number` and `head_branch` for `update-release-pr.yml`). A hook lacking its input fails the calling job on the first run.
 
 ## 6. A split file's diff reaches outside the markers
 

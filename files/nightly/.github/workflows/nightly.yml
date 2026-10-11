@@ -1,8 +1,9 @@
 # Runs the nightly CI, as the starter written once by {{github_username}}/repo-platform and never overwritten by a
 # later sync.
 #
-# Replace the placeholder step. The report job files one label-deduplicated tracking issue on a red night and closes
-# it on a green one (docs/modules/nightly.md).
+# Replace the placeholder step. The release-gate job runs the repo-owned release acceptance tier on the schedule too
+# (docs/all-green.md, "The release-gate hook"). The report job files one label-deduplicated tracking issue on a red
+# night and closes it on a green one (docs/modules/nightly.md).
 name: Nightly
 
 on:
@@ -34,11 +35,14 @@ jobs:
           # until then: an uncustomized starter must not file issues.
           echo "::warning::nightly starter not customized yet - replace the placeholder step (see repo-platform's docs/modules/nightly.md)"
 
-  # A CANCELLED checks job counts as red: hitting the timeout cancels
-  # rather than fails, and a hang is exactly what a nightly exists to
-  # catch.
+  # The same hook ci.yml calls on the release PR, so a tier the release blocks on is also judged every night.
+  release-gate:
+    uses: ./.github/workflows/release-gate.yml
+
+  # A CANCELLED job counts as red: hitting the timeout cancels rather
+  # than fails, and a hang is exactly what a nightly exists to catch.
   report:
-    needs: [checks]
+    needs: [checks, release-gate]
     if: always()
     runs-on: ubuntu-latest
     # A hung reporter is the residual silence window; keep this tight.
@@ -48,7 +52,9 @@ jobs:
       issues: write
     steps:
       - name: File or update the nightly issue
-        if: needs.checks.result == 'failure' || needs.checks.result == 'cancelled'
+        if: >-
+          contains(fromJSON('["failure","cancelled"]'), needs.checks.result) ||
+          contains(fromJSON('["failure","cancelled"]'), needs.release-gate.result)
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
@@ -59,7 +65,7 @@ jobs:
           stream: generic
 
       - name: Close the nightly issue on a green night
-        if: needs.checks.result == 'success'
+        if: needs.checks.result == 'success' && needs.release-gate.result == 'success'
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: resolve
