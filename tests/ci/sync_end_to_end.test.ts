@@ -165,7 +165,7 @@ function seedTarget(): string {
   const files: Record<string, string> = {
     ".repo-platform.yml": [
       // Shuffled on purpose: the selection comes out in files.yml order, never the registration's.
-      "modules: [fuzzer, bun, docs-site, deno]",
+      "modules: [fuzzer, bun, docs-site, uv]",
       "project: {name: Demo Project, slug: demo, description: A demo repository}",
       "labels: {fuzzer: fuzz-me}",
       "mirrors:",
@@ -291,7 +291,7 @@ describe("sync.ts end to end", () => {
   test("selects the modules in files.yml order; stale records with a file present, unsafe paths, and unreached mirrors become notes", () => {
     // The notes list is assembled in sync.ts from four rules and is the only home of three of the messages; a
     // stale record believed instead of noted let a hand edit through without a hold (#243).
-    expect(summary.modules).toEqual(["bun", "deno", "docs-site", "fuzzer"]);
+    expect(summary.modules).toEqual(["bun", "uv", "docs-site", "fuzzer"]);
     expect(summary.notes).toEqual([
       noWriterNote(".github/old-tool.yml"),
       noWriterNote(".github/workflows/release.yml"),
@@ -422,7 +422,7 @@ describe("sync.ts end to end", () => {
         "updates:",
         '  - package-ecosystem: "bun"',
         '    directory: "/"',
-        '  - package-ecosystem: "deno"',
+        '  - package-ecosystem: "uv"',
         '    directory: "/"',
         "# end of updates",
         "",
@@ -680,7 +680,7 @@ describe("sync.ts end to end", () => {
     // The header row is the sync's identity in the PR body. report.test builds the report's inputs by hand, so
     // the build and selection reaching it are pinned here. The hold list is the run's review agenda.
     expect(stdout).toContain(
-      `| \`${BUILD}\` | \`bun\`, \`deno\`, \`docs-site\`, \`fuzzer\` | public |`,
+      `| \`${BUILD}\` | \`bun\`, \`uv\`, \`docs-site\`, \`fuzzer\` | public |`,
     );
     expect(summary.hold).toBe(true);
     expect(summary.holdReasons).toEqual([
@@ -1043,9 +1043,10 @@ describe("sync.ts refusing at the command line or the registration", () => {
     },
     {
       reason: "a registration naming a module files.yml does not offer",
-      registration: "modules: [bun, uv]\nproject: {name: Demo, slug: demo, description: A demo}\n",
+      registration:
+        "modules: [bun, rust]\nproject: {name: Demo, slug: demo, description: A demo}\n",
       error:
-        '.repo-platform.yml: module "uv" is not a module files.yml offers (known: bun, deno, pages, docs-site, fuzzer)',
+        '.repo-platform.yml: module "rust" is not a module files.yml offers (known: bun, uv, pages, docs-site, fuzzer)',
     },
   ])(
     "$reason is refused before anything is written",

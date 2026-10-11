@@ -71,7 +71,6 @@ const FULL_TREE: Record<string, string> = {
   ".github/settings.yml": IDENTITY_SETTINGS,
   ".bun-version": "1.4.0\n",
   ".node-version": "v24.19.0\n",
-  ".dvmrc": "2.9.5\n",
   ".python-version": "3.13\n",
   "rust-toolchain.toml": '[toolchain]\nchannel = "1.82.0"\ncomponents = ["clippy"]\n',
   "LICENSE.md":
@@ -89,7 +88,6 @@ describe("collectFacts", () => {
       toolchains: [
         { name: "Bun", version: "1.4.0" },
         { name: "Node.js", version: "24.19.0" },
-        { name: "Deno", version: "2.9.5" },
         { name: "Python", version: "3.13" },
         { name: "Rust", version: "1.82.0" },
       ],

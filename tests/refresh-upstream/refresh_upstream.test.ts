@@ -242,10 +242,10 @@ describe("the refresh", () => {
     "      file: files/bun/.bun-version",
     "      repository: oven-sh/bun",
     "      tag: bun-v{version}",
-    "  deno:",
+    "  uv:",
     "    pin:",
-    "      file: files/deno/.dvmrc",
-    "      repository: denoland/deno",
+    "      file: files/uv/.uv-version",
+    "      repository: astral-sh/uv",
     "      tag: v{version}",
     "files:",
     "  - path: .gitignore",
@@ -258,7 +258,7 @@ describe("the refresh", () => {
     `      Node: {repository: o/a, sha: ${OLD}, path: Node.gitignore}`,
     "",
   ].join("\n");
-  const DOTFILES = { "files/bun/.bun-version": "1.4.0\n", "files/deno/.dvmrc": "2.9.5\n" };
+  const DOTFILES = { "files/bun/.bun-version": "1.4.0\n", "files/uv/.uv-version": "2.9.5\n" };
   const NODE_DIFF =
     "--- Node.gitignore\n+++ Node.gitignore\n@@ -1,1 +1,2 @@\n node_modules/\n+.bun/";
 
@@ -289,7 +289,7 @@ describe("the refresh", () => {
     [`h/o/a/${OLD}/Node.gitignore`]: "node_modules/\n",
     [`h/o/a/${NEW}/Node.gitignore`]: "node_modules/\n.bun/\n",
     [`${API}/oven-sh/bun/releases/latest`]: '{"tag_name": "bun-v1.4.1"}',
-    [`${API}/denoland/deno/releases/latest`]: '{"tag_name": "v3.0.0"}',
+    [`${API}/astral-sh/uv/releases/latest`]: '{"tag_name": "v3.0.0"}',
   };
 
   const rows: {
@@ -334,23 +334,23 @@ describe("the refresh", () => {
     },
     {
       kind: "release",
-      fetched: [`${API}/oven-sh/bun/releases/latest`, `${API}/denoland/deno/releases/latest`],
+      fetched: [`${API}/oven-sh/bun/releases/latest`, `${API}/astral-sh/uv/releases/latest`],
       bumps: [
         { kind: "release", name: "bun", from: "1.4.0", to: "1.4.1" },
-        { kind: "release", name: "deno", from: "2.9.5", to: "3.0.0" },
+        { kind: "release", name: "uv", from: "2.9.5", to: "3.0.0" },
       ],
       written: {
         "files.yml": CONFIG,
         "files/bun/.bun-version": "1.4.1\n",
-        "files/deno/.dvmrc": "3.0.0\n",
+        "files/uv/.uv-version": "3.0.0\n",
       },
-      prose: "bun to 1.4.1 and deno to 3.0.0",
+      prose: "bun to 1.4.1 and uv to 3.0.0",
       body: [
-        "**MAJOR VERSION JUMP: deno 2 -> 3 - review before merging.**",
+        "**MAJOR VERSION JUMP: uv 2 -> 3 - review before merging.**",
         "",
         "## bun: `1.4.0` -> `1.4.1`",
         "",
-        "## deno: `2.9.5` -> `3.0.0`",
+        "## uv: `2.9.5` -> `3.0.0`",
         "",
         "The next sync writes each dotfile to every repository selecting its module (docs/toolchains.md). Merging this moves the stable tag once green.",
       ].join("\n"),
@@ -380,14 +380,14 @@ describe("the refresh", () => {
       ...answers,
       [`${API}/o/a/commits/HEAD`]: `{"sha": "${OLD}"}`,
       [`${API}/oven-sh/bun/releases/latest`]: '{"tag_name": "bun-v1.4.0"}',
-      [`${API}/denoland/deno/releases/latest`]: '{"tag_name": "v2.9.5"}',
+      [`${API}/astral-sh/uv/releases/latest`]: '{"tag_name": "v2.9.5"}',
     });
     expect(await refresh({ kind: "commit", root, host: "h", fetch: current.fetch })).toEqual([]);
     expect(await refresh({ kind: "release", root, host: "h", fetch: current.fetch })).toEqual([]);
     expect(current.fetched).toEqual([
       `${API}/o/a/commits/HEAD`,
       `${API}/oven-sh/bun/releases/latest`,
-      `${API}/denoland/deno/releases/latest`,
+      `${API}/astral-sh/uv/releases/latest`,
     ]);
     expect(readFileSync(join(root, "files.yml"), "utf-8")).toBe(CONFIG);
     expect(proseBumps([])).toBe("");
@@ -413,7 +413,7 @@ describe("the refresh", () => {
   // lets the workflow's PR step close a still-valid refresh PR as caught up: every upstream answers, or nothing moves.
   test.each([
     ["commit", `${API}/o/a/commits/HEAD`],
-    ["release", `${API}/denoland/deno/releases/latest`],
+    ["release", `${API}/astral-sh/uv/releases/latest`],
   ] as const)(
     "%s pins: one unreachable upstream aborts the run before any pin moves",
     async (kind, failing) => {

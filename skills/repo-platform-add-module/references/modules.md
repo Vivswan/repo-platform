@@ -9,12 +9,12 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work on a push to main), `release-gate.yml` (your release acceptance tests; the contract is the platform's docs/all-green.md), `update-release.yml` and `update-release-pr.yml` (the release hooks, called only with release-please), `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml` (the repo's own settings overlay; edit it, never the rendered `.github/settings.yml`), `.github/actions/site-build/action.yml` (the site-build hook the `site` leg runs; a no-op until filled in).
 - Settings are rendered into `.github/settings.yml` by the sync and applied by the platform for every registered repo; the labels a module needs land in the render with its selection.
 
-## Toolchains: bun / deno / uv / rust
+## Toolchains: bun / uv / rust
 
-- Managed: the version dotfile for bun/deno (`.bun-version`, `.dvmrc`, fleet-pinned) and `deno-audit.yml` (deno). Public repos with bun/deno/uv: fleet CI runs CodeQL for their language.
+- Managed: the version dotfile for bun (`.bun-version`, fleet-pinned). Public repos with bun/uv: fleet CI runs CodeQL for their language.
 - Blocks: a gitignore section and a Toolchain section in `AGENTS.md` (split files), and a Dependabot ecosystem entry (the managed `.github/dependabot.yml`).
 - Starter: `auto-format.yml` for every toolchain but rust, written only when absent. An existing `auto-format.yml`, `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
-- Removal: the version dotfile is retired, and deno also retires `deno-audit.yml`; the blocks leave the split regions and the managed `.github/dependabot.yml`. `auto-format.yml` stays. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
+- Removal: the version dotfile is retired; the blocks leave the split regions and the managed `.github/dependabot.yml`. `auto-format.yml` stays. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
 
 ## site
 

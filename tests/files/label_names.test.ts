@@ -40,7 +40,6 @@ function moduleLayer(module: string): string {
 const DEPENDABOT_LANGUAGE_LABELS: Record<string, string> = {
   "github-actions": "github_actions",
   bun: "javascript",
-  deno: "deno",
   uv: "python:uv",
   cargo: "rust",
 };

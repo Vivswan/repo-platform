@@ -61,7 +61,6 @@ const TOOLCHAIN_FILES: { name: string; path: string; version: (text: string) => 
   [
     { name: "Bun", path: ".bun-version", version: pinnedVersion },
     { name: "Node.js", path: ".node-version", version: pinnedVersion },
-    { name: "Deno", path: ".dvmrc", version: pinnedVersion },
     { name: "Python", path: ".python-version", version: pinnedVersion },
     { name: "Rust", path: "rust-toolchain.toml", version: rustChannel },
   ];

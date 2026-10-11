@@ -507,7 +507,7 @@ describe("a module list declared by module data", () => {
       "placeholders: []",
       "modules:",
       "  bun: { codeql_languages: [javascript-typescript] }",
-      "  deno: { codeql_languages: [javascript-typescript] }",
+      "  uv: { codeql_languages: [javascript-typescript] }",
       "  rust: {}",
       "  extra: { codeql_languages: [python] }",
       "settings:",
@@ -534,12 +534,12 @@ describe("a module list declared by module data", () => {
     expect(config.settings?.layers).toEqual([
       {
         source: "settings/codeql-public.yml",
-        when: { private: false, any: ["bun", "deno", "extra"] },
+        when: { private: false, any: ["bun", "uv", "extra"] },
       },
     ]);
     expect(config.files.slice(2).map((entry) => entry.when)).toEqual([
-      { private: false, any: ["bun", "deno", "extra"] },
-      { private: false, without: ["bun", "deno", "extra"] },
+      { private: false, any: ["bun", "uv", "extra"] },
+      { private: false, without: ["bun", "uv", "extra"] },
     ]);
     const variant = (modules: string[]) =>
       selectEntries(config, { modules, private: false })
@@ -557,7 +557,7 @@ describe("a module list declared by module data", () => {
       "placeholders: []",
       "modules:",
       "  bun: { steps: [toolchain] }",
-      "  deno: { scans: [deno] }",
+      "  uv: { scans: [uv] }",
       "settings:",
       "  baseline: files/settings/baseline.yml",
       "  layers:",
@@ -571,7 +571,7 @@ describe("a module list declared by module data", () => {
     expect([
       problemsOf(untyped),
       problemsOf(untyped.replace("declaring: scans", "declaring: steps")),
-    ]).toEqual([[], ["modules.deno.scans: no file entry or settings layer reads it"]]);
+    ]).toEqual([[], ["modules.uv.scans: no file entry or settings layer reads it"]]);
   });
 });
 
@@ -621,7 +621,7 @@ describe("block sources", () => {
       "placeholders: []",
       "modules:",
       "  bun: { g: [Node, bun] }",
-      "  deno: { g: [Node] }",
+      "  uv: { g: [Node] }",
       "  fuzzer: { g: [fuzzer] }",
       "  site: {}",
       "files:",
@@ -641,11 +641,11 @@ describe("block sources", () => {
       "placeholders: []",
       "modules:",
       "  bun: { t: [bun] }",
-      "  deno: { t: [deno] }",
+      "  uv: { t: [uv] }",
       "files:",
-      "  - { path: AGENTS.md, class: split, region: html, blocks: t, sources: {bun: files/bun/AGENTS.toolchain.md, deno: files/deno/AGENTS.toolchain.md} }",
-      "  - { path: d.yml, class: managed, blocks: t, sources: {bun: files/bun/d.yml, deno: files/deno/d.yml} }",
-      "  - { path: s.yml, class: starter, blocks: t, sources: {bun: files/bun/s.yml, deno: files/deno/s.yml} }",
+      "  - { path: AGENTS.md, class: split, region: html, blocks: t, sources: {bun: files/bun/AGENTS.toolchain.md, uv: files/uv/AGENTS.toolchain.md} }",
+      "  - { path: d.yml, class: managed, blocks: t, sources: {bun: files/bun/d.yml, uv: files/uv/d.yml} }",
+      "  - { path: s.yml, class: starter, blocks: t, sources: {bun: files/bun/s.yml, uv: files/uv/s.yml} }",
       "",
     ].join("\n"),
   );
@@ -657,7 +657,7 @@ describe("block sources", () => {
     {
       config: shared,
       entry: 0,
-      selected: ["fuzzer", "deno", "bun"],
+      selected: ["fuzzer", "uv", "bun"],
       expected: [
         up("Windows", "Global/Windows.gitignore"),
         up("Node", "Node.gitignore"),
@@ -668,7 +668,7 @@ describe("block sources", () => {
     {
       config: shared,
       entry: 0,
-      selected: ["deno"],
+      selected: ["uv"],
       expected: [up("Windows", "Global/Windows.gitignore"), up("Node", "Node.gitignore")],
     },
     {
@@ -680,11 +680,11 @@ describe("block sources", () => {
     {
       config: own,
       entry: 0,
-      selected: ["bun", "deno"],
-      expected: [tree("bun", "bun/AGENTS.toolchain.md"), tree("deno", "deno/AGENTS.toolchain.md")],
+      selected: ["bun", "uv"],
+      expected: [tree("bun", "bun/AGENTS.toolchain.md"), tree("uv", "uv/AGENTS.toolchain.md")],
     },
     { config: own, entry: 1, selected: ["bun"], expected: [tree("bun", "bun/d.yml")] },
-    { config: own, entry: 2, selected: ["deno"], expected: [tree("deno", "deno/s.yml")] },
+    { config: own, entry: 2, selected: ["uv"], expected: [tree("uv", "uv/s.yml")] },
   ])(
     "blockSources for entry $entry under $selected: the always values first, then the selected modules in files.yml order, a value listed twice once",
     ({ config, entry, selected, expected }) => {

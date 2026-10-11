@@ -35,7 +35,7 @@ git add --all
 git commit -m "chore: initialize"
 ```
 
-- **`modules`** is any combination of `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster).
+- **`modules`** is any combination of `bun`, `uv`, `rust`, `site`, `release-please`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster).
 - **Module parameters** are read from the same file (see [docs/modules/site.md](modules/site.md), [docs/modules/fuzzer.md](modules/fuzzer.md), and [docs/modules/nightly.md](modules/nightly.md)).
 - **Nothing else is asked:** the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
 
@@ -185,9 +185,8 @@ The modules add:
 - **release-please:** arms the managed ci.yml's static `release` legs and lands the repo-owned release-please configuration ([the release pipeline](#the-release-pipeline-release-please) below).
 - **bun:** the fleet's `.bun-version` pin ([toolchains.md](toolchains.md)). Dependabot's bun PRs install with the lockfile Dependabot wrote; a PR whose frozen install fails is fixed by hand, or by re-running Dependabot on it.
 - **bun, a known limitation, accepted:** Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2 ([dependabot-core#15848](https://github.com/dependabot/dependabot-core/issues/15848)). So a Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
-- **deno:** a managed `deno-audit.yml` that runs `deno audit --frozen --level high` at the root weekly, on lockfile-touching PRs, and on pushes to main that change `deno.lock`. It fails when any locked dependency (JSR or npm, transitive included) has a high or critical advisory, and when the root `deno.lock` is not committed.
 - **rust:** a repo-owned `Cargo.toml` workspace root carrying the fleet's lint floor, and the cargo steps in `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` that gate on it. The floor, how a repository takes it, and the gate: [rust.md](modules/rust.md).
-- **Any toolchain:** a repo-owned `auto-format.yml` starter, prefilled with each selected toolchain's formatter: label a PR `fix-lint` to get a formatting commit pushed to it. Width limits apply to code only: the deno step runs `deno fmt --prose-wrap preserve`, so markdown prose keeps its line breaks. [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies.
+- **Any toolchain:** a repo-owned `auto-format.yml` starter, prefilled with each selected toolchain's formatter: label a PR `fix-lint` to get a formatting commit pushed to it. [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies.
 - **fuzzer:** a repo-owned `nightly-fuzz.yml` starter - placeholder fuzz step, seeded replay inputs, failure artifact upload, [tracking-issue](modules/tracking-issues.md) filing, auto-close on green. Replace the placeholder with your fuzzer; [fuzzer.md](modules/fuzzer.md) has the contract.
 - **nightly:** a repo-owned `nightly.yml` starter for checks too slow for every PR - placeholder step, tracking issue on failure, auto-close on the next green night ([nightly.md](modules/nightly.md)).
 

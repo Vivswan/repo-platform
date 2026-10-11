@@ -28,17 +28,6 @@ modules:
     gitignore_sources: [Node, bun]
     agents_toolchain: [bun]
     toolchain_steps: [bun]
-  deno:
-    description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
-    pin:
-      file: files/deno/.dvmrc
-      repository: denoland/deno
-      tag: v{version}
-    codeql_languages: [javascript-typescript]
-    dependabot_ecosystems: [deno]
-    gitignore_sources: [Deno, Node]
-    agents_toolchain: [deno]
-    toolchain_steps: [deno]
   uv:
     description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
     codeql_languages: [python]
@@ -81,7 +70,6 @@ settings:
     - {source: files/settings/public.yml, when: {private: false}}
     - {source: files/settings/private.yml, when: {private: true}}
     - {source: files/bun/settings.yml, when: {modules: [bun]}}
-    - {source: files/deno/settings.yml, when: {modules: [deno]}}
     - {source: files/uv/settings.yml, when: {modules: [uv]}}
     - {source: files/rust/settings.yml, when: {modules: [rust]}}
     - {source: files/site/settings.yml, when: {modules: [site]}}
@@ -112,7 +100,6 @@ files:
       JetBrains: {repository: github/gitignore, sha: 0e5d690153ca3da8a4a1aef2d053406f408f531c, path: Global/JetBrains.gitignore}
       Node: {repository: github/gitignore, sha: 0e5d690153ca3da8a4a1aef2d053406f408f531c, path: Node.gitignore}
       bun: {repository: github/gitignore, sha: 0e5d690153ca3da8a4a1aef2d053406f408f531c, path: bun.gitignore}
-      Deno: {repository: github/gitignore, sha: 0e5d690153ca3da8a4a1aef2d053406f408f531c, path: Deno.gitignore}
       Python: {repository: github/gitignore, sha: 0e5d690153ca3da8a4a1aef2d053406f408f531c, path: Python.gitignore}
       Rust: {repository: github/gitignore, sha: 0e5d690153ca3da8a4a1aef2d053406f408f531c, path: Rust.gitignore}
       fuzzer: files/fuzzer/fuzzer.gitignore
@@ -122,7 +109,6 @@ files:
     blocks: dependabot_ecosystems
     sources:
       bun: files/bun/.github/dependabot.bun.yml
-      deno: files/deno/.github/dependabot.deno.yml
       uv: files/uv/.github/dependabot.uv.yml
       cargo: files/rust/.github/dependabot.cargo.yml
   - {path: .github/actionlint.yaml, class: starter}
@@ -137,7 +123,6 @@ files:
     blocks: toolchain_steps
     sources:
       bun: files/bun/.github/workflows/checks.toolchain.yml
-      deno: files/deno/.github/workflows/checks.toolchain.yml
       uv: files/uv/.github/workflows/checks.toolchain.yml
       rust: files/rust/.github/workflows/checks.toolchain.yml
   - {path: .github/workflows/post-green.yml, class: starter}
@@ -150,7 +135,6 @@ files:
     blocks: toolchain_steps
     sources:
       bun: files/bun/.github/workflows/copilot-setup-steps.toolchain.yml
-      deno: files/deno/.github/workflows/copilot-setup-steps.toolchain.yml
       uv: files/uv/.github/workflows/copilot-setup-steps.toolchain.yml
       rust: files/rust/.github/workflows/copilot-setup-steps.toolchain.yml
   - {path: .gitleaks.toml, class: starter}
@@ -163,7 +147,6 @@ files:
     blocks: toolchain_steps
     sources:
       bun: files/bun/.github/workflows/auto-format.toolchain.yml
-      deno: files/deno/.github/workflows/auto-format.toolchain.yml
       uv: files/uv/.github/workflows/auto-format.toolchain.yml
       rust: files/rust/.github/workflows/auto-format.toolchain.yml
   - {path: .typography-allow, class: managed, when: {without: [release-please]}}
@@ -177,14 +160,11 @@ files:
     blocks: agents_toolchain
     sources:
       bun: files/bun/AGENTS.toolchain.md
-      deno: files/deno/AGENTS.toolchain.md
       uv: files/uv/AGENTS.toolchain.md
       rust: files/rust/AGENTS.toolchain.md
   - {path: LICENSE.md, class: split, region: html, when: {without: [custom-license]}}
   # --- modules
   - {path: .bun-version, class: managed, when: {modules: [bun]}}
-  - {path: .dvmrc, class: managed, when: {modules: [deno]}}
-  - {path: .github/workflows/deno-audit.yml, class: managed, when: {modules: [deno]}}
   - {path: .release-please-manifest.json, class: starter, when: {modules: [release-please]}}
   - {path: release-please-config.json, class: starter, when: {modules: [release-please]}}
   - {path: .github/workflows/pr-title.yml, class: managed, when: {modules: [pr-title]}}

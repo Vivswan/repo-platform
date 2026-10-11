@@ -207,8 +207,9 @@ describe("planCi", () => {
   test("CodeQL is off for a private repository and where no module analyzes; languages are one list, deduplicated", () => {
     expect(planCi(input("modules: [bun, uv]", true)).codeqlLanguages).toEqual([]);
     expect(planCi(input("modules: [rust, site]")).codeqlLanguages).toEqual([]);
-    expect(codeqlLanguages(selectModules(input("modules: [deno, bun]")), false)).toEqual([
+    expect(codeqlLanguages(selectModules(input("modules: [uv, bun]")), false)).toEqual([
       "javascript-typescript",
+      "python",
     ]);
     const twoLanguages = loadModuleData(
       `${MINIMAL_FILES}  poly: { codeql_languages: [python, go] }\n  uv: { codeql_languages: [python] }\n`,

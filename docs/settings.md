@@ -130,7 +130,7 @@ The run itself is [platform/settings-apply.md](platform/settings-apply.md): its 
 | When | Labels |
 |---|---|
 | always | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's approval label `merge-when-green`; the fleet-wide `security-nightly` stream label; `repo-platform:sync`, which a human adds to a PR for the branch sync ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)) |
-| per selected toolchain | the dependabot ecosystem labels: `javascript` for bun, `deno` for deno, `python:uv` for uv, `rust` for cargo |
+| per selected toolchain | the dependabot ecosystem labels: `javascript` for bun, `python:uv` for uv, `rust` for cargo |
 | with release-please | the `autorelease: *` pair and release-health's gate labels, `release-blocker` and `release-override`: stripping one un-blocks or un-overrides a release mid-flight |
 | with the fuzzer, nightly, or site module | the tracking labels, named and styled as the layer list above says |
 | private repos only | the `settings-as-code-report` marker label for private report issues: declared in the private overlay, and injected by the apply for redacted targets |

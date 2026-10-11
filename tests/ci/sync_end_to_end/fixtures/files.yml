@@ -15,9 +15,9 @@ modules:
     gitignore_sources: [Node, Bun]
     dependabot_ecosystems: [bun]
     checks_examples: [bun]
-  deno:
+  uv:
     gitignore_sources: [Node]
-    dependabot_ecosystems: [deno]
+    dependabot_ecosystems: [uv]
   pages: {}
   docs-site: {}
   fuzzer:
@@ -60,7 +60,7 @@ files:
     source: files/base/.github/dependabot.template
     sources:
       bun: files/bun/.github/dependabot.bun.yml
-      deno: files/deno/.github/dependabot.deno.yml
+      uv: files/uv/.github/dependabot.uv.yml
   - path: .github/workflows/checks.yml
     class: starter
     blocks: checks_examples

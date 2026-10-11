@@ -11,7 +11,7 @@ useDefault = true
 # entropy rules, and secrets do not belong in generated files.
 [[allowlists]]
 description = "generated lockfiles"
-paths = ['''(^|/)(bun\.lock|bun\.lockb|package-lock\.json|deno\.lock|uv\.lock|Cargo\.lock)$''']
+paths = ['''(^|/)(bun\.lock|bun\.lockb|package-lock\.json|uv\.lock|Cargo\.lock)$''']
 
 # Add further false-positive allowlists here; for a one-off finding,
 # prefer an inline "gitleaks:allow" comment on the flagged line -

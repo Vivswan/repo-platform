@@ -226,15 +226,12 @@ async function latestRelease(pin: ModulePin, fetch: Fetch): Promise<string> {
 
 const shown = (bump: Bump, sha: string) => (bump.kind === "commit" ? sha.slice(0, 7) : sha);
 
-/** "bun to 1.3.15" / "bun to 1.3.15 and deno to 2.9.6" / an ", and" list. */
+const LIST = new Intl.ListFormat("en-US", { style: "long", type: "conjunction" });
+
 export function proseBumps(bumps: Bump[]): string {
-  const parts = bumps.map((b) => `${b.name} to ${shown(b, b.to)}`);
-  if (parts.length <= 1) return parts[0] ?? "";
-  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
-  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+  return LIST.format(bumps.map((b) => `${b.name} to ${shown(b, b.to)}`));
 }
 
-/** The release bumps crossing a major line (a bun 2.0, a deno 3.0), as "deno 2 -> 3" fragments for the body's callout. */
 function majorJumps(bumps: Bump[]): string {
   return bumps
     .filter((b) => b.kind === "release" && b.from.split(".")[0] !== b.to.split(".")[0])

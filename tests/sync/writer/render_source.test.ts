@@ -34,7 +34,7 @@ const render = (entry: Sourced, modules: string[]) =>
   renderSourced(config, TREE, entry, modules, {}, bodies) as string;
 
 describe("the always blocks", () => {
-  test.each([[[]], [["bun"]], [["deno"]], [["bun", "deno", "fuzzer"]]])(
+  test.each([[[]], [["bun"]], [["uv"]], [["bun", "uv", "fuzzer"]]])(
     "selection %j renders the base, then the three OS sections, then what it rendered without them",
     (modules) => {
       const plain = render(withoutAlways, modules);
@@ -45,7 +45,7 @@ describe("the always blocks", () => {
 });
 
 test("upstream and tree blocks splice in files.yml order, a shared upstream block once, the tree block last", () => {
-  expect(render(gitignore, ["deno", "bun", "fuzzer"])).toBe(
+  expect(render(gitignore, ["uv", "bun", "fuzzer"])).toBe(
     `# BEGIN REPO-PLATFORM MANAGED\n${BASE}${OS_BLOCKS}` +
       "## Node (github/gitignore Node.gitignore)\n*.log\n\n" +
       "## Bun (github/gitignore Bun.gitignore)\nbun.lockb\n\n" +
