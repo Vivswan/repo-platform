@@ -7,6 +7,7 @@
 //
 // Usage: PR_NUMBER=<n> GITHUB_REPOSITORY=<owner/repo> bun .github/scripts/fleet/fleet_sync_default.ts
 
+import { notice, warning } from "@actions/core";
 import { type ZodType, z } from "zod";
 import { PLATFORM_NAME, PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import {
@@ -16,7 +17,7 @@ import {
   fleetSyncLabels,
   readDirective,
 } from "../post-green/fleet_sync_marker.ts";
-import { notice, requireEnv, warning } from "../shared/gha.ts";
+import { requireEnv } from "../shared/gha.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
 import { loadLayer } from "../sync/writer/settings_layers.ts";
 import { captureNetwork } from "./discovery.ts";

@@ -18,8 +18,9 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fill, loadAction, stepNamed } from "../../shared/action_step.ts";
-import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
+import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
+import { parseGithubOutput } from "../../shared/github_output.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
 import type { TempDirs } from "../../shared/temp_dir.ts";
 
@@ -125,17 +126,20 @@ export function pinnedLychee(): string | null {
 
 /** The step's lychee run the way lychee-action's entrypoint runs it (bash evals the args string), the markdown
  *  report on stdout. */
-export function runLinkCheck(lychee: string, linkCheckArgs: string, cwd: string): BuildResult {
+export function runLinkCheck(
+  lychee: string,
+  linkCheckArgs: string,
+  cwd: string,
+): BoundedSpawnResult {
   const args = fill(LINK_CHECK_STEP.with.args, {
     "${{ steps.assemble.outputs.link-check-args }}": linkCheckArgs,
   });
   return boundedSpawnSync(["bash", "-c", `'${lychee}' --format markdown ${args}`], { cwd });
 }
 
-export interface BuildResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
+export interface BuildResult extends BoundedSpawnResult {
+  /** The step outputs the build set, read back from its GITHUB_OUTPUT file. */
+  outputs: Record<string, string>;
 }
 
 export function buildSite(
@@ -144,32 +148,28 @@ export function buildSite(
   runner: RunnerTemp,
   env: Record<string, string>,
 ): BuildResult {
-  return boundedSpawnSync([process.execPath, BUILD_TS], {
+  const output = join(dirname(runner.alias), "github-output");
+  writeFileSync(output, "");
+  const result = boundedSpawnSync([process.execPath, BUILD_TS], {
     env: {
       ...process.env,
       GITHUB_WORKSPACE: workspace,
       GITHUB_REPOSITORY: repository,
       RUNNER_TEMP: runner.alias,
-      GITHUB_OUTPUT: "",
+      GITHUB_OUTPUT: output,
       CONFIG: siteConfig(),
       SITE_DIR: "",
       ...env,
     },
     timeoutMs: BUILD_TIMEOUT_MS,
   });
+  return { ...result, outputs: parseGithubOutput(readFileSync(output, "utf-8")) };
 }
 
 /** A failure message that carries the build's own output, so a red build
  *  names its cause instead of only its exit code. */
-export function describeRun(result: BuildResult): string {
+export function describeRun(result: BoundedSpawnResult): string {
   return `exit ${result.exitCode}\n--- stdout\n${result.stdout}\n--- stderr\n${result.stderr}`;
-}
-
-/** The step outputs the build set, read from the lines GITHUB_OUTPUT="" makes it print. */
-export function outputs(stdout: string): Record<string, string> {
-  return Object.fromEntries(
-    [...stdout.matchAll(/^\(output\) ([a-z-]+)=(.*)$/gm)].map((match) => [match[1], match[2]]),
-  );
 }
 
 export function present(site: string, rels: string[]): string[] {

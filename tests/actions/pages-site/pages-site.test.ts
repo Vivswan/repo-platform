@@ -27,7 +27,6 @@ import {
   assertIncludePages,
   copyInto,
   resolvePrebuilt,
-  setOutput,
   stageIncludes,
   tierStrictLinks,
 } from "../../../actions/pages-site/build.ts";
@@ -47,6 +46,7 @@ import {
 } from "../../../actions/pages-site/lib.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
+import { parseGithubOutput } from "../../shared/github_output.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
@@ -384,30 +384,6 @@ describe("resolvePrebuilt", () => {
   });
 });
 
-describe("setOutput", () => {
-  // GitHub's output format: a line break in a value sets a second output unless the value is delimited.
-  test("writes every output as one delimited block", () => {
-    const file = join(temp.dir("output-"), "output");
-    writeFileSync(file, "");
-    const before = process.env.GITHUB_OUTPUT;
-    process.env.GITHUB_OUTPUT = file;
-    try {
-      setOutput("publish", "true");
-      setOutput("site-title", "Docs\npublish=false");
-    } finally {
-      if (before === undefined) delete process.env.GITHUB_OUTPUT;
-      else process.env.GITHUB_OUTPUT = before;
-    }
-    const outputs: Record<string, string> = {};
-    for (const block of readFileSync(file, "utf8").matchAll(
-      /^([^<\n]+)<<(ghadelim_\S+)\n([\s\S]*?)\n\2\n/gm,
-    )) {
-      outputs[block[1]] = block[3];
-    }
-    expect(outputs).toEqual({ publish: "true", "site-title": "Docs\npublish=false" });
-  });
-});
-
 describe("derive", () => {
   // A walked dot directory surfaces a stray page silently.
   test("walkMarkdown lists markdown only, skipping dot directories", () => {
@@ -693,20 +669,22 @@ describe("check build", () => {
         "-qm",
         "docs",
       ]);
+      const output = join(root, "github-output");
+      writeFileSync(output, "");
       const result = boundedSpawnSync([process.execPath, join(ACTION_DIR, "build.ts")], {
         env: {
           ...process.env,
           GITHUB_WORKSPACE: join(root, "ws"),
           GITHUB_REPOSITORY: "o/r",
           RUNNER_TEMP: join(root, "runner-temp"),
-          // Empty, so the outputs print instead of landing in the runner's real file.
-          GITHUB_OUTPUT: "",
+          GITHUB_OUTPUT: output,
           CHECK: "true",
           SITE_DIR: "",
           CONFIG: `{"site_title": "t", "docs_path": ${docsPath}, "include": [], "link_rot_label": "", "link_rot_color": "", "link_rot_description": ""}`,
         },
         timeoutMs: 180_000,
       });
+      const outputs = parseGithubOutput(readFileSync(output, "utf-8"));
       const buildDir = join(realpathSync(join(root, "runner-temp")), "pages-site", "build-0");
       const page = join(buildDir, ".vitepress", "dist", "page.html");
       if (outcome === "stands down") {
@@ -714,30 +692,31 @@ describe("check build", () => {
         expect(result.stdout).toContain(
           "::notice::docs-check stood down: the registration turns the docs half off (site.path: null)",
         );
+        expect(outputs).toEqual({});
         expect(existsSync(buildDir)).toBe(false);
       } else if (outcome === "fails") {
-        // The SSR frame must sit inside vitepress's fatal block (`build error:`,
-        // ANSI-colored under CI, up to the action's annotation) and is never matched
-        // by wording: bun 1.4.0 prints a bare `Error` stack header in ~1.5% of throws.
+        // The SSR frame must sit inside vitepress's fatal block (`build error:`, ANSI-colored under CI) and is never
+        // matched by wording: bun 1.4.0 sometimes prints a bare `Error` stack header. The action's own annotation
+        // is a workflow command, so it lands on stdout.
         const stderr = Bun.stripANSI(result.stderr);
         const fatal = stderr.indexOf("build error:\n");
-        const annotation = stderr.indexOf(
+        expect(result.exitCode).toBe(1);
+        expect(result.stdout).toContain(
           `::error::command failed (exit 1): ${process.execPath} ${join(ACTION_DIR, "node_modules", ".bin", "vitepress")} build ${buildDir}\n`,
         );
-        expect(result.exitCode).toBe(1);
         expect(fatal).toBeGreaterThanOrEqual(0);
-        expect(annotation).toBeGreaterThan(fatal);
-        expect(stderr.slice(fatal, annotation)).toContain(
+        expect(stderr.slice(fatal)).toContain(
           `at _sfc_ssrRender (${join(buildDir, ".vitepress", ".temp", "page.md.js")}:`,
         );
+        expect(outputs).toEqual({});
         expect(existsSync(page)).toBe(false);
       } else {
         expect(result.exitCode).toBe(0);
         // The link check is the action's next step; the build hands it the dist as its own served root, each path
         // quoted the way Bun.$.escape quotes for bash.
-        expect(result.stdout).toContain(
-          `(output) link-check-args=--root-dir ${Bun.$.escape(join(buildDir, ".vitepress", "dist"))} --files-from ${Bun.$.escape(`${dirname(buildDir)}/link-check-inputs.txt`)}`,
-        );
+        expect(outputs).toEqual({
+          "link-check-args": `--root-dir ${Bun.$.escape(join(buildDir, ".vitepress", "dist"))} --files-from ${Bun.$.escape(`${dirname(buildDir)}/link-check-inputs.txt`)}`,
+        });
         expect(readFileSync(page, "utf-8")).toContain("<p>Plain text here.</p>");
         // The token layer reaches the bundle only through the virtual module config.mts serves.
         const assets = join(buildDir, ".vitepress", "dist", "assets");

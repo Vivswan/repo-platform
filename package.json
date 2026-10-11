@@ -27,6 +27,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@actions/core": "3.0.1",
     "@vivswan/github-settings-as-code": "next",
     "diff": "9.0.0",
     "yaml": "^2.9.0",

@@ -6,9 +6,10 @@
 // and a slug there would be dropped by the runner as masked or, unmasked, name a private repository.
 
 import { appendFileSync } from "node:fs";
+import { error, notice, setOutput, setSecret, warning } from "@actions/core";
 import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
-import { addMask, env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { env, requireEnv } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../sync/writer/settings_entry.ts";
@@ -53,7 +54,7 @@ function emitPlan(targets: DiscoveredRepo[]): void {
 // The step summary is not covered by the runner's masker, so callers pass already-scrubbed text.
 let summaryHeaded = false;
 function warn(message: string): void {
-  console.log(`::warning::${message}`);
+  warning(message);
   const summary = env("GITHUB_STEP_SUMMARY");
   if (summary !== "") {
     if (!summaryHeaded) {
@@ -158,7 +159,7 @@ async function probe<T>(
 const discovered = discoverOwnerRepos(owner, "select_settings_repos: user/repos response");
 // Before anything else prints: the masker covers what a scrub might miss.
 for (const row of discovered) {
-  if (row.private) for (const form of maskForms(row.repo)) addMask(form);
+  if (row.private) for (const form of maskForms(row.repo)) setSecret(form);
 }
 
 // A slug the probes later DROP is a notice or a counted refusal after the probes, so a valid scope may select nothing.

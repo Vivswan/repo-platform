@@ -4,7 +4,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { env, requireEnv, setOutput } from "../shared/gha.ts";
+import { setOutput } from "@actions/core";
+import { env, requireEnv } from "../shared/gha.ts";
 
 export const DELIVERY_VERDICTS = ["unchanged", "opened", "refreshed", "pushed", "failed"] as const;
 export type DeliveryVerdict = (typeof DELIVERY_VERDICTS)[number];
