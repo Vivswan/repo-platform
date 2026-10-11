@@ -27,7 +27,7 @@ The label is a registration key rather than a starter edit alone because the set
 
 - **Set up the toolchain** the fuzzer needs in the steps above it (rust nightly and cargo-fuzz, a docker stack, a corpus cache), and point the upload step's `path` at your failure-report directory. The artifact carries the failure directories themselves, so the `report` job's download path and `artifacts-dir` stay as they are.
 
-- **The `report` job is the machinery:** it downloads every `fuzz-failures-*` artifact of the run into `.fuzz-failures` (a pattern download of nothing succeeds, so a night that wrote no artifact files the bare notice) and runs the action once. Leave it as it is; only [sharding](#sharding) touches its `artifact-name`.
+- **The `report` job is the machinery:** it downloads every `fuzz-failures-*` artifact of the run into `.fuzz-failures` (a pattern download of nothing succeeds, so a night that wrote no artifact files the bare notice; a download that fails still files it, since the filing step leads with `always()`) and runs the action once. Leave it as it is; only [sharding](#sharding) touches its `artifact-name`.
 
 - **Hidden files in the upload:** the upload step sets `include-hidden-files: true`. Since v4.4, `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default. Without the flag the step finds no files and uploads nothing, and `if-no-files-found: ignore` keeps that silent.
 

@@ -5,9 +5,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { data, Evaluator, Lexer, Parser } from "@actions/expressions";
-import { truthy } from "@actions/expressions/result";
 import { parse as parseYaml } from "yaml";
+import { evaluateCondition } from "../shared/github_expression.ts";
 
 const root = join(import.meta.dir, "../..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
@@ -19,47 +18,6 @@ interface Job {
 interface Concurrency {
   group: string;
   "cancel-in-progress": string | boolean;
-}
-
-// The status functions are the workflow runner's, not the expression language's: a job whose condition passed is judged
-// here only when its chain ran or a status function let it continue, so always() reads true and cancelled() false.
-const STATUS_FUNCTIONS = new Map(
-  [
-    ["always", true],
-    ["cancelled", false],
-  ].map(([name, value]) => [
-    String(name),
-    {
-      name: String(name),
-      minArgs: 0,
-      maxArgs: 0,
-      call: () => new data.BooleanData(Boolean(value)),
-    },
-  ]),
-);
-
-/** GitHub's own expression language over a context of dotted keys; a key nobody set reads as null, as an unrun job's
- *  output does in Actions. */
-function evaluateCondition(expression: string, context: Record<string, string>): boolean {
-  const contexts = new data.Dictionary();
-  for (const [path, value] of Object.entries(context)) {
-    const keys = path.split(".");
-    let node = contexts;
-    for (const key of keys.slice(0, -1)) {
-      const child = node.get(key) ?? new data.Dictionary();
-      if (!(child instanceof data.Dictionary)) throw new Error(`${path}: ${key} is not a mapping`);
-      if (node.get(key) === undefined) node.add(key, child);
-      node = child;
-    }
-    node.add(keys[keys.length - 1], new data.StringData(value));
-  }
-  const tokens = new Lexer(expression).lex().tokens;
-  const tree = new Parser(
-    tokens,
-    contexts.pairs().map((pair) => pair.key),
-    [...STATUS_FUNCTIONS.values()],
-  ).parse();
-  return truthy(new Evaluator(tree, contexts, STATUS_FUNCTIONS).evaluate());
 }
 
 /** Simulates GitHub's own rules, which the body mirrors; `outputs` stands in for the step outputs
