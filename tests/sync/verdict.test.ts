@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROWS_FILE, VERDICT_FILE } from "../../.github/scripts/sync/verdict.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { parseGithubOutput } from "../shared/github_output";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -12,7 +13,7 @@ interface Run {
   exitCode: number;
   stdout: string;
   stderr: string;
-  outputs: string;
+  outputs: Record<string, string>;
 }
 
 function run(
@@ -38,7 +39,7 @@ function run(
       ...env,
     },
   });
-  return { ...result, outputs: readFileSync(outputFile, "utf-8") };
+  return { ...result, outputs: parseGithubOutput(readFileSync(outputFile, "utf-8")) };
 }
 
 describe("verdict.ts", () => {
@@ -53,7 +54,7 @@ describe("verdict.ts", () => {
       exitCode: 0,
       stdout: `plan: ${count} rows\n`,
       stderr: "",
-      outputs: `count=${count}\n`,
+      outputs: { count: String(count) },
     });
   });
 
@@ -76,7 +77,7 @@ describe("verdict.ts", () => {
       exitCode: 0,
       stdout: `${line}\n`,
       stderr: "",
-      outputs: "",
+      outputs: {},
     });
   });
 
@@ -112,7 +113,7 @@ describe("verdict.ts", () => {
     const result = run(mode, env, files);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
-    expect(result.outputs).toBe("");
+    expect(result.outputs).toEqual({});
     expect(result.exitCode).not.toBe(0);
   });
 });

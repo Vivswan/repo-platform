@@ -3,7 +3,8 @@
 // contract, TARGET alone (settings-repos.yml hands it to the library CLI as --repos). The CLI masks
 // the slug itself, but only once it runs: the apply step's preamble has spelled TARGET by then.
 
-import { fail, notice, requireEnv } from "../shared/gha.ts";
+import { notice } from "@actions/core";
+import { fail, requireEnv } from "../shared/gha.ts";
 import { resolveTarget } from "../sync/resolve_row.ts";
 import { supersededBy, supersededNotice } from "./newest_main.ts";
 

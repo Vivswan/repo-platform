@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
+
 // One invoker, post-green.yml's move-stable job: SOURCE_SHA is the judged commit on the call, the sha input on a dispatch (the tag's
 // contract: docs/platform/build-provenance.md; its place after the gate: docs/platform/post-green.md).
 // Output `previous` is the base the directives read takes from the tag: the commit it named before this run moved it, "" when
 // nothing moved (the first move included).
 
+import { notice, setOutput } from "@actions/core";
 import { DELIVERY_REF } from "../../../actions/shared/platform.ts";
 import { allGreenFailure, PROBE_TIMEOUT_MS } from "../shared/all_green.ts";
-import { env, fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { env, fail, requireEnv } from "../shared/gha.ts";
 import { gitAnswersYes, gitRemoteRef } from "../shared/git_yes_no.ts";
 import { must, mustCapture } from "../shared/proc.ts";
 

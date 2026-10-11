@@ -7,7 +7,6 @@ import {
   codeqlLanguages,
   loadModuleData,
   type Module,
-  outputLines,
   outputsOf,
   PlanError,
   type PlanInput,
@@ -22,6 +21,7 @@ import { parseRegistration, type Registration } from "../../../actions/plan/regi
 import { declaredLabelTuple, reservedLabelNames } from "../../../actions/plan/reserved_labels.ts";
 import { loadAction } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
+import { parseGithubOutput } from "../../shared/github_output.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -396,21 +396,11 @@ describe("planSite", () => {
   });
 });
 
-describe("outputLines", () => {
-  // GITHUB_OUTPUT's heredoc form is GitHub's; a random delimiter is one no value can be authored to close.
-  test("one-line values as name=value; a multi-line value under a delimiter it cannot contain", () => {
-    expect(outputLines({ a: "x", b: "" })).toBe("a=x\nb=\n");
-    const text = outputLines({ note: "line one\nline two" });
-    const match = /^note<<(ghadelimiter_[0-9a-f]{32})\nline one\nline two\n\1\n$/.exec(text);
-    expect(match).not.toBeNull();
-  });
-});
-
 describe("plan.ts as a child", () => {
   function run(
     files: Record<string, string>,
     env: Record<string, string>,
-  ): { exitCode: number; stdout: string; output: string } {
+  ): { exitCode: number; stdout: string; outputs: Record<string, string> } {
     const root = temp.dir("plan-root-");
     for (const [rel, text] of Object.entries(files)) {
       mkdirSync(join(root, rel, ".."), { recursive: true });
@@ -433,67 +423,64 @@ describe("plan.ts as a child", () => {
     return {
       exitCode: result.exitCode,
       stdout: result.stdout,
-      output: readFileSync(output, "utf-8"),
+      outputs: parseGithubOutput(readFileSync(output, "utf-8")),
     };
   }
-  const WEEKLY = `weekly=${new Date().getUTCDay() === 1}`;
-  const SITE_CONFIG = (title: string, include: string) =>
-    `config={"site_title":"${title}","docs_path":"docs","include":${include},"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}\n`;
+  const WEEKLY = String(new Date().getUTCDay() === 1);
+  const SITE_CONFIG = (title: string, include: string) => ({
+    config: `{"site_title":"${title}","docs_path":"docs","include":${include},"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}`,
+  });
 
   // The row names are the outputs fleet.yml's plan step hands its jobs: a renamed or missing row leaves them unselected, green.
   // fleet.yml passes no `mode`, so the default-mode row runs under the manifest's declared default.
   const MODE_DEFAULT = String(loadAction("actions/plan/action.yml").inputs?.mode.default);
-  test.each<{ reason: string; registration: string; env: Record<string, string>; output: string }>([
+  test.each<{
+    reason: string;
+    registration: string;
+    env: Record<string, string>;
+    outputs: Record<string, string>;
+  }>([
     {
       reason: "default mode, the mode fleet.yml gets by omitting the input",
       registration: `modules: [bun, fuzzer, release-please]\n${PROJECT}`,
       env: { PRIVATE: "false", MODE: MODE_DEFAULT },
-      output: [
-        'modules=["bun","release-please","fuzzer"]',
-        "private=false",
-        'codeql-languages=["javascript-typescript"]',
-        "tracking-labels=fuzz-nightly,security-nightly",
-        "security-label=security-nightly",
-        "security-label-color=1d76db",
-        "security-label-description=Automated nightly security scan findings",
-        WEEKLY,
-        "",
-      ].join("\n"),
+      outputs: {
+        "modules": '["bun","release-please","fuzzer"]',
+        "private": "false",
+        "codeql-languages": '["javascript-typescript"]',
+        "tracking-labels": "fuzz-nightly,security-nightly",
+        "security-label": "security-nightly",
+        "security-label-color": "1d76db",
+        "security-label-description": "Automated nightly security scan findings",
+        "weekly": WEEKLY,
+      },
     },
     {
       reason: "a private registration",
       registration: `modules: [uv]\n${PROJECT}`,
       env: { PRIVATE: "true" },
-      output: [
-        'modules=["uv"]',
-        "private=true",
-        "codeql-languages=[]",
-        "tracking-labels=security-nightly",
-        "security-label=security-nightly",
-        "security-label-color=1d76db",
-        "security-label-description=Automated nightly security scan findings",
-        WEEKLY,
-        "",
-      ].join("\n"),
+      outputs: {
+        "modules": '["uv"]',
+        "private": "true",
+        "codeql-languages": "[]",
+        "tracking-labels": "security-nightly",
+        "security-label": "security-nightly",
+        "security-label-color": "1d76db",
+        "security-label-description": "Automated nightly security scan findings",
+        "weekly": WEEKLY,
+      },
     },
     {
       reason: "site mode",
       registration:
         "modules: [bun, site]\nproject: { name: Site, slug: site, description: d }\nsite: { include: [{ path: skills, mount: skills, page: SKILL.md }] }\n",
       env: { MODE: "site" },
-      output: SITE_CONFIG("Site", '[{"path":"skills","mount":"skills","page":"SKILL.md"}]'),
+      outputs: SITE_CONFIG("Site", '[{"path":"skills","mount":"skills","page":"SKILL.md"}]'),
     },
-  ])(
-    "$reason writes every row fleet.yml reads, and echoes them",
-    ({ registration, env, output }) => {
-      const result = run({ ".repo-platform.yml": registration }, env);
-      expect([result.exitCode, result.output, result.stdout.trimEnd()]).toEqual([
-        0,
-        output,
-        output.trimEnd(),
-      ]);
-    },
-  );
+  ])("$reason writes every row fleet.yml reads", ({ registration, env, outputs }) => {
+    const result = run({ ".repo-platform.yml": registration }, env);
+    expect([result.exitCode, result.outputs, result.stdout]).toEqual([0, outputs, ""]);
+  });
 
   const missingFiles = () => join(temp.dir("plan-files-missing-"), "files.yml");
   const invalidFiles = () => {
@@ -590,7 +577,7 @@ describe("plan.ts as a child", () => {
       const result = run(files, typeof env === "function" ? env(at) : env);
       const expected = error(at);
       const stdout = detail ? result.stdout.slice(0, expected.length) : result.stdout;
-      expect([result.exitCode, result.output, stdout]).toEqual([1, "", expected]);
+      expect([result.exitCode, result.outputs, stdout]).toEqual([1, {}, expected]);
     },
   );
 
@@ -611,27 +598,31 @@ describe("plan.ts as a child", () => {
       { ".repo-platform.yml": `modules: [site]\n${PROJECT}` },
       { PRIVATE: "false", FILES_CONFIG: otherPath },
     );
-    expect([ci.exitCode, ci.output]).toEqual([
+    expect([ci.exitCode, ci.outputs]).toEqual([
       0,
-      [
-        'modules=["site"]',
-        "private=false",
-        "codeql-languages=[]",
-        "tracking-labels=docs-link-rot,security-nightly",
-        "security-label=security-nightly",
-        "security-label-color=1d76db",
-        "security-label-description=Automated nightly security scan findings",
-        WEEKLY,
-        "",
-      ].join("\n"),
+      {
+        "modules": '["site"]',
+        "private": "false",
+        "codeql-languages": "[]",
+        "tracking-labels": "docs-link-rot,security-nightly",
+        "security-label": "security-nightly",
+        "security-label-color": "1d76db",
+        "security-label-description": "Automated nightly security scan findings",
+        "weekly": WEEKLY,
+      },
     ]);
     const site = run(
       { ".repo-platform.yml": `modules: [bun, site]\n${PROJECT}` },
       { MODE: "site", FILES_CONFIG: otherPath },
     );
-    expect([site.exitCode, site.output]).toEqual([
+    expect([site.exitCode, site.outputs]).toEqual([
       0,
-      SITE_CONFIG("Demo Project", "[]").replace('"docs_path":"docs"', '"docs_path":"manual"'),
+      {
+        config: SITE_CONFIG("Demo Project", "[]").config.replace(
+          '"docs_path":"docs"',
+          '"docs_path":"manual"',
+        ),
+      },
     ]);
     const missingPath = join(dir, "missing-path.yml");
     writeFileSync(missingPath, real.replace("    path: docs\n", ""));
@@ -639,7 +630,7 @@ describe("plan.ts as a child", () => {
       { ".repo-platform.yml": `modules: [bun]\n${PROJECT}` },
       { PRIVATE: "false", FILES_CONFIG: missingPath },
     );
-    expect([missing.exitCode, missing.output]).toEqual([1, ""]);
+    expect([missing.exitCode, missing.outputs]).toEqual([1, {}]);
     expect(missing.stdout).toContain(
       `::error::${missingPath}: modules: no module declares path - the plan reads it as the default`,
     );

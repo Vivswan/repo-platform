@@ -6,6 +6,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { setOutput } from "@actions/core";
 import { isScalar, parseDocument, visit } from "yaml";
 import {
   type FilesConfig,
@@ -16,7 +17,6 @@ import {
   upstreamRefs,
 } from "../../../actions/plan/files_config.ts";
 import { BUN_PIN_FILE, bunLockDirs } from "../../../scripts/bootstrap.ts";
-import { setOutput } from "../shared/gha.ts";
 import { must } from "../shared/proc.ts";
 import { unifiedDiff } from "../sync/writer/report.ts";
 import { type Fetch, fetchText, fetchUpstream, RAW_HOST } from "../sync/writer/upstream.ts";

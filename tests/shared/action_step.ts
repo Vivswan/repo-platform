@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { boundedSpawnSync } from "./bounded_spawn";
+import { parseGithubOutput } from "./github_output";
 
 export const REPO_ROOT = join(import.meta.dir, "../..");
 export const RUNNER_BASH = ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c"];
@@ -68,14 +69,6 @@ export function runBashStep(
     exitCode: proc.exitCode,
     stdout: proc.stdout,
     stderr: proc.stderr,
-    outputs: Object.fromEntries(
-      readFileSync(outputs, "utf8")
-        .split("\n")
-        .filter((line) => line !== "")
-        .map((line) => {
-          const at = line.indexOf("=");
-          return [line.slice(0, at), line.slice(at + 1)];
-        }),
-    ),
+    outputs: parseGithubOutput(readFileSync(outputs, "utf8")),
   };
 }

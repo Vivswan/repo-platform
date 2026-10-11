@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
+import { parseGithubOutput } from "../shared/github_output";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -126,12 +127,7 @@ function run(scenario: Scenario): Outcome {
       ALL_GREEN_WAIT_MS: "0",
     },
   });
-  const outputs = Object.fromEntries(
-    readFileSync(outputFile, "utf-8")
-      .split("\n")
-      .filter((line) => line !== "")
-      .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
-  );
+  const outputs = parseGithubOutput(readFileSync(outputFile, "utf-8"));
   return {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
