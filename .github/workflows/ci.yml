@@ -368,6 +368,8 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: files/bun/.bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
       - name: Plant the two pins
         id: pins
         run: bun .github/scripts/ci/bun_setup_smoke.ts plant

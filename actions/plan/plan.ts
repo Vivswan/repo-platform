@@ -1,9 +1,9 @@
 // Every managed ci.yml is byte-identical; what differs per repository is computed here and handed to the jobs as step outputs.
 // Fail closed: nothing here defaults an invalid registration into a green run.
 
-import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, writeSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { setOutput } from "@actions/core";
 import type { DocsConfig, SiteConfigJson } from "../pages-site/.vitepress/conventions.ts";
 import {
   capture,
@@ -343,21 +343,8 @@ function main(): number {
       mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
   };
   const plan = mode === "site" ? planSite(input) : planCi(input);
-  const text = outputLines(outputsOf(plan));
-  appendFileSync(requireEnv("GITHUB_OUTPUT"), text);
-  writeSync(1, text);
+  for (const [name, value] of Object.entries(outputsOf(plan))) setOutput(name, value);
   return 0;
-}
-
-/** The delimiter is random, so no value can be authored to end the output early. */
-export function outputLines(outputs: Record<string, string>): string {
-  return Object.entries(outputs)
-    .map(([name, value]) => {
-      if (!/[\r\n]/.test(value)) return `${name}=${value}\n`;
-      const delimiter = `ghadelimiter_${randomBytes(16).toString("hex")}`;
-      return `${name}<<${delimiter}\n${value}\n${delimiter}\n`;
-    })
-    .join("");
 }
 
 if (import.meta.main) {

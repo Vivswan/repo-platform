@@ -5,9 +5,10 @@
 // "How the leg reads the label"; the direct-push rule: docs/all-green.md.
 
 import { resolve } from "node:path";
+import { notice, setOutput, warning } from "@actions/core";
 import { z } from "zod";
 import { captureNetwork } from "../fleet/discovery.ts";
-import { fail, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
+import { fail, requireEnv } from "../shared/gha.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
 import { loadLayer, sectionEntries } from "../sync/writer/settings_layers.ts";
 import {

@@ -21,7 +21,6 @@ import {
   isFile,
   linkCheckInputs,
   MERMAID_MOUNT_HTML,
-  outputs,
   pinnedLychee,
   present,
   type RunnerTemp,
@@ -92,7 +91,7 @@ describe("the artifact a deploy lands", () => {
     expect(built.stdout).toContain(
       "::notice::docs version v0.0.1 skipped: docs/ has no landing page (README.md or index.md) at that tag",
     );
-    expect(outputs(built.stdout)).toEqual({
+    expect(built.outputs).toEqual({
       "publish": "true",
       "site-dir": site,
       "link-check-args": deployLinkCheckArgs(runner, FLEET_REPO),
@@ -477,7 +476,7 @@ describe("the link check over the whole artifact", () => {
     () => {
       const check = runLinkCheck(
         lychee ?? "",
-        outputs(built.stdout)["link-check-args"],
+        built.outputs["link-check-args"],
         dirname(dirname(site)),
       );
       expect(check.exitCode, describeRun(check)).toBe(2);
@@ -601,6 +600,6 @@ describe("layouts that build no docs tier", () => {
     expect(missing).toEqual([]);
     expect(present(runner.site, row.absent)).toEqual([]);
     for (const line of row.stdout) expect(result.stdout).toContain(line);
-    expect(outputs(result.stdout)).toEqual(row.outputs(runner));
+    expect(result.outputs).toEqual(row.outputs(runner));
   });
 });

@@ -9,7 +9,6 @@ import {
   FLEET_SECRET,
   PAT_RECIPE_URL,
 } from "../../.github/scripts/fleet/require_fleet_token.ts";
-import { escapeData } from "../../.github/scripts/shared/gha.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const ROOT = join(import.meta.dir, "../..");
@@ -20,7 +19,7 @@ const PATH = process.env.PATH ?? "";
 // recipe's own query string reaches the log intact where a raw % would misparse the workflow command.
 const ERROR_LINE = new RegExp(
   `^::error::[^\\n]*\\b${FLEET_SECRET}\\b[^\\n]*\\b${FLEET_ENVIRONMENT}\\b[^\\n]*` +
-    `${RegExp.escape(escapeData(PAT_RECIPE_URL))}[^\\n]*\\n$`,
+    `${RegExp.escape(PAT_RECIPE_URL.replaceAll("%", "%25"))}[^\\n]*\\n$`,
 );
 
 test.each<{ token: string; env: Record<string, string>; exitCode: number; stdout: RegExp }>([

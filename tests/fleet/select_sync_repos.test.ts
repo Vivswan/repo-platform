@@ -9,14 +9,17 @@ import {
 import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
+import { parseGithubOutput } from "../shared/github_output";
 import type { LoopbackServer } from "../shared/loopback_server";
 import { spawnPushProbeServer } from "../shared/push_probe_server";
 import { tempDirs } from "../shared/temp_dir";
 
 const RUN_ID = "4242";
 const keyOf = rowKeyOf("stub-token", RUN_ID);
-const outputFor = (rows: { repo: string; private: boolean }[]) =>
-  `count=${rows.length}\nmatrix=${JSON.stringify(matrixRows(rows, keyOf))}\n`;
+const outputFor = (rows: { repo: string; private: boolean }[]) => ({
+  count: String(rows.length),
+  matrix: JSON.stringify(matrixRows(rows, keyOf)),
+});
 
 const temp = tempDirs();
 
@@ -97,7 +100,7 @@ describe("select_sync_repos.ts", () => {
     exitCode: number;
     stdout: string;
     stderr: string;
-    output: string;
+    outputs: Record<string, string>;
     rows: { repo: string; private: boolean }[] | null;
   }
 
@@ -157,7 +160,7 @@ describe("select_sync_repos.ts", () => {
       exitCode: proc.exitCode,
       stdout: proc.stdout.toString(),
       stderr: proc.stderr.toString(),
-      output: readFileSync(outputFile, "utf-8"),
+      outputs: parseGithubOutput(readFileSync(outputFile, "utf-8")),
       rows: existsSync(rowsFile) ? JSON.parse(readFileSync(rowsFile, "utf-8")) : null,
     };
   }
@@ -170,7 +173,7 @@ describe("select_sync_repos.ts", () => {
   }
 
   /** The public channels a private slug (or a branch name, which may name private work) must never reach. */
-  const publicChannels = (r: Run) => [r.stdout, r.stderr, r.output];
+  const publicChannels = (r: Run) => [r.stdout, r.stderr, ...Object.values(r.outputs)];
 
   /** One `::error::` line opening with `prefix`; the count-only messages themselves are sync_scope.test.ts's. */
   const errorLine = (prefix: string) =>
@@ -210,7 +213,7 @@ describe("select_sync_repos.ts", () => {
         "syncing: Vivswan/steady and 1 private repository",
       ),
       stderr: "",
-      output: outputFor(rows),
+      outputs: outputFor(rows),
       rows,
     });
     for (const channel of publicChannels(main)) {
@@ -286,7 +289,7 @@ describe("select_sync_repos.ts", () => {
     ({ reason, env, rows, stdout, withheld }) => {
       const name = `called-${Bun.hash(reason).toString(16)}`;
       const r = run(name, env(name));
-      expect(r).toEqual({ exitCode: 0, stdout, stderr: "", output: outputFor(rows ?? []), rows });
+      expect(r).toEqual({ exitCode: 0, stdout, stderr: "", outputs: outputFor(rows ?? []), rows });
       for (const channel of publicChannels(r)) {
         expect(channel).not.toContain("hidden-server");
         if (withheld !== undefined) expect(channel).not.toContain(withheld);
@@ -373,7 +376,7 @@ describe("select_sync_repos.ts", () => {
         exitCode: 1,
         stdout: errorLine(error),
         stderr: "",
-        output: "",
+        outputs: {},
         rows: null,
       });
       // The selector folds case, so an echo would be lowercased.
@@ -445,7 +448,7 @@ describe("select_sync_repos.ts", () => {
     ({ repo, rows, stdout }) => {
       const name = `filter-${Bun.hash(repo).toString(16)}`;
       const r = run(name, payloadEnv(name, { repo }), FILTER_FLEET);
-      expect(r).toEqual({ exitCode: 0, stdout, stderr: "", output: outputFor(rows ?? []), rows });
+      expect(r).toEqual({ exitCode: 0, stdout, stderr: "", outputs: outputFor(rows ?? []), rows });
       for (const channel of publicChannels(r)) {
         expect(channel).not.toContain("hidden-server");
         expect(channel).not.toContain("hidden-nomods");
@@ -470,7 +473,7 @@ describe("select_sync_repos.ts", () => {
           /^::error::adoption check failed for a private repository: HTTP 500: https:\/\/api\.github\.com\/repos\/a private repository failed; a private repository unavailable, retry a private repository later%0A\n$/,
         ),
         stderr: "",
-        output: "",
+        outputs: {},
         rows: null,
       });
       for (const channel of publicChannels(r)) {

@@ -2,6 +2,7 @@
 // The throwing forms exist for callers that contain their own failures
 // (a fleet lane's malformed verdict becomes that lane's failure row, not the run's abort).
 
+import { error } from "@actions/core";
 import type { ZodType } from "zod";
 
 /** exitOnThrow prints only this type: an unexpected exception's message was not written value-free,
@@ -39,7 +40,7 @@ function exitOnThrow<T>(parse: () => T): T {
     return parse();
   } catch (err) {
     if (!(err instanceof JsonShapeError)) throw err;
-    console.log(`::error::${err.message}`);
+    error(err.message);
     process.exit(1);
   }
 }

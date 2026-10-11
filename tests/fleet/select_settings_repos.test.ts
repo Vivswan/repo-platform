@@ -11,6 +11,7 @@ import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
+import { parseGithubOutput } from "../shared/github_output";
 import type { LoopbackServer } from "../shared/loopback_server";
 import { spawnPushProbeServer } from "../shared/push_probe_server";
 import { tempDirs } from "../shared/temp_dir";
@@ -148,7 +149,7 @@ describe("select_settings_repos.ts", () => {
     /** The values the ::add-mask:: lines registered, in order. */
     masked: string[];
     stderr: string;
-    output: string;
+    outputs: Record<string, string>;
     summary: string;
   }
 
@@ -210,7 +211,7 @@ describe("select_settings_repos.ts", () => {
       stdout: lines.join("\n"),
       masked,
       stderr: proc.stderr.toString(),
-      output: readFileSync(outputFile, "utf-8"),
+      outputs: parseGithubOutput(readFileSync(outputFile, "utf-8")),
       summary: readFileSync(summaryFile, "utf-8"),
     };
   }
@@ -226,12 +227,11 @@ describe("select_settings_repos.ts", () => {
    *  the resolver reads them (each key matched against the personas' keys under the stub token and
    *  run id), in the selector's order. The matrix text names no target. */
   function outputsOf(result: Run): { count: string; repos: (string | null)[] } {
-    const count = /^count=(.*)$/m.exec(result.output)?.[1];
-    const matrix = /^matrix=(.*)$/m.exec(result.output)?.[1];
+    const { count, matrix } = result.outputs;
     if (count === undefined || matrix === undefined) {
-      throw new Error(`no count= and matrix= lines in: ${result.output}`);
+      throw new Error(`no count and matrix outputs in: ${JSON.stringify(result.outputs)}`);
     }
-    expect(result.output).toBe(`count=${count}\nmatrix=${matrix}\n`);
+    expect(Object.keys(result.outputs).sort()).toEqual(["count", "matrix"]);
     for (const form of PRIVATE_SLUGS.flatMap(maskForms)) expect(matrix).not.toContain(form);
     const rows = JSON.parse(matrix) as { row: number; key: string }[];
     expect(rows.map((row) => row.row)).toEqual(rows.map((_, index) => index));
@@ -245,7 +245,7 @@ describe("select_settings_repos.ts", () => {
   /** The public channels a private slug may never reach: the log (masks aside), stderr, the step
    *  summary, and the output file (its matrix becomes a job output, which the run's views show). */
   function publicChannels(result: Run): string[] {
-    return [result.stdout, result.stderr, result.summary, result.output];
+    return [result.stdout, result.stderr, result.summary, ...Object.values(result.outputs)];
   }
 
   /** One `::error::` line opening with `prefix`; the count-only messages themselves are sync_scope.test.ts's. */
@@ -352,7 +352,7 @@ describe("select_settings_repos.ts", () => {
       ),
       masked: true,
       stderr: "",
-      output: `count=6\nmatrix=${JSON.stringify(matrixRows(rows, keyOf))}\n`,
+      outputs: { count: "6", matrix: JSON.stringify(matrixRows(rows, keyOf)) },
       summary: summaryOf(...ALL_WARNINGS),
     });
     expect(outputsOf(main)).toEqual({ count: "6", repos: ALL_TARGETS });
@@ -386,7 +386,7 @@ describe("select_settings_repos.ts", () => {
         ),
         masked: ALL_MASKS,
         stderr: "",
-        output: "",
+        outputs: {},
         summary: "",
       });
     },
@@ -435,12 +435,12 @@ describe("select_settings_repos.ts", () => {
     "called with $scope: $reason",
     ({ scope, repos, stdout, summary }) => {
       const r = run(`called-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope });
-      expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
+      expect({ ...r, masked: r.masked.length, outputs: outputsOf(r) }).toEqual({
         exitCode: 0,
         stdout,
         masked: ALL_MASKS,
         stderr: "",
-        output: { count: String(repos.length), repos },
+        outputs: { count: String(repos.length), repos },
         summary,
       });
       for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-");
@@ -499,12 +499,12 @@ describe("select_settings_repos.ts", () => {
     ({ repo, repos, stdout, summary }) => {
       const name = `filter-${Bun.hash(repo).toString(16)}`;
       const r = run(name, payloadEnv(name, repo));
-      expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
+      expect({ ...r, masked: r.masked.length, outputs: outputsOf(r) }).toEqual({
         exitCode: 0,
         stdout,
         masked: ALL_MASKS,
         stderr: "",
-        output: { count: String(repos.length), repos },
+        outputs: { count: String(repos.length), repos },
         summary,
       });
       for (const channel of publicChannels(r))
@@ -549,12 +549,12 @@ describe("select_settings_repos.ts", () => {
     ({ transport, scope, env, stdout, repos }) => {
       const name = `list-${Bun.hash(transport + scope).toString(16)}`;
       const r = run(name, env(name));
-      expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
+      expect({ ...r, masked: r.masked.length, outputs: outputsOf(r) }).toEqual({
         exitCode: 0,
         stdout: lines(stdout),
         masked: ALL_MASKS,
         stderr: "",
-        output: { count: String(repos.length), repos },
+        outputs: { count: String(repos.length), repos },
         summary: "",
       });
       for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-server");
@@ -610,7 +610,7 @@ describe("select_settings_repos.ts", () => {
         stdout: errorLine(error),
         masked,
         stderr: "",
-        output: "",
+        outputs: {},
         summary: "",
       });
       for (const channel of publicChannels(r)) expect(channel).not.toContain(withheld);
@@ -645,7 +645,7 @@ describe("select_settings_repos.ts", () => {
         ),
         masked: ALL_MASKS,
         stderr: "",
-        output: "count=0\nmatrix=[]\n",
+        outputs: { count: "0", matrix: "[]" },
         summary: "",
       });
       expect(outputsOf(r)).toEqual({ count: "0", repos: [] });

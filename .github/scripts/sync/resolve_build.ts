@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
+
 // Resolved once in sync-repos.yml's plan job: every row job checks out exactly this commit, so a tag moved mid-run changes
 // nothing a row reads. The tag's provenance is the commit itself (docs/platform/build-provenance.md): main history and a green
 // all-green check, the two facts the mover verified at the move, re-read here because the ruleset cannot pin the tag to
 // one writer.
 
+import { setOutput } from "@actions/core";
 import { DELIVERY_REF } from "../../../actions/shared/platform.ts";
 import { allGreenFailure } from "../shared/all_green.ts";
-import { fail, requireEnv, setOutput } from "../shared/gha.ts";
+import { fail, requireEnv } from "../shared/gha.ts";
 import { gitAnswersYes } from "../shared/git_yes_no.ts";
 import { lastLine } from "../shared/lines.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";

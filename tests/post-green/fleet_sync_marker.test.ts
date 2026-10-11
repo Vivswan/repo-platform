@@ -11,6 +11,7 @@ import { loadLayer } from "../../.github/scripts/sync/writer/settings_layers.ts"
 import { argvStub } from "../shared/argv_stub";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGitEnv } from "../shared/fixture_git";
+import { parseGithubOutput } from "../shared/github_output";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -128,7 +129,7 @@ describe("main", () => {
     sha: string,
     before: string,
     extra: Record<string, string> = {},
-  ): BoundedSpawnResult & { output: string } {
+  ): BoundedSpawnResult & { output: Record<string, string> } {
     const outputFile = join(root, `out-${Bun.hash(cwd + sha + before).toString(16)}.txt`);
     writeFileSync(outputFile, "");
     const proc = boundedSpawnSync(["bun", script], {
@@ -144,7 +145,7 @@ describe("main", () => {
         ...extra,
       },
     });
-    return { ...proc, output: readFileSync(outputFile, "utf-8") };
+    return { ...proc, output: parseGithubOutput(readFileSync(outputFile, "utf-8")) };
   }
   const lookup = (sha: string) => ["gh", "api", `repos/o/r/commits/${sha}/pulls`];
 
@@ -165,7 +166,7 @@ describe("main", () => {
     const fromTag = run(clone, direct, seed);
     expect(fromTag).toEqual({
       exitCode: 0,
-      output: "armed=true\nrepos=public\n",
+      output: { armed: "true", repos: "public" },
       stdout: lines(label(publicA, "public"), syncing(seed, direct, "public")),
       stderr: "",
     });
@@ -174,7 +175,7 @@ describe("main", () => {
     const pushOnly = run(clone, direct, unlabeled);
     expect(pushOnly).toEqual({
       exitCode: 0,
-      output: "armed=false\n",
+      output: { armed: "false" },
       stdout: lines(noLabel(unlabeled, direct)),
       stderr: "",
     });
@@ -186,7 +187,7 @@ describe("main", () => {
     const result = run(clone, publicB, direct);
     expect(result).toEqual({
       exitCode: 0,
-      output: "armed=true\nrepos=all\n",
+      output: { armed: "true", repos: "all" },
       stdout: lines(
         label(whole, "all"),
         older(twoScopes, TWO_SCOPES),
@@ -198,12 +199,18 @@ describe("main", () => {
     });
   });
 
-  test.each([
+  test.each<{
+    reason: string;
+    sha: string;
+    exitCode: number;
+    output: Record<string, string>;
+    stdout: (base: string, sha: string) => string;
+  }>([
     {
       reason: "a pull request with the public label arms public",
       sha: publicA,
       exitCode: 0,
-      output: "armed=true\nrepos=public\n",
+      output: { armed: "true", repos: "public" },
       stdout: (base: string, sha: string) =>
         lines(label(sha, "public"), syncing(base, sha, "public")),
     },
@@ -211,28 +218,28 @@ describe("main", () => {
       reason: "a pull request with the all label arms the whole fleet",
       sha: whole,
       exitCode: 0,
-      output: "armed=true\nrepos=all\n",
+      output: { armed: "true", repos: "all" },
       stdout: (base: string, sha: string) => lines(label(sha, "all"), syncing(base, sha, "all")),
     },
     {
       reason: "a pull request without a fleet-sync label arms nothing",
       sha: unlabeled,
       exitCode: 0,
-      output: "armed=false\n",
+      output: { armed: "false" },
       stdout: (base: string, sha: string) => lines(noLabel(base, sha)),
     },
     {
       reason: "a direct push has no pull request and arms nothing",
       sha: direct,
       exitCode: 0,
-      output: "armed=false\n",
+      output: { armed: "false" },
       stdout: (base: string, sha: string) => lines(noLabel(base, sha)),
     },
     {
       reason: "two pull requests list the commit: the one it is the merge of wins",
       sha: twoPulls,
       exitCode: 0,
-      output: "armed=true\nrepos=public\n",
+      output: { armed: "true", repos: "public" },
       stdout: (base: string, sha: string) =>
         lines(label(sha, "public"), syncing(base, sha, "public")),
     },
@@ -240,7 +247,7 @@ describe("main", () => {
       reason: "two pull requests claim the commit as their merge: refused, nothing armed",
       sha: ambiguous,
       exitCode: 1,
-      output: "",
+      output: {},
       stdout: (_base: string, sha: string) =>
         lines(
           `::error::${short(sha)}: repos/o/r/commits/${sha}/pulls: 2 pull requests claim this commit as their merge (#48, #49); refusing to pick one`,
@@ -250,14 +257,14 @@ describe("main", () => {
       reason: "two scopes on the judged commit's pull request: red leg, nothing armed",
       sha: twoScopes,
       exitCode: 1,
-      output: "",
+      output: {},
       stdout: (_base: string, sha: string) => lines(`::error::${short(sha)}: ${TWO_SCOPES}`),
     },
     {
       reason: "an undeclared fleet-sync label on the judged commit's pull request: red leg",
       sha: unknown,
       exitCode: 1,
-      output: "",
+      output: {},
       stdout: (_base: string, sha: string) =>
         lines(`::error::${short(sha)}: ${UNKNOWN("fleet-sync:private")}`),
     },
@@ -275,7 +282,7 @@ describe("main", () => {
     const result = run(clone, unlabeled, seed, { STUB_EXIT: "22" });
     expect(result).toEqual({
       exitCode: 1,
-      output: "",
+      output: {},
       stdout: `::error::${short(publicA)}: repos/o/r/commits/${publicA}/pulls could not be read (gh api exit 22)\n`,
       stderr: "",
     });

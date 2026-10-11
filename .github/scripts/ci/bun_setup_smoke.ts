@@ -2,7 +2,8 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { env, requireEnv, setOutput } from "../shared/gha.ts";
+import { error, setOutput } from "@actions/core";
+import { env, requireEnv } from "../shared/gha.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
@@ -80,7 +81,7 @@ function judge(): number {
   };
   console.log(JSON.stringify(reading, null, 2));
   const problems = smokeProblems(reading);
-  for (const problem of problems) console.log(`::error::bun-setup smoke: ${problem}`);
+  for (const problem of problems) error(`bun-setup smoke: ${problem}`);
   return problems.length === 0 ? 0 : 1;
 }
 

@@ -4,9 +4,7 @@
 // The tier's project facts and commit are read from the ref's tree with git, never from the working files.
 
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import {
-  appendFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -19,6 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, sep } from "node:path";
+import { error, notice, setOutput } from "@actions/core";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { type IncludeRoot, isUnwalkedEntry, LANDING_FILES } from "./.vitepress/conventions.ts";
 import { collectFacts } from "./facts.ts";
@@ -103,20 +102,6 @@ function writeExclusive(path: string, content: string, what: string): void {
     );
   }
   writeFileSync(path, content);
-}
-
-/** GitHub's delimited output form: a line break inside a value cannot set a second output. Exported for its tests. */
-export function setOutput(name: string, value: string): void {
-  const out = env("GITHUB_OUTPUT");
-  if (out === "") {
-    console.log(`(output) ${name}=${value}`);
-    return;
-  }
-  const delimiter = `ghadelim_${randomUUID()}`;
-  if (value.includes(delimiter)) {
-    throw new Error(`output ${name} contains its own delimiter '${delimiter}'`);
-  }
-  appendFileSync(out, `${name}<<${delimiter}\n${value}\n${delimiter}\n`);
 }
 
 /** The docs landing page (docs/modules/site.md, "Docs conventions"): README.md
@@ -269,8 +254,8 @@ export function stageIncludes(
     // The tag's own tree decides first: a tag from before the root existed
     // is skipped whatever its docs tree carries at the mount's name.
     if (tier.ref !== "HEAD" && !treeHas(workspace, tier.ref, include.path)) {
-      console.log(
-        `::notice::docs version ${tier.version} has no ${include.mount}/: ${include.path}/ does not exist at ${tier.ref}`,
+      notice(
+        `docs version ${tier.version} has no ${include.mount}/: ${include.path}/ does not exist at ${tier.ref}`,
       );
       continue;
     }
@@ -432,7 +417,7 @@ export function copyInto(src: string, dest: string, what: string, reserved?: Set
  *  llms.txt plugin fails the build without an index page). */
 function eligibleDocsTags(cfg: Config, kept: string[]): string[] {
   const skip = (tag: string, why: string) => {
-    console.log(`::notice::docs version ${tag} skipped: ${why} at that tag`);
+    notice(`docs version ${tag} skipped: ${why} at that tag`);
     return false;
   };
   return kept.filter((tag) => {
@@ -475,8 +460,8 @@ function assembleDocs(cfg: Config, mount: DocsMount, kept: string[]): TierScope[
     `the docs mount '${mount.path}' versions.json`,
   );
   if (tags.length === 0) {
-    console.log(
-      `::notice::no version tags to serve: ${mount.path} is built from the default branch head, like ${mount.path}latest/, and ${mount.path}stable/ is absent`,
+    notice(
+      `no version tags to serve: ${mount.path} is built from the default branch head, like ${mount.path}latest/, and ${mount.path}stable/ is absent`,
     );
   }
   return tiers.map((tier) => ({ rel: tier.rel, strict: tierStrictLinks(tier) }));
@@ -559,9 +544,7 @@ async function main(): Promise<void> {
   }
   if (check === "true") {
     if (cfg.docs === null) {
-      console.log(
-        "::notice::docs-check stood down: the registration turns the docs half off (site.path: null)",
-      );
+      notice("docs-check stood down: the registration turns the docs half off (site.path: null)");
       return;
     }
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
@@ -586,13 +569,13 @@ async function main(): Promise<void> {
       cfg.docs === null
         ? "the docs half is off (site.path: null)"
         : `the repository has no ${DOCS_DIR}/`;
-    console.log(`::notice::nothing to publish: the site-build hook named no directory and ${why}`);
+    notice(`nothing to publish: the site-build hook named no directory and ${why}`);
     setSiteOutputs(cfg, null, "");
     return;
   }
   if (website === null) {
-    console.log(
-      `::notice::no repository website (no site-build dist directory was handed over), so ${DOCS_DIR}/ publishes alone`,
+    notice(
+      `no repository website (no site-build dist directory was handed over), so ${DOCS_DIR}/ publishes alone`,
     );
   }
   // The hook's dist is judged before any docs tier builds: a refused
@@ -634,8 +617,8 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  main().catch((error) => {
-    console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
+  main().catch((err) => {
+    error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }

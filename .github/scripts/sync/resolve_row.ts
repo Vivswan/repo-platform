@@ -8,13 +8,14 @@
 
 import { createHmac } from "node:crypto";
 import { appendFileSync } from "node:fs";
+import { setSecret } from "@actions/core";
 import {
   captureNetwork,
   type DiscoveredRepo,
   discoverOwnerRepos,
   readDispatchBranch,
 } from "../fleet/discovery.ts";
-import { addMask, fail, requireEnv } from "../shared/gha.ts";
+import { fail, requireEnv } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
 import { tokenUrl } from "../shared/token_url.ts";
 
@@ -72,7 +73,7 @@ export function resolveTarget(
   const rows = discoverOwnerRepos(owner, `${script}: user/repos response`);
   const resolved = resolveRow(rows, rowKey, keyOf);
   if ("refusal" in resolved) fail(`${resolved.refusal}; re-run the workflow`);
-  for (const form of maskForms(resolved.target.repo)) addMask(form);
+  for (const form of maskForms(resolved.target.repo)) setSecret(form);
   const refusal = admit(resolved.target);
   if (refusal !== null) fail(refusal);
   appendFileSync(envFile, handOn(resolved.target));
