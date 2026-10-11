@@ -129,7 +129,7 @@ The run itself is [platform/settings-apply.md](platform/settings-apply.md): its 
 
 | When | Labels |
 |---|---|
-| always | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's approval label `merge-when-green`; the fleet-wide `security-nightly` stream label; `repo-platform:sync`, which a human adds to a PR for the branch sync ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)) |
+| always | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's PR-flow labels `merge-when-green` and `parked`; the fleet-wide `security-nightly` stream label; `repo-platform:sync`, which a human adds to a PR for the branch sync ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)) |
 | per selected toolchain | the dependabot ecosystem labels: `javascript` for bun, `python:uv` for uv, `rust` for cargo |
 | with release-please | the `autorelease: *` pair and release-health's gate labels, `release-blocker` and `release-override`: stripping one un-blocks or un-overrides a release mid-flight |
 | with the fuzzer, nightly, or site module | the tracking labels, named and styled as the layer list above says |
@@ -138,6 +138,8 @@ The run itself is [platform/settings-apply.md](platform/settings-apply.md): its 
 - **Why the dependabot labels are declared:** dependabot recreates its labels when missing, so an undeclared one would loop delete/recreate nightly. [tests/files/label_names.test.ts](../tests/files/label_names.test.ts) holds the layers to dependabot's names.
 
 - **`merge-when-green`** is applied by the owner alone. Whoever runs the landing verifies the labeling actor is the repository owner and that no push followed the labeling, then merges once every check is green; a later push voids it.
+
+- **`parked`** is applied by the owner alone. It says the PR is complete and kept open on purpose: whoever lands never merges it and never removes the label. A parked PR stays ready: non-draft, rebased on main, green.
 
 - **The tracking label** is the [tracking-issue stream's identity](modules/tracking-issues.md#the-label-is-the-stream), so losing it breaks the auto-close and the release-health gate stops seeing the open issue.
 
