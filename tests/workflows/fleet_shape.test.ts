@@ -7,9 +7,19 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Lexer, Parser } from "@actions/expressions";
-import { Logical } from "@actions/expressions/ast";
+import {
+  ContextAccess,
+  type Expr,
+  FunctionCall,
+  Grouping,
+  IndexAccess,
+  Literal,
+  Logical,
+  Unary,
+} from "@actions/expressions/ast";
 import { TokenType } from "@actions/expressions/lexer";
 import { parse as parseYaml } from "yaml";
+import { RELEASE_BRANCH_PREFIX } from "../../actions/shared/platform.ts";
 
 interface Step {
   id?: string;
@@ -285,6 +295,46 @@ describe("fleet.yml", () => {
       return `workflow_call output '${output}' is wired to jobs.${wired[1]}.outputs.${wired[2]}, another name`;
     return jobOutputGap(called, wired[1], wired[2]);
   };
+
+  // release-please's branch convention is an external fact the platform cannot enforce; two jobs read it in YAML and
+  // release-health in TypeScript, and a prefix misspelled in one place leaves that job skipped forever, green.
+  test("the release PR is one prefix on github.head_ref: fleet.yml's release-pr job, the skeleton's release-gate job, and release-health agree", () => {
+    const skeleton = parseYaml(
+      readFileSync(join(ROOT, "files/base/.github/workflows/ci.yml"), "utf8").replaceAll(
+        "{{github_username}}",
+        "owner",
+      ),
+    ) as Workflow;
+    // GitHub's own parser, so spacing, quoting, and bracket access read as GitHub reads them.
+    const pathOf = (expr: Expr): string | undefined =>
+      expr instanceof ContextAccess
+        ? expr.name.lexeme
+        : expr instanceof IndexAccess && expr.index instanceof Literal
+          ? `${pathOf(expr.expr)}.${expr.index.literal.coerceString()}`
+          : undefined;
+    const headRefPrefixes = (expr: Expr): string[] => {
+      if (expr instanceof FunctionCall) {
+        const [subject, prefix] = expr.args;
+        return expr.functionName.lexeme.toLowerCase() === "startswith" &&
+          pathOf(subject) === "github.head_ref" &&
+          prefix instanceof Literal
+          ? [prefix.literal.coerceString()]
+          : expr.args.flatMap(headRefPrefixes);
+      }
+      if (expr instanceof Logical) return expr.args.flatMap(headRefPrefixes);
+      if (expr instanceof Grouping) return headRefPrefixes(expr.group);
+      if (expr instanceof Unary) return headRefPrefixes(expr.expr);
+      return [];
+    };
+    const prefixesOf = (condition: string | undefined) => {
+      const { tokens } = new Lexer(unwrapped(condition)).lex();
+      return headRefPrefixes(new Parser(tokens, CONTEXTS, RUNNER_FUNCTIONS).parse());
+    };
+    expect({
+      releasePr: prefixesOf(fleet.jobs["release-pr"]?.if),
+      releaseGate: prefixesOf(skeleton.jobs["release-gate"]?.if),
+    }).toEqual({ releasePr: [RELEASE_BRANCH_PREFIX], releaseGate: [RELEASE_BRANCH_PREFIX] });
+  });
 
   test("every output read resolves to a step that sets it: the skeleton's through fleet.yml's workflow_call, the jobs', and the steps'", () => {
     const gaps: string[] = [];

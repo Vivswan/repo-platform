@@ -14,7 +14,7 @@ Every repository in the fleet - repo-platform included - gates merges on a requi
 
 | ci.yml | `allowed-skips` | Why |
 | --- | --- | --- |
-| the managed skeleton | `checks` alone | so a schedule night passes on `platform` and an all-skipped run cannot pass |
+| the managed skeleton | `checks` and `release-gate` | so a schedule night passes on `platform`, an ordinary run passes without the release gate, and an all-skipped run cannot pass |
 | repo-platform's own | `dependency-review` alone | since only a pull request has a dependency diff to review |
 
 **The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, which [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) holds to the root's sha, landed in the fleet by the next sync round.
@@ -52,13 +52,14 @@ Each entry is what you see, what it means, and what to do.
 
 ## What gates what
 
-A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-checksyml)) carries three gating jobs:
+A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-checksyml)) carries four gating jobs:
 
 | Gating job | What it does |
 | --- | --- |
 | `checks` | calls the repo-owned checks.yml; skipped on the nightly schedule run |
 | `platform` | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. The `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels. Its `trivy-nightly` job is the schedule's |
-| `all-green` | needs both |
+| `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository)) |
+| `all-green` | needs all three |
 
 **The nightly schedule run** is the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, the other checks stand down, and `trivy-nightly` runs the Trivy scan and files its tracking issue. Public repositories only: a private repository pays for every job that runs, and a skipped job bills nothing.
 
@@ -69,7 +70,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 **The jobs beside them gate nothing:** the `post-green` caller and the static legs are gate-downstream ([after the gate](#after-the-gate)).
 
-**The membership rule:** what gates a managed repository is being a job in fleet.yml or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
+**The membership rule:** what gates a managed repository is being a job in fleet.yml or checks.yml, or in release-gate.yml on the release PR and a dispatch - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
 
 - **Inside fleet.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green. `trivy-nightly` fails on a scan or configuration error alone, never on a finding; such a night's gate is red, and the site rebuild waits for the next.
 
@@ -157,12 +158,33 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 
 **A failing hook job blocks the release, never the merge.**
 
+### The release-gate hook in every managed repository
+
+**Every managed ci.yml carries a `release-gate` job** calling the repo-owned starter `release-gate.yml` (workflow_call only, no required inputs, seeded once, never resynced): the release acceptance tier, tests critical for a release that need not run on every merge because they are slow, environment-heavy, or network-bound.
+
+| Event | What happens |
+| --- | --- |
+| the release PR: a head branch with release-please's `release-please--` prefix, the spelling fleet.yml's `release-pr` job reads | the hook runs and all-green blocks on it |
+| a `workflow_dispatch` of ci.yml | the hook runs, and a red gate blocks that run's legs, the site deploy included |
+| every other event | the job skips, and `allowed-skips` names it so the gate stays green |
+| the nightly schedule | not ci.yml's: a nightly.yml the [nightly](modules/nightly.md) module seeds from now on calls the same file every night, an existing one [adds the sibling job itself](modules/nightly.md#customizing-the-starter), and a red tier files the nightly tracking issue |
+
+- **The caller's contract is checks.yml's:** no secrets, permissions cap at `contents: read`. A tier needing more gets its own workflow.
+
+- **Outputs are the repository's own,** and the managed call ignores them. Every job inside gates: the caller's result aggregates every job of the workflow it calls.
+
+- **No run on the release commit's push:** the PR head's run judged the gate, and a release PR behind main refreshes itself first ([what gates what](#what-gates-what)).
+
+- **The no-op seed** costs a runner allocation on every release-PR run and dispatch until the repository replaces it. Replace it, do not append beside it.
+
+- **No module and no label stream:** on the release PR the red check is the signal; on the schedule the nightly stream's open issue already blocks the release through release-health's tracking labels ([tracking-issues.md](modules/tracking-issues.md#release-gating)).
+
 ### The static legs
 
 ```text
-checks + platform -> all-green -> post-green (repo-owned hook) -> release -> update-release (hook) -> publish-release
-                             \                                          \-> update-release-pr (hook)
-                              \-> site, ordered behind release
+checks + platform + release-gate -> all-green -> post-green (repo-owned hook) -> release -> update-release (hook) -> publish-release
+                                            \                                          \-> update-release-pr (hook)
+                                             \-> site, ordered behind release
 ```
 
 **The legs after the hook are STATIC:** every managed ci.yml carries the same `release`, `update-release`, `publish-release`, `update-release-pr`, and `site` jobs, present in every run, and each skips where its module is not selected.

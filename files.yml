@@ -141,6 +141,7 @@ files:
       uv: files/uv/.github/workflows/checks.toolchain.yml
       rust: files/rust/.github/workflows/checks.toolchain.yml
   - {path: .github/workflows/post-green.yml, class: starter}
+  - {path: .github/workflows/release-gate.yml, class: starter}
   - {path: .github/workflows/update-release.yml, class: starter}
   - {path: .github/workflows/update-release-pr.yml, class: starter}
   - {path: .github/actions/site-build/action.yml, class: starter}

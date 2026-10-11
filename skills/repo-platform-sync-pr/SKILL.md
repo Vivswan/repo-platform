@@ -166,7 +166,7 @@ A split file (`AGENTS.md`, `LICENSE.md`, `.gitignore`, `.editorconfig`, `.gitatt
 
 | The change was in | Move it to |
 |---|---|
-| `ci.yml` (a job, a step) | `checks.yml` for gate jobs; `post-green.yml` for green-gated work on main; `update-release.yml` / `update-release-pr.yml` for release-time logic |
+| `ci.yml` (a job, a step) | `checks.yml` for gate jobs; `release-gate.yml` for release acceptance tests; `post-green.yml` for green-gated work on main; `update-release.yml` / `update-release-pr.yml` for release-time logic |
 | the managed region of a split file | above BEGIN or below END of the same file |
 | a module workflow or a pin dotfile | the platform's `files/` (a PR there reaches the whole fleet; one that feeds a platform action a new input may add the input in the same PR: [build provenance](https://github.com/Vivswan/repo-platform/blob/main/docs/platform/build-provenance.md#a-new-action-input-and-its-workflow-land-together)), or a repo-owned workflow beside it |
 | a module setting | the module's key in `.repo-platform.yml` (`labels.*`, `site.*`) |

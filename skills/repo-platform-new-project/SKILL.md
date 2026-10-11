@@ -133,6 +133,7 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 | --- | --- |
 | `.github/workflows/checks.yml` | the repo's own test and lint jobs; `ci.yml` calls it inside the gate |
 | `.github/workflows/post-green.yml` | green-gated work on a push to main, before the release |
+| `.github/workflows/release-gate.yml` | release acceptance tests, critical for a release but not run on every merge; the release PR, a dispatch, and the nightly starter run it |
 | `.github/workflows/update-release.yml` | release-please: mutate the draft release (assets, notes) |
 | `.github/workflows/update-release-pr.yml` | release-please: regenerate files that ride in the release commit |
 | `.github/actions/site-build/action.yml` | site: build the repo's own website into a directory named in `dist`; a no-op until filled in |

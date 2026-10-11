@@ -23,6 +23,7 @@
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { LABEL_RE } from "../shared/label.ts";
+import { RELEASE_BRANCH_PREFIX } from "../shared/platform.ts";
 import { baseTip } from "./freshness.ts";
 
 /** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
@@ -216,7 +217,7 @@ export async function findReleasePr(
     }>
   >;
   const prs = pages.flat();
-  const candidates = prs.filter((entry) => entry.head?.ref?.startsWith("release-please--"));
+  const candidates = prs.filter((entry) => entry.head?.ref?.startsWith(RELEASE_BRANCH_PREFIX));
   const merged = candidates.filter((entry) => entry.merged_at);
   if (merged.length > 1) {
     const numbers = merged.map((entry) => `#${entry.number}`).join(", ");

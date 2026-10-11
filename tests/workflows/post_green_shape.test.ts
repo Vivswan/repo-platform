@@ -67,13 +67,15 @@ function evaluateCondition(expression: string, context: Record<string, string>):
  * point of failure or skip onwards", even through a job a status function let continue.
  *   an unrun need                       -> result `skipped`, empty outputs
  *   a condition with no status function -> implicit success() over the WHOLE ancestry
- *   the run's ref                       -> main's head unless given (ci.yml's push trigger is filtered to main) */
+ *   the run's ref                       -> main's head unless given (ci.yml's push trigger is filtered to main)
+ *   the PR head branch                  -> unset unless given, as on every event but pull_request */
 function jobsRunning(
   jobs: Record<string, Job>,
   event: string,
   outputs: Record<string, string>,
   failed: string[] = [],
   ref = "refs/heads/main",
+  headRef?: string,
 ): string[] {
   const ran = new Set<string>();
   const ancestors = (id: string): Set<string> => {
@@ -97,6 +99,7 @@ function jobsRunning(
     }
     if (failed.includes(id)) continue;
     const context: Record<string, string> = { "github.event_name": event, "github.ref": ref };
+    if (headRef !== undefined) context["github.head_ref"] = headRef;
     for (const need of needs) {
       context[`needs.${need}.result`] = ran.has(need)
         ? "success"
@@ -175,7 +178,9 @@ describe("post-green wiring", () => {
   // an order (the site behind the release) is one it also reads as an implicit success() gate without the leading
   // !cancelled(). Either slip leaves a leg skipped forever on some event, green: the nightly rebuild, a release commit's
   // deploy, or the deploy after a red hook.
-  test("the skeleton: every leg runs on a release commit's push; the schedule rebuilds the site alone; a red hook skips the release and the deploy still runs", () => {
+  // The release gate's condition reads github.head_ref, which GitHub sets on pull_request alone; a spelling that read the
+  // ref or the event only would run the gate on every PR or on none.
+  test("the skeleton: every leg runs on a release commit's push; the schedule rebuilds the site alone; a red hook skips the release and the deploy still runs; the release gate runs on the release PR and a dispatch alone", () => {
     const skeleton = parseYaml(
       read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
     ) as { jobs: Record<string, Job> };
@@ -191,20 +196,30 @@ describe("post-green wiring", () => {
       outputs: Record<string, string>,
       failed?: string[],
       ref?: string,
-    ) => jobsRunning(skeleton.jobs, event, outputs, failed, ref).sort();
+      headRef?: string,
+    ) => jobsRunning(skeleton.jobs, event, outputs, failed, ref, headRef).sort();
+    const MERGE_REF = "refs/pull/7/merge";
     expect({
       releasePush: runs("push", released),
       plainPush: runs("push", { modules: "[]" }),
       schedule: runs("schedule", released),
       dispatch: runs("workflow_dispatch", released),
-      pullRequest: runs("pull_request", released, [], "refs/pull/7/merge"),
+      pullRequest: runs("pull_request", released, [], MERGE_REF, "feat/anything"),
+      releasePullRequest: runs(
+        "pull_request",
+        released,
+        [],
+        MERGE_REF,
+        "release-please--branches--main",
+      ),
       redHook: runs("push", released, ["post-green"]),
     }).toEqual({
-      releasePush: every,
+      releasePush: every.filter((job) => job !== "release-gate"),
       plainPush: ["all-green", "checks", "platform", "post-green"],
       schedule: ["all-green", "platform", "site"],
-      dispatch: ["all-green", "checks", "platform", "site"],
+      dispatch: ["all-green", "checks", "platform", "release-gate", "site"],
       pullRequest: ["all-green", "checks", "platform"],
+      releasePullRequest: ["all-green", "checks", "platform", "release-gate"],
       redHook: ["all-green", "checks", "platform", "site"],
     });
   });
