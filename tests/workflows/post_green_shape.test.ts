@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { evaluateCondition } from "../shared/github_expression.ts";
+import { evaluateCondition, hasStatusFunction } from "../shared/github_expression.ts";
 
 const root = join(import.meta.dir, "../..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
@@ -69,7 +69,7 @@ function jobsRunning(
       }
     }
     const condition = job.if ?? "";
-    const statusFunction = /\b(always|cancelled|success|failure)\(\)/.test(condition);
+    const statusFunction = condition !== "" && hasStatusFunction(condition);
     const chainRan = [...ancestors(id)].every((need) => ran.has(need));
     const passes = condition === "" || evaluateCondition(condition, context);
     if (passes && (statusFunction || chainRan)) ran.add(id);
@@ -138,17 +138,26 @@ describe("post-green wiring", () => {
   // deploy, or the deploy after a red hook.
   // The release gate's condition reads github.head_ref, which GitHub sets on pull_request alone; a spelling that read the
   // ref or the event only would run the gate on every PR or on none.
-  test("the skeleton: every leg runs on a release commit's push; the schedule rebuilds the site alone; a red hook skips the release and the deploy still runs; the release gate runs on the release PR and a dispatch alone", () => {
+  //
+  // Both hook calls gate on the plan's outputs: a seeded placeholder is never called (the billed minute the gate
+  // saves), the release still cuts behind a skipped post-green, and a hook with jobs keeps its call. A skipped
+  // placeholder's result vouches for nothing, so the release names `needs.all-green.result == 'success'` itself:
+  // without it a red gate would release.
+  test("the skeleton per event: all legs on a release push; the site alone on the schedule; the release gate on the release PR and a dispatch; a red hook skips the release only; a seeded hook skips its call; a red gate releases nothing", () => {
     const skeleton = parseYaml(
       read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
     ) as { jobs: Record<string, Job> };
     const every = Object.keys(skeleton.jobs).sort();
     const released = {
-      modules: '["release-please","site"]',
-      release_created: "true",
-      prs_created: "true",
-      tag_name: "v1.2.3",
+      "modules": '["release-please","site"]',
+      "post-green": "true",
+      "release-gate": "true",
+      "release_created": "true",
+      "prs_created": "true",
+      "tag_name": "v1.2.3",
     };
+    const seededHook = { ...released, "post-green": "false" };
+    const seededGate = { ...released, "release-gate": "false" };
     const runs = (
       event: string,
       outputs: Record<string, string>,
@@ -157,20 +166,20 @@ describe("post-green wiring", () => {
       headRef?: string,
     ) => jobsRunning(skeleton.jobs, event, outputs, failed, ref, headRef).sort();
     const MERGE_REF = "refs/pull/7/merge";
+    const RELEASE_HEAD = "release-please--branches--main";
     expect({
       releasePush: runs("push", released),
-      plainPush: runs("push", { modules: "[]" }),
+      plainPush: runs("push", { ...released, modules: "[]" }),
       schedule: runs("schedule", released),
       dispatch: runs("workflow_dispatch", released),
       pullRequest: runs("pull_request", released, [], MERGE_REF, "feat/anything"),
-      releasePullRequest: runs(
-        "pull_request",
-        released,
-        [],
-        MERGE_REF,
-        "release-please--branches--main",
-      ),
+      releasePullRequest: runs("pull_request", released, [], MERGE_REF, RELEASE_HEAD),
       redHook: runs("push", released, ["post-green"]),
+      seededHookReleasePush: runs("push", seededHook),
+      seededHookPlainPush: runs("push", { ...seededHook, modules: "[]" }),
+      seededHookRedGate: runs("push", seededHook, ["all-green"]),
+      seededGateDispatch: runs("workflow_dispatch", seededGate),
+      seededGateReleasePullRequest: runs("pull_request", seededGate, [], MERGE_REF, RELEASE_HEAD),
     }).toEqual({
       releasePush: every.filter((job) => job !== "release-gate"),
       plainPush: ["all-green", "checks", "platform", "post-green"],
@@ -179,6 +188,11 @@ describe("post-green wiring", () => {
       pullRequest: ["all-green", "checks", "platform"],
       releasePullRequest: ["all-green", "checks", "platform", "release-gate"],
       redHook: ["all-green", "checks", "platform", "site"],
+      seededHookReleasePush: every.filter((job) => job !== "post-green" && job !== "release-gate"),
+      seededHookPlainPush: ["all-green", "checks", "platform"],
+      seededHookRedGate: ["checks", "platform"],
+      seededGateDispatch: ["all-green", "checks", "platform", "site"],
+      seededGateReleasePullRequest: ["all-green", "checks", "platform"],
     });
   });
 });

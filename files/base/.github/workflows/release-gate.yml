@@ -1,10 +1,12 @@
+# repo-platform placeholder: ci.yml does not call this hook; delete this line when you add jobs
 # Runs this repository's release acceptance tests: the tier that is critical for a release but need not run on every
 # merge (slow, environment-heavy, or network-bound). The managed ci.yml calls it on the release PR and on a dispatch,
 # where all-green blocks on it; the nightly starter calls it on the schedule (docs/all-green.md, "The release-gate hook").
 #
 # This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
 #
-# Replace the no-op job with this repository's tiers; the caller grants no secrets and caps at contents: read.
+# Replace the no-op job with this repository's tiers and delete the first line of this file: while that line stands,
+# the managed ci.yml skips the call. The caller grants no secrets and caps at contents: read.
 
 name: Release Gate
 

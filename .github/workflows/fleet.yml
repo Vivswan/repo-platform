@@ -15,6 +15,12 @@ on:
       tracking-labels:
         description: Comma-separated nightly tracking-issue labels of the selected stream modules.
         value: ${{ jobs.standard-checks.outputs.tracking-labels }}
+      post-green:
+        description: '"true" when the managed ci.yml calls the repo-owned post-green.yml, "false" while it is missing or the seeded placeholder.'
+        value: ${{ jobs.standard-checks.outputs.post-green }}
+      release-gate:
+        description: '"true" when the managed ci.yml calls the repo-owned release-gate.yml, "false" while it is missing or the seeded placeholder.'
+        value: ${{ jobs.standard-checks.outputs.release-gate }}
 
 permissions:
   contents: read
@@ -43,6 +49,8 @@ jobs:
       codeql-languages: ${{ steps.plan.outputs.codeql-languages }}
       tracking-labels: ${{ steps.plan.outputs.tracking-labels }}
       weekly: ${{ steps.plan.outputs.weekly }}
+      post-green: ${{ steps.plan.outputs.post-green }}
+      release-gate: ${{ steps.plan.outputs.release-gate }}
     steps:
       # fetch-depth 0: commit-names walks history and gitleaks scans the event's range.
       - id: checkout

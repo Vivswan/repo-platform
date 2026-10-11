@@ -1,3 +1,4 @@
+# repo-platform placeholder: ci.yml does not call this hook; delete this line when you add jobs
 # Runs this repository's own work after every green push to main (the contract is the fleet's docs/all-green.md,
 # "After the gate").
 #
@@ -6,8 +7,8 @@
 # Every green push to main gets its own run of this hook, and the runs of neighbouring commits overlap, so a job
 # here may finish after a newer commit's did.
 #
-# Replace the no-op job with this repository's work, since it costs a runner allocation on every green push until
-# you do.
+# Replace the no-op job with this repository's work and delete the first line of this file: while that line stands,
+# the managed ci.yml skips the call, so nothing here runs.
 #
 # A job acts on the repository's current state, idempotently, never on "what this commit changed" or "the newest
 # commit".

@@ -51,11 +51,15 @@ jobs:
       vulnerability-alerts: read
 
   # Repo-owned: edit release-gate.yml, not this file. The release acceptance tier (docs/all-green.md). The branch
-  # prefix is release-please's own, spelled as in fleet.yml's release-pr job; the no-op seed never gates a run red.
+  # prefix is release-please's own, spelled as in fleet.yml's release-pr job. The call waits on `platform` to read the
+  # plan's release-gate output: it is skipped while the hook is the seeded placeholder, which saves a billed job on a
+  # private repository.
   release-gate:
+    needs: [platform]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--'))
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--'))) &&
+      needs.platform.outputs.release-gate == 'true'
     uses: ./.github/workflows/release-gate.yml
 
   # THE gate: this job's own check run (named all-green, created by the GitHub Actions app) is the ruleset's required
@@ -74,13 +78,15 @@ jobs:
 
   # Repo-owned: edit post-green.yml, not this file. No job lane here: a caller holding a lane a called job takes deadlocks the call.
   # !cancelled(): the implicit success() reads the whole needs chain, so a gating job skipped by its condition would skip this job past a green gate.
+  # The call is skipped while the hook is the seeded placeholder (the plan's post-green output), which saves a billed job on a private repository.
   post-green:
-    needs: [all-green]
+    needs: [platform, all-green]
     if: >-
       !cancelled() &&
       needs.all-green.result == 'success' &&
       github.event_name == 'push' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      needs.platform.outputs.post-green == 'true'
     # The hook ceiling: contents write pushes a fast-forward branch (a packaged latest), id-token write mints the run's
     # OIDC token for trusted publishing (npm, PyPI). A called job cannot exceed its caller, so both are granted here.
     permissions:
@@ -97,12 +103,14 @@ jobs:
   # name; `platform` sits in a needs list because a job reads outputs only from its direct dependencies.
   #   !cancelled() first -> each condition names the results it gates on (see post-green)
   #   no lane here       -> the called job holds its own, keyed by the judged commit, so a burst of merges cancels no cut
-  #   needs post-green   -> the repository's own green-gated work lands before the tag is minted
+  #   needs post-green   -> the repository's own green-gated work lands before the tag is minted; a skipped placeholder
+  #                         hook gates nothing, so the gate itself is named beside it
   release:
-    needs: [platform, post-green]
+    needs: [platform, all-green, post-green]
     if: >-
       !cancelled() &&
-      needs.post-green.result == 'success' &&
+      needs.all-green.result == 'success' &&
+      (needs.post-green.result == 'success' || needs.platform.outputs.post-green == 'false') &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       contains(needs.platform.outputs.modules, '"release-please"')
