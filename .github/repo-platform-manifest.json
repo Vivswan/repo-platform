@@ -15,7 +15,6 @@
     ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "42534cbfecfcc71acbee7f232d2c2b6c03b523e8158fdbac354d25a27aaf6510"},
     ".github/workflows/post-green.yml": {"class": "starter"},
     ".github/workflows/pr-title.yml": {"class": "managed", "hash": "2fccd2525633dca4bc127ba7825e4a9366ea004e2045d05f88a45110273efc55"},
-    ".github/workflows/release-gate.yml": {"class": "starter"},
     ".github/workflows/sync-branch.yml": {"class": "managed", "hash": "9d5264f7efcdcdfda980bc484cf44f6391c8e5dcac5a57fdb7857f91442efdce"},
     ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "cec43c51db4c869f35bcace72a8f6728647cdd97f73fc5590fdccaa2fe077f06"},
     ".gitleaks.toml": {"class": "starter"},

@@ -89,8 +89,10 @@ jobs:
           path: .fuzz-failures
           merge-multiple: true
 
+      # always(): a bare condition implies success() over the steps before it, so a download that failed
+      # (an API error on a red night) would skip the filing and the night would go silent.
       - name: File or update the fuzz issue
-        if: needs.fuzz.result == 'failure' || needs.fuzz.result == 'cancelled'
+        if: always() && (needs.fuzz.result == 'failure' || needs.fuzz.result == 'cancelled')
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
