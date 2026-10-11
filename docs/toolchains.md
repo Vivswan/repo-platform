@@ -12,9 +12,8 @@ One version per toolchain, fleet-wide, spelled once: a version dotfile under `fi
 | Toolchain | Pin | Readers |
 |---|---|---|
 | bun | [files/bun/.bun-version](../files/bun/.bun-version) | the fleet's synced `.bun-version`; this repository's workflows (`bun-version-file: files/bun/.bun-version`); every composite action's bun-setup step, through this repository's own synced root copy; `@types/bun` in every package declaring it, pinned exactly to it |
-| deno | [files/deno/.dvmrc](../files/deno/.dvmrc) | the fleet's synced `.dvmrc` |
 
-Modules without a pin: uv floats on its setup action's default, and the rust blocks' setup action installs the toolchain the repository's `rust-toolchain.toml` names (stable when there is none), so rust version selection stays repository-owned.
+bun is the one pinned toolchain. uv floats on its setup action's default, and the rust blocks' setup action installs the toolchain the repository's `rust-toolchain.toml` names (stable when there is none), so rust version selection stays repository-owned.
 
 The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.txt` pins the yamllint the action installs, and dependabot's pip entry for that directory bumps it. The action is the one yamllint gate; this repository runs no yamllint locally, since the hook runs bun's own checks alone (fleet-guidelines, "Pre-commit hooks only check").
 
@@ -22,7 +21,7 @@ The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.tx
 
 - **Managed files:** the dotfiles are MANAGED files (deliberately not starters). In a repo selecting the module, every sync updates them, and no registration key overrides them: the fleet shares one version per toolchain.
 
-- **Version-file inputs:** managed workflows and the repo-owned starters as first written pass the matching version-file input (`bun-version-file: .bun-version`, `deno-version-file: .dvmrc`).
+- **Version-file inputs:** managed workflows and the repo-owned starters as first written pass the matching version-file input (`bun-version-file: .bun-version`).
 
 - **The site hook:** the [site module's](modules/site.md) build hook is the repository's own composite action, so it installs whatever toolchain its steps name (the seeded example reads `.bun-version`); the fleet's docs build runs under the fleet's own bun, never the repository's pin.
 
@@ -51,7 +50,6 @@ To run one repo on a different version, override in a repo-owned workflow and le
 | Toolchain | Override |
 |---|---|
 | bun | pass the explicit version input (`bun-version:` on setup-bun), which the action prefers over its version-file input |
-| deno | setup-deno resolves the other way around (a non-empty `deno-version-file` wins over `deno-version`), so replace or remove the `deno-version-file:` line instead |
 | rust | commit a `rust-toolchain.toml` naming the channel (1.84 or newer, [rust.md](modules/rust.md#the-floor)) and components; the setup action in the three rust blocks installs it, with no dotfile to leave alone |
 
 Rules that follow:
@@ -64,7 +62,7 @@ Rules that follow:
 
 ## Keeping the pins fresh
 
-Each pinned module declares its pin in `files.yml` (`modules.<name>.pin`, its keys defined in [platform/sync/files.md](platform/sync/files.md#module-data)), data the refresh reads and never content the sync writes. bun's:
+A pinned module declares its pin in `files.yml` (`modules.<name>.pin`, its keys defined in [platform/sync/files.md](platform/sync/files.md#module-data)), data the refresh reads and never content the sync writes. bun's, the only one today:
 
 | Key | bun |
 |---|---|

@@ -256,7 +256,7 @@ describe("scanMarkdown", () => {
 describe("scan scope", () => {
   // A scanner that takes no file passes the gate silently.
   test.each([
-    ["files/deno/AGENTS.toolchain.md", true],
+    ["files/uv/AGENTS.toolchain.md", true],
     ["docs/settings.md", true],
     ["files/fuzzer/fuzzer.gitignore", false],
   ])("%s is scanned: %s", (path, scanned) => {

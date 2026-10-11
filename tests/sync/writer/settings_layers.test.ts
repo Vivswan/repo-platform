@@ -135,7 +135,7 @@ test("every required check a fleet layer declares is pinned to the Actions app",
 });
 
 describe("the managed rulesets", () => {
-  const CODEQL_MODULES = ["bun", "deno", "uv"];
+  const CODEQL_MODULES = ["bun", "uv"];
   const codeQuality = { type: "code_quality", parameters: { severity: "warnings" } };
   const copilotReview = {
     type: "copilot_code_review",
@@ -244,8 +244,8 @@ describe("the managed rulesets", () => {
 test("the fleet layers with the override, for every module subset and visibility", () => {
   // Folded once per distinct layer stack: a module with no layer of its
   // own changes nothing, and the library judges every layer on every
-  // fold, so the 2048 selections would cost the runner more than the
-  // test bound for 256 distinct folds.
+  // fold, so the 1024 selections would cost the runner more than the
+  // test bound for 128 distinct folds.
   const names = Object.keys(CONFIG.modules);
   const stacks = new Map<string, string[]>();
   for (let mask = 0; mask < 1 << names.length; mask++) {
