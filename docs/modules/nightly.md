@@ -40,4 +40,6 @@ The label is a registration key rather than a starter edit alone; [Tracking issu
 
 - **Candidates:** everything the managed ci.yml does NOT run per-PR. Port the setup and run steps into the `checks` job, or add them as sibling jobs and extend the `report` job's `needs` list and red/green conditions to fold in each result. The report job already decides red or green from the `needs` results, so one green job cannot close an issue another job just filed.
 
+- **A nightly.yml seeded before the release-gate hook existed** adds the `release-gate` sibling job itself (`uses: ./.github/workflows/release-gate.yml`), lists it in the report job's `needs`, and folds its result into both conditions as the current starter spells them. A starter is never rewritten, so no sync brings it.
+
 - **Keep sibling jobs unconditional:** a sibling skipped by its own `if:` reports `result == 'skipped'`, which matches neither the red nor the green condition, and the report job silently does nothing that night. If a sibling must be conditional, fold its `skipped` state into one side explicitly.

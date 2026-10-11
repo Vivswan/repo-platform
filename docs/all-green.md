@@ -167,7 +167,7 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 | the release PR: a head branch with release-please's `release-please--` prefix, the spelling fleet.yml's `release-pr` job reads | the hook runs and all-green blocks on it |
 | a `workflow_dispatch` of ci.yml | the hook runs, and a red gate blocks that run's legs, the site deploy included |
 | every other event | the job skips, and `allowed-skips` names it so the gate stays green |
-| the nightly schedule | not ci.yml's: the [nightly](modules/nightly.md) module's starter calls the same file every night, and a red tier files the nightly tracking issue |
+| the nightly schedule | not ci.yml's: a nightly.yml the [nightly](modules/nightly.md) module seeds from now on calls the same file every night, an existing one [adds the sibling job itself](modules/nightly.md#customizing-the-starter), and a red tier files the nightly tracking issue |
 
 - **The caller's contract is checks.yml's:** no secrets, permissions cap at `contents: read`. A tier needing more gets its own workflow.
 
