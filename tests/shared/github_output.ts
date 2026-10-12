@@ -1,7 +1,8 @@
-/** The outputs a step wrote to its GITHUB_OUTPUT file, read back the way the runner reads them. Both forms the file
- *  carries: `name=value` from a shell echo, and `name<<delimiter` ... `delimiter` from @actions/core's setOutput, whose
- *  delimiter is random per call. A later write of the same name wins, as it does on the runner. */
-export function parseGithubOutput(text: string): Record<string, string> {
+/** The variables a step wrote to one of the runner's key-value files (GITHUB_OUTPUT, GITHUB_ENV), read back the way the
+ *  runner reads them. Both forms the file carries: `name=value` from a shell echo, and `name<<delimiter` ... `delimiter`
+ *  from @actions/core's setOutput and exportVariable, whose delimiter is random per call. A later write of the same name
+ *  wins, as it does on the runner. */
+function parseKeyValueFile(file: string, text: string): Record<string, string> {
   const outputs: Record<string, string> = {};
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -10,14 +11,22 @@ export function parseGithubOutput(text: string): Record<string, string> {
     const block = /^([^=<]+)<<(.+)$/.exec(line);
     if (block !== null) {
       const end = lines.indexOf(block[2], i + 1);
-      if (end === -1) throw new Error(`GITHUB_OUTPUT: '${block[1]}' never closes its delimiter`);
+      if (end === -1) throw new Error(`${file}: '${block[1]}' never closes its delimiter`);
       outputs[block[1]] = lines.slice(i + 1, end).join("\n");
       i = end;
       continue;
     }
     const at = line.indexOf("=");
-    if (at <= 0) throw new Error(`GITHUB_OUTPUT: line '${line}' is neither name=value nor a block`);
+    if (at <= 0) throw new Error(`${file}: line '${line}' is neither name=value nor a block`);
     outputs[line.slice(0, at)] = line.slice(at + 1);
   }
   return outputs;
+}
+
+export function parseGithubOutput(text: string): Record<string, string> {
+  return parseKeyValueFile("GITHUB_OUTPUT", text);
+}
+
+export function parseGithubEnv(text: string): Record<string, string> {
+  return parseKeyValueFile("GITHUB_ENV", text);
 }

@@ -5,8 +5,7 @@
 // as the apply matrix's keyed rows (sync/resolve_row.ts): the job output that feeds it is public,
 // and a slug there would be dropped by the runner as masked or, unmasked, name a private repository.
 
-import { appendFileSync } from "node:fs";
-import { error, notice, setOutput, setSecret, warning } from "@actions/core";
+import { error, notice, setOutput, setSecret, summary, warning } from "@actions/core";
 import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { env, requireEnv } from "../shared/gha.ts";
@@ -53,16 +52,11 @@ function emitPlan(targets: DiscoveredRepo[]): void {
 
 // The step summary is not covered by the runner's masker, so callers pass already-scrubbed text.
 let summaryHeaded = false;
-function warn(message: string): void {
+async function warn(message: string): Promise<void> {
   warning(message);
-  const summary = env("GITHUB_STEP_SUMMARY");
-  if (summary !== "") {
-    if (!summaryHeaded) {
-      appendFileSync(summary, "### Settings apply warnings\n");
-      summaryHeaded = true;
-    }
-    appendFileSync(summary, `- ${message}\n`);
-  }
+  if (!summaryHeaded) summary.addRaw("### Settings apply warnings", true);
+  summaryHeaded = true;
+  await summary.addRaw(`- ${message}`, true).write();
 }
 
 // A drop is a notice already printed, or a hand-written settings.yml counted and refused after the probes.
@@ -150,7 +144,7 @@ async function probe<T>(
       await Bun.sleep(RETRY_DELAY_MS);
     }
   }
-  warn(
+  await warn(
     `${display}: the ${label} failed ${ATTEMPTS} times (last error: ${detail}) - no answer, so the repo is skipped this run; the nightly apply retries it. If this persists, check the repo's availability and the fleet token.`,
   );
   return null;
@@ -183,7 +177,7 @@ for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
   const filters = modulesFilterFor(scope, repo);
   if (filters !== null) {
     if (adopted.modules === null) {
-      warn(
+      await warn(
         `${display}: its ${REGISTRATION_PATH} has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`,
       );
       continue;

@@ -7,8 +7,7 @@
 // same resolver.
 
 import { createHmac } from "node:crypto";
-import { appendFileSync } from "node:fs";
-import { setSecret } from "@actions/core";
+import { exportVariable, setSecret } from "@actions/core";
 import {
   captureNetwork,
   type DiscoveredRepo,
@@ -57,26 +56,26 @@ export function resolveRow(
 
 /** The listing is the check, not a re-selection: a repository the listing no longer names fails the
  *  step naming nothing, and one still listed is this run's target whatever its registration or the
- *  token's grant now says. `admit` refuses a resolved target before its name is handed on.
+ *  token's grant now says. `admit` refuses a resolved target before its name is handed on; `handOn`
+ *  names the variables the next step reads.
  *
  *  Env: ROW_KEY (the plan's key for this row), PAT and GITHUB_RUN_ID (the key's inputs), OWNER and
  *  GH_TOKEN (the listing), GITHUB_ENV. */
 export function resolveTarget(
   script: string,
-  handOn: (target: DiscoveredRepo) => string,
+  handOn: (target: DiscoveredRepo) => Record<string, string>,
   admit: (target: DiscoveredRepo) => string | null = () => null,
 ): void {
   const keyOf = rowKeyOf(requireEnv("PAT"), requireEnv("GITHUB_RUN_ID"));
   const rowKey = requireEnv("ROW_KEY");
   const owner = requireEnv("OWNER");
-  const envFile = requireEnv("GITHUB_ENV");
   const rows = discoverOwnerRepos(owner, `${script}: user/repos response`);
   const resolved = resolveRow(rows, rowKey, keyOf);
   if ("refusal" in resolved) fail(`${resolved.refusal}; re-run the workflow`);
   for (const form of maskForms(resolved.target.repo)) setSecret(form);
   const refusal = admit(resolved.target);
   if (refusal !== null) fail(refusal);
-  appendFileSync(envFile, handOn(resolved.target));
+  for (const [name, value] of Object.entries(handOn(resolved.target))) exportVariable(name, value);
 }
 
 /** A dispatched branch the target does not carry, or its default branch, refuses here, so the row prints the unresolved
@@ -111,7 +110,7 @@ export function branchRefusal(target: DiscoveredRepo): string | null {
 if (import.meta.main) {
   resolveTarget(
     "resolve_row",
-    (target) => `TARGET=${target.repo}\nTARGET_PRIVATE=${target.private}\n`,
+    (target) => ({ TARGET: target.repo, TARGET_PRIVATE: String(target.private) }),
     branchRefusal,
   );
 }

@@ -5,6 +5,7 @@
 
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { summary } from "@actions/core";
 import {
   AUTOMATION_BRANCH,
   FAILURE_ISSUE_TITLE,
@@ -476,7 +477,7 @@ class Delivery {
     this.log(`closed the obsolete sync pull request #${existing.number} and deleted its branch`);
   }
 
-  deliver(): void {
+  async deliver(): Promise<void> {
     if (env("CHECKOUT_OUTCOME") !== "success") this.fileFailure("the target checkout failed");
     if (env("WRITER_OUTCOME") !== "success") this.fileFailure("the writer exited with an error");
     const summary = JSON.parse(
@@ -514,7 +515,7 @@ class Delivery {
     if (!head.startsWith("refs/heads/")) this.fileFailure("the target checkout is not on a branch");
     const base = head.slice("refs/heads/".length);
     if (this.branch !== "") {
-      this.deliverOntoBranch(report);
+      await this.deliverOntoBranch(report);
       return;
     }
     this.must(
@@ -632,24 +633,25 @@ class Delivery {
   /** One commit onto the dispatched branch, no PR and no issue: the failure issue is the default-branch sync's, and the
    *  branch's own PR carries this commit. The lease is the commit the row cloned, so a commit pushed to the branch
    *  meanwhile fails the push instead of being overwritten. */
-  deliverOntoBranch(report: string): void {
+  async deliverOntoBranch(report: string): Promise<void> {
     const tip = this.must(
       this.git("rev-parse", "HEAD"),
       "reading the checkout's commit failed",
     ).trim();
     this.must(this.git("commit", "-q", "-m", prTitle(this.build)), "committing the sync failed");
     this.push(this.branch, tip, "the branch");
-    appendFileSync(
-      requireEnv("GITHUB_STEP_SUMMARY"),
-      branchSummary({
-        private: env("TARGET_PRIVATE") === "true",
-        branch: this.branch,
-        build: this.build,
-        report,
-      }),
-    );
+    await summary
+      .addRaw(
+        branchSummary({
+          private: env("TARGET_PRIVATE") === "true",
+          branch: this.branch,
+          build: this.build,
+          report,
+        }),
+      )
+      .write();
     this.verdict("pushed");
   }
 }
 
-if (import.meta.main) new Delivery().deliver();
+if (import.meta.main) await new Delivery().deliver();

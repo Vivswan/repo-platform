@@ -19,7 +19,7 @@ export function normalizeUpstream(text: string): string {
     .replace(/\n+$/, "");
 }
 
-/** Both messages are fixed text: fetch()'s own rejection text is runtime-generated, and this is the run's one ::error:: line. */
+/** Both messages are fixed text: fetch()'s own rejection text is runtime-generated, and this is the run's one error annotation. */
 export async function fetchText(
   url: string,
   headers: Record<string, string> = {},
