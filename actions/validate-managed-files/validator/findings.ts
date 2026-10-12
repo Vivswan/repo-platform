@@ -24,6 +24,6 @@ export function print(findings: readonly Finding[]): number {
     console.error(`\n${findings.length} error(s).`);
     return 1;
   }
-  console.log("Validation passed.");
+  console.log("Tree checks passed.");
   return 0;
 }
