@@ -1,9 +1,12 @@
 {
   "name": "trivy",
   "private": true,
-  "description": "Dev-only manifest for editor/typecheck support; the action itself has no runtime dependencies.",
+  "description": "Dependency manifest for the trivy action: @actions/core annotates the bypass file findings.",
   "devDependencies": {
     "@types/bun": "1.4.2",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@actions/core": "3.0.1"
   }
 }

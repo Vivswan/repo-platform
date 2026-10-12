@@ -24,13 +24,20 @@ runs:
   steps:
     # The action's pinned bun by absolute path: later steps run
     # steps.action-bun.outputs.path, never `bun` through PATH, where a later
-    # setup-bun can put another bun first. The script imports node builtins
-    # and actions/shared alone, so there is nothing to install.
+    # setup-bun can put another bun first.
     - name: Set up the action's bun
       id: action-bun
       uses: $/actions/bun-setup
       with:
         from: ${{ github.action_path }}
+
+    - name: Install the action's dependencies
+      id: install
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
     - name: Install semgrep
       shell: bash
@@ -45,15 +52,18 @@ runs:
         --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
         --sarif-output="$RUNNER_TEMP/semgrep.sarif" .
 
+    # Both run after a scan that found something (exit 1). The filter needs the install, and the upload needs the
+    # filter to have succeeded, or an unfiltered SARIF reaches code scanning.
     - name: Drop the marked findings from the SARIF
-      if: ${{ !cancelled() }}
+      id: filter
+      if: ${{ !cancelled() && steps.install.outcome == 'success' }}
       shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/drop_suppressed.ts"'
 
     - name: Upload the findings to code scanning
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && steps.filter.outcome == 'success' }}
       uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
       with:
         sarif_file: ${{ runner.temp }}/semgrep.sarif

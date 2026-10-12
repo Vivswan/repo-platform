@@ -11,7 +11,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { requireEnv } from "../shared/action_runtime.ts";
+import { setFailed } from "@actions/core";
+import { messageOf, requireEnv } from "../shared/action_runtime.ts";
 import { IGNORE_FILE } from "./ignore_check.ts";
 
 export const SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] as const;
@@ -184,4 +185,10 @@ function main(): number {
   return 0;
 }
 
-if (import.meta.main) process.exit(main());
+if (import.meta.main) {
+  try {
+    process.exit(main());
+  } catch (cause) {
+    setFailed(messageOf(cause));
+  }
+}

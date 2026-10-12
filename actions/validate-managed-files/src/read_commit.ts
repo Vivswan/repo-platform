@@ -3,14 +3,19 @@
 // itself in `problem`, which run.ts reports as the verdict.
 
 import { appendFileSync } from "node:fs";
-import { requireEnv } from "../../shared/action_runtime.ts";
+import { setFailed } from "@actions/core";
+import { messageOf, requireEnv } from "../../shared/action_runtime.ts";
 import { recordedCommit } from "../../shared/recorded_commit.ts";
 
-const read = recordedCommit(".");
-const outputs =
-  "commit" in read ? { commit: read.commit, problem: "" } : { commit: "", problem: read.problem };
-appendFileSync(
-  requireEnv("GITHUB_OUTPUT"),
-  `commit=${outputs.commit}\nproblem=${outputs.problem}\n`,
-);
-if (outputs.commit !== "") console.log(`judged against ${outputs.commit}`);
+try {
+  const read = recordedCommit(".");
+  const outputs =
+    "commit" in read ? { commit: read.commit, problem: "" } : { commit: "", problem: read.problem };
+  appendFileSync(
+    requireEnv("GITHUB_OUTPUT"),
+    `commit=${outputs.commit}\nproblem=${outputs.problem}\n`,
+  );
+  if (outputs.commit !== "") console.log(`judged against ${outputs.commit}`);
+} catch (cause) {
+  setFailed(messageOf(cause));
+}

@@ -5,7 +5,8 @@
 
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { requireEnv } from "../shared/action_runtime.ts";
+import { setFailed } from "@actions/core";
+import { messageOf, requireEnv } from "../shared/action_runtime.ts";
 
 interface SarifResult {
   suppressions?: unknown[];
@@ -24,14 +25,18 @@ export function dropSuppressed(sarif: Sarif): Sarif {
 }
 
 if (import.meta.main) {
-  const path = join(requireEnv("RUNNER_TEMP"), "semgrep.sarif");
-  if (existsSync(path)) {
-    // Written beside and renamed over, so a failed write leaves the original for the upload.
-    const filtered = `${path}.upload`;
-    writeFileSync(
-      filtered,
-      JSON.stringify(dropSuppressed(JSON.parse(readFileSync(path, "utf8")) as Sarif)),
-    );
-    renameSync(filtered, path);
+  try {
+    const path = join(requireEnv("RUNNER_TEMP"), "semgrep.sarif");
+    if (existsSync(path)) {
+      // Written beside and renamed over, so a failed write leaves the original SARIF intact.
+      const filtered = `${path}.upload`;
+      writeFileSync(
+        filtered,
+        JSON.stringify(dropSuppressed(JSON.parse(readFileSync(path, "utf8")) as Sarif)),
+      );
+      renameSync(filtered, path);
+    }
+  } catch (cause) {
+    setFailed(messageOf(cause));
   }
 }

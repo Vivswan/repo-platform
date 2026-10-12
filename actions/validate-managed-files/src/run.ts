@@ -2,19 +2,18 @@
 // Runs from the caller's checkout; the exit code colours the step only, the gate reads report.ts. The clone of
 // repo-platform at the recorded commit, under the scratch root, judges the tree with its own check.ts.
 
-import { appendFileSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { error, notice, setFailed, summary, warning } from "@actions/core";
 import {
   capture,
   env,
-  error,
   failureDetail,
-  notice,
+  messageOf,
   type RunResult,
   requireEnv,
   run,
   succeeded,
-  warning,
 } from "../../shared/action_runtime.ts";
 import { DELIVERY_REF, PLATFORM_NAME, SYNC_LABEL } from "../../shared/platform.ts";
 import { classify, type Integrity, writeVerdict } from "./verdict.ts";
@@ -22,12 +21,15 @@ import { classify, type Integrity, writeVerdict } from "./verdict.ts";
 const STEP_TIMEOUT_MS = 300_000;
 const CHECK = "actions/validate-managed-files/check.ts";
 
-const verdictFile = requireEnv("VERDICT_FILE");
-const scratch = requireEnv("SCRATCH_DIR");
-const bun = requireEnv("ACTION_BUN");
-const actionPath = requireEnv("ACTION_PATH");
-const platform = requireEnv("PLATFORM_DIR");
-const root = resolve(".");
+/** The paths action.yml hands the step, and the checkout it runs in. */
+interface Paths {
+  verdictFile: string;
+  scratch: string;
+  bun: string;
+  actionPath: string;
+  platform: string;
+  root: string;
+}
 
 const notJudged = (reason: string): Integrity => ({ kind: "not-judged", reason });
 
@@ -57,7 +59,7 @@ function judgeCheck(result: RunResult, short: string): Integrity {
 }
 
 /** Information only: the exit code never follows it. */
-function reportFreshness(commit: string, short: string): void {
+async function reportFreshness(platform: string, commit: string, short: string): Promise<void> {
   const git = (args: string[]) =>
     capture(["git", ...args], { cwd: platform, timeoutMs: STEP_TIMEOUT_MS });
   const tag = git(["rev-parse", "--verify", "--quiet", `refs/tags/${DELIVERY_REF}^{commit}`]);
@@ -87,10 +89,10 @@ function reportFreshness(commit: string, short: string): void {
       warning(line);
     }
   }
-  appendFileSync(requireEnv("GITHUB_STEP_SUMMARY"), `${line}\n\n`);
+  await summary.addRaw(`${line}\n\n`).write();
 }
 
-function judgeAtRecordedCommit(commit: string): Integrity {
+async function judgeAtRecordedCommit(paths: Paths, commit: string): Promise<Integrity> {
   const short = commit.slice(0, 12);
   const outcome = env("PLATFORM_OUTCOME");
   if (outcome !== "success") {
@@ -103,8 +105,8 @@ function judgeAtRecordedCommit(commit: string): Integrity {
   if (visibility !== "true" && visibility !== "false") {
     return notJudged(`the private input must be true or false, not "${visibility}"`);
   }
-  const installed = run([bun, "install", "--frozen-lockfile", "--silent"], {
-    cwd: platform,
+  const installed = run([paths.bun, "install", "--frozen-lockfile", "--silent"], {
+    cwd: paths.platform,
     timeoutMs: STEP_TIMEOUT_MS,
   });
   if (!succeeded(installed)) {
@@ -112,10 +114,10 @@ function judgeAtRecordedCommit(commit: string): Integrity {
   }
   const checked = capture(
     [
-      bun,
-      join(platform, CHECK),
+      paths.bun,
+      join(paths.platform, CHECK),
       "--target",
-      root,
+      paths.root,
       "--repository",
       requireEnv("REPOSITORY"),
       "--private",
@@ -123,19 +125,18 @@ function judgeAtRecordedCommit(commit: string): Integrity {
       "--build",
       commit,
     ],
-    { cwd: root, timeoutMs: STEP_TIMEOUT_MS },
+    { cwd: paths.root, timeoutMs: STEP_TIMEOUT_MS },
   );
-  reportFreshness(commit, short);
+  await reportFreshness(paths.platform, commit, short);
   return judgeCheck(checked, short);
 }
 
-function hygiene(): Integrity {
-  const findingsFile = join(scratch, "findings.md");
-  const exit = run([bun, join(actionPath, "validator", "validate_managed_files.ts"), root], {
-    cwd: root,
-    env: { FINDINGS_FILE: findingsFile },
-    timeoutMs: STEP_TIMEOUT_MS,
-  });
+function hygiene(paths: Paths): Integrity {
+  const findingsFile = join(paths.scratch, "findings.md");
+  const exit = run(
+    [paths.bun, join(paths.actionPath, "validator", "validate_managed_files.ts"), paths.root],
+    { cwd: paths.root, env: { FINDINGS_FILE: findingsFile }, timeoutMs: STEP_TIMEOUT_MS },
+  );
   return classify(exit, STEP_TIMEOUT_MS, findingsFile);
 }
 
@@ -145,14 +146,32 @@ function merge(a: Integrity, b: Integrity): Integrity {
   return { kind: "findings", findings: `${a.findings}\n\n${b.findings}` };
 }
 
-mkdirSync(scratch, { recursive: true });
-const commit = env("COMMIT");
-const judged =
-  commit === "" ? notJudged(requireEnv("COMMIT_PROBLEM")) : judgeAtRecordedCommit(commit);
-const verdict = merge(judged, hygiene());
-writeVerdict(verdictFile, verdict);
-// The writer's output is captured into the verdict, never printed, so this is the log's one line for the whole.
-if (verdict.kind === "not-judged") error(verdict.reason);
-else if (verdict.kind === "clean") console.log("Verdict: clean.");
-else console.log("Verdict: findings; the report step carries them to the step summary.");
-process.exit(verdict.kind === "clean" ? 0 : 1);
+async function main(): Promise<number> {
+  const paths: Paths = {
+    verdictFile: requireEnv("VERDICT_FILE"),
+    scratch: requireEnv("SCRATCH_DIR"),
+    bun: requireEnv("ACTION_BUN"),
+    actionPath: requireEnv("ACTION_PATH"),
+    platform: requireEnv("PLATFORM_DIR"),
+    root: resolve("."),
+  };
+  mkdirSync(paths.scratch, { recursive: true });
+  const commit = env("COMMIT");
+  const judged =
+    commit === ""
+      ? notJudged(requireEnv("COMMIT_PROBLEM"))
+      : await judgeAtRecordedCommit(paths, commit);
+  const verdict = merge(judged, hygiene(paths));
+  writeVerdict(paths.verdictFile, verdict);
+  // The writer's output is captured into the verdict, never printed, so this is the log's one line for the whole.
+  if (verdict.kind === "not-judged") error(verdict.reason);
+  else if (verdict.kind === "clean") console.log("Verdict: clean.");
+  else console.log("Verdict: findings; the report step carries them to the step summary.");
+  return verdict.kind === "clean" ? 0 : 1;
+}
+
+try {
+  process.exit(await main());
+} catch (cause) {
+  setFailed(messageOf(cause));
+}

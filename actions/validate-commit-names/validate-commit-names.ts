@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { warning } from "@actions/core";
 import { commitlint, type Verdict, writeStdout } from "./commitlint.ts";
 
 const zeroSha = /^0{40}$/;
@@ -76,8 +77,8 @@ function judged(): Commit[] {
     // GitHub truncates the push payload's commit list at 20 entries; at
     // exactly 20 there is no way to tell truncation from a 20-commit push.
     if (listed.length >= 20) {
-      console.log(
-        "::warning::push payload may be truncated (it lists 20 commits, GitHub's cap) and the base..head range is not resolvable here; commits beyond the payload, if any, were not validated",
+      warning(
+        "push payload may be truncated (it lists 20 commits, GitHub's cap) and the base..head range is not resolvable here; commits beyond the payload, if any, were not validated",
       );
     }
     return listed.map(({ id, message }) => ({ sha: id, message }));

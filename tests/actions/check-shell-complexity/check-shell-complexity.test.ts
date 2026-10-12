@@ -554,13 +554,12 @@ describe("the check over a checkout", () => {
     });
     expect(run(root)).toEqual({
       exitCode: 1,
-      stdout: "",
-      stderr: [
+      stdout: [
         `::error file=.github/workflows/release.yml,line=20::.github/workflows/release.yml:20: $(...) tested inside if; ${REMEDY}`,
         `::error file=scripts/a|b.sh,line=3::scripts/a|b.sh:3: || inside if; ${REMEDY}`,
-        `2 finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
         "",
       ].join("\n"),
+      stderr: `2 finding(s). Shell may nest no construct inside another; ${REMEDY}.\n`,
       output: "report=findings\n",
       report: [
         "## Shell complexity check",
@@ -602,14 +601,14 @@ describe("the check over a checkout", () => {
       [ALLOWLIST_FILE]: "scripts/run.sh\n.github/workflows/release.yml # was shell once\n",
     });
     const result = run(root);
-    expect([result.exitCode, result.stderr]).toEqual([
+    expect([result.exitCode, result.stdout, result.stderr]).toEqual([
       1,
       [
         `::error::${ALLOWLIST_FILE}:1: 'scripts/run.sh' has no '# reason'; ${REASON_RULE}`,
         `::error::${ALLOWLIST_FILE}:2: '.github/workflows/release.yml' is stale (no refused construct, or not a tracked file); remove the entry`,
-        `2 finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
         "",
       ].join("\n"),
+      `2 finding(s). Shell may nest no construct inside another; ${REMEDY}.\n`,
     ]);
   });
 

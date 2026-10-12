@@ -2,7 +2,8 @@
 // The exit-code contract this reads is action.yml's description.
 
 import { appendFileSync } from "node:fs";
-import { env, error, requireEnv } from "../shared/action_runtime.ts";
+import { error, setFailed } from "@actions/core";
+import { env, messageOf, requireEnv } from "../shared/action_runtime.ts";
 
 export type Verdict = { found: boolean } | { error: string };
 
@@ -15,10 +16,14 @@ export function lycheeVerdict(exitCode: string): Verdict {
 }
 
 if (import.meta.main) {
-  const verdict = lycheeVerdict(env("EXIT_CODE"));
-  if ("error" in verdict) {
-    error(verdict.error);
-    process.exit(1);
+  try {
+    const verdict = lycheeVerdict(env("EXIT_CODE"));
+    if ("error" in verdict) {
+      error(verdict.error);
+      process.exit(1);
+    }
+    appendFileSync(requireEnv("GITHUB_OUTPUT"), `found=${verdict.found}\n`);
+  } catch (cause) {
+    setFailed(messageOf(cause));
   }
-  appendFileSync(requireEnv("GITHUB_OUTPUT"), `found=${verdict.found}\n`);
 }

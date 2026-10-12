@@ -899,10 +899,10 @@ describe("the CLI", () => {
           `::warning::src/chatty.ts:2: ${COMMENT_CAPS.block + 1} comment lines (cap ${COMMENT_CAPS.block})`,
           `::warning::src/header.ts:1: ${COMMENT_CAPS.header + 1} comment lines (cap ${COMMENT_CAPS.header} for a header)`,
           `::warning::src/marker.sh:1: ${COMMENT_MARKER} needs a reason`,
-        ],
-        stderr: [
           `::error::src/big.ts: ${hardLines} lines (cap ${HARD.lines.source} for source)`,
           `::error::src/wide.sh:1: 279 chars (cap ${HARD_WIDTH})`,
+        ],
+        stderr: [
           `2 finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
         ],
         comment: findingsBody,
@@ -937,9 +937,8 @@ describe("the CLI", () => {
         }),
       () => ({
         exitCode: 1,
-        stdout: [""],
+        stdout: [`::error::${stale}`],
         stderr: [
-          `::error::${stale}`,
           `1 finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
         ],
         comment: staleBody,
@@ -968,8 +967,8 @@ describe("the CLI", () => {
       notGit,
       (root) => ({
         exitCode: 1,
-        stdout: [""],
-        stderr: [`::error::check-file-size did not run to completion: ${gitMessage(root)}`],
+        stdout: [`::error::check-file-size did not run to completion: ${gitMessage(root)}`],
+        stderr: [""],
         comment: null,
         summary: `## File size check\n\nThe check did not run to completion: ${gitMessage(root)}\n`,
         output: "report=error\n",

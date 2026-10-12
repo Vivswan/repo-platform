@@ -3,13 +3,13 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { setOutput } from "@actions/core";
+import { error, setFailed, setOutput } from "@actions/core";
 import type { DocsConfig, SiteConfigJson } from "../pages-site/.vitepress/conventions.ts";
 import {
   capture,
   env,
-  error,
   failureDetail,
+  messageOf,
   requireEnv,
   succeeded,
 } from "../shared/action_runtime.ts";
@@ -351,8 +351,10 @@ if (import.meta.main) {
   try {
     process.exit(main());
   } catch (err) {
-    if (!(err instanceof PlanError)) throw err;
-    for (const problem of err.problems) error(problem);
-    process.exit(1);
+    if (err instanceof PlanError) {
+      for (const problem of err.problems) error(problem);
+      process.exit(1);
+    }
+    setFailed(messageOf(err));
   }
 }
