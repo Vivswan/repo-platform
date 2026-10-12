@@ -687,20 +687,17 @@ describe("failureBody", () => {
 });
 
 describe("closedFences", () => {
-  // CommonMark's closing rule, which the cut relies on: a run at least as long, alone on its line, no info string.
+  // markdown-it has no "closed" flag on a fence token; deliver.ts reads it from the token's line span against its
+  // content, and the closer it appends is the opener's own run. The library's closing rule itself is not pinned.
   test.each([
     { text: "```\nx", closed: "```\nx\n```", reason: "a three-backtick fence left open" },
+    { text: "```diff", closed: "```diff\n```", reason: "a fence cut right after its opener" },
     {
       text: "````diff\n ```\nx",
       closed: "````diff\n ```\nx\n````",
       reason: "a four-backtick fence: the quoted three cannot close it",
     },
     { text: "```\nx\n```", closed: "```\nx\n```", reason: "a closed fence" },
-    {
-      text: "```\nx\n```diff",
-      closed: "```\nx\n```diff\n```",
-      reason: "a run carrying an info string does not close",
-    },
     { text: "no fence", closed: "no fence", reason: "no fence" },
   ])("$reason", ({ text, closed }) => {
     expect(closedFences(text)).toBe(closed);
@@ -869,7 +866,7 @@ describe("boundedReport", () => {
     expect(seen.headed).toBeGreaterThan(0);
   });
 
-  // Cross-file with report.ts fencedDiff (one backtick longer than any quoted run) against deliver.ts openFence:
+  // Cross-file with report.ts fencedDiff (one backtick longer than any quoted run) against deliver.ts closedFences:
   // three backticks would leave the marker and the Review section rendering as code.
   test("a cut inside a four-backtick fence (a diff quoting a fence line) is closed with four backticks", () => {
     const outcome: SyncOutcome = {

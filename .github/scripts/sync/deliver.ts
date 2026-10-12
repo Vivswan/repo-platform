@@ -6,6 +6,7 @@
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { summary } from "@actions/core";
+import MarkdownIt from "markdown-it";
 import {
   AUTOMATION_BRANCH,
   FAILURE_ISSUE_TITLE,
@@ -86,33 +87,29 @@ export function truncatedLines(text: string, budget: number): string {
   return text.slice(0, cut <= 0 ? budget : cut);
 }
 
-const FENCE_LINE = /^ {0,3}(`{3,})(.*)$/;
+const markdown = new MarkdownIt({ html: true });
 
-/** Only a run at least as long and alone on its line closes a block (CommonMark), so the report's diff fence stays open across the
- *  backtick runs its lines quote. */
-export function openFence(text: string): string {
-  let open = "";
-  for (const line of text.split("\n")) {
-    const fence = FENCE_LINE.exec(line);
-    if (fence === null) continue;
-    if (open === "") open = fence[1];
-    else if (fence[1].length >= open.length && fence[2].trim() === "") open = "";
+/** Lines as markdown-it counts them: a final newline ends a line and starts none. */
+const lineCount = (text: string): number =>
+  text.split("\n").length - (text === "" || text.endsWith("\n") ? 1 : 0);
+
+/** markdown-it gives a fence no "closed" flag: its `map` span counts the closing line when there is one and its
+ *  `content` never does, so an unclosed fence is the one whose span holds only the opener and the content. */
+function fences(text: string): { markup: string; closed: boolean }[] {
+  const found: { markup: string; closed: boolean }[] = [];
+  for (const token of markdown.parse(text, {})) {
+    if (token.type !== "fence" || token.map === null) continue;
+    const [start, end] = token.map;
+    found.push({ markup: token.markup, closed: end - start === lineCount(token.content) + 2 });
   }
-  return open;
+  return found;
 }
 
 /** A cut can leave a fence open, and everything after it would then render as code. */
 export function closedFences(text: string): string {
-  const open = openFence(text);
-  return open === "" ? text : `${text}\n${open}`;
+  const last = fences(text).at(-1);
+  return last === undefined || last.closed ? text : `${text}\n${last.markup}`;
 }
-
-/** The longest fence line in `text`: the most a cut can owe to close one. */
-const longestFence = (text: string): string =>
-  text
-    .split("\n")
-    .map((line) => FENCE_LINE.exec(line)?.[1] ?? "")
-    .reduce((best, run) => (run.length > best.length ? run : best), "");
 
 const cutMarker = (omitted: number) =>
   `\n\n> [!WARNING]\n> ${omitted} characters of this section were cut to fit GitHub's body limit.\n`;
@@ -120,8 +117,8 @@ const cutMarker = (omitted: number) =>
 function cutSection(section: string, room: number): string {
   const headingEnd = section.indexOf("\n", 1);
   const heading = headingEnd === -1 ? section : section.slice(0, headingEnd);
-  const fence = longestFence(section);
-  const reserve = cutMarker(section.length).length + (fence === "" ? 0 : fence.length + 1);
+  const longest = fences(section).reduce((max, fence) => Math.max(max, fence.markup.length), 0);
+  const reserve = cutMarker(section.length).length + (longest === 0 ? 0 : longest + 1);
   if (room < heading.length + reserve) return "";
   const kept = truncatedLines(section, room - reserve);
   return `${closedFences(kept)}${cutMarker(section.length - kept.length)}`;
