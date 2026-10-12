@@ -74,6 +74,13 @@ runs:
       with:
         from: ${{ github.action_path }}
 
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
     # The label and the report tuple ride along for the script's requirement
     # check: a composite's `required: true` only documents, and the later
     # steps would otherwise list issues under an empty label, create a label

@@ -3,7 +3,7 @@
 //
 // DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal imports only.
 
-import { appendFileSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { messageOf } from "./action_runtime.ts";
 
@@ -24,6 +24,7 @@ export interface Annotation {
 export interface Core {
   warning(message: string, properties?: { file?: string; startLine?: number }): void;
   error(message: string, properties?: { file?: string; startLine?: number }): void;
+  setOutput(name: string, value: string): void;
   summary: { addRaw(text: string): { write(): Promise<unknown> } };
 }
 
@@ -57,8 +58,7 @@ export async function runCheck<Verdict>(
     const body = program.report(outcome);
     if (reportPath && outcome.state === "findings") writeFileSync(reportPath, body);
     if (process.env.GITHUB_STEP_SUMMARY) await core.summary.addRaw(body).write();
-    if (process.env.GITHUB_OUTPUT)
-      appendFileSync(process.env.GITHUB_OUTPUT, `report=${outcome.state}\n`);
+    if (process.env.GITHUB_OUTPUT) core.setOutput("report", outcome.state);
   };
   // core prints `::error ::` (a stray space) for a properties object whose every value is unset, so an unanchored
   // annotation passes none.

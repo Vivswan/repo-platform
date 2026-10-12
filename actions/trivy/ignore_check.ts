@@ -1,9 +1,9 @@
 // Every bypass entry carries an expiry and a reason, so Trivy drops it when the date passes and the finding blocks again on its own.
 // The plain .trivyignore format has no expiry field, so its presence fails the check; so does the zero date, which Trivy keeps forever.
 
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { error, setFailed, warning } from "@actions/core";
-import { messageOf, requireEnv } from "../shared/action_runtime.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { error, setFailed, setOutput, warning } from "@actions/core";
+import { messageOf } from "../shared/action_runtime.ts";
 import { isMapping } from "../shared/values.ts";
 
 export const IGNORE_FILE = ".trivyignore.yaml";
@@ -88,7 +88,6 @@ export function checkIgnoreFile(text: string, today: Date): IgnoreCheck {
 }
 
 function main(): number {
-  const output = requireEnv("GITHUB_OUTPUT");
   if (existsSync(PLAIN_IGNORE_FILE)) {
     error(
       `${PLAIN_IGNORE_FILE} is not honored: its entries never expire. Move each one into ${IGNORE_FILE} with a statement and an expired_at date.`,
@@ -97,7 +96,7 @@ function main(): number {
     return 1;
   }
   if (!existsSync(IGNORE_FILE)) {
-    appendFileSync(output, "ignorefile=\n");
+    setOutput("ignorefile", "");
     console.log(`no ${IGNORE_FILE}: nothing is bypassed`);
     return 0;
   }
@@ -110,7 +109,7 @@ function main(): number {
     );
   }
   if (problems.length > 0) return 1;
-  appendFileSync(output, `ignorefile=${IGNORE_FILE}\n`);
+  setOutput("ignorefile", IGNORE_FILE);
   console.log(`${IGNORE_FILE}: every entry carries a statement and an expiry`);
   return 0;
 }

@@ -22,6 +22,7 @@ import {
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { checkout } from "../../shared/fixture_checkout.ts";
 import { fixtureGitEnv } from "../../shared/fixture_git.ts";
+import { readGithubOutput } from "../../shared/github_output.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -532,7 +533,7 @@ describe("the check over a checkout", () => {
       exitCode: proc.exitCode,
       stdout: proc.stdout,
       stderr: proc.stderr,
-      output: readFileSync(output, "utf8"),
+      output: readGithubOutput(output),
       report: ((): string | null => {
         try {
           return readFileSync(report, "utf8");
@@ -560,7 +561,7 @@ describe("the check over a checkout", () => {
         "",
       ].join("\n"),
       stderr: `2 finding(s). Shell may nest no construct inside another; ${REMEDY}.\n`,
-      output: "report=findings\n",
+      output: { report: "findings" },
       report: [
         "## Shell complexity check",
         "",
@@ -589,7 +590,7 @@ describe("the check over a checkout", () => {
       stdout:
         "Shell complexity check passed. Bodies judged: 1 workflow run step. 1 managed file(s) skipped; repo-platform owns them.\n",
       stderr: "",
-      output: "report=clean\n",
+      output: { report: "clean" },
       report: null,
     });
   });

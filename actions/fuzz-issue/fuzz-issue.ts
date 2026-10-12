@@ -6,7 +6,6 @@
  */
 
 import {
-  appendFileSync,
   existsSync,
   mkdtempSync,
   readdirSync,
@@ -15,6 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
+import { setOutput } from "@actions/core";
 
 const REPORT_LINES = 60;
 /** GitHub caps an issue or comment body at 65,536 characters; stay comfortably under it. */
@@ -275,8 +275,7 @@ function main(): void {
     throw new Error(`unknown STREAM '${stream}' (expected fuzz or generic)`);
   }
   const runnerTemp = process.env.RUNNER_TEMP;
-  const outputFile = process.env.GITHUB_OUTPUT;
-  if (!runnerTemp || !outputFile) {
+  if (!runnerTemp || !process.env.GITHUB_OUTPUT) {
     throw new Error("RUNNER_TEMP and GITHUB_OUTPUT are required (the runner sets both)");
   }
   const artifactsDir = process.env.ARTIFACTS_DIR;
@@ -292,7 +291,7 @@ function main(): void {
   // A fresh directory per run: one job can run the action once per stream.
   const file = join(mkdtempSync(join(runnerTemp, "fuzz-issue-")), `${mode}.md`);
   writeFileSync(file, text);
-  appendFileSync(outputFile, `file=${file}\n`);
+  setOutput("file", file);
 }
 
 if (import.meta.main) {

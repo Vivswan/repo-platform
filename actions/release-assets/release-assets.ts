@@ -1,7 +1,6 @@
 // Runs with no checkout, so every gh call names the repository. The bundle is deleted from the RELEASE, not a
 // checkout, so no later skip path (a non-public repository, a draft left with no other asset) can publish a stale one.
 
-import { appendFileSync } from "node:fs";
 import * as core from "@actions/core";
 import {
   capture,
@@ -54,9 +53,8 @@ export function inspectAssets(
 
 function main(): number {
   const repo = requireEnv("GITHUB_REPOSITORY");
-  const output = requireEnv("GITHUB_OUTPUT");
   const present = inspectAssets(gh, repo, requireEnv("TAG"), requireEnv("BUNDLE_NAME"), core);
-  appendFileSync(output, `present=${present}\n`);
+  core.setOutput("present", String(present));
   return 0;
 }
 

@@ -349,7 +349,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 - **Packaging:** a repository that packages from its root (an npm package with no `files` field, for one) lists the allowlist in its packaging ignore file (`.npmignore`), or it ships as content.
 
-**Enforced by:** the `file-size` step of fleet.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It reads lines and nothing else: no parser, no grammar, no runtime dependency.
+**Enforced by:** the `file-size` step of fleet.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)). It reads lines and nothing else: no parser, no grammar. Its one runtime dependency is `@actions/core`, which writes its annotations, summary, and output.
 
 - **What fails:** a hard-cap finding or an allowlist defect fails the step, and with it the `standard-checks` job. repo-platform's own ci.yml runs the same action as its standalone `file-size` job.
 

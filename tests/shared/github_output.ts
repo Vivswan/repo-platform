@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 /** The variables a step wrote to one of the runner's key-value files (GITHUB_OUTPUT, GITHUB_ENV), read back the way the
  *  runner reads them. Both forms the file carries: `name=value` from a shell echo, and `name<<delimiter` ... `delimiter`
  *  from @actions/core's setOutput and exportVariable, whose delimiter is random per call. A later write of the same name
@@ -25,6 +27,11 @@ function parseKeyValueFile(file: string, text: string): Record<string, string> {
 
 export function parseGithubOutput(text: string): Record<string, string> {
   return parseKeyValueFile("GITHUB_OUTPUT", text);
+}
+
+/** The outputs a step left in the file it was handed as GITHUB_OUTPUT. */
+export function readGithubOutput(file: string): Record<string, string> {
+  return parseGithubOutput(readFileSync(file, "utf8"));
 }
 
 export function parseGithubEnv(text: string): Record<string, string> {

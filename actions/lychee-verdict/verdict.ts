@@ -1,9 +1,8 @@
 #!/usr/bin/env bun
 // The exit-code contract this reads is action.yml's description.
 
-import { appendFileSync } from "node:fs";
-import { error, setFailed } from "@actions/core";
-import { env, messageOf, requireEnv } from "../shared/action_runtime.ts";
+import { error, setFailed, setOutput } from "@actions/core";
+import { env, messageOf } from "../shared/action_runtime.ts";
 
 export type Verdict = { found: boolean } | { error: string };
 
@@ -22,7 +21,7 @@ if (import.meta.main) {
       error(verdict.error);
       process.exit(1);
     }
-    appendFileSync(requireEnv("GITHUB_OUTPUT"), `found=${verdict.found}\n`);
+    setOutput("found", String(verdict.found));
   } catch (cause) {
     setFailed(messageOf(cause));
   }
