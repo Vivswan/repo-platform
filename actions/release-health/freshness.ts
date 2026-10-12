@@ -5,13 +5,13 @@
 // shallow checkout) throws; it is never read as either verdict.
 
 import { appendFileSync } from "node:fs";
+import { setFailed, warning } from "@actions/core";
 import {
   capture,
-  error,
   failureDetail,
+  messageOf,
   requireEnv,
   succeeded,
-  warning,
 } from "../shared/action_runtime.ts";
 
 const GIT_HANG_BOUND_MS = 60_000;
@@ -59,7 +59,6 @@ if (import.meta.main) {
   try {
     process.exit(main());
   } catch (cause) {
-    error(cause instanceof Error ? cause.message : String(cause));
-    process.exit(1);
+    setFailed(messageOf(cause));
   }
 }

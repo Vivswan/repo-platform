@@ -5,22 +5,36 @@
 
 import { appendFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { workflowCommand } from "./action_runtime.ts";
+import { messageOf } from "./action_runtime.ts";
 
 /** The three outcomes an action distinguishes (its `report` output). */
 export type Outcome<Verdict> =
   | { state: "findings" | "clean"; verdict: Verdict }
   | { state: "error"; message: string };
 
+/** One annotation: `file` and `line` anchor it on the diff when they are the finding's own. */
+export interface Annotation {
+  message: string;
+  file?: string;
+  line?: number;
+}
+
+/** The slice of @actions/core the check reports through. The zone cannot carry the package (bun resolves it upward
+ *  from the importing file, and an action's node_modules is not above this one), so the action hands its own in. */
+export interface Core {
+  warning(message: string, properties?: { file?: string; startLine?: number }): void;
+  error(message: string, properties?: { file?: string; startLine?: number }): void;
+  summary: { addRaw(text: string): { write(): Promise<unknown> } };
+}
+
 export interface CheckProgram<Verdict> {
   name: string;
   check(root: string): Verdict | Promise<Verdict>;
   outcomeOf(verdict: Verdict): Outcome<Verdict>;
   report(outcome: Outcome<Verdict>): string;
-  /** `::warning` commands, to stdout. */
-  warnings(verdict: Verdict): string[];
-  /** `::error` commands, to stderr; any one fails the run. */
-  errors(verdict: Verdict): string[];
+  warnings(verdict: Verdict): Annotation[];
+  /** Any one fails the run. */
+  errors(verdict: Verdict): Annotation[];
   passed(verdict: Verdict): string;
   failed(count: number): string;
 }
@@ -33,38 +47,44 @@ export function rootOf(argv: string[]): string {
 
 export async function runCheck<Verdict>(
   program: CheckProgram<Verdict>,
+  core: Core,
   argv: string[] = process.argv.slice(2),
 ): Promise<never> {
   // Cleared first, so a crash below leaves no comment body behind.
   const reportPath = process.env.REPORT_PATH;
   if (reportPath) rmSync(reportPath, { force: true });
-  const emit = (outcome: Outcome<Verdict>): void => {
+  const emit = async (outcome: Outcome<Verdict>): Promise<void> => {
     const body = program.report(outcome);
     if (reportPath && outcome.state === "findings") writeFileSync(reportPath, body);
-    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
+    if (process.env.GITHUB_STEP_SUMMARY) await core.summary.addRaw(body).write();
     if (process.env.GITHUB_OUTPUT)
       appendFileSync(process.env.GITHUB_OUTPUT, `report=${outcome.state}\n`);
   };
+  // core prints `::error ::` (a stray space) for a properties object whose every value is unset, so an unanchored
+  // annotation passes none.
+  const annotate = (kind: "warning" | "error", { message, file, line }: Annotation): void =>
+    core[kind](
+      message,
+      file === undefined && line === undefined ? undefined : { file, startLine: line },
+    );
   let verdict: Verdict;
   try {
     verdict = await program.check(rootOf(argv));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(
-      workflowCommand("error", `${program.name} did not run to completion: ${message}`),
-    );
-    emit({ state: "error", message });
+  } catch (cause) {
+    const message = messageOf(cause);
+    core.error(`${program.name} did not run to completion: ${message}`);
+    await emit({ state: "error", message });
     process.exit(1);
   }
-  for (const warning of program.warnings(verdict)) console.log(warning);
+  for (const warning of program.warnings(verdict)) annotate("warning", warning);
   const errors = program.errors(verdict);
   if (errors.length > 0) {
-    for (const line of errors) console.error(line);
+    for (const error of errors) annotate("error", error);
     console.error(program.failed(errors.length));
   } else {
     console.log(program.passed(verdict));
   }
   // Last, so nothing after it can leave a recorded state the run's exit contradicts.
-  emit(program.outcomeOf(verdict));
+  await emit(program.outcomeOf(verdict));
   process.exit(errors.length > 0 ? 1 : 0);
 }

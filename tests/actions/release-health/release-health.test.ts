@@ -11,6 +11,7 @@ import {
   type GateOutcome,
   type GhRunner,
   issueGate,
+  type Log,
   type Override,
   overrideFromPullRequest,
   parseConfig,
@@ -24,6 +25,15 @@ import {
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
+
+/** A log line as the recorder saw it: core's method, then the message. */
+type Line = ["info" | "notice" | "warning" | "error", string];
+const recorder = (lines: Line[]): Log => ({
+  info: (message) => lines.push(["info", message]),
+  notice: (message) => lines.push(["notice", String(message)]),
+  warning: (message) => lines.push(["warning", String(message)]),
+  error: (message) => lines.push(["error", String(message)]),
+});
 
 interface CommitPull {
   number: number;
@@ -344,13 +354,8 @@ describe("securityGate", () => {
       const thrown = `security gate could not read the Dependabot alerts (${message})${remedy}`;
       expect(await rejection(securityGate(run, REPO, "high", "advice"))).toBe(thrown);
       if (viaRun) {
-        const lines: string[] = [];
-        const viaCheck = runHealthCheck(
-          prConfig(),
-          run,
-          (line) => lines.push(line),
-          () => {},
-        );
+        const lines: Line[] = [];
+        const viaCheck = runHealthCheck(prConfig(), run, recorder(lines), () => {});
         expect([await rejection(viaCheck), lines]).toEqual([thrown, []]);
       }
     },
@@ -387,14 +392,9 @@ describe("overrideFromPullRequest", () => {
     const lookup = overrideFromPullRequest(run, REPO, eventPath, "release-override");
     if (override === null) {
       await expect(lookup).rejects.toThrow("gh pr view failed");
-      await expect(
-        runHealthCheck(
-          prConfig(),
-          run,
-          () => {},
-          () => {},
-        ),
-      ).rejects.toThrow("gh pr view failed");
+      await expect(runHealthCheck(prConfig(), run, recorder([]), () => {})).rejects.toThrow(
+        "gh pr view failed",
+      );
     } else {
       expect([await lookup, calls]).toEqual([override, [PR_VIEW_CALL]]);
     }
@@ -475,7 +475,7 @@ describe("findReleasePr", () => {
 describe("runHealthCheck", () => {
   interface Run {
     exit: number;
-    lines: string[];
+    lines: Line[];
     outputs: string[];
     calls: string[][];
   }
@@ -483,21 +483,20 @@ describe("runHealthCheck", () => {
   const NOW = new Date("2026-08-09T12:00:00.500Z");
   async function run(config: Config, fixture: Fixture): Promise<Run> {
     const gh = fakeGh(fixture);
-    const lines: string[] = [];
+    const lines: Line[] = [];
     const outputs: string[] = [];
     const exit = await runHealthCheck(
       config,
       gh.run,
-      (line) => lines.push(line),
+      recorder(lines),
       (name, value) => outputs.push(`${name}=${value}`),
       NOW,
     );
     return { exit, lines, outputs, calls: gh.calls };
   }
 
-  // The advice each gate family attaches to its ::error line, pinned verbatim: it is the operator's only
-  // instruction when a release is blocked, and `::error::` is GitHub's workflow-command surface (a misspelled
-  // command is plain log text, silently).
+  // The advice each gate family attaches to its error annotation, pinned verbatim: it is the operator's only
+  // instruction when a release is blocked.
   const OVERRIDE_HINT =
     "or apply the 'release-override' label to the release PR and re-run this check";
   const TRACKING_ADVICE = `fix the failures behind it (the stream's next green nightly run closes the tracking issue automatically), ${OVERRIDE_HINT}`;
@@ -522,7 +521,10 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 0,
         lines: [
-          "release health: all gates passed (tracking:fuzz-nightly: no open 'fuzz-nightly' issues; blocker: no open 'release-blocker' issues; security: no open Dependabot alerts at or above high)",
+          [
+            "info",
+            "release health: all gates passed (tracking:fuzz-nightly: no open 'fuzz-nightly' issues; blocker: no open 'release-blocker' issues; security: no open Dependabot alerts at or above high)",
+          ],
         ],
         outputs: [],
         calls: PR_CALLS(["fuzz-nightly"]),
@@ -535,7 +537,10 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 0,
         lines: [
-          "release health: all gates passed (blocker: no open 'release-blocker' issues; security: no open Dependabot alerts at or above high)",
+          [
+            "info",
+            "release health: all gates passed (blocker: no open 'release-blocker' issues; security: no open Dependabot alerts at or above high)",
+          ],
         ],
         outputs: [],
         calls: PR_CALLS([]),
@@ -557,14 +562,17 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 1,
         lines: [
-          `::error::tracking:nightly-failure gate failed: 1 open 'nightly-failure' issue(s): #3. To release: ${TRACKING_ADVICE}`,
+          [
+            "error",
+            `tracking:nightly-failure gate failed: 1 open 'nightly-failure' issue(s): #3. To release: ${TRACKING_ADVICE}`,
+          ],
         ],
         outputs: [],
         calls: PR_CALLS(["fuzz-nightly", "nightly-failure"]),
       },
     },
     {
-      reason: "each failing gate is an ::error with its advice, exit 1",
+      reason: "each failing gate is an error annotation with its advice, exit 1",
       config: prConfig(),
       fixture: {
         issues: { "fuzz-nightly": [2], "release-blocker": [7] },
@@ -574,9 +582,18 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 1,
         lines: [
-          `::error::tracking:fuzz-nightly gate failed: 1 open 'fuzz-nightly' issue(s): #2. To release: ${TRACKING_ADVICE}`,
-          `::error::blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
-          `::error::security gate failed: 1 open Dependabot alert(s) at or above high: #11. To release: ${SECURITY_ADVICE}`,
+          [
+            "error",
+            `tracking:fuzz-nightly gate failed: 1 open 'fuzz-nightly' issue(s): #2. To release: ${TRACKING_ADVICE}`,
+          ],
+          [
+            "error",
+            `blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
+          ],
+          [
+            "error",
+            `security gate failed: 1 open Dependabot alert(s) at or above high: #11. To release: ${SECURITY_ADVICE}`,
+          ],
         ],
         outputs: [],
         calls: PR_CALLS(["fuzz-nightly"]),
@@ -594,9 +611,12 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 0,
         lines: [
-          "::warning::blocker gate failed: 1 open 'release-blocker' issue(s): #7",
-          "::warning::security gate failed: 1 open Dependabot alert(s) at or above high: #5",
-          "::notice::OVERRIDE: the 'release-override' label on release PR #12 bypassed 2 failing gate(s) (blocker, security); this release ships despite them",
+          ["warning", "blocker gate failed: 1 open 'release-blocker' issue(s): #7"],
+          ["warning", "security gate failed: 1 open Dependabot alert(s) at or above high: #5"],
+          [
+            "notice",
+            "OVERRIDE: the 'release-override' label on release PR #12 bypassed 2 failing gate(s) (blocker, security); this release ships despite them",
+          ],
         ],
         outputs: [],
         calls: PR_CALLS(["fuzz-nightly"]),
@@ -620,8 +640,11 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 0,
         lines: [
-          "::warning::blocker gate failed: 1 open 'release-blocker' issue(s): #7",
-          "::notice::OVERRIDE: the 'release-override' label on release PR #21 bypassed 1 failing gate(s) (blocker); this release ships despite them",
+          ["warning", "blocker gate failed: 1 open 'release-blocker' issue(s): #7"],
+          [
+            "notice",
+            "OVERRIDE: the 'release-override' label on release PR #21 bypassed 1 failing gate(s) (blocker); this release ships despite them",
+          ],
         ],
         outputs: ["release-cut=true"],
         calls: [
@@ -642,7 +665,10 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 1,
         lines: [
-          `::error::blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
+          [
+            "error",
+            `blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
+          ],
         ],
         outputs: ["release-cut=true"],
         calls: [
@@ -664,7 +690,7 @@ describe("runHealthCheck", () => {
       },
       expected: {
         exit: 0,
-        lines: ["::notice::release health: abc123 is not a release-PR merge; nothing to gate"],
+        lines: [["notice", "release health: abc123 is not a release-PR merge; nothing to gate"]],
         outputs: ["release-cut=false", "head-current=true"],
         calls: [COMMIT_PULLS_CALL, HEAD_CALL],
       },
@@ -679,8 +705,11 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 0,
         lines: [
-          "::notice::release health: abc123 is not a release-PR merge; nothing to gate",
-          "::notice::main moved to def4567 since abc123 was judged; the newer run refreshes the release PR",
+          ["notice", "release health: abc123 is not a release-PR merge; nothing to gate"],
+          [
+            "notice",
+            "main moved to def4567 since abc123 was judged; the newer run refreshes the release PR",
+          ],
         ],
         outputs: ["release-cut=false", "head-current=false"],
         calls: [COMMIT_PULLS_CALL, HEAD_CALL],
@@ -697,7 +726,10 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 0,
         lines: [
-          "::notice::release health: abc123 is not a release-PR merge; nothing to gate (open release PR(s) associated: #9)",
+          [
+            "notice",
+            "release health: abc123 is not a release-PR merge; nothing to gate (open release PR(s) associated: #9)",
+          ],
         ],
         outputs: ["release-cut=false", "head-current=true"],
         calls: [COMMIT_PULLS_CALL, HEAD_CALL],
@@ -712,18 +744,24 @@ describe("runHealthCheck", () => {
   // is NOW minus 30 minutes, and gh's mergedAt is an ISO instant, so a PR merged 29 minutes ago is not stale.
   const afterProposeConfig = (): Config =>
     parseConfig({ GITHUB_REPOSITORY: REPO, MODE: "after-propose" } as NodeJS.ProcessEnv);
-  const PARKED =
-    "::error::merged release PR(s) #12, #14 have worn 'autorelease: pending' for over 30 minutes, " +
-    "so release-please refuses to propose any new release ('untagged, merged release PRs outstanding'). " +
-    "Re-run the CI run of that merge commit (only the run that judged the merge tags it), " +
-    "or finish or abandon the release by hand and then move the label to 'autorelease: tagged'.";
+  const PARKED: Line = [
+    "error",
+    "merged release PR(s) #12, #14 have worn 'autorelease: pending' for over 30 minutes, " +
+      "so release-please refuses to propose any new release ('untagged, merged release PRs outstanding'). " +
+      "Re-run the CI run of that merge commit (only the run that judged the merge tags it), " +
+      "or finish or abandon the release by hand and then move the label to 'autorelease: tagged'.",
+  ];
+  const IN_FLIGHT: Line = [
+    "info",
+    "no merged release PR has worn 'autorelease: pending' past 30 minutes",
+  ];
   test.each<{ reason: string; fixture: Fixture; expected: Run }>([
     {
       reason: "no merged PR wears the pending label",
       fixture: { mergedPending: [] },
       expected: {
         exit: 0,
-        lines: ["no merged release PR has worn 'autorelease: pending' past 30 minutes"],
+        lines: [IN_FLIGHT],
         outputs: [],
         calls: [PENDING_CALL],
       },
@@ -739,7 +777,7 @@ describe("runHealthCheck", () => {
       },
       expected: {
         exit: 0,
-        lines: ["no merged release PR has worn 'autorelease: pending' past 30 minutes"],
+        lines: [IN_FLIGHT],
         outputs: [],
         calls: [PENDING_CALL],
       },
@@ -782,23 +820,32 @@ describe("runHealthCheck", () => {
     "-f",
     `expected_head_sha=${JUDGED}`,
   ];
-  const REFRESHED = `::notice::release PR #12 refreshed to ${MOVED}; approve its run from the merge box`;
-  const MAIN_MOVED =
-    "::error::main moved to 4444444 since this run checked it out at 3333333; this run cannot tell whether the refresh saw that commit, and its own green run refreshes the release PR";
-  const MERGING =
-    "release-please left PR #12 at 1111111: its body is unchanged, so the commits it lacks add no changelog line and merging main loses none; asking GitHub to update the branch";
-  const STILL_BEHIND =
-    "::error::Release PR is behind main and GitHub's branch update has not moved it within 60 s; its version and changelog would miss commits already on main. Do not merge; release-please refreshes the PR after the next green run on main.";
+  const REFRESHED: Line = [
+    "notice",
+    `release PR #12 refreshed to ${MOVED}; approve its run from the merge box`,
+  ];
+  const MAIN_MOVED: Line = [
+    "error",
+    "main moved to 4444444 since this run checked it out at 3333333; this run cannot tell whether the refresh saw that commit, and its own green run refreshes the release PR",
+  ];
+  const MERGING: Line = [
+    "info",
+    "release-please left PR #12 at 1111111: its body is unchanged, so the commits it lacks add no changelog line and merging main loses none; asking GitHub to update the branch",
+  ];
+  const STILL_BEHIND: Line = [
+    "error",
+    "Release PR is behind main and GitHub's branch update has not moved it within 60 s; its version and changelog would miss commits already on main. Do not merge; release-please refreshes the PR after the next green run on main.",
+  ];
   const polls = (n: number) => Array.from({ length: n }, () => PR_HEAD_CALL);
   const waits = (n: number) => Array.from({ length: n }, () => UPDATE_BRANCH_POLL_MS);
   async function runAfterRefresh(fixture: Fixture): Promise<Run & { sleeps: number[] }> {
     const gh = fakeGh(fixture);
-    const lines: string[] = [];
+    const lines: Line[] = [];
     const sleeps: number[] = [];
     const exit = await runHealthCheck(
       afterRefreshConfig(),
       gh.run,
-      (line) => lines.push(line),
+      recorder(lines),
       () => {},
       NOW,
       async (ms) => {
@@ -891,7 +938,10 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 1,
         lines: [
-          "::error::Release PR is behind main, and release-please proposes nothing while merged release PR(s) #40 wear 'autorelease: pending'. Re-run this job once the cut has relabelled them 'autorelease: tagged'.",
+          [
+            "error",
+            "Release PR is behind main, and release-please proposes nothing while merged release PR(s) #40 wear 'autorelease: pending'. Re-run this job once the cut has relabelled them 'autorelease: tagged'.",
+          ],
         ],
         outputs: [],
         calls: [PR_HEAD_CALL, PENDING_CALL],
@@ -947,19 +997,21 @@ describe("runHealthCheck", () => {
     "after-refresh mode: $reason propagates, never read as moved",
     async ({ fixture, rejects, calls }) => {
       const gh = fakeGh(fixture);
-      const lines: string[] = [];
+      const lines: Line[] = [];
       const attempt = runHealthCheck(
         afterRefreshConfig(),
         gh.run,
-        (line) => lines.push(line),
+        recorder(lines),
         () => {},
         NOW,
         async () => {},
         () => TIP,
       );
-      expect([await rejection(attempt), gh.calls, lines.filter((l) => l.startsWith("::"))]).toEqual(
-        [rejects, calls, []],
-      );
+      expect([
+        await rejection(attempt),
+        gh.calls,
+        lines.filter(([kind]) => kind !== "info"),
+      ]).toEqual([rejects, calls, []]);
     },
   );
 });

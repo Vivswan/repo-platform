@@ -96,15 +96,9 @@ function writeFakePlatform(dir: string, packageJson: string): void {
 
 function play(scenario: Scenario): Outcome {
   const root = temp.dir("validate-managed-action-");
+  // The step scripts run in place, where their dependencies are installed; ACTION_PATH points them at a fake validator.
   const actionPath = join(root, "action");
   mkdirSync(join(actionPath, "validator"), { recursive: true });
-  for (const name of ["src/run.ts", "src/report.ts", "src/verdict.ts"]) {
-    mkdirSync(join(actionPath, "src"), { recursive: true });
-    writeFileSync(
-      join(actionPath, name),
-      readFileSync(join(ACTION, name), "utf8").replaceAll("../../shared/", `${ACTION}/../shared/`),
-    );
-  }
   writeFileSync(join(actionPath, "validator", "validate_managed_files.ts"), fakeValidator);
   const platform = join(root, "platform");
   writeFakePlatform(platform, scenario.packageJson ?? '{"name": "fake", "private": true}\n');
@@ -122,7 +116,7 @@ function play(scenario: Scenario): Outcome {
   writeFileSync(summary, "");
   let runExit: number | null = null;
   if (scenario.verdict === undefined) {
-    const result = boundedSpawnSync([process.execPath, join(actionPath, "src/run.ts")], {
+    const result = boundedSpawnSync([process.execPath, join(ACTION, "src/run.ts")], {
       cwd: checkout,
       env: {
         ...fixtureGitEnv(),
@@ -148,7 +142,7 @@ function play(scenario: Scenario): Outcome {
   } else if (scenario.verdict !== "absent") {
     writeVerdict(verdictFile, scenario.verdict);
   }
-  const report = boundedSpawnSync([process.execPath, join(actionPath, "src/report.ts")], {
+  const report = boundedSpawnSync([process.execPath, join(ACTION, "src/report.ts")], {
     env: {
       ...process.env,
       GITHUB_STEP_SUMMARY: summary,
