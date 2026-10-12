@@ -43,6 +43,6 @@ The one file the writer renders instead of copying is `.github/settings.yml`, fo
 
 The sync targets this repository like any other: its [.repo-platform.yml](../../../.repo-platform.yml) registers it, and the writer keeps its root copies of the files it ships (`.editorconfig`, the `.gitignore` region, `LICENSE.md`, the `AGENTS.md` region, the rendered `.github/settings.yml`, the links) by sync PR, recorded in its own manifest.
 
-- **Its `except`:** the paths whose file is this repository's own and cannot be the fleet's (its `ci.yml`, `dependabot.yml`, `.yamllint`, and the starters it does not take).
+- **Its `except`:** the paths whose file is this repository's own and cannot be the fleet's (its `ci.yml`, `dependabot.yml`, `.yamllint`, and the starters it does not take). A new starter and this repository's `except` for it take two PRs: the check judges the registration at the recorded commit ([manifest.md](manifest.md#judged-at-the-synced-commit)), which knows the path only after the sync that records it here.
 - **Its CI** runs the [plan action](../../../actions/plan/action.yml) over the registration and then the [validate-managed-files action](../../../actions/validate-managed-files/action.yml) from the checkout, as fleet CI does: this checkout's action shell runs, the recorded commit's `check.ts` judges. A PR that changes `files/` stays green until this repository syncs itself.
 - **Its `.yamllint`** ignores `files`, so the writer's templates (placeholder tokens, not YAML) are outside yamllint.

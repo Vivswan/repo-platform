@@ -151,5 +151,8 @@ const judged =
   commit === "" ? notJudged(requireEnv("COMMIT_PROBLEM")) : judgeAtRecordedCommit(commit);
 const verdict = merge(judged, hygiene());
 writeVerdict(verdictFile, verdict);
+// The writer's output is captured into the verdict, never printed, so this is the log's one line for the whole.
 if (verdict.kind === "not-judged") error(verdict.reason);
+else if (verdict.kind === "clean") console.log("Verdict: clean.");
+else console.log("Verdict: findings; the report step carries them to the step summary.");
 process.exit(verdict.kind === "clean" ? 0 : 1);

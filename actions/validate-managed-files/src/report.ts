@@ -46,4 +46,5 @@ appendFileSync(summaryFile, `${body}\n`);
 // left (clean) - a clean repository has nothing worth a comment.
 writeFileSync(commentFile, `${body}\n`);
 appendFileSync(outputFile, `report=${blocking ? "findings" : "clean"}\n`);
+console.log(`Managed files check: ${verdict.kind}${blocking ? ", in the step summary" : ""}.`);
 process.exit(blocking ? 1 : 0);
