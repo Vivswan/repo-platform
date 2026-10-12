@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dependency manifest for the check-file-size action: @actions/core writes its annotations and step summary.",
   "devDependencies": {
-    "@types/bun": "1.4.2",
+    "@types/bun": "1.4.3",
     "typescript": "^7.0.2"
   },
   "dependencies": {
