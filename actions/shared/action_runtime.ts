@@ -25,11 +25,15 @@ export type ChildExit =
 export function childExit(proc: {
   exitedDueToTimeout?: boolean;
   exitCode: number | null;
-  signalCode?: string | null;
+  // bun names the signal or, since 1.4.3's types, numbers it.
+  signalCode?: string | number | null;
 }): ChildExit {
   if (proc.exitedDueToTimeout === true) return { kind: "timed-out" };
   if (proc.exitCode !== null) return { kind: "exited", code: proc.exitCode };
-  return { kind: "signaled", signal: proc.signalCode ?? "an unknown signal" };
+  return {
+    kind: "signaled",
+    signal: proc.signalCode == null ? "an unknown signal" : String(proc.signalCode),
+  };
 }
 
 export function succeeded(exit: ChildExit): boolean {

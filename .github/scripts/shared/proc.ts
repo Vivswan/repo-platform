@@ -37,13 +37,19 @@ export function redactCommand(command: string[]): string {
   return command.map(redactText).join(" ");
 }
 
+/** bun reports the killing signal by name or, since 1.4.3's types, by number; either becomes the shell's 128 + N. */
+export type SignalCode = string | number | null | undefined;
+
 /** Bash-style exit code: the command's own, or 128+signal when it was
  * killed (a signal-terminated child reports exitCode null). */
-export function exitCodeOf(proc: { exitCode: number | null; signalCode?: string | null }): number {
+export function exitCodeOf(proc: { exitCode: number | null; signalCode?: SignalCode }): number {
   if (proc.exitCode !== null) return proc.exitCode;
-  const signal = proc.signalCode
-    ? (constants.signals as Record<string, number | undefined>)[proc.signalCode]
-    : undefined;
+  const signal =
+    typeof proc.signalCode === "number"
+      ? proc.signalCode
+      : proc.signalCode
+        ? (constants.signals as Record<string, number | undefined>)[proc.signalCode]
+        : undefined;
   return signal !== undefined ? 128 + signal : 1;
 }
 
@@ -51,7 +57,7 @@ export function exitCodeOf(proc: { exitCode: number | null; signalCode?: string 
  * must never read as success. */
 export function timeoutExitCode(proc: {
   exitCode: number | null;
-  signalCode?: string | null;
+  signalCode?: SignalCode;
 }): number {
   const code = exitCodeOf(proc);
   return code === 0 ? 124 : code;
