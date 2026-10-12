@@ -36,9 +36,13 @@ const step = (id: string) => steps.find((candidate) => candidate.id === id);
 describe("reusable-site.yml", () => {
   // The escaped-dot patterns must match the assembly's own-origin remap (actions/pages-site/build.ts), and the lowercase host is
   // lychee's reporting convention: a link to the own site in another case would be reported as external.
-  test("the urls step, executed, resolves the project-pages base path and the lowercase owner origin", () => {
+  // The remap is lychee's regex pair (pattern, a space, the replacement with $N captures): a blob link into the own
+  // default branch, in any letter case, with a line fragment, a query, or a trailing slash (GitHub serves all three),
+  // must land on the checkout's file, and
+  // another repository's link must not match, or GitHub's 503 on anonymous blob crawls would be back as rot.
+  test("the urls step, executed, resolves the project-pages base path, the lowercase owner origin, and the tree remap", () => {
     const urls = step("urls");
-    expect(urls?.env).toBeUndefined();
+    expect(urls?.env).toEqual({ DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}" });
     const output = join(temp.dir("reusable-site-urls-"), "output");
     writeFileSync(output, "");
     const result = spawnSync(
@@ -51,9 +55,14 @@ describe("reusable-site.yml", () => {
           GITHUB_OUTPUT: output,
           GITHUB_SERVER_URL: "https://github.com",
           GITHUB_REPOSITORY: "Vivswan/Example-Repo",
+          GITHUB_WORKSPACE: "/home/runner/work/Example-Repo/Example-Repo",
+          DEFAULT_BRANCH: "main",
         },
       },
     );
+    const remap =
+      "(?i)^https://github\\.com/Vivswan/Example-Repo/(blob|tree)/main/([^?#]*?)/*([?#].*)?$ " +
+      "file:///home/runner/work/Example-Repo/Example-Repo/$2";
     expect({
       status: result.status,
       stdout: result.stdout,
@@ -66,8 +75,26 @@ describe("reusable-site.yml", () => {
         "origin=https://vivswan.github.io",
         "own_links=^https://vivswan\\.github\\.io/Example-Repo([/?#]|$)",
         "edit_links=^https://github\\.com/Vivswan/Example-Repo/edit/",
+        `tree_links=${remap}`,
         "",
       ].join("\n"),
+    });
+    // Rust's inline (?i) is JavaScript's i flag; the capture syntax is the same.
+    const [pattern, replacement] = remap.split(" ");
+    const regex = new RegExp(pattern.replace(/^\(\?i\)/, ""), "i");
+    const apply = (url: string) => (regex.test(url) ? url.replace(regex, replacement) : url);
+    expect({
+      blobWithFragment: apply("https://github.com/vivswan/example-repo/blob/main/src/a.ts#L10-L12"),
+      treeWithQuery: apply("https://github.com/Vivswan/Example-Repo/tree/main/docs?plain=1"),
+      trailingSlash: apply("https://github.com/Vivswan/Example-Repo/blob/main/README.md/"),
+      otherRepo: apply("https://github.com/Vivswan/other/blob/main/README.md"),
+      otherBranch: apply("https://github.com/Vivswan/Example-Repo/blob/v1.2.0/src/a.ts"),
+    }).toEqual({
+      blobWithFragment: "file:///home/runner/work/Example-Repo/Example-Repo/src/a.ts",
+      treeWithQuery: "file:///home/runner/work/Example-Repo/Example-Repo/docs",
+      trailingSlash: "file:///home/runner/work/Example-Repo/Example-Repo/README.md",
+      otherRepo: "https://github.com/Vivswan/other/blob/main/README.md",
+      otherBranch: "https://github.com/Vivswan/Example-Repo/blob/v1.2.0/src/a.ts",
     });
   });
 

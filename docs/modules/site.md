@@ -275,6 +275,8 @@ The nightly run checks the deployed site's EXTERNAL links after publishing with 
 
 **Retries:** a timed-out or rate-limited (429) request is retried three times before it counts, and one that keeps failing is reported under its own status.
 
+**Links into the repository's own tree** (`github.com/<owner>/<repo>/blob/<default branch>/...`, `tree/` too) are never fetched: lychee remaps each to the checkout's path and judges it by the file, so a moved or deleted file still rots and a query or line fragment changes nothing. github.com answers an anonymous crawl of blob pages with 503, and the tree is their truth anyway.
+
 | Skipped | Why |
 |---|---|
 | the theme's "Edit this page" links | theme output an anonymous crawl cannot judge (auth redirect, 404 on a private repository) |
