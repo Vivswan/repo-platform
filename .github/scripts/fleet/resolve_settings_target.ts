@@ -23,4 +23,4 @@ if (newer !== null) {
   process.exit(0);
 }
 
-resolveTarget("resolve_settings_target", (target) => `TARGET=${target.repo}\n`);
+resolveTarget("resolve_settings_target", (target) => ({ TARGET: target.repo }));
