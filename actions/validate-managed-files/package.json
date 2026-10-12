@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dependency manifest for the validate-managed-files action: @actions/core annotates the step scripts under src/ and writes their summary lines, the hygiene validator carries no runtime dependency, and check.ts runs from the platform checkout with that checkout's dependencies.",
   "devDependencies": {
-    "@types/bun": "1.4.2",
+    "@types/bun": "1.4.3",
     "typescript": "^7.0.2"
   },
   "dependencies": {

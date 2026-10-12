@@ -6,7 +6,7 @@
     "knip": "6.35.1"
   },
   "devDependencies": {
-    "@types/bun": "1.4.2",
+    "@types/bun": "1.4.3",
     "typescript": "^7.0.2"
   }
 }

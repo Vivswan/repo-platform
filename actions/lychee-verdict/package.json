@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dependency manifest for the lychee-verdict action: @actions/core annotates an exit code lychee never published.",
   "devDependencies": {
-    "@types/bun": "1.4.2",
+    "@types/bun": "1.4.3",
     "typescript": "^7.0.2"
   },
   "dependencies": {
