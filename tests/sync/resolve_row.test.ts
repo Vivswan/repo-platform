@@ -9,6 +9,7 @@ import { supersededNotice } from "../../.github/scripts/fleet/newest_main.ts";
 import { MIN_MASKED_NAME, maskForms } from "../../.github/scripts/shared/mask.ts";
 import { matrixRows, resolveRow, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { parseGithubEnv } from "../shared/github_output";
 import { STUB_GIT_FAIL_REFUSAL, writeStubGit } from "../shared/stub_git";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -44,7 +45,8 @@ interface Run {
   exitCode: number;
   stdout: string;
   stderr: string;
-  env: string;
+  /** The variables GITHUB_ENV carries, read back as the runner reads them. */
+  env: Record<string, string>;
   calls: string[];
 }
 
@@ -54,13 +56,13 @@ const ENTRIES = [
   {
     script: "sync/resolve_row.ts",
     label: "resolve_row",
-    handOn: (row: Row) => `TARGET=${row.repo}\nTARGET_PRIVATE=${row.private}\n`,
+    handOn: (row: Row) => ({ TARGET: row.repo, TARGET_PRIVATE: String(row.private) }),
     newestWins: false,
   },
   {
     script: "fleet/resolve_settings_target.ts",
     label: "resolve_settings_target",
-    handOn: (row: Row) => `TARGET=${row.repo}\n`,
+    handOn: (row: Row) => ({ TARGET: row.repo }),
     newestWins: true,
   },
 ];
@@ -135,7 +137,7 @@ function run(script: string, env: Record<string, string | undefined>): Run {
   });
   return {
     ...result,
-    env: readFileSync(envFile, "utf-8"),
+    env: parseGithubEnv(readFileSync(envFile, "utf-8")),
     calls: readFileSync(callsFile, "utf-8")
       .split("\n")
       .filter((line) => line !== ""),
@@ -162,7 +164,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
     exitCode,
     stdout: `::error::${error}\n`,
     stderr: "",
-    env: "",
+    env: {},
     calls,
   });
   const MOVED =
@@ -220,7 +222,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
         exitCode: 1,
         stdout: "",
         stderr: "HTTP 500 from stub\n",
-        env: "",
+        env: {},
         calls: [...before, LISTING],
       },
     },
@@ -244,7 +246,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
               exitCode: 0,
               stdout: `::notice::${supersededNotice(SHA, NEWER_SHA)}\n`,
               stderr: "",
-              env: "",
+              env: {},
               calls: [TIP_READ],
             },
           },
@@ -263,7 +265,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
   ])("$reason: the row writes no TARGET and names no repository", ({ env, outcome }) => {
     const result = run(script, env);
     expect(result).toEqual(outcome);
-    for (const channel of [result.stdout, result.stderr, result.env]) {
+    for (const channel of [result.stdout, result.stderr, ...Object.values(result.env)]) {
       for (const name of ["pub-repo", "hidden-server", "revoked-mid-run", "shapeless"]) {
         expect(channel.toLowerCase()).not.toContain(name);
       }
@@ -320,7 +322,7 @@ describe("resolve_row.ts with a dispatched branch", () => {
       exitCode: 1,
       stdout: `${masks(rows[0])}::error::${error}\n`,
       stderr: "",
-      env: "",
+      env: {},
       calls: [LISTING, probe(rows[0])],
     });
   });
