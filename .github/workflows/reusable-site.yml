@@ -44,9 +44,10 @@ jobs:
       # The owner is lowercased: Pages serves <owner>.github.io in lowercase and lychee reports hosts
       # that way, so the own-site exclude matches. The excludes and the remap are regexes, hence the
       # escaped dots (the assembly's own-origin remap in actions/pages-site/build.ts escapes the same way).
-      # tree_links: a github.com link into this repository's own default branch becomes the checkout's
-      # path, so lychee judges it by the tree ($2 is the path; trailing slashes, the query, and the
-      # fragment are dropped, since GitHub serves them and a file path does not).
+      # tree_links: a github.com link into this repository's own default branch, as spelled, becomes the
+      # checkout's path, so lychee judges it by the tree ($2 is the path; trailing slashes, the query, and
+      # the fragment are dropped, since GitHub serves them and a file path does not). Case-sensitive: a
+      # branch in another case is another ref, and a link spelled otherwise stays a network check.
       - name: Resolve the site URLs
         id: urls
         env:
@@ -62,7 +63,7 @@ jobs:
             echo "origin=$origin"
             echo "own_links=^${site_url//./\\.}([/?#]|$)"
             echo "edit_links=^${edit_url//./\\.}"
-            echo "tree_links=(?i)^${tree_url//./\\.}(blob|tree)/${DEFAULT_BRANCH}/([^?#]*?)/*([?#].*)?$ file://$GITHUB_WORKSPACE/\$2"
+            echo "tree_links=^${tree_url//./\\.}(blob|tree)/${DEFAULT_BRANCH}/([^?#]*?)/*([?#].*)?$ file://$GITHUB_WORKSPACE/\$2"
           } >> "$GITHUB_OUTPUT"
 
       # A repository without the hook publishes docs/ alone, when it has one; the assembly says so with a notice.

@@ -37,9 +37,9 @@ describe("reusable-site.yml", () => {
   // The escaped-dot patterns must match the assembly's own-origin remap (actions/pages-site/build.ts), and the lowercase host is
   // lychee's reporting convention: a link to the own site in another case would be reported as external.
   // The remap is lychee's regex pair (pattern, a space, the replacement with $N captures): a blob link into the own
-  // default branch, in any letter case, with a line fragment, a query, or a trailing slash (GitHub serves all three),
-  // must land on the checkout's file, and
-  // another repository's link must not match, or GitHub's 503 on anonymous blob crawls would be back as rot.
+  // default branch, with a line fragment, a query, or a trailing slash (GitHub serves all three), must land on the
+  // checkout's file; another repository's link, another branch, or the branch in another case (another ref) must
+  // not match, or GitHub's 503 on anonymous blob crawls would be back as rot, or a dead ref would read as alive.
   test("the urls step, executed, resolves the project-pages base path, the lowercase owner origin, and the tree remap", () => {
     const urls = step("urls");
     expect(urls?.env).toEqual({ DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}" });
@@ -61,7 +61,7 @@ describe("reusable-site.yml", () => {
       },
     );
     const remap =
-      "(?i)^https://github\\.com/Vivswan/Example-Repo/(blob|tree)/main/([^?#]*?)/*([?#].*)?$ " +
+      "^https://github\\.com/Vivswan/Example-Repo/(blob|tree)/main/([^?#]*?)/*([?#].*)?$ " +
       "file:///home/runner/work/Example-Repo/Example-Repo/$2";
     expect({
       status: result.status,
@@ -79,22 +79,24 @@ describe("reusable-site.yml", () => {
         "",
       ].join("\n"),
     });
-    // Rust's inline (?i) is JavaScript's i flag; the capture syntax is the same.
+    // Rust's and JavaScript's regex syntax agree on these constructs.
     const [pattern, replacement] = remap.split(" ");
-    const regex = new RegExp(pattern.replace(/^\(\?i\)/, ""), "i");
+    const regex = new RegExp(pattern);
     const apply = (url: string) => (regex.test(url) ? url.replace(regex, replacement) : url);
     expect({
-      blobWithFragment: apply("https://github.com/vivswan/example-repo/blob/main/src/a.ts#L10-L12"),
+      blobWithFragment: apply("https://github.com/Vivswan/Example-Repo/blob/main/src/a.ts#L10-L12"),
       treeWithQuery: apply("https://github.com/Vivswan/Example-Repo/tree/main/docs?plain=1"),
       trailingSlash: apply("https://github.com/Vivswan/Example-Repo/blob/main/README.md/"),
       otherRepo: apply("https://github.com/Vivswan/other/blob/main/README.md"),
       otherBranch: apply("https://github.com/Vivswan/Example-Repo/blob/v1.2.0/src/a.ts"),
+      branchInAnotherCase: apply("https://github.com/Vivswan/Example-Repo/blob/MAIN/README.md"),
     }).toEqual({
       blobWithFragment: "file:///home/runner/work/Example-Repo/Example-Repo/src/a.ts",
       treeWithQuery: "file:///home/runner/work/Example-Repo/Example-Repo/docs",
       trailingSlash: "file:///home/runner/work/Example-Repo/Example-Repo/README.md",
       otherRepo: "https://github.com/Vivswan/other/blob/main/README.md",
       otherBranch: "https://github.com/Vivswan/Example-Repo/blob/v1.2.0/src/a.ts",
+      branchInAnotherCase: "https://github.com/Vivswan/Example-Repo/blob/MAIN/README.md",
     });
   });
 
