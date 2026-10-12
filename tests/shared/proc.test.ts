@@ -169,6 +169,12 @@ describe("timeoutExitCode", () => {
       124,
     ],
     ["a killed child keeps 128+signal", { exitCode: null, signalCode: "SIGKILL" }, 137],
+    // bun 1.4.3's types report the signal by number too; the shell convention is the same.
+    [
+      "a killed child reported by signal number keeps 128+signal",
+      { exitCode: null, signalCode: 9 },
+      137,
+    ],
     ["a failed child keeps its own code", { exitCode: 3, signalCode: null }, 3],
   ])("%s", (_reason, proc, expected) => {
     expect(timeoutExitCode(proc)).toBe(expected);
