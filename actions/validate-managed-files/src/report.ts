@@ -39,6 +39,8 @@ switch (verdict.kind) {
 const blocking = verdict.kind !== "clean";
 
 const body = `### Managed files check\n\n${integrity}`;
+// Appended by hand, the one summary writer not @actions/core's: this step runs on always(), after a failed
+// install too (action.yml), so nothing here may need node_modules.
 appendFileSync(summaryFile, `${body}\n`);
 
 // The sticky steps in action.yml read both: the body from the file, and

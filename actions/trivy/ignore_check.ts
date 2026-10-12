@@ -1,8 +1,9 @@
 // Every bypass entry carries an expiry and a reason, so Trivy drops it when the date passes and the finding blocks again on its own.
 // The plain .trivyignore format has no expiry field, so its presence fails the check; so does the zero date, which Trivy keeps forever.
 
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { error, requireEnv, warning } from "../shared/action_runtime.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { error, setFailed, setOutput, warning } from "@actions/core";
+import { messageOf } from "../shared/action_runtime.ts";
 import { isMapping } from "../shared/values.ts";
 
 export const IGNORE_FILE = ".trivyignore.yaml";
@@ -87,31 +88,36 @@ export function checkIgnoreFile(text: string, today: Date): IgnoreCheck {
 }
 
 function main(): number {
-  const output = requireEnv("GITHUB_OUTPUT");
   if (existsSync(PLAIN_IGNORE_FILE)) {
     error(
       `${PLAIN_IGNORE_FILE} is not honored: its entries never expire. Move each one into ${IGNORE_FILE} with a statement and an expired_at date.`,
-      PLAIN_IGNORE_FILE,
+      { file: PLAIN_IGNORE_FILE },
     );
     return 1;
   }
   if (!existsSync(IGNORE_FILE)) {
-    appendFileSync(output, "ignorefile=\n");
+    setOutput("ignorefile", "");
     console.log(`no ${IGNORE_FILE}: nothing is bypassed`);
     return 0;
   }
   const today = new Date(new Date().toISOString().slice(0, 10));
   const { problems, expired } = checkIgnoreFile(readFileSync(IGNORE_FILE, "utf-8"), today);
-  for (const problem of problems) error(`${IGNORE_FILE}: ${problem}`, IGNORE_FILE);
+  for (const problem of problems) error(`${IGNORE_FILE}: ${problem}`, { file: IGNORE_FILE });
   for (const name of expired) {
     warning(
       `${IGNORE_FILE}: ${name} has expired; Trivy no longer ignores it - fix the finding or delete the entry`,
     );
   }
   if (problems.length > 0) return 1;
-  appendFileSync(output, `ignorefile=${IGNORE_FILE}\n`);
+  setOutput("ignorefile", IGNORE_FILE);
   console.log(`${IGNORE_FILE}: every entry carries a statement and an expiry`);
   return 0;
 }
 
-if (import.meta.main) process.exit(main());
+if (import.meta.main) {
+  try {
+    process.exit(main());
+  } catch (cause) {
+    setFailed(messageOf(cause));
+  }
+}

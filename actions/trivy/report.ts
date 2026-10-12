@@ -2,16 +2,10 @@
 // A finding's matched secret text never leaves the JSON: the report names the rule, the file, and the line.
 
 import { createHash } from "node:crypto";
-import {
-  appendFileSync,
-  copyFileSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { requireEnv } from "../shared/action_runtime.ts";
+import { setFailed, setOutput } from "@actions/core";
+import { messageOf, requireEnv } from "../shared/action_runtime.ts";
 import { IGNORE_FILE } from "./ignore_check.ts";
 
 export const SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] as const;
@@ -162,15 +156,13 @@ export function writeReports(reports: TargetReport[], reportDir: string, results
 
 function main(): number {
   const reportDir = requireEnv("REPORT_DIR");
-  const output = requireEnv("GITHUB_OUTPUT");
   const results = requireEnv("RESULTS");
   const reports = collectFindings(JSON.parse(readFileSync(results, "utf-8")));
   writeReports(reports, reportDir, results);
   const all = reports.flatMap((report) => report.findings);
-  appendFileSync(
-    output,
-    `findings=${all.length}\nfound=${all.length > 0}\nreport-dir=${reportDir}\n`,
-  );
+  setOutput("findings", String(all.length));
+  setOutput("found", String(all.length > 0));
+  setOutput("report-dir", reportDir);
   if (all.length === 0) {
     console.log("trivy found nothing");
     return 0;
@@ -184,4 +176,10 @@ function main(): number {
   return 0;
 }
 
-if (import.meta.main) process.exit(main());
+if (import.meta.main) {
+  try {
+    process.exit(main());
+  } catch (cause) {
+    setFailed(messageOf(cause));
+  }
+}

@@ -34,6 +34,13 @@ runs:
       with:
         from: ${{ github.action_path }}
 
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
     # The script records report=findings|clean|error itself; a crash before
     # that leaves it empty, which posts no comment. The comment steps read it
     # on !cancelled(), so the comment is posted before the job turns red.

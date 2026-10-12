@@ -15,6 +15,7 @@ import {
   reportBody,
 } from "../../../actions/trivy/report";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { readGithubOutput } from "../../shared/github_output";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -207,14 +208,14 @@ describe("the report step", () => {
         REPORT_DIR: reportDir,
       },
     });
-    return { ...result, reportDir, output: readFileSync(output, "utf-8") };
+    return { ...result, reportDir, output: readGithubOutput(output) };
   };
 
   test.each<{
     reason: string;
     results: unknown;
     listing: string[];
-    outputs: string;
+    outputs: Record<string, string>;
     says: string[];
   }>([
     {
@@ -227,7 +228,7 @@ describe("the report step", () => {
         "tests_fixtures_keys.env",
         "trivy.json",
       ],
-      outputs: "findings=6\nfound=true\n",
+      outputs: { findings: "6", found: "true" },
       says: [
         "trivy found 6 finding(s) in 3 target(s): 2 CRITICAL, 1 HIGH, 1 MEDIUM, 1 LOW, 1 UNKNOWN",
         "  Dockerfile: 1 HIGH, 1 LOW",
@@ -237,7 +238,7 @@ describe("the report step", () => {
       reason: "a clean scan: an empty report directory and findings=0",
       results: { Results: [{ Target: "bun.lock", Class: "lang-pkgs", Type: "bun" }] },
       listing: [],
-      outputs: "findings=0\nfound=false\n",
+      outputs: { findings: "0", found: "false" },
       says: ["trivy found nothing"],
     },
     {
@@ -255,7 +256,7 @@ describe("the report step", () => {
         ],
       },
       listing: [RESULTS_NAME, `${RESULTS_NAME}-2`],
-      outputs: "findings=1\nfound=true\n",
+      outputs: { findings: "1", found: "true" },
       says: ["trivy found 1 finding(s) in 1 target(s): 1 CRITICAL"],
     },
   ])("$reason", ({ results, listing, outputs, says }) => {
@@ -263,7 +264,7 @@ describe("the report step", () => {
     expect([result.exitCode, readdirSync(result.reportDir).sort(), result.output]).toEqual([
       0,
       listing,
-      `${outputs}report-dir=${result.reportDir}\n`,
+      { ...outputs, "report-dir": result.reportDir },
     ]);
     expect(says.filter((line) => result.stdout.includes(line))).toEqual(says);
     if (listing.length > 0) {

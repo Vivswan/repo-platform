@@ -3,10 +3,11 @@
 // text was recorded, and `problem` is the red check's whole instruction to the operator.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { MANIFEST_NAME } from "../../../actions/shared/platform";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { readGithubOutput } from "../../shared/github_output";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -24,38 +25,43 @@ const REVERT = "revert the edit (git history has the stamped original) or dispat
 const NOT_A_SHA = `${MANIFEST_NAME} names no full 40-hex commit in its own entry; ${REVERT}`;
 
 describe("the read-commit step", () => {
-  test.each<{ reason: string; tree: Record<string, string>; outputs: string }>([
+  const problem = (text: string) => ({ commit: "", problem: text });
+  test.each<{ reason: string; tree: Record<string, string>; outputs: Record<string, string> }>([
     {
       reason: "a stamped self entry",
       tree: { [MANIFEST_NAME]: STAMPED },
-      outputs: `commit=${COMMIT}\nproblem=\n`,
+      outputs: { commit: COMMIT, problem: "" },
     },
     {
       reason: "no manifest",
       tree: {},
-      outputs: `commit=\nproblem=${MANIFEST_NAME} is missing; every sync writes it, so restore it from git history or dispatch a sync\n`,
+      outputs: problem(
+        `${MANIFEST_NAME} is missing; every sync writes it, so restore it from git history or dispatch a sync`,
+      ),
     },
     {
       reason: "a directory at the manifest's path",
       tree: { [`${MANIFEST_NAME}/keep`]: "" },
-      outputs: `commit=\nproblem=${MANIFEST_NAME} cannot be read (EISDIR); restore the file from git history or dispatch a sync\n`,
+      outputs: problem(
+        `${MANIFEST_NAME} cannot be read (EISDIR); restore the file from git history or dispatch a sync`,
+      ),
     },
     {
       reason: "a manifest that is not JSON",
       tree: { [MANIFEST_NAME]: "{ not json" },
-      outputs: `commit=\nproblem=${MANIFEST_NAME} does not parse as a manifest (invalid JSON); ${REVERT}\n`,
+      outputs: problem(`${MANIFEST_NAME} does not parse as a manifest (invalid JSON); ${REVERT}`),
     },
     {
       reason: "a self entry without its commit",
       tree: { [MANIFEST_NAME]: manifest('{"class": "managed", "hash": null}') },
-      outputs: `commit=\nproblem=${NOT_A_SHA}\n`,
+      outputs: problem(NOT_A_SHA),
     },
     {
       reason: "no self entry at all",
       tree: {
         [MANIFEST_NAME]: `{"files": {".bun-version": {"class": "managed", "hash": "${"a".repeat(64)}"}}}`,
       },
-      outputs: `commit=\nproblem=${NOT_A_SHA}\n`,
+      outputs: problem(NOT_A_SHA),
     },
     {
       reason: "a short sha",
@@ -64,7 +70,7 @@ describe("the read-commit step", () => {
           `{"class": "managed", "hash": null, "commit": "${COMMIT.slice(0, 12)}"}`,
         ),
       },
-      outputs: `commit=\nproblem=${NOT_A_SHA}\n`,
+      outputs: problem(NOT_A_SHA),
     },
     {
       reason: "an uppercase sha",
@@ -73,12 +79,12 @@ describe("the read-commit step", () => {
           `{"class": "managed", "hash": null, "commit": "${COMMIT.toUpperCase()}"}`,
         ),
       },
-      outputs: `commit=\nproblem=${NOT_A_SHA}\n`,
+      outputs: problem(NOT_A_SHA),
     },
     {
       reason: "a commit that is not a string",
       tree: { [MANIFEST_NAME]: manifest('{"class": "managed", "hash": null, "commit": null}') },
-      outputs: `commit=\nproblem=${NOT_A_SHA}\n`,
+      outputs: problem(NOT_A_SHA),
     },
   ])("$reason", ({ tree, outputs }) => {
     const root = temp.dir("read-commit-");
@@ -92,6 +98,6 @@ describe("the read-commit step", () => {
       cwd: root,
       env: { GITHUB_OUTPUT: file },
     });
-    expect([run.exitCode, readFileSync(file, "utf8")]).toEqual([0, outputs]);
+    expect([run.exitCode, readGithubOutput(file)]).toEqual([0, outputs]);
   });
 });

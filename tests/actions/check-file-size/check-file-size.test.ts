@@ -24,6 +24,7 @@ import { loadAction, stepNamed } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { checkout } from "../../shared/fixture_checkout.ts";
 import { fixtureGitEnv } from "../../shared/fixture_git.ts";
+import { readGithubOutput } from "../../shared/github_output.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -874,7 +875,7 @@ describe("the CLI", () => {
       stderr: proc.stderr.trimEnd().split("\n"),
       comment: existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : null,
       summary: readFileSync(summaryPath, "utf-8"),
-      output: readFileSync(outputPath, "utf-8"),
+      output: readGithubOutput(outputPath),
     };
   };
   const notGit = () => temp.dir("check-file-size-notgit-");
@@ -899,15 +900,15 @@ describe("the CLI", () => {
           `::warning::src/chatty.ts:2: ${COMMENT_CAPS.block + 1} comment lines (cap ${COMMENT_CAPS.block})`,
           `::warning::src/header.ts:1: ${COMMENT_CAPS.header + 1} comment lines (cap ${COMMENT_CAPS.header} for a header)`,
           `::warning::src/marker.sh:1: ${COMMENT_MARKER} needs a reason`,
-        ],
-        stderr: [
           `::error::src/big.ts: ${hardLines} lines (cap ${HARD.lines.source} for source)`,
           `::error::src/wide.sh:1: 279 chars (cap ${HARD_WIDTH})`,
+        ],
+        stderr: [
           `2 finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
         ],
         comment: findingsBody,
         summary: findingsBody,
-        output: `report=${POSTED}\n`,
+        output: { report: POSTED },
       }),
     ],
     [
@@ -925,7 +926,7 @@ describe("the CLI", () => {
         stderr: [""],
         comment: warmBody,
         summary: warmBody,
-        output: `report=${POSTED}\n`,
+        output: { report: POSTED },
       }),
     ],
     [
@@ -937,14 +938,13 @@ describe("the CLI", () => {
         }),
       () => ({
         exitCode: 1,
-        stdout: [""],
+        stdout: [`::error::${stale}`],
         stderr: [
-          `::error::${stale}`,
           `1 finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
         ],
         comment: staleBody,
         summary: staleBody,
-        output: `report=${POSTED}\n`,
+        output: { report: POSTED },
       }),
     ],
     [
@@ -960,7 +960,7 @@ describe("the CLI", () => {
         stderr: [""],
         comment: null,
         summary: cleanBody,
-        output: `report=${DELETED}\n`,
+        output: { report: DELETED },
       }),
     ],
     [
@@ -968,11 +968,11 @@ describe("the CLI", () => {
       notGit,
       (root) => ({
         exitCode: 1,
-        stdout: [""],
-        stderr: [`::error::check-file-size did not run to completion: ${gitMessage(root)}`],
+        stdout: [`::error::check-file-size did not run to completion: ${gitMessage(root)}`],
+        stderr: [""],
         comment: null,
         summary: `## File size check\n\nThe check did not run to completion: ${gitMessage(root)}\n`,
-        output: "report=error\n",
+        output: { report: "error" },
       }),
     ],
   ])("%s", (_name, makeRoot, expected) => {

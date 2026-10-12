@@ -7,7 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { workflowCommand } from "../shared/action_runtime.ts";
+import * as core from "@actions/core";
 import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
 import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
 import { COMMENT_LINE, headerLines, isManaged } from "../shared/managed_header.ts";
@@ -416,19 +416,21 @@ export function report(outcome: Outcome): string {
 const REMEDY = `Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`;
 
 if (import.meta.main) {
-  await runCheck<Verdict>({
-    name: "check-file-size",
-    check,
-    outcomeOf,
-    report,
-    warnings: (verdict) =>
-      verdict.warnings.map((warning) => workflowCommand("warning", describe(warning))),
-    errors: (verdict) =>
-      [...verdict.failures.map(describe), ...verdict.allowlistErrors].map((failure) =>
-        workflowCommand("error", failure),
-      ),
-    passed: (verdict) =>
-      `File size check passed (${verdict.warnings.length} warning(s), ${verdict.managedSkipped} managed file(s) skipped).`,
-    failed: (count) => `${count} finding(s). ${REMEDY}`,
-  });
+  await runCheck<Verdict>(
+    {
+      name: "check-file-size",
+      check,
+      outcomeOf,
+      report,
+      warnings: (verdict) => verdict.warnings.map((warning) => ({ message: describe(warning) })),
+      errors: (verdict) =>
+        [...verdict.failures.map(describe), ...verdict.allowlistErrors].map((message) => ({
+          message,
+        })),
+      passed: (verdict) =>
+        `File size check passed (${verdict.warnings.length} warning(s), ${verdict.managedSkipped} managed file(s) skipped).`,
+      failed: (count) => `${count} finding(s). ${REMEDY}`,
+    },
+    core,
+  );
 }

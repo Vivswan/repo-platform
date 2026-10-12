@@ -1,5 +1,6 @@
-// Dependency-free on purpose: a composite action runs from its own directory at the delivery commit,
-// where only its own pinned dependencies are installed.
+// DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal imports only. Annotations are the action's
+// own @actions/core, which bun resolves upward from the importing file: from an action's directory into its
+// node_modules, never from here. So nothing here annotates; a refusal throws, and the entry point annotates it.
 
 export function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
@@ -7,49 +8,12 @@ export function env(name: string, fallback = ""): string {
 
 export function requireEnv(name: string): string {
   const value = process.env[name];
-  if (value === undefined || value === "") {
-    error(`${name} must be set`);
-    process.exit(2);
-  }
+  if (value === undefined || value === "") throw new Error(`${name} must be set`);
   return value;
 }
 
-/** Workflow-command payloads escape newlines and carriage returns, or a
- *  multi-line message would terminate the command at the first break. */
-function escapeData(message: string): string {
-  return message.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-}
-
-/** A property value escapes the separators too. */
-function escapeProperty(value: string): string {
-  return escapeData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
-}
-
-/** The command line as GitHub reads it, for a caller that prints it where it wants (stderr, a captured line). */
-export function workflowCommand(
-  kind: "notice" | "warning" | "error",
-  message: string,
-  file?: string,
-  line?: number,
-): string {
-  const properties = [
-    ...(file === undefined ? [] : [`file=${escapeProperty(file)}`]),
-    ...(line === undefined ? [] : [`line=${line}`]),
-  ];
-  const where = properties.length === 0 ? "" : ` ${properties.join(",")}`;
-  return `::${kind}${where}::${escapeData(message)}`;
-}
-
-export function notice(message: string): void {
-  console.log(workflowCommand("notice", message));
-}
-
-export function warning(message: string): void {
-  console.log(workflowCommand("warning", message));
-}
-
-export function error(message: string, file?: string, line?: number): void {
-  console.log(workflowCommand("error", message, file, line));
+export function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 /** The deadline wins over the exit code: a child that exited 0 while an orphan held its pipe open still hit the deadline. */

@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { workflowCommand } from "../shared/action_runtime.ts";
+import * as core from "@actions/core";
 import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
 import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
 import { isManaged } from "../shared/managed_header.ts";
@@ -290,29 +290,24 @@ if (import.meta.main) {
       outcomeOf,
       report,
       warnings: (verdict) =>
-        verdict.unreadable.map((problem) =>
-          workflowCommand(
-            "warning",
-            `${where(problem)}: ${problem.message}; skipped`,
-            problem.path,
-            problem.written === undefined ? problem.line : undefined,
-          ),
-        ),
+        verdict.unreadable.map((problem) => ({
+          message: `${where(problem)}: ${problem.message}; skipped`,
+          file: problem.path,
+          line: problem.written === undefined ? problem.line : undefined,
+        })),
       errors: (verdict) => [
-        ...verdict.findings.map((finding) =>
-          workflowCommand(
-            "error",
-            describe(finding),
-            finding.path,
-            finding.written === undefined ? finding.line : undefined,
-          ),
-        ),
-        ...verdict.allowlistErrors.map((failure) => workflowCommand("error", failure)),
+        ...verdict.findings.map((finding) => ({
+          message: describe(finding),
+          file: finding.path,
+          line: finding.written === undefined ? finding.line : undefined,
+        })),
+        ...verdict.allowlistErrors.map((message) => ({ message })),
       ],
       passed: (verdict) => `Shell complexity check passed. ${census(verdict)}`,
       failed: (count) =>
         `${count} finding(s). Shell may nest no construct inside another; ${REMEDY}.`,
     },
+    core,
     rest,
   );
 }

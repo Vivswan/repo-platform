@@ -73,6 +73,13 @@ runs:
       with:
         from: ${{ github.action_path }}
 
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
     # The merge ref GitHub checks out by default already contains the base
     # tip, so the caller checks out the PR head; GITHUB_BASE_REF names the base.
     - name: Read whether the release PR contains the tip of its base branch

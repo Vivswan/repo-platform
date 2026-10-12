@@ -4,9 +4,10 @@
 // the step runs it, each code to one whole verdict.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { readGithubOutput } from "../../shared/github_output";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -23,18 +24,18 @@ const readVerdict = (exitCode: string | undefined) => {
       ...(exitCode === undefined ? {} : { EXIT_CODE: exitCode }),
     },
   });
-  return { status: run.exitCode, stdout: run.stdout, output: readFileSync(output, "utf8") };
+  return { status: run.exitCode, stdout: run.stdout, output: readGithubOutput(output) };
 };
 const noVerdict = (exitCode: string) => ({
   status: 1,
   stdout: `::error::lychee published no verdict: exit code '${exitCode}' (0 = clean, 2 = broken links)\n`,
-  output: "",
+  output: {},
 });
 
 describe("verdict.ts", () => {
   test.each([
-    { exitCode: "0", verdict: { status: 0, stdout: "", output: "found=false\n" } },
-    { exitCode: "2", verdict: { status: 0, stdout: "", output: "found=true\n" } },
+    { exitCode: "0", verdict: { status: 0, stdout: "", output: { found: "false" } } },
+    { exitCode: "2", verdict: { status: 0, stdout: "", output: { found: "true" } } },
     { exitCode: "1", verdict: noVerdict("1") },
     { exitCode: "3", verdict: noVerdict("3") },
     { exitCode: "", verdict: noVerdict("") },

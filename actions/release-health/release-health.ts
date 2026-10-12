@@ -21,13 +21,18 @@
  * A changed body is always release-please's rebuild: a merge there would leave the changelog without those commits.
  */
 
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import * as core from "@actions/core";
+import { messageOf } from "../shared/action_runtime.ts";
 import { LABEL_RE } from "../shared/label.ts";
 import { RELEASE_BRANCH_PREFIX } from "../shared/platform.ts";
 import { baseTip } from "./freshness.ts";
 
 /** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
 export type GhRunner = (args: string[]) => Promise<string>;
+
+/** The run's log, @actions/core's own in main; a test hands in a recorder. */
+export type Log = Pick<typeof core, "info" | "notice" | "warning" | "error">;
 
 const gh: GhRunner = async (args) => {
   const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
@@ -275,7 +280,7 @@ export async function stalePendingGuard(
   run: GhRunner,
   repo: string,
   now: Date,
-  out: (line: string) => void,
+  log: Log,
 ): Promise<number> {
   const merged = await mergedPendingPrs(run, repo);
   // gh's mergedAt carries whole seconds, so the cutoff does too: a merge exactly 30 minutes old is not yet stale.
@@ -288,12 +293,14 @@ export async function stalePendingGuard(
     return mergedAt < cutoff;
   });
   if (stale.length === 0) {
-    out(`no merged release PR has worn '${PENDING_LABEL}' past ${PENDING_GRACE_MINUTES} minutes`);
+    log.info(
+      `no merged release PR has worn '${PENDING_LABEL}' past ${PENDING_GRACE_MINUTES} minutes`,
+    );
     return 0;
   }
   const list = stale.map((pr) => `#${pr.number}`).join(", ");
-  out(
-    `::error::merged release PR(s) ${list} have worn '${PENDING_LABEL}' for over ${PENDING_GRACE_MINUTES} minutes, ` +
+  log.error(
+    `merged release PR(s) ${list} have worn '${PENDING_LABEL}' for over ${PENDING_GRACE_MINUTES} minutes, ` +
       "so release-please refuses to propose any new release ('untagged, merged release PRs outstanding'). " +
       "Re-run the CI run of that merge commit (only the run that judged the merge tags it), " +
       `or finish or abandon the release by hand and then move the label to '${TAGGED_LABEL}'.`,
@@ -428,7 +435,7 @@ export async function refreshVerdict(
   run: GhRunner,
   repo: string,
   eventPath: string,
-  out: (line: string) => void,
+  log: Log,
   sleep: (ms: number) => Promise<void>,
   checkoutTip: (base: string) => string,
 ): Promise<number> {
@@ -437,14 +444,14 @@ export async function refreshVerdict(
   const baseMoved = async (): Promise<boolean> => {
     const head = await branchHead(run, repo, base);
     if (head === tip) return false;
-    out(
-      `::error::${base} moved to ${head.slice(0, 7)} since this run checked it out at ${tip.slice(0, 7)}; this run cannot tell whether the refresh saw that commit, and its own green run refreshes the release PR`,
+    log.error(
+      `${base} moved to ${head.slice(0, 7)} since this run checked it out at ${tip.slice(0, 7)}; this run cannot tell whether the refresh saw that commit, and its own green run refreshes the release PR`,
     );
     return true;
   };
   const refreshed = async (head: string): Promise<number> => {
     if (await baseMoved()) return 1;
-    out(`::notice::release PR #${number} refreshed to ${head}; approve its run from the merge box`);
+    log.notice(`release PR #${number} refreshed to ${head}; approve its run from the merge box`);
     return 0;
   };
   const afterPropose = await pullRequestHead(run, repo, number);
@@ -456,13 +463,13 @@ export async function refreshVerdict(
   const pending = await mergedPendingPrs(run, repo);
   if (pending.length > 0) {
     const list = pending.map((pr) => `#${pr.number}`).join(", ");
-    out(
-      `::error::Release PR is behind ${base}, and release-please proposes nothing while merged release PR(s) ${list} wear '${PENDING_LABEL}'. Re-run this job once the cut has relabelled them '${TAGGED_LABEL}'.`,
+    log.error(
+      `Release PR is behind ${base}, and release-please proposes nothing while merged release PR(s) ${list} wear '${PENDING_LABEL}'. Re-run this job once the cut has relabelled them '${TAGGED_LABEL}'.`,
     );
     return 1;
   }
   if (await baseMoved()) return 1;
-  out(
+  log.info(
     `release-please left PR #${number} at ${judged.slice(0, 7)}: its body is unchanged, so the commits it lacks add no changelog line and merging ${base} loses none; asking GitHub to update the branch`,
   );
   await run([
@@ -481,8 +488,8 @@ export async function refreshVerdict(
     }
   }
   const waited = (UPDATE_BRANCH_POLLS * UPDATE_BRANCH_POLL_MS) / 1000;
-  out(
-    `::error::Release PR is behind ${base} and GitHub's branch update has not moved it within ${waited} s; its version and changelog would miss commits already on ${base}. Do not merge; release-please refreshes the PR after the next green run on ${base}.`,
+  log.error(
+    `Release PR is behind ${base} and GitHub's branch update has not moved it within ${waited} s; its version and changelog would miss commits already on ${base}. Do not merge; release-please refreshes the PR after the next green run on ${base}.`,
   );
   return 1;
 }
@@ -490,17 +497,17 @@ export async function refreshVerdict(
 export async function runHealthCheck(
   cfg: Config,
   run: GhRunner,
-  out: (line: string) => void,
+  log: Log,
   setOutput: (name: string, value: string) => void,
   now: Date = new Date(),
   sleep: (ms: number) => Promise<void> = Bun.sleep,
   checkoutTip: (base: string) => string = baseTip,
 ): Promise<number> {
   if (cfg.context.mode === "after-propose") {
-    return stalePendingGuard(run, cfg.repo, now, out);
+    return stalePendingGuard(run, cfg.repo, now, log);
   }
   if (cfg.context.mode === "after-refresh") {
-    return refreshVerdict(run, cfg.repo, cfg.context.eventPath, out, sleep, checkoutTip);
+    return refreshVerdict(run, cfg.repo, cfg.context.eventPath, log, sleep, checkoutTip);
   }
   let override: Override;
   if (cfg.context.mode === "release") {
@@ -512,12 +519,12 @@ export async function runHealthCheck(
         unmerged.length > 0
           ? ` (open release PR(s) associated: ${unmerged.map((n) => `#${n}`).join(", ")})`
           : "";
-      out(`::notice::release health: ${sha} is not a release-PR merge; nothing to gate${open}`);
+      log.notice(`release health: ${sha} is not a release-PR merge; nothing to gate${open}`);
       const head = await branchHead(run, cfg.repo, ref);
       setOutput("head-current", head === sha ? "true" : "false");
       if (head !== sha) {
-        out(
-          `::notice::${ref} moved to ${head.slice(0, 7)} since ${sha.slice(0, 7)} was judged; the newer run refreshes the release PR`,
+        log.notice(
+          `${ref} moved to ${head.slice(0, 7)} since ${sha.slice(0, 7)} was judged; the newer run refreshes the release PR`,
         );
       }
       return 0;
@@ -566,23 +573,23 @@ export async function runHealthCheck(
     const parts = outcomes
       .flatMap((o) => (o.status === "pass" ? [`${o.gate}: ${o.summary}`] : []))
       .join("; ");
-    out(`release health: all gates passed (${parts})`);
+    log.info(`release health: all gates passed (${parts})`);
     return 0;
   }
 
   if (override.active) {
     for (const failure of failures) {
-      out(`::warning::${failure.gate} gate failed: ${failure.problem}`);
+      log.warning(`${failure.gate} gate failed: ${failure.problem}`);
     }
     const names = failures.map((failure) => failure.gate).join(", ");
-    out(
-      `::notice::OVERRIDE: the '${OVERRIDE_LABEL}' label on release PR #${override.prNumber} bypassed ${failures.length} failing gate(s) (${names}); this release ships despite them`,
+    log.notice(
+      `OVERRIDE: the '${OVERRIDE_LABEL}' label on release PR #${override.prNumber} bypassed ${failures.length} failing gate(s) (${names}); this release ships despite them`,
     );
     return 0;
   }
 
   for (const failure of failures) {
-    out(`::error::${failure.gate} gate failed: ${failure.problem}. To release: ${failure.advice}`);
+    log.error(`${failure.gate} gate failed: ${failure.problem}. To release: ${failure.advice}`);
   }
   return 1;
 }
@@ -592,26 +599,18 @@ async function main(): Promise<number> {
   try {
     cfg = parseConfig(process.env);
   } catch (error) {
-    console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
+    core.error(messageOf(error));
     return 1;
   }
-  // A lost output would read as "not a release cut" and silently skip every tag.
-  const outputFile = process.env.GITHUB_OUTPUT;
-  if (!outputFile) {
-    throw new Error("GITHUB_OUTPUT is required");
-  }
-  return runHealthCheck(cfg, gh, console.log, (name, value) =>
-    appendFileSync(outputFile, `${name}=${value}\n`),
-  );
+  return runHealthCheck(cfg, gh, core, core.setOutput);
 }
 
 if (import.meta.main) {
   try {
     process.exit(await main());
   } catch (error) {
-    // ::error:: so an unexpected failure (a rate-limited gate, a broken gh)
-    // is annotated on the run like every deliberate gate failure.
-    console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
+    // Annotated, so an unexpected failure (a rate-limited gate, a broken gh)
+    // shows on the run like every deliberate gate failure.
+    core.setFailed(messageOf(error));
   }
 }

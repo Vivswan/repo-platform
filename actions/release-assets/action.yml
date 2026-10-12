@@ -35,6 +35,13 @@ runs:
       with:
         from: ${{ github.action_path }}
 
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
     - name: Inspect the draft release's assets
       id: inspect
       shell: bash

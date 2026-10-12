@@ -25,14 +25,16 @@ function fakeGh(assets: string[]): { run: GhRunner; calls: string[][] } {
 // fleet-release-publish.yml runs with no checkout, so every call names the repository.
 const VIEW = ["release", "view", TAG, "--repo", REPO, "--json", "assets"];
 const DELETE = ["release", "delete-asset", TAG, BUNDLE, "--yes", "--repo", REPO];
-const NO_ASSETS = "::notice::the release has no assets; nothing to attest";
-const DELETED = `deleted the stale ${BUNDLE} a prior attempt left on ${TAG}`;
+/** A log line as the recorder saw it: core's method, then the message. */
+type Line = ["info" | "notice", string];
+const NO_ASSETS: Line = ["notice", "the release has no assets; nothing to attest"];
+const DELETED: Line = ["info", `deleted the stale ${BUNDLE} a prior attempt left on ${TAG}`];
 
 test.each<{
   reason: string;
   assets: string[];
   present: boolean;
-  lines: string[];
+  lines: Line[];
   calls: string[][];
 }>([
   {
@@ -65,7 +67,10 @@ test.each<{
   },
 ])("$reason", ({ assets, present, lines, calls }) => {
   const gh = fakeGh(assets);
-  const out: string[] = [];
-  const judged = inspectAssets(gh.run, REPO, TAG, BUNDLE, (line) => out.push(line));
+  const out: Line[] = [];
+  const judged = inspectAssets(gh.run, REPO, TAG, BUNDLE, {
+    info: (message) => out.push(["info", message]),
+    notice: (message) => out.push(["notice", String(message)]),
+  });
   expect({ present: judged, lines: out, calls: gh.calls }).toEqual({ present, lines, calls });
 });
