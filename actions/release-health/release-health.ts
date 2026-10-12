@@ -21,7 +21,7 @@
  * A changed body is always release-please's rebuild: a merge there would leave the changelog without those commits.
  */
 
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as core from "@actions/core";
 import { messageOf } from "../shared/action_runtime.ts";
 import { LABEL_RE } from "../shared/label.ts";
@@ -602,14 +602,7 @@ async function main(): Promise<number> {
     core.error(messageOf(error));
     return 1;
   }
-  // A lost output would read as "not a release cut" and silently skip every tag.
-  const outputFile = process.env.GITHUB_OUTPUT;
-  if (!outputFile) {
-    throw new Error("GITHUB_OUTPUT is required");
-  }
-  return runHealthCheck(cfg, gh, core, (name, value) =>
-    appendFileSync(outputFile, `${name}=${value}\n`),
-  );
+  return runHealthCheck(cfg, gh, core, core.setOutput);
 }
 
 if (import.meta.main) {

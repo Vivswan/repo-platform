@@ -3,7 +3,7 @@
 // today is already expired (Trivy's `<=`); V8 rolls `2026-02-30` over to March 2 silently, which the round trip refuses.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   checkIgnoreFile,
@@ -11,6 +11,7 @@ import {
   PLAIN_IGNORE_FILE,
 } from "../../../actions/trivy/ignore_check";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { readGithubOutput } from "../../shared/github_output";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -155,7 +156,7 @@ describe("the ignore_check step", () => {
     });
     return {
       exitCode: result.exitCode,
-      output: readFileSync(output, "utf-8"),
+      output: readGithubOutput(output),
       stdout: result.stdout,
     };
   };
@@ -164,28 +165,28 @@ describe("the ignore_check step", () => {
     reason: string;
     files: Record<string, string>;
     exitCode: number;
-    output: string;
+    output: Record<string, string>;
     stdout: string[];
   }>([
     {
       reason: "no bypass file: green, and the scan gets no ignore file",
       files: {},
       exitCode: 0,
-      output: "ignorefile=\n",
+      output: { ignorefile: "" },
       stdout: [`no ${IGNORE_FILE}: nothing is bypassed`],
     },
     {
       reason: "a valid file: green, and the scan gets it",
       files: { [IGNORE_FILE]: VALID },
       exitCode: 0,
-      output: `ignorefile=${IGNORE_FILE}\n`,
+      output: { ignorefile: IGNORE_FILE },
       stdout: [`${IGNORE_FILE}: every entry carries a statement and an expiry`],
     },
     {
       reason: "an entry without a statement: red with a file-anchored annotation, no output row",
       files: { [IGNORE_FILE]: "vulnerabilities:\n  - id: CVE-1\n    expired_at: 2099-01-01\n" },
       exitCode: 1,
-      output: "",
+      output: {},
       stdout: [
         `::error file=${IGNORE_FILE}::${IGNORE_FILE}: vulnerabilities[0] (CVE-1): statement must say why the finding is accepted`,
       ],
@@ -194,7 +195,7 @@ describe("the ignore_check step", () => {
       reason: "an expired entry: green with a warning naming it, and no error",
       files: { [IGNORE_FILE]: entry("CVE-1", "2000-01-01") },
       exitCode: 0,
-      output: `ignorefile=${IGNORE_FILE}\n`,
+      output: { ignorefile: IGNORE_FILE },
       stdout: [
         `::warning::${IGNORE_FILE}: vulnerabilities[0] (CVE-1) has expired; Trivy no longer ignores it - fix the finding or delete the entry`,
         `${IGNORE_FILE}: every entry carries a statement and an expiry`,
@@ -204,7 +205,7 @@ describe("the ignore_check step", () => {
       reason: "the plain .trivyignore format is refused even beside a valid YAML file",
       files: { [PLAIN_IGNORE_FILE]: "CVE-1\n", [IGNORE_FILE]: VALID },
       exitCode: 1,
-      output: "",
+      output: {},
       stdout: [
         `::error file=${PLAIN_IGNORE_FILE}::${PLAIN_IGNORE_FILE} is not honored: its entries never expire. Move each one into ${IGNORE_FILE} with a statement and an expired_at date.`,
       ],

@@ -14,6 +14,7 @@ import {
   type Stream,
 } from "../../../actions/fuzz-issue/fuzz-issue.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
+import { readGithubOutput } from "../../shared/github_output.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -502,7 +503,7 @@ describe("the script", () => {
         ...vars,
       },
     });
-    const file = readFileSync(outputs, "utf8").match(/^file=(.+)$/m)?.[1];
+    const file = readGithubOutput(outputs).file as string | undefined;
     return {
       ...proc,
       root,

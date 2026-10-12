@@ -4,8 +4,7 @@
 // release-please's refresh in the same run; a stale head is never a failure here. An errored look (no origin/<base>, a
 // shallow checkout) throws; it is never read as either verdict.
 
-import { appendFileSync } from "node:fs";
-import { setFailed, warning } from "@actions/core";
+import { setFailed, setOutput, warning } from "@actions/core";
 import {
   capture,
   failureDetail,
@@ -41,10 +40,9 @@ function headContains(sha: string): boolean {
 
 function main(): number {
   const base = requireEnv("GITHUB_BASE_REF");
-  const outputFile = requireEnv("GITHUB_OUTPUT");
   const tip = baseTip(base);
   const behind = !headContains(tip);
-  appendFileSync(outputFile, `behind=${behind}\n`);
+  setOutput("behind", String(behind));
   if (!behind) {
     console.log(`release PR contains the ${base} tip (${tip})`);
     return 0;
