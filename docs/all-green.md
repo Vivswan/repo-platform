@@ -58,7 +58,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | --- | --- |
 | `checks` | calls the repo-owned checks.yml; skipped on the nightly schedule run |
 | `platform` | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. The `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels. Its `trivy-nightly` job is the schedule's |
-| `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository)) |
+| `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch once `platform` reports the hook is no placeholder, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository)) |
 | `all-green` | needs all three |
 
 **The nightly schedule run** is the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, the other checks stand down, and `trivy-nightly` runs the Trivy scan and files its tracking issue. Public repositories only: a private repository pays for every job that runs, and a skipped job bills nothing.
@@ -150,7 +150,13 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 | `contents: write` | a hook may publish a fast-forward branch such as a packaged `latest` |
 | `id-token: write` | a hook may mint the run's OIDC token for trusted publishing (npm, PyPI). GitHub artifact attestations need `attestations: write` too, which this ceiling does not grant |
 
-**The starter ships one no-op job** (a workflow_call cannot ship empty), and that job costs a runner allocation on every green push to main until the repository REPLACES it. Replace the no-op, do not append beside it.
+**The starter ships one placeholder job** (a workflow_call cannot ship empty) under a marker as its first line, and the `post-green` job does not call it: the `platform` call's `post-green` output is `false` while the hook opens with the marker, and the call is skipped. GitHub bills a private repository a full minute for the runner a no-op boots, on every push to main.
+
+```text
+# repo-platform placeholder: ci.yml does not call this hook; delete this line when you add jobs
+```
+
+**Delete the marker when you add jobs,** replacing the no-op. The plan reads the first line alone: any other first line, a reworded marker included, calls the hook. Deleting the file is no shortcut: GitHub resolves a `./` call at run creation, so the run fails before any `if`. A hook seeded before the marker gets it from [the sync's rung](platform/sync/writer.md#migrations) while its body is the seed's.
 
 **Every hook job must be state-based and idempotent,** since the runs of neighbouring commits overlap ([after the gate](#after-the-gate)): act on the repository's current state, never on "what this commit changed".
 
@@ -166,7 +172,7 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 | --- | --- |
 | the release PR: a head branch with release-please's `release-please--` prefix, the spelling fleet.yml's `release-pr` job reads | the hook runs and all-green blocks on it |
 | a `workflow_dispatch` of ci.yml | the hook runs, and a red gate blocks that run's legs, the site deploy included |
-| every other event | the job skips, and `allowed-skips` names it so the gate stays green |
+| every other event, and every event while the hook is the seeded placeholder | the job skips, and `allowed-skips` names it so the gate stays green |
 | the nightly schedule | not ci.yml's: a nightly.yml the [nightly](modules/nightly.md) module seeds from now on calls the same file every night, an existing one [adds the sibling job itself](modules/nightly.md#customizing-the-starter), and a red tier files the nightly tracking issue |
 
 - **The caller's contract is checks.yml's:** no secrets, permissions cap at `contents: read`. A tier needing more gets its own workflow.
@@ -175,7 +181,7 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 
 - **No run on the release commit's push:** the PR head's run judged the gate, and a release PR behind main refreshes itself first ([what gates what](#what-gates-what)).
 
-- **The no-op seed** costs a runner allocation on every release-PR run and dispatch until the repository replaces it. Replace it, do not append beside it.
+- **The seed is not called:** it opens with the same placeholder marker as post-green.yml, and the `platform` call's `release-gate` output is `false` while it does, so the `release-gate` job waits on `platform` and skips. Delete the marker when you add tiers, and replace the no-op rather than appending beside it.
 
 - **No module and no label stream:** on the release PR the red check is the signal; on the schedule the nightly stream's open issue already blocks the release through release-health's tracking labels ([tracking-issues.md](modules/tracking-issues.md#release-gating)).
 
@@ -192,7 +198,9 @@ checks + platform + release-gate -> all-green -> post-green (repo-owned hook) ->
 - Adding a module needs no change to ci.yml ([changing the module selection](new-repo.md#changing-the-module-selection)).
 - How each leg's condition is spelled in the managed ci.yml, and which lanes the release cut holds, is [platform/post-green.md](platform/post-green.md#how-the-static-legs-gate).
 
-**The `release` leg** needs the hook, which itself ran only past a green gate, so the repo's post-green work lands before the tag is minted. It then calls [fleet-release.yml](../.github/workflows/fleet-release.yml)`@stable` with the judged sha and the `platform` call's `tracking-labels` output. The called job takes two paths off release-health's `release-cut` output:
+**The `release` leg** needs the gate and the hook: it runs past a green `all-green` once the hook passed, or at once where the hook is a placeholder the call skipped. The repo's post-green work lands before the tag is minted, and a placeholder never holds a release.
+
+It then calls [fleet-release.yml](../.github/workflows/fleet-release.yml)`@stable` with the judged sha and the `tracking-labels` output. The called job takes two paths off release-health's `release-cut` output:
 
 | Push | Path |
 | --- | --- |
