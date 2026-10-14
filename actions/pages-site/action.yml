@@ -1,29 +1,25 @@
 name: Pages Site
 description: |
-  Assembles the fleet's GitHub Pages site from the repository's own website, its docs/, or both.
+  Assembles the fleet's GitHub Pages site from the repository's own website, its docs/, or both; the layout and the
+  versioning rules are docs/modules/site.md's.
 
-  The layout and the versioning rules (the two parts and where each mounts, the docs tiers from the
-  vX.Y.Z tags, the include roots, the link check, a null docs_path, and check mode) are
-  docs/modules/site.md's.
-
-  The website arrives prebuilt by the repository's site-build hook as the site-dir input. The
-  configuration is the config input, or the repository's registration read through the plan action
-  when the input is empty. With neither part the step ends green with publish false and no directory.
-
-  A deploy needs a full checkout (fetch-depth 0): version tags and per-ref trees come from git history.
+  - The website arrives prebuilt by the repository's site-build hook as the site-dir input.
+  - The configuration is the config input, or the registration read through the plan action when the input is empty.
+  - With neither part the step ends green with publish false and no directory.
+  - A deploy needs a full checkout (fetch-depth 0): version tags and per-ref trees come from git history.
 
 inputs:
   site-dir:
     description: >-
-      The repository's prebuilt website (the site-build hook's dist), a directory relative to
-      the repository root. Empty means no website.
+      The repository's prebuilt website (the site-build hook's dist) as a directory relative to the repository root,
+      or empty for no website.
     required: false
     default: ""
   config:
     description: >-
-      The site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label",
-      "link_rot_color", "link_rot_description"}, docs_path null for no docs half. Empty reads
-      the registration through the plan action.
+      The site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label", "link_rot_color",
+      "link_rot_description"} with docs_path null for no docs half, or empty to read the registration through the plan
+      action.
     required: false
     default: ""
   check:
@@ -33,10 +29,13 @@ inputs:
 
 outputs:
   publish:
-    description: '"true" when a site was assembled and site-dir is ready to upload, "false" when there was nothing to publish (empty in check mode)'
+    description: >-
+      "true" when a site was assembled and site-dir is ready to upload, "false" when there was nothing to publish, and
+      empty in check mode.
     value: ${{ steps.assemble.outputs.publish }}
   site-dir:
-    description: The assembled site directory to upload as the Pages artifact (empty when publish is false or in check mode)
+    description: >-
+      The assembled site directory to upload as the Pages artifact, empty when publish is false or in check mode.
     value: ${{ steps.assemble.outputs.site-dir }}
   link-rot-label:
     description: The nightly external-link check's tracking label from the configuration ("" disables the check)

@@ -1,18 +1,14 @@
 name: Validate Managed Files
 description: |
-  Judges the caller's checkout as repo-platform writes it, the body of the fleet's validate-managed-files step.
+  Judges the caller's checkout as repo-platform writes it, the body of the fleet's validate-managed-files step: the
+  check.ts of the commit the repository was last synced with, run from a clone of repo-platform under the runner's
+  temp
+  directory, followed by the repository's conflict-marker and release-as hygiene.
 
-  The judge is the check.ts of the commit the repository was last synced with, run from a
-  clone of repo-platform the action makes under the runner's temp directory. After it, the
-  action checks the repository's conflict-marker and release-as hygiene.
-
-  The findings are posted as one sticky PR comment plus the step summary. A missing bun fails
-  the action before anything runs. Past that the report step always runs, writes the summary
-  and the comment body, and fails on anything but a clean verdict. The comment steps after it
-  run on !cancelled(), so a red check still posts its comment before the job ends.
-
-  The calling job needs pull-requests: write for the comment, and nothing else beyond
-  contents: read.
+  - The findings are one sticky PR comment plus the step summary; the calling job needs pull-requests: write for the
+    comment and nothing beyond contents: read.
+  - The report step always runs, writes the summary and the comment body, and fails on anything but a clean verdict; the
+    comment steps run on !cancelled(), so a red check still posts its comment.
 
 inputs:
   private:
