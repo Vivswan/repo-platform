@@ -13,45 +13,40 @@ on:
     - cron: "50 8 * * 2"
   workflow_dispatch:
     inputs:
+      # The scope grammar is fleet/sync_scope.ts: a modules:<a>+<b> filter admits a repo selecting every listed module,
+      # intersects with a visibility token, and a slug adds as typed.
       repo:
         description: >-
-          The repositories to sync, comma-separated: owner/name slugs, the visibility tokens public and private,
-          or modules:<a>+<b> (every managed repo whose .repo-platform.yml selects all the listed modules,
-          intersected with a visibility token, while a slug adds as typed). The literal "all", or empty, is
-          every managed repo.
+          Owner/name slugs, public, private, or modules:<a>+<b>, comma-separated (empty or all: every managed repo).
         required: false
         type: string
       manual:
         description: >-
-          Never arm auto-merge, so every PR this run delivers waits for human review, clean updates included.
+          Arm no auto-merge: every PR this run delivers waits for review.
         required: false
         type: boolean
         default: false
+      # The refusals (manual or add_modules beside it, more than one repository, the default branch, a branch the
+      # repository lacks) are the operator page's "Syncing a branch" (docs/platform/sync/operator.md).
       branch:
         description: >-
-          A branch of the one repository in repo, which the row checks out, writes over, and commits onto with
-          no PR, so a PR changing a module selection carries its own files. The report goes to the job summary,
-          a failure files the target's issue, and the refusals (manual, more than one repository, the default
-          branch, a branch the repository lacks) are the operator page's "Syncing a branch"
-          (docs/platform/sync/operator.md).
+          A branch of the one repository in repo to commit onto, with no PR (docs/platform/sync/operator.md, "Syncing a branch").
         required: false
         type: string
       add_modules:
         description: >-
-          Module names, comma-separated, to add to each selected repository's .repo-platform.yml before the writer
-          runs, so the sync PR carries the new selection with its files; no PR of the run is armed for auto-merge,
-          and the input is refused beside branch (docs/platform/sync/operator.md, "Adding modules").
+          Module names, comma-separated, added to each repository's .repo-platform.yml by a PR that waits for review
+          (docs/platform/sync/operator.md, "Adding modules").
         required: false
         type: string
   # Named `repos`, not `repo`, on purpose: the dispatch input may be a private slug and never rides in step env,
-  # while this value is public text off merged PRs and is passed as ONLY_REPO below.
+  # while this value is public text off merged PRs and is passed as ONLY_REPO below. post-green passes its label
+  # reader's public or all; the dispatch-only modules: filter never appears here.
   workflow_call:
     inputs:
       repos:
         description: >-
-          "all", or a comma-separated list of owner/name slugs and the visibility tokens public and private
-          (fleet/sync_scope.ts). post-green passes its label reader's public or all, and the dispatch-only
-          modules: filter never appears here.
+          all, or comma-separated owner/name slugs and the tokens public and private (fleet/sync_scope.ts).
         required: true
         type: string
 
