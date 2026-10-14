@@ -27,8 +27,8 @@ inputs:
     required: false
   artifacts-dir:
     description: >-
-      Directory of per-failure subdirectories (contract v1), or empty for a stream without failure artifacts, which
-      report mode files as a generic nightly-failure report.
+      Directory of per-failure subdirectories (contract v1), or empty for a stream without failure artifacts, for
+      which report mode builds a generic nightly-failure report instead.
     required: false
     default: ""
   artifact-name:

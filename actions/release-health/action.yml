@@ -12,9 +12,9 @@ description: |
   - after-refresh: there, in the same checkout, after release-please's propose ran against a stale head. Green naming the new
     head when it moved and the base still stands where the checkout fetched it; red when the base moved, since it may carry a
     commit the refresh never saw, and that commit's own run refreshes the PR.
-  - after-refresh, head unmoved: beside a merged release PR still pending it fails (release-please proposed nothing).
-    Otherwise the PR body was unchanged, so no changelog line is lost: GitHub's update-branch merges the base, and a
-    head still unmoved fails.
+  - Inside after-refresh, an unmoved head: beside a merged release PR still pending it fails (release-please proposed
+    nothing). Otherwise the PR body was unchanged, so no changelog line is lost: GitHub's update-branch merges the base, and
+    a head still unmoved fails.
   - release: on the main-push path. Gates a release-PR merge and reports which push it was through `release-cut`; an
     ordinary push is not gated, and `head-current` says whether the branch still stands at the judged commit.
   - after-propose: after release-please's propose step. Fails when a merged release PR has worn "autorelease: pending"
