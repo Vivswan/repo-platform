@@ -13,8 +13,8 @@ on:
     inputs:
       issue:
         description: >-
-          Issue or PR number to assign on a dispatch, where empty sweeps every open unassigned item; an issue or
-          pull-request event assigns its own item.
+          On a dispatch, the issue or PR number to assign, or empty to sweep every open unassigned item (the other
+          events do not read it).
         required: false
         type: string
         default: ""
