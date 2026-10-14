@@ -13,38 +13,40 @@ on:
     - cron: "50 8 * * 2"
   workflow_dispatch:
     inputs:
+      # The scope grammar is fleet/sync_scope.ts: a modules:<a>+<b> filter admits a repo selecting every listed module,
+      # intersects with a visibility token, and a slug adds as typed.
       repo:
         description: >-
-          The repositories to sync, comma-separated: owner/name slugs, the visibility tokens public and private,
-          or modules:<a>+<b> (every managed repo whose .repo-platform.yml selects all the listed modules,
-          intersected with a visibility token, while a slug adds as typed). The literal "all", or empty, is
-          every managed repo.
+          Owner/name slugs, public, private, or modules:<a>+<b>, comma-separated (empty or all: every managed repo).
         required: false
         type: string
       manual:
         description: >-
-          Never arm auto-merge, so every PR this run delivers waits for human review, clean updates included.
+          Arm no auto-merge: every PR this run delivers waits for review.
         required: false
         type: boolean
         default: false
+      # The refusals (manual or add_modules beside it, more than one repository, the default branch, a branch the
+      # repository lacks) are the operator page's "Syncing a branch" (docs/platform/sync/operator.md).
       branch:
         description: >-
-          A branch of the one repository in repo, which the row checks out, writes over, and commits onto with
-          no PR, so a PR changing a module selection carries its own files. The report goes to the job summary,
-          a failure files the target's issue, and the refusals (manual, more than one repository, the default
-          branch, a branch the repository lacks) are the operator page's "Syncing a branch"
-          (docs/platform/sync/operator.md).
+          A branch of the one repository in repo to commit onto, with no PR (docs/platform/sync/operator.md, "Syncing a branch").
+        required: false
+        type: string
+      add_modules:
+        description: >-
+          Module names, comma-separated, added to each repository's .repo-platform.yml by a PR that waits for review
+          (docs/platform/sync/operator.md, "Adding modules").
         required: false
         type: string
   # Named `repos`, not `repo`, on purpose: the dispatch input may be a private slug and never rides in step env,
-  # while this value is public text off merged PRs and is passed as ONLY_REPO below.
+  # while this value is public text off merged PRs and is passed as ONLY_REPO below. post-green passes its label
+  # reader's public or all; the dispatch-only modules: filter never appears here.
   workflow_call:
     inputs:
       repos:
         description: >-
-          "all", or a comma-separated list of owner/name slugs and the visibility tokens public and private
-          (fleet/sync_scope.ts). post-green passes its label reader's public or all, and the dispatch-only
-          modules: filter never appears here.
+          all, or comma-separated owner/name slugs and the tokens public and private (fleet/sync_scope.ts).
         required: true
         type: string
 
@@ -72,6 +74,8 @@ jobs:
       build: ${{ steps.build.outputs.build }}
       count: ${{ steps.plan.outputs.count }}
       matrix: ${{ steps.select.outputs.matrix }}
+      # Roster names in files.yml order, or empty: public, unlike the typed input (fleet/sync_scope.ts).
+      add_modules: ${{ steps.select.outputs.add_modules }}
     steps:
       # Full history: the resolve proves the tagged commit is main history.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -188,6 +192,17 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/sync/checkout_target.ts > "$RUNNER_TEMP/checkout-stdio.log" 2>&1
 
+      # The names the plan admitted go onto the target's registration before the rungs and the writer read it; a run
+      # without the input writes nothing. Its log is the writer's until the writer writes its report over it: a
+      # refusal skips the rungs and the writer and is delivered as the writer's failure, the refusal in the log tail.
+      - name: Add the dispatched modules to the target's registration
+        id: add_modules
+        if: steps.checkout.outcome == 'success'
+        continue-on-error: true
+        env:
+          ADD_MODULES: ${{ needs.plan.outputs.add_modules }}
+        run: bun .github/scripts/sync/add_modules.ts > "$RUNNER_TEMP/sync.log" 2>&1
+
       # Every rung of the build's migrations/, in name order, over the target
       # (docs/platform/sync/writer.md, Migrations), driven by the build's own migrate.ts like
       # the writer below. Its log is the writer's until the writer writes its
@@ -195,7 +210,7 @@ jobs:
       # the writer's failure, the rung's line in the log tail.
       - name: Run the migrations over the target
         id: migrate
-        if: steps.checkout.outcome == 'success'
+        if: steps.add_modules.outcome == 'success'
         continue-on-error: true
         run: bun build/.github/scripts/sync/migrate.ts build/migrations target > "$RUNNER_TEMP/sync.log" 2>&1
 
@@ -222,6 +237,7 @@ jobs:
           BUILD: ${{ needs.plan.outputs.build }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           MANUAL: ${{ inputs.manual || false }}
+          ADD_MODULES: ${{ needs.plan.outputs.add_modules }}
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
           WRITER_OUTCOME: ${{ steps.write.outcome }}
         run: bun .github/scripts/sync/deliver.ts > "$RUNNER_TEMP/deliver-stdio.log" 2>&1

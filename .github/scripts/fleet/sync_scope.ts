@@ -142,10 +142,18 @@ export function scopeRefusal(
 }
 
 /** A branch dispatch commits onto one repository's branch and opens no PR, so a scope that could select
- *  two repositories, or a `manual` that only governs a PR's auto-merge, is a dispatch that means nothing. */
-export function branchDispatchRefusal(scope: Scope, manual: boolean): string | null {
+ *  two repositories, a `manual` that only governs a PR's auto-merge, or an `add_modules` edit the branch's own
+ *  registration should carry, is a dispatch that means nothing. */
+export function branchDispatchRefusal(
+  scope: Scope,
+  manual: boolean,
+  addsModules: boolean,
+): string | null {
   if (manual) {
     return "manual is meaningless with branch: a branch sync commits onto the branch and opens no PR; drop manual";
+  }
+  if (addsModules) {
+    return "add_modules does not combine with branch: a branch sync writes the selection the branch already declares, so edit the modules list on the branch instead";
   }
   const oneSlug =
     scope.kind === "list" &&
@@ -154,4 +162,29 @@ export function branchDispatchRefusal(scope: Scope, manual: boolean): string | n
     scope.modules.length === 0;
   if (oneSlug) return null;
   return "branch takes exactly one owner/name in repo: the sync commits onto that one repository's branch (no list, no all, no visibility token, no modules: filter)";
+}
+
+export type AddModules = { names: string[] } | { error: string };
+
+/** The dispatch's add_modules value: counts, never the typed values, since the plan's log is public. The names come back
+ *  in roster order (files.yml's, the canonical one), each once; the plan publishes that list as its output, so the rows
+ *  take it as given. */
+export function parseAddModules(raw: string, roster: readonly string[]): AddModules {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { names: [] };
+  const entries = trimmed.split(",").map((entry) => entry.trim().toLowerCase());
+  if (entries.includes("")) {
+    return {
+      error:
+        "add_modules has an empty entry: pass module names separated by commas, with no stray or trailing comma",
+    };
+  }
+  const unknown = entries.filter((name) => !roster.includes(name)).length;
+  if (unknown > 0) {
+    return {
+      error: `${unknown} of ${entries.length} names in add_modules ${unknown === 1 ? "is not a module" : "are not modules"} files.yml knows (values withheld - this log is public); the modules are: ${roster.join(", ")}`,
+    };
+  }
+  const wanted = new Set(entries);
+  return { names: roster.filter((name) => wanted.has(name)) };
 }

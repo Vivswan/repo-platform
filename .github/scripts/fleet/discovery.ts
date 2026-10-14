@@ -101,19 +101,39 @@ export function parseDiscovered(data: unknown): DiscoveredRepo[] | null {
 // nullish: schedule and release events carry no `inputs` key, and an inputs-less API dispatch
 // writes `"inputs": null`.
 const dispatchEvent = z.object({
-  inputs: z.object({ repo: z.string().optional(), branch: z.string().optional() }).nullish(),
+  inputs: z
+    .object({
+      repo: z.string().optional(),
+      branch: z.string().optional(),
+      add_modules: z.string().optional(),
+    })
+    .nullish(),
 });
 
 /** Read from the event payload on disk, never step env: the values may name a private repository
  * and its work, and the runner prints step env into the public log group. */
-function dispatchInputs(): { repo: string; branch: string } {
-  if (env("GITHUB_EVENT_PATH") === "") return { repo: "", branch: "" };
+function dispatchInputs(): { repo: string; branch: string; addModules: string } {
+  if (env("GITHUB_EVENT_PATH") === "") return { repo: "", branch: "", addModules: "" };
   const event = parseJsonWith(
     dispatchEvent,
     readFileSync(env("GITHUB_EVENT_PATH"), "utf-8"),
     "dispatch inputs: event payload",
   );
-  return { repo: event.inputs?.repo ?? "", branch: event.inputs?.branch ?? "" };
+  return {
+    repo: event.inputs?.repo ?? "",
+    branch: event.inputs?.branch ?? "",
+    addModules: event.inputs?.add_modules ?? "",
+  };
+}
+
+/** Per entry trimmed and case-folded; empty entries survive on purpose (",", "a,,b"): the parsers reject them loudly,
+ * where dropping one here would silently widen or narrow the list. */
+function foldedList(value: string): string {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .join(",")
+    .toLowerCase();
 }
 
 /** The branch a dispatch syncs onto (docs/platform/sync/operator.md, "Syncing a branch"); empty on every other run. Verbatim: git forbids
@@ -126,16 +146,14 @@ export function readDispatchBranch(): string {
 /** Lowercased because GitHub identity is case-insensitive. A non-empty ONLY_REPO wins over the
  * dispatch input: the post-green call, the harnesses, and local runs pass the scope that way. */
 export function readDispatchRepo(): string {
-  let repo = env("ONLY_REPO");
-  if (repo === "") repo = dispatchInputs().repo;
-  // Empty entries survive on purpose (",", "a/b,,c/d"): the scope parser
-  // rejects them loudly, where dropping one here would silently widen or
-  // narrow the scope.
-  return repo
-    .split(",")
-    .map((entry) => entry.trim())
-    .join(",")
-    .toLowerCase();
+  const repo = env("ONLY_REPO");
+  return foldedList(repo === "" ? dispatchInputs().repo : repo);
+}
+
+/** The module names a dispatch adds to the target's registration (docs/platform/sync/operator.md, "Adding modules");
+ * empty on every other run. Folded like the scope: module names are kebab-case. */
+export function readDispatchAddModules(): string {
+  return foldedList(dispatchInputs().addModules);
 }
 
 // Case-insensitive replaceAll: GitHub identity is case-insensitive, so a

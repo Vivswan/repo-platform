@@ -37,6 +37,7 @@ The one file the writer renders instead of copying is `.github/settings.yml`, fo
 | When does a file the platform stopped writing leave? | [sync/writer/retire.ts](../../../.github/scripts/sync/writer/retire.ts) |
 | What does the manifest record? | [sync/writer/manifest.ts](../../../.github/scripts/sync/writer/manifest.ts) |
 | What holds a PR for review? | `holdReasons` in [sync/writer/report.ts](../../../.github/scripts/sync/writer/report.ts) |
+| How does a dispatch add a module to a registration? | `withModules` in [sync/add_modules.ts](../../../.github/scripts/sync/add_modules.ts) ([the operator's "Adding modules"](operator.md#adding-modules)) |
 | The whole run, as a CLI | [sync/writer/sync.ts](../../../.github/scripts/sync/writer/sync.ts) |
 
 ## This repository as a target

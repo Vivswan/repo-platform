@@ -124,6 +124,8 @@ YAML syntax and duplicate mapping keys are the `yamllint` step's, in the same jo
 
 ### Changing the module selection
 
+Adding a module is one dispatch of the operator with `add_modules`, and the sync PR it opens waits for review ([platform/sync/operator.md](platform/sync/operator.md#adding-modules)). Any other change, a module dropped or several edits at once, is a PR of your own that the branch sync completes.
+
 A module change is one PR when the branch sync carries the files onto it ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch)). CI itself needs nothing written: ci.yml is the same file for every selection, and fleet.yml's `plan` step reads the new list on the next run. The sync writes the module's DATA files (its workflows, starters, and toolchain pins) and the manifest stamp onto the PR's branch as one commit:
 
 ```text

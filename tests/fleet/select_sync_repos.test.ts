@@ -16,9 +16,10 @@ import { tempDirs } from "../shared/temp_dir";
 
 const RUN_ID = "4242";
 const keyOf = rowKeyOf("stub-token", RUN_ID);
-const outputFor = (rows: { repo: string; private: boolean }[]) => ({
+const outputFor = (rows: { repo: string; private: boolean }[], addModules = "") => ({
   count: String(rows.length),
   matrix: JSON.stringify(matrixRows(rows, keyOf)),
+  add_modules: addModules,
 });
 
 const temp = tempDirs();
@@ -231,6 +232,8 @@ describe("select_sync_repos.ts", () => {
     rows: Run["rows"];
     stdout: string;
     withheld?: string;
+    /** The plan's add_modules output: the admitted names, roster order, comma-joined. */
+    addModules?: string;
   }>([
     {
       reason: "a public slug list selects exactly those (the unadopted one drops with its notice)",
@@ -284,12 +287,34 @@ describe("select_sync_repos.ts", () => {
       stdout: lines("syncing: Vivswan/steady"),
       withheld: BRANCH,
     },
+    {
+      reason:
+        "add_modules narrows nothing; the names the roster vouched for print once, in files.yml order",
+      scope: "Vivswan/steady,Vivswan/hidden-server",
+      env: (name) =>
+        payloadEnv(name, {
+          repo: "Vivswan/steady,Vivswan/hidden-server",
+          add_modules: " Nightly, site ",
+        }),
+      rows: [HIDDEN_SERVER_ROW, STEADY_ROW],
+      stdout: lines(
+        "syncing: Vivswan/steady and 1 private repository",
+        "add_modules: site, nightly go onto each row's .repo-platform.yml; no PR of this run is armed",
+      ),
+      addModules: "site,nightly",
+    },
   ])(
     "$scope: $reason",
-    ({ reason, env, rows, stdout, withheld }) => {
+    ({ reason, env, rows, stdout, withheld, addModules }) => {
       const name = `called-${Bun.hash(reason).toString(16)}`;
       const r = run(name, env(name));
-      expect(r).toEqual({ exitCode: 0, stdout, stderr: "", outputs: outputFor(rows ?? []), rows });
+      expect(r).toEqual({
+        exitCode: 0,
+        stdout,
+        stderr: "",
+        outputs: outputFor(rows ?? [], addModules),
+        rows,
+      });
       for (const channel of publicChannels(r)) {
         expect(channel).not.toContain("hidden-server");
         if (withheld !== undefined) expect(channel).not.toContain(withheld);
@@ -307,6 +332,7 @@ describe("select_sync_repos.ts", () => {
     transport: "the call input" | "the dispatch payload";
     branch?: string;
     manual?: boolean;
+    addModules?: string;
     discoveredList?: typeof discovered;
     error: string;
     /** The one entry the refusal may name, when the selector has already read it as public. */
@@ -354,6 +380,29 @@ describe("select_sync_repos.ts", () => {
       error: "manual is meaningless with branch",
     },
     {
+      reason: "a branch dispatch beside add_modules",
+      scope: "Vivswan/hidden-server",
+      transport: "the dispatch payload",
+      branch: BRANCH,
+      addModules: "site",
+      error: "add_modules does not combine with branch",
+    },
+    {
+      reason: "an add_modules list with an empty entry fails before any probe",
+      scope: "Vivswan/hidden-server",
+      transport: "the dispatch payload",
+      addModules: "site,",
+      error: "add_modules has an empty entry",
+    },
+    {
+      reason:
+        "an add_modules name files.yml does not know fails before any probe, naming the roster",
+      scope: "Vivswan/hidden-server",
+      transport: "the dispatch payload",
+      addModules: "hidden-module",
+      error: `1 of 1 names in add_modules is not a module files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}`,
+    },
+    {
       reason: "a push probe answering a transport code fails the plan instead of guessing",
       scope: "Vivswan/deadprobe",
       transport: "the call input",
@@ -364,12 +413,26 @@ describe("select_sync_repos.ts", () => {
     },
   ])(
     "$reason: refused before any row is written",
-    ({ reason, scope, transport, branch, manual, discoveredList = discovered, error, named }) => {
+    ({
+      reason,
+      scope,
+      transport,
+      branch,
+      manual,
+      addModules,
+      discoveredList = discovered,
+      error,
+      named,
+    }) => {
       const name = `refused-${Bun.hash(reason).toString(16)}`;
       const env: Record<string, string> =
         transport === "the call input"
           ? { ONLY_REPO: scope }
-          : payloadEnv(name, { repo: scope, ...(branch === undefined ? {} : { branch }) });
+          : payloadEnv(name, {
+              repo: scope,
+              ...(branch === undefined ? {} : { branch }),
+              ...(addModules === undefined ? {} : { add_modules: addModules }),
+            });
       if (manual === true) env.MANUAL = "true";
       const r = run(name, env, discoveredList);
       expect(r).toEqual({
@@ -387,6 +450,7 @@ describe("select_sync_repos.ts", () => {
           .filter((entry) => entry.startsWith("modules:"))
           .flatMap((entry) => entry.slice("modules:".length).split("+")),
         ...(branch === undefined ? [] : [branch]),
+        ...(addModules === undefined ? [] : addModules.split(",").filter((v) => v !== "")),
       ];
       if (named === undefined) expect(withheld.length).toBeGreaterThan(0);
       for (const channel of publicChannels(r)) {

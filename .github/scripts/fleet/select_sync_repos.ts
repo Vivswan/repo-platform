@@ -18,6 +18,7 @@ import {
   PRIVATE_DISPLAY,
   parseDiscovered,
   pushProbeSkipNotice,
+  readDispatchAddModules,
   readDispatchBranch,
   readDispatchRepo,
   scrubSlug,
@@ -30,6 +31,7 @@ import {
   modulesAdmit,
   modulesFilterFor,
   modulesLeftOutLine,
+  parseAddModules,
   parseScope,
   scopeRefusal,
   scopeSelects,
@@ -40,13 +42,23 @@ const pat = requireEnv("PAT");
 const runId = requireEnv("GITHUB_RUN_ID");
 const owner = requireEnv("OWNER");
 
-const scope = parseScope(readDispatchRepo(), new Set(moduleRoster()));
+const roster = moduleRoster();
+const scope = parseScope(readDispatchRepo(), new Set(roster));
 if (scope.kind === "error") {
   error(scope.message);
   process.exit(1);
 }
+const addModules = parseAddModules(readDispatchAddModules(), roster);
+if ("error" in addModules) {
+  error(addModules.error);
+  process.exit(1);
+}
 if (readDispatchBranch() !== "") {
-  const refusal = branchDispatchRefusal(scope, env("MANUAL") === "true");
+  const refusal = branchDispatchRefusal(
+    scope,
+    env("MANUAL") === "true",
+    addModules.names.length > 0,
+  );
   if (refusal !== null) {
     error(refusal);
     process.exit(1);
@@ -131,6 +143,14 @@ if (leftOutLine !== null) console.log(leftOutLine);
 writeFileSync(join(runnerTemp, ROWS_FILE), JSON.stringify(rows));
 setOutput("count", String(rows.length));
 setOutput("matrix", JSON.stringify(matrixRows(rows, rowKeyOf(pat, runId))));
+// The rows take this list as given (sync/add_modules.ts, sync/deliver.ts): names the roster vouched for, so it rides
+// a public output and step env.
+setOutput("add_modules", addModules.names.join(","));
 const line = selectedLine(rows, "syncing", "no adopted repos selected; nothing to sync.");
 if (rows.length === 0) notice(line);
 else console.log(line);
+if (addModules.names.length > 0) {
+  console.log(
+    `add_modules: ${addModules.names.join(", ")} go onto each row's ${REGISTRATION_PATH}; no PR of this run is armed`,
+  );
+}

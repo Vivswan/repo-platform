@@ -4,7 +4,7 @@ order: 5
 
 # The operator
 
-This page is the operator's contract: the run that writes every managed repository as one row job each, what a row delivers, and the two ways a branch is synced instead of the default branch. What that run keeps out of the public log for a private repository is [its own page](private-repositories.md).
+This page is the operator's contract: the run that writes every managed repository as one row job each, what a row delivers, the dispatch that adds modules, and the two ways a branch is synced instead of the default branch. What that run keeps out of the public log for a private repository is [its own page](private-repositories.md).
 
 [sync-repos.yml](../../../.github/workflows/sync-repos.yml) runs the writer against every managed repository: a `plan` job, then one `sync (row <i>)` job per row.
 
@@ -19,10 +19,11 @@ This page is the operator's contract: the run that writes every managed reposito
 | row 1: check out | actions/checkout | repo-platform, then the delivery commit the plan resolved under `build/` with its full history, whose dependencies are installed there (`bun install --cwd build`) so its writer renders with its own versions |
 | row 2: resolve | [sync/resolve_row.ts](../../../.github/scripts/sync/resolve_row.ts) | one listing of the owner's writable repositories (the same call discovery makes, no re-selection); the row's key recomputed over it and the one repository carrying it taken, its name masked ([private repositories](private-repositories.md)); no such repository, or a dispatched branch one `git ls-remote` does not find: the step refuses, naming no repository |
 | row 3: check out the target | [sync/checkout_target.ts](../../../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text), at the dispatched branch when there is one; the token is stripped from the remote afterwards; `continue-on-error` |
-| row 4: migrate | the build's own [sync/migrate.ts](../../../.github/scripts/sync/migrate.ts), run from `build/` | every rung of the build's `migrations/` over the target ([Migrations](writer.md#migrations)); its log is `sync.log` until the writer's report replaces it; `continue-on-error` |
-| row 5: write | the build's own [sync/writer/sync.ts](../../../.github/scripts/sync/writer/sync.ts), run from `build/` | the one writer step, so the commit the manifest records is the code that wrote the tree: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
-| row 6: deliver | [sync/deliver.ts](../../../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform` and a PR whose body is the report, or another outcome ([delivering a row](#delivering-a-row)) |
-| row 7: print | [sync/verdict.ts](../../../.github/scripts/sync/verdict.ts) `row` | one verdict line |
+| row 4: add modules | [sync/add_modules.ts](../../../.github/scripts/sync/add_modules.ts) | the dispatched `add_modules` names appended to the target's `.repo-platform.yml` ([adding modules](#adding-modules)); nothing on a run without the input; its log is `sync.log` until the writer's report replaces it; `continue-on-error` |
+| row 5: migrate | the build's own [sync/migrate.ts](../../../.github/scripts/sync/migrate.ts), run from `build/` | every rung of the build's `migrations/` over the target ([Migrations](writer.md#migrations)); its log is `sync.log` until the writer's report replaces it; `continue-on-error` |
+| row 6: write | the build's own [sync/writer/sync.ts](../../../.github/scripts/sync/writer/sync.ts), run from `build/` | the one writer step, so the commit the manifest records is the code that wrote the tree: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
+| row 7: deliver | [sync/deliver.ts](../../../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform` and a PR whose body is the report, or another outcome ([delivering a row](#delivering-a-row)) |
+| row 8: print | [sync/verdict.ts](../../../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 
 The vocabulary, complete (`tests/sync/verdict.test.ts` pins it):
 
@@ -52,15 +53,36 @@ The residual is a slug another writable repository takes within the run: the row
 
 ## Delivering a row
 
-Row 6 delivers the writer's output: a commit and a PR in the target, one commit onto a dispatched branch with no PR, nothing when the tree already matches the build, or one failure issue.
+The deliver step takes the writer's output: a commit and a PR in the target, one commit onto a dispatched branch with no PR, nothing when the tree already matches the build, or one failure issue.
 
-- **What a delivery commits:** the manifest, the paths the writer's summary says it changed, and the paths the rungs reported. Each is a literal pathspec (a `[` in a name is that character, not a class) forced past the target's own `.gitignore`. Nothing else is staged, and a path git cannot find fails the row.
+- **What a delivery commits:** the manifest, the paths the writer's summary says it changed, the paths the rungs reported, and the registration on an `add_modules` run. Each is a literal pathspec (a `[` in a name is that character, not a class) forced past the target's own `.gitignore`. Nothing else is staged, and a path git cannot find fails the row.
 - **The commit** lands on `automation/repo-platform`, pushed with a lease. On a branch dispatch it lands on the dispatched branch instead ([syncing a branch](#syncing-a-branch)).
-- **The PR's body is the report.** Auto-merge is armed only when `hold` is false and the run's `manual` input is false.
+- **The PR's body is the report.** Auto-merge is armed only when `hold` is false and the run's `manual` and `add_modules` inputs are both empty.
 - **A refresh** re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's.
 - **A tree that already matches the build** closes any open sync PR as obsolete: disarmed, closed with a one-line comment, its branch deleted.
 - **A failed checkout, writer, or push** files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails.
 - **Every line** goes to `$RUNNER_TEMP/deliver.log`.
+
+## Adding modules
+
+```bash
+gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f add_modules=<a>,<b>
+```
+
+```text
+add_modules: <a>, <b> go onto each row's .repo-platform.yml; no PR of this run is armed
+row <i>: PR opened
+```
+
+The ordinary run, with one step more: row 4 appends the names the target's `.repo-platform.yml` lacks to its `modules` list, so the rungs and the writer read the new selection and the sync PR carries the registration edit with the module's files. The PR waits for a human: a module change is reviewed, so no PR of the run is armed, whatever the report says.
+
+- **The edit is a splice,** one `- <name>` line per missing name after the last item (or before a flow list's `]`), and every other byte of the file stays. A name already selected stays where it is, and a repository selecting them all gets the ordinary sync.
+- **The plan prints the admitted names once** and hands them to the rows as its `add_modules` output; the typed value stays off the log as `repo` does ([private repositories](private-repositories.md#where-the-model-stops)).
+- **`repo` takes any scope** (a slug list, a visibility token, a `modules:` filter, `all`), so one dispatch rolls a module out across the fleet. `manual` beside it changes nothing; `branch` beside it is refused in the plan, since the branch's own registration is the edit.
+- **Refused in the plan, before any repository is probed:** a name `files.yml` does not know, or an empty entry; the refusal counts the names and lists the roster.
+- **Refused in the row, delivered as the writer's failure:** a registration the grammar refuses, or a `modules` list laid out in a way the splice cannot extend (a flow list with a trailing comma); the failure issue's writer log carries the line, and the way out is a branch carrying the edit ([syncing a branch](#syncing-a-branch)).
+- **The writer judges the result:** a name the build at `stable` does not know yet (added to the platform since) is the writer's `unknown module(s)` refusal, filed in the target as any writer failure.
+- **The PR body** opens with the dispatch's value, so the reviewer knows why the registration moved.
 
 ## Syncing a branch
 
@@ -80,7 +102,7 @@ A PR that changes a module selection carries its own files this way, declared an
 
 - **No sync PR, no auto-merge, and no issue touched on a clean run:** the failure issue is the default-branch sync's. A failed checkout, writer, or push files it as any delivery failure does.
 - **The report** the PR body would carry goes to the run's job summary, for a public repository; a private repository's summary says the report is withheld, and the commit on the branch is the record.
-- **`repo` names exactly one repository** (no list, no `all`, no visibility token, no `modules:` filter), and `manual` is refused beside `branch`: both refuse in the plan job, before any repository is probed.
+- **`repo` names exactly one repository** (no list, no `all`, no visibility token, no `modules:` filter), and `manual` and `add_modules` are refused beside `branch`: all three refuse in the plan job, before any repository is probed.
 - **A branch the repository does not have,** or its default branch (a direct push there would pass the repository's PR gate; the plain dispatch syncs it through a PR), refuses in the row's resolve step, so the row prints `failed before the target was resolved`.
 - **The branch name** rides the event payload as the repository name does, never step env, and never reaches the log; a public repository's job summary is the one place that names it.
 
@@ -90,7 +112,7 @@ A human adds the `repo-platform:sync` label to a pull request; the repository's 
 
 ```text
 label added -> checks out the branch and the platform at `stable`
-            -> the migrations, then the writer over the branch (the operator's row 4 and 5)
+            -> the migrations, then the writer over the branch (the operator's row 5 and 6)
             -> the delivery step takes the label off
             -> one commit onto the branch, pushed with a lease on the commit it checked out
             -> one sticky comment on the pull request carrying the report
