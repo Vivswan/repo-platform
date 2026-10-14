@@ -156,21 +156,25 @@ export function boundedReport(report: string, cap = BODY_CAP): string {
   return kept.join("");
 }
 
-/** The add_modules line names the dispatch's value: the reviewer's first question is why the registration moved. */
+/** The add_modules line names the dispatch's value: the reviewer's first question is why the registration moved, or why it did not. */
 export function prBody(input: {
   operator: string;
   build: string;
   runUrl: string;
   report: string;
   addModules: string;
+  registrationChanged: boolean;
 }): string {
+  const dispatched = `Dispatched with \`add_modules=${input.addModules}\``;
   return [
     `Automated sync from [${input.operator}](https://github.com/${input.operator}) build \`${input.build}\` ([run](${input.runUrl})).`,
     "",
     ...(input.addModules === ""
       ? []
       : [
-          `Dispatched with \`add_modules=${input.addModules}\`: the names \`${REGISTRATION_PATH}\` lacked were added to its modules list, and auto-merge stays off so the selection is reviewed.`,
+          input.registrationChanged
+            ? `${dispatched}: \`${REGISTRATION_PATH}\` now selects them, and auto-merge stays off so the selection is reviewed.`
+            : `${dispatched}: every name was already selected, so \`${REGISTRATION_PATH}\` is unchanged. Auto-merge stays off as on every add_modules run.`,
           "",
         ]),
     boundedReport(input.report).replace(/\n$/, ""),
@@ -555,6 +559,7 @@ class Delivery {
         runUrl: this.runUrl,
         report,
         addModules: this.addModules,
+        registrationChanged: staged.includes(REGISTRATION_PATH),
       }),
     );
     let number: string;

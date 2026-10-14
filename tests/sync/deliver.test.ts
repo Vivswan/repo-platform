@@ -47,7 +47,7 @@ const GIT_LINES = [
   'if [ -n "${STUB_REAL_GIT:-}" ]; then case " $* " in *" push "*|*" ls-remote "*) ;; *) exec "$STUB_REAL_GIT" "$@" ;; esac; fi',
   'case "$*" in',
   '  *" add -f -- "*) if [ "${STUB_ADD_FAIL:-}" = 1 ]; then echo "fatal: unable to stage" >&2; exit 128; fi ;;',
-  '  *" diff --cached --name-only -z --no-renames") if [ -n "${STUB_DIRTY:-}" ]; then printf "x\\0"; fi ;;',
+  '  *" diff --cached --name-only -z --no-renames") if [ -n "${STUB_DIRTY:-}" ]; then printf "x\\0"; fi; if [ -n "${STUB_DIRTY_REGISTRATION:-}" ]; then printf ".repo-platform.yml\\0"; fi ;;',
   '  *" rev-parse HEAD") echo "${STUB_HEAD_SHA:-}" ;;',
   '  *" symbolic-ref HEAD") case "${STUB_HEAD:-refs/heads/main}" in',
   '    error) echo "fatal: not a git repository: target" >&2; exit 128 ;;',
@@ -307,20 +307,41 @@ describe("deliver.ts", () => {
   // The push authenticates alone (the checkout kept no token) under a lease, so a concurrent writer fails loudly;
   // squash is the fleet's merge method; the token must reach neither the log nor the body; a manual run never
   // arms auto-merge, since the operator asked to look; and an add_modules run never arms either, stages the
-  // registration the add step edited beside the writer's paths, and says why in the body.
-  test.each<{ manual: boolean; addModules?: string; merge: string[][]; log: string | null }>([
+  // registration beside the writer's paths, and says in the body whether the registration is in the diff.
+  test.each<{
+    manual: boolean;
+    addModules?: string;
+    registrationChanged?: boolean;
+    merge: string[][];
+    log: string | null;
+    line?: string;
+  }>([
     { manual: false, merge: [["7", "-R", TARGET, "--squash", "--auto"]], log: null },
     { manual: true, merge: [], log: "manual run" },
     {
       manual: false,
       addModules: "site,nightly",
+      registrationChanged: true,
       merge: [],
       log: "the run adds modules to the registration",
+      line: "Dispatched with `add_modules=site,nightly`: `.repo-platform.yml` now selects them, and auto-merge stays off so the selection is reviewed.",
+    },
+    {
+      manual: false,
+      addModules: "site",
+      registrationChanged: false,
+      merge: [],
+      log: "the run adds modules to the registration",
+      line: "Dispatched with `add_modules=site`: every name was already selected, so `.repo-platform.yml` is unchanged. Auto-merge stays off as on every add_modules run.",
     },
   ])(
-    "a clean change opens the PR whose body carries the report (manual: $manual, add_modules: $addModules)",
-    ({ manual, addModules, merge, log }) => {
-      const result = run({ manual, addModules, stub: { STUB_DIRTY: "1" } });
+    "a clean change opens the PR whose body carries the report (manual: $manual, add_modules: $addModules, registration changed: $registrationChanged)",
+    ({ manual, addModules, registrationChanged = false, merge, log, line }) => {
+      const result = run({
+        manual,
+        addModules,
+        stub: { STUB_DIRTY: "1", ...(registrationChanged ? { STUB_DIRTY_REGISTRATION: "1" } : {}) },
+      });
       silent(result);
       expect(result.verdict).toBe("opened");
       expect(result.git.map((argv) => argv.slice(3, 5).join(" "))).toContain("commit -q");
@@ -337,8 +358,8 @@ describe("deliver.ts", () => {
       const body = readFileSync(create[create.indexOf("--body-file") + 1], "utf-8");
       expect(body).toContain(`build \`${BUILD}\``);
       expect(body).toContain(REPORT.trimEnd());
-      const dispatched = `Dispatched with \`add_modules=${addModules}\``;
-      expect(body.includes(dispatched)).toBe(addModules !== undefined);
+      expect(body.includes("Dispatched with `add_modules=")).toBe(line !== undefined);
+      if (line !== undefined) expect(body).toContain(line);
       expect(calls(result.gh, "pr", "merge").map((argv) => argv.slice(3))).toEqual(merge);
       if (log !== null) expect(result.log).toContain(log);
       expect(result.log).not.toContain(PAT);
@@ -741,7 +762,14 @@ describe("boundedReport", () => {
     expect(bounded).toContain("```diff\n```\n\n> [!WARNING]");
     expect(omitted(bounded)).toEqual([`\n${longLine}\n\`\`\``.length]);
     expect(bounded.endsWith(review)).toBe(true);
-    const body = prBody({ operator: "o/r", build: BUILD, runUrl: "u", report, addModules: "" });
+    const body = prBody({
+      operator: "o/r",
+      build: BUILD,
+      runUrl: "u",
+      report,
+      addModules: "",
+      registrationChanged: false,
+    });
     expect(body.length).toBeLessThan(65_536);
   });
 
