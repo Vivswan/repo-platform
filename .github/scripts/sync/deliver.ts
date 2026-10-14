@@ -12,6 +12,7 @@ import {
   FAILURE_ISSUE_TITLE,
   MANIFEST_NAME,
   PLATFORM_NAME,
+  REGISTRATION_PATH,
   SYNC_PR_TITLE_PREFIX,
 } from "../../../actions/shared/platform.ts";
 import { NETWORK_TIMEOUT_MS, readDispatchBranch } from "../fleet/discovery.ts";
@@ -155,15 +156,23 @@ export function boundedReport(report: string, cap = BODY_CAP): string {
   return kept.join("");
 }
 
+/** The add_modules line names the dispatch's value: the reviewer's first question is why the registration moved. */
 export function prBody(input: {
   operator: string;
   build: string;
   runUrl: string;
   report: string;
+  addModules: string;
 }): string {
   return [
     `Automated sync from [${input.operator}](https://github.com/${input.operator}) build \`${input.build}\` ([run](${input.runUrl})).`,
     "",
+    ...(input.addModules === ""
+      ? []
+      : [
+          `Dispatched with \`add_modules=${input.addModules}\`: the names \`${REGISTRATION_PATH}\` lacked were added to its modules list, and auto-merge stays off so the selection is reviewed.`,
+          "",
+        ]),
     boundedReport(input.report).replace(/\n$/, ""),
     "",
     "> [!NOTE]",
@@ -194,16 +203,17 @@ export function branchSummary(input: {
 
 /** By name and forced: a path the target's own .gitignore covers must reach the commit whose manifest names it
  *  (`git add --all` skipped it and shipped the manifest entry without the file). Literal, so a path spelling `[`, `*`
- *  or `?` stages itself alone. Renames off, so a retired path is listed as its own deletion. */
+ *  or `?` stages itself alone. Renames off, so a retired path is listed as its own deletion. `before` holds the paths
+ *  the steps ahead of the writer wrote: the rungs', and the registration on an add_modules run. */
 export function stageWritten(
   summary: SyncReport,
-  migrated: string[],
+  before: string[],
   git: (...args: string[]) => string[],
   must: (argv: string[], reason: string) => string,
 ): string[] {
   const changed = [
     MANIFEST_NAME,
-    ...migrated,
+    ...before,
     ...summary.written
       .filter((row) => row.change !== "unchanged" && row.change !== "held")
       .map((row) => row.path),
@@ -241,6 +251,8 @@ class Delivery {
   readonly runUrl = requireEnv("RUN_URL");
   /** docs/platform/sync/operator.md, "Syncing a branch". */
   readonly branch = readDispatchBranch();
+  /** The plan's admitted names, comma-joined (docs/platform/sync/operator.md, "Adding modules"). */
+  readonly addModules = env("ADD_MODULES");
   readonly logFile = join(this.runnerTemp, DELIVER_LOG);
 
   constructor() {
@@ -490,7 +502,7 @@ class Delivery {
     }
     const staged = stageWritten(
       summary,
-      readMigrated(this.runnerTemp),
+      [...readMigrated(this.runnerTemp), ...(this.addModules === "" ? [] : [REGISTRATION_PATH])],
       (...args) => this.git(...args),
       (argv, reason) => this.must(argv, reason),
     );
@@ -542,6 +554,7 @@ class Delivery {
         build: this.build,
         runUrl: this.runUrl,
         report,
+        addModules: this.addModules,
       }),
     );
     let number: string;
@@ -596,6 +609,8 @@ class Delivery {
       this.log("auto-merge left off: the report holds the PR for review");
     } else if (env("MANUAL") === "true") {
       this.log("auto-merge left off: manual run");
+    } else if (this.addModules !== "") {
+      this.log("auto-merge left off: the run adds modules to the registration");
     } else if (number !== "") {
       // A refused arm (auto-merge disabled in the target) is the target's
       // choice: the PR waits for a human, and the log says so.

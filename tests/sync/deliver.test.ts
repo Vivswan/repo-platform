@@ -77,6 +77,8 @@ interface Options {
   hold?: boolean;
   manual?: boolean;
   branch?: string;
+  /** The plan's add_modules output, as the row's step env carries it. */
+  addModules?: string;
   public?: boolean;
   writer?: "success" | "failure" | "skipped";
   checkout?: "success" | "failure";
@@ -150,6 +152,7 @@ function run(options: Options = {}): Run {
       RUN_URL: "https://github.com/Vivswan/repo-platform/actions/runs/1",
       GITHUB_REPOSITORY: "Vivswan/repo-platform",
       MANUAL: options.manual === true ? "true" : "false",
+      ADD_MODULES: options.addModules ?? "",
       CHECKOUT_OUTCOME: options.checkout ?? "success",
       WRITER_OUTCOME: options.writer ?? "success",
       GIT_CONFIG_GLOBAL: FIXTURE_GITCONFIG,
@@ -302,18 +305,27 @@ describe("deliver.ts", () => {
   );
 
   // The push authenticates alone (the checkout kept no token) under a lease, so a concurrent writer fails loudly;
-  // squash is the fleet's merge method; the token must reach neither the log nor the body; and a manual run never
-  // arms auto-merge, since the operator asked to look.
-  test.each<{ manual: boolean; merge: string[][]; log: string | null }>([
+  // squash is the fleet's merge method; the token must reach neither the log nor the body; a manual run never
+  // arms auto-merge, since the operator asked to look; and an add_modules run never arms either, stages the
+  // registration the add step edited beside the writer's paths, and says why in the body.
+  test.each<{ manual: boolean; addModules?: string; merge: string[][]; log: string | null }>([
     { manual: false, merge: [["7", "-R", TARGET, "--squash", "--auto"]], log: null },
     { manual: true, merge: [], log: "manual run" },
+    {
+      manual: false,
+      addModules: "site,nightly",
+      merge: [],
+      log: "the run adds modules to the registration",
+    },
   ])(
-    "a clean change opens the PR whose body carries the report (manual: $manual)",
-    ({ manual, merge, log }) => {
-      const result = run({ manual, stub: { STUB_DIRTY: "1" } });
+    "a clean change opens the PR whose body carries the report (manual: $manual, add_modules: $addModules)",
+    ({ manual, addModules, merge, log }) => {
+      const result = run({ manual, addModules, stub: { STUB_DIRTY: "1" } });
       silent(result);
       expect(result.verdict).toBe("opened");
       expect(result.git.map((argv) => argv.slice(3, 5).join(" "))).toContain("commit -q");
+      const staged = calls(result.git, "add")[0].slice(6);
+      expect(staged.includes(":(literal).repo-platform.yml")).toBe(addModules !== undefined);
       const push = calls(result.git, "push")[0];
       expect(push).toContain("--force-with-lease=automation/repo-platform:");
       expect(push).toContain(`https://x-access-token:${PAT}@github.com/${TARGET}.git`);
@@ -325,6 +337,8 @@ describe("deliver.ts", () => {
       const body = readFileSync(create[create.indexOf("--body-file") + 1], "utf-8");
       expect(body).toContain(`build \`${BUILD}\``);
       expect(body).toContain(REPORT.trimEnd());
+      const dispatched = `Dispatched with \`add_modules=${addModules}\``;
+      expect(body.includes(dispatched)).toBe(addModules !== undefined);
       expect(calls(result.gh, "pr", "merge").map((argv) => argv.slice(3))).toEqual(merge);
       if (log !== null) expect(result.log).toContain(log);
       expect(result.log).not.toContain(PAT);
@@ -727,7 +741,7 @@ describe("boundedReport", () => {
     expect(bounded).toContain("```diff\n```\n\n> [!WARNING]");
     expect(omitted(bounded)).toEqual([`\n${longLine}\n\`\`\``.length]);
     expect(bounded.endsWith(review)).toBe(true);
-    const body = prBody({ operator: "o/r", build: BUILD, runUrl: "u", report });
+    const body = prBody({ operator: "o/r", build: BUILD, runUrl: "u", report, addModules: "" });
     expect(body.length).toBeLessThan(65_536);
   });
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   captureNetwork,
   parseDiscovered,
+  readDispatchAddModules,
   readDispatchBranch,
   readDispatchRepo,
   scrubSlug,
@@ -203,6 +204,7 @@ describe("the dispatch inputs", () => {
     eventBody?: string;
     repo: string;
     branch: string;
+    addModules?: string;
   }>([
     {
       reason: "ONLY_REPO is trimmed and case-folded",
@@ -267,6 +269,17 @@ describe("the dispatch inputs", () => {
       branch: "feat/add-site\u00a0",
     },
     {
+      reason:
+        "add_modules folds like the scope, per entry; empties survive for its parser to reject (it never reads ONLY_REPO)",
+      onlyRepo: "Vivswan/from-env",
+      eventBody: JSON.stringify({
+        inputs: { repo: "Vivswan/A", add_modules: " Site, Nightly ,," },
+      }),
+      repo: "vivswan/from-env",
+      branch: "",
+      addModules: "site,nightly,,",
+    },
+    {
       reason: "an event payload without a repo or branch input reads as empty",
       eventBody: JSON.stringify({ inputs: {} }),
       repo: "",
@@ -285,14 +298,18 @@ describe("the dispatch inputs", () => {
       branch: "",
     },
     { reason: "nothing set reads as empty", repo: "", branch: "" },
-  ])("$reason", ({ onlyRepo = "", eventBody, repo, branch }) => {
+  ])("$reason", ({ onlyRepo = "", eventBody, repo, branch, addModules = "" }) => {
     let eventPath = "";
     if (eventBody !== undefined) {
       eventPath = join(root, `event-${Bun.hash(eventBody).toString(16)}.json`);
       writeFileSync(eventPath, eventBody);
     }
     withEnv({ ONLY_REPO: onlyRepo, GITHUB_EVENT_PATH: eventPath }, () => {
-      expect([readDispatchRepo(), readDispatchBranch()]).toEqual([repo, branch]);
+      expect([readDispatchRepo(), readDispatchBranch(), readDispatchAddModules()]).toEqual([
+        repo,
+        branch,
+        addModules,
+      ]);
     });
   });
 
@@ -302,8 +319,8 @@ describe("the dispatch inputs", () => {
   writeFileSync(
     dispatchEntry,
     [
-      `import { readDispatchBranch, readDispatchRepo } from ${JSON.stringify(DISCOVERY)};`,
-      "console.log(JSON.stringify([readDispatchRepo(), readDispatchBranch()]));",
+      `import { readDispatchAddModules, readDispatchBranch, readDispatchRepo } from ${JSON.stringify(DISCOVERY)};`,
+      "console.log(JSON.stringify([readDispatchRepo(), readDispatchBranch(), readDispatchAddModules()]));",
       "",
     ].join("\n"),
   );
@@ -329,6 +346,13 @@ describe("the dispatch inputs", () => {
       payload: JSON.stringify({ inputs: { branch: 31337 } }),
       diagnostic: "unexpected shape",
       path: "inputs.branch",
+      value: "31337",
+    },
+    {
+      reason: "a wrong-typed add_modules input",
+      payload: JSON.stringify({ inputs: { add_modules: 31337 } }),
+      diagnostic: "unexpected shape",
+      path: "inputs.add_modules",
       value: "31337",
     },
     {

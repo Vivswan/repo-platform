@@ -36,6 +36,13 @@ on:
           (docs/platform/sync/operator.md).
         required: false
         type: string
+      add_modules:
+        description: >-
+          Module names, comma-separated, to add to each selected repository's .repo-platform.yml before the writer
+          runs, so the sync PR carries the new selection with its files; no PR of the run is armed for auto-merge,
+          and the input is refused beside branch (docs/platform/sync/operator.md, "Adding modules").
+        required: false
+        type: string
   # Named `repos`, not `repo`, on purpose: the dispatch input may be a private slug and never rides in step env,
   # while this value is public text off merged PRs and is passed as ONLY_REPO below.
   workflow_call:
@@ -72,6 +79,8 @@ jobs:
       build: ${{ steps.build.outputs.build }}
       count: ${{ steps.plan.outputs.count }}
       matrix: ${{ steps.select.outputs.matrix }}
+      # Roster names in files.yml order, or empty: public, unlike the typed input (fleet/sync_scope.ts).
+      add_modules: ${{ steps.select.outputs.add_modules }}
     steps:
       # Full history: the resolve proves the tagged commit is main history.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -188,6 +197,17 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/sync/checkout_target.ts > "$RUNNER_TEMP/checkout-stdio.log" 2>&1
 
+      # The names the plan admitted go onto the target's registration before the rungs and the writer read it; a run
+      # without the input writes nothing. Its log is the writer's until the writer writes its report over it: a
+      # refusal skips the rungs and the writer and is delivered as the writer's failure, the refusal in the log tail.
+      - name: Add the dispatched modules to the target's registration
+        id: add_modules
+        if: steps.checkout.outcome == 'success'
+        continue-on-error: true
+        env:
+          ADD_MODULES: ${{ needs.plan.outputs.add_modules }}
+        run: bun .github/scripts/sync/add_modules.ts > "$RUNNER_TEMP/sync.log" 2>&1
+
       # Every rung of the build's migrations/, in name order, over the target
       # (docs/platform/sync/writer.md, Migrations), driven by the build's own migrate.ts like
       # the writer below. Its log is the writer's until the writer writes its
@@ -195,7 +215,7 @@ jobs:
       # the writer's failure, the rung's line in the log tail.
       - name: Run the migrations over the target
         id: migrate
-        if: steps.checkout.outcome == 'success'
+        if: steps.add_modules.outcome == 'success'
         continue-on-error: true
         run: bun build/.github/scripts/sync/migrate.ts build/migrations target > "$RUNNER_TEMP/sync.log" 2>&1
 
@@ -222,6 +242,7 @@ jobs:
           BUILD: ${{ needs.plan.outputs.build }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           MANUAL: ${{ inputs.manual || false }}
+          ADD_MODULES: ${{ needs.plan.outputs.add_modules }}
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
           WRITER_OUTCOME: ${{ steps.write.outcome }}
         run: bun .github/scripts/sync/deliver.ts > "$RUNNER_TEMP/deliver-stdio.log" 2>&1
