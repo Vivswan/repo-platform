@@ -24,8 +24,8 @@ on:
         type: string
       tracking-labels:
         description: >-
-          Comma-separated nightly tracking-issue labels, where release-health blocks on an open issue carrying
-          any of them. Empty disables the tracking gates.
+          Comma-separated nightly tracking-issue labels, where release-health blocks on an open issue carrying any of
+          them (empty disables the tracking gates).
         required: false
         type: string
         default: ""

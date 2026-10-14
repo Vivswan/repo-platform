@@ -1,18 +1,13 @@
 name: Knip
 description: |
-  Runs knip over the caller's installed checkout, the fleet's dead-code gate for JavaScript toolchains.
+  Runs knip over the caller's installed checkout, the fleet's dead-code gate for JavaScript toolchains: unused files,
+  exports, and dependencies.
 
-  knip reports unused files, exports, and dependencies. It runs on its own defaults,
-  overridden by whatever configuration the repository carries: any of knip's config file
-  names, a knip.ts or knip.js among them, or a knip key in package.json. A configured entry
-  or project list replaces the default list.
-
-  The caller installs the toolchain and the dependencies first, since knip resolves imports
-  through node_modules.
-
-  A finding fails the step, and so does a configuration hint (a stale `ignore*` entry, a pattern
-  matching nothing): the fix is in the repository's own knip configuration. The only bypass for
-  a finding is an ignore entry there, with a reason.
+  - Configuration: knip's defaults, overridden by whatever the repository carries (any knip config file, knip.ts or
+    knip.js included, or a knip key in package.json). A configured entry or project list replaces the default list.
+  - The caller installs the toolchain and the dependencies first, since knip resolves imports through node_modules.
+  - A finding fails the step, and so does a configuration hint (a stale `ignore*` entry, a pattern matching nothing), whose fix
+    is in the repository's own knip configuration. The only bypass for a finding is an ignore entry there, with a reason.
 
 runs:
   using: composite

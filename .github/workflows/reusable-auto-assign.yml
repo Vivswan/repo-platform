@@ -12,7 +12,9 @@ on:
   workflow_call:
     inputs:
       issue:
-        description: Issue or PR number to assign, dispatch only. Empty means sweep.
+        description: >-
+          On a dispatch, the issue or PR number to assign, or empty to sweep every open unassigned item (the other
+          events do not read it).
         required: false
         type: string
         default: ""

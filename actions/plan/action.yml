@@ -1,21 +1,15 @@
 name: Plan
 description: |
-  Resolves one managed repository's fleet configuration at run time, so every managed ci.yml can be byte-identical.
+  Resolves one managed repository's fleet configuration at run time, so every managed ci.yml can be byte-identical: it
+  reads the registration (.repo-platform.yml) in the caller's checkout, checks it against files.yml at the root of the
+  delivery commit beside this action, and publishes step outputs. An invalid registration fails closed.
 
-  It reads the repository's registration (.repo-platform.yml) in the caller's checkout,
-  checks it against the module data at the root of the delivery commit beside this action,
-  and publishes the result as step outputs. That data is files.yml, whose modules block is
-  the vocabulary in canonical order. Any invalid registration fails closed.
+  - default: what fleet.yml's jobs key on (the module selection in canonical order, the visibility, the CodeQL
+    languages, the tracking labels).
+  - site: the configuration the pages-site action consumes, as one JSON document (the site title, the docs mount path or null
+    for no docs half, the include roots, the link-rot label).
 
-  Modes:
-    - default: what fleet.yml's jobs key on (the module selection in canonical order, the
-      visibility, the CodeQL languages, the tracking labels)
-    - site: the site configuration the pages-site action consumes, as one JSON document (the
-      site title, the docs mount path or null for no docs half, the include roots, the
-      link-rot label)
-
-  GH_TOKEN is needed in the environment only when the private input is empty, since the
-  visibility is then read from the API.
+  GH_TOKEN is needed only when the private input is empty, since the visibility is then read from the API.
 
 inputs:
   mode:
@@ -24,8 +18,8 @@ inputs:
     default: default
   private:
     description: >-
-      The repository's visibility, "true" or "false" (pass github.event.repository.private).
-      Empty asks the API with GH_TOKEN.
+      The repository's visibility, "true" or "false" (pass github.event.repository.private), or empty to ask the API
+      with GH_TOKEN.
     required: false
     default: ""
 outputs:
@@ -51,13 +45,13 @@ outputs:
     description: The security label's description, as the baseline declares it (mode default).
     value: ${{ steps.plan.outputs.security-label-description }}
   weekly:
-    description: '"true" on Mondays (UTC): the scheduled run that also reruns CodeQL (mode default).'
+    description: >-
+      "true" on Mondays (UTC), the scheduled run that also reruns CodeQL (mode default).
     value: ${{ steps.plan.outputs.weekly }}
   config:
     description: >-
       The site configuration as compact JSON {"site_title", "docs_path", "include", "link_rot_label",
-      "link_rot_color", "link_rot_description"}, the pages-site action's config input (mode site).
-      docs_path is null when the registration turns the docs half off with site.path: null.
+      "link_rot_color", "link_rot_description"}, the pages-site action's config input, with docs_path null when the registration turns the docs half off with site.path: null (mode site).
     value: ${{ steps.plan.outputs.config }}
 
 runs:
