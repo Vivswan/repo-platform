@@ -1,26 +1,18 @@
 name: Check File Size
 description: |
-  Caps file length, line width, and comment block length in the caller's checkout.
+  Caps file length, line width, and comment block length in the caller's checkout; the caps and the file kinds are
+  check-file-size.ts.
 
-  Two tiers for length: a sensible size warns, a hard cap fails. One tier for width: a line
-  over 256 code points fails. One tier for a comment block: it warns only, and a comment line
-  `comment-cap: ignore <reason>` exempts its block.
+  - Length: a sensible size warns, a hard cap fails.
+  - Width: a line over 256 code points fails.
+  - Comment block: warns only, and a `comment-cap: ignore <reason>` line exempts its block. A block is a run of lines
+    opening with a comment prefix, so a string line opening with `//` counts toward the warning, never a red check.
 
-  The caps and the file kinds are check-file-size.ts.
-
-  A comment block is a run of lines opening with a comment prefix, whatever the language. So a
-  string line opening with `//` counts toward a block warning, never a red check.
-
-  Findings are written once, as one table, and reported through the sinks the fleet rule sets
-  for any check that reports findings:
-    - the step summary and the log annotations, on every event
-    - a sticky PR comment on pull_request events, deleted when there is nothing to say
+  Findings are one table in the step summary and the log annotations on every event, plus a sticky PR comment on
+  pull_request events, deleted when there is nothing to say (the calling job needs pull-requests: write for it).
 
   Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it).
-
   Repo-owned exemptions: `.file-size-allow.local`, one path per line with a `# reason`.
-
-  The calling job needs pull-requests: write for the comment.
 
 runs:
   using: composite

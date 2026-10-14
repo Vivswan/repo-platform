@@ -13,17 +13,18 @@ name: Post Green
 on:
   workflow_call:
     inputs:
+      # The sync leg reads the stable tag instead of this input.
       sha:
         description: >-
-          The green main commit the calling run judged, its own github.sha, which the mover,
-          directives, and settings legs act on. The sync reads the stable tag instead.
+          The green main commit the calling run judged, its own github.sha, which the mover, directives, and settings
+          legs act on.
         required: true
         type: string
+      # Passed explicitly, as sha is, never read from the event payload.
       before:
         description: >-
-          The push payload's `before` (all zeros for a branch-creating push), the read-directives
-          leg's base when the mover reports none because the tag did not move or did not exist
-          before this run. Explicit like sha, and verified an ancestor of it.
+          The push payload's `before` (all zeros for a branch-creating push), verified an ancestor of sha, and the
+          read-directives leg's base when the tag did not move or did not exist before.
         required: true
         type: string
   # The self-heal: the scripts refuse any sha that is not green main history, so re-run that commit's CI first
@@ -32,7 +33,7 @@ on:
     inputs:
       sha:
         description: >-
-          The full 40-hex main commit to move the stable tag to. It must carry a green all-green check.
+          The full 40-hex main commit to move the stable tag to, carrying a green all-green check.
         required: true
         type: string
 

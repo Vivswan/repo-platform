@@ -1,25 +1,19 @@
 name: Nightly Issue
 description: |
-  Files, refreshes, or closes the tracking issue of a nightly stream (fuzz, plain CI, security, link rot).
+  Files, refreshes, or closes the tracking issue of a nightly stream (fuzz, plain CI, security, link rot): the fleet's
+  issue mechanism, as the sticky PR comment is its comment mechanism (docs/modules/tracking-issues.md).
 
-  It is the fleet's issue mechanism, the way the sticky PR comment is its comment mechanism.
-  No stream's wording is a default: every caller names its mode and stream, and in report
-  mode its title and label tuple.
+  - report: files the stream's issue, or refreshes the open one, the body replaced and never appended to.
+  - resolve: after a green run, comments on and closes the open labeled issues.
 
-  Modes:
-    - report: files the stream's issue, or refreshes the newest open one carrying the label,
-      through peter-evans/create-issue-from-file. The body is replaced, never appended to.
-    - resolve: after a green run, comments on and closes the open labeled issues, up to 100 a run.
+  Which issue a refresh takes, how many a resolve closes, and who is assigned and why are docs/modules/tracking-issues.md's.
 
-  Report mode assigns the repository owner every time. An issue created with GITHUB_TOKEN
-  fires no issues:opened event for the auto-assign workflow to catch, and GitHub drops a login
-  it cannot assign.
+  No stream's wording is a default: every caller names its mode and stream, and in report mode its title and label
+  tuple.
+  With an artifacts-dir the body is built from failure reports under docs/modules/fuzzer.md's contract; without one it
+  is a generic report (workflow, commit, run link).
 
-  With an artifacts-dir the body is built from failure reports, under the contract
-  docs/modules/fuzzer.md owns. Without one it is a generic nightly-failure report: workflow,
-  commit, run link.
-
-  The calling job needs issues: write, and gh on the runner (GitHub-hosted runners preinstall it).
+  The calling job needs issues: write, and gh on the runner.
 
 inputs:
   mode:
@@ -33,28 +27,28 @@ inputs:
     required: false
   artifacts-dir:
     description: >-
-      Directory of per-failure subdirectories (contract v1). Empty means the stream has no
-      failure artifacts, so report mode files a generic nightly-failure report instead.
+      Directory of per-failure subdirectories (contract v1), or empty for a stream without failure artifacts, which
+      report mode files as a generic nightly-failure report.
     required: false
     default: ""
   artifact-name:
     description: >-
-      Name of the uploaded workflow artifact carrying the full reports, which the issue body
-      summarizes by each report's head and points at. Empty makes the issue body the only
-      record: every report rides whole, cut only at GitHub's body limit.
+      Name of the uploaded workflow artifact carrying the full reports, which the issue body summarizes and points at,
+      or empty to make the body the only record (every report whole, cut at GitHub's body limit).
     required: false
     default: ""
   label-color:
-    description: Color report mode creates the label with, or repaints an existing one to. Required in report mode.
+    description: >-
+      Color report mode creates the label with or repaints an existing one to (required in report mode).
     required: false
   label-description:
-    description: Description report mode creates the label with, or resets an existing one to. Required in report mode.
+    description: >-
+      Description report mode creates the label with or resets an existing one to (required in report mode).
     required: false
   stream:
     description: >-
-      Which nightly stream the issue tracks, which shapes the wording of the report body and
-      the resolve comment. fuzz speaks of failure reports and crashing inputs and hedges on
-      unpinned regression seeds, while generic carries no fuzz notions.
+      Which nightly stream the issue tracks: fuzz speaks of failure reports, crashing inputs, and unpinned regression
+      seeds, while generic carries no fuzz notions.
     required: true
 
 outputs:

@@ -1,42 +1,34 @@
 name: Check Shell Complexity
 description: |
-  Refuses shell nested more than one level deep, and any function.
+  Refuses shell nested more than one level deep, and any function, in the caller's checkout.
 
-  Depth 1 is allowed: an if, for, while, until, case, `||` chain, or tested command substitution
-  whose body holds only plain commands. Depth 2 is refused: any construct inside another.
-  A function is refused at any depth, since a function is a script asking to be TypeScript.
+  - Depth 1 passes: an if, for, while, until, case, `||` chain, or tested command substitution whose body holds only
+    plain commands.
+  - Depth 2 is refused: any construct inside another. A function is refused at any depth, since a function is a script
+    asking to be TypeScript.
 
-  Judged, in the caller's checkout:
-    - `run:` steps of workflows and composite actions (bash, sh, zsh, pwsh, powershell, cmd)
-    - moon task scripts and Containerfile RUN instructions
-    - *.sh, *.bash, *.zsh, *.ps1, *.psm1, *.bat, *.cmd files
-    - a tracked extensionless file whose shebang names one of those shells (a git hook)
+  Judged: `run:` steps of workflows and composite actions (bash, sh, zsh, pwsh, powershell, cmd), moon task scripts,
+  Containerfile RUN instructions, *.sh, *.bash, *.zsh, *.ps1, *.psm1, *.bat, and *.cmd files, and a tracked
+  extensionless file whose shebang names one of those shells.
 
-  Parsers: mvdan/sh for bash, sh, and zsh; pwsh's own parser for PowerShell, so pwsh must be on PATH
-  when a PowerShell body exists (the step fails naming it otherwise); cmd by tokens after dropping rem
-  lines, so nesting is counted by keyword count rather than structure, a keyword inside a quoted
-  argument counts too, and a three-way `||` chain is refused where bash passes it as one chain.
+  - Parsers: mvdan/sh for bash, sh, and zsh; pwsh's own parser for PowerShell, so pwsh must be on PATH when a
+    PowerShell body exists (the step fails naming it otherwise).
+  - cmd is read by tokens after dropping rem lines: nesting is counted by keyword, a keyword inside a quoted argument
+    counts, and a three-way `||` chain is refused where bash passes it.
+  - Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it). Warned and skipped: a yaml
+    file the reader cannot parse.
+  - Never read: vendored installs and build output (node_modules, vendor, third_party, dist, build, .venv), and the directories
+    named in `skip` (repo-platform names `files`, its sync templates, judged through the trees its writer lands instead).
 
-  Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it).
-  Warned and skipped: a yaml file the reader cannot parse.
-  Never read: vendored installs and build output (node_modules, vendor, third_party, dist, build, .venv),
-  and the directories the caller names in `skip` (repo-platform names `files`, its sync templates, judged
-  through the trees its writer lands instead).
-
-  Findings are written once, as one table through two sinks on every event: the step summary and the
-  log annotations. On pull_request events a sticky PR comment carries the same table and is deleted
-  when there is nothing to say; the calling job needs `pull-requests: write` for it.
-
+  Findings are one table in the step summary and the log annotations on every event, plus a sticky PR comment on
+  pull_request events, deleted when there is nothing to say (the calling job needs pull-requests: write for it).
   Exemptions: `.shell-complexity-allow.local`, one path per line with a `# reason`.
 
 inputs:
   skip:
-    description: |
-      Directory names the check must not read, beyond the generic ones it always skips.
-
-      Comma-separated, spaces trimmed; directory components only, never file names.
-
-      Empty, the default, skips nothing more.
+    description: >-
+      Directory names the check must not read beyond the generic ones, comma-separated with spaces trimmed, directory
+      components only, and empty by default.
     required: false
     default: ""
 

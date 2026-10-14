@@ -1,37 +1,31 @@
 name: Release Health
 description: |
-  Gates releases in managed repositories on what says the repository is not release-worthy.
+  Gates releases in managed repositories on what says the repository is not release-worthy; any of these, open, fails
+  the gate: a tracking issue of a nightly stream (fuzz or CI), a release-blocker issue, or a Dependabot alert at high
+  or critical severity.
 
-  Any of these open fails the gate:
-    - a tracking issue of a nightly stream (fuzz or CI)
-    - a release-blocker issue
-    - a Dependabot alert at high or critical severity
+  Modes, each named by the caller:
 
-  Modes:
-    - pull-request: on a release-please PR's CI, in a full-history checkout of the PR head.
-      First reads whether the head contains the base branch's tip into the `behind` output (a
-      stale release PR cuts a release missing commits already on it, so the caller refreshes
-      it in the same run), then runs the gates.
-    - after-refresh: on that CI, after release-please's propose ran against a stale head, in the
-      same checkout. Green naming the new head when the head moved and the base branch still
-      stands where the checkout fetched it (a base that moved may carry a commit the refresh
-      never saw: red, and that commit's own run refreshes the PR). Unmoved beside a merged
-      release PR still pending fails (release-please proposed nothing). Unmoved otherwise means
-      the PR body was unchanged, so no changelog line is lost: GitHub's update-branch merges the
-      base branch, and a head still unmoved fails.
-    - release: on the main-push release path. Gates a release-PR merge and tells the caller
-      which push it was through `release-cut`. An ordinary push is not gated, and
-      `head-current` says whether the branch still stands at the judged commit.
-    - after-propose: after release-please's propose step. Fails when a merged release PR has
-      worn "autorelease: pending" for over 30 minutes, since release-please then proposes
-      nothing, green.
+  - pull-request: on a release-please PR's CI, in a full-history checkout of the head. Reads whether the head contains
+    the base tip into `behind` (a stale release PR would cut a release missing commits, so the caller refreshes it in
+    the same run), then runs the gates.
+  - after-refresh: there, in the same checkout, after release-please's propose ran against a stale head. Green naming the new
+    head when it moved and the base still stands where the checkout fetched it; red when the base moved, since it may carry a
+    commit the refresh never saw, and that commit's own run refreshes the PR.
+  - after-refresh, head unmoved: beside a merged release PR still pending it fails (release-please proposed nothing).
+    Otherwise the PR body was unchanged, so no changelog line is lost: GitHub's update-branch merges the base, and a
+    head still unmoved fails.
+  - release: on the main-push path. Gates a release-PR merge and reports which push it was through `release-cut`; an
+    ordinary push is not gated, and `head-current` says whether the branch still stands at the judged commit.
+  - after-propose: after release-please's propose step. Fails when a merged release PR has worn "autorelease: pending"
+    for over 30 minutes, since release-please then proposes nothing, green.
 
-  The release-override label on the release PR turns gate failures into warnings. Freshness is
-  never overridden (a stale head is refreshed, not waved through), nor is the pending check.
+  The release-override label on the release PR turns gate failures into warnings; freshness and the pending check are
+  never overridden.
 
-  Needs GH_TOKEN in the environment with issues read, pull-requests read, and
-  vulnerability-alerts read (an unreadable alerts endpoint fails the gate), and gh >= 2.51 on
-  the runner (GitHub-hosted runners ship current gh). After-refresh mode's branch update needs
+  Needs GH_TOKEN with issues read, pull-requests read, and vulnerability-alerts read (an unreadable alerts endpoint
+  fails
+  the gate), gh >= 2.51 on the runner (GitHub-hosted runners ship current gh), and for after-refresh's branch update
   contents write and pull-requests write.
 
 inputs:
@@ -43,8 +37,8 @@ inputs:
     required: true
   tracking-labels:
     description: >-
-      Comma-separated labels of the nightly tracking-issue streams, where an open issue
-      carrying any of them blocks. Empty disables the tracking gates.
+      Comma-separated labels of the nightly tracking-issue streams, where an open issue carrying any of them blocks
+      (empty disables the tracking gates).
     required: false
     default: ""
 

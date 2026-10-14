@@ -1,18 +1,10 @@
 name: Typos
 description: |
-  Spell-checks the caller's checkout with the pinned typos action and the fleet allowlist shipped beside this action.
+  Spell-checks the caller's checkout with the pinned typos action and the fleet allowlist shipped beside this action;
+  typos layers that allowlist as --config over the repository's own file, which extends it without replacing it.
 
-  typos layers a --config file over the one it discovers at the checkout root (_typos.toml,
-  typos.toml, or .typos.toml), so a repository's own file extends the fleet allowlist without
-  replacing it.
-
-  A repository's own extensions:
-    - `[default.extend-words]` for its vocabulary
-    - `[default.extend-identifiers]` for one identifier
-    - `[files] extend-exclude` for fixture paths spelled wrong on purpose
-    - a `# typos: ignore` line marker for a one-off
-
-  A finding fails the step. The only bypass is one of those, with a reason.
+  A finding fails the step. The repository's own extensions, the only bypass, are docs/fleet-guidelines.md's, "How to
+  bypass a check".
 
 runs:
   using: composite
