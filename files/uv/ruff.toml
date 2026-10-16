@@ -1,0 +1,11 @@
+# This file is managed by {{github_username}}/repo-platform.
+# Local edits are replaced on the next sync.
+# The fleet's Python docstring floor (docs/modules/python.md). The repository's own ruff settings live in
+# pyproject.toml under [tool.ruff], which this file extends, so they apply beneath the floor.
+extend = "pyproject.toml"
+
+[lint]
+extend-select = ["D2", "D3", "D4"]
+
+[lint.pydocstyle]
+convention = "google"

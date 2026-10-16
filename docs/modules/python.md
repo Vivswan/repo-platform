@@ -8,11 +8,22 @@ Selecting the `uv` module gives a repository the ruff steps that make the fleet'
 
 ## The floor
 
-The floor rides ruff's command line in the module's steps, so a repository's own ruff `select` and `ignore` stay its own and cannot lower it (a `per-file-ignores` entry still exempts the files it names, as any local exemption does):
+The sync writes `ruff.toml`, a managed file, beside the repository's `pyproject.toml` and extends it:
 
-```text
-uvx ruff check --no-fix --no-fix-only --extend-select D2,D3,D4 --config 'lint.pydocstyle.convention = "google"' .
+```toml
+extend = "pyproject.toml"
+
+[lint]
+extend-select = ["D2", "D3", "D4"]
+
+[lint.pydocstyle]
+convention = "google"
 ```
+
+- **The repository's settings stay in `pyproject.toml`** under `[tool.ruff]`, read through the `extend`: its own `select`, `ignore`, and `line-length` apply, and an `ignore = ["D"]` there does not lower the floor.
+- **Two local exemptions remain,** both visible in a diff: a `per-file-ignores` entry exempts the files it names, and a nested `pyproject.toml` with its own `[tool.ruff]` governs the files under it, since ruff reads the closest configuration.
+- **The editor sees the floor too:** a ruff run from the repository root reads the same file CI reads.
+- **A uv repository needs a `pyproject.toml`** at its root, since the `extend` fails without one, and must keep no `.ruff.toml`, which ruff would read instead of the managed file, silently.
 
 The families are D2xx (whitespace), D3xx (quotes), and D4xx (content), as the `google` convention keeps them; ruff's pydocstyle documentation lists the rules that convention switches off. The findings a repository meets first:
 
@@ -26,7 +37,7 @@ The families are D2xx (whitespace), D3xx (quotes), and D4xx (content), as the `g
 The findings on a docstring whose `Args` header lacks its colon and leaves `b` undescribed:
 
 ```text
-$ uvx ruff check --quiet --output-format concise --extend-select D2,D3,D4 --config 'lint.pydocstyle.convention = "google"' .
+$ uvx ruff check --quiet --output-format concise .
 t.py:1:5: D417 Missing argument description in the docstring for `add`: `b`
 t.py:4:5: D416 [*] Section name should end with a colon ("Args")
 ```
@@ -47,15 +58,15 @@ def add(a: int, b: int) -> int:
     return a + b
 ```
 
-- **A missing docstring is not a finding.** The presence rules (D1xx) are not selected. A repository that wants them selects them in its own configuration, and the floor leaves that selection standing.
+- **A missing docstring is not a finding.** The presence rules (D1xx) are not selected. A repository that wants them selects them in its own `pyproject.toml`, and the floor leaves that selection standing.
 - **A NumPy-style section is not rejected.** Ruff's `google` convention judges Google-style sections and passes an underlined `Parameters` block untouched (ruff 0.17), so a repository converting from NumPy style converts by hand.
 
 ## How a repository takes it
 
-The workflows are starters, written once ([platform/sync/writer.md](../platform/sync/writer.md#classes)):
+`ruff.toml` is managed, so every sync writes it; the workflows are starters, written once ([platform/sync/writer.md](../platform/sync/writer.md#classes)):
 
-1. **A new repository:** the sync writes `checks.yml` and `auto-format.yml` with the ruff steps in place.
-2. **A repository that already owns them:** copy the ruff steps from the [uv blocks](https://github.com/Vivswan/repo-platform/tree/main/files/uv/.github/workflows) into its `checks.yml` and `auto-format.yml`.
+1. **A new repository:** the sync writes `ruff.toml`, `checks.yml`, and `auto-format.yml` with the ruff steps in place.
+2. **A repository that already owns the workflows:** the next sync brings `ruff.toml` (a `ruff.toml` of the repository's own there is a replaced local edit, which holds the sync PR for review); copy the ruff steps from the [uv blocks](https://github.com/Vivswan/repo-platform/tree/main/files/uv/.github/workflows) into its `checks.yml` and `auto-format.yml`.
 
 ## The gate
 
@@ -63,7 +74,7 @@ The module's toolchain blocks ([platform/sync/files.md](../platform/sync/files.m
 
 ```yaml
 - uses: astral-sh/setup-uv@<sha> # v10.0.1
-- run: uvx ruff check --no-fix --no-fix-only --extend-select D2,D3,D4 --config 'lint.pydocstyle.convention = "google"' .
+- run: uvx ruff check --no-fix --no-fix-only .
 - run: uvx ruff format --check .
 ```
 
