@@ -1,5 +1,9 @@
 
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      # The floor is the managed ruff.toml; the two --no flags keep a repository's fix or fix-only setting from
+      # repairing or passing findings in the runner (docs/modules/python.md).
+      - run: uvx ruff check --no-fix --no-fix-only .
+      - run: uvx ruff format --check .
       # Example uv checks; replace the placeholder below with real ones.
-      # - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       # - run: uv sync
       # - run: uv run pytest

@@ -32,7 +32,7 @@ One line each, the `description` of each module in the platform's `files.yml`.
 | Module | What it gives the repo |
 |---|---|
 | `bun` | TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS) |
-| `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python) |
+| `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff docstring gate) |
 | `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
 | `site` | one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme) |
 | `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels |
