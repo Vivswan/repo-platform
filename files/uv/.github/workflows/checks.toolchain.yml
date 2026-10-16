@@ -1,8 +1,9 @@
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       # The fleet's Python floor rides the command line, so the repository's own ruff select and ignore stay its own
-      # and cannot lower it (docs/modules/python.md).
-      - run: uvx ruff check --extend-select D2,D3,D4 --config 'lint.pydocstyle.convention = "google"' .
+      # and cannot lower it; the two --no flags keep a repository's fix or fix-only setting from repairing or passing
+      # findings in the runner (docs/modules/python.md).
+      - run: uvx ruff check --no-fix --no-fix-only --extend-select D2,D3,D4 --config 'lint.pydocstyle.convention = "google"' .
       - run: uvx ruff format --check .
       # Example uv checks; replace the placeholder below with real ones.
       # - run: uv sync

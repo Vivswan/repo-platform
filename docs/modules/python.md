@@ -11,7 +11,7 @@ Selecting the `uv` module gives a repository the ruff steps that make the fleet'
 The floor rides ruff's command line in the module's steps, so a repository's own ruff `select` and `ignore` stay its own and cannot lower it (a `per-file-ignores` entry still exempts the files it names, as any local exemption does):
 
 ```text
-uvx ruff check --extend-select D2,D3,D4 --config 'lint.pydocstyle.convention = "google"' .
+uvx ruff check --no-fix --no-fix-only --extend-select D2,D3,D4 --config 'lint.pydocstyle.convention = "google"' .
 ```
 
 The families are D2xx (whitespace), D3xx (quotes), and D4xx (content), as the `google` convention keeps them; ruff's pydocstyle documentation lists the rules that convention switches off. The findings a repository meets first:
@@ -63,9 +63,10 @@ The module's toolchain blocks ([platform/sync/files.md](../platform/sync/files.m
 
 ```yaml
 - uses: astral-sh/setup-uv@<sha> # v10.0.1
-- run: uvx ruff check --extend-select D2,D3,D4 --config 'lint.pydocstyle.convention = "google"' .
+- run: uvx ruff check --no-fix --no-fix-only --extend-select D2,D3,D4 --config 'lint.pydocstyle.convention = "google"' .
 - run: uvx ruff format --check .
 ```
 
+- **`--no-fix --no-fix-only`:** a repository's own `fix = true` or `fix-only = true` would otherwise repair findings in the runner or exit green on unfixable ones; the gate judges the committed files, and the label repairs.
 - **`uvx ruff` floats** on the latest release; the version policy is [toolchains.md](../toolchains.md)'s.
 - **`auto-format.yml`** runs the same check with `--fix`, then `ruff format`, on the `fix-lint` label: the findings ruff marks fixable (`[*]`) are fixed by the label, the rest by hand.
