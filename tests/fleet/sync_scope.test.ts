@@ -268,8 +268,16 @@ describe("branchDispatchRefusal", () => {
     "manual is meaningless with branch: a branch sync commits onto the branch and opens no PR; drop manual";
   const ONE_REPO =
     "branch takes exactly one owner/name in repo: the sync commits onto that one repository's branch (no list, no all, no visibility token, no modules: filter)";
+  const ADD_MODULES =
+    "add_modules does not combine with branch: a branch sync writes the selection the branch already declares, so edit the modules list on the branch instead";
 
-  test.each<{ reason: string; scope: Scope; manual: boolean; expected: string | null }>([
+  test.each<{
+    reason: string;
+    scope: Scope;
+    manual: boolean;
+    addsModules?: boolean;
+    expected: string | null;
+  }>([
     {
       reason: "one slug without manual is the admitted shape",
       scope: ONE,
@@ -277,6 +285,13 @@ describe("branchDispatchRefusal", () => {
       expected: null,
     },
     { reason: "manual beside branch", scope: ONE, manual: true, expected: MANUAL },
+    {
+      reason: "add_modules beside branch",
+      scope: ONE,
+      manual: false,
+      addsModules: true,
+      expected: ADD_MODULES,
+    },
     { reason: "two slugs", scope: list([], ["o/a", "o/b"]), manual: false, expected: ONE_REPO },
     { reason: "all", scope: ALL, manual: false, expected: ONE_REPO },
     {
@@ -304,7 +319,7 @@ describe("branchDispatchRefusal", () => {
       expected: ONE_REPO,
     },
     { reason: "manual outranks the scope refusal", scope: ALL, manual: true, expected: MANUAL },
-  ])("$reason", ({ scope, manual, expected }) => {
-    expect(branchDispatchRefusal(scope, manual)).toBe(expected);
+  ])("$reason", ({ scope, manual, addsModules = false, expected }) => {
+    expect(branchDispatchRefusal(scope, manual, addsModules)).toBe(expected);
   });
 });

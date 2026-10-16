@@ -1,20 +1,15 @@
 name: Trivy
 description: |
-  Scans the caller's checkout with Trivy (lockfiles, Dockerfiles, infrastructure files).
+  Scans the caller's checkout with Trivy (lockfiles, Dockerfiles, infrastructure files); the configuration lives here
+  once, so no managed repository carries a Trivy file. A MEDIUM or LOW finding neither blocks nor surfaces.
 
-  The configuration lives here once, so no managed repository carries a Trivy file. A MEDIUM
-  or LOW finding neither blocks nor surfaces.
+  - blocking: fails on a HIGH or CRITICAL vulnerability with a fix available, and on any HIGH or CRITICAL
+    misconfiguration (ignore-unfixed filters vulnerabilities only, since a misconfiguration has no fixed version).
+  - nightly: scans everything at HIGH and CRITICAL, never fails on a finding, and leaves the findings as the fuzz-issue action's
+    report directory plus a SARIF file for code scanning.
 
-  Modes:
-    - blocking: fails on a HIGH or CRITICAL vulnerability with a fix available, and on any
-      HIGH or CRITICAL misconfiguration (ignore-unfixed filters vulnerabilities only, since a
-      misconfiguration has no fixed version)
-    - nightly: scans everything at HIGH and CRITICAL severity, never fails, and leaves the
-      findings as the fuzz-issue action's report directory plus a SARIF file for code scanning
-
-  Both modes honor the repository's .trivyignore.yaml only when every entry carries a
-  statement and an expired_at date (Trivy drops expired entries, so a bypass undoes itself).
-  The plain .trivyignore format is refused.
+  Both modes honor the repository's .trivyignore.yaml under the rules of docs/modules/security-scans.md, "Bypassing a
+  finding".
 
 inputs:
   mode:
