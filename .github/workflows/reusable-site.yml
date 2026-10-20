@@ -41,33 +41,11 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.sha }}
 
-      # The owner is lowercased: Pages serves <owner>.github.io in lowercase and lychee reports hosts
-      # that way, so the own-site exclude matches. The excludes and the remap are regexes, hence the
-      # escaped dots (the assembly's own-origin remap in actions/pages-site/build.ts escapes the same way).
-      # tree_links: a github.com link into this repository's own default branch, as spelled, becomes the
-      # checkout's path, so lychee judges it by the tree ($2 is the path; trailing slashes, the query, and
-      # the fragment are dropped, since GitHub serves them and a file path does not). Case-sensitive: a
-      # branch in another case is another ref, and a link spelled otherwise stays a network check.
+      # The base path the hook builds for and the lychee patterns the link-rot step reads, from the one rule in
+      # actions/shared/pages_site.ts (the assembly lays the artifact out at the same base path).
       - name: Resolve the site URLs
         id: urls
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          owner="$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')"
-          repo="${GITHUB_REPOSITORY#*/}"
-          # pagesBasePath (actions/pages-site/lib.ts): the owner's <owner>.github.io repository is the user site at the root.
-          if [ "$(echo "$repo" | tr '[:upper:]' '[:lower:]')" = "$owner.github.io" ]; then base_path="/"; else base_path="/$repo/"; fi
-          origin="https://$owner.github.io"
-          site_url="$origin${base_path%/}"
-          edit_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/edit/"
-          tree_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/"
-          {
-            echo "base_path=$base_path"
-            echo "origin=$origin"
-            echo "own_links=^${site_url//./\\.}([/?#]|$)"
-            echo "edit_links=^${edit_url//./\\.}"
-            echo "tree_links=^${tree_url//./\\.}(blob|tree)/${DEFAULT_BRANCH}/([^?#]*?)/*([?#].*)?$ file://$GITHUB_WORKSPACE/\$2"
-          } >> "$GITHUB_OUTPUT"
+        uses: $/actions/site-urls
 
       # A repository without the hook publishes docs/ alone, when it has one; the assembly says so with a notice.
       - name: Build the repository's website
@@ -75,7 +53,7 @@ jobs:
         if: hashFiles('.github/actions/site-build/action.yml') != ''
         uses: ./.github/actions/site-build
         with:
-          base-path: ${{ steps.urls.outputs.base_path }}
+          base-path: ${{ steps.urls.outputs.base-path }}
           origin: ${{ steps.urls.outputs.origin }}
 
       # The Pages steps run whenever the assembly has something to publish. No pre-check of the Pages site: GitHub
@@ -143,10 +121,10 @@ jobs:
             --root-dir ${{ steps.site.outputs.site-dir }}
             --scheme https --scheme http --scheme file
             --exclude-all-private
-            --exclude '${{ steps.urls.outputs.own_links }}'
-            --exclude '${{ steps.urls.outputs.edit_links }}'
+            --exclude '${{ steps.urls.outputs.own-links }}'
+            --exclude '${{ steps.urls.outputs.edit-links }}'
             --exclude '^file://${{ steps.site.outputs.site-dir }}/'
-            --remap '${{ steps.urls.outputs.tree_links }}'
+            --remap '${{ steps.urls.outputs.tree-links }}'
             --timeout 30 --max-retries 3 --retry-wait-time 5
             --glob-ignore-case '**/*.html' '**/*.htm'
           fail: false

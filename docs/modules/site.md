@@ -37,7 +37,7 @@ The called workflow is one job, in this order:
 | Step | Runs when | What |
 |---|---|---|
 | checkout | always | the judged commit, full history (the tag list is the version set) |
-| urls | always | computes the base path `/<repo>/` (`/` for the owner's `<owner>.github.io` repository, the user site) and the origin `https://<owner>.github.io` |
+| urls | always | the shared [site-urls action](../../actions/site-urls/action.yml): the base path `/<repo>/` (`/` for the owner's `<owner>.github.io` repository, the user site), the origin `https://<owner>.github.io`, and the link-rot step's lychee patterns |
 | hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
 | pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, and writes `versions.json` under the docs mount |
 | configure, upload, deploy | something was built (`publish`) | the one Pages artifact, deployed to the `github-pages` environment; red on configure-pages's error while the Pages site does not exist yet ([below](#pages-enablement)) |

@@ -91,7 +91,7 @@ export function deployLinkCheckArgs(
   return (
     `--root-dir ${Bun.$.escape(runner.served)} ` +
     `--files-from ${Bun.$.escape(join(runner.scratch, "link-check-inputs.txt"))} ` +
-    `--remap ${Bun.$.escape(`^${own}([/?#]|$) file://${runner.site}$1`)}`
+    `--remap ${Bun.$.escape(`^${own}([/?#]|$) ${Bun.pathToFileURL(runner.site).href}$1`)}`
   );
 }
 
