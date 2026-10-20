@@ -235,7 +235,7 @@ beforeAll(async () => {
   writeFileSync(join(workspace, "README.md"), "# fixture\n");
   initRepo(workspace);
   commitAll(workspace, "fixture");
-  const runner = runnerTemp(temp, REPOSITORY);
+  const runner = runnerTemp(temp, `${BASE}/`);
   const result = buildSite(workspace, REPOSITORY, runner, {
     CONFIG: siteConfig({ site_title: "Fixture" }),
   });

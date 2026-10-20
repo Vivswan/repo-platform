@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { error, notice, setOutput } from "@actions/core";
+import { ownLinksPattern, pagesSite } from "../shared/pages_site.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { type IncludeRoot, isUnwalkedEntry, LANDING_FILES } from "./.vitepress/conventions.ts";
 import { collectFacts } from "./facts.ts";
@@ -135,6 +136,8 @@ interface Config extends SiteConfig {
    *  serves it: lychee's --root-dir, so an absolute link resolves as the
    *  browser resolves it. */
   served: string;
+  /** The artifact's own directory: `served` at the base path, so `served`
+   *  itself for a user site. */
   site: string;
   /** The site-build hook's dist, relative to the repository root; "" for
    *  no website. */
@@ -144,6 +147,7 @@ interface Config extends SiteConfig {
    *  emits (edit links, project facts) joins onto it. */
   serverUrl: string;
   origin: string;
+  /** The URL path the site is served under (pagesSite's base path). */
   rootBase: string;
   /** The repository's edit URL up to the repo root; a page's edit link
    *  appends its own source path (an include root's page edits at that
@@ -155,7 +159,7 @@ interface Config extends SiteConfig {
 function readConfig(): Config {
   const workspace = requireEnv("GITHUB_WORKSPACE");
   const repository = requireEnv("GITHUB_REPOSITORY");
-  const [owner, repo] = repository.split("/");
+  const { origin, basePath: rootBase } = pagesSite(repository);
   const defaultBranch = env("DEFAULT_BRANCH", "main");
   const serverUrl = env("GITHUB_SERVER_URL", "https://github.com").replace(/\/+$/, "");
   // realpath'd: a scratch base behind a symlink (macOS /tmp) gives the
@@ -168,12 +172,12 @@ function readConfig(): Config {
     workspace,
     scratch,
     served,
-    site: join(served, repo),
+    site: join(served, rootBase.slice(1, -1)),
     siteDir: env("SITE_DIR"),
     repository,
     serverUrl,
-    origin: `https://${owner.toLowerCase()}.github.io`,
-    rootBase: `/${repo}/`,
+    origin,
+    rootBase,
     defaultBranch,
     editBase: `${serverUrl}/${repository}/edit/${defaultBranch}/`,
   };
@@ -511,10 +515,8 @@ function linkCheckArgs(
     `--files-from ${Bun.$.escape(inputs)}`,
   ];
   if (layout.origin !== null) {
-    // The delimiter after the base is captured and carried into the file URL (Rust regex has no lookahead), so a
-    // sibling site on the same origin stays external.
-    const own = `${new URL(layout.origin).origin}${layout.rootBase.slice(0, -1)}`;
-    const pattern = `^${RegExp.escape(own)}([/?#]|$)`;
+    // The captured delimiter is carried into the file URL, so the site's own links alone land in the artifact.
+    const pattern = ownLinksPattern({ origin: layout.origin, basePath: layout.rootBase });
     args.push(`--remap ${Bun.$.escape(`${pattern} ${Bun.pathToFileURL(layout.site).href}$1`)}`);
   }
   return args.join(" ");

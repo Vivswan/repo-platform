@@ -2,12 +2,11 @@
 // executed as the runner runs it; the rest is cross-file (the action, ci.yml, fuzz-issue) or cross-step (the Pages gate).
 
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { buildBody, failureDirs } from "../../actions/fuzz-issue/fuzz-issue.ts";
-import { loadAction, stepNamed } from "../shared/action_step";
+import { loadAction, REPO_ROOT, runBashStep, type StepRun, stepNamed } from "../shared/action_step";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -16,7 +15,7 @@ const DATE = "2026-03-04";
 beforeAll(() => setSystemTime(new Date(`${DATE}T12:00:00Z`)));
 afterAll(() => setSystemTime());
 
-interface Step {
+interface Step extends Record<string, unknown> {
   id?: string;
   if?: string;
   uses?: string;
@@ -31,53 +30,59 @@ const source = readFileSync(
 );
 const workflow = parseYaml(source) as { jobs: Record<string, { steps?: Step[] }> };
 const steps = workflow.jobs.site?.steps ?? [];
+const SITE_URLS = loadAction("actions/site-urls/action.yml");
 const step = (id: string) => steps.find((candidate) => candidate.id === id);
 
 describe("reusable-site.yml", () => {
-  // The escaped-dot patterns must match the assembly's own-origin remap (actions/pages-site/build.ts), and the lowercase host is
-  // lychee's reporting convention: a link to the own site in another case would be reported as external.
+  /** The site-urls action's own step run as the runner runs it, for `repository` checked out at `workspace`. */
+  function resolveUrls(repository: string, workspace: string): StepRun {
+    return runBashStep(stepNamed(SITE_URLS, "Resolve the site URLs"), {
+      fills: {
+        "${{ github.action_path }}": join(REPO_ROOT, "actions/site-urls"),
+        "${{ github.event.repository.default_branch }}": "main",
+        "${{ steps.action-bun.outputs.path }}": process.execPath,
+      },
+      env: {
+        GITHUB_SERVER_URL: "https://github.com",
+        GITHUB_REPOSITORY: repository,
+        GITHUB_WORKSPACE: workspace,
+      },
+      cwd: temp.dir("site-urls-cwd-"),
+      root: temp.dir("site-urls-"),
+    });
+  }
+
+  // The step's id and the output names are the contract between two files: an output the workflow reads under a
+  // name the action never declares reads as empty, and lychee then excludes nothing (own-links) or remaps nothing.
+  test("the urls step is the site-urls action, and every output the workflow reads from it is declared", () => {
+    expect(step("urls")?.uses).toBe("$/actions/site-urls");
+    const read = [...source.matchAll(/steps\.urls\.outputs\.([\w-]+)/g)].map((match) => match[1]);
+    expect(new Set(read)).toEqual(new Set(Object.keys(SITE_URLS.outputs ?? {})));
+  });
+
+  // The own-site exclude must match the assembly's own-origin remap (both are ownLinksPattern's), and the lowercase
+  // host is lychee's reporting convention: a link to the own site in another case would be reported as external.
   // The remap is lychee's regex pair (pattern, a space, the replacement with $N captures): a blob link into the own
   // default branch, with a line fragment, a query, or a trailing slash (GitHub serves all three), must land on the
   // checkout's file; another repository's link, another branch, or the branch in another case (another ref) must
   // not match, or GitHub's 503 on anonymous blob crawls would be back as rot, or a dead ref would read as alive.
   test("the urls step, executed, resolves the project-pages base path, the lowercase owner origin, and the tree remap", () => {
-    const urls = step("urls");
-    expect(urls?.env).toEqual({ DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}" });
-    const output = join(temp.dir("reusable-site-urls-"), "output");
-    writeFileSync(output, "");
-    const result = spawnSync(
-      "bash",
-      ["--noprofile", "--norc", "-eo", "pipefail", "-c", urls?.run ?? ""],
-      {
-        encoding: "utf8",
-        env: {
-          PATH: process.env.PATH ?? "",
-          GITHUB_OUTPUT: output,
-          GITHUB_SERVER_URL: "https://github.com",
-          GITHUB_REPOSITORY: "Vivswan/Example-Repo",
-          GITHUB_WORKSPACE: "/home/runner/work/Example-Repo/Example-Repo",
-          DEFAULT_BRANCH: "main",
-        },
-      },
-    );
     const remap =
-      "^https://github\\.com/Vivswan/Example-Repo/(blob|tree)/main/([^?#]*?)/*([?#].*)?$ " +
+      `^${RegExp.escape("https://github.com/Vivswan/Example-Repo/")}(blob|tree)/${RegExp.escape("main")}/([^?#]*?)/*([?#].*)?$ ` +
       "file:///home/runner/work/Example-Repo/Example-Repo/$2";
-    expect({
-      status: result.status,
-      stdout: result.stdout,
-      output: readFileSync(output, "utf8"),
-    }).toEqual({
-      status: 0,
+    expect(
+      resolveUrls("Vivswan/Example-Repo", "/home/runner/work/Example-Repo/Example-Repo"),
+    ).toEqual({
+      exitCode: 0,
       stdout: "",
-      output: [
-        "base_path=/Example-Repo/",
-        "origin=https://vivswan.github.io",
-        "own_links=^https://vivswan\\.github\\.io/Example-Repo([/?#]|$)",
-        "edit_links=^https://github\\.com/Vivswan/Example-Repo/edit/",
-        `tree_links=${remap}`,
-        "",
-      ].join("\n"),
+      stderr: "",
+      outputs: {
+        "base-path": "/Example-Repo/",
+        "origin": "https://vivswan.github.io",
+        "own-links": `^${RegExp.escape("https://vivswan.github.io/Example-Repo")}([/?#]|$)`,
+        "edit-links": `^${RegExp.escape("https://github.com/Vivswan/Example-Repo/edit/")}`,
+        "tree-links": remap,
+      },
     });
     // Rust's and JavaScript's regex syntax agree on these constructs.
     const [pattern, replacement] = remap.split(" ");
@@ -97,6 +102,20 @@ describe("reusable-site.yml", () => {
       otherRepo: "https://github.com/Vivswan/other/blob/main/README.md",
       otherBranch: "https://github.com/Vivswan/Example-Repo/blob/v1.2.0/src/a.ts",
       branchInAnotherCase: "https://github.com/Vivswan/Example-Repo/blob/MAIN/README.md",
+    });
+  });
+
+  // GitHub serves the repository named <owner>.github.io, in whatever case, at the origin's root, so the hook builds
+  // for "/" and the own-site exclude is the bare origin.
+  test("the urls step serves the owner's <owner>.github.io repository at the root", () => {
+    const { outputs } = resolveUrls(
+      "Vivswan/Vivswan.github.io",
+      "/home/runner/work/Vivswan.github.io/Vivswan.github.io",
+    );
+    expect(outputs).toMatchObject({
+      "base-path": "/",
+      "origin": "https://vivswan.github.io",
+      "own-links": `^${RegExp.escape("https://vivswan.github.io")}([/?#]|$)`,
     });
   });
 

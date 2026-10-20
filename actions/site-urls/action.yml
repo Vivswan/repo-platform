@@ -1,0 +1,54 @@
+name: Site URLs
+description: |
+  Resolves where GitHub Pages serves the calling repository, for reusable-site.yml's deploy (docs/modules/site.md):
+  the base path the site-build hook builds for, the origin, and the lychee patterns the nightly link-rot check reads.
+
+  - The base path is `/<repo>/`, or `/` for the owner's user site, the repository named `<owner>.github.io`.
+  - The owner is lowercased in the origin: Pages serves `<owner>.github.io` in lowercase and lychee reports hosts
+    that way.
+
+outputs:
+  base-path:
+    description: The URL path the site is served under, "/<repo>/" or "/"
+    value: ${{ steps.urls.outputs.base-path }}
+  origin:
+    description: The site's origin, https://<owner>.github.io
+    value: ${{ steps.urls.outputs.origin }}
+  own-links:
+    description: The regex matching the site's own URLs, judged against the artifact at assembly rather than crawled
+    value: ${{ steps.urls.outputs.own-links }}
+  edit-links:
+    description: The regex matching the theme's "Edit this page" links, which an anonymous crawl cannot judge
+    value: ${{ steps.urls.outputs.edit-links }}
+  tree-links:
+    description: >-
+      lychee's remap (pattern, a space, the replacement) turning a github.com link into this repository's default
+      branch into the checkout's path, so the tree judges it
+    value: ${{ steps.urls.outputs.tree-links }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: $/actions/bun-setup
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    - name: Resolve the site URLs
+      id: urls
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/urls.ts"'

@@ -1,0 +1,12 @@
+{
+  "name": "site-urls",
+  "private": true,
+  "description": "Dependency manifest for the site-urls action: @actions/core writes the resolved URLs as step outputs.",
+  "devDependencies": {
+    "@types/bun": "1.4.3",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@actions/core": "3.0.1"
+  }
+}
