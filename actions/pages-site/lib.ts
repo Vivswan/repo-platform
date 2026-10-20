@@ -131,6 +131,14 @@ export function parseSiteConfig(json: string): SiteConfig {
   };
 }
 
+/** GitHub's rule for where Pages serves a repository (docs/modules/site.md, "The hook"): the one named
+ *  `<owner>.github.io` (case-insensitive) is the owner's user site at the origin's root, every other one a project
+ *  site under `/<repo>/`. The urls step of reusable-site.yml spells the same rule in bash. */
+export function pagesBasePath(repository: string): string {
+  const [owner, repo] = repository.split("/");
+  return repo.toLowerCase() === `${owner.toLowerCase()}.github.io` ? "/" : `/${repo}/`;
+}
+
 /** The table in docs/modules/site.md, "Layout". */
 export function siteLayout(input: {
   dist: string;

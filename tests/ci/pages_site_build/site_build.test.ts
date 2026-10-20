@@ -4,7 +4,7 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { tierRouteGuard } from "../../../actions/pages-site/.vitepress/theme/tier-routes.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 import {
@@ -14,6 +14,7 @@ import {
   commitAll,
   deployLinkCheckArgs,
   describeRun,
+  FLEET_BASE,
   FLEET_ENV,
   FLEET_REPO,
   fleetRepo,
@@ -30,6 +31,7 @@ import {
   runnerTemp,
   SEALED_DEAD_LINK,
   SITE_TITLE,
+  siteConfig,
   TEST_TIMEOUT_MS,
   versionLabels,
 } from "./fixtures.ts";
@@ -49,7 +51,7 @@ let latestAssets = "";
 beforeAll(() => {
   workspace = temp.dir("pages-site-fleet-");
   fleetRepo(workspace);
-  runner = runnerTemp(temp, FLEET_REPO);
+  runner = runnerTemp(temp, FLEET_BASE);
   built = buildSite(workspace, FLEET_REPO, runner, FLEET_ENV);
   if (built.exitCode !== 0)
     throw new Error(`the fleet fixture's build failed: ${describeRun(built)}`);
@@ -94,7 +96,7 @@ describe("the artifact a deploy lands", () => {
     expect(built.outputs).toEqual({
       "publish": "true",
       "site-dir": site,
-      "link-check-args": deployLinkCheckArgs(runner, FLEET_REPO),
+      "link-check-args": deployLinkCheckArgs(runner, FLEET_REPO, FLEET_BASE),
       "link-rot-label": "rot",
       "link-rot-color": "",
       "link-rot-description": "",
@@ -474,11 +476,7 @@ describe("the link check over the whole artifact", () => {
   test.skipIf(lychee === null)(
     "lychee, run as the step runs it, fails on the website's links into missing docs pages (the glob-named page's included) and the docs' link to a missing anchor, naming each",
     () => {
-      const check = runLinkCheck(
-        lychee ?? "",
-        built.outputs["link-check-args"],
-        dirname(dirname(site)),
-      );
+      const check = runLinkCheck(lychee ?? "", built.outputs["link-check-args"], runner.scratch);
       expect(check.exitCode, describeRun(check)).toBe(2);
       expect(check.stdout).toContain(`### Errors in ${site}/index.html`);
       expect(check.stdout).toMatch(
@@ -513,8 +511,8 @@ describe("link strictness on HEAD", () => {
       cpSync(workspace, rotten, { recursive: true });
       const setup = join(rotten, "docs", "setup.md");
       writeFileSync(setup, `${readFileSync(setup, "utf-8")}\n${SEALED_DEAD_LINK}`);
-      const deploy = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_REPO), FLEET_ENV);
-      const check = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_REPO), {
+      const deploy = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_BASE), FLEET_ENV);
+      const check = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_BASE), {
         CHECK: "true",
         CONFIG: FLEET_ENV.CONFIG,
       });
@@ -561,7 +559,7 @@ describe("layouts that build no docs tier", () => {
         ...NO_LINK_ROT,
         "publish": "true",
         "site-dir": runner.site,
-        "link-check-args": deployLinkCheckArgs(runner, FLEET_REPO),
+        "link-check-args": deployLinkCheckArgs(runner, FLEET_REPO, FLEET_BASE),
         "site-title": SITE_TITLE,
       }),
     },
@@ -590,7 +588,7 @@ describe("layouts that build no docs tier", () => {
   ])("$layout", (row) => {
     const repo = temp.dir("pages-site-layout-");
     row.fixture(repo);
-    const runner = runnerTemp(temp, FLEET_REPO);
+    const runner = runnerTemp(temp, FLEET_BASE);
     const result = buildSite(repo, FLEET_REPO, runner, row.env);
     expect(result.exitCode, describeRun(result)).toBe(0);
     expect(result.stdout).not.toMatch(/vitepress|building docs tier/);
@@ -602,4 +600,57 @@ describe("layouts that build no docs tier", () => {
     for (const line of row.stdout) expect(result.stdout).toContain(line);
     expect(result.outputs).toEqual(row.outputs(runner));
   });
+});
+
+describe("a user site", () => {
+  // GitHub serves the repository named <owner>.github.io, in whatever case, at the origin's root. Laid out under
+  // /<repo>/ like a project site, the hook would build for a base path Pages never serves, and lychee would resolve
+  // every root-absolute link under a directory the page is not in.
+  const USER_SITE_REPO = "fixture-owner/Fixture-Owner.github.io";
+  let runner: RunnerTemp;
+  let result: BuildResult;
+
+  beforeAll(() => {
+    const repo = temp.dir("pages-site-user-");
+    mkdirSync(join(repo, "dist"), { recursive: true });
+    writeFileSync(
+      join(repo, "dist", "index.html"),
+      '<html><head><link rel="icon" href="/favicon.ico"></head><body>USER-SITE ' +
+        '<a href="https://fixture-owner.github.io/about">about</a></body></html>\n',
+    );
+    writeFileSync(join(repo, "dist", "favicon.ico"), "");
+    writeFileSync(join(repo, "dist", "about.html"), "<html><body>About</body></html>\n");
+    initRepo(repo);
+    commitAll(repo, "user site");
+    runner = runnerTemp(temp, "/");
+    result = buildSite(repo, USER_SITE_REPO, runner, {
+      SITE_DIR: "dist",
+      CONFIG: siteConfig({ docs_path: null }),
+    });
+  });
+
+  test("is assembled at the served root itself, the directory uploaded and lychee's root, with its own links remapped to the bare origin", () => {
+    expect(result.exitCode, describeRun(result)).toBe(0);
+    expect(runner.site).toBe(runner.served);
+    expect(readSite(runner.site, "index.html")).toContain("USER-SITE");
+    expect(result.outputs).toMatchObject({
+      "publish": "true",
+      "site-dir": runner.served,
+      "link-check-args": deployLinkCheckArgs(runner, USER_SITE_REPO, "/"),
+    });
+  });
+
+  test.skipIf(pinnedLychee() === null)(
+    "lychee resolves its root-absolute link and its origin-spelled link in the artifact",
+    () => {
+      const check = runLinkCheck(
+        pinnedLychee() ?? "",
+        result.outputs["link-check-args"],
+        runner.scratch,
+      );
+      expect(check.exitCode, describeRun(check)).toBe(0);
+      expect(check.stdout).toContain("| ✅ Successful  | 2     |");
+    },
+    TEST_TIMEOUT_MS,
+  );
 });

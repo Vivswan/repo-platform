@@ -37,7 +37,7 @@ export const SITE_TITLE = "Fixture Site";
 export function siteConfig(
   overrides: Partial<{
     site_title: string;
-    docs_path: string;
+    docs_path: string | null;
     include: { path: string; mount: string; page: string }[];
     link_rot_label: string;
   }> = {},
@@ -59,38 +59,45 @@ export interface RunnerTemp {
    *  base sees the build root under two spellings, on which vitepress's
    *  path-keyed route resolution reports every internal link dead. */
   alias: string;
-  /** The assembled artifact, under the real path: the build's scratch
-   *  directory, then the served root, then the repository's base path. */
+  /** The build's scratch directory, under the real path. */
+  scratch: string;
+  /** The served root: the directory Pages serves at `/`, lychee's root. */
+  served: string;
+  /** The assembled artifact: the served root at the site's base path, so
+   *  the served root itself for a user site (base path `/`). */
   site: string;
 }
 
-export function runnerTemp(temp: TempDirs, repository: string): RunnerTemp {
+export function runnerTemp(temp: TempDirs, basePath: string): RunnerTemp {
   const real = temp.dir("pages-site-temp-");
   const alias = join(temp.dir("pages-site-alias-"), "alias");
   symlinkSync(real, alias);
-  const repo = repository.split("/")[1];
-  return { alias, site: join(realpathSync(real), "pages-site", "served", repo) };
+  const scratch = join(realpathSync(real), "pages-site");
+  const served = join(scratch, "served");
+  return { alias, scratch, served, site: join(served, ...basePath.split("/")) };
 }
 
-/** The `link-check-args` output a deploy of `repository` emits for `runner`'s layout: the artifact's root, the page
- *  list in the scratch directory, and the site's own links remapped into the artifact. Each value is quoted the way
- *  `Bun.$.escape` quotes for bash, the origin spelled the way `RegExp.escape` spells it (the fixture owner's hyphen is
- *  a hex escape); the live lychee run is what proves bash and Rust read both. */
-export function deployLinkCheckArgs(runner: RunnerTemp, repository: string): string {
-  const [owner, repo] = repository.split("/");
-  const scratch = dirname(dirname(runner.site));
-  const own = RegExp.escape(`https://${owner.toLowerCase()}.github.io/${repo}`);
+/** The `link-check-args` output a deploy of `repository` at `basePath` emits for `runner`'s layout: the served root,
+ *  the page list in the scratch directory, and the site's own links remapped into the artifact. Each value is quoted
+ *  the way `Bun.$.escape` quotes for bash, the origin spelled the way `RegExp.escape` spells it (the fixture owner's
+ *  hyphen is a hex escape); the live lychee run is what proves bash and Rust read both. */
+export function deployLinkCheckArgs(
+  runner: RunnerTemp,
+  repository: string,
+  basePath: string,
+): string {
+  const owner = repository.split("/")[0];
+  const own = RegExp.escape(`https://${owner.toLowerCase()}.github.io${basePath.slice(0, -1)}`);
   return (
-    `--root-dir ${Bun.$.escape(dirname(runner.site))} ` +
-    `--files-from ${Bun.$.escape(join(scratch, "link-check-inputs.txt"))} ` +
+    `--root-dir ${Bun.$.escape(runner.served)} ` +
+    `--files-from ${Bun.$.escape(join(runner.scratch, "link-check-inputs.txt"))} ` +
     `--remap ${Bun.$.escape(`^${own}([/?#]|$) file://${runner.site}$1`)}`
   );
 }
 
 /** The pages the build listed for lychee, relative to the site. */
 export function linkCheckInputs(runner: RunnerTemp): string[] {
-  const scratch = dirname(dirname(runner.site));
-  return readFileSync(join(scratch, "link-check-inputs.txt"), "utf-8")
+  return readFileSync(join(runner.scratch, "link-check-inputs.txt"), "utf-8")
     .trimEnd()
     .split("\n")
     .map((line) => line.slice(runner.site.length + 1));
@@ -339,6 +346,8 @@ const ONE_AGENT =
   "---\nname: one\n---\n\nUses the [alpha skill](../../skills/alpha/SKILL.md#install).\n";
 
 export const FLEET_REPO = "fixture-owner/fixture-repo";
+/** A project site: served under the repository's name. */
+export const FLEET_BASE = "/fixture-repo/";
 
 /** The include roots as a registration lists them, child first: a staging that followed list order would land
  *  agents/ where its parent has yet to be copied. */

@@ -24,6 +24,7 @@ import { collectFacts } from "./facts.ts";
 import {
   type DocsMount,
   mountRel,
+  pagesBasePath,
   parseSiteConfig,
   planMount,
   reservedRootEntries,
@@ -135,6 +136,8 @@ interface Config extends SiteConfig {
    *  serves it: lychee's --root-dir, so an absolute link resolves as the
    *  browser resolves it. */
   served: string;
+  /** The artifact's own directory: `served` at the base path, so `served`
+   *  itself for a user site. */
   site: string;
   /** The site-build hook's dist, relative to the repository root; "" for
    *  no website. */
@@ -144,6 +147,7 @@ interface Config extends SiteConfig {
    *  emits (edit links, project facts) joins onto it. */
   serverUrl: string;
   origin: string;
+  /** The URL path the site is served under: pagesBasePath's. */
   rootBase: string;
   /** The repository's edit URL up to the repo root; a page's edit link
    *  appends its own source path (an include root's page edits at that
@@ -155,7 +159,7 @@ interface Config extends SiteConfig {
 function readConfig(): Config {
   const workspace = requireEnv("GITHUB_WORKSPACE");
   const repository = requireEnv("GITHUB_REPOSITORY");
-  const [owner, repo] = repository.split("/");
+  const owner = repository.split("/")[0];
   const defaultBranch = env("DEFAULT_BRANCH", "main");
   const serverUrl = env("GITHUB_SERVER_URL", "https://github.com").replace(/\/+$/, "");
   // realpath'd: a scratch base behind a symlink (macOS /tmp) gives the
@@ -163,17 +167,18 @@ function readConfig(): Config {
   // inside vitepress falls apart on the mismatch.
   const scratch = join(realpathSync(requireEnv("RUNNER_TEMP")), "pages-site");
   const served = join(scratch, "served");
+  const rootBase = pagesBasePath(repository);
   return {
     ...parseSiteConfig(requireEnv("CONFIG")),
     workspace,
     scratch,
     served,
-    site: join(served, repo),
+    site: join(served, rootBase.slice(1, -1)),
     siteDir: env("SITE_DIR"),
     repository,
     serverUrl,
     origin: `https://${owner.toLowerCase()}.github.io`,
-    rootBase: `/${repo}/`,
+    rootBase,
     defaultBranch,
     editBase: `${serverUrl}/${repository}/edit/${defaultBranch}/`,
   };
@@ -512,7 +517,8 @@ function linkCheckArgs(
   ];
   if (layout.origin !== null) {
     // The delimiter after the base is captured and carried into the file URL (Rust regex has no lookahead), so a
-    // sibling site on the same origin stays external.
+    // project site's sibling on the same origin stays external. A user site's base is the bare origin, so it owns
+    // every link on it (docs/modules/site.md, "The docs PR check").
     const own = `${new URL(layout.origin).origin}${layout.rootBase.slice(0, -1)}`;
     const pattern = `^${RegExp.escape(own)}([/?#]|$)`;
     args.push(`--remap ${Bun.$.escape(`${pattern} ${Bun.pathToFileURL(layout.site).href}$1`)}`);

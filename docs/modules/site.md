@@ -37,7 +37,7 @@ The called workflow is one job, in this order:
 | Step | Runs when | What |
 |---|---|---|
 | checkout | always | the judged commit, full history (the tag list is the version set) |
-| urls | always | computes the base path `/<repo>/` and the origin `https://<owner>.github.io` |
+| urls | always | computes the base path `/<repo>/` (`/` for the owner's `<owner>.github.io` repository, the user site) and the origin `https://<owner>.github.io` |
 | hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
 | pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, and writes `versions.json` under the docs mount |
 | configure, upload, deploy | something was built (`publish`) | the one Pages artifact, deployed to the `github-pages` environment; red on configure-pages's error while the Pages site does not exist yet ([below](#pages-enablement)) |
@@ -62,7 +62,7 @@ It is a composite action, so the fleet can run it from the caller's checkout ins
 
 | Contract | Value |
 |---|---|
-| input `base-path` | the URL path the site is served under, `/<repo>/` |
+| input `base-path` | the URL path the site is served under: `/<repo>/`, or `/` for the owner's `<owner>.github.io` repository, which GitHub serves at the origin's root |
 | input `origin` | `https://<owner>.github.io` |
 | output `dist` | the built site's directory, relative to the repository root, with an `index.html`; empty (the seeded default) means no repository website |
 | runs as | a step of the deploy job, on the checked-out judged commit, under that job's token (contents read, pages and id-token write, issues write), the same exposure the release hooks have, so it runs only code from the judged commit |
@@ -244,6 +244,8 @@ fleet.yml's `docs-check` job builds `docs/` strictly on every pull request of a 
 **Internal links** are checked across the whole assembled site by [lychee](https://github.com/lycheeverse/lychee), run offline by the same [lychee-action](https://github.com/lycheeverse/lychee-action) step and version as the nightly link-rot check. It reads the artifact laid out the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`.
 
 Every same-site link on a page built from the default branch must resolve, wherever the target lives (a website page into the docs, a docs page to a staged skill, a `#fragment` naming a heading, an emitted asset, a link spelled with the site's own URL).
+
+A user site (`<owner>.github.io`) owns the whole origin, so a link to a sibling project site (`https://<owner>.github.io/<repo>/`, or root-absolute `/<repo>/`) is judged against the artifact too, where it does not exist.
 
 A broken one fails the step with lychee's report, in the log and the job summary: one section per page, every failing link with its line and column and lychee's reason.
 
