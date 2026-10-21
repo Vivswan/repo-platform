@@ -74,9 +74,13 @@ jobs:
       - id: commit-names
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: $/actions/validate-commit-names
+      # -ignore: no actionlint release knows concurrency.queue (rhysd/actionlint#687), which the managed ci.yml carries and
+      # GitHub runs. The action splits flags on whitespace, so the regex spells its spaces as \s. Remove when actionlint knows the key.
       - id: actionlint
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+        with:
+          flags: -ignore unexpected\skey\s"queue"\sfor\s"concurrency"\ssection
       - id: yamllint
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: $/actions/yamllint
