@@ -4,21 +4,23 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type CiInput,
   codeqlLanguages,
   loadModuleData,
   type Module,
   outputsOf,
   PlanError,
-  type PlanInput,
   planCi,
   planSite,
   REQUIRED_DEFAULTS,
+  readHooks,
   type SitePlan,
   selectModules,
   weekly,
 } from "../../../actions/plan/plan.ts";
 import { parseRegistration, type Registration } from "../../../actions/plan/registration.ts";
 import { declaredLabelTuple, reservedLabelNames } from "../../../actions/plan/reserved_labels.ts";
+import { PLACEHOLDER_MARKER } from "../../../actions/shared/platform.ts";
 import { loadAction } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { parseGithubOutput } from "../../shared/github_output.ts";
@@ -52,7 +54,7 @@ function registration(text: string): Registration {
   return read.registration;
 }
 
-function input(text: string, isPrivate = false, modules: Module[] = MODULES): PlanInput {
+function input(text: string, isPrivate = false, modules: Module[] = MODULES): CiInput {
   return {
     registration: registration(text),
     modules,
@@ -62,6 +64,7 @@ function input(text: string, isPrivate = false, modules: Module[] = MODULES): Pl
     reservedLabels: RESERVED,
     securityLabel: SECURITY,
     private: isPrivate,
+    hooks: { "post-green": null, "release-gate": null },
   };
 }
 
@@ -135,6 +138,8 @@ describe("planCi", () => {
         "tracking-labels": "docs-link-rot,fuzz: nightly,nightly-red,security-nightly",
         ...SECURITY_ROWS,
         "weekly": "true",
+        "post-green": "false",
+        "release-gate": "false",
       },
     },
     {
@@ -148,6 +153,8 @@ describe("planCi", () => {
         "tracking-labels": "fuzz: nightly,nightly-failure,security-nightly",
         ...SECURITY_ROWS,
         "weekly": "false",
+        "post-green": "false",
+        "release-gate": "false",
       },
     },
     {
@@ -161,6 +168,8 @@ describe("planCi", () => {
         "tracking-labels": "security-nightly",
         ...SECURITY_ROWS,
         "weekly": "false",
+        "post-green": "false",
+        "release-gate": "false",
       },
     },
   ])(
@@ -178,6 +187,7 @@ describe("planCi", () => {
           description: "Automated nightly security scan findings",
         },
         weekly: outputs.weekly === "true",
+        hooks: { "post-green": false, "release-gate": false },
       });
       expect(outputsOf(plan)).toEqual(outputs);
     },
@@ -396,6 +406,19 @@ describe("planSite", () => {
   });
 });
 
+describe("readHooks", () => {
+  // The skeleton reads `false` as "nothing to call", so only a missing file may read as null: a hook the runner
+  // cannot read (a directory at its path, a permission) stops the plan instead of skipping a hook that exists.
+  test("a missing hook is null; a hook that exists but cannot be read stops the plan, naming the path", () => {
+    const root = temp.dir("plan-hook-");
+    expect(readHooks(root)).toEqual({ "post-green": null, "release-gate": null });
+    mkdirSync(join(root, ".github/workflows/post-green.yml"), { recursive: true });
+    const problems = problemsOf(() => readHooks(root));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toStartWith(".github/workflows/post-green.yml: cannot read the hook (");
+  });
+});
+
 describe("plan.ts as a child", () => {
   function run(
     files: Record<string, string>,
@@ -432,11 +455,18 @@ describe("plan.ts as a child", () => {
   });
 
   // The row names are the outputs fleet.yml's plan step hands its jobs: a renamed or missing row leaves them unselected, green.
-  // fleet.yml passes no `mode`, so the default-mode row runs under the manifest's declared default.
+  // fleet.yml passes no `mode`, so the default-mode row runs under the manifest's declared default. The hook row reads
+  // each hook at its one path: a wrong path reads it as missing, and the skeleton skips the call.
   const MODE_DEFAULT = String(loadAction("actions/plan/action.yml").inputs?.mode.default);
+  const HOOK_FILES = {
+    ".github/workflows/post-green.yml":
+      "on: workflow_call\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/build\n",
+    ".github/workflows/release-gate.yml": `${PLACEHOLDER_MARKER}\non: workflow_call\njobs: {}\n`,
+  };
   test.each<{
     reason: string;
     registration: string;
+    hooks?: Record<string, string>;
     env: Record<string, string>;
     outputs: Record<string, string>;
   }>([
@@ -453,11 +483,14 @@ describe("plan.ts as a child", () => {
         "security-label-color": "1d76db",
         "security-label-description": "Automated nightly security scan findings",
         "weekly": WEEKLY,
+        "post-green": "false",
+        "release-gate": "false",
       },
     },
     {
-      reason: "a private registration",
+      reason: "a private registration with its own post-green hook and a still-seeded release-gate",
       registration: `modules: [uv]\n${PROJECT}`,
+      hooks: HOOK_FILES,
       env: { PRIVATE: "true" },
       outputs: {
         "modules": '["uv"]',
@@ -468,6 +501,8 @@ describe("plan.ts as a child", () => {
         "security-label-color": "1d76db",
         "security-label-description": "Automated nightly security scan findings",
         "weekly": WEEKLY,
+        "post-green": "true",
+        "release-gate": "false",
       },
     },
     {
@@ -477,8 +512,8 @@ describe("plan.ts as a child", () => {
       env: { MODE: "site" },
       outputs: SITE_CONFIG("Site", '[{"path":"skills","mount":"skills","page":"SKILL.md"}]'),
     },
-  ])("$reason writes every row fleet.yml reads", ({ registration, env, outputs }) => {
-    const result = run({ ".repo-platform.yml": registration }, env);
+  ])("$reason writes every row fleet.yml reads", ({ registration, hooks, env, outputs }) => {
+    const result = run({ ".repo-platform.yml": registration, ...hooks }, env);
     expect([result.exitCode, result.outputs, result.stdout]).toEqual([0, outputs, ""]);
   });
 
@@ -609,6 +644,8 @@ describe("plan.ts as a child", () => {
         "security-label-color": "1d76db",
         "security-label-description": "Automated nightly security scan findings",
         "weekly": WEEKLY,
+        "post-green": "false",
+        "release-gate": "false",
       },
     ]);
     const site = run(

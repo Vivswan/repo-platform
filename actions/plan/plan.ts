@@ -23,6 +23,7 @@ import {
   type ModuleData,
   parseFilesConfig,
 } from "./files_config.ts";
+import { HOOKS, type Hook, hookIsCalled } from "./hooks.ts";
 import {
   declaredMirrors,
   describeMirrorProblem,
@@ -117,6 +118,11 @@ export interface PlanInput {
   private: boolean;
 }
 
+/** What the CI plan reads beyond the shared input: each repo-owned hook's text, null where the repository has none. */
+export interface CiInput extends PlanInput {
+  hooks: Record<Hook, string | null>;
+}
+
 export function selectModules(input: PlanInput): Module[] {
   const problems = unknownModuleProblems(
     input.registration.modules,
@@ -180,6 +186,8 @@ export interface CiPlan {
   trackingLabels: string[];
   securityLabel: LabelTuple;
   weekly: boolean;
+  /** Per hook, whether the skeleton calls it: false while the file is missing or still the seeded placeholder. */
+  hooks: Record<Hook, boolean>;
 }
 
 /** Whether a scheduled run is the week's CodeQL rescan: the skeleton's
@@ -199,7 +207,7 @@ export function codeqlLanguages(selected: Module[], isPrivate: boolean): string[
   return [...new Set(selected.flatMap((m) => m.codeql_languages ?? []))];
 }
 
-export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
+export function planCi(input: CiInput, now: Date = new Date()): CiPlan {
   const selected = selectModules(input);
   const owned = ownedPaths(input, {
     modules: selected.map((module) => module.name),
@@ -218,6 +226,10 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
     trackingLabels: [...trackingLabels(input, selected), input.securityLabel.name],
     securityLabel: input.securityLabel,
     weekly: weekly(now),
+    hooks: {
+      "post-green": hookIsCalled(input.hooks["post-green"]),
+      "release-gate": hookIsCalled(input.hooks["release-gate"]),
+    },
   };
 }
 
@@ -283,6 +295,8 @@ export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
     "security-label-color": plan.securityLabel.color,
     "security-label-description": plan.securityLabel.description,
     "weekly": String(plan.weekly),
+    "post-green": String(plan.hooks["post-green"]),
+    "release-gate": String(plan.hooks["release-gate"]),
   };
 }
 
@@ -305,6 +319,24 @@ export function readRegistration(root: string): Registration {
   const read = parseRegistration(readFileSync(path, "utf-8"));
   if ("errors" in read) throw new PlanError(read.errors);
   return read.registration;
+}
+
+/** Each hook's text, or null where the repository has no such file (ENOENT alone); any other failure to read one is a
+ *  broken checkout and stops the plan rather than publishing the hook as missing. */
+export function readHooks(root: string): Record<Hook, string | null> {
+  const read = (relative: string): string | null => {
+    try {
+      return readFileSync(join(root, relative), "utf-8");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new PlanError([`${relative}: cannot read the hook (${detail})`]);
+    }
+  };
+  return {
+    "post-green": read(HOOKS["post-green"]),
+    "release-gate": read(HOOKS["release-gate"]),
+  };
 }
 
 /** The API fallback keeps an empty input from reading as public. */
@@ -339,10 +371,16 @@ function main(): number {
     ...moduleData,
     reservedLabels: reservedLabelNames(moduleData.layers, tree),
     securityLabel: declaredLabelTuple(moduleData.layers, tree, SECURITY_LABEL),
-    private:
-      mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
+    private: false,
   };
-  const plan = mode === "site" ? planSite(input) : planCi(input);
+  const plan =
+    mode === "site"
+      ? planSite(input)
+      : planCi({
+          ...input,
+          private: resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
+          hooks: readHooks(root),
+        });
   for (const [name, value] of Object.entries(outputsOf(plan))) setOutput(name, value);
   return 0;
 }

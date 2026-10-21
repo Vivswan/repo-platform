@@ -31,6 +31,10 @@ export const SYNC_BOT = `${PLATFORM_NAME}-sync`;
 /** The moving tag the fleet's `uses:` pins ride (docs/platform/build-provenance.md); post-green's mover pushes refs/tags/<this>. */
 export const DELIVERY_REF = "stable";
 
+/** The first line of a seeded hook (post-green.yml, release-gate.yml) while it is still the placeholder: the plan reads
+ *  it and the managed ci.yml skips the call; the repository deletes the line when it adds jobs. */
+export const PLACEHOLDER_MARKER = `# ${PLATFORM_NAME} placeholder: ci.yml does not call this hook; delete this line when you add jobs`;
+
 export const AUTOMATION_BRANCH = `automation/${PLATFORM_NAME}`;
 export const FAILURE_ISSUE_TITLE = `[${PLATFORM_NAME}] sync failed`;
 export const SYNC_PR_TITLE_PREFIX = `chore: sync ${PLATFORM_NAME} build`;

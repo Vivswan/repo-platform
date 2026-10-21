@@ -136,6 +136,7 @@ Beyond the table:
 | `0001-link-records-are-mirrors` | a `link` manifest record becomes `{"class": "mirror", "kind": "symlink"}` with its hash kept, the fleet's `AGENTS.md` symlinks having become mirrors the fleet declares |
 | `0002-homepage-unmanaged` | the overlay's `homepage` key is deleted when its value is empty or the repository's own GitHub address (read from the checkout's `origin`), the platform having stopped managing the homepage ([settings.md](../../settings.md#apply-semantics)); any other value stays |
 | `0003-topics-empty-list` | the overlay's `topics: ""` (or a valueless `topics:`) becomes `topics: []`, the spelling the settings library accepts for no topics; any other value stays |
+| `0004-hook-placeholder-marker` | a seeded `post-green.yml` or `release-gate.yml` still carrying the seed body below its header comment gets the placeholder marker as its first line, so the managed ci.yml skips the call ([all-green.md](../../all-green.md#the-post-green-hook-in-every-managed-repository)); a hook whose body differs is the repository's own and stays |
 
 ## The report
 

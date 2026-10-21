@@ -48,6 +48,16 @@ outputs:
     description: >-
       "true" on Mondays (UTC), the scheduled run that also reruns CodeQL (mode default).
     value: ${{ steps.plan.outputs.weekly }}
+  post-green:
+    description: >-
+      "true" when the managed ci.yml calls the repo-owned post-green.yml, "false" while the file is missing or its
+      first line is the seeded placeholder marker (mode default).
+    value: ${{ steps.plan.outputs.post-green }}
+  release-gate:
+    description: >-
+      "true" when the managed ci.yml calls the repo-owned release-gate.yml, "false" while the file is missing or its
+      first line is the seeded placeholder marker (mode default).
+    value: ${{ steps.plan.outputs.release-gate }}
   config:
     description: >-
       The site configuration as compact JSON {"site_title", "docs_path", "include", "link_rot_label",
