@@ -29,7 +29,7 @@ modules:
     agents_toolchain: [bun]
     toolchain_steps: [bun]
   uv:
-    description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
+    description: Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff docstring gate)
     codeql_languages: [python]
     dependabot_ecosystems: [uv]
     gitignore_sources: [Python]
@@ -169,6 +169,7 @@ files:
   - {path: release-please-config.json, class: starter, when: {modules: [release-please]}}
   - {path: .github/workflows/pr-title.yml, class: managed, when: {modules: [pr-title]}}
   - {path: Cargo.toml, class: starter, when: {modules: [rust]}}
+  - {path: ruff.toml, class: managed, when: {modules: [uv]}}
   - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
   - {path: .github/workflows/nightly.yml, class: starter, when: {modules: [nightly]}}
 
