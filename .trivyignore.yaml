@@ -9,3 +9,13 @@ vulnerabilities:
       the pages-site action only runs the static build, and no vite dev server
       runs in CI or production.
     expired_at: 2026-12-11
+  - id: CVE-2026-112942
+    paths:
+      - actions/pages-site/bun.lock
+    statement: >-
+      launch-editor's fs.existsSync bypass on Windows (GHSA-587h-7wmj-h5pm),
+      reached through vite 5's dev server; vitepress 1.x pins vite 5, which has
+      no fixed release (the fix ships in 6.4.4, 7.3.7, and 8.1.6). The
+      pages-site action only runs the static build, and no vite dev server
+      runs in CI or production.
+    expired_at: 2026-12-11
