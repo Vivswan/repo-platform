@@ -37,12 +37,12 @@ outputs:
     description: >-
       The assembled site directory to upload as the Pages artifact, empty when publish is false or in check mode.
     value: ${{ steps.assemble.outputs.site-dir }}
-  own-links:
+  link-rot-ignore:
     description: >-
-      The regex matching the site's own URLs on its origin (the artifact's top-level entries under the base, and the
-      base itself), judged against the artifact here, so the nightly link-rot check excludes them; empty in check mode
-      or with nothing to publish
-    value: ${{ steps.assemble.outputs.own-links }}
+      The nightly link-rot crawl's .lycheeignore, to stage into the site after the upload: the site's own links on its
+      origin (the artifact's top-level entries under the base, and the base itself), judged against the artifact here,
+      then the repository's own .lycheeignore when it has one; empty in check mode or with nothing to publish
+    value: ${{ steps.assemble.outputs.link-rot-ignore }}
   link-rot-label:
     description: The nightly external-link check's tracking label from the configuration ("" disables the check)
     value: ${{ steps.assemble.outputs.link-rot-label }}
@@ -97,8 +97,9 @@ runs:
     # Every same-site link of a page built from HEAD must resolve in the
     # artifact as Pages serves it (docs/modules/site.md, "The docs PR check"): the
     # same lychee as reusable-site.yml's nightly link-rot step, offline.
-    # It runs in the build's scratch directory, which holds no lychee.toml
-    # or .lycheeignore of the caller's, so neither reconfigures the check.
+    # It runs in the build's scratch directory: its lychee.toml is the
+    # assembly's (the own-links remap, a file since the regex can outgrow an
+    # argument), and no .lycheeignore of the caller's is there.
     - name: Check the site's internal links
       if: steps.assemble.outputs.link-check-args != ''
       uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0

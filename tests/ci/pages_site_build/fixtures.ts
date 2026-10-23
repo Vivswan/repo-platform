@@ -77,15 +77,23 @@ export function runnerTemp(temp: TempDirs, basePath: string): RunnerTemp {
   return { alias, scratch, served, site: join(served, ...basePath.split("/")) };
 }
 
-/** The `link-check-args` output a deploy emits for `runner`'s layout once its `own-links` output is `ownLinks`: the
- *  served root, the page list in the scratch directory, and the own links remapped into the artifact. Each value is
- *  quoted the way `Bun.$.escape` quotes for bash, which the live lychee run proves bash reads. */
-export function deployLinkCheckArgs(runner: RunnerTemp, ownLinks: string): string {
+/** The `link-check-args` output a deploy emits for `runner`'s layout: the served root and the page list in the scratch
+ *  directory, each quoted the way `Bun.$.escape` quotes for bash, which the live lychee run proves bash reads. */
+export function deployLinkCheckArgs(runner: RunnerTemp): string {
   return (
     `--root-dir ${Bun.$.escape(runner.served)} ` +
-    `--files-from ${Bun.$.escape(join(runner.scratch, "link-check-inputs.txt"))} ` +
-    `--remap ${Bun.$.escape(`${ownLinks} ${Bun.pathToFileURL(runner.site).href}$1`)}`
+    `--files-from ${Bun.$.escape(join(runner.scratch, "link-check-inputs.txt"))}`
   );
+}
+
+/** The own-links remap the deploy wrote into the scratch directory's lychee.toml, the file lychee reads from its working
+ *  directory: the pattern and the replacement it carries. */
+export function linkCheckRemap(runner: RunnerTemp): { pattern: string; replacement: string } {
+  const config = Bun.TOML.parse(readFileSync(join(runner.scratch, "lychee.toml"), "utf-8")) as {
+    remap: string[];
+  };
+  const [pattern, replacement] = config.remap[0].split(" ");
+  return { pattern, replacement };
 }
 
 /** Which of `urls` the own-links regex `ownLinks` matches, by URL, the way the tests state what a site owns. */

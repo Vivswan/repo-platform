@@ -39,7 +39,7 @@ The called workflow is one job, in this order:
 | checkout | always | the judged commit, full history (the tag list is the version set) |
 | urls | always | the shared [site-urls action](../../actions/site-urls/action.yml): the base path `/<repo>/` (`/` for the owner's `<owner>.github.io` repository, the user site), the origin `https://<owner>.github.io`, and the link-rot step's edit and tree patterns |
 | hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
-| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, names the links the site owns on its origin for the link-rot step, and writes `versions.json` under the docs mount |
+| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes the link-rot step's `.lycheeignore` (the links the site owns on its origin, then the repository's own list), and writes `versions.json` under the docs mount |
 | configure, upload, deploy | something was built (`publish`) | the one Pages artifact, deployed to the `github-pages` environment; red on configure-pages's error while the Pages site does not exist yet ([below](#pages-enablement)) |
 | link rot | the schedule alone, after a deploy | checks the site's external links with lychee, reads lychee's exit code as the verdict through the shared [lychee-verdict action](../../actions/lychee-verdict/action.yml), and files the tracking issue ([below](#link-rot)) |
 
@@ -291,7 +291,7 @@ The nightly run checks the deployed site's EXTERNAL links after publishing with 
 | same-site links and assets, relative or spelled with the site's own URL (the artifact's entries on the origin; a sibling project site's link is crawled) | judged against the artifact at build time, not over the network |
 | URLs matching the repository's root `.lycheeignore` | the repository's own list of what an anonymous crawl cannot judge: hosts behind a bot wall (403) or a login redirect |
 
-**`.lycheeignore`** is [lychee's own format](https://lychee.cli.rs/recipes/excluding-links/): one regular expression per line, `#` starting a comment. lychee reads it from its working directory alone, so the deploy copies the repository's copy into the assembled site after the Pages upload; the served site never carries it.
+**`.lycheeignore`** is [lychee's own format](https://lychee.cli.rs/recipes/excluding-links/): one regular expression per line, `#` starting a comment. lychee reads it from its working directory alone, so the deploy stages the crawl's list into the assembled site after the Pages upload: the assembly's own-links regex first, then the repository's copy; the served site never carries it.
 
 Keep it to hosts that are alive in a browser and reject automated clients, each with the reason: a broken link excluded there is never reported again.
 

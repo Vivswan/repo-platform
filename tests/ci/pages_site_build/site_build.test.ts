@@ -21,6 +21,7 @@ import {
   initRepo,
   isFile,
   linkCheckInputs,
+  linkCheckRemap,
   MERMAID_MOUNT_HTML,
   ownedBy,
   pinnedLychee,
@@ -97,17 +98,23 @@ describe("the artifact a deploy lands", () => {
     expect(built.outputs).toEqual({
       "publish": "true",
       "site-dir": site,
-      "link-check-args": deployLinkCheckArgs(runner, built.outputs["own-links"]),
-      "own-links": expect.stringMatching(/^\^/),
+      "link-check-args": deployLinkCheckArgs(runner),
+      "link-rot-ignore": join(runner.scratch, "link-rot.lycheeignore"),
       "link-rot-label": "rot",
       "link-rot-color": "",
       "link-rot-description": "",
       "site-title": "Fixture Docs",
     });
     // Own is the artifact's top level under the base: the website's pages (the glob-named one as a browser spells
-    // it), the docs mount, and the base itself; a sibling project site on the same origin is not.
+    // it), the docs mount, and the base itself; a sibling project site on the same origin is not. The remap lives in
+    // the scratch directory's lychee.toml and the nightly's ignore list opens with the same regex.
+    const remap = linkCheckRemap(runner);
+    expect(remap.replacement).toBe(`${Bun.pathToFileURL(site).href}$1`);
+    expect(readFileSync(join(runner.scratch, "link-rot.lycheeignore"), "utf-8")).toBe(
+      `${remap.pattern}\n`,
+    );
     expect(
-      ownedBy(built.outputs["own-links"], {
+      ownedBy(remap.pattern, {
         base: "https://fixture-owner.github.io/fixture-repo/",
         docs: "https://fixture-owner.github.io/fixture-repo/docs/latest/",
         globNamed: "https://fixture-owner.github.io/fixture-repo/[guide].html",
@@ -582,8 +589,8 @@ describe("layouts that build no docs tier", () => {
         ...NO_LINK_ROT,
         "publish": "true",
         "site-dir": runner.site,
-        "link-check-args": expect.stringContaining(`--root-dir ${Bun.$.escape(runner.served)} `),
-        "own-links": expect.stringMatching(/^\^/),
+        "link-check-args": deployLinkCheckArgs(runner),
+        "link-rot-ignore": join(runner.scratch, "link-rot.lycheeignore"),
         "site-title": SITE_TITLE,
       }),
     },
@@ -606,7 +613,7 @@ describe("layouts that build no docs tier", () => {
         "publish": "false",
         "site-dir": "",
         "link-check-args": "",
-        "own-links": "",
+        "link-rot-ignore": "",
         "site-title": SITE_TITLE,
       }),
     },
@@ -648,6 +655,10 @@ describe("a user site", () => {
     writeFileSync(join(repo, "dist", "favicon.ico"), "");
     writeFileSync(join(repo, "dist", "about.html"), "<html><body>About</body></html>\n");
     writeFileSync(join(repo, "dist", "my page.html"), "<html><body>Spaced</body></html>\n");
+    writeFileSync(
+      join(repo, ".lycheeignore"),
+      "# hosts behind a bot wall\n^https://example\\.invalid/\n",
+    );
     initRepo(repo);
     commitAll(repo, "user site");
     runner = runnerTemp(temp, "/");
@@ -668,10 +679,17 @@ describe("a user site", () => {
     expect(result.outputs).toMatchObject({
       "publish": "true",
       "site-dir": runner.served,
-      "link-check-args": deployLinkCheckArgs(runner, result.outputs["own-links"]),
+      "link-check-args": deployLinkCheckArgs(runner),
+      "link-rot-ignore": join(runner.scratch, "link-rot.lycheeignore"),
     });
+    const remap = linkCheckRemap(runner);
+    expect(remap.replacement).toBe(`${Bun.pathToFileURL(runner.served).href}$1`);
+    // The crawl's ignore list: the own links first, then the repository's own list as it stands.
+    expect(readFileSync(join(runner.scratch, "link-rot.lycheeignore"), "utf-8")).toBe(
+      `${remap.pattern}\n# hosts behind a bot wall\n^https://example\\.invalid/\n`,
+    );
     expect(
-      ownedBy(result.outputs["own-links"], {
+      ownedBy(remap.pattern, {
         root: "https://fixture-owner.github.io/",
         bareOrigin: "https://fixture-owner.github.io",
         page: "https://fixture-owner.github.io/about",

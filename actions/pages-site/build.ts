@@ -9,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -498,17 +499,12 @@ export function ownEntries(site: string): string[] {
 }
 
 /** The arguments the action's link-check step (action.yml) hands lychee on top of its own: the pages built from HEAD as
- *  the inputs, resolved under the served root. `ownLinks` is the deployed site's own-links regex (ownLinksPattern): a
- *  link matching it is remapped into the artifact. Null when the layout is not the deployed one (the docs PR check
- *  builds one mount at "/"), so a link spelled with the site's URL stays external. */
+ *  the inputs, resolved under the served root. The own-links remap is not among them: it is the scratch directory's
+ *  lychee.toml (writeLinkCheckConfig), which the docs PR check never writes, so there a link spelled with the site's URL
+ *  stays external. */
 function linkCheckArgs(
   cfg: Config,
-  layout: {
-    served: string;
-    site: string;
-    tiers: TierScope[];
-    ownLinks: string | null;
-  },
+  layout: { served: string; site: string; tiers: TierScope[] },
 ): string {
   const pages = seedPages(walkHtml(layout.site), layout.tiers);
   if (pages.length === 0) {
@@ -521,31 +517,43 @@ function linkCheckArgs(
   const inputs = join(cfg.scratch, "link-check-inputs.txt");
   writeFileSync(inputs, `${pages.map((page) => literal(join(layout.site, page))).join("\n")}\n`);
   // Each value is quoted for lychee-action, which evals its args in bash.
-  const args = [
-    `--root-dir ${Bun.$.escape(layout.served)}`,
-    `--files-from ${Bun.$.escape(inputs)}`,
-  ];
-  if (layout.ownLinks !== null) {
-    // The pattern's capture is the tail after the base, carried into the file URL.
-    args.push(
-      `--remap ${Bun.$.escape(`${layout.ownLinks} ${Bun.pathToFileURL(layout.site).href}$1`)}`,
-    );
-  }
-  return args.join(" ");
+  return [`--root-dir ${Bun.$.escape(layout.served)}`, `--files-from ${Bun.$.escape(inputs)}`].join(
+    " ",
+  );
 }
 
-/** The outputs every deploy run publishes, whatever it assembled. `ownLinks` is the regex the nightly link-rot step
- *  excludes: the links the assembly already judged. */
+/** The link check's lychee.toml, read from its working directory, the scratch (action.yml): a link matching `ownLinks`
+ *  is remapped into the artifact, the pattern's capture (the tail after the base) carried into the file URL. A file
+ *  rather than an argument: the regex grows with the artifact's top-level entries, and one argument string is capped
+ *  at 128 KiB on Linux. */
+function writeLinkCheckConfig(cfg: Config, site: string, ownLinks: string): void {
+  const remap = `${ownLinks} ${Bun.pathToFileURL(site).href}$1`;
+  writeFileSync(join(cfg.scratch, "lychee.toml"), Bun.TOML.stringify({ remap: [remap] }));
+}
+
+/** The nightly link-rot crawl's .lycheeignore, staged into the site after the upload (reusable-site.yml): the own links
+ *  the assembly judged, then the repository's own list when it has one. Returns the file's path, the deploy's
+ *  `link-rot-ignore` output. */
+function writeLinkRotIgnore(cfg: Config, ownLinks: string): string {
+  const repository = join(cfg.workspace, ".lycheeignore");
+  const own = existsSync(repository) ? readFileSync(repository, "utf-8") : "";
+  const path = join(cfg.scratch, "link-rot.lycheeignore");
+  writeFileSync(path, `${ownLinks}\n${own}`);
+  return path;
+}
+
+/** The outputs every deploy run publishes, whatever it assembled. `linkRotIgnore` is the path of the nightly crawl's
+ *  .lycheeignore, "" with nothing to publish. */
 function setSiteOutputs(
   cfg: Config,
   site: string | null,
   linkCheck: string,
-  ownLinks: string,
+  linkRotIgnore: string,
 ): void {
   setOutput("publish", site === null ? "false" : "true");
   setOutput("site-dir", site ?? "");
   setOutput("link-check-args", linkCheck);
-  setOutput("own-links", ownLinks);
+  setOutput("link-rot-ignore", linkRotIgnore);
   setOutput("link-rot-label", cfg.linkRotLabel);
   setOutput("link-rot-color", cfg.linkRotColor);
   setOutput("link-rot-description", cfg.linkRotDescription);
@@ -570,13 +578,10 @@ async function main(): Promise<void> {
     }
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
     const { dist } = buildVitepressTier(cfg, tier, [], cfg.docs.include, { base: "/" });
-    // No own links: this build sits at "/", not at the deployed layout, so a
+    // No remap: this build sits at "/", not at the deployed layout, so a
     // link spelled with the site's own origin stays external here.
     const tiers = [{ rel: "", strict: true }];
-    setOutput(
-      "link-check-args",
-      linkCheckArgs(cfg, { served: dist, site: dist, tiers, ownLinks: null }),
-    );
+    setOutput("link-check-args", linkCheckArgs(cfg, { served: dist, site: dist, tiers }));
     return;
   }
 
@@ -634,12 +639,9 @@ async function main(): Promise<void> {
   // no other judge than the check over the whole artifact.
   const { served, site, rootBase, origin } = cfg;
   const ownLinks = ownLinksPattern({ origin, basePath: rootBase }, ownEntries(site));
-  setSiteOutputs(
-    cfg,
-    site,
-    linkCheckArgs(cfg, { served, site, tiers: scopes, ownLinks }),
-    ownLinks,
-  );
+  writeLinkCheckConfig(cfg, site, ownLinks);
+  const linkCheck = linkCheckArgs(cfg, { served, site, tiers: scopes });
+  setSiteOutputs(cfg, site, linkCheck, writeLinkRotIgnore(cfg, ownLinks));
   console.log(`assembled ${cfg.site}`);
 }
 

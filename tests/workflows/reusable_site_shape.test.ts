@@ -116,16 +116,21 @@ describe("reusable-site.yml", () => {
     });
   });
 
-  // The nightly's own-site exclude must be the same regex the assembly remapped into the artifact, which only the
-  // assembly knows (a user site owns its top-level entries, not its origin), so it is read from the assembly step.
-  // Read under a name the action never declares, it is empty, and lychee would crawl the site's own links.
-  test("the nightly excludes the own links the assembly step declares", () => {
+  // The nightly's own-site exclusion must be the regex the assembly remapped into the artifact, which only the assembly
+  // knows (a user site owns its top-level entries, not its origin), so the assembly writes the crawl's .lycheeignore
+  // and the workflow stages that file; an argument could not carry it (one argument string is capped at 128 KiB).
+  // Staged under a name the action never declares, the copy fails and the nightly skips.
+  test("the nightly stages the assembly's .lycheeignore and excludes no own-links argument", () => {
+    const staging = steps.find((candidate) => candidate.name === "Stage the crawl's .lycheeignore");
     const links = steps.find((candidate) => candidate.id === "links");
     const assembly = steps.find((candidate) => candidate.uses === "$/actions/pages-site");
+    const env = staging?.env as Record<string, string> | undefined;
     const args = (links?.with as Record<string, string> | undefined)?.args ?? "";
-    expect(args).toContain(`--exclude '\${{ steps.${assembly?.id}.outputs.own-links }}'`);
+    expect(env?.IGNORE).toBe(`\${{ steps.${assembly?.id}.outputs.link-rot-ignore }}`);
+    expect(staging?.run).toBe('cp "$IGNORE" "$SITE_DIR/.lycheeignore"');
+    expect(args).not.toContain("own-links");
     expect(Object.keys(loadAction("actions/pages-site/action.yml").outputs ?? {})).toContain(
-      "own-links",
+      "link-rot-ignore",
     );
   });
 
