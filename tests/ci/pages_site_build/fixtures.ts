@@ -77,22 +77,29 @@ export function runnerTemp(temp: TempDirs, basePath: string): RunnerTemp {
   return { alias, scratch, served, site: join(served, ...basePath.split("/")) };
 }
 
-/** The `link-check-args` output a deploy of `repository` at `basePath` emits for `runner`'s layout: the served root,
- *  the page list in the scratch directory, and the site's own links remapped into the artifact. Each value is quoted
- *  the way `Bun.$.escape` quotes for bash, the origin spelled the way `RegExp.escape` spells it (the fixture owner's
- *  hyphen is a hex escape); the live lychee run is what proves bash and Rust read both. */
-export function deployLinkCheckArgs(
-  runner: RunnerTemp,
-  repository: string,
-  basePath: string,
-): string {
-  const owner = repository.split("/")[0];
-  const own = RegExp.escape(`https://${owner.toLowerCase()}.github.io${basePath.slice(0, -1)}`);
+/** The `link-check-args` output a deploy emits for `runner`'s layout: the served root and the page list in the scratch
+ *  directory, each quoted the way `Bun.$.escape` quotes for bash, which the live lychee run proves bash reads. */
+export function deployLinkCheckArgs(runner: RunnerTemp): string {
   return (
     `--root-dir ${Bun.$.escape(runner.served)} ` +
-    `--files-from ${Bun.$.escape(join(runner.scratch, "link-check-inputs.txt"))} ` +
-    `--remap ${Bun.$.escape(`^${own}([/?#]|$) ${Bun.pathToFileURL(runner.site).href}$1`)}`
+    `--files-from ${Bun.$.escape(join(runner.scratch, "link-check-inputs.txt"))}`
   );
+}
+
+/** The own-links remap the deploy wrote into the scratch directory's lychee.toml, the file lychee reads from its working
+ *  directory: the pattern and the replacement it carries. */
+export function linkCheckRemap(runner: RunnerTemp): { pattern: string; replacement: string } {
+  const config = Bun.TOML.parse(readFileSync(join(runner.scratch, "lychee.toml"), "utf-8")) as {
+    remap: string[];
+  };
+  const [pattern, replacement] = config.remap[0].split(" ");
+  return { pattern, replacement };
+}
+
+/** Which of `urls` the own-links regex `ownLinks` matches, by URL, the way the tests state what a site owns. */
+export function ownedBy(ownLinks: string, urls: Record<string, string>): Record<string, boolean> {
+  const regex = new RegExp(ownLinks);
+  return Object.fromEntries(Object.entries(urls).map(([name, url]) => [name, regex.test(url)]));
 }
 
 /** The pages the build listed for lychee, relative to the site. */
