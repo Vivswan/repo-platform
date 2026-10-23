@@ -22,6 +22,7 @@ import {
   isFile,
   linkCheckInputs,
   MERMAID_MOUNT_HTML,
+  ownedBy,
   pinnedLychee,
   present,
   type RunnerTemp,
@@ -96,11 +97,33 @@ describe("the artifact a deploy lands", () => {
     expect(built.outputs).toEqual({
       "publish": "true",
       "site-dir": site,
-      "link-check-args": deployLinkCheckArgs(runner, FLEET_REPO, FLEET_BASE),
+      "link-check-args": deployLinkCheckArgs(runner, built.outputs["own-links"]),
+      "own-links": expect.stringMatching(/^\^/),
       "link-rot-label": "rot",
       "link-rot-color": "",
       "link-rot-description": "",
       "site-title": "Fixture Docs",
+    });
+    // Own is the artifact's top level under the base: the website's pages (the glob-named one as a browser spells
+    // it), the docs mount, and the base itself; a sibling project site on the same origin is not.
+    expect(
+      ownedBy(built.outputs["own-links"], {
+        base: "https://fixture-owner.github.io/fixture-repo/",
+        docs: "https://fixture-owner.github.io/fixture-repo/docs/latest/",
+        globNamed: "https://fixture-owner.github.io/fixture-repo/[guide].html",
+        extensionless: "https://fixture-owner.github.io/fixture-repo/[guide]",
+        asset: "https://fixture-owner.github.io/fixture-repo/assets/app.js",
+        sibling: "https://fixture-owner.github.io/other-repo/",
+        userSiteRoot: "https://fixture-owner.github.io/",
+      }),
+    ).toEqual({
+      base: true,
+      docs: true,
+      globNamed: true,
+      extensionless: true,
+      asset: true,
+      sibling: false,
+      userSiteRoot: false,
     });
   });
 
@@ -559,7 +582,8 @@ describe("layouts that build no docs tier", () => {
         ...NO_LINK_ROT,
         "publish": "true",
         "site-dir": runner.site,
-        "link-check-args": deployLinkCheckArgs(runner, FLEET_REPO, FLEET_BASE),
+        "link-check-args": expect.stringContaining(`--root-dir ${Bun.$.escape(runner.served)} `),
+        "own-links": expect.stringMatching(/^\^/),
         "site-title": SITE_TITLE,
       }),
     },
@@ -582,6 +606,7 @@ describe("layouts that build no docs tier", () => {
         "publish": "false",
         "site-dir": "",
         "link-check-args": "",
+        "own-links": "",
         "site-title": SITE_TITLE,
       }),
     },
@@ -616,10 +641,13 @@ describe("a user site", () => {
     writeFileSync(
       join(repo, "dist", "index.html"),
       '<html><head><link rel="icon" href="/favicon.ico"></head><body>USER-SITE ' +
-        '<a href="https://fixture-owner.github.io/about">about</a></body></html>\n',
+        '<a href="https://fixture-owner.github.io/about">about</a> ' +
+        '<a href="https://fixture-owner.github.io/my%20page">a page with a space in its name</a> ' +
+        '<a href="https://fixture-owner.github.io/other-project/">a project site</a></body></html>\n',
     );
     writeFileSync(join(repo, "dist", "favicon.ico"), "");
     writeFileSync(join(repo, "dist", "about.html"), "<html><body>About</body></html>\n");
+    writeFileSync(join(repo, "dist", "my page.html"), "<html><body>Spaced</body></html>\n");
     initRepo(repo);
     commitAll(repo, "user site");
     runner = runnerTemp(temp, "/");
@@ -629,19 +657,48 @@ describe("a user site", () => {
     });
   });
 
-  test("is assembled at the served root itself, the directory uploaded and lychee's root, with its own links remapped to the bare origin", () => {
+  // The origin is shared with the owner's project sites (https://owner.github.io/<repo>/), so own links are the
+  // artifact's top-level entries, not the origin: a user site's deploy once failed on its link to a sibling project
+  // site, read as a missing page of the artifact. A link is read as its author spelled it, so an entry matches every
+  // percent-spelling of its name.
+  test("is assembled at the served root itself, the directory uploaded and lychee's root, owning its own entries on the bare origin", () => {
     expect(result.exitCode, describeRun(result)).toBe(0);
     expect(runner.site).toBe(runner.served);
     expect(readSite(runner.site, "index.html")).toContain("USER-SITE");
     expect(result.outputs).toMatchObject({
       "publish": "true",
       "site-dir": runner.served,
-      "link-check-args": deployLinkCheckArgs(runner, USER_SITE_REPO, "/"),
+      "link-check-args": deployLinkCheckArgs(runner, result.outputs["own-links"]),
+    });
+    expect(
+      ownedBy(result.outputs["own-links"], {
+        root: "https://fixture-owner.github.io/",
+        bareOrigin: "https://fixture-owner.github.io",
+        page: "https://fixture-owner.github.io/about",
+        pageHtml: "https://fixture-owner.github.io/about.html",
+        spaced: "https://fixture-owner.github.io/my%20page",
+        spacedOtherCase: "https://fixture-owner.github.io/my%20PAGE",
+        spacedEncodedLetters: "https://fixture-owner.github.io/%6dy%20page",
+        icon: "https://fixture-owner.github.io/favicon.ico",
+        sibling: "https://fixture-owner.github.io/other-project/",
+        prefixOfAPage: "https://fixture-owner.github.io/about-us",
+      }),
+    ).toEqual({
+      root: true,
+      bareOrigin: true,
+      page: true,
+      pageHtml: true,
+      spaced: true,
+      spacedOtherCase: false,
+      spacedEncodedLetters: true,
+      icon: true,
+      sibling: false,
+      prefixOfAPage: false,
     });
   });
 
   test.skipIf(pinnedLychee() === null)(
-    "lychee resolves its root-absolute link and its origin-spelled link in the artifact",
+    "lychee resolves its root-absolute link and its origin-spelled links (one percent-encoded) in the artifact, and leaves the sibling project site's link to the network",
     () => {
       const check = runLinkCheck(
         pinnedLychee() ?? "",
@@ -649,7 +706,8 @@ describe("a user site", () => {
         runner.scratch,
       );
       expect(check.exitCode, describeRun(check)).toBe(0);
-      expect(check.stdout).toContain("| ✅ Successful  | 2     |");
+      expect(check.stdout).toContain("| ✅ Successful  | 3     |");
+      expect(check.stdout).not.toContain("other-project");
     },
     TEST_TIMEOUT_MS,
   );

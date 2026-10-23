@@ -1,15 +1,14 @@
 #!/usr/bin/env bun
-// The outputs are action.yml's. The three regexes are lychee's: the excludes match a URL as spelled, and the remap is
+// The outputs are action.yml's. The two regexes are lychee's: the exclude matches a URL as spelled, and the remap is
 // a pattern, a space, and a replacement carrying `$N` captures.
 
 import { setFailed, setOutput } from "@actions/core";
 import { messageOf, requireEnv } from "../shared/action_runtime.ts";
-import { ownLinksPattern, pagesSite } from "../shared/pages_site.ts";
+import { pagesSite } from "../shared/pages_site.ts";
 
 export interface SiteUrls {
   "base-path": string;
   origin: string;
-  "own-links": string;
   "edit-links": string;
   "tree-links": string;
 }
@@ -28,7 +27,6 @@ export function siteUrls(input: {
   return {
     "base-path": site.basePath,
     "origin": site.origin,
-    "own-links": ownLinksPattern(site),
     "edit-links": `^${RegExp.escape(`${repoUrl}edit/`)}`,
     "tree-links":
       `^${RegExp.escape(repoUrl)}(blob|tree)/${RegExp.escape(input.defaultBranch)}/([^?#]*?)/*([?#].*)?$ ` +

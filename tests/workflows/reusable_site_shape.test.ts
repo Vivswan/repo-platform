@@ -53,16 +53,15 @@ describe("reusable-site.yml", () => {
   }
 
   // The step's id and the output names are the contract between two files: an output the workflow reads under a
-  // name the action never declares reads as empty, and lychee then excludes nothing (own-links) or remaps nothing.
+  // name the action never declares reads as empty, and lychee then excludes nothing (edit-links) or remaps nothing.
   test("the urls step is the site-urls action, and every output the workflow reads from it is declared", () => {
     expect(step("urls")?.uses).toBe("$/actions/site-urls");
     const read = [...source.matchAll(/steps\.urls\.outputs\.([\w-]+)/g)].map((match) => match[1]);
     expect(new Set(read)).toEqual(new Set(Object.keys(SITE_URLS.outputs ?? {})));
   });
 
-  // The own-site exclude must match the assembly's own-origin remap (both are ownLinksPattern's), and the lowercase
-  // host is lychee's reporting convention: a link to the own site in another case would be reported as external.
-  // The remap is lychee's regex pair (pattern, a space, the replacement with $N captures): a blob link into the own
+  // The lowercase host is lychee's reporting convention: a link to the own site in another case would be reported as
+  // external. The remap is lychee's regex pair (pattern, a space, the replacement with $N captures): a blob link into the own
   // default branch, with a line fragment, a query, or a trailing slash (GitHub serves all three), must land on the
   // checkout's file; another repository's link, another branch, or the branch in another case (another ref) must
   // not match, or GitHub's 503 on anonymous blob crawls would be back as rot, or a dead ref would read as alive.
@@ -79,7 +78,6 @@ describe("reusable-site.yml", () => {
       outputs: {
         "base-path": "/Example-Repo/",
         "origin": "https://vivswan.github.io",
-        "own-links": `^${RegExp.escape("https://vivswan.github.io/Example-Repo")}([/?#]|$)`,
         "edit-links": `^${RegExp.escape("https://github.com/Vivswan/Example-Repo/edit/")}`,
         "tree-links": remap,
       },
@@ -106,7 +104,7 @@ describe("reusable-site.yml", () => {
   });
 
   // GitHub serves the repository named <owner>.github.io, in whatever case, at the origin's root, so the hook builds
-  // for "/" and the own-site exclude is the bare origin.
+  // for "/".
   test("the urls step serves the owner's <owner>.github.io repository at the root", () => {
     const { outputs } = resolveUrls(
       "Vivswan/Vivswan.github.io",
@@ -115,8 +113,20 @@ describe("reusable-site.yml", () => {
     expect(outputs).toMatchObject({
       "base-path": "/",
       "origin": "https://vivswan.github.io",
-      "own-links": `^${RegExp.escape("https://vivswan.github.io")}([/?#]|$)`,
     });
+  });
+
+  // The nightly's own-site exclude must be the same regex the assembly remapped into the artifact, which only the
+  // assembly knows (a user site owns its top-level entries, not its origin), so it is read from the assembly step.
+  // Read under a name the action never declares, it is empty, and lychee would crawl the site's own links.
+  test("the nightly excludes the own links the assembly step declares", () => {
+    const links = steps.find((candidate) => candidate.id === "links");
+    const assembly = steps.find((candidate) => candidate.uses === "$/actions/pages-site");
+    const args = (links?.with as Record<string, string> | undefined)?.args ?? "";
+    expect(args).toContain(`--exclude '\${{ steps.${assembly?.id}.outputs.own-links }}'`);
+    expect(Object.keys(loadAction("actions/pages-site/action.yml").outputs ?? {})).toContain(
+      "own-links",
+    );
   });
 
   // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml), the nightly, and the

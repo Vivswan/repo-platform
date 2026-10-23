@@ -37,6 +37,12 @@ outputs:
     description: >-
       The assembled site directory to upload as the Pages artifact, empty when publish is false or in check mode.
     value: ${{ steps.assemble.outputs.site-dir }}
+  own-links:
+    description: >-
+      The regex matching the site's own URLs on its origin (the artifact's top-level entries under the base, and the
+      base itself), judged against the artifact here, so the nightly link-rot check excludes them; empty in check mode
+      or with nothing to publish
+    value: ${{ steps.assemble.outputs.own-links }}
   link-rot-label:
     description: The nightly external-link check's tracking label from the configuration ("" disables the check)
     value: ${{ steps.assemble.outputs.link-rot-label }}

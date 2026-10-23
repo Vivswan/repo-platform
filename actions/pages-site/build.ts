@@ -485,18 +485,29 @@ function walkHtml(dir: string, prefix = ""): string[] {
   return pages;
 }
 
+/** What the artifact owns on its origin: its top-level entries, an html page under its extensionless name too (Pages
+ *  serves both). */
+export function ownEntries(site: string): string[] {
+  const names = new Set<string>();
+  for (const name of readdirSync(site)) {
+    names.add(name);
+    const page = /\.html?$/i.test(name) && statSync(join(site, name)).isFile();
+    if (page) names.add(name.replace(/\.html?$/i, ""));
+  }
+  return [...names].sort();
+}
+
 /** The arguments the action's link-check step (action.yml) hands lychee on top of its own: the pages built from HEAD as
- *  the inputs, resolved under the served root. `origin` is the deployed site's (`https://owner.github.io`): a link spelled
- *  with it under the base is the site's own and is remapped into the artifact. Null when the layout is not the deployed
- *  one (the docs PR check builds one mount at "/"), so such links stay external. */
+ *  the inputs, resolved under the served root. `ownLinks` is the deployed site's own-links regex (ownLinksPattern): a
+ *  link matching it is remapped into the artifact. Null when the layout is not the deployed one (the docs PR check
+ *  builds one mount at "/"), so a link spelled with the site's URL stays external. */
 function linkCheckArgs(
   cfg: Config,
   layout: {
     served: string;
     site: string;
-    rootBase: string;
     tiers: TierScope[];
-    origin: string | null;
+    ownLinks: string | null;
   },
 ): string {
   const pages = seedPages(walkHtml(layout.site), layout.tiers);
@@ -514,19 +525,27 @@ function linkCheckArgs(
     `--root-dir ${Bun.$.escape(layout.served)}`,
     `--files-from ${Bun.$.escape(inputs)}`,
   ];
-  if (layout.origin !== null) {
-    // The captured delimiter is carried into the file URL, so the site's own links alone land in the artifact.
-    const pattern = ownLinksPattern({ origin: layout.origin, basePath: layout.rootBase });
-    args.push(`--remap ${Bun.$.escape(`${pattern} ${Bun.pathToFileURL(layout.site).href}$1`)}`);
+  if (layout.ownLinks !== null) {
+    // The pattern's capture is the tail after the base, carried into the file URL.
+    args.push(
+      `--remap ${Bun.$.escape(`${layout.ownLinks} ${Bun.pathToFileURL(layout.site).href}$1`)}`,
+    );
   }
   return args.join(" ");
 }
 
-/** The outputs every deploy run publishes, whatever it assembled. */
-function setSiteOutputs(cfg: Config, site: string | null, linkCheck: string): void {
+/** The outputs every deploy run publishes, whatever it assembled. `ownLinks` is the regex the nightly link-rot step
+ *  excludes: the links the assembly already judged. */
+function setSiteOutputs(
+  cfg: Config,
+  site: string | null,
+  linkCheck: string,
+  ownLinks: string,
+): void {
   setOutput("publish", site === null ? "false" : "true");
   setOutput("site-dir", site ?? "");
   setOutput("link-check-args", linkCheck);
+  setOutput("own-links", ownLinks);
   setOutput("link-rot-label", cfg.linkRotLabel);
   setOutput("link-rot-color", cfg.linkRotColor);
   setOutput("link-rot-description", cfg.linkRotDescription);
@@ -551,12 +570,12 @@ async function main(): Promise<void> {
     }
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
     const { dist } = buildVitepressTier(cfg, tier, [], cfg.docs.include, { base: "/" });
-    // No origin: this build sits at "/", not at the deployed layout, so a
+    // No own links: this build sits at "/", not at the deployed layout, so a
     // link spelled with the site's own origin stays external here.
     const tiers = [{ rel: "", strict: true }];
     setOutput(
       "link-check-args",
-      linkCheckArgs(cfg, { served: dist, site: dist, rootBase: "/", tiers, origin: null }),
+      linkCheckArgs(cfg, { served: dist, site: dist, tiers, ownLinks: null }),
     );
     return;
   }
@@ -572,7 +591,7 @@ async function main(): Promise<void> {
         ? "the docs half is off (site.path: null)"
         : `the repository has no ${DOCS_DIR}/`;
     notice(`nothing to publish: the site-build hook named no directory and ${why}`);
-    setSiteOutputs(cfg, null, "");
+    setSiteOutputs(cfg, null, "", "");
     return;
   }
   if (website === null) {
@@ -614,7 +633,13 @@ async function main(): Promise<void> {
   // After every mount is in place: a link from one mount into another has
   // no other judge than the check over the whole artifact.
   const { served, site, rootBase, origin } = cfg;
-  setSiteOutputs(cfg, site, linkCheckArgs(cfg, { served, site, rootBase, tiers: scopes, origin }));
+  const ownLinks = ownLinksPattern({ origin, basePath: rootBase }, ownEntries(site));
+  setSiteOutputs(
+    cfg,
+    site,
+    linkCheckArgs(cfg, { served, site, tiers: scopes, ownLinks }),
+    ownLinks,
+  );
   console.log(`assembled ${cfg.site}`);
 }
 

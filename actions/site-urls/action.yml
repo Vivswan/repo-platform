@@ -1,7 +1,7 @@
 name: Site URLs
 description: |
   Resolves where GitHub Pages serves the calling repository, for reusable-site.yml's deploy (docs/modules/site.md):
-  the base path the site-build hook builds for, the origin, and the lychee patterns the nightly link-rot check reads.
+  the base path the site-build hook builds for, the origin, and the edit and tree patterns the nightly link-rot check reads.
 
   - The base path is `/<repo>/`, or `/` for the owner's user site, the repository named `<owner>.github.io`.
   - The owner is lowercased in the origin: Pages serves `<owner>.github.io` in lowercase and lychee reports hosts
@@ -14,9 +14,6 @@ outputs:
   origin:
     description: The site's origin, https://<owner>.github.io
     value: ${{ steps.urls.outputs.origin }}
-  own-links:
-    description: The regex matching the site's own URLs, judged against the artifact at assembly rather than crawled
-    value: ${{ steps.urls.outputs.own-links }}
   edit-links:
     description: The regex matching the theme's "Edit this page" links, which an anonymous crawl cannot judge
     value: ${{ steps.urls.outputs.edit-links }}
