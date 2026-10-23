@@ -37,9 +37,9 @@ The called workflow is one job, in this order:
 | Step | Runs when | What |
 |---|---|---|
 | checkout | always | the judged commit, full history (the tag list is the version set) |
-| urls | always | the shared [site-urls action](../../actions/site-urls/action.yml): the base path `/<repo>/` (`/` for the owner's `<owner>.github.io` repository, the user site), the origin `https://<owner>.github.io`, and the link-rot step's lychee patterns |
+| urls | always | the shared [site-urls action](../../actions/site-urls/action.yml): the base path `/<repo>/` (`/` for the owner's `<owner>.github.io` repository, the user site), the origin `https://<owner>.github.io`, and the link-rot step's edit and tree patterns |
 | hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
-| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, and writes `versions.json` under the docs mount |
+| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes the link-rot step's `.lycheeignore` (the links the site owns on its origin, then the repository's own list), and writes `versions.json` under the docs mount |
 | configure, upload, deploy | something was built (`publish`) | the one Pages artifact, deployed to the `github-pages` environment; red on configure-pages's error while the Pages site does not exist yet ([below](#pages-enablement)) |
 | link rot | the schedule alone, after a deploy | checks the site's external links with lychee, reads lychee's exit code as the verdict through the shared [lychee-verdict action](../../actions/lychee-verdict/action.yml), and files the tracking issue ([below](#link-rot)) |
 
@@ -245,7 +245,11 @@ fleet.yml's `docs-check` job builds `docs/` strictly on every pull request of a 
 
 Every same-site link on a page built from the default branch must resolve, wherever the target lives (a website page into the docs, a docs page to a staged skill, a `#fragment` naming a heading, an emitted asset, a link spelled with the site's own URL).
 
-A user site (`<owner>.github.io`) owns the whole origin, so a link to a sibling project site (`https://<owner>.github.io/<repo>/`, or root-absolute `/<repo>/`) is judged against the artifact too, where it does not exist.
+**A link spelled with the site's own URL is the site's own** when its first path segment under the base is a top-level entry of the artifact (a page under its extensionless name too, a name as the URL spells it) or it is the base itself.
+
+Any other link on the origin is another site's: a user site shares `https://<owner>.github.io` with every project site of the owner (`/<repo>/`), so a link to a sibling project site is left to the nightly check, as an external link.
+
+**Root-absolute links are this site's, whatever they name:** lychee resolves `/<path>` from the served root, so on a user site a root-absolute link to a sibling project site (`/<repo>/`) is read as a missing page of the artifact and fails the build. Spell a sibling site's link with its full URL.
 
 A broken one fails the step with lychee's report, in the log and the job summary: one section per page, every failing link with its line and column and lychee's reason.
 
@@ -284,10 +288,10 @@ The nightly run checks the deployed site's EXTERNAL links after publishing with 
 | the theme's "Edit this page" links | theme output an anonymous crawl cannot judge (auth redirect, 404 on a private repository) |
 | mail links | not http(s) |
 | private-network and loopback URLs | not on the public network (`--exclude-all-private`) |
-| same-site links and assets, relative or spelled with the site's own URL | judged against the artifact at build time, not over the network |
+| same-site links and assets, relative or spelled with the site's own URL (the artifact's entries on the origin; a sibling project site's link is crawled) | judged against the artifact at build time, not over the network |
 | URLs matching the repository's root `.lycheeignore` | the repository's own list of what an anonymous crawl cannot judge: hosts behind a bot wall (403) or a login redirect |
 
-**`.lycheeignore`** is [lychee's own format](https://lychee.cli.rs/recipes/excluding-links/): one regular expression per line, `#` starting a comment. lychee reads it from its working directory alone, so the deploy copies the repository's copy into the assembled site after the Pages upload; the served site never carries it.
+**`.lycheeignore`** is [lychee's own format](https://lychee.cli.rs/recipes/excluding-links/): one regular expression per line, `#` starting a comment. lychee reads it from its working directory alone, so the deploy stages the crawl's list into the assembled site after the Pages upload: the assembly's own-links regex first, then the repository's copy; the served site never carries it.
 
 Keep it to hosts that are alive in a browser and reject automated clients, each with the reason: a broken link excluded there is never reported again.
 
