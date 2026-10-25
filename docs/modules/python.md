@@ -31,6 +31,16 @@ max-returns = 6
 
 [lint.pydocstyle]
 convention = "google"
+
+[format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
 ```
 
 | Family | What it holds |
@@ -45,6 +55,7 @@ convention = "google"
 | `RUF` | ruff's own rules |
 | `ANN` | every signature annotated |
 | `D2`, `D3`, `D4` | docstring whitespace, quotes, and content, under the `google` convention |
+| `[format]` | Black's shape: double quotes, spaces, the file's own line ending, a trailing comma keeps a list expanded; `ruff format --check` in `checks.yml` holds it |
 
 Off, with the reason beside each in the file: `PLR2004` (magic values) and `D202` (the blank line after a docstring). The presence rules `D1` are neither selected nor ignored, so a repository can add them (below) and a small helper whose name says what it does carries no docstring until it does.
 
