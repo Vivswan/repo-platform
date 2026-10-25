@@ -6,33 +6,41 @@ interface Tier {
   roots: string[];
 }
 
-/** A project-pages docs site with two tags: the root tier's base prefixes
- *  every other tier's. */
+/** A project-pages docs site with two tags: the root tier's base prefixes every other tier's. */
 const ROOT: Tier = {
   base: "/repo/",
   roots: ["/repo/latest/", "/repo/stable/", "/repo/v2.0.0/", "/repo/v1.0.0/"],
 };
+
+/** The newest tag's own tier. */
 const LATEST: Tier = { base: "/repo/latest/", roots: ROOT.roots };
-/** The newest tag's content again under stable/: its own build, so the
- *  root's pages are another tier's. */
+
+/** The newest tag's content again under stable/: its own build, so the root's pages are another tier's. */
 const STABLE: Tier = { base: "/repo/stable/", roots: ROOT.roots };
-/** A versioned site before its first tag: the root is built from HEAD and
- *  latest/ is the one version served. */
+
+/** A versioned site before its first tag: the root is built from HEAD and latest/ is the one version served. */
 const NO_TAGS: Tier = { base: "/repo/", roots: ["/repo/latest/"] };
+
 /** The docs mount of a site that also has a website at the repo root. */
 const MOUNTED_LATEST: Tier = {
   base: "/repo/docs/latest/",
   roots: ["/repo/docs/latest/", "/repo/docs/v1.0.0/"],
 };
+
 /** An unversioned mount: the theme is fed no version list at all. */
 const UNVERSIONED: Tier = { base: "/repo/", roots: [] };
 
 interface Case {
+  /** The tier whose build the guard is installed in. */
   tier: Tier;
+
   /** The router's normalized route. */
   to: string;
+
   /** The document's own path; a page of the tier unless the case is a boot. */
   here?: string;
+
+  /** "routed" when the guard leaves the route to the router, "left" when it hands it to the browser. */
   outcome: "routed" | "left";
 }
 

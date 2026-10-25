@@ -207,8 +207,11 @@ describe("parseRegistration", () => {
     },
   ])("refuses $reason", ({ text, outcome }) => {
     const read = parseRegistration(text);
-    if ("registration" in outcome) expect(read).toEqual(outcome);
-    else expect("errors" in read ? read.errors[0] : null).toStartWith(outcome.error);
+    if ("registration" in outcome) {
+      expect(read).toEqual(outcome);
+    } else {
+      expect("errors" in read ? read.errors[0] : null).toStartWith(outcome.error);
+    }
   });
 
   test("site.path: null turns the docs half off, and is refused beside include roots that would need it", () => {
@@ -264,8 +267,11 @@ describe("include roots: the registration and the pages-site config agree", () =
       link_rot_description: "",
     });
     const parse = () => parseSiteConfig(config);
-    if (accepted) expect(parse).not.toThrow();
-    else expect(parse).toThrow();
+    if (accepted) {
+      expect(parse).not.toThrow();
+    } else {
+      expect(parse).toThrow();
+    }
   });
 });
 

@@ -10,8 +10,7 @@ import { tempDirs } from "../../shared/temp_dir";
 const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../../actions/semgrep/drop_suppressed.ts");
 
-// A result carrying a suppression is semgrep's shape for a nosemgrep-marked finding.
-const suppressed = (ruleId: string) => ({ ruleId, suppressions: [{ kind: "inSource" }] });
+const nosemgrepMarked = (ruleId: string) => ({ ruleId, suppressions: [{ kind: "inSource" }] });
 const sarifWith = (firstRunResults: object[]) => ({
   $schema: "https://json.schemastore.org/sarif-2.1.0.json",
   version: "2.1.0",
@@ -23,7 +22,7 @@ const sarifWith = (firstRunResults: object[]) => ({
     },
     {
       tool: { driver: { name: "second" } },
-      results: [{ ruleId: "s" }, suppressed("s")],
+      results: [{ ruleId: "s" }, nosemgrepMarked("s")],
     },
     { tool: { driver: { name: "third, no results key" } } },
   ],
@@ -31,7 +30,9 @@ const sarifWith = (firstRunResults: object[]) => ({
 const drop = (sarif: object | null) => {
   const root = temp.dir("semgrep-drop-");
   const path = join(root, "semgrep.sarif");
-  if (sarif !== null) writeFileSync(path, JSON.stringify(sarif));
+  if (sarif !== null) {
+    writeFileSync(path, JSON.stringify(sarif));
+  }
   const run = boundedSpawnSync([process.execPath, SCRIPT], {
     env: { PATH: process.env.PATH ?? "", RUNNER_TEMP: root },
   });
@@ -48,7 +49,7 @@ describe("drop_suppressed.ts", () => {
     const expected = sarifWith([plain, unsuppressed]);
     expected.runs[1].results = [{ ruleId: "s" }];
     expect([
-      drop(sarifWith([suppressed("r"), plain, unsuppressed, suppressed("r")])),
+      drop(sarifWith([nosemgrepMarked("r"), plain, unsuppressed, nosemgrepMarked("r")])),
       drop(null),
     ]).toEqual([
       { exitCode: 0, kept: expected },

@@ -43,7 +43,9 @@ test("wraps each top-level table in a focusable div.vp-table; a nested table sta
 test("the test renderer installs every markdown rule config.mts installs, in the same order", () => {
   const installedRules = (source: string): string[] => {
     const body = /\bconfig\(md[^)]*\) \{([\s\S]*?)\n {2,6}\},\n/.exec(source)?.[1];
-    if (body === undefined) throw new Error("no config(md) body found");
+    if (body === undefined) {
+      throw new Error("no config(md) body found");
+    }
     return [...body.matchAll(/^\s*(\w+Rule)\(md\b/gm)].map((match) => match[1]);
   };
   const config = installedRules(readFileSync(join(ACTION_DIR, ".vitepress/config.mts"), "utf8"));

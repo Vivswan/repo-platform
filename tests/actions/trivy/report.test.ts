@@ -179,7 +179,9 @@ describe("directoryName", () => {
       "escape",
       "target",
     ]);
-    for (const name of names) expect(name).toMatch(/^[A-Za-z0-9._-]+$/);
+    for (const name of names) {
+      expect(name).toMatch(/^[A-Za-z0-9._-]+$/);
+    }
     const deep = `${"a".repeat(100)}/${"b".repeat(100)}/${"c".repeat(100)}/package-lock.json`;
     const name = directoryName(deep, new Set());
     expect(name).toHaveLength(MAX_NAME);

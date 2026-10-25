@@ -28,13 +28,21 @@ import {
   serve,
 } from "./headless_chrome.ts";
 
+// The site under test and its fixture page, piece by piece:
+//   DIAGRAM      twelve chained nodes draw far wider than the reading column, so the column copy is scaled down
+//   CRUSH_TABLE  the reported shape, a 90-character code token beside twelve words of prose
+//   WIDE_TABLE   six code columns, each a whole token, so the table can only overflow the column
+//   PICTURE_SVG  1600px in a 648px column, so the lightbox has room to grow; the linked one stays its link's
+//   IMAGES_MD    the broken one's only srcset candidate is a data URL that is not an image: deterministic, offline,
+//                and outside the bundler's path resolution, which fails the build on a missing relative candidate
+//   OTHER_MD     a second page with no diagram, one history step away
+
 const REPOSITORY = "fixture-owner/fixture-repo";
 const BASE = "/fixture-repo";
 const PAGE = `${BASE}/latest/`;
 const SCENARIO_TIMEOUT_MS = harnessBound(60_000);
 const REM = 16;
 
-/** Twelve chained nodes draw far wider than the reading column, so the column copy is scaled down. */
 const DIAGRAM = [
   "```mermaid",
   "flowchart LR",
@@ -43,7 +51,6 @@ const DIAGRAM = [
   "```",
 ].join("\n");
 
-/** The reported shape: a 90-character code token beside twelve words of prose. */
 const LONG_TOKEN =
   "error[E0433]: failed to resolve: use of undeclared crate or module edges in an import path";
 const PROSE = "Move the import, or add the edge under the section declaring it.";
@@ -51,16 +58,12 @@ const CRUSH_TABLE = ["| Message | Fix |", "|---|---|", `| \`${LONG_TOKEN}\` | ${
   "\n",
 );
 
-/** Six code columns, each a whole token, so the table can only overflow the column. */
 const WIDE_TABLE = [
   `| ${Array.from({ length: 6 }, (_, i) => `Column ${i}`).join(" | ")} |`,
   `|${"---|".repeat(6)}`,
   `| ${Array.from({ length: 6 }, (_, i) => `\`src/sections/contract/plan-${i}.ts\``).join(" | ")} |`,
 ].join("\n");
 
-/** A 1600px picture in a 648px column, so the lightbox has room to grow; the linked one stays its link's. The
- *  broken one's only srcset candidate is a data URL that is not an image: deterministic, offline, and outside the
- *  bundler's path resolution, which fails the build on a missing relative candidate. */
 const PICTURE_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">' +
   '<rect width="1600" height="1000" fill="#345"/><circle cx="800" cy="500" r="300" fill="#fc6"/></svg>\n';
@@ -75,7 +78,6 @@ const IMAGES_MD =
   '<img src="./picture.svg" srcset="data:image/svg+xml,x" alt="A broken picture">';
 
 const DOCS_MD = `# Fixture\n\n${DIAGRAM}\n\n${IMAGES_MD}\n\n${CRUSH_TABLE}\n\n${WIDE_TABLE}\n`;
-/** A second page with no diagram, one history step away. */
 const OTHER_MD = "# Other\n\nNo diagram here.\n";
 
 const WHEN_RENDERED = `new Promise((resolve) => {
@@ -88,8 +90,22 @@ const WHEN_RENDERED = `new Promise((resolve) => {
   }).observe(document, { subtree: true, attributes: true, attributeFilter: ["data-state"] });
 })`;
 
-/** Page-side probes shared by the steps of the view test. Panzoom writes its transform on the next animation frame,
- *  so every measurement waits one out. */
+interface Opened {
+  label: string;
+  open: boolean;
+  column: number;
+  natural: number;
+  viewBox: number;
+  locked: string;
+  focusInside: boolean;
+  stage: { x: number; y: number; width: number; height: number };
+}
+
+// The view test's page scripts, where the name does not say it all:
+//   PROBES       Panzoom writes its transform on the next animation frame, so every measurement waits one out
+//   BAR_AT_280   a bar that cannot wrap shrinks its buttons under their labels, so each label is measured inside its button
+//   WHEN_TITLED  `go` runs after the observer is armed, for a history step the page must be watching before it starts
+
 const PROBES = `(() => {
   const round = (n) => Math.round(n * 10) / 10;
   const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -144,8 +160,6 @@ const PROBES = `(() => {
   return true;
 })()`;
 
-/** The view's bar at a narrow viewport: every button inside the bar with its label inside the button (a bar that
- *  cannot wrap shrinks its buttons under their labels instead). */
 const BAR_AT_280 = `new Promise((resolve) => requestAnimationFrame(() => {
   const bar = document.querySelector(".fleet-mermaid-view-bar").getBoundingClientRect();
   const buttons = [...document.querySelectorAll(".fleet-mermaid-view-bar > button")];
@@ -173,8 +187,6 @@ const WHEN_REDRAWN = (previous: string) => `new Promise((resolve) => {
   }).observe(document, { subtree: true, childList: true });
 })`;
 
-/** Resolves once the page's h1 starts with `title` (its anchor follows): VitePress swapped the content in. `go`
- *  runs after the observer is armed, for a history step the page must be watching before it starts. */
 const WHEN_TITLED = (title: string, go = "") => `new Promise((resolve) => {
   const titled = () => document.querySelector("h1")?.textContent.startsWith(${JSON.stringify(title)}) === true;
   const observer = new MutationObserver(() => {
@@ -197,7 +209,8 @@ interface Column {
   scrolls: boolean;
 }
 
-/** On paper nothing scrolls, so every wrapped table must fit its wrapper. */
+// On paper nothing scrolls, so every wrapped table must fit its wrapper.
+
 const MEASURE_PRINT = `[...document.querySelectorAll(".vp-doc .vp-table")].map((wrapper) =>
   wrapper.querySelector("table").getBoundingClientRect().width <= wrapper.getBoundingClientRect().width + 1
 )`;
@@ -221,7 +234,9 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 
 // Registered before tempDirs() so Chrome is gone before its profile directory is removed.
 afterAll(async () => {
-  if (browser !== undefined) await closeChrome(browser);
+  if (browser !== undefined) {
+    await closeChrome(browser);
+  }
   server?.stop(true);
 }, harnessBound(15_000));
 const temp = tempDirs();
@@ -239,7 +254,9 @@ beforeAll(async () => {
   const result = buildSite(workspace, REPOSITORY, runner, {
     CONFIG: siteConfig({ site_title: "Fixture" }),
   });
-  if (result.exitCode !== 0) throw new Error(`the fixture build failed: ${describeRun(result)}`);
+  if (result.exitCode !== 0) {
+    throw new Error(`the fixture build failed: ${describeRun(result)}`);
+  }
   server = serve(runner.site, BASE);
   browser = await launchChrome(temp.dir("theme-layout-chrome-"));
 }, TEST_TIMEOUT_MS);
@@ -247,6 +264,7 @@ beforeAll(async () => {
 /** Carbon's config starts every site dark and VitePress stores that choice, so the system preference reaches the
  *  page only for a reader whose stored choice is `auto` (what VitePress stores when a toggle lands on the system's
  *  own mode). The view test starts as that reader on a light system, whatever the host prefers. */
+
 const FOLLOW_SYSTEM = 'localStorage.setItem("vitepress-theme-appearance", "auto")';
 
 async function preferScheme(cdp: CDPSession, value: "light" | "dark"): Promise<void> {
@@ -280,16 +298,7 @@ test(
     const { page, cdp } = await openPage("light");
     try {
       await evaluate(page, PROBES);
-      const opened = await evaluate<{
-        label: string;
-        open: boolean;
-        column: number;
-        natural: number;
-        viewBox: number;
-        locked: string;
-        focusInside: boolean;
-        stage: { x: number; y: number; width: number; height: number };
-      }>(page, "window.__probe.open()");
+      const opened = await evaluate<Opened>(page, "window.__probe.open()");
       expect(opened).toEqual({
         label: "Zoom the diagram",
         open: true,
@@ -443,21 +452,23 @@ test(
   SCENARIO_TIMEOUT_MS,
 );
 
+// What OPEN_LIGHTBOX measures, where the field name does not say:
+//   atNavCorner      what a click on the nav bar's title would hit: the lightbox, or the nav still above it
+//   linkedAttached   a linked image belongs to its link, so medium-zoom must leave it alone
+//   buttonAttached   an image inside a native button belongs to that button, as a linked one belongs to its link
+//   printedOriginal  on paper, with the lightbox open, whether the original image still shows
+//   decorative       an image with an empty, missing, or blank alt has no name to be a button under: neither attached nor a button
+//   layoutInert      the page behind the overlay is inert while the lightbox is up
 interface Lightbox {
   inline: number;
   zoomed: number;
   opened: boolean;
   overlay: { color: string; opacity: string };
-  /** What a click on the nav bar's title would hit: the lightbox, or the nav still above it. */
   atNavCorner: string;
   linkedAttached: boolean;
-  /** An image inside a native button belongs to that button, as a linked one belongs to its link. */
   buttonAttached: boolean;
-  /** On paper, with the lightbox open, whether the original image still shows. */
   printedOriginal: string;
-  /** An image with an empty, missing, or blank alt has no name to be a button under: neither attached nor a button. */
   decorative: { attached: boolean; tabindex: string | null; role: string | null }[];
-  /** The page behind the overlay is inert while the lightbox is up. */
   layoutInert: boolean;
 }
 
@@ -496,27 +507,23 @@ const OPEN_LIGHTBOX = `new Promise((resolve) => {
   img.click();
 })`;
 
+/** The original image's visibility, read under print media with the lightbox up. */
 const PRINTED_ORIGINAL = `getComputedStyle(document.querySelector(".vp-doc img")).visibility`;
 
-/** Whether any focusable behind the overlay (the skip link, the nav, the article's links and images) takes focus
- *  while the lightbox is up: what a Tab would land on. A real Tab is not pressed: with the whole page inert it leaves
- *  the document for the browser's own UI, and a headless page that lost focus stalls its transitions, so the close
- *  the test presses next would never finish. */
+/** Whether any focusable behind the overlay (the skip link, the nav, the article's links and images) takes focus: what a Tab would land on. */
 const FOCUS_BEHIND_OVERLAY = `[...document.querySelectorAll(".Layout a, .Layout button, .Layout [tabindex]")].some((el) => {
   el.focus();
   return document.activeElement === el;
 })`;
 
+/** Whether the first image takes a focus() aimed at it: the tabindex medium-zoom gave it. */
 const FOCUS_IMAGE = `(() => {
   const img = document.querySelector(".vp-doc img");
   img.focus();
   return document.activeElement === img;
 })()`;
 
-/** Whether the lightbox finished opening within a second of the key press, and what the original and its copy
- *  carry. The
- *  body class medium-zoom sets a frame into the open is not that: an Escape before the transition ends is one the
- *  library drops. */
+/** Whether the lightbox finished opening within a second of the key press, and what the original and its copy carry. */
 const KEY_OPENED = `new Promise((resolve) => {
   const timer = setTimeout(() => resolve({ opened: false }), 1000);
   document.querySelector(".vp-doc img").addEventListener("medium-zoom:opened", () => {
@@ -532,10 +539,10 @@ const KEY_OPENED = `new Promise((resolve) => {
   }, { once: true });
 })`;
 
+/** Whether focus is back on the first image: what a close hands back to its opener. */
 const FOCUS_ON_IMAGE = `document.activeElement === document.querySelector(".vp-doc img")`;
 
-/** Opens the first image by a click and closes it the way a reader scrolling on does: a scroll past medium-zoom's
- *  offset with the image left above the viewport. Resolves at `closed` with where the scroll ended up. */
+/** Opens the first image by a click, then closes it as a reader scrolling on does: a scroll past medium-zoom's offset; resolves at `closed` with where the scroll ended up. */
 const SCROLL_CLOSE = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc img");
   img.addEventListener("medium-zoom:opened", () => {
@@ -549,6 +556,7 @@ const SCROLL_CLOSE = `new Promise((resolve) => {
   img.click();
 })`;
 
+/** Resolves once the overlay has left the document, with the page's inert state. */
 const WHEN_OVERLAY_GONE = `new Promise((resolve) => {
   const state = () => ({
     overlay: document.querySelector(".medium-zoom-overlay") !== null,
@@ -562,9 +570,7 @@ const WHEN_OVERLAY_GONE = `new Promise((resolve) => {
   }).observe(document.body, { childList: true });
 })`;
 
-/** Clicks the first image and leaves for the other page inside the opening transition; resolves once the open
- *  finishes on the (by then detached) image with the page's inert state, and whether the other page had indeed
- *  landed by then (a slow page module would let the open finish first and prove nothing). */
+/** Clicks the first image and leaves for the other page inside the opening transition; resolves once the open finishes on the (by then detached) image. */
 const RACE_OPEN_WITH_NAVIGATION = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc img");
   img.addEventListener("medium-zoom:opened", () => {
@@ -588,8 +594,7 @@ const WHEN_ATTACHED = `new Promise((resolve) => {
   }).observe(document, { subtree: true, attributes: true, attributeFilter: ["class"] });
 })`;
 
-/** Opens the first image, waits for the open to finish, then leaves by Forward; reads inert while the close fades and
- *  again once medium-zoom reports it closed. */
+/** Opens the first image, waits for the open to finish, then leaves by Forward; reads inert while the close fades and again once medium-zoom reports it closed. */
 const LEAVE_OPEN_LIGHTBOX = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc img");
   const inert = () => document.querySelector(".Layout").hasAttribute("inert");
@@ -612,8 +617,7 @@ const LEAVE_OPEN_LIGHTBOX = `new Promise((resolve) => {
   img.click();
 })`;
 
-/** Clicks the broken-srcset image and, well past the 300ms transition, reports the stuck state: the page inert, the
- *  overlay up, and the open never finished. */
+/** Clicks the broken-srcset image and, well past the 300ms transition, reports the stuck state: the page inert, the overlay up, the open never finished. */
 const OPEN_BROKEN = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc img[srcset]");
   let opened = false;
@@ -635,8 +639,7 @@ const FOCUS_SECOND_IMAGE = `(() => {
   return document.activeElement === second;
 })()`;
 
-/** Reports the motion preference the close ran under: Chromium replaces the whole emulated feature set on every
- *  setEmulatedMedia call, so a media switch that names no features drops the preference silently. */
+/** Resolves once medium-zoom reports the close, with the motion preference it ran under. */
 const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc :not(a) > img");
   const closed = () => ({
@@ -681,6 +684,8 @@ test(
           ],
           layoutInert: true,
         });
+        // A real Tab is not pressed: with the whole page inert it leaves the document for the browser's own UI, and a
+        // headless page that lost focus stalls its transitions, so the close the test presses next would never finish.
         expect(await evaluate<boolean>(page, FOCUS_BEHIND_OVERLAY)).toBe(false);
         expect(lightbox.zoomed).toBeGreaterThan(lightbox.inline * 1.5);
         expect(lightbox.overlay.color).not.toBe("rgba(0, 0, 0, 0)");
@@ -699,6 +704,8 @@ test(
         role: "button",
         name: "A picture",
       });
+      // KEY_OPENED waits for the open to finish, not for the body class medium-zoom sets a frame into the open: an
+      // Escape before the transition ends is one the library drops.
       const keyOpened = evaluate<Record<string, unknown>>(page, KEY_OPENED);
       await page.keyboard.press("Enter");
       // The original is what medium-zoom clones (a srcset image gets a second, later copy), so it carries no
@@ -724,7 +731,8 @@ test(
       expect(await evaluate<boolean>(page, FOCUS_ON_IMAGE)).toBe(true);
 
       // Leaving the page inside a healthy open: the content update frees the page, then the open finishes over the
-      // new page and takes it back until Escape closes the lightbox.
+      // new page and takes it back until Escape closes the lightbox. `navigated` proves the other page had landed by
+      // then: a slow page module would let the open finish first and prove nothing.
       await cdp.send("Emulation.setEmulatedMedia", {
         features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
       });

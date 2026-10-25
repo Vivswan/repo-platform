@@ -86,8 +86,7 @@ describe("classify", () => {
   });
 });
 
-/** Abridged header excerpts of this repository's hand-written files that
- *  name a generator without declaring anything about themselves. */
+/** Abridged header excerpts of this repository's hand-written files that name a generator without declaring anything about themselves. */
 const GENERATOR_MENTIONS: [string, string][] = [
   [
     "a helper naming the generator that calls it (action_steps.ts)",
@@ -289,7 +288,9 @@ describe("judgeFile line width", () => {
     ["markdown prose has no width cap", "f.md", wide(1000), []],
   ])("%s", (_name, path, text, expected) => {
     const kind = classify(path);
-    if (kind === null) throw new Error(`${path} has no kind`);
+    if (kind === null) {
+      throw new Error(`${path} has no kind`);
+    }
     expect(judgeFile(path, kind, text)).toEqual(expected);
   });
 });
@@ -318,7 +319,9 @@ describe("judgeFile comment blocks", () => {
         };
   const judgeComments = (path: string, text: string, expected: Row[]): void => {
     const kind = classify(path);
-    if (kind === null) throw new Error(`${path} has no kind`);
+    if (kind === null) {
+      throw new Error(`${path} has no kind`);
+    }
     expect(judgeFile(path, kind, text)).toEqual(
       expected.map((row) => commentFinding(path, kind, row)),
     );
@@ -331,8 +334,9 @@ describe("judgeFile comment blocks", () => {
     const bullet = readFileSync(join(REPO_ROOT, "docs/fleet-guidelines.md"), "utf8")
       .split("\n")
       .find((line) => line.startsWith("- **A comment block**"));
-    if (bullet === undefined)
+    if (bullet === undefined) {
       throw new Error("docs/fleet-guidelines.md lost its comment block bullet");
+    }
     return [...bullet.matchAll(/`([^`]+)`/g)].map((match) => match[1]);
   })();
   test("the guide names exactly the comment prefixes the regex knows", () => {
@@ -785,7 +789,9 @@ describe("the CLI", () => {
   const gateValue = (stepName: string): string => {
     const gate = String(stepNamed(loadAction("actions/check-file-size/action.yml"), stepName).if);
     const value = /steps\.check\.outputs\.report == '([a-z]+)'/.exec(gate)?.[1];
-    if (value === undefined) throw new Error(`no report gate in ${gate}`);
+    if (value === undefined) {
+      throw new Error(`no report gate in ${gate}`);
+    }
     return value;
   };
   const POSTED = gateValue("Post the findings as a sticky PR comment");

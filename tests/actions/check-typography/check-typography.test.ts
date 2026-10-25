@@ -1,5 +1,6 @@
 // A gitignored checkout (the docs-check job's `.skills/`) once failed the typography check while git itself never
-// judged it; the script is run as the action runs it, so the file source is under test, not a mock of it.
+// judged it; the script is run as the action runs it, so the file source is under test, not a mock of it. The
+// fixture's curly quotes are escapes, not literals: the suite is itself a tracked file the check judges.
 
 import { expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -10,7 +11,6 @@ import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 const SCRIPT = resolve(import.meta.dir, "../../../actions/check-typography/check-typography.ts");
-// Escapes, not literals: the suite is itself a tracked file the check judges.
 const CURLY = "a \u201Cquoted\u201D word\n";
 
 test("judges tracked and untracked files alike, and never an ignored untracked one", () => {

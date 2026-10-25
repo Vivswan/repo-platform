@@ -10,8 +10,6 @@ const { default: MarkdownIt } = (await import(Bun.resolveSync("markdown-it", ACT
   default: new () => Md;
 };
 
-// Every character the escape must touch, plus the hexagon node's `{{ }}`,
-// which the mount's v-pre keeps out of Vue's compiler.
 const SOURCE = 'graph TD\n  A["x <b>& y</b>"] -->|"go"| B{{done}}';
 const MOUNT =
   '<div class="fleet-mermaid" v-pre><pre class="fleet-mermaid-source">' +
@@ -28,7 +26,9 @@ function render(markdown: string): string {
   return md.render(markdown);
 }
 
-// `mermaid {1}` and `mermaid:line-numbers` are VitePress's own info forms; `mermaidjs` is another language.
+// `mermaid {1}` and `mermaid:line-numbers` are VitePress's own info forms; `mermaidjs` is another language. SOURCE
+// holds every character the escape must touch, plus the hexagon node's `{{ }}`, which the mount's v-pre keeps out
+// of Vue's compiler.
 test.each([
   ["```", "mermaid", MOUNT],
   ["~~~", "mermaid", MOUNT],

@@ -43,7 +43,9 @@ function problemsOf(text: string, label?: string): string[] {
   try {
     parseFilesConfig(text, label);
   } catch (error) {
-    if (error instanceof FilesConfigError) return error.problems;
+    if (error instanceof FilesConfigError) {
+      return error.problems;
+    }
     throw error;
   }
   return [];

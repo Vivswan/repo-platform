@@ -26,18 +26,18 @@ const env = {
 } as NodeJS.ProcessEnv;
 const RUN = "Run: https://github.com/o/r/actions/runs/42";
 
-/**
- * Every body under test stamps the UTC day at call time, so the clock is
- * frozen for the whole file and the expected date is a literal (a date read
- * once at module load would race midnight against the source's own read).
- */
 const date = "2026-03-04";
+
+// Every body under test stamps the UTC day at call time, so the clock is frozen for the whole file and the expected
+// date is a literal (a date read once at module load would race midnight against the source's own read).
 beforeAll(() => setSystemTime(new Date(`${date}T12:00:00Z`)));
 afterAll(() => setSystemTime());
 
 const reportDir = (root: string, name: string, report?: string): void => {
   mkdirSync(join(root, name), { recursive: true });
-  if (report !== undefined) writeFileSync(join(root, name, "report.md"), report);
+  if (report !== undefined) {
+    writeFileSync(join(root, name, "report.md"), report);
+  }
 };
 
 describe("the cuts", () => {
@@ -301,7 +301,9 @@ describe("buildBody", () => {
     name = (i: number) => `target-${i}`,
   ) => {
     const root = temp.dir("budget-");
-    for (let i = 0; i < count; i++) reportDir(root, name(i), report(i));
+    for (let i = 0; i < count; i++) {
+      reportDir(root, name(i), report(i));
+    }
     return root;
   };
   const line = "x".repeat(68);

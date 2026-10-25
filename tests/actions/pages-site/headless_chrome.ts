@@ -52,7 +52,9 @@ export async function closeChrome(browser: Browser): Promise<void> {
     closed.then(() => true),
     Bun.sleep(harnessBound(5_000)).then(() => false),
   ]);
-  if (exited) return;
+  if (exited) {
+    return;
+  }
   browser.process()?.kill("SIGKILL");
   await closed;
 }
@@ -68,7 +70,9 @@ export async function accessibleNode(
   selector: string,
 ): Promise<{ role: string; name: string }> {
   const element = await page.$(selector);
-  if (element === null) throw new Error(`no element matches ${selector}`);
+  if (element === null) {
+    throw new Error(`no element matches ${selector}`);
+  }
   const node = await page.accessibility.snapshot({ root: element, interestingOnly: false });
   return { role: node?.role ?? "", name: node?.name ?? "" };
 }
@@ -80,8 +84,12 @@ export function serve(site: string, base: string): ReturnType<typeof Bun.serve> 
     fetch(request) {
       const path = decodeURIComponent(new URL(request.url).pathname);
       let file = join(site, path.startsWith(base) ? path.slice(base.length) : path);
-      if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");
-      if (!existsSync(file)) return new Response("not found", { status: 404 });
+      if (existsSync(file) && statSync(file).isDirectory()) {
+        file = join(file, "index.html");
+      }
+      if (!existsSync(file)) {
+        return new Response("not found", { status: 404 });
+      }
       return new Response(Bun.file(file));
     },
   });

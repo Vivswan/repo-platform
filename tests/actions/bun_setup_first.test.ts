@@ -18,7 +18,6 @@ const setupStep = {
   from: "${{ github.action_path }}",
 };
 
-// The shared setup action is the one place setup-bun runs (tests/actions/bun-setup pins its shape).
 const manifests = actionManifestPaths(join(REPO_ROOT, "actions")).filter(
   (file) => dirname(file) !== "actions/bun-setup",
 );

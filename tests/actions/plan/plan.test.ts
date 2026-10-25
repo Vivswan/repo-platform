@@ -32,7 +32,6 @@ const FILES_TREE = join(REPO_ROOT, "files");
 const FILES_DATA = loadModuleData(readFileSync(FILES_CONFIG, "utf-8"));
 const MODULES = FILES_DATA.modules;
 
-/** files.yml reduced to the modules block the plan cannot load without. */
 const MINIMAL_FILES = [
   "placeholders: []",
   "files: []",
@@ -48,7 +47,9 @@ const PROJECT = "project: { name: Demo Project, slug: demo, description: A demo 
 
 function registration(text: string): Registration {
   const read = parseRegistration(`${text}\n${PROJECT}`);
-  if ("errors" in read) throw new Error(read.errors.join("\n"));
+  if ("errors" in read) {
+    throw new Error(read.errors.join("\n"));
+  }
   return read.registration;
 }
 
@@ -69,7 +70,9 @@ const problemsOf = (run: () => unknown): string[] => {
   try {
     run();
   } catch (error) {
-    if (error instanceof PlanError) return error.problems;
+    if (error instanceof PlanError) {
+      return error.problems;
+    }
     throw error;
   }
   return [];
@@ -197,8 +200,11 @@ describe("planCi", () => {
       ).toEqual([true, true, false, false]);
       expect(planCi(input("modules: []"), THURSDAY).weekly).toBe(false);
     } finally {
-      if (zone === undefined) delete process.env.TZ;
-      else process.env.TZ = zone;
+      if (zone === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = zone;
+      }
     }
   });
 
@@ -492,14 +498,14 @@ describe("plan.ts as a child", () => {
   // Every refusal is a workflow error naming the document, and no row is written: fleet.yml's jobs read empty outputs
   // as nothing to do. The reserved roster is derived from the files/ tree at run time (FILES_TREE), so a label the
   // settings layers manage is refused whichever layer declares it; site mode reads the registration through the same
-  // parse, so a refused key fails the plan before a deploy could read it as nothing.
+  // parse, so a refused key fails the plan before a deploy could read it as nothing. A `detail` row's text after the
+  // expected head is the OS's, the schema library's, or the live module roster of files.yml.
   test.each<{
     reason: string;
     files: Record<string, string>;
     env: Record<string, string> | ((path: string) => Record<string, string>);
     path?: () => string;
     error: (path: string) => string;
-    /** The text after the expected head is the OS's, the schema library's, or the live module roster of files.yml. */
     detail?: true;
   }>([
     {

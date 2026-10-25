@@ -17,8 +17,6 @@ import { tempDirs } from "../../shared/temp_dir";
 const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../../actions/trivy/ignore_check.ts");
 const TODAY = new Date("2026-09-10T00:00:00Z");
-
-// The CLI rows run on the real clock, so a fixed future date would expire under the suite one day.
 const FUTURE = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
 const VALID = [
   "vulnerabilities:",
@@ -144,10 +142,13 @@ describe("checkIgnoreFile", () => {
 // The executed entry point: an empty `ignorefile=` output is what leaves the scan's `trivyignores` input unset, and
 // Trivy honors the plain .trivyignore file, whose entries never expire, so its presence is refused even beside a valid
 // YAML file.
+// The CLI rows run on the real clock, so a fixed future date would expire under the suite one day: FUTURE is a year out.
 describe("the ignore_check step", () => {
   const run = (files: Record<string, string>) => {
     const dir = temp.dir("trivy-ignore-");
-    for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+    for (const [name, text] of Object.entries(files)) {
+      writeFileSync(join(dir, name), text);
+    }
     const output = join(dir, "output.txt");
     writeFileSync(output, "");
     const result = boundedSpawnSync([process.execPath, SCRIPT], {

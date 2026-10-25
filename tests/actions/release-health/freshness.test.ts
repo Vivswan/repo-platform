@@ -16,7 +16,6 @@ const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../../actions/release-health/freshness.ts");
 const scratch = temp.dir("release-freshness-");
 
-// No user or system git config: a global commit.gpgsign or core.commentChar would change what the scratch repo stores.
 const GIT_PINS = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
@@ -26,12 +25,16 @@ const GIT_PINS = {
   GIT_COMMITTER_EMAIL: "t@t",
 };
 
+/** Runs git in `repo` under no user or system config: a global commit.gpgsign or core.commentChar would change what
+ *  the scratch repo stores. */
 function git(repo: string, args: string[]): string {
   const result = boundedSpawnSync(["git", ...args], {
     cwd: repo,
     env: { PATH: process.env.PATH, ...GIT_PINS },
   });
-  if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+  if (result.exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+  }
   return result.stdout.trim();
 }
 
@@ -58,7 +61,6 @@ interface Check {
   exitCode: number;
   stdout: string;
   stderr: string;
-  /** The outputs left in GITHUB_OUTPUT. */
   outputs: Record<string, string>;
 }
 

@@ -162,8 +162,11 @@ describe("parseSiteConfig", () => {
       { error: "include.0.path: must be a plain relative path" },
     ],
   ])("%s", (_reason, json, outcome) => {
-    if ("error" in outcome) expect(() => parseSiteConfig(json)).toThrow(outcome.error);
-    else expect(parseSiteConfig(json)).toEqual(outcome.parsed);
+    if ("error" in outcome) {
+      expect(() => parseSiteConfig(json)).toThrow(outcome.error);
+    } else {
+      expect(parseSiteConfig(json)).toEqual(outcome.parsed);
+    }
   });
 });
 
@@ -522,8 +525,11 @@ describe("resolvePrebuilt", () => {
       "dist/assets/app.js": "js",
       "dist/site/index.html": "<html></html>",
     });
-    if (error === null) expect(resolvePrebuilt(ws, dist)).toBe(join(ws, dist));
-    else expect(() => resolvePrebuilt(ws, dist)).toThrow(error);
+    if (error === null) {
+      expect(resolvePrebuilt(ws, dist)).toBe(join(ws, dist));
+    } else {
+      expect(() => resolvePrebuilt(ws, dist)).toThrow(error);
+    }
   });
 });
 
@@ -661,10 +667,16 @@ describe("central theme guard", () => {
       mkdirSync(join(dir, file, ".."), { recursive: true });
       writeFileSync(join(dir, file), "# Home\n");
     }
-    if (theme === null) expect(() => assertCentralTheme(dir)).not.toThrow();
-    else expect(() => assertCentralTheme(dir)).toThrow(theme);
-    if (landing === null) expect(() => assertDocsLanding(dir)).not.toThrow();
-    else expect(() => assertDocsLanding(dir)).toThrow(landing);
+    if (theme === null) {
+      expect(() => assertCentralTheme(dir)).not.toThrow();
+    } else {
+      expect(() => assertCentralTheme(dir)).toThrow(theme);
+    }
+    if (landing === null) {
+      expect(() => assertDocsLanding(dir)).not.toThrow();
+    } else {
+      expect(() => assertDocsLanding(dir)).toThrow(landing);
+    }
   });
 
   // Cross-file with isUnwalkedEntry: a page and an index.md in one walked directory are two files at one route.

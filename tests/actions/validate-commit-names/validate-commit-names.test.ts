@@ -39,6 +39,7 @@ function eventFile(payload: unknown): string {
 }
 
 // config-conventional caps the header at 100; the fleet turns that rule off (its titles run long by house style).
+
 const HEADER_101 = `fix: ${"x".repeat(96)}`;
 
 const TITLES: [title: string, problems: string[]][] = [
@@ -98,7 +99,9 @@ function scratchGit(): { repo: string; root: string; git: Git } {
       env: { PATH: process.env.PATH, ...GIT_PINS },
       stdin: stdin === undefined ? undefined : Buffer.from(stdin),
     });
-    if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+    if (result.exitCode !== 0) {
+      throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+    }
     return result.stdout.trim();
   };
   mkdirSync(repo);

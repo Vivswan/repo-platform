@@ -46,7 +46,9 @@ const loadAction = (name: string): Action => loadYaml(`actions/${name}/action.ym
 function expressionsOf(node: unknown): string[] {
   const found = [...JSON.stringify(node).matchAll(EXPRESSION)].map((m) => m[1]);
   const condition = (node as { if?: unknown }).if;
-  if (typeof condition === "string") found.push(condition);
+  if (typeof condition === "string") {
+    found.push(condition);
+  }
   return found;
 }
 
@@ -57,7 +59,9 @@ function expressionsOf(node: unknown): string[] {
  *  passes here and is caught by the step's own test. */
 function writesKey(text: string, key: string, form: "run" | "script"): boolean {
   const name = key.replaceAll("-", "\\-");
-  if (form === "run") return new RegExp(`(["']|echo\\s+)${name}=[^\\n]*GITHUB_OUTPUT`).test(text);
+  if (form === "run") {
+    return new RegExp(`(["']|echo\\s+)${name}=[^\\n]*GITHUB_OUTPUT`).test(text);
+  }
   const lines = text.replaceAll("\\n", "\n");
   return (
     new RegExp(`(^|["'\`])${name}=`, "m").test(lines) ||
@@ -67,10 +71,10 @@ function writesKey(text: string, key: string, form: "run" | "script"): boolean {
   );
 }
 
-/** A key may leave through a shared module the script imports (the checks' one main writes `report=`), so each
- *  script's relative imports are read with it, one level deep. */
 const RELATIVE_IMPORT = /from\s+["'](\.\.?\/[^"']+\.ts)["']/g;
 
+/** The step's run text with every script it names, each read with its relative imports one level deep: a key may
+ *  leave through a shared module the script imports (the checks' one main writes `report=`). */
 function scriptsOf(actionName: string, step: Step): { run: string; scripts: string[] } {
   const actionDir = join(ACTIONS_DIR, actionName);
   const run = String(step.run).replaceAll(ACTION_PATH, actionDir);
@@ -93,45 +97,72 @@ function stepWrites(actionName: string, step: Step, key: string): boolean {
     return writesKey(run, key, "run") || scripts.some((script) => writesKey(script, key, "script"));
   }
   const own = OWN_ACTION.exec(String(step.uses));
-  if (own === null) return true;
+  if (own === null) {
+    return true;
+  }
   return Object.hasOwn(loadAction(own[1]).outputs ?? {}, key);
+}
+
+/** Every `inputs.x` one expression reads that the action does not declare. */
+function undeclaredInputReads(where: string, expression: string, inputs: Set<string>): string[] {
+  return [...expression.matchAll(INPUT_REF)]
+    .filter((m) => !inputs.has(m[1]))
+    .map((m) => `${where}: inputs.${m[1]} is not declared`);
+}
+
+/** Every `steps.id.outputs.key` one expression reads from a step that is not among `visible` or writes no such key. */
+function badStepReads(
+  where: string,
+  expression: string,
+  visible: Set<string>,
+  byId: Map<string, Step>,
+  actionName: string,
+): string[] {
+  const problems: string[] = [];
+  for (const [, id, key] of expression.matchAll(STEP_REF)) {
+    const step = byId.get(id);
+    if (!visible.has(id) || step === undefined) {
+      problems.push(`${where}: steps.${id} is no earlier step`);
+    } else if (key !== undefined && !stepWrites(actionName, step, key)) {
+      problems.push(`${where}: steps.${id} writes no output '${key}'`);
+    }
+  }
+  return problems;
 }
 
 function manifestProblems(name: string, action: Action): string[] {
   const inputs = new Set(Object.keys(action.inputs ?? {}));
   const steps = action.runs.steps;
   const byId = new Map(steps.filter((s) => typeof s.id === "string").map((s) => [String(s.id), s]));
+  const judge = (where: string, expressions: string[], visible: Set<string>): string[] =>
+    expressions.flatMap((expression) => [
+      ...undeclaredInputReads(where, expression, inputs),
+      ...badStepReads(where, expression, visible, byId, name),
+    ]);
   const problems: string[] = [];
-  const judge = (where: string, expressions: string[], visible: Set<string>) => {
-    for (const expression of expressions) {
-      for (const m of expression.matchAll(INPUT_REF)) {
-        if (!inputs.has(m[1])) problems.push(`${where}: inputs.${m[1]} is not declared`);
-      }
-      for (const [, id, key] of expression.matchAll(STEP_REF)) {
-        const step = byId.get(id);
-        if (!visible.has(id) || step === undefined) {
-          problems.push(`${where}: steps.${id} is no earlier step`);
-        } else if (key !== undefined && !stepWrites(name, step, key)) {
-          problems.push(`${where}: steps.${id} writes no output '${key}'`);
-        }
-      }
-    }
-  };
   const earlier = new Set<string>();
   steps.forEach((step, index) => {
-    judge(`step ${index + 1} (${String(step.name ?? step.id)})`, expressionsOf(step), earlier);
-    if (typeof step.id === "string") earlier.add(step.id);
+    problems.push(
+      ...judge(`step ${index + 1} (${String(step.name ?? step.id)})`, expressionsOf(step), earlier),
+    );
+    if (typeof step.id === "string") {
+      earlier.add(step.id);
+    }
   });
   for (const [output, spec] of Object.entries(action.outputs ?? {})) {
-    judge(`outputs.${output}`, expressionsOf(spec), new Set(byId.keys()));
+    problems.push(...judge(`outputs.${output}`, expressionsOf(spec), new Set(byId.keys())));
   }
   return problems;
 }
 
 /** A starter block's fragment is an indented sequence with no `jobs:` above it, so the walk takes every array. */
 function callSites(node: unknown, path: string): [string, Caller][] {
-  if (Array.isArray(node)) return node.flatMap((item, i) => callSites(item, `${path}[${i}]`));
-  if (node === null || typeof node !== "object") return [];
+  if (Array.isArray(node)) {
+    return node.flatMap((item, i) => callSites(item, `${path}[${i}]`));
+  }
+  if (node === null || typeof node !== "object") {
+    return [];
+  }
   const record = node as Record<string, unknown>;
   const own: [string, Caller][] =
     typeof record.uses === "string" && OWN_ACTION.test(record.uses)
@@ -145,7 +176,9 @@ function callSites(node: unknown, path: string): [string, Caller][] {
 function callerProblems(caller: Caller, actions: Map<string, Action>): string[] {
   const name = OWN_ACTION.exec(caller.uses)?.[1] ?? "";
   const action = actions.get(name);
-  if (action === undefined) return [`no action '${name}'`];
+  if (action === undefined) {
+    return [`no action '${name}'`];
+  }
   const declared = action.inputs ?? {};
   const passed = Object.keys(caller.with ?? {});
   const problems = passed
@@ -213,7 +246,9 @@ test("every with: key a workflow, a starter, or a composite passes to a platform
   const passed = new Map(ACTION_NAMES.map((name) => [name, new Set<string>()]));
   for (const [, caller] of sites) {
     const name = OWN_ACTION.exec(caller.uses)?.[1] ?? "";
-    for (const key of Object.keys(caller.with ?? {})) passed.get(name)?.add(key);
+    for (const key of Object.keys(caller.with ?? {})) {
+      passed.get(name)?.add(key);
+    }
   }
   const unpassed = Object.fromEntries(
     [...actions].map(([name, action]) => [
@@ -243,7 +278,9 @@ function stepArrays(node: unknown): Step[][] {
     );
     return steps && node.length > 0 ? [node as Step[]] : node.flatMap(stepArrays);
   }
-  if (node === null || typeof node !== "object") return [];
+  if (node === null || typeof node !== "object") {
+    return [];
+  }
   return Object.values(node as Record<string, unknown>).flatMap(stepArrays);
 }
 
@@ -252,12 +289,16 @@ export function undeclaredOutputReads(steps: Step[], actions: Map<string, Action
   const ownAction = new Map<string, string>();
   for (const step of steps) {
     const own = OWN_ACTION.exec(String(step.uses ?? ""));
-    if (own !== null && typeof step.id === "string") ownAction.set(step.id, own[1]);
+    if (own !== null && typeof step.id === "string") {
+      ownAction.set(step.id, own[1]);
+    }
   }
   const problems: string[] = [];
   for (const [, id, key] of JSON.stringify(steps).matchAll(STEP_REF)) {
     const name = ownAction.get(id);
-    if (key === undefined || name === undefined) continue;
+    if (key === undefined || name === undefined) {
+      continue;
+    }
     const action = actions.get(name);
     if (action === undefined || !Object.hasOwn(action.outputs ?? {}, key)) {
       problems.push(`steps.${id}.outputs.${key}: ${name} declares no output '${key}'`);

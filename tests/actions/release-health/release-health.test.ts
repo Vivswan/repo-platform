@@ -43,18 +43,30 @@ interface CommitPull {
 }
 
 interface Fixture {
+  /** The open issues per tracking label, as `gh issue list --label` answers them. */
   issues?: Record<string, number[]>;
+
+  /** The open Dependabot alerts at or above the threshold, as the alerts API lists them. */
   alerts?: number[];
+
+  /** The message the alerts API fails with instead of a listing. */
   alertsError?: string;
+
   /** One inner array per page, as `--paginate --slurp` hands them over. */
   commitPulls?: CommitPull[][];
+
+  /** The labels `gh pr view` answers for the event's PR; undefined is a PR gh cannot find. */
   prViewLabels?: string[];
+
   /** What the branch ref read answers (release mode, an ordinary push). */
   headSha?: string;
+
   /** The merged PRs still labelled pending, as `gh pr list --state merged` answers them (after-propose mode). */
   mergedPending?: Array<{ number: number; mergedAt: string }>;
+
   /** What each successive read of the release PR's head answers (after-refresh mode); `null` is a payload with no sha. */
   prHeads?: Array<string | null>;
+
   /** What GitHub's update-branch answers instead of 202 (after-refresh mode). */
   updateBranchError?: string;
 }
@@ -75,53 +87,65 @@ function assertNamesRepo(args: string[]): void {
   }
 }
 
+/** What `gh api` answers for each endpoint the action reads; the fixture's errors throw as gh would. */
+function apiAnswer(fixture: Fixture, args: string[]): string {
+  if (args[1]?.includes("/dependabot/alerts")) {
+    if (fixture.alertsError) {
+      throw new Error(fixture.alertsError);
+    }
+    return JSON.stringify((fixture.alerts ?? []).map((number) => ({ number })));
+  }
+  if (args[1] === `repos/${REPO}/pulls/12/update-branch`) {
+    if (fixture.updateBranchError) {
+      throw new Error(fixture.updateBranchError);
+    }
+    return JSON.stringify({ message: "Updating pull request branch." });
+  }
+  if (args[1] === `repos/${REPO}/pulls/12`) {
+    const sha = fixture.prHeads?.shift();
+    if (sha === undefined) {
+      throw new Error("gh api failed (1): HTTP 502: Bad Gateway");
+    }
+    return JSON.stringify(sha === null ? {} : { head: { sha } });
+  }
+  if (args.some((arg) => arg.includes("/pulls"))) {
+    return JSON.stringify(fixture.commitPulls ?? [[]]);
+  }
+  if (args[1]?.includes("/git/ref/heads/")) {
+    return JSON.stringify({ object: { sha: fixture.headSha } });
+  }
+  throw new Error(`unexpected gh call: ${args.join(" ")}`);
+}
+
+/** What the `gh` subcommands the action runs answer; a PR gh cannot find throws as gh would. */
+function commandAnswer(fixture: Fixture, args: string[]): string {
+  if (args[0] === "issue" && args[1] === "list") {
+    const label = args[args.indexOf("--label") + 1] ?? "";
+    // gh truncates to --limit (default 30); the fake does the same so
+    // over-limit counting is exercised, not hidden.
+    const limit = Number(args[args.indexOf("--limit") + 1] ?? 30);
+    return JSON.stringify(
+      (fixture.issues?.[label] ?? []).slice(0, limit).map((number) => ({ number })),
+    );
+  }
+  if (args[0] === "pr" && args[1] === "list") {
+    return JSON.stringify(fixture.mergedPending ?? []);
+  }
+  if (args[0] === "pr" && args[1] === "view") {
+    if (fixture.prViewLabels === undefined) {
+      throw new Error("gh pr view failed (1): no pull requests found");
+    }
+    return JSON.stringify({ labels: fixture.prViewLabels.map((name) => ({ name })) });
+  }
+  throw new Error(`unexpected gh call: ${args.join(" ")}`);
+}
+
 function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
   const calls: string[][] = [];
   const run: GhRunner = async (args) => {
     calls.push(args);
     assertNamesRepo(args);
-    if (args[0] === "issue" && args[1] === "list") {
-      const label = args[args.indexOf("--label") + 1] ?? "";
-      // gh truncates to --limit (default 30); the fake does the same so
-      // over-limit counting is exercised, not hidden.
-      const limit = Number(args[args.indexOf("--limit") + 1] ?? 30);
-      return JSON.stringify(
-        (fixture.issues?.[label] ?? []).slice(0, limit).map((number) => ({ number })),
-      );
-    }
-    if (args[0] === "api" && args[1]?.includes("/dependabot/alerts")) {
-      if (fixture.alertsError) {
-        throw new Error(fixture.alertsError);
-      }
-      return JSON.stringify((fixture.alerts ?? []).map((number) => ({ number })));
-    }
-    if (args[0] === "api" && args[1] === `repos/${REPO}/pulls/12/update-branch`) {
-      if (fixture.updateBranchError) {
-        throw new Error(fixture.updateBranchError);
-      }
-      return JSON.stringify({ message: "Updating pull request branch." });
-    }
-    if (args[0] === "api" && args[1] === `repos/${REPO}/pulls/12`) {
-      const sha = fixture.prHeads?.shift();
-      if (sha === undefined) throw new Error("gh api failed (1): HTTP 502: Bad Gateway");
-      return JSON.stringify(sha === null ? {} : { head: { sha } });
-    }
-    if (args[0] === "api" && args.some((arg) => arg.includes("/pulls"))) {
-      return JSON.stringify(fixture.commitPulls ?? [[]]);
-    }
-    if (args[0] === "api" && args[1]?.includes("/git/ref/heads/")) {
-      return JSON.stringify({ object: { sha: fixture.headSha } });
-    }
-    if (args[0] === "pr" && args[1] === "list") {
-      return JSON.stringify(fixture.mergedPending ?? []);
-    }
-    if (args[0] === "pr" && args[1] === "view") {
-      if (fixture.prViewLabels === undefined) {
-        throw new Error("gh pr view failed (1): no pull requests found");
-      }
-      return JSON.stringify({ labels: fixture.prViewLabels.map((name) => ({ name })) });
-    }
-    throw new Error(`unexpected gh call: ${args.join(" ")}`);
+    return args[0] === "api" ? apiAnswer(fixture, args) : commandAnswer(fixture, args);
   };
   return { run, calls };
 }
@@ -129,6 +153,7 @@ function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
 // The payload snapshot carries the override label so that every pull-request row proves the live `gh pr view`
 // decides, never the snapshot: a label applied after a failing run to re-run it is absent from the payload,
 // and one removed since is still in it. The head is the one the run was started for (after-refresh mode).
+
 const JUDGED = "1111111111111111111111111111111111111111";
 const eventDir = temp.dir("release-health-");
 const eventPath = join(eventDir, "event.json");
@@ -466,8 +491,11 @@ describe("findReleasePr", () => {
   ])("$reason", async ({ pages, expected }) => {
     const { run, calls } = fakeGh({ commitPulls: pages });
     const lookup = findReleasePr(run, REPO, "abc123");
-    if (expected === "rejects") await expect(lookup).rejects.toThrow("#4, #6");
-    else expect(await lookup).toEqual(expected);
+    if (expected === "rejects") {
+      await expect(lookup).rejects.toThrow("#4, #6");
+    } else {
+      expect(await lookup).toEqual(expected);
+    }
     expect(calls).toEqual([COMMIT_PULLS_CALL]);
   });
 });

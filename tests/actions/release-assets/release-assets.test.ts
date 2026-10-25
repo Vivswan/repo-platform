@@ -16,13 +16,16 @@ function fakeGh(assets: string[]): { run: GhRunner; calls: string[][] } {
     if (args[0] === "release" && args[1] === "view") {
       return JSON.stringify({ assets: assets.map((name) => ({ name })) });
     }
-    if (args[0] === "release" && args[1] === "delete-asset") return "";
+    if (args[0] === "release" && args[1] === "delete-asset") {
+      return "";
+    }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
   return { run, calls };
 }
 
 // fleet-release-publish.yml runs with no checkout, so every call names the repository.
+
 const VIEW = ["release", "view", TAG, "--repo", REPO, "--json", "assets"];
 const DELETE = ["release", "delete-asset", TAG, BUNDLE, "--yes", "--repo", REPO];
 /** A log line as the recorder saw it: core's method, then the message. */

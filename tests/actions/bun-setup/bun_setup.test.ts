@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { fill } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { tempDirs } from "../../shared/temp_dir";
 
@@ -26,7 +27,9 @@ const action = parseYaml(readFileSync(join(REPO_ROOT, "actions/bun-setup/action.
 const steps: Step[] = action.runs.steps;
 const stepById = (id: string): Step => {
   const step = steps.find((s) => s.id === id);
-  if (step === undefined) throw new Error(`no step '${id}'`);
+  if (step === undefined) {
+    throw new Error(`no step '${id}'`);
+  }
   return step;
 };
 
@@ -56,7 +59,9 @@ function pathFor(onPath: "real" | "decoy" | "failing" | "lying" | "none", root: 
  *  command the steps run, so a system bun can never leak into a case. */
 function toolsDir(root: string): string {
   const dir = join(root, "tools");
-  if (existsSync(dir)) return dir;
+  if (existsSync(dir)) {
+    return dir;
+  }
   mkdirSync(dir);
   symlinkSync("/bin/cat", join(dir, "cat"));
   return dir;
@@ -68,18 +73,12 @@ function runStep(
   path: string,
   root: string,
 ): { exitCode: number; stdout: string; outputs: Record<string, string> } {
-  const fill = (text: string): string => {
-    let filled = text;
-    for (const [expr, value] of Object.entries(fills)) filled = filled.replaceAll(expr, value);
-    if (filled.includes("${{")) throw new Error(`unresolved expression in ${filled}`);
-    return filled;
-  };
   const outputs = join(root, `${String(step.id)}-outputs.txt`);
   writeFileSync(outputs, "");
   const env = Object.fromEntries(
-    Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [k, fill(v)]),
+    Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [k, fill(v, fills)]),
   );
-  const proc = boundedSpawnSync([...RUNNER_BASH, fill(String(step.run))], {
+  const proc = boundedSpawnSync([...RUNNER_BASH, fill(String(step.run), fills)], {
     env: { ...env, PATH: `${path}:${toolsDir(root)}`, GITHUB_OUTPUT: outputs },
   });
   return {
@@ -138,7 +137,9 @@ describe("actions/bun-setup", () => {
     const start = from(root);
     const locate = runStep(stepById("locate"), { "${{ inputs.from }}": start }, BUN_DIR, root);
     expect([locate.exitCode, locate.outputs]).toEqual([exitCode, outputs(root)]);
-    if (exitCode !== 0) expect(locate.stdout).toContain(error(start));
+    if (exitCode !== 0) {
+      expect(locate.stdout).toContain(error(start));
+    }
   });
 
   test("neither setup attempt can end the action, the retry keys on the first attempt's outcome, and the resolve runs whatever they did", () => {
@@ -234,6 +235,8 @@ describe("actions/bun-setup", () => {
       root,
     );
     expect([resolve.exitCode, resolve.outputs]).toEqual([exitCode, outputs]);
-    if (exitCode !== 0) expect(resolve.stdout).toContain("::error::no bun matching the pin");
+    if (exitCode !== 0) {
+      expect(resolve.stdout).toContain("::error::no bun matching the pin");
+    }
   });
 });
