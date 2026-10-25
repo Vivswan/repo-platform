@@ -12,9 +12,7 @@ try {
     "commit" in read ? { commit: read.commit, problem: "" } : { commit: "", problem: read.problem };
   setOutput("commit", outputs.commit);
   setOutput("problem", outputs.problem);
-  if (outputs.commit !== "") {
-    console.log(`judged against ${outputs.commit}`);
-  }
+  if (outputs.commit !== "") console.log(`judged against ${outputs.commit}`);
 } catch (cause) {
   setFailed(messageOf(cause));
 }

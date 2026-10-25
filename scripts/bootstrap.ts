@@ -31,18 +31,12 @@ export function installHooks(root: string): void {
 export function bunLockDirs(root: string): string[] {
   const found: string[] = [];
   const walk = (dir: string) => {
-    if (existsSync(join(dir, "bun.lock"))) {
-      found.push(relative(root, dir));
-    }
+    if (existsSync(join(dir, "bun.lock"))) found.push(relative(root, dir));
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory() && entry.name !== "node_modules") {
-        walk(join(dir, entry.name));
-      }
+      if (entry.isDirectory() && entry.name !== "node_modules") walk(join(dir, entry.name));
     }
   };
-  if (existsSync(join(root, "bun.lock"))) {
-    found.push(".");
-  }
+  if (existsSync(join(root, "bun.lock"))) found.push(".");
   walk(join(root, "actions"));
   return found.sort();
 }
@@ -56,6 +50,4 @@ function main(): void {
   console.log(`bootstrap: git hooks installed (core.hooksPath ${HOOKS_PATH})`);
 }
 
-if (import.meta.main) {
-  main();
-}
+if (import.meta.main) main();

@@ -27,19 +27,12 @@ import {
 function walk(rel: string): string[] {
   const found: string[] = [];
   for (const name of readdirSync(join(REPO_ROOT, rel)).sort()) {
-    if (name === "node_modules") {
-      continue;
-    }
+    if (name === "node_modules") continue;
     const child = `${rel}/${name}`;
     const stat = lstatSync(join(REPO_ROOT, child));
-    if (stat.isSymbolicLink()) {
-      continue;
-    }
-    if (stat.isDirectory()) {
-      found.push(...walk(child));
-    } else {
-      found.push(child);
-    }
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) found.push(...walk(child));
+    else found.push(child);
   }
   return found;
 }
@@ -67,12 +60,8 @@ const callable = callableWorkflowNames(
  *  the gap: a comment pinact reads as a version but leaves unverified, sha included. The branches follow pinact's classifier order. */
 export function pinactJudgesComment(comment: string): boolean {
   const version = comment.replace(/^tag=/, "");
-  if (!/^v?\d/.test(version)) {
-    return true;
-  }
-  if (/\b[0-9a-f]{40}\b/.test(version)) {
-    return false;
-  }
+  if (!/^v?\d/.test(version)) return true;
+  if (/\b[0-9a-f]{40}\b/.test(version)) return false;
   return /^v?\d+\.\d+\.\d+\S*$/.test(version);
 }
 
@@ -88,9 +77,7 @@ export function splitPins(pins: Pin[]): string[] {
   const byAction = new Map<string, Map<string, string[]>>();
   for (const pin of pins) {
     const action = pin.action.toLowerCase();
-    if (action === self) {
-      continue;
-    }
+    if (action === self) continue;
     const refs = byAction.get(action) ?? new Map<string, string[]>();
     refs.set(pin.ref, [...(refs.get(pin.ref) ?? []), pin.file]);
     byAction.set(action, refs);
@@ -110,12 +97,8 @@ export function callableWorkflowNames(files: { path: string; text: string }[]): 
     .filter((f) => {
       const doc: unknown = parseYaml(f.text);
       const on = doc && typeof doc === "object" ? (doc as Record<string, unknown>).on : undefined;
-      if (typeof on === "string") {
-        return on === "workflow_call";
-      }
-      if (Array.isArray(on)) {
-        return on.includes("workflow_call");
-      }
+      if (typeof on === "string") return on === "workflow_call";
+      if (Array.isArray(on)) return on.includes("workflow_call");
       return on !== null && typeof on === "object" && "workflow_call" in on;
     })
     .map((f) => f.path.slice(dir.length))

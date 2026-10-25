@@ -41,9 +41,7 @@ function stagedPath(repoPath: string, scope: LinkScope): string | null {
     ...scope.includes.map((root) => ({ path: root.path, mount: `${root.mount}/` })),
   ].sort((a, b) => b.path.length - a.path.length);
   for (const root of roots) {
-    if (repoPath === root.path) {
-      return root.mount.replace(/\/$/, "");
-    }
+    if (repoPath === root.path) return root.mount.replace(/\/$/, "");
 
     if (repoPath.startsWith(`${root.path}/`)) {
       return root.mount + repoPath.slice(root.path.length + 1);
@@ -70,9 +68,7 @@ function servedRoute(
   const files = new Set(scope.files);
   const index = staged === "" ? "index.md" : `${staged}/index.md`;
   const hasIndex = files.has(index) || Object.values(scope.rewrites).includes(index);
-  if (writtenAsDirectory || hasIndex) {
-    return { kind: "directory", path: staged };
-  }
+  if (writtenAsDirectory || hasIndex) return { kind: "directory", path: staged };
 
   if (files.has(staged) || /\.(md|html?)$/i.test(staged)) {
     return { kind: "page", path: scope.rewrites[staged] ?? staged };
@@ -93,9 +89,7 @@ function githubHref(
   suffix: string,
   scope: LinkScope,
 ): string {
-  if (repoTarget === ".") {
-    return `${scope.repoUrl}/tree/${scope.ref}${suffix}`;
-  }
+  if (repoTarget === ".") return `${scope.repoUrl}/tree/${scope.ref}${suffix}`;
 
   const view = isDirectory ? "tree" : "blob";
   return `${scope.repoUrl}/${view}/${scope.ref}/${encodePathSegments(repoTarget)}${suffix}`;
@@ -113,9 +107,7 @@ function routeHref(
   }
 
   const relative = posix.relative(pageDir === "." ? "" : pageDir, route.path);
-  if (relative === "") {
-    return { href: `./${suffix}`, verbatim: false };
-  }
+  if (relative === "") return { href: `./${suffix}`, verbatim: false };
 
   const slash = route.kind === "directory" ? "/" : "";
   return { href: `${encodePathSegments(relative)}${slash}${suffix}`, verbatim: false };
@@ -125,16 +117,12 @@ function routeHref(
  *  The path math runs on decoded file names. */
 export function rewriteLink(href: string, relativePath: string, scope: LinkScope): RewrittenLink {
   const asIs = { href, verbatim: false };
-  if (NOT_A_PATH.test(href)) {
-    return asIs;
-  }
+  if (NOT_A_PATH.test(href)) return asIs;
 
   const suffixAt = href.search(/[?#]/);
   const rawPath = suffixAt === -1 ? href : href.slice(0, suffixAt);
   const suffix = suffixAt === -1 ? "" : href.slice(suffixAt);
-  if (rawPath === "") {
-    return asIs;
-  }
+  if (rawPath === "") return asIs;
 
   const path = decodePathSegments(rawPath);
   const trailing = path.endsWith("/") ? "/" : "";
@@ -152,9 +140,7 @@ export function rewriteLink(href: string, relativePath: string, scope: LinkScope
   const repoTarget = posix
     .normalize(posix.join(posix.dirname(pageRepoPath), path))
     .replace(/(.)\/$/, "$1");
-  if (repoTarget === ".." || repoTarget.startsWith("../")) {
-    return asIs;
-  }
+  if (repoTarget === ".." || repoTarget.startsWith("../")) return asIs;
 
   const staged = stagedPath(repoTarget === "." ? "" : repoTarget, scope);
   const route = staged === null ? null : servedRoute(staged, trailing === "/", scope);
@@ -167,20 +153,14 @@ export function rewriteLink(href: string, relativePath: string, scope: LinkScope
 
 function rewriteTokens(tokens: Token[], relativePath: string, scope: LinkScope): void {
   for (const token of tokens) {
-    if (token.type !== "link_open") {
-      continue;
-    }
+    if (token.type !== "link_open") continue;
 
     const href = token.attrGet("href");
-    if (href === null) {
-      continue;
-    }
+    if (href === null) continue;
 
     const link = rewriteLink(href, relativePath, scope);
     token.attrSet("href", link.href);
-    if (link.verbatim) {
-      token.attrSet("target", "_self");
-    }
+    if (link.verbatim) token.attrSet("target", "_self");
   }
 }
 
@@ -192,9 +172,7 @@ export function rewriteLinksRule(md: MarkdownRenderer, scope: LinkScope): void {
   md.core.ruler.push("fleet_rewrite_links", (state) => {
     const relativePath = (state.env as MarkdownEnv).relativePath ?? "index.md";
     for (const block of state.tokens) {
-      if (block.type !== "inline" || block.children === null) {
-        continue;
-      }
+      if (block.type !== "inline" || block.children === null) continue;
 
       rewriteTokens(block.children, relativePath, scope);
     }

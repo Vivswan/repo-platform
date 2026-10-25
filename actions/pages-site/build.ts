@@ -53,9 +53,7 @@ const MAX_VERSIONS = 5;
 
 function requireEnv(name: string): string {
   const value = env(name);
-  if (value === "") {
-    throw new Error(`${name} is required and empty`);
-  }
+  if (value === "") throw new Error(`${name} is required and empty`);
 
   return value;
 }
@@ -66,9 +64,7 @@ function run(argv: string[], opts: { cwd?: string; env?: Record<string, string> 
     stdio: "inherit",
     env: { ...process.env, ...(opts.env ?? {}) },
   });
-  if (proc.error) {
-    throw proc.error;
-  }
+  if (proc.error) throw proc.error;
 
   if (proc.status !== 0) {
     throw new Error(`command failed (exit ${proc.status}): ${argv.join(" ")}`);
@@ -77,9 +73,7 @@ function run(argv: string[], opts: { cwd?: string; env?: Record<string, string> 
 
 function capture(argv: string[], cwd?: string): string {
   const proc = spawnSync(argv[0], argv.slice(1), { cwd, encoding: "utf-8" });
-  if (proc.error) {
-    throw proc.error;
-  }
+  if (proc.error) throw proc.error;
 
   if (proc.status !== 0) {
     throw new Error(`command failed (exit ${proc.status}): ${argv.join(" ")}\n${proc.stderr}`);
@@ -97,14 +91,10 @@ function treeHas(workspace: string, ref: string, path: string): boolean {
 /** `git show` on a symlink yields its target path text, which must never be judged as content. */
 function treeFile(workspace: string, ref: string, path: string): string | null {
   const entry = capture(["git", "-C", workspace, "ls-tree", ref, "--", path]).trim();
-  if (entry === "") {
-    return null;
-  }
+  if (entry === "") return null;
 
   const mode = entry.split(" ")[0];
-  if (mode !== "100644" && mode !== "100755") {
-    return null;
-  }
+  if (mode !== "100644" && mode !== "100755") return null;
 
   return capture(["git", "-C", workspace, "show", `${ref}:${path}`]);
 }
@@ -329,9 +319,7 @@ export function stageIncludes(
 
 export function assertIncludePages(target: string, include: IncludeRoot): void {
   for (const child of readdirSync(target, { withFileTypes: true })) {
-    if (!child.isDirectory() || isUnwalkedEntry(child.name)) {
-      continue;
-    }
+    if (!child.isDirectory() || isUnwalkedEntry(child.name)) continue;
 
     const dir = join(target, child.name);
     if (existsSync(join(dir, include.page)) && existsSync(join(dir, "index.md"))) {
@@ -458,9 +446,7 @@ function eligibleDocsTags(cfg: Config, kept: string[]): string[] {
     return false;
   };
   return kept.filter((tag) => {
-    if (!treeHas(cfg.workspace, tag, DOCS_DIR)) {
-      return skip(tag, `${DOCS_DIR}/ does not exist`);
-    }
+    if (!treeHas(cfg.workspace, tag, DOCS_DIR)) return skip(tag, `${DOCS_DIR}/ does not exist`);
 
     if (treeHas(cfg.workspace, tag, `${DOCS_DIR}/.vitepress`)) {
       return skip(
@@ -532,9 +518,7 @@ export function ownEntries(site: string): string[] {
   for (const name of readdirSync(site)) {
     names.add(name);
     const page = /\.html?$/i.test(name) && statSync(join(site, name)).isFile();
-    if (page) {
-      names.add(name.replace(/\.html?$/i, ""));
-    }
+    if (page) names.add(name.replace(/\.html?$/i, ""));
   }
 
   return [...names].sort();
@@ -674,9 +658,7 @@ async function main(): Promise<void> {
   // The docs land first: the website's copy then meets the docs mount's
   // directory already in place, so a website emitting that directory
   // collides loudly instead of silently mixing two sources under one URL.
-  if (docs !== null) {
-    scopes.push(...assembleDocs(cfg, docs, kept));
-  }
+  if (docs !== null) scopes.push(...assembleDocs(cfg, docs, kept));
 
   if (website !== null && websiteDir !== null) {
     console.log(`copying the site-build hook's website from ${website.dist}`);

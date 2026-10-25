@@ -29,22 +29,16 @@ export function attachZoom(mount: HTMLElement, diagram: HTMLElement): void {
     mount.append(button);
   }
 
-  if (shown.value?.mount === mount) {
-    shown.value = { mount, diagram };
-  }
+  if (shown.value?.mount === mount) shown.value = { mount, diagram };
 }
 
 export function detachZoom(mount: HTMLElement): void {
   mount.querySelector(`:scope > .${ZOOM_BUTTON_CLASS}`)?.remove();
-  if (shown.value?.mount === mount) {
-    shown.value = null;
-  }
+  if (shown.value?.mount === mount) shown.value = null;
 }
 
 /** Closes a view whose mount is not among the page's `mounts`: the view sits on <body>, outside the content a route
  *  change swaps, and the browser's Back and Forward reach a page under a modal. */
 export function closeZoomOutside(mounts: readonly HTMLElement[]): void {
-  if (shown.value !== null && !mounts.includes(shown.value.mount)) {
-    shown.value = null;
-  }
+  if (shown.value !== null && !mounts.includes(shown.value.mount)) shown.value = null;
 }

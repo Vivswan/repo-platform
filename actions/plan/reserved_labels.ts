@@ -11,9 +11,7 @@ export type LayerSources = Pick<FilesConfig, "modules" | "settings">;
 
 export function declaredLayers(config: LayerSources): string[] {
   const { settings } = config;
-  if (settings === null) {
-    return [];
-  }
+  if (settings === null) return [];
 
   return [settings.baseline, ...settings.layers.map((layer) => layer.source), settings.override];
 }
@@ -43,9 +41,7 @@ function layerLabelEntries(config: LayerSources, tree: string): Record<string, u
       throw new Error(`settings layer ${SOURCE_PREFIX}${rel}: must be a YAML mapping`);
     }
 
-    if (layer.labels === undefined || layer.labels === null) {
-      continue;
-    }
+    if (layer.labels === undefined || layer.labels === null) continue;
 
     const labels = isMapping(layer.labels) ? layer.labels.entries : layer.labels;
     if (!Array.isArray(labels)) {
@@ -75,9 +71,7 @@ export function reservedLabelNames(config: LayerSources, tree: string): Set<stri
   const names = new Set<string>();
   for (const label of layerLabelEntries(config, tree)) {
     names.add(String(label.name).toLowerCase());
-    if (typeof label.new_name === "string") {
-      names.add(label.new_name.toLowerCase());
-    }
+    if (typeof label.new_name === "string") names.add(label.new_name.toLowerCase());
   }
 
   return names;

@@ -22,9 +22,7 @@ const rung = (exit: number) =>
 
 function rungs(files: Record<string, string>): string {
   const dir = temp.dir("migrate-rungs-");
-  for (const [name, text] of Object.entries(files)) {
-    writeFileSync(join(dir, name), text);
-  }
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
   return dir;
 }
 

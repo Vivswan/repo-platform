@@ -14,13 +14,9 @@ function usageError(message: string): never {
 
 function main(): number {
   const [root, ...rest] = process.argv.slice(2);
-  if (rest.length > 0) {
-    usageError(`unrecognized argument: ${rest[0]}`);
-  }
+  if (rest.length > 0) usageError(`unrecognized argument: ${rest[0]}`);
 
-  if (root?.startsWith("-")) {
-    usageError(`unrecognized argument: ${root}`);
-  }
+  if (root?.startsWith("-")) usageError(`unrecognized argument: ${root}`);
 
   const ctx = loadContext(resolve(root ?? "."));
   const findings = CHECKS.flatMap((check) => check(ctx));

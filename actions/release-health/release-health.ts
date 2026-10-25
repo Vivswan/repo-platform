@@ -105,14 +105,10 @@ export function parseTrackingLabels(env: NodeJS.ProcessEnv): string[] {
   const labels: string[] = [];
   for (const token of (env.TRACKING_LABELS ?? "").split(",")) {
     const label = token.trim();
-    if (label === "") {
-      continue;
-    }
+    if (label === "") continue;
     parseLabel("TRACKING_LABELS", label);
     const key = label.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
+    if (seen.has(key)) continue;
     seen.add(key);
     labels.push(label);
   }
@@ -474,18 +470,14 @@ export async function refreshVerdict(
   const tip = checkoutTip(base);
   const baseMoved = async (): Promise<boolean> => {
     const head = await branchHead(run, repo, base);
-    if (head === tip) {
-      return false;
-    }
+    if (head === tip) return false;
     log.error(
       `${base} moved to ${head.slice(0, 7)} since this run checked it out at ${tip.slice(0, 7)}; this run cannot tell whether the refresh saw that commit, and its own green run refreshes the release PR`,
     );
     return true;
   };
   const refreshed = async (head: string): Promise<number> => {
-    if (await baseMoved()) {
-      return 1;
-    }
+    if (await baseMoved()) return 1;
     log.notice(`release PR #${number} refreshed to ${head}; approve its run from the merge box`);
     return 0;
   };
@@ -504,9 +496,7 @@ export async function refreshVerdict(
     return 1;
   }
 
-  if (await baseMoved()) {
-    return 1;
-  }
+  if (await baseMoved()) return 1;
   log.info(
     `release-please left PR #${number} at ${judged.slice(0, 7)}: its body is unchanged, so the commits it lacks add no changelog line and merging ${base} loses none; asking GitHub to update the branch`,
   );
@@ -547,9 +537,7 @@ async function resolveReleaseMode(
   const { pr, unmerged } = await findReleasePr(run, repo, sha);
   setOutput("release-cut", pr === undefined ? "false" : "true");
   if (pr !== undefined) {
-    if (hasLabel(pr.labels, OVERRIDE_LABEL)) {
-      return { active: true, prNumber: pr.number };
-    }
+    if (hasLabel(pr.labels, OVERRIDE_LABEL)) return { active: true, prNumber: pr.number };
 
     return { active: false, reason: `no '${OVERRIDE_LABEL}' label on release PR #${pr.number}` };
   }
@@ -598,9 +586,7 @@ export async function runHealthCheck(
     cfg.context.mode === "release"
       ? await resolveReleaseMode(run, cfg.repo, cfg.context, setOutput, log)
       : await overrideFromPullRequest(run, cfg.repo, cfg.context.eventPath, OVERRIDE_LABEL);
-  if (override === null) {
-    return 0;
-  }
+  if (override === null) return 0;
 
   const overrideHint = `or apply the '${OVERRIDE_LABEL}' label to the release PR and re-run this check`;
   // Every gate runs even under the override, so the report is complete.

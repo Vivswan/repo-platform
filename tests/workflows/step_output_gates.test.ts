@@ -33,32 +33,20 @@ function unsafeStepCondition(raw: string): string | null {
   // A step output is any term reaching `.outputs` from `steps`, a dynamic index (`steps[env.PROBE]`)
   // included: a term the classifier below cannot read is named, never passed.
   const OUTPUT = /(?<![.\w])steps\b.*\.outputs\b/i;
-  if (!OUTPUT.test(condition)) {
-    return null;
-  }
+  if (!OUTPUT.test(condition)) return null;
   // A negated GROUP inverts terms this check reads term by term, so it cannot be proven safe here.
   // `!cancelled()` and friends do not match: the parenthesis has to follow the `!` directly.
-  if (/!\s*\(/.test(condition)) {
-    return `a negated group: ${condition.trim()}`;
-  }
+  if (/!\s*\(/.test(condition)) return `a negated group: ${condition.trim()}`;
   // A parenthesis becomes a space, never nothing: glued to the function name, `contains(steps...` would read as no
   // step output at all.
   for (const raw of condition.split(/&&|\|\|/)) {
     const term = raw.replaceAll(/[()]/g, " ").replaceAll(/\s+/g, " ").trim();
-    if (!OUTPUT.test(term)) {
-      continue;
-    }
-    if (/^contains steps\.[\w-]+\.outputs\.[\w-]+, '[^']+'$/i.test(term)) {
-      continue;
-    }
+    if (!OUTPUT.test(term)) continue;
+    if (/^contains steps\.[\w-]+\.outputs\.[\w-]+, '[^']+'$/i.test(term)) continue;
     const match = /^steps\.[\w-]+\.outputs\.[\w-]+ ?(==|!=) ?'([^']*)'$/i.exec(term);
-    if (match === null) {
-      return term;
-    }
+    if (match === null) return term;
     const [, operator, literal] = match;
-    if (operator === "==" ? Number(literal) === 0 : literal !== "") {
-      return term;
-    }
+    if (operator === "==" ? Number(literal) === 0 : literal !== "") return term;
   }
   return null;
 }
@@ -69,22 +57,16 @@ function unsafeStepCondition(raw: string): string | null {
  *  left to right, and an escaped quote or any construct outside the listed forms is judged effectful, so
  *  the scanner errs toward reporting. */
 function isFailStep(step: Step): boolean {
-  if (step["continue-on-error"]) {
-    return false;
-  }
+  if (step["continue-on-error"]) return false;
   const run = String(step.run ?? "");
-  if (/\\["']/.test(run)) {
-    return false;
-  }
+  if (/\\["']/.test(run)) return false;
   const lines = run
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("#"));
   const last = lines.at(-1);
   const prints = (line: string) => {
-    if (!/^(echo|printf)\b/.test(line)) {
-      return false;
-    }
+    if (!/^(echo|printf)\b/.test(line)) return false;
     // Quoted text prints, read left to right in ONE pass so a quote of one kind inside the other is
     // text: single quotes hide everything, double quotes hide operators but not a substitution
     // (`$(` or a backtick pair still runs inside them).
@@ -101,13 +83,9 @@ function negativeGates(text: string): string[] {
   const gates: string[] = [];
   for (const job of Object.values(doc.jobs ?? {})) {
     for (const step of job.steps ?? []) {
-      if (isFailStep(step)) {
-        continue;
-      }
+      if (isFailStep(step)) continue;
       const unsafe = unsafeStepCondition(String(step.if ?? ""));
-      if (unsafe !== null) {
-        gates.push(`step "${step.id ?? step.name ?? step.uses}": ${unsafe}`);
-      }
+      if (unsafe !== null) gates.push(`step "${step.id ?? step.name ?? step.uses}": ${unsafe}`);
     }
   }
   return gates;

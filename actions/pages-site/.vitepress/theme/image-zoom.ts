@@ -34,18 +34,14 @@ function unmakeButton(image: Element): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== "Enter" && event.key !== " ") {
-    return;
-  }
+  if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();
   void zoom?.open({ target: event.currentTarget as HTMLElement });
 }
 
 function setPageInert(inert: boolean): void {
   const page = document.querySelector<HTMLElement>(PAGE_SELECTOR);
-  if (page !== null) {
-    page.inert = inert;
-  }
+  if (page !== null) page.inert = inert;
 }
 
 /** Fires before medium-zoom clones the original, so no copy (a srcset image gets a second one later) inherits the
@@ -71,9 +67,7 @@ function onClosed(event: Event): void {
   const image = event.target as HTMLElement;
   setPageInert(false);
   makeButton(image);
-  if (focusedAtOpen === image) {
-    image.focus({ preventScroll: true });
-  }
+  if (focusedAtOpen === image) image.focus({ preventScroll: true });
   focusedAtOpen = null;
 }
 
@@ -91,9 +85,7 @@ function attachImageZoom(): void {
   // A stuck open (its candidate never loaded) never closes, so the page it made inert is freed here; a finished one
   // is closing now, its fade over the page, and onClosed frees it. One still in its transition takes the page back
   // when it finishes (onOpened): medium-zoom's detach leaves the listeners on the image.
-  if (!openFinished) {
-    setPageInert(false);
-  }
+  if (!openFinished) setPageInert(false);
   // CSS cannot tell a blank alt from a word, so the name check is here.
   zoom.attach(
     [...document.querySelectorAll<HTMLImageElement>(IMAGE_SELECTOR)].filter(

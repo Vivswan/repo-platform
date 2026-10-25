@@ -91,11 +91,8 @@ describe("the commit pins", () => {
     try {
       expect(await headSha("o/a", answer(`{"sha": "${NEW}"}`))).toBe(NEW);
     } finally {
-      if (saved === undefined) {
-        delete process.env.GH_TOKEN;
-      } else {
-        process.env.GH_TOKEN = saved;
-      }
+      if (saved === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = saved;
     }
     expect(calls).toEqual([
       [
@@ -156,11 +153,8 @@ describe("the release pins", () => {
     { template: "release.{version}", tag: "release.1.0.0", outcome: "1.0.0" },
     { template: "release.{version}", tag: "releasex1.0.0", outcome: { throws: "does not match" } },
   ])("$template reads $tag -> $outcome", ({ template, tag, outcome }) => {
-    if (typeof outcome === "string") {
-      expect(tagVersion(tag, template, "o/a")).toBe(outcome);
-    } else {
-      expect(() => tagVersion(tag, template, "o/a")).toThrow(outcome.throws);
-    }
+    if (typeof outcome === "string") expect(tagVersion(tag, template, "o/a")).toBe(outcome);
+    else expect(() => tagVersion(tag, template, "o/a")).toThrow(outcome.throws);
   });
 
   // The dotfile is what the setup actions' version-file inputs read verbatim, so every other shape is refused here rather than ordered.
@@ -181,9 +175,7 @@ describe("the release pins", () => {
     const plant = (dir: string, pkg: Record<string, unknown>, lock = true) => {
       mkdirSync(join(root, dir), { recursive: true });
       writeFileSync(join(root, dir, "package.json"), JSON.stringify(pkg));
-      if (lock) {
-        writeFileSync(join(root, dir, "bun.lock"), "");
-      }
+      if (lock) writeFileSync(join(root, dir, "bun.lock"), "");
     };
     plant(".", { devDependencies: { "@types/bun": "0.0.0" } });
     plant("actions/dev", { devDependencies: { "@types/bun": "0.0.0" } });
@@ -287,9 +279,7 @@ describe("the refresh", () => {
     const fetch = async (url: string) => {
       fetched.push(url);
       const text = answers[url];
-      if (text === undefined) {
-        throw new Error(`GET ${url} failed: HTTP 503`);
-      }
+      if (text === undefined) throw new Error(`GET ${url} failed: HTTP 503`);
       return text;
     };
     return { fetched, fetch };

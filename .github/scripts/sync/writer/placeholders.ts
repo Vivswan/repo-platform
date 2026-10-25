@@ -41,9 +41,7 @@ export function isPlaceholderName(name: string): name is PlaceholderName {
 export function placeholderTokens(text: string): string[] {
   const names: string[] = [];
   for (const match of text.matchAll(TOKEN_RE)) {
-    if (match[1] === "") {
-      names.push(match[2]);
-    }
+    if (match[1] === "") names.push(match[2]);
   }
   return names;
 }
@@ -51,25 +49,17 @@ export function placeholderTokens(text: string): string[] {
 export function unknownPlaceholders(text: string, allowed: readonly string[]): string[] {
   const unknown: string[] = [];
   for (const name of placeholderTokens(text)) {
-    if (!allowed.includes(name) && !unknown.includes(name)) {
-      unknown.push(name);
-    }
+    if (!allowed.includes(name) && !unknown.includes(name)) unknown.push(name);
   }
   return unknown;
 }
 
 export function blocksAnchorProblem(text: string): string | null {
   const mentions = text.split(BLOCKS_ANCHOR).length - 1;
-  if (mentions === 0) {
-    return null;
-  }
+  if (mentions === 0) return null;
   const lines = text.split("\n").filter((line) => line === BLOCKS_ANCHOR).length;
-  if (mentions > 1) {
-    return `mentions ${BLOCKS_ANCHOR} more than once`;
-  }
-  if (lines !== 1) {
-    return `mentions ${BLOCKS_ANCHOR} mid-line; it must be a line of its own`;
-  }
+  if (mentions > 1) return `mentions ${BLOCKS_ANCHOR} more than once`;
+  if (lines !== 1) return `mentions ${BLOCKS_ANCHOR} mid-line; it must be a line of its own`;
   return null;
 }
 
@@ -80,9 +70,7 @@ export function spliceBlocks(text: string, blocks: string[]): string {
   const joined = blocks.map(terminate).join("");
   const lines = text.split("\n");
   const at = lines.indexOf(BLOCKS_ANCHOR);
-  if (at === -1) {
-    return blocks.length === 0 ? text : terminate(text) + joined;
-  }
+  if (at === -1) return blocks.length === 0 ? text : terminate(text) + joined;
   const above = at === 0 ? "" : `${lines.slice(0, at).join("\n")}\n`;
   return `${above}${joined}${lines.slice(at + 1).join("\n")}`;
 }
@@ -92,9 +80,7 @@ export function missingPlaceholders(text: string, values: PlaceholderValues): st
   const missing: string[] = [];
   for (const name of placeholderTokens(text)) {
     const value = isPlaceholderName(name) ? values[name] : undefined;
-    if ((value === undefined || value === "") && !missing.includes(name)) {
-      missing.push(name);
-    }
+    if ((value === undefined || value === "") && !missing.includes(name)) missing.push(name);
   }
   return missing;
 }
@@ -103,13 +89,9 @@ export function missingPlaceholders(text: string, values: PlaceholderValues): st
  *  The unsafe-value throw is the only gate for a files.yml label default, which the registration grammar never sees. */
 export function substitute(text: string, values: PlaceholderValues): string {
   return text.replace(TOKEN_RE, (whole, dollar: string, name: string) => {
-    if (dollar !== "") {
-      return whole;
-    }
+    if (dollar !== "") return whole;
     const value = isPlaceholderName(name) ? values[name] : undefined;
-    if (value === undefined) {
-      throw new Error(`unknown placeholder {{${name}}}`);
-    }
+    if (value === undefined) throw new Error(`unknown placeholder {{${name}}}`);
     if (UNSAFE_VALUE_RE.test(value)) {
       throw new Error(
         `placeholder {{${name}}}: its value carries a double quote, backslash, or control character`,

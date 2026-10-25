@@ -225,11 +225,8 @@ describe("the manifest's commit under the stamp rule", () => {
       before.delete(MANIFEST_NAME);
       after.delete(MANIFEST_NAME);
     }
-    if (treeKept) {
-      expect(after).toEqual(before);
-    } else {
-      expect(after).not.toEqual(before);
-    }
+    if (treeKept) expect(after).toEqual(before);
+    else expect(after).not.toEqual(before);
   });
 
   test("a recorded commit the build checkout's history lacks fails the run before anything is written", () => {
@@ -265,9 +262,7 @@ const OFF_SURFACE = [
 describe("the checker surface", () => {
   test("is check.ts's import closure: the writer in, the stable-run and operator files out", () => {
     const surface = checkerSurface(REPO_ROOT);
-    for (const path of surface) {
-      expect(existsSync(join(REPO_ROOT, path))).toBe(true);
-    }
+    for (const path of surface) expect(existsSync(join(REPO_ROOT, path))).toBe(true);
     expect(surface).toContain(CHECK_ENTRY);
     expect(surface).toContain(".github/scripts/sync/writer/sync.ts");
     expect(surface).toContain("actions/pages-site/.vitepress/conventions.ts");

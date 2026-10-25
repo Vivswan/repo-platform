@@ -105,9 +105,7 @@ function aboutRows(facts: ProjectFacts): VNode[] {
     );
   }
 
-  if (facts.topics.length > 0) {
-    about.push(row("Topics", topicChips(facts.topics)));
-  }
+  if (facts.topics.length > 0) about.push(row("Topics", topicChips(facts.topics)));
 
   return about;
 }
@@ -118,9 +116,7 @@ export default defineComponent({
     const { theme, frontmatter } = useData<FactsTheme>();
     return () => {
       const facts = theme.value.docsSiteFacts;
-      if (frontmatter.value.fleetLanding !== true || facts === undefined) {
-        return null;
-      }
+      if (frontmatter.value.fleetLanding !== true || facts === undefined) return null;
 
       const sections: VNode[] = [section(aboutRows(facts))];
 

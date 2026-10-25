@@ -97,9 +97,7 @@ export function collectFindings(json: unknown): TargetReport[] {
       ...(result.Misconfigurations ?? []).map(misconfigurationFinding),
       ...(result.Secrets ?? []).map(secretFinding),
     ];
-    if (findings.length === 0) {
-      continue;
-    }
+    if (findings.length === 0) continue;
 
     findings.sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
     reports.push({ target: result.Target ?? "(unnamed target)", findings });
@@ -148,9 +146,7 @@ export function directoryName(target: string, taken: Set<string>): string {
   }
 
   let name = base;
-  for (let n = 2; taken.has(name); n++) {
-    name = `${base}-${n}`;
-  }
+  for (let n = 2; taken.has(name); n++) name = `${base}-${n}`;
   taken.add(name);
   return name;
 }

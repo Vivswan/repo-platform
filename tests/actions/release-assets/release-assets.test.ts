@@ -16,9 +16,7 @@ function fakeGh(assets: string[]): { run: GhRunner; calls: string[][] } {
     if (args[0] === "release" && args[1] === "view") {
       return JSON.stringify({ assets: assets.map((name) => ({ name })) });
     }
-    if (args[0] === "release" && args[1] === "delete-asset") {
-      return "";
-    }
+    if (args[0] === "release" && args[1] === "delete-asset") return "";
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
   return { run, calls };

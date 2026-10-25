@@ -28,9 +28,7 @@ const toolchainAgents = config.files.find(
   (entry) => entry.path === "AGENTS.md" && "blocks" in entry && entry.blocks !== undefined,
 ) as Extract<FileEntry, { sources: unknown }>;
 const bunToolchain = toolchainAgents.sources.bun;
-if (typeof bunToolchain !== "string") {
-  throw new Error("the bun toolchain block is not a tree file");
-}
+if (typeof bunToolchain !== "string") throw new Error("the bun toolchain block is not a tree file");
 const bunBlock = readFileSync(join(FILES_TREE, bunToolchain), "utf-8");
 
 test.each([

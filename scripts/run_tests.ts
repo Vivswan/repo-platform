@@ -25,33 +25,21 @@ const LISTED_LEFTOVERS = 20;
  *  died before its hooks, so leftovers are judged only on a full run that exited on its own.
  *  A short-option cluster holding `t` counts as a filter: over-detecting costs a verdict, under-detecting a false red. */
 export function leftoversJudgeable(args: string[], signalCode: string | number | null): boolean {
-  if (signalCode !== null) {
-    return false;
-  }
+  if (signalCode !== null) return false;
   for (const arg of args) {
-    if (arg === "--") {
-      return true;
-    }
-    if (arg === "--test-name-pattern" || arg.startsWith("--test-name-pattern=")) {
-      return false;
-    }
-    if (/^-[^-]/.test(arg) && arg.includes("t")) {
-      return false;
-    }
+    if (arg === "--") return true;
+    if (arg === "--test-name-pattern" || arg.startsWith("--test-name-pattern=")) return false;
+    if (/^-[^-]/.test(arg) && arg.includes("t")) return false;
   }
   return true;
 }
 
 export function leftoverExitCode(exitCode: number, leftovers: string[]): number {
-  if (leftovers.length === 0) {
-    return exitCode;
-  }
+  if (leftovers.length === 0) return exitCode;
   const sorted = [...leftovers].sort();
   const shown = sorted.slice(0, LISTED_LEFTOVERS).map((name) => `  ${name}`);
   const rest = sorted.length - shown.length;
-  if (rest > 0) {
-    shown.push(`  ... and ${rest} more`);
-  }
+  if (rest > 0) shown.push(`  ... and ${rest} more`);
   console.error(
     `run_tests: ${sorted.length} entr${sorted.length === 1 ? "y" : "ies"} left in the per-run TMPDIR ` +
       "(a fixture made outside tests/shared/temp_dir.ts, or one its file never finished):\n" +
@@ -65,9 +53,7 @@ async function main(argv: string[]): Promise<number> {
   // Handlers are installed before the scratch exists: under bun's default disposition a signal would end the launcher ahead of the finally.
   // The first await sits after the spawn and handlers run from the event loop, so the child is always there when one fires.
   let child: Subprocess | undefined;
-  for (const signal of FORWARDED_SIGNALS) {
-    process.on(signal, () => child?.kill(signal));
-  }
+  for (const signal of FORWARDED_SIGNALS) process.on(signal, () => child?.kill(signal));
   const scratch = mkdtempSync(join(tmpdir(), `${PLATFORM_NAME}-tests-`));
   try {
     // Async on purpose (biome.local.jsonc exempts this file from the Bun.spawn ban):
@@ -80,15 +66,11 @@ async function main(argv: string[]): Promise<number> {
       stdio: ["inherit", "inherit", "inherit"],
     });
     await child.exited;
-    if (!leftoversJudgeable(args, child.signalCode)) {
-      return exitCodeOf(child);
-    }
+    if (!leftoversJudgeable(args, child.signalCode)) return exitCodeOf(child);
     return leftoverExitCode(exitCodeOf(child), readdirSync(scratch));
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
 }
 
-if (import.meta.main) {
-  process.exit(await main(process.argv.slice(2)));
-}
+if (import.meta.main) process.exit(await main(process.argv.slice(2)));

@@ -13,9 +13,7 @@ export function loadContext(root: string): Context {
   const found: string[] = [];
   const visit = (rel: string) => {
     for (const name of readdirSync(join(root, rel))) {
-      if (name === ".git") {
-        continue;
-      }
+      if (name === ".git") continue;
 
       const childRel = rel ? `${rel}/${name}` : name;
       const stat = lstatSync(join(root, childRel));
@@ -24,9 +22,7 @@ export function loadContext(root: string): Context {
         continue;
       }
 
-      if (stat.isFile()) {
-        found.push(childRel);
-      }
+      if (stat.isFile()) found.push(childRel);
     }
   };
   visit("");

@@ -20,9 +20,7 @@ function treeWith(privateLayer: string, more: Record<string, string> = {}): stri
   const tree = join(temp.dir("reserved-labels-"), "files");
   cpSync(TREE, tree, { recursive: true });
   writeFileSync(join(tree, PRIVATE_LAYER), privateLayer);
-  for (const [rel, text] of Object.entries(more)) {
-    writeFileSync(join(tree, rel), text);
-  }
+  for (const [rel, text] of Object.entries(more)) writeFileSync(join(tree, rel), text);
   return tree;
 }
 
@@ -32,9 +30,7 @@ function writerClaims(tree: string): Set<string> {
   for (const layer of loadLayers(CONFIG, tree).values()) {
     const labels = (layer.doc as { labels?: Record<string, unknown>[] }).labels ?? [];
     for (const entry of labels) {
-      for (const claim of labelClaims(entry)) {
-        claims.add(claim);
-      }
+      for (const claim of labelClaims(entry)) claims.add(claim);
     }
   }
   return claims;
@@ -94,9 +90,7 @@ describe("reservedLabelNames", () => {
     { reason: "a null labels section", layer: "labels: null\n", result: { has: ["bug"] } },
   ])("refuses instead of shrinking the roster: $reason", ({ layer, result }) => {
     const tree = treeWith(layer ?? "");
-    if (layer === null) {
-      rmSync(join(tree, PRIVATE_LAYER));
-    }
+    if (layer === null) rmSync(join(tree, PRIVATE_LAYER));
     if (typeof result === "string") {
       expect(() => reservedLabelNames(CONFIG, tree)).toThrow(result);
     } else {

@@ -3,19 +3,13 @@ import { harnessBound } from "./harness_bound";
 
 function withScale<T>(value: string | undefined, body: () => T): T {
   const previous = process.env.TEST_TIME_SCALE;
-  if (value === undefined) {
-    delete process.env.TEST_TIME_SCALE;
-  } else {
-    process.env.TEST_TIME_SCALE = value;
-  }
+  if (value === undefined) delete process.env.TEST_TIME_SCALE;
+  else process.env.TEST_TIME_SCALE = value;
   try {
     return body();
   } finally {
-    if (previous === undefined) {
-      delete process.env.TEST_TIME_SCALE;
-    } else {
-      process.env.TEST_TIME_SCALE = previous;
-    }
+    if (previous === undefined) delete process.env.TEST_TIME_SCALE;
+    else process.env.TEST_TIME_SCALE = previous;
   }
 }
 

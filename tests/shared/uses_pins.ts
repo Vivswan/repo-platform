@@ -24,12 +24,8 @@ export function extractUsesPins(text: string, file: string): Pin[] {
     const match = line.match(
       /uses:\s*['"]?([A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+)@([^\s'"]+)['"]?(?:[ \t]+#[ \t]*(\S+))?/,
     );
-    if (!match) {
-      continue;
-    }
-    if (match[2].includes("<PLACEHOLDER>")) {
-      continue;
-    }
+    if (!match) continue;
+    if (match[2].includes("<PLACEHOLDER>")) continue;
     const action = match[1].split("/").slice(0, 2).join("/");
     pins.push({ file, action, ref: match[2], version: match[3] ?? null });
   }

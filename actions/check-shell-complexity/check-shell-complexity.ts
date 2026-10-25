@@ -65,13 +65,9 @@ function fromWritten<T extends { path: string; line: number }>(
   const template = Object.hasOwn(written.templates, item.path)
     ? written.templates[item.path]
     : undefined;
-  if (template === undefined) {
-    return { ...item, written: { tree: written.tree } };
-  }
+  if (template === undefined) return { ...item, written: { tree: written.tree } };
 
-  if (template.lineMapped) {
-    return { ...item, path: template.path };
-  }
+  if (template.lineMapped) return { ...item, path: template.path };
 
   return { ...item, path: template.path, written: { tree: written.tree } };
 }
@@ -123,18 +119,12 @@ export function judgeBodies(bodies: CollectedBody[]): Finding[] {
   };
   const powershell: (Body & { body: CollectedBody })[] = [];
   bodies.forEach((body, index) => {
-    if (body.dialect === "bash") {
-      at(body, judgeBash(body.code));
-    } else if (body.dialect === "cmd") {
-      at(body, judgeCmd(body.code));
-    } else {
-      powershell.push({ id: String(index), dialect: "powershell", code: body.code, body });
-    }
+    if (body.dialect === "bash") at(body, judgeBash(body.code));
+    else if (body.dialect === "cmd") at(body, judgeCmd(body.code));
+    else powershell.push({ id: String(index), dialect: "powershell", code: body.code, body });
   });
   const judged = judgePowerShell(powershell);
-  for (const { id, body } of powershell) {
-    at(body, judged.get(id) ?? []);
-  }
+  for (const { id, body } of powershell) at(body, judged.get(id) ?? []);
 
   return findings;
 }
@@ -171,14 +161,10 @@ function shellSource(
   tracked: ReadonlySet<string>,
 ): { kind: SourceKind; text: string } | null {
   const named = sourceKindOf(relPath);
-  if (named === null && !(tracked.has(relPath) && isExtensionless(relPath))) {
-    return null;
-  }
+  if (named === null && !(tracked.has(relPath) && isExtensionless(relPath))) return null;
 
   const text = readFileSync(join(root, relPath), "utf-8");
-  if (named === null && shebangDialect(text) === null) {
-    return null;
-  }
+  if (named === null && shebangDialect(text) === null) return null;
 
   return { kind: named ?? "script", text };
 }
@@ -198,14 +184,10 @@ export function check(root: string, options: CheckOptions = { judgeManaged: fals
   let managedSkipped = 0;
   const tracked = new Set(repositoryFiles(root, { untracked: false }));
   for (const relPath of repositoryFiles(root, { untracked: true })) {
-    if (!isJudged(relPath, skip)) {
-      continue;
-    }
+    if (!isJudged(relPath, skip)) continue;
 
     const source = shellSource(root, relPath, tracked);
-    if (source === null) {
-      continue;
-    }
+    if (source === null) continue;
 
     if (!options.judgeManaged && isManaged(source.text)) {
       managedSkipped += 1;

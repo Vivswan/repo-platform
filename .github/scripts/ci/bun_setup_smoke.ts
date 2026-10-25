@@ -10,16 +10,10 @@ const REPO_ROOT = resolve(import.meta.dir, "../../..");
 /** The previous minor's .0 always exists: every bun minor line starts at .0. */
 export function earlierRelease(version: string): string {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
-  if (match === null) {
-    throw new Error(`not a release version: '${version}'`);
-  }
+  if (match === null) throw new Error(`not a release version: '${version}'`);
   const [major, minor, patch] = match.slice(1).map(Number);
-  if (patch > 0) {
-    return `${major}.${minor}.${patch - 1}`;
-  }
-  if (minor > 0) {
-    return `${major}.${minor - 1}.0`;
-  }
+  if (patch > 0) return `${major}.${minor}.${patch - 1}`;
+  if (minor > 0) return `${major}.${minor - 1}.0`;
   throw new Error(`no release before ${version}`);
 }
 
@@ -94,19 +88,13 @@ function judge(): number {
   };
   console.log(JSON.stringify(reading, null, 2));
   const problems = smokeProblems(reading);
-  for (const problem of problems) {
-    error(`bun-setup smoke: ${problem}`);
-  }
+  for (const problem of problems) error(`bun-setup smoke: ${problem}`);
   return problems.length === 0 ? 0 : 1;
 }
 
 function main(argv: string[]): number {
-  if (argv.length === 1 && argv[0] === "plant") {
-    return plant();
-  }
-  if (argv.length === 1 && argv[0] === "judge") {
-    return judge();
-  }
+  if (argv.length === 1 && argv[0] === "plant") return plant();
+  if (argv.length === 1 && argv[0] === "judge") return judge();
   console.error("usage: bun_setup_smoke.ts plant|judge");
   return 2;
 }

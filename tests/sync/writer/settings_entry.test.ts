@@ -109,9 +109,7 @@ const CONFIG = (() => {
 
 function registration(text: string) {
   const read = parseRegistration(`${text}project: {name: Demo, slug: demo, description: Mine}\n`);
-  if ("errors" in read) {
-    throw new Error(read.errors.join("\n"));
-  }
+  if ("errors" in read) throw new Error(read.errors.join("\n"));
   return read.registration;
 }
 
@@ -134,9 +132,7 @@ function rendered(overrides: Partial<SettingsRenderInput> = {}): {
   doc: Record<string, unknown>;
 } {
   const result = renderSettings(input(overrides));
-  if ("held" in result) {
-    throw new Error(`held: ${result.held}`);
-  }
+  if ("held" in result) throw new Error(`held: ${result.held}`);
   return { text: result.content, doc: parseYaml(result.content) as Record<string, unknown> };
 }
 

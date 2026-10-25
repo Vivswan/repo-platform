@@ -67,9 +67,7 @@ export function namedModules(config: LayerSources): Module[] {
  *  reads. An empty document is an empty layer. */
 export function readLayer(text: string, where: string): Layer {
   const parsed = parseSettingsDoc(text);
-  if (parsed.isErr()) {
-    throw new Error(`${where}: ${parsed.error.reason.split("\n")[0]}`);
-  }
+  if (parsed.isErr()) throw new Error(`${where}: ${parsed.error.reason.split("\n")[0]}`);
   return { name: where, doc: parsed.value };
 }
 
@@ -86,9 +84,7 @@ export function loadLayer(path: string): Layer {
 export function readFleetLayer(text: string, where: string): Layer {
   const layer = readLayer(text, where);
   const judged = foldSettings([layer], where);
-  if ("refused" in judged) {
-    throw new Error(judged.refused);
-  }
+  if ("refused" in judged) throw new Error(judged.refused);
   return layer;
 }
 
@@ -113,13 +109,9 @@ export function labelClaims(entry: Record<string, unknown>): readonly string[] {
  *  plain list as the fleet writes them or the `{_undeclared, entries}`
  *  wrapper the fold leaves; none for an absent or opted-out section. */
 export function sectionEntries(doc: unknown, section: string): Record<string, unknown>[] {
-  if (!isMapping(doc)) {
-    return [];
-  }
+  if (!isMapping(doc)) return [];
   const declared = doc[section];
-  if (Array.isArray(declared)) {
-    return declared.filter(isMapping);
-  }
+  if (Array.isArray(declared)) return declared.filter(isMapping);
   if (isMapping(declared) && Array.isArray(declared.entries)) {
     return declared.entries.filter(isMapping);
   }
@@ -137,9 +129,7 @@ export function foldSettings(
   where: string,
 ): { settings: SettingsDoc; yaml: string } | { refused: string } {
   const merged = mergeSettings(layers, { source: where, layering: "deep", io: silentIo() });
-  if (merged.isErr()) {
-    return { refused: describeProblem(merged.error) };
-  }
+  if (merged.isErr()) return { refused: describeProblem(merged.error) };
   return { settings: merged.value.settings, yaml: merged.value.yaml };
 }
 
@@ -174,9 +164,7 @@ export function readLayers(config: LayerSources, tree: string): ReadLayers {
 
 export function loadLayers(config: LayerSources, tree: string): Map<string, Layer> {
   const { layers, problems } = readLayers(config, tree);
-  if (problems.length > 0) {
-    throw new Error(problems.join("\n"));
-  }
+  if (problems.length > 0) throw new Error(problems.join("\n"));
   return layers;
 }
 

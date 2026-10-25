@@ -15,16 +15,12 @@ const CONFIG_PATH = "release-please-config.json";
  *  Presence-gated, not module-gated: the file is a repo-owned starter, so
  *  it is the file, not the module selection, that can carry the pin. */
 export function checkReleasePlease(ctx: Context): Finding[] {
-  if (!ctx.files.includes(CONFIG_PATH)) {
-    return [];
-  }
+  if (!ctx.files.includes(CONFIG_PATH)) return [];
 
   const text = readFileSync(join(ctx.root, CONFIG_PATH), "utf-8");
   // A conflict-marked config is the conflict-marker check's report; parsing
   // it here would only add a second, noisier diagnostic for the same damage.
-  if (hasConflictMarker(text)) {
-    return [];
-  }
+  if (hasConflictMarker(text)) return [];
 
   let config: unknown;
   try {
@@ -37,26 +33,18 @@ export function checkReleasePlease(ctx: Context): Finding[] {
     ];
   }
 
-  if (!isMapping(config)) {
-    return [];
-  }
+  if (!isMapping(config)) return [];
 
   const pinned: string[] = [];
-  if ("release-as" in config) {
-    pinned.push("the top level");
-  }
+  if ("release-as" in config) pinned.push("the top level");
 
   if (isMapping(config.packages)) {
     for (const [name, pkg] of Object.entries(config.packages)) {
-      if (isMapping(pkg) && "release-as" in pkg) {
-        pinned.push(`package "${name}"`);
-      }
+      if (isMapping(pkg) && "release-as" in pkg) pinned.push(`package "${name}"`);
     }
   }
 
-  if (pinned.length === 0) {
-    return [];
-  }
+  if (pinned.length === 0) return [];
 
   return [
     error(

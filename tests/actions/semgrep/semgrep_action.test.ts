@@ -30,9 +30,7 @@ const sarifWith = (firstRunResults: object[]) => ({
 const drop = (sarif: object | null) => {
   const root = temp.dir("semgrep-drop-");
   const path = join(root, "semgrep.sarif");
-  if (sarif !== null) {
-    writeFileSync(path, JSON.stringify(sarif));
-  }
+  if (sarif !== null) writeFileSync(path, JSON.stringify(sarif));
   const run = boundedSpawnSync([process.execPath, SCRIPT], {
     env: { PATH: process.env.PATH ?? "", RUNNER_TEMP: root },
   });

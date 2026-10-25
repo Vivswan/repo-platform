@@ -76,9 +76,7 @@ function trackingLabelTuples(
       selected,
     );
   } catch (error) {
-    if (!(error instanceof PlanError)) {
-      throw error;
-    }
+    if (!(error instanceof PlanError)) throw error;
     return { held: error.problems.join("; ") };
   }
   const streams = selected.filter((m) => m.tracking_label !== undefined);
@@ -93,9 +91,7 @@ function trackingLabelTuples(
  *  wrapper; every top-level mapping is checked, so a section that gains a
  *  wrapper in a library bump cannot slip past the guard. */
 function layeringDirective(overlay: Layer, overlayPath: string): string | null {
-  if (!isMapping(overlay.doc)) {
-    return null;
-  }
+  if (!isMapping(overlay.doc)) return null;
   const doc = overlay.doc;
   const site =
     LAYERING_KEY in doc
@@ -103,9 +99,7 @@ function layeringDirective(overlay: Layer, overlayPath: string): string | null {
       : Object.entries(doc)
           .filter(([, value]) => isMapping(value) && LAYERING_KEY in value)
           .map(([section]) => `under ${section}`)[0];
-  if (site === undefined) {
-    return null;
-  }
+  if (site === undefined) return null;
   return (
     `the repository's ${overlayPath} declares ${LAYERING_KEY} ${site}; the fleet's list sections ` +
     "union by their key, and _remove: true on an entry drops the fleet's"
@@ -121,16 +115,12 @@ function layeringDirective(overlay: Layer, overlayPath: string): string | null {
 function trackingCollision(overlay: Layer, tracking: Label[], overlayPath: string): string | null {
   const claimed = new Map<string, string>();
   for (const entry of sectionEntries(overlay.doc, "labels")) {
-    for (const claim of labelClaims(entry)) {
-      claimed.set(claim, String(entry.name));
-    }
+    for (const claim of labelClaims(entry)) claimed.set(claim, String(entry.name));
   }
   for (const label of tracking) {
     for (const claim of labelClaims(label)) {
       const prior = claimed.get(claim);
-      if (prior === undefined) {
-        continue;
-      }
+      if (prior === undefined) continue;
       return (
         `the repository's ${overlayPath} declares label ${JSON.stringify(prior)}, one name to ` +
         `GitHub with the tracking label ${JSON.stringify(label.name)} (label names are ` +
@@ -152,15 +142,11 @@ export function renderSettings(input: SettingsRenderInput): SettingsRender {
   try {
     overlay = readLayer(input.overlay, input.overlayPath);
   } catch (error) {
-    if (!(error instanceof Error)) {
-      throw error;
-    }
+    if (!(error instanceof Error)) throw error;
     return { held: error.message };
   }
   const directive = layeringDirective(overlay, input.overlayPath);
-  if (directive !== null) {
-    return { held: directive };
-  }
+  if (directive !== null) return { held: directive };
   const visibility = declaredPrivate(overlay.doc);
   if (visibility === null) {
     return {
@@ -174,17 +160,11 @@ export function renderSettings(input: SettingsRenderInput): SettingsRender {
     loadOverrideLayer(join(input.tree, config.settings.override)),
   ];
   const fleetAlone = foldSettings(fleet, "the fleet settings layers");
-  if ("refused" in fleetAlone) {
-    throw new Error(fleetAlone.refused);
-  }
+  if ("refused" in fleetAlone) throw new Error(fleetAlone.refused);
   const tracking = trackingLabelTuples(input, reservedLabelNames(config, input.tree));
-  if ("held" in tracking) {
-    return tracking;
-  }
+  if ("held" in tracking) return tracking;
   const collision = trackingCollision(overlay, tracking, input.overlayPath);
-  if (collision !== null) {
-    return { held: collision };
-  }
+  if (collision !== null) return { held: collision };
   const folded = foldSettings(
     [
       ...fleet.slice(0, -1),
@@ -196,8 +176,6 @@ export function renderSettings(input: SettingsRenderInput): SettingsRender {
     ],
     `the render of ${input.overlayPath} with the fleet layers`,
   );
-  if ("refused" in folded) {
-    return { held: folded.refused };
-  }
+  if ("refused" in folded) return { held: folded.refused };
   return { content: header(input) + folded.yaml };
 }

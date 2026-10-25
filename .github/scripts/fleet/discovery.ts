@@ -67,9 +67,7 @@ export interface DiscoveredRepo {
 export const PRIVATE_DISPLAY = "a private repository";
 
 export function selectedLine(rows: DiscoveredRepo[], prefix: string, none: string): string {
-  if (rows.length === 0) {
-    return none;
-  }
+  if (rows.length === 0) return none;
   const publicSlugs = rows.filter((row) => !row.private).map((row) => row.repo);
   const hidden = rows.length - publicSlugs.length;
   const parts = [
@@ -110,9 +108,7 @@ const dispatchEvent = z.object({
 /** Read from the event payload on disk, never step env: the values may name a private repository
  * and its work, and the runner prints step env into the public log group. */
 function dispatchInputs(): { repo: string; branch: string; addModules: string } {
-  if (env("GITHUB_EVENT_PATH") === "") {
-    return { repo: "", branch: "", addModules: "" };
-  }
+  if (env("GITHUB_EVENT_PATH") === "") return { repo: "", branch: "", addModules: "" };
   const event = parseJsonWith(
     dispatchEvent,
     readFileSync(env("GITHUB_EVENT_PATH"), "utf-8"),
@@ -167,9 +163,7 @@ function replaceAllFoldingCase(text: string, needle: string, replacement: string
  * slugs instead of hiding anything. Substring on purpose: garbling an innocent embedding is
  * cosmetic, printing a private name is not. */
 export function scrubSlug(detail: string, slug: string, display: string): string {
-  if (display === slug) {
-    return detail;
-  }
+  if (display === slug) return detail;
   const scrubbed = replaceAllFoldingCase(detail, slug, display);
   return replaceAllFoldingCase(scrubbed, slug.split("/").pop() ?? slug, display);
 }

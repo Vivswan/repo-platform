@@ -960,9 +960,7 @@ describe("sync.ts over a registration with an empty description", () => {
     };
     expect(manifest.files["AGENTS.md"]).toBeUndefined();
     expect(manifest.files[HOOK]).toEqual({ class: "starter" });
-    for (const path of Object.keys(FLEET_LINKS)) {
-      expect(existsSync(join(target, path))).toBe(false);
-    }
+    for (const path of Object.keys(FLEET_LINKS)) expect(existsSync(join(target, path))).toBe(false);
   });
 
   test("the fleet's mirror of a held source fails the run, naming files.yml as the declaring document", () => {
@@ -1298,8 +1296,6 @@ describe("sync.ts over a target that excepts a path an earlier sync recorded", (
     const manifest = JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as {
       files: Record<string, unknown>;
     };
-    for (const path of excepted) {
-      expect(manifest.files[path]).toBeUndefined();
-    }
+    for (const path of excepted) expect(manifest.files[path]).toBeUndefined();
   });
 });

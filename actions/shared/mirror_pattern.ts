@@ -46,18 +46,12 @@ interface Walk {
 /** How the walk goes on at a name a `*` segment matched (the table on expandPattern): probed, riding literally from
  *  here, or not at all. */
 function matchedStep(walk: Walk, path: string, final: boolean): "probed" | "unprobed" | null {
-  if (pathProblem(path) !== null) {
-    return "unprobed";
-  }
+  if (pathProblem(path) !== null) return "unprobed";
 
   const standing = walk.probe.standing(path);
-  if (standing === null) {
-    return null;
-  }
+  if (standing === null) return null;
 
-  if (standing === "symlink") {
-    return final || !walk.probe.linksToFile(path) ? "unprobed" : null;
-  }
+  if (standing === "symlink") return final || !walk.probe.linksToFile(path) ? "unprobed" : null;
 
   const wanted = final ? "file" : "directory";
   return standing === wanted ? "probed" : null;
@@ -84,22 +78,16 @@ function walkSegment(walk: Walk, prefix: string, index: number, unprobed: boolea
     return;
   }
 
-  if (probe.standing(prefix) !== "directory") {
-    return;
-  }
+  if (probe.standing(prefix) !== "directory") return;
 
   const final = index === segments.length - 1;
   const names = segmentPattern(segment);
   for (const name of probe.list(prefix)) {
-    if (!names.test(name)) {
-      continue;
-    }
+    if (!names.test(name)) continue;
 
     const path = rel(name);
     const step = matchedStep(walk, path, final);
-    if (step !== null) {
-      walkSegment(walk, path, index + 1, step === "unprobed");
-    }
+    if (step !== null) walkSegment(walk, path, index + 1, step === "unprobed");
   }
 }
 
@@ -109,9 +97,7 @@ function walkSegment(walk: Walk, prefix: string, index: number, unprobed: boolea
  *    link matched by a `*` directory segment, not provably a file  -> rides literally
  *    link matched by a `*` directory segment, resolving to a file  -> skipped, like a file */
 export function expandPattern(probe: TreeProbe, pattern: string): string[] {
-  if (!pattern.includes("*")) {
-    return [pattern];
-  }
+  if (!pattern.includes("*")) return [pattern];
 
   const walk: Walk = { probe, segments: pattern.split("/"), out: [] };
   walkSegment(walk, "", 0, false);

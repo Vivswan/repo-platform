@@ -15,9 +15,7 @@ const scopeToken = /^[A-Za-z0-9._/-]+$/;
 
 const scopeOne = (parsed) => {
   const scope = parsed.scope ?? (/^\w*\(\)/.test(parsed.header ?? "") ? "" : null);
-  if (scope === null || scopeToken.test(scope)) {
-    return [true];
-  }
+  if (scope === null || scopeToken.test(scope)) return [true];
 
   return [
     false,

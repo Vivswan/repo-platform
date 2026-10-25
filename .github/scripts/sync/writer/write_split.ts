@@ -25,9 +25,7 @@ export function writeSplit(
 ): WriteOutcome {
   const regionBytes = Buffer.from(region, "utf-8");
   const found = probe(target, path);
-  if (found.kind === "link") {
-    return { change: "held", reason: LINK_IN_THE_WAY };
-  }
+  if (found.kind === "link") return { change: "held", reason: LINK_IN_THE_WAY };
   if (found.kind === "absent") {
     writeFile(target, path, regionBytes);
     return { change: "created" };
@@ -49,9 +47,7 @@ export function writeSplit(
     );
   }
   const previous = Buffer.from(slice.region, "latin1");
-  if (previous.equals(regionBytes)) {
-    return { change: "unchanged" };
-  }
+  if (previous.equals(regionBytes)) return { change: "unchanged" };
   writeFile(
     target,
     path,
@@ -61,8 +57,6 @@ export function writeSplit(
       Buffer.from(slice.below, "latin1"),
     ]),
   );
-  if (recorded !== null && sha256(previous) === recorded) {
-    return { change: "updated" };
-  }
+  if (recorded !== null && sha256(previous) === recorded) return { change: "updated" };
   return { change: "replaced local edits", replaced: previous.toString("utf-8") };
 }

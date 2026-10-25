@@ -58,9 +58,7 @@ function load(rel: string): Workflow {
  *  against this repository's workflows, whose own `$/` calls resolve against the workflows beside them. */
 function calledPath(uses: string, callerRoot: string): string | null {
   const local = LOCAL_CALL.exec(uses);
-  if (local !== null) {
-    return `${callerRoot}/${local[1]}`;
-  }
+  if (local !== null) return `${callerRoot}/${local[1]}`;
   return PLATFORM_CALL.exec(uses)?.[1] ?? null;
 }
 
@@ -71,13 +69,9 @@ const workflowFiles = (root: string) =>
 
 const lanesOf = (workflow: Workflow): [string, string][] => {
   const lanes: [string, string][] = [];
-  if (workflow.concurrency !== undefined) {
-    lanes.push(["workflow", workflow.concurrency.group]);
-  }
+  if (workflow.concurrency !== undefined) lanes.push(["workflow", workflow.concurrency.group]);
   for (const [id, job] of Object.entries(workflow.jobs)) {
-    if (job.concurrency !== undefined) {
-      lanes.push([`job '${id}'`, job.concurrency.group]);
-    }
+    if (job.concurrency !== undefined) lanes.push([`job '${id}'`, job.concurrency.group]);
   }
   return lanes;
 };
@@ -92,9 +86,7 @@ function deriveCalls(): Call[] {
     const caller = load(callerRel);
     for (const [callerJob, job] of Object.entries(caller.jobs)) {
       const calledRel = job.uses === undefined ? null : calledPath(job.uses, dirname(callerRel));
-      if (calledRel === null) {
-        continue;
-      }
+      if (calledRel === null) continue;
       const heldHere = new Set([
         ...held,
         ...[caller.concurrency?.group, job.concurrency?.group]
@@ -110,15 +102,11 @@ function deriveCalls(): Call[] {
         heldByChain: new Set<string>(),
       };
       bySite.set(site, known);
-      for (const group of heldHere) {
-        known.heldByChain.add(group);
-      }
+      for (const group of heldHere) known.heldByChain.add(group);
       visit(calledRel, [...chain, callerRel], heldHere);
     }
   };
-  for (const rel of CALLER_ROOTS.flatMap(workflowFiles)) {
-    visit(rel, [], new Set());
-  }
+  for (const rel of CALLER_ROOTS.flatMap(workflowFiles)) visit(rel, [], new Set());
   return [...bySite.values()];
 }
 
@@ -138,9 +126,7 @@ function overCeilingGaps({ site, ceiling, called }: Call): string[] {
   const gaps: string[] = [];
   for (const [calledJob, raw] of Object.entries(called.jobs)) {
     const grant = raw.permissions ?? called.permissions;
-    if (grant === undefined) {
-      continue;
-    }
+    if (grant === undefined) continue;
     if (!isMapping(grant)) {
       gaps.push(`${site} job '${calledJob}': grant is ${grant}, not a per-scope mapping`);
       continue;
@@ -157,9 +143,7 @@ function overCeilingGaps({ site, ceiling, called }: Call): string[] {
 
 function raiseTo(union: Record<string, string>, grant: Record<string, string>): void {
   for (const [scope, level] of Object.entries(grant)) {
-    if ((RANK[level] ?? Infinity) > (RANK[union[scope] ?? "none"] ?? -1)) {
-      union[scope] = level;
-    }
+    if ((RANK[level] ?? Infinity) > (RANK[union[scope] ?? "none"] ?? -1)) union[scope] = level;
   }
 }
 
@@ -180,9 +164,7 @@ function absorbGrants(
       continue;
     }
     const grant = job.permissions ?? workflow.permissions;
-    if (!isMapping(grant)) {
-      throw new Error(`${callerRel} job '${id}': grant is ${String(grant)}`);
-    }
+    if (!isMapping(grant)) throw new Error(`${callerRel} job '${id}': grant is ${String(grant)}`);
     raiseTo(union, grant);
   }
 }
@@ -233,9 +215,7 @@ function lanesReadingGithubWorkflow(): string[] {
   const findings: string[] = [];
   for (const rel of CALLER_ROOTS.flatMap(workflowFiles)) {
     const workflow = load(rel);
-    if (!JSON.stringify(workflow.on).includes("workflow_call")) {
-      continue;
-    }
+    if (!JSON.stringify(workflow.on).includes("workflow_call")) continue;
     for (const [where, group] of lanesOf(workflow)) {
       if (group.includes("github.workflow")) {
         findings.push(`${rel} ${where}: '${group}' reads github.workflow`);

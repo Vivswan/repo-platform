@@ -47,9 +47,7 @@ const PROJECT = "project: { name: Demo Project, slug: demo, description: A demo 
 
 function registration(text: string): Registration {
   const read = parseRegistration(`${text}\n${PROJECT}`);
-  if ("errors" in read) {
-    throw new Error(read.errors.join("\n"));
-  }
+  if ("errors" in read) throw new Error(read.errors.join("\n"));
   return read.registration;
 }
 
@@ -70,9 +68,7 @@ const problemsOf = (run: () => unknown): string[] => {
   try {
     run();
   } catch (error) {
-    if (error instanceof PlanError) {
-      return error.problems;
-    }
+    if (error instanceof PlanError) return error.problems;
     throw error;
   }
   return [];
@@ -200,11 +196,8 @@ describe("planCi", () => {
       ).toEqual([true, true, false, false]);
       expect(planCi(input("modules: []"), THURSDAY).weekly).toBe(false);
     } finally {
-      if (zone === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = zone;
-      }
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
     }
   });
 

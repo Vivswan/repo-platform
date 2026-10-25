@@ -59,9 +59,7 @@ const DOCS = `https://github.com/${PLATFORM_SLUG}/blob/main/docs/all-green.md#op
 
 export function labelOf(known: FleetSyncLabels, scope: FleetSyncScope): string {
   for (const [label, labelScope] of known) {
-    if (labelScope === scope) {
-      return label;
-    }
+    if (labelScope === scope) return label;
   }
   throw new Error(`no fleet-sync label names the ${scope} scope`);
 }
@@ -95,9 +93,7 @@ function noteFrame(known: FleetSyncLabels, note: Note): [lead: string, closing: 
 export function noteBody(paths: readonly string[], known: FleetSyncLabels, note: Note): string {
   const [lead, closing] = noteFrame(known, note);
   const listed = paths.slice(0, LISTED_PATHS).map((path) => `- \`${path}\``);
-  if (paths.length > LISTED_PATHS) {
-    listed.push(`- and ${paths.length - LISTED_PATHS} more`);
-  }
+  if (paths.length > LISTED_PATHS) listed.push(`- and ${paths.length - LISTED_PATHS} more`);
   return [MARKER, lead, "", ...listed, "", `${closing} Details: [all-green.md](${DOCS}).`, ""].join(
     "\n",
   );
@@ -158,9 +154,7 @@ export function plan(pr: PullRequest, known: FleetSyncLabels): Plan {
   const botOwnsPublic = own.includes(publicLabel) && pr.history.lastAddedBy === BOT_LOGIN;
   const withdraw: LabelAction = botOwnsPublic ? "remove" : "keep";
   const paths = [...new Set(pr.changed.filter(deliveredBySync))].sort();
-  if (paths.length === 0) {
-    return clear("no path here reaches the fleet through a sync", withdraw);
-  }
+  if (paths.length === 0) return clear("no path here reaches the fleet through a sync", withdraw);
   if (pr.base !== pr.defaultBranch) {
     return clear(`merges into ${pr.base}, not ${pr.defaultBranch}`, withdraw);
   }
@@ -172,9 +166,7 @@ export function plan(pr: PullRequest, known: FleetSyncLabels): Plan {
   if (directive.kind === "error") {
     return say(withdraw, paths, known, { kind: "refused", error: directive.error });
   }
-  if (botOwnsPublic) {
-    return say("keep", paths, known, { kind: "added" });
-  }
+  if (botOwnsPublic) return say("keep", paths, known, { kind: "added" });
   if (pr.history.removedBy !== null) {
     return say("keep", paths, known, { kind: "kept-off", by: pr.history.removedBy });
   }
@@ -207,9 +199,7 @@ export type LabelEvent = z.infer<typeof eventsPages>[number][number];
 export function labelHistory(events: readonly LabelEvent[], label: string): LabelHistory {
   const history: LabelHistory = { lastAddedBy: null, removedBy: null };
   for (const event of events) {
-    if (event.label?.name.toLowerCase() !== label) {
-      continue;
-    }
+    if (event.label?.name.toLowerCase() !== label) continue;
     const actor = event.actor?.login ?? null;
     if (event.event === "labeled") {
       history.lastAddedBy = actor;
@@ -248,17 +238,13 @@ function applyLabel(issue: string, publicLabel: string, action: LabelAction): st
 }
 
 function applyComment(repository: string, issue: string, wanted: Wanted): string {
-  if (wanted.kind === "leave") {
-    return `comment left as it is (${wanted.reason})`;
-  }
+  if (wanted.kind === "leave") return `comment left as it is (${wanted.reason})`;
   const comments = `${issue}/comments`;
   // startsWith, not includes: a reply quoting the comment carries the marker mid-text.
   const existing =
     readPages(commentsPages, comments).find((comment) => comment.body?.startsWith(MARKER)) ?? null;
   if (wanted.kind === "clear") {
-    if (existing === null) {
-      return `nothing to say (${wanted.reason})`;
-    }
+    if (existing === null) return `nothing to say (${wanted.reason})`;
     api(`repos/${repository}/issues/comments/${existing.id}`, "-X", "DELETE");
     return `removed the comment: ${wanted.reason}`;
   }
@@ -266,9 +252,7 @@ function applyComment(repository: string, issue: string, wanted: Wanted): string
     api(comments, "-X", "POST", "-f", `body=${wanted.body}`);
     return "posted the comment";
   }
-  if (existing.body === wanted.body) {
-    return "the comment is current";
-  }
+  if (existing.body === wanted.body) return "the comment is current";
   api(
     `repos/${repository}/issues/comments/${existing.id}`,
     "-X",

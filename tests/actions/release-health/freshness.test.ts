@@ -32,9 +32,7 @@ function git(repo: string, args: string[]): string {
     cwd: repo,
     env: { PATH: process.env.PATH, ...GIT_PINS },
   });
-  if (result.exitCode !== 0) {
-    throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
-  }
+  if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
   return result.stdout.trim();
 }
 

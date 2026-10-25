@@ -32,12 +32,8 @@ const SCRIPT = resolve(
 );
 
 function judge(dialect: Dialect, code: string, powershell: Map<string, Refusal[]>): Refusal[] {
-  if (dialect === "bash") {
-    return judgeBash(code);
-  }
-  if (dialect === "cmd") {
-    return judgeCmd(code);
-  }
+  if (dialect === "bash") return judgeBash(code);
+  if (dialect === "cmd") return judgeCmd(code);
   return powershell.get(code) ?? [];
 }
 

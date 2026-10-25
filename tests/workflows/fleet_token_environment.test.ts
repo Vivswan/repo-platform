@@ -42,9 +42,7 @@ const workflows = readdirSync(join(root, workflowsDir))
 
 /** Every string in the node, keys included, depth first. */
 function strings(node: unknown): string[] {
-  if (typeof node === "string") {
-    return [node];
-  }
+  if (typeof node === "string") return [node];
 
   if (typeof node === "object" && node !== null) {
     return Object.entries(node).flatMap(([key, value]) => [key, ...strings(value)]);
@@ -133,9 +131,7 @@ describe(`the ${SECRET} readers`, () => {
     expect(declaring).toEqual([]);
     const reachesEnvironment = (rel: string, seen = new Set<string>()): boolean => {
       const doc = workflows.find((workflow) => workflow.rel === rel)?.doc;
-      if (doc === undefined || seen.has(rel)) {
-        return false;
-      }
+      if (doc === undefined || seen.has(rel)) return false;
       seen.add(rel);
       return Object.values(doc.jobs).some(
         (job) =>

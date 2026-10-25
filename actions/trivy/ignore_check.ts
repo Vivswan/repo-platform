@@ -29,9 +29,7 @@ export interface IgnoreCheck {
 
 export function parseDate(value: unknown): Date | null {
   const text = value instanceof Date ? value.toISOString().slice(0, 10) : value;
-  if (typeof text !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    return null;
-  }
+  if (typeof text !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
 
   const date = new Date(`${text}T00:00:00Z`);
   return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== text ? null : date;
@@ -53,9 +51,7 @@ function entryVerdict(
   const problems: string[] = [];
   const id = typeof entry.id === "string" && entry.id !== "" ? entry.id : null;
   const name = id === null ? where : `${where} (${id})`;
-  if (id === null) {
-    problems.push(`${where}: id must be a non-empty string`);
-  }
+  if (id === null) problems.push(`${where}: id must be a non-empty string`);
 
   for (const key of Object.keys(entry)) {
     if (!(ENTRY_KEYS as readonly string[]).includes(key)) {
@@ -110,9 +106,7 @@ export function checkIgnoreFile(text: string, today: Date): IgnoreCheck {
 
   for (const section of SECTIONS) {
     const entries = data[section];
-    if (entries === undefined || entries === null) {
-      continue;
-    }
+    if (entries === undefined || entries === null) continue;
 
     if (!Array.isArray(entries)) {
       problems.push(`${section}: must be a list of entries`);
@@ -122,9 +116,7 @@ export function checkIgnoreFile(text: string, today: Date): IgnoreCheck {
     entries.forEach((entry, index) => {
       const verdict = entryVerdict(entry, `${section}[${index}]`, today);
       problems.push(...verdict.problems);
-      if (verdict.expired !== null) {
-        expired.push(verdict.expired);
-      }
+      if (verdict.expired !== null) expired.push(verdict.expired);
     });
   }
 
@@ -148,9 +140,7 @@ function main(): number {
 
   const today = new Date(new Date().toISOString().slice(0, 10));
   const { problems, expired } = checkIgnoreFile(readFileSync(IGNORE_FILE, "utf-8"), today);
-  for (const problem of problems) {
-    error(`${IGNORE_FILE}: ${problem}`, { file: IGNORE_FILE });
-  }
+  for (const problem of problems) error(`${IGNORE_FILE}: ${problem}`, { file: IGNORE_FILE });
 
   for (const name of expired) {
     warning(
@@ -158,9 +148,7 @@ function main(): number {
     );
   }
 
-  if (problems.length > 0) {
-    return 1;
-  }
+  if (problems.length > 0) return 1;
   setOutput("ignorefile", IGNORE_FILE);
   console.log(`${IGNORE_FILE}: every entry carries a statement and an expiry`);
   return 0;

@@ -14,9 +14,7 @@ export function versionNav(
   current: string,
   origin: string,
 ): NonNullable<ThemeConfig["nav"]> {
-  if (versions.length < 2) {
-    return [];
-  }
+  if (versions.length < 2) return [];
 
   return [
     {

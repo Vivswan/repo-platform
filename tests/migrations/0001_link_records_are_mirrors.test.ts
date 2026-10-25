@@ -37,9 +37,7 @@ function manifestOf(lines: string[]): string {
 function checkout(manifest: string | null): string {
   const root = temp.dir("migration-0001-");
   mkdirSync(join(root, ".github"));
-  if (manifest !== null) {
-    writeFileSync(join(root, MANIFEST_NAME), manifest);
-  }
+  if (manifest !== null) writeFileSync(join(root, MANIFEST_NAME), manifest);
   return root;
 }
 

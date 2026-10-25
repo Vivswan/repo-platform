@@ -38,9 +38,7 @@ export function fleetSyncLabels(overlay: unknown, where: string): FleetSyncLabel
   const labels = new Map<string, FleetSyncScope>();
   for (const entry of sectionEntries(overlay, "labels")) {
     const name = String(entry.name).toLowerCase();
-    if (!name.startsWith(LABEL_PREFIX)) {
-      continue;
-    }
+    if (!name.startsWith(LABEL_PREFIX)) continue;
     const scope = scopeSchema.safeParse(name.slice(LABEL_PREFIX.length));
     if (!scope.success) {
       throw new Error(
@@ -49,9 +47,7 @@ export function fleetSyncLabels(overlay: unknown, where: string): FleetSyncLabel
     }
     labels.set(name, scope.data);
   }
-  if (labels.size === 0) {
-    throw new Error(`${where}: no ${LABEL_PREFIX} label is declared`);
-  }
+  if (labels.size === 0) throw new Error(`${where}: no ${LABEL_PREFIX} label is declared`);
   return labels;
 }
 
@@ -67,18 +63,13 @@ export function readDirective(labels: readonly string[], known: FleetSyncLabels)
     .map((label) => label.toLowerCase())
     .filter((label) => label.startsWith(LABEL_PREFIX))
     .sort();
-  if (own.length === 0) {
-    return { kind: "none" };
-  }
+  if (own.length === 0) return { kind: "none" };
   const scopes: FleetSyncScope[] = [];
   const unknown: string[] = [];
   for (const label of own) {
     const scope = known.get(label);
-    if (scope === undefined) {
-      unknown.push(label);
-    } else {
-      scopes.push(scope);
-    }
+    if (scope === undefined) unknown.push(label);
+    else scopes.push(scope);
   }
   if (unknown.length > 0) {
     return {
@@ -123,18 +114,14 @@ function mergedPullLabels(repository: string, commit: string): string[] | null {
       `${endpoint}: ${merged.length} pull requests claim this commit as their merge (${merged.map((pull) => `#${pull.number}`).join(", ")}); refusing to pick one`,
     );
   }
-  if (merged.length === 0) {
-    return null;
-  }
+  if (merged.length === 0) return null;
   return merged[0].labels.map((label) => label.name);
 }
 
 /** The directive of the pull request that merged `commit`; none for a commit no pull request produced. */
 function commitDirective(repository: string, commit: string, known: FleetSyncLabels): Directive {
   const labels = mergedPullLabels(repository, commit);
-  if (labels === null) {
-    return { kind: "none" };
-  }
+  if (labels === null) return { kind: "none" };
   return readDirective(labels, known);
 }
 
@@ -156,23 +143,17 @@ function rangeScope(
       // that cannot be read must fail the leg, never quietly disarm it.
       return { failure: `${short}: ${error instanceof Error ? error.message : String(error)}` };
     }
-    if (directive.kind === "none") {
-      continue;
-    }
+    if (directive.kind === "none") continue;
     if (directive.kind === "error") {
       // Only the judged commit's labels are this run's fault; failing on an
       // older one would poison every range that starts below it.
-      if (commit === sha) {
-        return { failure: `${short}: ${directive.error}` };
-      }
+      if (commit === sha) return { failure: `${short}: ${directive.error}` };
       warning(
         `${short}: ${directive.error}; the commit contributes nothing to this range, and only the judged commit's labels fail this leg`,
       );
       continue;
     }
-    if (scope !== "all") {
-      scope = directive.scope;
-    }
+    if (scope !== "all") scope = directive.scope;
     notice(`fleet-sync label on ${short}: ${directive.scope}`);
   }
   return { scope };
@@ -191,9 +172,7 @@ function main(): number {
     return fail(error instanceof Error ? error.message : String(error));
   }
   const found = rangeScope(rangeCommits(cwd, sha, base), repository, sha, known);
-  if ("failure" in found) {
-    return fail(found.failure);
-  }
+  if ("failure" in found) return fail(found.failure);
   const { scope } = found;
   const range = rangeLabel(sha, base);
   if (scope === null) {

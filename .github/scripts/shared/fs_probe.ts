@@ -13,9 +13,7 @@ export function lstatOrNull(path: string): Stats | null {
   try {
     return lstatSync(path) ?? null;
   } catch (err) {
-    if (absentError(err)) {
-      return null;
-    }
+    if (absentError(err)) return null;
     throw err;
   }
 }

@@ -58,9 +58,7 @@ export function ownedPaths(
   const reserved = new Map<string, string>();
   const claim = (paths: Iterable<string>, what: string) => {
     for (const path of paths) {
-      if (!reserved.has(path)) {
-        reserved.set(path, what);
-      }
+      if (!reserved.has(path)) reserved.set(path, what);
     }
   };
   claim([...entries.map((entry) => entry.path), MANIFEST_NAME], "a path files.yml writes");
@@ -85,15 +83,11 @@ export function nestedWith(
   others: ReadonlySet<string> | ReadonlyMap<string, unknown>,
 ): Nesting | null {
   for (let dir = dirname(path); dir !== "." && dir !== "/"; dir = dirname(dir)) {
-    if (others.has(dir)) {
-      return { under: dir };
-    }
+    if (others.has(dir)) return { under: dir };
   }
 
   for (const other of others.keys()) {
-    if (other.startsWith(`${path}/`)) {
-      return { above: other };
-    }
+    if (other.startsWith(`${path}/`)) return { above: other };
   }
 
   return null;
@@ -104,31 +98,19 @@ export function nestedWith(
  *  of it, would unregister the repository. */
 export function mirrorPathProblem(path: string, owned: OwnedPaths): string | null {
   const problem = pathProblem(path);
-  if (problem !== null) {
-    return problem;
-  }
+  if (problem !== null) return problem;
 
-  if (path === REGISTRATION_PATH) {
-    return "is the registration itself";
-  }
+  if (path === REGISTRATION_PATH) return "is the registration itself";
 
-  if (path.startsWith(`${REGISTRATION_PATH}/`)) {
-    return "sits under the registration";
-  }
+  if (path.startsWith(`${REGISTRATION_PATH}/`)) return "sits under the registration";
 
-  if (path.toLowerCase().startsWith(".github/workflows/")) {
-    return "sits under .github/workflows/";
-  }
+  if (path.toLowerCase().startsWith(".github/workflows/")) return "sits under .github/workflows/";
 
   const what = owned.reserved.get(path);
-  if (what !== undefined) {
-    return `is ${what}`;
-  }
+  if (what !== undefined) return `is ${what}`;
 
   const nested = nestedWith(path, owned.reserved);
-  if (nested === null) {
-    return null;
-  }
+  if (nested === null) return null;
 
   return "under" in nested
     ? `sits under '${nested.under}', ${owned.reserved.get(nested.under)}`
@@ -179,9 +161,7 @@ function claimsByPath(
 ): Map<string, Claim[]> {
   const byPath = new Map<string, Claim[]>();
   for (const claim of claims) {
-    if (settled.has(claim.path)) {
-      continue;
-    }
+    if (settled.has(claim.path)) continue;
 
     byPath.set(claim.path, [...(byPath.get(claim.path) ?? []), claim]);
   }
@@ -209,9 +189,7 @@ function nestingPartners(
   texts: ReadonlySet<string>,
   every: ReadonlySet<string>,
 ): ReadonlySet<string> {
-  if (!texts.has(path)) {
-    return every;
-  }
+  if (!texts.has(path)) return every;
 
   // Two different texts are nested as written, never by what they can match (`tests/*/foo` and `tests/a*/foo/bar` pass
   // here and fail at the writer on any checkout with a `tests/a*` directory): their conflicts fall to sync time.
@@ -230,9 +208,7 @@ function pathVerdicts(
   nested: Nesting | null,
 ): string[] {
   const verdicts: string[] = [];
-  if (own !== null) {
-    verdicts.push(own);
-  }
+  if (own !== null) verdicts.push(own);
 
   if (nested !== null) {
     verdicts.push(
@@ -271,9 +247,7 @@ function spelledTwice(
 
 /** How a problem names the declaration: the literal target, the pattern itself, or the path a pattern expands to. */
 function describeTarget(path: string, target: string): string {
-  if (path !== target) {
-    return `the pattern expands to '${path}', which`;
-  }
+  if (path !== target) return `the pattern expands to '${path}', which`;
 
   return target.includes("*") ? "the pattern" : "the target";
 }
@@ -293,9 +267,7 @@ function claimProblems(
     const what = describeTarget(path, target);
     const own =
       target === path && twice.has(source) ? [...verdicts, "is declared more than once"] : verdicts;
-    for (const verdict of own) {
-      problems.push({ source, target, problem: `${what} ${verdict}` });
-    }
+    for (const verdict of own) problems.push({ source, target, problem: `${what} ${verdict}` });
   }
 
   return problems;
@@ -320,9 +292,7 @@ export function judgeClaims(
     const verdicts = pathVerdicts(claimants, pathProblem(path), nested);
     const twice = spelledTwice(path, claimants, texts);
     problems.push(...claimProblems(path, claimants, verdicts, twice));
-    if (verdicts.length === 0 && twice.size === 0) {
-      now.add(path);
-    }
+    if (verdicts.length === 0 && twice.size === 0) now.add(path);
   }
 
   return { problems, settled: now };
@@ -333,14 +303,10 @@ export function judgeClaims(
  *  is listed. */
 export function knownProbe(literals: ReadonlyMap<string, MirrorKind>): TreeProbe {
   const known = new Map<string, TreeEntry>();
-  for (const [path, kind] of literals) {
-    known.set(path, kind === "copy" ? "file" : "symlink");
-  }
+  for (const [path, kind] of literals) known.set(path, kind === "copy" ? "file" : "symlink");
 
   for (const path of literals.keys()) {
-    for (let dir = dirname(path); dir !== "."; dir = dirname(dir)) {
-      known.set(dir, "directory");
-    }
+    for (let dir = dirname(path); dir !== "."; dir = dirname(dir)) known.set(dir, "directory");
   }
 
   return {
@@ -399,11 +365,8 @@ export function mirrorDeclarationProblems(
 
     const what = isGlob(target) ? "pattern" : "target";
     const problem = target.includes("**") ? "uses '**'" : mirrorPathProblem(target, owned);
-    if (problem === null) {
-      clean.push({ source, target, kind });
-    } else {
-      problems.push({ source, target, problem: `the ${what} ${problem}` });
-    }
+    if (problem === null) clean.push({ source, target, kind });
+    else problems.push({ source, target, problem: `the ${what} ${problem}` });
   }
 
   const literals = clean.filter(({ target }) => !isGlob(target));
@@ -412,9 +375,7 @@ export function mirrorDeclarationProblems(
   const known = new Map([...owned.reserved, [REGISTRATION_PATH, "the registration"]]);
   const claims: Claim[] = literals.map((literal) => ({ ...literal, path: literal.target }));
   for (const declaration of clean) {
-    if (!isGlob(declaration.target)) {
-      continue;
-    }
+    if (!isGlob(declaration.target)) continue;
 
     const expanded = patternClaims(declaration, probe, known);
     problems.push(...expanded.problems);

@@ -11,9 +11,7 @@
 /** `tierRoots` are the versions' roots (themeConfig.docsSiteVersions links): the root tier's base prefixes every one
  *  of them, so the base prefix alone cannot tell its own pages from another version's. */
 function leavesTier(path: string, base: string, tierRoots: readonly string[]): boolean {
-  if (!path.startsWith(base)) {
-    return true;
-  }
+  if (!path.startsWith(base)) return true;
 
   return tierRoots.some((root) => root !== base && path.startsWith(root));
 }
@@ -36,9 +34,7 @@ export function tierRouteGuard(
 ): (to: string) => false | undefined {
   return (to) => {
     const { pathname } = new URL(to, "http://tier.invalid");
-    if (pathname === browser.here() || !leavesTier(pathname, base, tierRoots)) {
-      return undefined;
-    }
+    if (pathname === browser.here() || !leavesTier(pathname, base, tierRoots)) return undefined;
     browser.leave(to);
     return false;
   };

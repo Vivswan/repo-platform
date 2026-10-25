@@ -24,9 +24,7 @@ export function parseArgs(argv: string[]): {
     options: { "with-checkout": { type: "boolean" } },
     allowPositionals: true,
   });
-  if (positionals.length !== 1) {
-    throw new Error(`expected one <dest>, got ${positionals.length}`);
-  }
+  if (positionals.length !== 1) throw new Error(`expected one <dest>, got ${positionals.length}`);
   return {
     withCheckout: values["with-checkout"] ?? false,
     dest: positionals[0],

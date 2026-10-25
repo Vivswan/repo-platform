@@ -115,9 +115,7 @@ function render(
       overlayPath,
       owner: facts.slug.owner,
     });
-    if ("held" in rendered) {
-      return rendered;
-    }
+    if ("held" in rendered) return rendered;
     return {
       content: rendered.content,
       record: { class: "managed", hash: sha256(rendered.content) },
@@ -133,9 +131,7 @@ function render(
     };
   }
   const body = text();
-  if (typeof body !== "string") {
-    return body;
-  }
+  if (typeof body !== "string") return body;
   if (entry.class === "split") {
     const markers = regionMarkers(entry.region);
     return {
@@ -176,9 +172,7 @@ function writeOverFlip(
 ): Written | { missing: string[] } {
   if (keepReason(options.target, entry.path, records) !== null) {
     const outcome = rendered.write(null);
-    if ("missing" in outcome) {
-      return outcome;
-    }
+    if ("missing" in outcome) return outcome;
     return {
       outcome,
       record: rendered.record,
@@ -194,9 +188,7 @@ function writeOverFlip(
   }
   removeFile(options.target, entry.path);
   const outcome = rendered.write(null);
-  if ("missing" in outcome) {
-    return outcome;
-  }
+  if ("missing" in outcome) return outcome;
   return {
     outcome: outcome.change === "created" ? { change: "updated" } : outcome,
     record: rendered.record,
@@ -217,9 +209,7 @@ function writeEntry(
   records: Records,
 ): Written | { missing: string[] } | { held: string } {
   const rendered = render(options, config, entry, modules, facts);
-  if ("missing" in rendered || "held" in rendered) {
-    return rendered;
-  }
+  if ("missing" in rendered || "held" in rendered) return rendered;
   const previous = readRecord(records[entry.path]);
   const recorded = previous === null || previous.class === "starter" ? null : previous.hash;
   const flipped =
@@ -233,9 +223,7 @@ function writeEntry(
     }
   }
   const outcome = rendered.write(recorded);
-  if ("missing" in outcome) {
-    return outcome;
-  }
+  if ("missing" in outcome) return outcome;
   return { outcome, record: rendered.record, content: rendered.content };
 }
 
@@ -280,9 +268,7 @@ interface Writes {
 /** A carried record never overwrites one this run wrote. */
 function carry(run: Run, path: string): void {
   const record = readRecord(run.records[path]);
-  if (record !== null && !run.next.has(path)) {
-    run.next.set(path, record);
-  }
+  if (record !== null && !run.next.has(path)) run.next.set(path, record);
 }
 
 /** A stale record is retired only when its path is one the writer could have written; one whose path no files.yml entry
@@ -323,25 +309,19 @@ function judgeRecords(
   const released: RetireRow[] = [];
   let unreadable = 0;
   for (const [path, entry] of Object.entries(run.records)) {
-    if (path === MANIFEST_NAME) {
-      continue;
-    }
+    if (path === MANIFEST_NAME) continue;
     const record = readRecord(entry);
     if (record === null) {
       unreadable++;
       continue;
     }
     // A mirror record is mirrors.ts's to carry or drop: `except` retires no record, it drops the target from the declarations.
-    if (record.class === "mirror") {
-      continue;
-    }
+    if (record.class === "mirror") continue;
     if (excepted.has(path)) {
       released.push(release(path, run.records));
       continue;
     }
-    if (entryPaths.has(path) || record.class === "starter") {
-      continue;
-    }
+    if (entryPaths.has(path) || record.class === "starter") continue;
     markStale(run, path, declared, stale);
   }
   if (unreadable > 0) {
@@ -358,9 +338,7 @@ function heldRow(entry: FileEntry, detail: string): WrittenRow {
 function noteMissingPlaceholders(notes: string[], missing: readonly string[]): string {
   for (const name of missing) {
     const note = `placeholder \`{{${name}}}\` has no value: set ${PLACEHOLDER_SOURCE[name as PlaceholderName]} in ${REGISTRATION_PATH}`;
-    if (!notes.includes(note)) {
-      notes.push(note);
-    }
+    if (!notes.includes(note)) notes.push(note);
   }
   const tokens = missing.map((name) => `{{${name}}}`).join(", ");
   return `no value for ${tokens}`;
@@ -369,11 +347,8 @@ function noteMissingPlaceholders(notes: string[], missing: readonly string[]): s
 function recordWrite(run: Run, entry: FileEntry, result: Written, writes: Writes): void {
   const { outcome, record, content } = result;
   // A held path keeps its previous record: the file is still that write.
-  if (outcome.change === "held") {
-    carry(run, entry.path);
-  } else {
-    run.next.set(entry.path, record);
-  }
+  if (outcome.change === "held") carry(run, entry.path);
+  else run.next.set(entry.path, record);
   writes.rows.push({
     path: entry.path,
     class: entry.class,
@@ -405,9 +380,7 @@ function recordWrite(run: Run, entry: FileEntry, result: Written, writes: Writes
   // A held file is not one this sync wrote, so no mirror copies it.
   if ((entry.class === "managed" || entry.class === "split") && outcome.change !== "held") {
     const found = probe(run.options.target, entry.path);
-    if (found.kind === "file") {
-      writes.written.set(entry.path, found.bytes);
-    }
+    if (found.kind === "file") writes.written.set(entry.path, found.bytes);
   }
 }
 
@@ -471,9 +444,7 @@ function mirrorWrites(run: Run, writes: Writes, owned: OwnedPaths): MirrorRow[] 
     owned,
     run.records,
   );
-  for (const [path, record] of mirrors.records) {
-    run.next.set(path, record);
-  }
+  for (const [path, record] of mirrors.records) run.next.set(path, record);
   for (const { path, before, after } of mirrors.replaced) {
     writes.replaced.push({ path, diff: unifiedDiff(path, before, after) });
   }
@@ -494,9 +465,7 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
     upstream: await fetchUpstream(upstreamRefs(config.files), options.upstream),
   };
   const { records, commit: recorded, problem } = readRecords(options.target);
-  if (problem !== null) {
-    notes.push(`${problem}; every existing file is judged as unrecorded`);
-  }
+  if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
   const manifestBefore = existingFile(options.target, MANIFEST_NAME);
   // Read before the writes: a recorded commit the checkout's history lacks fails the run before a byte moves. `files.yml`
   // sits at the platform root, which is the checkout the diff reads.
@@ -530,9 +499,7 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
   const owned = ownedPaths(config, selection, stale);
   const retired = [...retire(options.target, stale, records), ...released];
   for (const row of retired) {
-    if (row.outcome === "held") {
-      carry(run, row.path);
-    }
+    if (row.outcome === "held") carry(run, row.path);
   }
 
   const writes = writeEntries(run, entries);
@@ -590,9 +557,7 @@ async function main(argv: string[]): Promise<number> {
       upstream: flags.upstream ?? RAW_HOST,
     });
   } catch (error) {
-    if (error instanceof MirrorFailure) {
-      fail(error.lines);
-    }
+    if (error instanceof MirrorFailure) fail(error.lines);
     fail(error instanceof Error ? error.message : String(error));
   }
   if (flags.summary !== undefined) {
@@ -602,6 +567,4 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-if (import.meta.main) {
-  process.exit(await main(process.argv.slice(2)));
-}
+if (import.meta.main) process.exit(await main(process.argv.slice(2)));

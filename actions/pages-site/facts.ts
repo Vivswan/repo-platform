@@ -132,13 +132,9 @@ function looksLikeHost(text: string): boolean {
  *  anything that is neither a URL nor a host reads as no homepage. */
 function homepageUrl(value: unknown): string | null {
   const text = nonEmptyString(value);
-  if (text === null) {
-    return null;
-  }
+  if (text === null) return null;
 
-  if (/^https?:\/\//i.test(text)) {
-    return httpUrl(text);
-  }
+  if (/^https?:\/\//i.test(text)) return httpUrl(text);
 
   return looksLikeHost(text) ? httpUrl(`https://${text}`) : null;
 }
@@ -146,13 +142,9 @@ function homepageUrl(value: unknown): string | null {
 /** Topics as one comma-separated string or a YAML list, the two shapes
  *  the settings apply accepts. */
 function topicEntries(value: unknown): unknown[] {
-  if (Array.isArray(value)) {
-    return value;
-  }
+  if (Array.isArray(value)) return value;
 
-  if (typeof value === "string") {
-    return value.split(",");
-  }
+  if (typeof value === "string") return value.split(",");
 
   return [];
 }
@@ -176,9 +168,7 @@ function parseYamlRecord(text: string): Record<string, unknown> | null {
 /** Null for a missing block too: older tags predate the settings file. */
 function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null {
   const text = read(SETTINGS_PATH);
-  if (text === null) {
-    return null;
-  }
+  if (text === null) return null;
 
   const settings = parseYamlRecord(text);
   return settings !== null && isMapping(settings.repository) ? settings.repository : null;
@@ -197,13 +187,9 @@ function readIdentity(read: FactsReader): Identity {
 function firstHeading(lines: string[]): string | null {
   for (const [index, line] of lines.entries()) {
     const atx = /^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
-    if (atx !== null) {
-      return atx[1];
-    }
+    if (atx !== null) return atx[1];
 
-    if (line.trim() !== "" && /^\s*(=+|-+)\s*$/.test(lines[index + 1] ?? "")) {
-      return line.trim();
-    }
+    if (line.trim() !== "" && /^\s*(=+|-+)\s*$/.test(lines[index + 1] ?? "")) return line.trim();
   }
 
   return null;
@@ -236,9 +222,7 @@ function knownLicense(title: string): string | null {
 function licenseName(text: string): string {
   const lines = text.split("\n").slice(0, LICENSE_HEAD_LINES);
   const heading = firstHeading(lines);
-  if (heading !== null) {
-    return knownLicense(heading) ?? heading;
-  }
+  if (heading !== null) return knownLicense(heading) ?? heading;
 
   const [opening, next] = paragraphs(lines);
   const candidates = [opening?.join(" "), next?.[0]].filter((entry) => entry !== undefined);

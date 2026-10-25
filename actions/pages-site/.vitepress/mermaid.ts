@@ -33,9 +33,7 @@ function inCodeGroup(tokens: Token[], idx: number): boolean {
     if (tokens[i].type === CODE_GROUP_CLOSE) {
       closed += 1;
     } else if (tokens[i].type === CODE_GROUP_OPEN) {
-      if (closed === 0) {
-        return true;
-      }
+      if (closed === 0) return true;
       closed -= 1;
     }
   }
@@ -54,16 +52,12 @@ export function mermaidRule(md: MarkdownRenderer): void {
     ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
   md.renderer.rules.fence = (tokens, idx, options, env, self) => {
     const token = tokens[idx];
-    if (!MERMAID_INFO.test(token.info.trim())) {
-      return installed(tokens, idx, options, env, self);
-    }
+    if (!MERMAID_INFO.test(token.info.trim())) return installed(tokens, idx, options, env, self);
 
     const classes = [MERMAID_CLASS];
     if (inCodeGroup(tokens, idx)) {
       classes.push("vp-block");
-      if (ACTIVE_MARKER.test(token.info)) {
-        classes.push("active");
-      }
+      if (ACTIVE_MARKER.test(token.info)) classes.push("active");
     }
 
     const source = md.utils.escapeHtml(token.content.replace(/\n$/, ""));

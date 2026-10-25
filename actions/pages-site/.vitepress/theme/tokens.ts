@@ -331,9 +331,7 @@ export function modeValues(mode: Mode): Map<TokenName, string> {
   for (const group of Object.values(MODE_TOKENS)) {
     for (const [name, perMode] of Object.entries(group) as [TokenName, ModeValues][]) {
       const value = perMode[mode];
-      if (value !== undefined) {
-        values.set(name, value);
-      }
+      if (value !== undefined) values.set(name, value);
     }
   }
 

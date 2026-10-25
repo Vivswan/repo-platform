@@ -245,9 +245,7 @@ describe("the CLI", () => {
       ...overrides,
     };
     for (const [name, value] of Object.entries(env)) {
-      if (value === undefined) {
-        delete env[name];
-      }
+      if (value === undefined) delete env[name];
     }
     const proc = boundedSpawnSync(["bun", script], { env });
     return {

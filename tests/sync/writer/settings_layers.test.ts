@@ -41,9 +41,7 @@ const fleetLayers = (s: Selection) =>
   layerPaths(CONFIG, s).map((rel) => loadLayer(join(TREE, rel)));
 const fleetFold = (s: Selection): SettingsDoc => {
   const folded = foldSettings(fleetLayers(s), "the fleet layers");
-  if ("refused" in folded) {
-    throw new Error(folded.refused);
-  }
+  if ("refused" in folded) throw new Error(folded.refused);
   return folded.settings;
 };
 const rulesets = (s: Selection) => sectionEntries(fleetFold(s), "rulesets");
@@ -262,9 +260,7 @@ test("the fleet layers with the override, for every module subset and visibility
   for (const [stack, paths] of stacks) {
     const layers = paths.map((rel) => loadLayer(join(TREE, rel)));
     const folded = foldSettings([...layers, override], "the fleet fold");
-    if ("refused" in folded) {
-      throw new Error(`${stack}: ${folded.refused}`);
-    }
+    if ("refused" in folded) throw new Error(`${stack}: ${folded.refused}`);
   }
   expect(stacks.size).toBeGreaterThan(1);
 });
@@ -409,9 +405,7 @@ describe("foldSettings", () => {
       yaml: expect.any(String),
     });
     expect(folded).not.toHaveProperty("refused");
-    if ("yaml" in folded) {
-      expect(folded.yaml).not.toContain("_remove");
-    }
+    if ("yaml" in folded) expect(folded.yaml).not.toContain("_remove");
   });
 
   // The one pin of the merge dialect against the library: a semantic change in a bump would otherwise reach the
@@ -645,9 +639,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
       [...privateFleet, readLayer(overlayText, "r"), loadOverrideLayer(OVERRIDE)],
       "f",
     );
-    if ("refused" in folded) {
-      throw new Error(folded.refused);
-    }
+    if ("refused" in folded) throw new Error(folded.refused);
     const main = sectionEntries(folded.settings, "rulesets").find((r) => r.name === "main");
     return ((main?.rules ?? []) as Record<string, unknown>[]).map((r) => r.type);
   };
@@ -738,9 +730,7 @@ describe("the github-pages environment", () => {
   test("a repository overlay declaring its own environment keeps github-pages beside it", () => {
     const overlay = readLayer("environments:\n  - name: mine\n    wait_timer: 5\n", "overlay");
     const folded = foldSettings([...fleetLayers(selection({ modules: ["site"] })), overlay], "f");
-    if ("refused" in folded) {
-      throw new Error(folded.refused);
-    }
+    if ("refused" in folded) throw new Error(folded.refused);
     expect(folded.settings.environments).toEqual([
       ...(fleetFold(selection({ modules: ["site"] })).environments as unknown[]),
       { name: "mine", wait_timer: 5 },

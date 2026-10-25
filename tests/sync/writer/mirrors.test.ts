@@ -50,19 +50,13 @@ function treeState(root: string): Record<string, Standing> {
   const state: Record<string, Standing> = {};
   const walk = (dir: string) => {
     const names = readdirSync(join(root, dir)).sort();
-    if (names.length === 0 && dir !== "") {
-      state[dir] = { emptyDir: true };
-    }
+    if (names.length === 0 && dir !== "") state[dir] = { emptyDir: true };
     for (const name of names) {
       const rel = dir === "" ? name : `${dir}/${name}`;
       const stat = lstatSync(join(root, rel));
-      if (stat.isSymbolicLink()) {
-        state[rel] = linkTo(readlinkSync(join(root, rel)));
-      } else if (stat.isDirectory()) {
-        walk(rel);
-      } else {
-        state[rel] = file(readFileSync(join(root, rel), "utf-8"));
-      }
+      if (stat.isSymbolicLink()) state[rel] = linkTo(readlinkSync(join(root, rel)));
+      else if (stat.isDirectory()) walk(rel);
+      else state[rel] = file(readFileSync(join(root, rel), "utf-8"));
     }
   };
   walk("");
@@ -102,9 +96,7 @@ function failuresOf(run: () => unknown): MirrorProblem[] | null {
   try {
     run();
   } catch (error) {
-    if (error instanceof MirrorFailure) {
-      return error.failures;
-    }
+    if (error instanceof MirrorFailure) return error.failures;
     throw error;
   }
   return null;
@@ -431,9 +423,7 @@ describe("applyMirrors", () => {
       symlinkSync("../outside/locked/x.md", join(root, "skills/denied"));
     }
     const before = treeState(root);
-    if (denied) {
-      chmodSync(join(root, "outside/locked"), 0o000);
-    }
+    if (denied) chmodSync(join(root, "outside/locked"), 0o000);
     let failures: MirrorProblem[] | null;
     try {
       failures = failuresOf(() =>
@@ -453,9 +443,7 @@ describe("applyMirrors", () => {
         ),
       );
     } finally {
-      if (denied) {
-        chmodSync(join(root, "outside/locked"), 0o755);
-      }
+      if (denied) chmodSync(join(root, "outside/locked"), 0o755);
     }
     const linkAbove = (pattern: string, path: string, dir: string) =>
       expands("A.md", pattern, path, `sits under '${dir}', a symbolic link`);

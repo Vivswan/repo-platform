@@ -14,9 +14,7 @@ export type Integrity =
  *  as an empty findings file) is absent. */
 function reportText(path: string): string | null {
   try {
-    if (!lstatSync(path).isFile()) {
-      return null;
-    }
+    if (!lstatSync(path).isFile()) return null;
 
     return readFileSync(path, "utf8").replace(/\n+$/, "");
   } catch {
@@ -97,9 +95,7 @@ export function readVerdict(path: string): Integrity {
     return none;
   }
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return none;
-  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return none;
 
   const record = parsed as Record<string, unknown>;
   const shape = (...keys: string[]): boolean =>

@@ -131,9 +131,7 @@ function run(scenario: Scenario): Outcome {
   const stubbedGit = stubbedGitLines(scenario, shas);
   if (stubbedGit.length > 0) {
     const real = Bun.which("git");
-    if (real === null) {
-      throw new Error("git is not on PATH");
-    }
+    if (real === null) throw new Error("git is not on PATH");
     writeFileSync(
       join(bin, "git"),
       ["#!/usr/bin/env bash", ...stubbedGit, `exec ${JSON.stringify(real)} "$@"`, ""].join("\n"),
@@ -178,13 +176,9 @@ function run(scenario: Scenario): Outcome {
           env: fixtureGitEnv(),
         },
       );
-      if (probe.exitCode === 0) {
-        return probe.stdout.trimEnd();
-      }
+      if (probe.exitCode === 0) return probe.stdout.trimEnd();
       // --verify --quiet exits 1 for an absent ref; anything else is a failed look, never an absence.
-      if (probe.exitCode === 1) {
-        return "";
-      }
+      if (probe.exitCode === 1) return "";
       throw new Error(
         `git rev-parse ${TAG} in origin failed (exit ${probe.exitCode}): ${probe.stderr}`,
       );
@@ -319,9 +313,7 @@ describe("move_stable.ts behavior (real git)", () => {
     const r = run(scenario);
     expect(r.exitCode).toBe(exitCode);
     expect(r.output).toContain(message);
-    if (not !== undefined) {
-      expect(r.output).not.toContain(not);
-    }
+    if (not !== undefined) expect(r.output).not.toContain(not);
     expect(r.outputs).toEqual({});
     expect(r.originTag()).toBe(scenario.tag === undefined ? "" : r[scenario.tag]);
   });

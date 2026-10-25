@@ -17,9 +17,7 @@ import { REPO_ROOT } from "../shared/action_step";
 
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
 const config = parseFilesConfig(read("files.yml"));
-if (config.settings === null) {
-  throw new Error("files.yml declares no settings layers");
-}
+if (config.settings === null) throw new Error("files.yml declares no settings layers");
 const settings = config.settings;
 
 function layerLabelNames(rel: string): string[] {

@@ -237,6 +237,16 @@ describe("the rules, per record kind and construct", () => {
       ["5: all-or-none", "5: blank-line-between-members"],
     ],
     [
+      "a comment between `static` and a static block's brace is the member's (a method's doc, so no shape asked), and the packed member below is the finding",
+      "class C {\n  static /* Initializes the class. */ {}\n  x = 1;\n}\n",
+      ["3: blank-line-between-members"],
+    ],
+    [
+      "control: a comment inside an arrow's parenthesized expression body is code, never the constant's",
+      "const A = (n: number) => (\n  // Calculate the result.\n  n + 1\n);\nconst B = 2;\n",
+      [],
+    ],
+    [
       "an enum member runs to its comma: a comment before the comma on a later line is the member's, so a finding, and the next is bare and packed",
       "enum E {\n  A\n  /* A. */,\n  B,\n}\n",
       ["3: one-line-comment", "4: all-or-none", "4: blank-line-between-members"],
@@ -406,9 +416,7 @@ describe("the CLI", () => {
       stepNamed(loadAction("actions/check-member-shape/action.yml"), stepName).if,
     );
     const value = /steps\.check\.outputs\.report == '([a-z]+)'/.exec(gate)?.[1];
-    if (value === undefined) {
-      throw new Error(`no report gate in ${gate}`);
-    }
+    if (value === undefined) throw new Error(`no report gate in ${gate}`);
     return value;
   };
   const POSTED = gateValue("Post the findings as a sticky PR comment");

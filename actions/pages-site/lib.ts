@@ -70,17 +70,13 @@ export interface Tier {
 
 export function validateRelPath(value: string, what: string): void {
   const problem = relPathProblem(value);
-  if (problem !== null) {
-    throw new Error(`${what} '${value}' ${problem}`);
-  }
+  if (problem !== null) throw new Error(`${what} '${value}' ${problem}`);
 }
 
 function judged(problem: (value: string) => string | null) {
   return z.string().superRefine((value, ctx) => {
     const message = problem(value);
-    if (message !== null) {
-      ctx.addIssue({ code: "custom", message });
-    }
+    if (message !== null) ctx.addIssue({ code: "custom", message });
   });
 }
 
@@ -105,9 +101,7 @@ const siteConfigSchema: z.ZodType<SiteConfigJson> = z
       )
       .superRefine((roots, ctx) => {
         const message = includeListProblem(roots);
-        if (message !== null) {
-          ctx.addIssue({ code: "custom", message });
-        }
+        if (message !== null) ctx.addIssue({ code: "custom", message });
       }),
     link_rot_label: oneLine,
     link_rot_color: oneLine,
@@ -115,9 +109,7 @@ const siteConfigSchema: z.ZodType<SiteConfigJson> = z
   })
   .superRefine((config, ctx) => {
     const message = includeWithoutDocsProblem(config.docs_path, config.include);
-    if (message !== null) {
-      ctx.addIssue({ code: "custom", message, path: ["include"] });
-    }
+    if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
   });
 
 /** Parse the config input (a JSON object); every issue is reported, one line each, as the plan's readers spell them. */

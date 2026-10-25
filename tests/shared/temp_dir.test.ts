@@ -121,9 +121,7 @@ describe("tempDirs", () => {
       const r = runProbe(body, flags, env);
       expectOutcome(r, { exitCode, fixtureSurvives: false });
       expect(r.inner !== undefined).toBe(inner === true);
-      if (r.inner !== undefined) {
-        expect(existsSync(r.inner)).toBe(false);
-      }
+      if (r.inner !== undefined) expect(existsSync(r.inner)).toBe(false);
     },
   );
 

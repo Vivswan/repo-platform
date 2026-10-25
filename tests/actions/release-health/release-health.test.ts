@@ -103,9 +103,7 @@ function apiAnswer(fixture: Fixture, args: string[]): string {
   }
   if (args[1] === `repos/${REPO}/pulls/12`) {
     const sha = fixture.prHeads?.shift();
-    if (sha === undefined) {
-      throw new Error("gh api failed (1): HTTP 502: Bad Gateway");
-    }
+    if (sha === undefined) throw new Error("gh api failed (1): HTTP 502: Bad Gateway");
     return JSON.stringify(sha === null ? {} : { head: { sha } });
   }
   if (args.some((arg) => arg.includes("/pulls"))) {
@@ -491,11 +489,8 @@ describe("findReleasePr", () => {
   ])("$reason", async ({ pages, expected }) => {
     const { run, calls } = fakeGh({ commitPulls: pages });
     const lookup = findReleasePr(run, REPO, "abc123");
-    if (expected === "rejects") {
-      await expect(lookup).rejects.toThrow("#4, #6");
-    } else {
-      expect(await lookup).toEqual(expected);
-    }
+    if (expected === "rejects") await expect(lookup).rejects.toThrow("#4, #6");
+    else expect(await lookup).toEqual(expected);
     expect(calls).toEqual([COMMIT_PULLS_CALL]);
   });
 });

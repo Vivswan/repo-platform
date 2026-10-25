@@ -29,9 +29,7 @@ function run(
   if (files.verdict !== undefined) {
     writeFileSync(join(runnerTemp, VERDICT_FILE), `${files.verdict}\n`);
   }
-  if (files.rows !== undefined) {
-    writeFileSync(join(runnerTemp, ROWS_FILE), files.rows);
-  }
+  if (files.rows !== undefined) writeFileSync(join(runnerTemp, ROWS_FILE), files.rows);
   const result = boundedSpawnSync(["bun", SCRIPT, mode], {
     env: {
       PATH: process.env.PATH,

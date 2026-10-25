@@ -67,9 +67,7 @@ function unwrapped(condition: string | undefined): string {
  *  parenthesis splits nothing), each as its source text; a condition that is not an `&&` chain is one clause. */
 function clausesOf(condition: string | undefined): string[] {
   const source = unwrapped(condition);
-  if (source === "") {
-    return [""];
-  }
+  if (source === "") return [""];
   const { tokens: lexed, tree } = parseExpression(source);
   const conjuncts =
     tree instanceof Logical && tree.operator.type === TokenType.AND ? tree.args.length : 1;
@@ -80,16 +78,10 @@ function clausesOf(condition: string | undefined): string[] {
   let depth = 0;
   let from = tokens[0];
   for (const [at, token] of tokens.entries()) {
-    if (token.type === TokenType.LEFT_PAREN) {
-      depth += 1;
-    }
-    if (token.type === TokenType.RIGHT_PAREN) {
-      depth -= 1;
-    }
+    if (token.type === TokenType.LEFT_PAREN) depth += 1;
+    if (token.type === TokenType.RIGHT_PAREN) depth -= 1;
     const splits = depth === 0 && token.type === TokenType.AND && conjuncts > 1;
-    if (!splits && at < tokens.length - 1) {
-      continue;
-    }
+    if (!splits && at < tokens.length - 1) continue;
     const to = splits ? tokens[at - 1] : token;
     clauses.push(source.slice(offset(from.range.start), offset(to.range.end)));
     from = tokens[at + 1];
@@ -103,9 +95,7 @@ function clausesOf(condition: string | undefined): string[] {
 /** A context access's dotted path (bracket access with a literal index included), or undefined for any other
  *  expression. */
 function pathOf(expr: Expr): string | undefined {
-  if (expr instanceof ContextAccess) {
-    return expr.name.lexeme;
-  }
+  if (expr instanceof ContextAccess) return expr.name.lexeme;
 
   if (expr instanceof IndexAccess && expr.index instanceof Literal) {
     return `${pathOf(expr.expr)}.${expr.index.literal.coerceString()}`;
@@ -121,9 +111,7 @@ function headRefPrefixes(expr: Expr): string[] {
     const testsHeadRef =
       expr.functionName.lexeme.toLowerCase() === "startswith" &&
       pathOf(subject) === "github.head_ref";
-    if (testsHeadRef && prefix instanceof Literal) {
-      return [prefix.literal.coerceString()];
-    }
+    if (testsHeadRef && prefix instanceof Literal) return [prefix.literal.coerceString()];
   }
 
   return subexpressions(expr).flatMap(headRefPrefixes);
@@ -262,9 +250,7 @@ describe("fleet.yml", () => {
     const SCHEDULE_ALONE = new Set(["trivy-nightly"]);
     const sideOf = (job: Job): string => {
       const clauses = clausesOf(job.if);
-      if (clauses.includes(ONLY_ON_SCHEDULE)) {
-        return "schedule only";
-      }
+      if (clauses.includes(ONLY_ON_SCHEDULE)) return "schedule only";
 
       if (
         clauses.includes(SKIP_ON_SCHEDULE) ||
@@ -276,13 +262,9 @@ describe("fleet.yml", () => {
       return "every event";
     };
     const expectedSide = (name: string): string => {
-      if (SCHEDULE_RUNS.has(name)) {
-        return "every event";
-      }
+      if (SCHEDULE_RUNS.has(name)) return "every event";
 
-      if (SCHEDULE_ALONE.has(name)) {
-        return "schedule only";
-      }
+      if (SCHEDULE_ALONE.has(name)) return "schedule only";
 
       return "never on the schedule";
     };
@@ -300,35 +282,25 @@ describe("fleet.yml", () => {
   // A wire to another name is a swap nothing else catches, so it fails here too.
   const actionOutputs = (uses: string): string[] | null => {
     const name = platformAction(uses);
-    if (name === undefined) {
-      return null;
-    }
+    if (name === undefined) return null;
     const path = join(ROOT, "actions", name, "action.yml");
-    if (!existsSync(path)) {
-      return [];
-    }
+    if (!existsSync(path)) return [];
     const action = parseYaml(readFileSync(path, "utf8")) as { outputs?: Record<string, unknown> };
     return Object.keys(action.outputs ?? {});
   };
   /** Why `steps.<id>.outputs.<name>` inside `job` resolves to nothing, or null when a declared output sets it. */
   const stepOutputGap = (job: Job, id: string, output: string): string | null => {
     const step = job.steps?.find((candidate) => candidate.id === id);
-    if (step === undefined) {
-      return `no step '${id}'`;
-    }
+    if (step === undefined) return `no step '${id}'`;
     const declared = step.uses === undefined ? null : actionOutputs(step.uses);
-    if (declared === null) {
-      return null;
-    }
+    if (declared === null) return null;
     return declared.includes(output) ? null : `'${step.uses}' declares no output '${output}'`;
   };
   /** Why `needs.<job>.outputs.<name>` resolves to nothing, or null when the job wires it to a step that sets it; a call
    *  job's outputs are the called workflow's. */
   const jobOutputGap = (workflow: Workflow, jobName: string, output: string): string | null => {
     const job = workflow.jobs[jobName];
-    if (job === undefined) {
-      return `no job '${jobName}'`;
-    }
+    if (job === undefined) return `no job '${jobName}'`;
     if (job.uses !== undefined) {
       const called = /^\$\/\.github\/workflows\/(.+)$/.exec(job.uses)?.[1];
       return called === undefined
@@ -336,9 +308,7 @@ describe("fleet.yml", () => {
         : callOutputGap(loadWorkflow(called), output);
     }
     const value = job.outputs?.[output];
-    if (value === undefined) {
-      return `job '${jobName}' declares no output '${output}'`;
-    }
+    if (value === undefined) return `job '${jobName}' declares no output '${output}'`;
     const wired = /^\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
     if (wired === null) {
       return `job '${jobName}' output '${output}' is ${value}, not one step output`;
@@ -351,13 +321,9 @@ describe("fleet.yml", () => {
   /** Why a caller's `needs.<call>.outputs.<name>` resolves to nothing, or null when the called workflow wires it through. */
   const callOutputGap = (called: Workflow, output: string): string | null => {
     const value = called.on.workflow_call.outputs?.[output]?.value;
-    if (value === undefined) {
-      return `workflow_call declares no output '${output}'`;
-    }
+    if (value === undefined) return `workflow_call declares no output '${output}'`;
     const wired = /^\$\{\{ jobs\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
-    if (wired === null) {
-      return `workflow_call output '${output}' is ${value}, not one job output`;
-    }
+    if (wired === null) return `workflow_call output '${output}' is ${value}, not one job output`;
     if (wired[2] !== output) {
       return `workflow_call output '${output}' is wired to jobs.${wired[1]}.outputs.${wired[2]}, another name`;
     }
@@ -406,9 +372,7 @@ describe("fleet.yml", () => {
     );
     for (const output of skeletonReads) {
       const gap = callOutputGap(fleet, output);
-      if (gap !== null) {
-        gaps.push(`skeleton reads needs.platform.outputs.${output}: ${gap}`);
-      }
+      if (gap !== null) gaps.push(`skeleton reads needs.platform.outputs.${output}: ${gap}`);
     }
     for (const [jobName, job] of Object.entries(fleet.jobs)) {
       gaps.push(...jobReadGaps(jobName, job));

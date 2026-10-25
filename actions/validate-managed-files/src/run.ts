@@ -46,15 +46,11 @@ function checkFindings(short: string, exitCode: number, output: string): string 
 }
 
 function judgeCheck(result: RunResult, short: string): Integrity {
-  if (result.stderr !== "") {
-    console.error(result.stderr);
-  }
+  if (result.stderr !== "") console.error(result.stderr);
 
   const output = result.stdout.replace(/\n+$/, "");
   const exit = result.exit;
-  if (exit.kind === "exited" && exit.code === 0) {
-    return { kind: "clean" };
-  }
+  if (exit.kind === "exited" && exit.code === 0) return { kind: "clean" };
 
   if (exit.kind === "exited" && (exit.code === 1 || exit.code === 2) && output !== "") {
     return { kind: "findings", findings: checkFindings(short, exit.code, output) };
@@ -151,13 +147,9 @@ function hygiene(paths: Paths): Integrity {
 }
 
 function merge(a: Integrity, b: Integrity): Integrity {
-  if (a.kind === "not-judged" || b.kind === "clean") {
-    return a;
-  }
+  if (a.kind === "not-judged" || b.kind === "clean") return a;
 
-  if (b.kind === "not-judged" || a.kind === "clean") {
-    return b;
-  }
+  if (b.kind === "not-judged" || a.kind === "clean") return b;
 
   return { kind: "findings", findings: `${a.findings}\n\n${b.findings}` };
 }
@@ -180,13 +172,9 @@ async function main(): Promise<number> {
   const verdict = merge(judged, hygiene(paths));
   writeVerdict(paths.verdictFile, verdict);
   // The writer's output is captured into the verdict, never printed, so this is the log's one line for the whole.
-  if (verdict.kind === "not-judged") {
-    error(verdict.reason);
-  } else if (verdict.kind === "clean") {
-    console.log("Verdict: clean.");
-  } else {
-    console.log("Verdict: findings; the report step carries them to the step summary.");
-  }
+  if (verdict.kind === "not-judged") error(verdict.reason);
+  else if (verdict.kind === "clean") console.log("Verdict: clean.");
+  else console.log("Verdict: findings; the report step carries them to the step summary.");
 
   return verdict.kind === "clean" ? 0 : 1;
 }

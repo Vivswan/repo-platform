@@ -120,9 +120,7 @@ describe("resolveBase", () => {
   test("a git that errors on the resolve question is fatal at the leg, never read as an absent commit", () => {
     // The stub errors on the base's resolve alone and hands every other call to the real git.
     const real = Bun.which("git");
-    if (real === null) {
-      throw new Error("git is not on PATH");
-    }
+    if (real === null) throw new Error("git is not on PATH");
     const bin = join(root, "erroring-git-bin");
     mkdirSync(bin, { recursive: true });
     writeFileSync(

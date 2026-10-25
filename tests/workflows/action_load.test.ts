@@ -37,9 +37,7 @@ const ci = parseYaml(readFileSync(join(REPO_ROOT, ".github/workflows/ci.yml"), "
 function runsOn(job: Job, step: Step): string {
   const advisory = (owner: Job | Step) =>
     owner["continue-on-error"] !== undefined && owner["continue-on-error"] !== false;
-  if (advisory(job) || advisory(step)) {
-    return "under continue-on-error";
-  }
+  if (advisory(job) || advisory(step)) return "under continue-on-error";
   const narrowing = [job.if, step.if]
     .map((condition) => (condition ?? "").trim())
     .filter((condition) => condition !== "" && condition !== "always()")
@@ -53,9 +51,7 @@ test("every shipped action is run, so loaded, by a gating job's step on every pu
   for (const job of gating) {
     for (const step of ci.jobs[job].steps ?? []) {
       const dir = /^\$\/(actions\/.+)$/.exec(step.uses ?? "")?.[1];
-      if (dir !== undefined) {
-        runs.get(dir)?.add(runsOn(ci.jobs[job], step));
-      }
+      if (dir !== undefined) runs.get(dir)?.add(runsOn(ci.jobs[job], step));
     }
   }
   const judged = Object.fromEntries(

@@ -199,9 +199,7 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 
 // Registered before tempDirs() so Chrome is gone before its profile directory is removed.
 afterAll(async () => {
-  if (browser !== undefined) {
-    await closeChrome(browser);
-  }
+  if (browser !== undefined) await closeChrome(browser);
   server?.stop(true);
 }, harnessBound(15_000));
 const temp = tempDirs();
@@ -217,9 +215,7 @@ beforeAll(async () => {
   const result = buildSite(workspace, REPOSITORY, runner, {
     CONFIG: siteConfig({ site_title: "Fixture" }),
   });
-  if (result.exitCode !== 0) {
-    throw new Error(`the fixture build failed: ${describeRun(result)}`);
-  }
+  if (result.exitCode !== 0) throw new Error(`the fixture build failed: ${describeRun(result)}`);
   server = serve(runner.site, "/fixture-repo");
   browser = await launchChrome(temp.dir("mermaid-labels-chrome-"));
 }, TEST_TIMEOUT_MS);

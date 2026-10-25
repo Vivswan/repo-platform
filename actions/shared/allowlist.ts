@@ -29,9 +29,7 @@ export function parseAllowlist(text: string, file: string, reasonRule: string): 
   const failures: string[] = [];
   text.split("\n").forEach((raw, index) => {
     const line = raw.trim();
-    if (line === "" || line.startsWith("#")) {
-      return;
-    }
+    if (line === "" || line.startsWith("#")) return;
 
     const hash = line.indexOf("#");
     const path = (hash === -1 ? line : line.slice(0, hash)).trim();

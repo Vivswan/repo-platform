@@ -107,14 +107,10 @@ async function judge(commit: Commit): Promise<number> {
 
 async function main(): Promise<number> {
   const title = process.env.PR_TITLE ?? "";
-  if (title !== "") {
-    return report(await commitlint(title));
-  }
+  if (title !== "") return report(await commitlint(title));
   // Every commit gets its verdict before the step fails.
   let status = 0;
-  for (const commit of judged()) {
-    status = Math.max(status, await judge(commit));
-  }
+  for (const commit of judged()) status = Math.max(status, await judge(commit));
 
   return status;
 }

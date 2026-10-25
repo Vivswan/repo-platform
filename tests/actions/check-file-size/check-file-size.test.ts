@@ -288,9 +288,7 @@ describe("judgeFile line width", () => {
     ["markdown prose has no width cap", "f.md", wide(1000), []],
   ])("%s", (_name, path, text, expected) => {
     const kind = classify(path);
-    if (kind === null) {
-      throw new Error(`${path} has no kind`);
-    }
+    if (kind === null) throw new Error(`${path} has no kind`);
     expect(judgeFile(path, kind, text)).toEqual(expected);
   });
 });
@@ -319,9 +317,7 @@ describe("judgeFile comment blocks", () => {
         };
   const judgeComments = (path: string, text: string, expected: Row[]): void => {
     const kind = classify(path);
-    if (kind === null) {
-      throw new Error(`${path} has no kind`);
-    }
+    if (kind === null) throw new Error(`${path} has no kind`);
     expect(judgeFile(path, kind, text)).toEqual(
       expected.map((row) => commentFinding(path, kind, row)),
     );
@@ -789,9 +785,7 @@ describe("the CLI", () => {
   const gateValue = (stepName: string): string => {
     const gate = String(stepNamed(loadAction("actions/check-file-size/action.yml"), stepName).if);
     const value = /steps\.check\.outputs\.report == '([a-z]+)'/.exec(gate)?.[1];
-    if (value === undefined) {
-      throw new Error(`no report gate in ${gate}`);
-    }
+    if (value === undefined) throw new Error(`no report gate in ${gate}`);
     return value;
   };
   const POSTED = gateValue("Post the findings as a sticky PR comment");

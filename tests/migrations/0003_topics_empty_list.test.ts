@@ -34,9 +34,7 @@ const SILENT = { exitCode: 0, stdout: "", stderr: "" };
 function checkout(overlay: string | null): string {
   const root = temp.dir("migration-0003-");
   mkdirSync(join(root, ".github"));
-  if (overlay !== null) {
-    writeFileSync(join(root, OVERLAY), overlay);
-  }
+  if (overlay !== null) writeFileSync(join(root, OVERLAY), overlay);
   return root;
 }
 
@@ -98,9 +96,7 @@ describe("0003-topics-empty-list", () => {
   ])("$reason is a no-op", ({ overlay }) => {
     const root = checkout(overlay);
     expect(run(root)).toEqual(SILENT);
-    if (overlay !== null) {
-      expect(readFileSync(join(root, OVERLAY), "utf-8")).toBe(overlay);
-    }
+    if (overlay !== null) expect(readFileSync(join(root, OVERLAY), "utf-8")).toBe(overlay);
   });
 
   // The edit must read back as the original with `[]` in the value's place, or the line is a human's: a block scalar

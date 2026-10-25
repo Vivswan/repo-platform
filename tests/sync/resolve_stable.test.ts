@@ -110,9 +110,7 @@ function run(scenario: Scenario): Outcome {
   }
   if (scenario.gitErrorsOn !== undefined || scenario.mainAdvancesAfterTagFetch === true) {
     const real = Bun.which("git");
-    if (real === null) {
-      throw new Error("git is not on PATH");
-    }
+    if (real === null) throw new Error("git is not on PATH");
     // The advance lands the instant the tag fetch returns: the narrowest window between the resolver's two fetches.
     const advanceMain = `if [ "$1" = fetch ] && [[ "$*" == *${TAG}* ]]; then ${JSON.stringify(real)} "$@"; rc=$?; ${JSON.stringify(real)} -C ${JSON.stringify(origin)} update-ref refs/heads/main ${m3}; exit $rc; fi`;
     const stub =
@@ -215,9 +213,7 @@ describe("resolve_build.ts behavior (real git)", () => {
     ({ scenario, says, ghCalls }) => {
       const r = run(scenario);
       expect(r.exitCode).toBe(1);
-      for (const line of says) {
-        expect(r.output).toContain(line);
-      }
+      for (const line of says) expect(r.output).toContain(line);
       expect(r.output).not.toContain("refusing to guess");
       expect(r.ghCalls).toHaveLength(ghCalls);
       expect(r.outputs).toEqual({});

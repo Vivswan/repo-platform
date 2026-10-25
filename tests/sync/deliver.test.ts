@@ -232,12 +232,8 @@ describe("deliver.ts", () => {
     const disarmAt = result.sequence.findIndex((line) => line.includes("--disable-auto"));
     const closeAt = result.sequence.findIndex((line) => line.startsWith("gh pr close"));
     expect(disarmAt >= 0).toBe(pr.includes("merge"));
-    if (disarmAt >= 0) {
-      expect(closeAt).toBeGreaterThan(disarmAt);
-    }
-    if (close !== null) {
-      expect(result.log).toContain("closed the obsolete sync pull request #12");
-    }
+    if (disarmAt >= 0) expect(closeAt).toBeGreaterThan(disarmAt);
+    if (close !== null) expect(result.log).toContain("closed the obsolete sync pull request #12");
   });
 
   // GitHub's `gh pr list --head` matches a fork's branch of the same name, so a fork could impersonate the sync PR:
@@ -366,13 +362,9 @@ describe("deliver.ts", () => {
       expect(body).toContain(`build \`${BUILD}\``);
       expect(body).toContain(REPORT.trimEnd());
       expect(body.includes("Dispatched with `add_modules=")).toBe(line !== undefined);
-      if (line !== undefined) {
-        expect(body).toContain(line);
-      }
+      if (line !== undefined) expect(body).toContain(line);
       expect(calls(result.gh, "pr", "merge").map((argv) => argv.slice(3))).toEqual(merge);
-      if (log !== null) {
-        expect(result.log).toContain(log);
-      }
+      if (log !== null) expect(result.log).toContain(log);
       expect(result.log).not.toContain(PAT);
       expect(body).not.toContain(PAT);
       expect(result.summary).toBe("");
@@ -499,9 +491,7 @@ describe("deliver.ts", () => {
         "refs/heads/automation/repo-platform",
       );
     }
-    for (const text of issue) {
-      expect(result.issueBody).toContain(text);
-    }
+    for (const text of issue) expect(result.issueBody).toContain(text);
   });
 
   // The incoming revision may need review, so an armed PR is disarmed before the branch moves under it, and the
@@ -570,14 +560,10 @@ describe("deliver.ts", () => {
       const create = result.gh.find((argv) => argv[4] === "POST");
       expect(create?.slice(1, 5)).toEqual(["api", `repos/${TARGET}/issues`, "--method", "POST"]);
       expect(create).toContain(`title=${FAILURE_ISSUE_TITLE}`);
-      for (const line of says) {
-        expect(result.issueBody).toContain(line);
-      }
+      for (const line of says) expect(result.issueBody).toContain(line);
       expect(calls(result.git, "commit")).toEqual([]);
       expect(calls(result.git, "push")).toEqual([]);
-      if (!gitAsked) {
-        expect(result.git).toEqual([]);
-      }
+      if (!gitAsked) expect(result.git).toEqual([]);
     },
   );
 
@@ -857,21 +843,12 @@ describe("boundedReport", () => {
     const bounded = boundedReport(report, cap);
     expect(bounded.length).toBeLessThanOrEqual(cap);
     expect(bounded.startsWith(head)).toBe(true);
-    if (typeof tail === "string") {
-      expect(bounded.endsWith(tail)).toBe(true);
-    } else {
-      expect(bounded).toMatch(new RegExp(`${tail.source}$`));
-    }
-    for (const text of present) {
-      expect(bounded).toContain(text);
-    }
-    for (const text of absent) {
-      expect(bounded).not.toContain(text);
-    }
+    if (typeof tail === "string") expect(bounded.endsWith(tail)).toBe(true);
+    else expect(bounded).toMatch(new RegExp(`${tail.source}$`));
+    for (const text of present) expect(bounded).toContain(text);
+    for (const text of absent) expect(bounded).not.toContain(text);
     expect(omitted(bounded)).toHaveLength(1);
-    if (accounted !== undefined) {
-      expect(omitted(bounded)).toEqual([accounted(bounded)]);
-    }
+    if (accounted !== undefined) expect(omitted(bounded)).toEqual([accounted(bounded)]);
   });
 
   // Cross-file with report.ts: the section split on "\n### " and the REVIEW_HEADING and REPLACED_HEADING
@@ -900,9 +877,7 @@ describe("boundedReport", () => {
     expect(report.length).toBeGreaterThan(BODY_CAP);
     const bounded = boundedReport(report);
     expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
-    for (const reason of holdReasons(outcome)) {
-      expect(bounded).toContain(`- ${reason}\n`);
-    }
+    for (const reason of holdReasons(outcome)) expect(bounded).toContain(`- ${reason}\n`);
     for (const row of outcome.written) {
       expect(bounded).toContain(`| \`${row.path}\` | managed | updated |`);
     }

@@ -81,9 +81,7 @@ export function splitLines(content: string): Line[] {
     }
   }
 
-  if (start < content.length) {
-    out.push({ text: content.slice(start), end: content.length });
-  }
+  if (start < content.length) out.push({ text: content.slice(start), end: content.length });
 
   return out;
 }
@@ -107,16 +105,12 @@ export interface RegionSlice {
 export function splitManagedRegion(content: string, markers: RegionMarkers): RegionSlice | null {
   const lines = splitLines(content);
   const begin = lines.findIndex((line) => isMarkerLine(line.text, markers.begin));
-  if (begin === -1) {
-    return null;
-  }
+  if (begin === -1) return null;
 
   const end = lines.findIndex(
     (line, index) => index > begin && isMarkerLine(line.text, markers.end),
   );
-  if (end === -1) {
-    return null;
-  }
+  if (end === -1) return null;
 
   const regionStart = begin === 0 ? 0 : lines[begin - 1].end;
   return {
@@ -132,9 +126,7 @@ export function cleanManagedRegion(content: string, markers: RegionMarkers): Reg
   const clean = [markers.begin, markers.end].every(
     (marker) => markerLineCount(content, marker) === 1 && substringCount(content, marker) === 1,
   );
-  if (!clean) {
-    return null;
-  }
+  if (!clean) return null;
 
   return splitManagedRegion(content, markers);
 }

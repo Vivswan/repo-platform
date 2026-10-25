@@ -157,9 +157,7 @@ function grouped(pages: LevelPage[]): LevelPage[] {
     }
 
     const run = [page];
-    if (page.meta.group !== null) {
-      byGroup.set(page.meta.group, run);
-    }
+    if (page.meta.group !== null) byGroup.set(page.meta.group, run);
     runs.push(run);
   }
 

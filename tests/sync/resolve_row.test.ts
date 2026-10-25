@@ -371,12 +371,8 @@ describe("the matrix rows", () => {
     { name: "beef", repo: BEEF, how: "its raw digest spells it" },
     { name: "include", repo: INCLUDE, how: "the matrix's structural word" },
   ])("a private repository named $name ($how) is spelled nowhere in the matrix", ({ repo }) => {
-    if (repo === BEEF) {
-      expect(keyOf(BEEF).replaceAll("~", "")).toContain("beef");
-    }
-    for (const form of maskForms(repo)) {
-      expect(text).not.toContain(form);
-    }
+    if (repo === BEEF) expect(keyOf(BEEF).replaceAll("~", "")).toContain("beef");
+    for (const form of maskForms(repo)) expect(text).not.toContain(form);
   });
 
   // The general property behind the two names above, cross-file with shared/mask.ts: no piece between the matrix's

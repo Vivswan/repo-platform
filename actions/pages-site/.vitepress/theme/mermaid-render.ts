@@ -28,9 +28,7 @@ function directChild(mount: HTMLElement, className: string): HTMLElement | null 
  *  replaces the previous diagram or error rather than stacking one more. */
 function ensureChild(mount: HTMLElement, tag: "div" | "p", className: string): HTMLElement {
   const found = directChild(mount, className);
-  if (found !== null) {
-    return found;
-  }
+  if (found !== null) return found;
 
   const made = document.createElement(tag);
   made.className = className;
@@ -58,9 +56,7 @@ const FACE_DEADLINE_MS = 3_000;
 // when the pass starts, and mermaid would measure every label in the fallback face and draw it in the real one.
 function faceOrDeadline(font: string, text: string): Promise<void> {
   const fonts: FontFaceSet | undefined = document.fonts;
-  if (fonts === undefined) {
-    return Promise.resolve();
-  }
+  if (fonts === undefined) return Promise.resolve();
 
   return new Promise((resolve) => {
     const deadline = setTimeout(resolve, FACE_DEADLINE_MS);
@@ -83,9 +79,7 @@ async function themedMermaid(
   try {
     const mermaid = await loadMermaid();
     await face;
-    if (run !== generation) {
-      return null;
-    }
+    if (run !== generation) return null;
 
     mermaid.initialize({
       startOnLoad: false,
@@ -97,13 +91,9 @@ async function themedMermaid(
     return mermaid;
   } catch (error) {
     loading = undefined;
-    if (run !== generation) {
-      return null;
-    }
+    if (run !== generation) return null;
 
-    for (const mount of mounts) {
-      fail(mount, error);
-    }
+    for (const mount of mounts) fail(mount, error);
 
     return null;
   }
@@ -115,9 +105,7 @@ export async function renderAll(dark: boolean): Promise<void> {
   const run = ++generation;
   const mounts = [...document.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS}`)];
   closeZoomOutside(mounts);
-  if (mounts.length === 0) {
-    return;
-  }
+  if (mounts.length === 0) return;
 
   const sources = mounts.map(
     (mount) => directChild(mount, MERMAID_SOURCE_CLASS)?.textContent ?? "",
@@ -129,9 +117,7 @@ export async function renderAll(dark: boolean): Promise<void> {
     sources.join(""),
   );
   const mermaid = await themedMermaid(run, themeVariables, face, mounts);
-  if (mermaid === null) {
-    return;
-  }
+  if (mermaid === null) return;
 
   for (const [index, mount] of mounts.entries()) {
     try {
@@ -139,9 +125,7 @@ export async function renderAll(dark: boolean): Promise<void> {
         `fleet-mermaid-${run}-${index}`,
         sources[index],
       );
-      if (run !== generation) {
-        return;
-      }
+      if (run !== generation) return;
 
       const diagram = ensureChild(mount, "div", MERMAID_DIAGRAM_CLASS);
       diagram.innerHTML = svg;
@@ -150,9 +134,7 @@ export async function renderAll(dark: boolean): Promise<void> {
       attachZoom(mount, diagram);
       mount.dataset.state = "rendered";
     } catch (error) {
-      if (run !== generation) {
-        return;
-      }
+      if (run !== generation) return;
       fail(mount, error);
     }
   }

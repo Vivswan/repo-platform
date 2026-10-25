@@ -52,30 +52,20 @@ const HASH_RE = /^[0-9a-f]{64}$/;
 /** retire.ts and mirrors.ts judge through this too, so no path is held or vouched for on a record the writer could not carry; check.ts runs
  *  this writer over a copy of the target, so a shape refused here is the target's validate-managed-files finding. */
 export function readRecord(entry: ManifestEntryShape | undefined): ManifestRecord | null {
-  if (entry === undefined || !isRecordedClass(entry.class)) {
-    return null;
-  }
+  if (entry === undefined || !isRecordedClass(entry.class)) return null;
 
-  if (strayFields(RECORD_FIELDS[entry.class], entry).length > 0) {
-    return null;
-  }
+  if (strayFields(RECORD_FIELDS[entry.class], entry).length > 0) return null;
 
-  if (entry.class === "starter") {
-    return { class: "starter" };
-  }
+  if (entry.class === "starter") return { class: "starter" };
 
   const hash = entry.hash;
-  if (typeof hash !== "string" || !HASH_RE.test(hash)) {
-    return null;
-  }
+  if (typeof hash !== "string" || !HASH_RE.test(hash)) return null;
 
   switch (entry.class) {
     case "managed":
       return { class: "managed", hash };
     case "mirror":
-      if (!("kind" in entry)) {
-        return { class: "mirror", hash };
-      }
+      if (!("kind" in entry)) return { class: "mirror", hash };
       return entry.kind === "symlink" ? { class: "mirror", kind: "symlink", hash } : null;
     case "split": {
       const grammar = knownGrammar(entry.grammar);
@@ -112,13 +102,9 @@ export function readRecords(target: string): {
   problem: string | null;
 } {
   const bytes = existingFile(target, MANIFEST_NAME);
-  if (bytes === null) {
-    return { records: recordsOf(), commit: null, problem: null };
-  }
+  if (bytes === null) return { records: recordsOf(), commit: null, problem: null };
   const parsed = parseManifestFiles(bytes.toString("utf-8"));
-  if (parsed.problem !== null) {
-    return refused(parsed.problem);
-  }
+  if (parsed.problem !== null) return refused(parsed.problem);
   const commit = parsed.files[MANIFEST_NAME]?.commit;
   if (typeof commit !== "string" || !COMMIT_RE.test(commit)) {
     return refused("names no full 40-hex commit in its own entry");
@@ -142,12 +128,8 @@ const COMMENT =
 
 /** Code-unit order, as `<` compares strings: a locale compare would move case and accents, and the fleet diffs the manifest. */
 function byCodeUnit(a: string, b: string): number {
-  if (a < b) {
-    return -1;
-  }
-  if (a > b) {
-    return 1;
-  }
+  if (a < b) return -1;
+  if (a > b) return 1;
   return 0;
 }
 

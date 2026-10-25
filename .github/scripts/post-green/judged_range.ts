@@ -10,13 +10,9 @@ const FULL_SHA = /^[0-9a-f]{40}$/;
 
 export function judgedRangeEnv(): { sha: string; before: string } {
   const sha = requireEnv("SOURCE_SHA");
-  if (!FULL_SHA.test(sha)) {
-    fail(`SOURCE_SHA is not a full commit sha (got '${sha}')`);
-  }
+  if (!FULL_SHA.test(sha)) fail(`SOURCE_SHA is not a full commit sha (got '${sha}')`);
   const before = requireEnv("BEFORE_SHA");
-  if (!FULL_SHA.test(before)) {
-    fail(`BEFORE_SHA is not a full commit sha (got '${before}')`);
-  }
+  if (!FULL_SHA.test(before)) fail(`BEFORE_SHA is not a full commit sha (got '${before}')`);
   return { sha, before };
 }
 

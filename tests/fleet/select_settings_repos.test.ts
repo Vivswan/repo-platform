@@ -230,9 +230,7 @@ describe("select_settings_repos.ts", () => {
       throw new Error(`no count and matrix outputs in: ${JSON.stringify(result.outputs)}`);
     }
     expect(Object.keys(result.outputs).sort()).toEqual(["count", "matrix"]);
-    for (const form of PRIVATE_SLUGS.flatMap(maskForms)) {
-      expect(matrix).not.toContain(form);
-    }
+    for (const form of PRIVATE_SLUGS.flatMap(maskForms)) expect(matrix).not.toContain(form);
     const rows = JSON.parse(matrix) as { row: number; key: string }[];
     expect(rows.map((row) => row.row)).toEqual(rows.map((_, index) => index));
     const slugs = PERSONAS.map((persona) => `Vivswan/${persona.name}`);
@@ -360,9 +358,7 @@ describe("select_settings_repos.ts", () => {
 
   test("every discovered private slug is masked in every spelling before anything else prints", () => {
     for (const slug of PRIVATE_SLUGS) {
-      for (const form of maskForms(slug)) {
-        expect(main.masked).toContain(form);
-      }
+      for (const form of maskForms(slug)) expect(main.masked).toContain(form);
     }
     expect(main.masked).toHaveLength(ALL_MASKS);
     // The masks are the first lines: the run() split above consumed them
@@ -445,9 +441,7 @@ describe("select_settings_repos.ts", () => {
         outputs: { count: String(repos.length), repos },
         summary,
       });
-      for (const channel of publicChannels(r)) {
-        expect(channel).not.toContain("hidden-");
-      }
+      for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-");
     },
     TEST_TIMEOUT_MS,
   );
@@ -562,9 +556,7 @@ describe("select_settings_repos.ts", () => {
         outputs: { count: String(repos.length), repos },
         summary: "",
       });
-      for (const channel of publicChannels(r)) {
-        expect(channel).not.toContain("hidden-server");
-      }
+      for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-server");
     },
     TEST_TIMEOUT_MS,
   );
@@ -620,9 +612,7 @@ describe("select_settings_repos.ts", () => {
         outputs: {},
         summary: "",
       });
-      for (const channel of publicChannels(r)) {
-        expect(channel).not.toContain(withheld);
-      }
+      for (const channel of publicChannels(r)) expect(channel).not.toContain(withheld);
     },
     TEST_TIMEOUT_MS,
   );

@@ -23,9 +23,7 @@ export const EXEMPT_DIRS: ReadonlySet<string> = new Set([
 export function repositoryFiles(root: string, options: { untracked: boolean }): string[] {
   // --deduplicate: an unresolved merge lists one path per stage.
   const args = ["-C", root, "ls-files", "-z", "--deduplicate", "--cached"];
-  if (options.untracked) {
-    args.push("--others", "--exclude-standard");
-  }
+  if (options.untracked) args.push("--others", "--exclude-standard");
 
   const proc = spawnSync("git", args, { encoding: "utf-8", maxBuffer: LIST_BUFFER_BYTES });
   if (proc.status !== 0) {
@@ -33,9 +31,7 @@ export function repositoryFiles(root: string, options: { untracked: boolean }): 
   }
 
   return proc.stdout.split("\0").filter((relPath) => {
-    if (relPath === "") {
-      return false;
-    }
+    if (relPath === "") return false;
 
     const path = join(root, relPath);
     return existsSync(path) && lstatSync(path).isFile();

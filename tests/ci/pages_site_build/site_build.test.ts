@@ -629,9 +629,7 @@ describe("layouts that build no docs tier", () => {
     );
     expect(missing).toEqual([]);
     expect(present(runner.site, row.absent)).toEqual([]);
-    for (const line of row.stdout) {
-      expect(result.stdout).toContain(line);
-    }
+    for (const line of row.stdout) expect(result.stdout).toContain(line);
     expect(result.outputs).toEqual(row.outputs(runner));
   });
 });

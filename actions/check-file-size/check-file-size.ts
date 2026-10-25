@@ -107,9 +107,7 @@ function extensionOf(relPath: string): string {
 export function classify(relPath: string): Kind | null {
   const segments = relPath.split("/");
   const dirs = segments.slice(0, -1);
-  if (dirs.some((dir) => EXEMPT_DIRS.has(dir))) {
-    return null;
-  }
+  if (dirs.some((dir) => EXEMPT_DIRS.has(dir))) return null;
 
   const name = segments[segments.length - 1];
   const ext = extensionOf(relPath);
@@ -121,13 +119,9 @@ export function classify(relPath: string): Kind | null {
     return "workflow";
   }
 
-  if (SHELL_EXTENSIONS.has(ext)) {
-    return "shell";
-  }
+  if (SHELL_EXTENSIONS.has(ext)) return "shell";
 
-  if (ext === "md") {
-    return "markdown";
-  }
+  if (ext === "md") return "markdown";
 
   if (SOURCE_EXTENSIONS.has(ext)) {
     return TEST_NAME.test(name) || dirs.some((dir) => TEST_DIRS.has(dir)) ? "test" : "source";
@@ -140,9 +134,7 @@ export function classify(relPath: string): Kind | null {
  *  CRLF file's `\r` is not width. */
 function splitLines(text: string): string[] {
   const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
-  if (lines[lines.length - 1] === "") {
-    lines.pop();
-  }
+  if (lines[lines.length - 1] === "") lines.pop();
 
   return lines;
 }
@@ -159,19 +151,12 @@ function generatedRegionMask(lines: string[]): boolean[] {
   let begin = -1;
   lines.forEach((line, index) => {
     if (begin === -1) {
-      if (!REGION_BEGIN.test(line)) {
-        return;
-      }
+      if (!REGION_BEGIN.test(line)) return;
 
-      if (REGION_END.test(line)) {
-        mask[index] = true;
-      } else {
-        begin = index;
-      }
+      if (REGION_END.test(line)) mask[index] = true;
+      else begin = index;
     } else if (REGION_END.test(line)) {
-      for (let i = begin; i <= index; i++) {
-        mask[i] = true;
-      }
+      for (let i = begin; i <= index; i++) mask[i] = true;
       begin = -1;
     }
   });
@@ -203,9 +188,7 @@ function commentBlocks(lines: readonly string[], skip: readonly boolean[]): Comm
   let start = -1;
   let headerAhead = true;
   const end = (at: number): void => {
-    if (start === -1) {
-      return;
-    }
+    if (start === -1) return;
 
     const markers: CommentBlock["markers"] = [];
     for (let row = start; row < at; row++) {
@@ -233,9 +216,7 @@ function commentBlocks(lines: readonly string[], skip: readonly boolean[]): Comm
     } else if (row === 0 && SHEBANG.test(line)) {
       return;
     } else if (COMMENT_LINE.test(line)) {
-      if (start === -1) {
-        start = row;
-      }
+      if (start === -1) start = row;
     } else {
       end(row);
       headerAhead = false;
@@ -263,13 +244,9 @@ export type Finding =
   | (FindingBase & { measure: "marker"; tier: "warn"; line: number });
 
 function exceeded(value: number, hard: number, warn: number): { tier: Tier; cap: number } | null {
-  if (value > hard) {
-    return { tier: "hard", cap: hard };
-  }
+  if (value > hard) return { tier: "hard", cap: hard };
 
-  if (value > warn) {
-    return { tier: "warn", cap: warn };
-  }
+  if (value > warn) return { tier: "warn", cap: warn };
 
   return null;
 }
@@ -284,18 +261,12 @@ export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
     findings.push({ path, kind, ...lineCount, measure: "lines", value: counted });
   }
 
-  if (kind === PROSE) {
-    return findings;
-  }
+  if (kind === PROSE) return findings;
   lines.forEach((line, index) => {
-    if (generated[index] || isUnbreakable(line)) {
-      return;
-    }
+    if (generated[index] || isUnbreakable(line)) return;
 
     const width = [...line].length;
-    if (width <= HARD_WIDTH) {
-      return;
-    }
+    if (width <= HARD_WIDTH) return;
     findings.push({
       path,
       kind,
@@ -313,9 +284,7 @@ export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
       }
     }
 
-    if (markers.some((marker) => REASONED.test(marker.reason))) {
-      continue;
-    }
+    if (markers.some((marker) => REASONED.test(marker.reason))) continue;
 
     const cap = COMMENT_CAPS[scope];
     if (length > cap) {
@@ -390,14 +359,10 @@ export function check(root: string): Verdict {
   let managedSkipped = 0;
   for (const relPath of repositoryFiles(root, { untracked: false })) {
     const kind = classify(relPath);
-    if (kind === null) {
-      continue;
-    }
+    if (kind === null) continue;
 
     const text = readFileSync(join(root, relPath), "utf-8");
-    if (isGenerated(text)) {
-      continue;
-    }
+    if (isGenerated(text)) continue;
 
     if (isManaged(text)) {
       managedSkipped += 1;
@@ -405,13 +370,9 @@ export function check(root: string): Verdict {
     }
 
     const judged = judgeFile(relPath, kind, text);
-    if (judged.length === 0) {
-      continue;
-    }
+    if (judged.length === 0) continue;
     found.add(relPath);
-    if (!allowed.has(relPath)) {
-      findings.push(...judged);
-    }
+    if (!allowed.has(relPath)) findings.push(...judged);
   }
 
   const allowlistErrors = [

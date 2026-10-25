@@ -55,12 +55,8 @@ export function evaluateCondition(expression: string, context: Record<string, st
     let node = contexts;
     for (const key of keys.slice(0, -1)) {
       const child = node.get(key) ?? new data.Dictionary();
-      if (!(child instanceof data.Dictionary)) {
-        throw new Error(`${path}: ${key} is not a mapping`);
-      }
-      if (node.get(key) === undefined) {
-        node.add(key, child);
-      }
+      if (!(child instanceof data.Dictionary)) throw new Error(`${path}: ${key} is not a mapping`);
+      if (node.get(key) === undefined) node.add(key, child);
       node = child;
     }
     node.add(keys[keys.length - 1], new data.StringData(value));
@@ -89,25 +85,15 @@ export function parseExpression(source: string): { tokens: Token[]; tree: Expr }
 
 /** The direct subexpressions of a node (none for a literal or a context name), so a walk needs no case per type. */
 export function subexpressions(expr: Expr): Expr[] {
-  if (expr instanceof Unary) {
-    return [expr.expr];
-  }
+  if (expr instanceof Unary) return [expr.expr];
 
-  if (expr instanceof Binary) {
-    return [expr.left, expr.right];
-  }
+  if (expr instanceof Binary) return [expr.left, expr.right];
 
-  if (expr instanceof Logical || expr instanceof FunctionCall) {
-    return expr.args;
-  }
+  if (expr instanceof Logical || expr instanceof FunctionCall) return expr.args;
 
-  if (expr instanceof Grouping) {
-    return [expr.group];
-  }
+  if (expr instanceof Grouping) return [expr.group];
 
-  if (expr instanceof IndexAccess) {
-    return [expr.expr, expr.index];
-  }
+  if (expr instanceof IndexAccess) return [expr.expr, expr.index];
 
   return [];
 }

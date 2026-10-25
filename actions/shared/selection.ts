@@ -16,9 +16,7 @@ export type ModuleList = string[] | { declaring: string };
 /** files_config.ts derives an entry's default source from the first `modules` name, so a derived list keeps the
  *  modules block's order. */
 export function moduleList(list: ModuleList, modules: Readonly<Record<string, unknown>>): string[] {
-  if (Array.isArray(list)) {
-    return list;
-  }
+  if (Array.isArray(list)) return list;
 
   return Object.keys(modules).filter((name) => {
     const data = modules[name];
@@ -41,9 +39,7 @@ export interface Selection {
 /** Whether one `when` clause holds for the repository: a files.yml entry's (through `selects`) or a settings layer's.
  *  Absent clauses hold. */
 export function applies(when: When | null, selection: Selection): boolean {
-  if (when === null) {
-    return true;
-  }
+  if (when === null) return true;
 
   const selected = (name: string) => selection.modules.includes(name);
   return (

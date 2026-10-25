@@ -9,13 +9,9 @@ export function snapshotTree(root: string, prefix = ""): Map<string, string> {
   const out = new Map<string, string>();
   for (const entry of readdirSync(join(root, prefix), { withFileTypes: true })) {
     const rel = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-    if (rel === ".git") {
-      continue;
-    }
+    if (rel === ".git") continue;
     if (entry.isDirectory()) {
-      for (const [path, hash] of snapshotTree(root, rel)) {
-        out.set(path, hash);
-      }
+      for (const [path, hash] of snapshotTree(root, rel)) out.set(path, hash);
     } else if (entry.isSymbolicLink()) {
       out.set(rel, `-> ${readlinkSync(join(root, rel))}`);
     } else {

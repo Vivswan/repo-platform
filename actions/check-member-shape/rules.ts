@@ -35,22 +35,16 @@ const isBlank = (lines: string[], line: number): boolean => lines[line - 1].trim
 
 /** Once any member carries a comment, every pair of adjacent members has exactly one blank line between them. */
 function blankLineBetweenMembers(block: Block, lines: string[]): number[] {
-  if (block.kind === "const block" || !block.items.some(carries)) {
-    return [];
-  }
+  if (block.kind === "const block" || !block.items.some(carries)) return [];
 
   const found: number[] = [];
   block.items.forEach((item, index) => {
-    if (index === 0) {
-      return;
-    }
+    if (index === 0) return;
 
     const gapFrom = block.items[index - 1].endLine + 1;
     const gapTo = firstLineOf(item);
     const gap = Array.from({ length: gapTo - gapFrom }, (_, i) => gapFrom + i);
-    if (gap.length === 1 && isBlank(lines, gap[0])) {
-      return;
-    }
+    if (gap.length === 1 && isBlank(lines, gap[0])) return;
     found.push(gapTo);
   });
   return found;
@@ -61,20 +55,14 @@ function blankLineBetweenMembers(block: Block, lines: string[]): number[] {
 function oneLineComment(block: Block): number[] {
   const found: number[] = [];
   for (const item of block.items.filter(isField)) {
-    if (item.trailing !== null) {
-      found.push(item.trailing.line);
-    }
+    if (item.trailing !== null) found.push(item.trailing.line);
 
     const comments = [...item.above, ...item.inside];
-    if (comments.length === 0) {
-      continue;
-    }
+    if (comments.length === 0) continue;
 
     const [comment] = comments;
     const oneLine = comments.length === 1 && comment.line === comment.endLine;
-    if (!(oneLine && comment.endLine === item.line - 1)) {
-      found.push(comment.line);
-    }
+    if (!(oneLine && comment.endLine === item.line - 1)) found.push(comment.line);
   }
 
   return found;
@@ -84,9 +72,7 @@ function oneLineComment(block: Block): number[] {
  *  finding. A method's doc comment counts for neither side. */
 function allOrNone(block: Block): number[] {
   const fields = block.items.filter(isField);
-  if (fields.every(carries) || !fields.some(carries)) {
-    return [];
-  }
+  if (fields.every(carries) || !fields.some(carries)) return [];
 
   return fields.filter((item) => !carries(item)).map((item) => item.line);
 }
@@ -94,9 +80,7 @@ function allOrNone(block: Block): number[] {
 /** A commented module-level constant has a blank line (or the file start) before its comment and a blank line (or
  *  the file end) after its declaration. */
 function constantSpacing(block: Block, lines: string[]): number[] {
-  if (block.kind !== "const block") {
-    return [];
-  }
+  if (block.kind !== "const block") return [];
 
   return block.items
     .filter(carries)
@@ -113,9 +97,7 @@ function constantSpacing(block: Block, lines: string[]): number[] {
 export function judge(path: string, source: Source): Finding[] {
   const findings: Finding[] = [];
   const add = (rule: Rule, lines: number[]): void => {
-    for (const line of lines) {
-      findings.push({ path, line, rule });
-    }
+    for (const line of lines) findings.push({ path, line, rule });
   };
   for (const block of source.blocks) {
     add("blank-line-between-members", blankLineBetweenMembers(block, source.lines));

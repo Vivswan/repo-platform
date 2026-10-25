@@ -105,25 +105,15 @@ const HEREDOC_ALONE = /^\s*<<-?\S+\s*$/;
 
 export function sourceKindOf(relPath: string): SourceKind | null {
   const name = basename(relPath);
-  if (WORKFLOW_PATH.test(relPath)) {
-    return "workflow";
-  }
+  if (WORKFLOW_PATH.test(relPath)) return "workflow";
 
-  if (ACTION_NAME.test(name)) {
-    return "action";
-  }
+  if (ACTION_NAME.test(name)) return "action";
 
-  if (MOON_PATH.test(relPath)) {
-    return "moon";
-  }
+  if (MOON_PATH.test(relPath)) return "moon";
 
-  if (CONTAINERFILE_NAME.test(name)) {
-    return "containerfile";
-  }
+  if (CONTAINERFILE_NAME.test(name)) return "containerfile";
 
-  if (SCRIPT_DIALECT.has(extensionOf(name))) {
-    return "script";
-  }
+  if (SCRIPT_DIALECT.has(extensionOf(name))) return "script";
 
   return null;
 }
@@ -135,14 +125,10 @@ function extensionOf(name: string): string {
 
 /** Unset, or an expression GitHub resolves at run time (`${{ matrix.shell }}`), is the runner default. */
 export function dialectOfShell(shell: unknown, unset: Dialect): Dialect | null {
-  if (shell === undefined || shell === null) {
-    return unset;
-  }
+  if (shell === undefined || shell === null) return unset;
 
   const text = String(shell).trim();
-  if (text.includes("${{")) {
-    return unset;
-  }
+  if (text.includes("${{")) return unset;
 
   const word = text.split(/\s+/)[0] ?? "";
   return SHELL_DIALECT.get(shellName(word)) ?? null;
@@ -171,17 +157,13 @@ export function collectFile(relPath: string, text: string): Collected {
       return { bodies: collectContainerfile(relPath, text), problems: [] };
     case "script": {
       const dialect = SCRIPT_DIALECT.get(extensionOf(basename(relPath)));
-      if (dialect === undefined) {
-        return { bodies: [], problems: [] };
-      }
+      if (dialect === undefined) return { bodies: [], problems: [] };
 
       return { bodies: [{ path: relPath, line: 1, kind, dialect, code: text }], problems: [] };
     }
     case null: {
       const dialect = isExtensionless(relPath) ? shebangDialect(text) : null;
-      if (dialect === null) {
-        return { bodies: [], problems: [] };
-      }
+      if (dialect === null) return { bodies: [], problems: [] };
 
       return {
         bodies: [{ path: relPath, line: 1, kind: "script", dialect, code: text }],
@@ -199,9 +181,7 @@ export function isExtensionless(relPath: string): boolean {
 /** The dialect a first-line shebang names, `#!/usr/bin/env bash` included; null for no shebang or another program. */
 export function shebangDialect(text: string): Dialect | null {
   const match = SHEBANG.exec(text.split("\n", 1)[0] ?? "");
-  if (match === null) {
-    return null;
-  }
+  if (match === null) return null;
 
   const program = basename(match[1]) === "env" ? (match[2] ?? "") : match[1];
   return SHELL_DIALECT.get(shellName(program)) ?? null;
@@ -240,20 +220,14 @@ function stepScripts(
   inherited: unknown,
   unset: Dialect,
 ): YamlScript[] {
-  if (!isSeq(steps)) {
-    return [];
-  }
+  if (!isSeq(steps)) return [];
 
   const scripts: YamlScript[] = [];
   for (const step of steps.items) {
-    if (!isMap(step)) {
-      continue;
-    }
+    if (!isMap(step)) continue;
 
     const run = scalarAt(doc, step.get("run", true));
-    if (run === null) {
-      continue;
-    }
+    if (run === null) continue;
 
     const shell = step.has("shell") ? valueAt(doc, step.get("shell", true)) : inherited;
     scripts.push({ scalar: run, dialect: dialectOfShell(shell, unset) });
@@ -268,9 +242,7 @@ function workflowScripts(doc: Document): YamlScript[] {
   const workflowShell = valueAt(doc, doc.getIn(["defaults", "run", "shell"], true));
   const scripts: YamlScript[] = [];
   for (const { value: job } of isMap(jobs) ? jobs.items : []) {
-    if (!isMap(job)) {
-      continue;
-    }
+    if (!isMap(job)) continue;
 
     const jobShell = job.hasIn(["defaults", "run", "shell"])
       ? valueAt(doc, job.getIn(["defaults", "run", "shell"], true))
@@ -287,14 +259,10 @@ function moonScripts(doc: Document): YamlScript[] {
   const tasks = doc.get("tasks");
   const scripts: YamlScript[] = [];
   for (const { value: task } of isMap(tasks) ? (tasks as YAMLMap).items : []) {
-    if (!isMap(task)) {
-      continue;
-    }
+    if (!isMap(task)) continue;
 
     const script = scalarAt(doc, task.get("script", true));
-    if (script !== null) {
-      scripts.push({ scalar: script, dialect: "bash" });
-    }
+    if (script !== null) scripts.push({ scalar: script, dialect: "bash" });
   }
 
   return scripts;
@@ -341,9 +309,7 @@ function collectYaml(
 
   const bodies: CollectedBody[] = [];
   for (const { scalar, dialect } of yamlScripts(doc, kind)) {
-    if (dialect === null) {
-      continue;
-    }
+    if (dialect === null) continue;
 
     bodies.push({
       path: relPath,
@@ -361,9 +327,7 @@ function collectYaml(
  *  bash for a fresh base. */
 function fromDialect(from: From, stages: ReadonlyMap<string, Dialect | null>): Dialect | null {
   const base = (from.getImage() ?? "").toLowerCase();
-  if (!stages.has(base)) {
-    return "bash";
-  }
+  if (!stages.has(base)) return "bash";
 
   return stages.get(base) ?? null;
 }
@@ -371,9 +335,7 @@ function fromDialect(from: From, stages: ReadonlyMap<string, Dialect | null>): D
 /** The dialect a `SHELL` instruction sets: pwsh or cmd, or null for a program that is no shell. */
 function shellDialect(instruction: JSONInstruction): Dialect | null {
   const program = instruction.getJSONStrings()[0]?.getJSONValue();
-  if (program === undefined) {
-    return null;
-  }
+  if (program === undefined) return null;
 
   return SHELL_DIALECT.get(shellName(program)) ?? null;
 }
@@ -391,9 +353,7 @@ function heredocBody(
   const body = sourceLines.slice(start, end + 1).join("\n");
   const script = /^\s*<<-/.test(marker) ? body.replace(/^\t+/, "") : body;
   const bodyDialect = script.startsWith("#!") ? shebangDialect(script) : dialect;
-  if (bodyDialect === null) {
-    return null;
-  }
+  if (bodyDialect === null) return null;
 
   return {
     path: relPath,
@@ -416,19 +376,13 @@ function runBody(
 ): CollectedBody | null {
   const code = instruction.getArgumentsContent();
   const first = instruction.getArguments()[0];
-  if (code === null || first === undefined || isExecForm(code)) {
-    return null;
-  }
+  if (code === null || first === undefined || isExecForm(code)) return null;
 
   const marker = code.split("\n")[0];
   const heredoc = HEREDOC_ALONE.test(marker) ? heredocRange(instruction) : null;
-  if (heredoc !== null) {
-    return heredocBody(relPath, sourceLines, heredoc, marker, dialect);
-  }
+  if (heredoc !== null) return heredocBody(relPath, sourceLines, heredoc, marker, dialect);
 
-  if (dialect === null) {
-    return null;
-  }
+  if (dialect === null) return null;
 
   return {
     path: relPath,
@@ -448,9 +402,7 @@ function collectContainerfile(relPath: string, text: string): CollectedBody[] {
   let stage: string | null = null;
   let dialect: Dialect | null = "bash";
   const rememberStage = (): void => {
-    if (stage !== null) {
-      stages.set(stage, dialect);
-    }
+    if (stage !== null) stages.set(stage, dialect);
   };
   for (const instruction of DockerfileParser.parse(text).getInstructions()) {
     const keyword = instruction.getKeyword().toUpperCase();
@@ -468,14 +420,10 @@ function collectContainerfile(relPath: string, text: string): CollectedBody[] {
       continue;
     }
 
-    if (keyword !== "RUN") {
-      continue;
-    }
+    if (keyword !== "RUN") continue;
 
     const body = runBody(relPath, sourceLines, instruction, dialect);
-    if (body !== null) {
-      bodies.push(body);
-    }
+    if (body !== null) bodies.push(body);
   }
 
   return bodies;

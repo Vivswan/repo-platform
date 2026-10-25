@@ -21,9 +21,7 @@ function serve(token: string, table: ProbeTable): ReturnType<typeof Bun.serve> {
       const match = /^\/([^/]+)\/([^/]+\/[^/]+)\.git\/info\/refs$/.exec(
         new URL(request.url).pathname,
       );
-      if (match === null) {
-        return new Response("", { status: 404 });
-      }
+      if (match === null) return new Response("", { status: 404 });
       const [, run, slug] = match;
       const statuses = table[slug] ?? [200];
       const key = `${run} ${slug}`;

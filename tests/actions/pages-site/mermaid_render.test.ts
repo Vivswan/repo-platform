@@ -27,9 +27,7 @@ class FakeElement {
   }
   querySelector(selector: string): FakeElement | null {
     const match = /^:scope > \.([\w-]+)$/.exec(selector);
-    if (match === null) {
-      throw new Error(`unsupported selector ${selector}`);
-    }
+    if (match === null) throw new Error(`unsupported selector ${selector}`);
     return this.children.find((child) => child.className.split(" ").includes(match[1])) ?? null;
   }
   get shape(): string {
@@ -63,12 +61,8 @@ const calls = {
 const fontsApi = {
   load(font: string, text: string): Promise<unknown[]> {
     calls.fontLoads.push([font, text]);
-    if (stub.failFonts) {
-      return Promise.reject(new Error("NetworkError"));
-    }
-    if (!stub.holdFonts) {
-      return Promise.resolve([]);
-    }
+    if (stub.failFonts) return Promise.reject(new Error("NetworkError"));
+    if (!stub.holdFonts) return Promise.resolve([]);
     return new Promise((resolve, reject) =>
       stub.heldFonts.push({ resolve: () => resolve([]), reject }),
     );
@@ -103,9 +97,7 @@ Bun.plugin({
   setup(build) {
     build.module("mermaid", () => {
       calls.loads += 1;
-      if (stub.failLoad) {
-        throw new Error("offline");
-      }
+      if (stub.failLoad) throw new Error("offline");
       return {
         loader: "object",
         exports: {
@@ -119,9 +111,7 @@ Bun.plugin({
               if (stub.hold) {
                 await new Promise<void>((resolve, reject) => stub.held.push({ resolve, reject }));
               }
-              if (source.endsWith("-->")) {
-                throw new Error("Parse error on line 2:\nA -->\n-----^");
-              }
+              if (source.endsWith("-->")) throw new Error("Parse error on line 2:\nA -->\n-----^");
               // Each render's SVG carries its ordinal, so a stale result landing is visible.
               return { svg: `<svg data-render="${ordinal}">${source}</svg>` };
             },
@@ -152,9 +142,7 @@ const darkModes = () =>
   calls.initialize.map((config) => (config.themeVariables as { darkMode: boolean }).darkMode);
 
 async function heldRenders(count: number): Promise<void> {
-  for (let i = 0; i < 100 && stub.held.length < count; i += 1) {
-    await Bun.sleep(1);
-  }
+  for (let i = 0; i < 100 && stub.held.length < count; i += 1) await Bun.sleep(1);
   expect(stub.held).toHaveLength(count);
 }
 
@@ -296,9 +284,7 @@ test("initializes and draws only once the theme's mono face has loaded for every
   ];
   stub.holdFonts = true;
   const run = renderAll(false);
-  for (let i = 0; i < 100 && stub.heldFonts.length < 1; i += 1) {
-    await Bun.sleep(1);
-  }
+  for (let i = 0; i < 100 && stub.heldFonts.length < 1; i += 1) await Bun.sleep(1);
   // The face is asked for before the pass awaits the import, so a timer lets the import's
   // microtasks drain: the pass is then parked on the face, or, without the wait, already drawn.
   await Bun.sleep(10);

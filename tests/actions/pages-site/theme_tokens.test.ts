@@ -28,11 +28,8 @@ function filesUnder(dir: string, exts: string[]): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry);
-    if (statSync(path).isDirectory()) {
-      out.push(...filesUnder(path, exts));
-    } else if (exts.some((ext) => entry.endsWith(ext))) {
-      out.push(path);
-    }
+    if (statSync(path).isDirectory()) out.push(...filesUnder(path, exts));
+    else if (exts.some((ext) => entry.endsWith(ext))) out.push(path);
   }
   return out;
 }
@@ -53,9 +50,7 @@ function liveCarbonReads(text: string, overridden: Set<string>): string[] {
       continue;
     }
     for (const match of body.matchAll(DECLARATION)) {
-      if (!overridden.has(match[1])) {
-        live.push(...tokens(match[2], VAR_READ));
-      }
+      if (!overridden.has(match[1])) live.push(...tokens(match[2], VAR_READ));
     }
   }
   return live;
@@ -67,9 +62,7 @@ function liveCarbonReads(text: string, overridden: Set<string>): string[] {
  *    terminal palette   -> only inside an ansi fence, whose undeclared var() reads fall back to the code foreground */
 function shikiReads(): { all: string[]; colored: string[] } {
   const prefix = readFileSync(CONFIG, "utf-8").match(/variablePrefix:\s*"(--[a-z0-9-]+)"/)?.[1];
-  if (prefix === undefined) {
-    throw new Error("config.mts declares no shiki variablePrefix");
-  }
+  if (prefix === undefined) throw new Error("config.mts declares no shiki variablePrefix");
   const theme = createCssVariablesTheme({ variablePrefix: prefix }) as {
     colors: Record<string, string>;
     tokenColors: unknown[];
@@ -86,9 +79,7 @@ function shikiReads(): { all: string[]; colored: string[] } {
 function themeDeclarations(): Set<string> {
   const declared = new Set<string>(tokenNames());
   for (const file of filesUnder(THEME, [".css"])) {
-    for (const token of tokens(readFileSync(file, "utf-8"), DECLARATION)) {
-      declared.add(token);
-    }
+    for (const token of tokens(readFileSync(file, "utf-8"), DECLARATION)) declared.add(token);
   }
   return declared;
 }
@@ -97,20 +88,14 @@ test("every custom property the theme declares has a live var() reader", () => {
   const declared = themeDeclarations();
   const read = new Set<string>();
   for (const file of filesUnder(THEME, [".css", ".ts"])) {
-    for (const token of tokens(readFileSync(file, "utf-8"), VAR_READ)) {
-      read.add(token);
-    }
+    for (const token of tokens(readFileSync(file, "utf-8"), VAR_READ)) read.add(token);
   }
   for (const file of filesUnder(CARBON, [".css", ".vue", ".js"])) {
-    for (const token of liveCarbonReads(readFileSync(file, "utf-8"), declared)) {
-      read.add(token);
-    }
+    for (const token of liveCarbonReads(readFileSync(file, "utf-8"), declared)) read.add(token);
   }
   const shiki = shikiReads();
   expect(shiki.colored).toContain("--fleet-code-token-comment");
-  for (const token of shiki.all) {
-    read.add(token);
-  }
+  for (const token of shiki.all) read.add(token);
   const unread = [...declared].filter((token) => !read.has(token)).sort();
   expect(declared.size).toBeGreaterThan(50);
   expect(unread).toEqual([]);

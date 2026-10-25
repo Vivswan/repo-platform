@@ -34,9 +34,7 @@ export type Found =
 export function probe(target: string, path: string): Found {
   const abs = insideTarget(target, path);
   const stat = lstatOrNull(abs);
-  if (stat === null) {
-    return { kind: "absent" };
-  }
+  if (stat === null) return { kind: "absent" };
   if (stat.isSymbolicLink()) {
     return { kind: "link", target: readlinkSync(abs, { encoding: "buffer" }) };
   }
@@ -58,18 +56,10 @@ export type Occupant =
 /** Unlike probe, a directory or a device is named for a hold instead of refused. */
 export function occupant(target: string, path: string): Occupant | null {
   const stat = lstatOrNull(insideTarget(target, path));
-  if (stat === null) {
-    return null;
-  }
-  if (stat.isSymbolicLink()) {
-    return "a symbolic link";
-  }
-  if (stat.isDirectory()) {
-    return "a directory";
-  }
-  if (stat.isFile()) {
-    return "a regular file";
-  }
+  if (stat === null) return null;
+  if (stat.isSymbolicLink()) return "a symbolic link";
+  if (stat.isDirectory()) return "a directory";
+  if (stat.isFile()) return "a regular file";
   return "something that is not a regular file";
 }
 
@@ -106,9 +96,7 @@ export function writeLink(target: string, path: string, linkTarget: string): voi
     );
   }
   mkdirSync(dirname(abs), { recursive: true });
-  if (stat !== null) {
-    unlinkSync(abs);
-  }
+  if (stat !== null) unlinkSync(abs);
   symlinkSync(linkTarget, abs);
 }
 

@@ -41,9 +41,7 @@ const bashParser = syntax.NewParser(syntax.Variant(syntax.LangBash));
 const OR_OPERATOR = (() => {
   let op = -1;
   syntax.Walk(bashParser.Parse("a || b", "or.sh"), (node) => {
-    if (node !== null && syntax.NodeType(node) === "BinaryCmd") {
-      op = (node as BinaryCmd).Op;
-    }
+    if (node !== null && syntax.NodeType(node) === "BinaryCmd") op = (node as BinaryCmd).Op;
 
     return node !== null;
   });
@@ -55,22 +53,16 @@ const OR_OPERATOR = (() => {
  *  only look a name up. */
 function testsItsArguments(node: Node): boolean {
   const type = syntax.NodeType(node);
-  if (type === "TestClause") {
-    return true;
-  }
+  if (type === "TestClause") return true;
 
-  if (type !== "CallExpr") {
-    return false;
-  }
+  if (type !== "CallExpr") return false;
 
   const words = (node as CallExpr).Args.map((word) => word.Lit());
   let at = 0;
   while (words[at] === "command" || words[at] === "builtin") {
     at += 1;
     while (words[at]?.startsWith("-")) {
-      if (/[vV]/.test(words[at])) {
-        return false;
-      }
+      if (/[vV]/.test(words[at])) return false;
       at += 1;
     }
   }
@@ -98,9 +90,7 @@ function constructOf(node: Node, parent: Node | undefined, ancestors: Node[]): s
     case "WhileClause":
       return (node as WhileClause).Until ? "until" : "while";
     case "BinaryCmd": {
-      if ((node as BinaryCmd).Op !== OR_OPERATOR) {
-        return null;
-      }
+      if ((node as BinaryCmd).Op !== OR_OPERATOR) return null;
       // `a || b || c` nests right through a Stmt: the inner chain is the outer one.
       const enclosing = ancestors.findLast((ancestor) => syntax.NodeType(ancestor) !== "Stmt");
       const chained =
@@ -117,9 +107,7 @@ function constructOf(node: Node, parent: Node | undefined, ancestors: Node[]): s
       );
       const between = ancestors.slice(enclosing + 1);
       const tester = between.findLastIndex(testsItsArguments);
-      if (tester === -1) {
-        return null;
-      }
+      if (tester === -1) return null;
 
       const assigned = between
         .slice(tester + 1)
@@ -137,9 +125,7 @@ export function judgeBash(code: string): Refusal[] {
   try {
     file = bashParser.Parse(code, "body.sh");
   } catch (error) {
-    if (!isParseError(error)) {
-      throw error;
-    }
+    if (!isParseError(error)) throw error;
 
     return [{ line: error.Pos.Line(), construct: `does not parse as bash: ${error.Text}` }];
   }
@@ -176,9 +162,7 @@ function dedupe(refusals: Refusal[]): Refusal[] {
   const seen = new Set<string>();
   return refusals.filter((refusal) => {
     const key = `${refusal.line}:${refusal.construct}`;
-    if (seen.has(key)) {
-      return false;
-    }
+    if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
@@ -209,22 +193,16 @@ export function judgeCmd(code: string): Refusal[] {
   const constructs: Refusal[] = [];
   code.split("\n").forEach((raw, index) => {
     const line = raw.trim();
-    if (line === "" || CMD_COMMENT.test(line)) {
-      return;
-    }
+    if (line === "" || CMD_COMMENT.test(line)) return;
 
     const at = index + 1;
     for (const [pattern, construct] of CMD_JUMPS) {
-      if (pattern.test(line)) {
-        refusals.push({ line: at, construct });
-      }
+      if (pattern.test(line)) refusals.push({ line: at, construct });
     }
 
     // Every occurrence counts: `if exist x if exist y` is two constructs on one line.
     for (const [construct, pattern] of CMD_CONSTRUCTS) {
-      for (const _ of line.matchAll(pattern)) {
-        constructs.push({ line: at, construct });
-      }
+      for (const _ of line.matchAll(pattern)) constructs.push({ line: at, construct });
     }
   });
   if (constructs.length >= 2) {
@@ -271,9 +249,7 @@ function refusalsOf(constructs: PowerShellConstruct[]): Refusal[] {
 /** One pwsh per batch: it reads the bodies from a file this call owns and removes, so a refused body never rides argv. */
 export function judgePowerShell(bodies: Body[]): Map<string, Refusal[]> {
   const judged = new Map<string, Refusal[]>();
-  if (bodies.length === 0) {
-    return judged;
-  }
+  if (bodies.length === 0) return judged;
 
   const scratch = mkdtempSync(join(tmpdir(), "check-shell-complexity-"));
   try {
@@ -295,9 +271,7 @@ export function judgePowerShell(bodies: Body[]): Map<string, Refusal[]> {
   }
 
   for (const { id } of bodies) {
-    if (!judged.has(id)) {
-      throw new Error(`pwsh returned no verdict for ${id}`);
-    }
+    if (!judged.has(id)) throw new Error(`pwsh returned no verdict for ${id}`);
   }
 
   return judged;
@@ -314,9 +288,7 @@ function run(command: string[]): string {
     );
   }
 
-  if (!succeeded(result.exit)) {
-    throw new Error(`pwsh failed: ${failureDetail(result)}`);
-  }
+  if (!succeeded(result.exit)) throw new Error(`pwsh failed: ${failureDetail(result)}`);
 
   return result.stdout;
 }

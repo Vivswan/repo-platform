@@ -40,9 +40,7 @@ function naturalSize(svg: SVGSVGElement): { width: number; height: number } | nu
 function fill(canvas: HTMLElement, diagram: HTMLElement): void {
   const svg = diagram.querySelector<SVGSVGElement>(":scope > svg");
   canvas.replaceChildren();
-  if (svg === null) {
-    return;
-  }
+  if (svg === null) return;
 
   const copy = svg.cloneNode(true) as SVGSVGElement;
   const size = naturalSize(svg);
@@ -80,9 +78,7 @@ const Body = defineComponent({
     }
     /** A chord (Alt, Ctrl, Meta) stays the browser's: Alt+ArrowLeft is Back. */
     function onKey(event: KeyboardEvent): void {
-      if (event.altKey || event.ctrlKey || event.metaKey) {
-        return;
-      }
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
 
       const pan = PAN_KEYS[event.key];
       if (pan !== undefined) {
@@ -154,9 +150,7 @@ export default defineComponent({
         {
           open: current !== null,
           "onUpdate:open": (open: boolean) => {
-            if (!open) {
-              shown.value = null;
-            }
+            if (!open) shown.value = null;
           },
         },
         () =>

@@ -54,9 +54,7 @@ function emitPlan(targets: DiscoveredRepo[]): void {
 let summaryHeaded = false;
 async function warn(message: string): Promise<void> {
   warning(message);
-  if (!summaryHeaded) {
-    summary.addRaw("### Settings apply warnings", true);
-  }
+  if (!summaryHeaded) summary.addRaw("### Settings apply warnings", true);
   summaryHeaded = true;
   await summary.addRaw(`- ${message}`, true).write();
 }
@@ -71,9 +69,7 @@ type ProbeResult<T> =
 // permission; 401/403/404 = no grant; a transport failure reports 0).
 async function probePush(slug: string, display: string): Promise<ProbeResult<true>> {
   const code = await pushProbeStatus(slug, pat);
-  if (code === 200) {
-    return { kind: "pass", value: true };
-  }
+  if (code === 200) return { kind: "pass", value: true };
   if (code === 401 || code === 403 || code === 404) {
     notice(pushProbeSkipNotice(display));
     return { kind: "drop" };
@@ -113,9 +109,7 @@ let handWritten = 0;
 function probeRendered(slug: string, display: string): ProbeResult<true> {
   const probe = readRepoFile(slug, SETTINGS_PATH);
   if (probe.exitCode === 0) {
-    if (probe.stdout.split("\n", 1)[0] === RENDERED_HEADER) {
-      return { kind: "pass", value: true };
-    }
+    if (probe.stdout.split("\n", 1)[0] === RENDERED_HEADER) return { kind: "pass", value: true };
     handWritten++;
     return { kind: "drop" };
   }
@@ -141,12 +135,8 @@ async function probe<T>(
   let detail = "";
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     const result = await fn(slug, display);
-    if (result.kind === "pass") {
-      return result.value;
-    }
-    if (result.kind === "drop") {
-      return null;
-    }
+    if (result.kind === "pass") return result.value;
+    if (result.kind === "drop") return null;
     detail = scrubSlug(result.detail, slug, display);
     if (attempt < ATTEMPTS) {
       console.log(
@@ -165,9 +155,7 @@ const discovered = discoverOwnerRepos(owner, "select_settings_repos: user/repos 
 // Before anything else prints: the masker covers what a scrub might miss.
 for (const row of discovered) {
   if (row.private) {
-    for (const form of maskForms(row.repo)) {
-      setSecret(form);
-    }
+    for (const form of maskForms(row.repo)) setSecret(form);
   }
 }
 
@@ -185,16 +173,10 @@ let leftOut = 0;
 for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
   const { repo } = row;
   const display = row.private ? PRIVATE_DISPLAY : repo;
-  if (!scopeSelects(scope, repo, row.private)) {
-    continue;
-  }
-  if ((await probe("push-permission probe", probePush, repo, display)) === null) {
-    continue;
-  }
+  if (!scopeSelects(scope, repo, row.private)) continue;
+  if ((await probe("push-permission probe", probePush, repo, display)) === null) continue;
   const adopted = await probe("adoption check", probeAdoption, repo, display);
-  if (adopted === null) {
-    continue;
-  }
+  if (adopted === null) continue;
   // A repo the filter leaves out is counted, never named: it may be private.
   const filters = modulesFilterFor(scope, repo);
   if (filters !== null) {
@@ -209,9 +191,7 @@ for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
       continue;
     }
   }
-  if ((await probe("rendered settings check", probeRendered, repo, display)) === null) {
-    continue;
-  }
+  if ((await probe("rendered settings check", probeRendered, repo, display)) === null) continue;
   targets.push(row);
 }
 
@@ -224,17 +204,12 @@ if (handWritten > 0) {
   process.exit(1);
 }
 const leftOutLine = modulesLeftOutLine(scope, leftOut);
-if (leftOutLine !== null) {
-  console.log(leftOutLine);
-}
+if (leftOutLine !== null) console.log(leftOutLine);
 emitPlan(targets);
 const line = selectedLine(
   targets,
   "settings targets",
   "no settings targets selected; nothing to apply.",
 );
-if (targets.length === 0) {
-  notice(line);
-} else {
-  console.log(line);
-}
+if (targets.length === 0) notice(line);
+else console.log(line);

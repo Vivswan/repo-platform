@@ -63,9 +63,7 @@ export function themeTokensCss(): string {
   lines.push("", ...modeBlock(":root", "light"));
   lines.push("", ...modeBlock(".dark", "dark"));
   HUES.forEach((hue, slot) => {
-    if (slot === 0) {
-      return;
-    }
+    if (slot === 0) return;
     lines.push("", ...block(`html[data-fleet-hue="${slot}"]`, hueDeclarations(hue.light)));
     lines.push("", ...block(`html.dark[data-fleet-hue="${slot}"]`, hueDeclarations(hue.dark)));
   });

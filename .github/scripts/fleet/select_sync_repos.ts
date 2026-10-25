@@ -89,9 +89,7 @@ let leftOut = 0;
 for (const entry of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
   const slug = entry.repo;
   const display = entry.private ? PRIVATE_DISPLAY : slug;
-  if (!scopeSelects(scope, slug, entry.private)) {
-    continue;
-  }
+  if (!scopeSelects(scope, slug, entry.private)) continue;
   const probeCode = await pushProbeStatus(slug, pat);
   if (probeCode === 401 || probeCode === 403 || probeCode === 404) {
     notice(pushProbeSkipNotice(display));
@@ -142,9 +140,7 @@ for (const entry of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) 
 }
 
 const leftOutLine = modulesLeftOutLine(scope, leftOut);
-if (leftOutLine !== null) {
-  console.log(leftOutLine);
-}
+if (leftOutLine !== null) console.log(leftOutLine);
 writeFileSync(join(runnerTemp, ROWS_FILE), JSON.stringify(rows));
 setOutput("count", String(rows.length));
 setOutput("matrix", JSON.stringify(matrixRows(rows, rowKeyOf(pat, runId))));
@@ -152,11 +148,8 @@ setOutput("matrix", JSON.stringify(matrixRows(rows, rowKeyOf(pat, runId))));
 // a public output and step env.
 setOutput("add_modules", addModules.names.join(","));
 const line = selectedLine(rows, "syncing", "no adopted repos selected; nothing to sync.");
-if (rows.length === 0) {
-  notice(line);
-} else {
-  console.log(line);
-}
+if (rows.length === 0) notice(line);
+else console.log(line);
 if (addModules.names.length > 0) {
   console.log(
     `add_modules: ${addModules.names.join(", ")} go onto each row's ${REGISTRATION_PATH}; no PR of this run is armed`,

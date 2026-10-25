@@ -66,15 +66,9 @@ export function blockedAncestor(root: string, path: string): BlockedAncestor | n
   for (let depth = 1; depth < segments.length; depth++) {
     const dir = segments.slice(0, depth).join("/");
     const stat = lstatOrNull(join(root, dir));
-    if (stat === null) {
-      return null;
-    }
-    if (stat.isSymbolicLink()) {
-      return { dir, is: "a symbolic link" };
-    }
-    if (!stat.isDirectory()) {
-      return { dir, is: "a file" };
-    }
+    if (stat === null) return null;
+    if (stat.isSymbolicLink()) return { dir, is: "a symbolic link" };
+    if (!stat.isDirectory()) return { dir, is: "a file" };
   }
   return null;
 }
@@ -91,15 +85,9 @@ export function checkoutProbe(root: string): TreeProbe {
   return {
     standing(path) {
       const stat = lstatOrNull(join(root, path));
-      if (stat === null) {
-        return null;
-      }
-      if (stat.isSymbolicLink()) {
-        return "symlink";
-      }
-      if (stat.isDirectory()) {
-        return "directory";
-      }
+      if (stat === null) return null;
+      if (stat.isSymbolicLink()) return "symlink";
+      if (stat.isDirectory()) return "directory";
       return stat.isFile() ? "file" : "other";
     },
     linksToFile(path) {
@@ -172,17 +160,13 @@ function patternPaths(
   pattern: string,
   pass: Pass,
 ): string[] | { problem: string } {
-  if (pass === "literal") {
-    return [pattern];
-  }
+  if (pass === "literal") return [pattern];
   const blocked = blockedPrefix(target, pattern);
   if (blocked !== null) {
     return { problem: `the pattern's ancestor '${blocked.dir}' is ${blocked.is}` };
   }
   const paths = expandPattern(probe, pattern);
-  if (paths.length === 0) {
-    return { problem: "the pattern matches nothing" };
-  }
+  if (paths.length === 0) return { problem: "the pattern matches nothing" };
   return paths;
 }
 
@@ -219,16 +203,10 @@ function claimsOf(
 /** What the checkout shows of the path: a literal makes its directories, a glob's path must find them standing. */
 function pathFailure({ target, owned }: MirrorContext, path: string, pass: Pass): string | null {
   const problem = mirrorPathProblem(path, owned);
-  if (problem !== null) {
-    return problem;
-  }
+  if (problem !== null) return problem;
   const blocked = blockedAncestor(target, path);
-  if (blocked?.is === "a symbolic link") {
-    return `sits under '${blocked.dir}', a symbolic link`;
-  }
-  if (pass === "glob" && blocked !== null) {
-    return `sits under '${blocked.dir}', a file`;
-  }
+  if (blocked?.is === "a symbolic link") return `sits under '${blocked.dir}', a symbolic link`;
+  if (pass === "glob" && blocked !== null) return `sits under '${blocked.dir}', a file`;
   if (pass === "glob" && lstatOrNull(join(target, dirname(path)))?.isDirectory() !== true) {
     return `sits in '${dirname(path)}', a directory that does not exist`;
   }
@@ -269,14 +247,9 @@ function applyClaims(
       continue;
     }
     const previous = vouched(records, path, found);
-    if (found !== null && found.kind !== kind) {
-      removeFile(target, path);
-    }
-    if (kind === "symlink") {
-      writeLink(target, path, placed.toString("utf-8"));
-    } else {
-      writeFile(target, path, placed);
-    }
+    if (found !== null && found.kind !== kind) removeFile(target, path);
+    if (kind === "symlink") writeLink(target, path, placed.toString("utf-8"));
+    else writeFile(target, path, placed);
     if (detail !== "") {
       outcome.rows.push({ source, target: path, outcome: "replaced", detail });
     } else if (found !== null && !previous) {
@@ -304,9 +277,7 @@ export function applyMirrors(
 ): MirrorOutcome {
   const mirrors = [...fleet, ...own];
   const declared = mirrorDeclarationProblems(mirrors, owned);
-  if (declared.length > 0) {
-    throw new MirrorFailure(declared, own);
-  }
+  if (declared.length > 0) throw new MirrorFailure(declared, own);
   const context: MirrorContext = { target, written, owned, records, probe: checkoutProbe(target) };
   const patterns: Pattern[] = mirrors.flatMap(({ source, targets, kind }) =>
     targets.map((pattern) => ({ source, pattern, kind })),
@@ -323,9 +294,7 @@ export function applyMirrors(
     );
     const judged = judgeClaims(claims, settled, (path) => pathFailure(context, path, pass));
     failures.push(...judged.problems);
-    if (failures.length > 0) {
-      throw new MirrorFailure(failures, own);
-    }
+    if (failures.length > 0) throw new MirrorFailure(failures, own);
     settled = judged.settled;
     applyClaims(context, claims, outcome);
   }

@@ -4,13 +4,9 @@
 // compiler API); line numbers come from offsets through one line-start table.
 
 import type {
-  ArrayExpression,
-  BlockStatement,
   ClassBody,
   Node,
-  ObjectExpression,
   Program,
-  StaticBlock,
   TSEnumBody,
   TSInterfaceBody,
   TSTypeLiteral,
@@ -71,9 +67,19 @@ export interface Source {
 type RecordBody = TSInterfaceBody | ClassBody | TSTypeLiteral | TSEnumBody;
 type ModuleStatement = Program["body"][number];
 
-/** A construct whose comments are its own, never an enclosing member's: a record body (its members are judged on
- *  their own), a function body (code comments, not a doc comment), an object or array literal (its entries'). */
-type Nested = RecordBody | BlockStatement | StaticBlock | ObjectExpression | ArrayExpression;
+/** The offsets of a construct whose comments are its own, never an enclosing member's: a record body (its members
+ *  are judged on their own), a function body, braced or an arrow's expression (code comments, not a doc comment), an
+ *  object or array literal (its entries'). */
+interface Owned {
+  start: number;
+  end: number;
+}
+
+/** The record bodies of a file in visiting order, and every owned region, the record bodies among them. */
+interface Constructs {
+  records: RecordBody[];
+  owned: Owned[];
+}
 
 /** What the attribution reads of a member or a declarator: its kind and the offsets its own lines span, its
  *  delimiter included. */
@@ -129,11 +135,8 @@ class LineTable {
     let high = this.starts.length - 1;
     while (low < high) {
       const mid = Math.ceil((low + high) / 2);
-      if (this.starts[mid] <= offset) {
-        low = mid;
-      } else {
-        high = mid - 1;
-      }
+      if (this.starts[mid] <= offset) low = mid;
+      else high = mid - 1;
     }
 
     return low + 1;
@@ -148,35 +151,53 @@ function membersOf(body: RecordBody): Node[] {
   return "members" in body ? body.members : body.body;
 }
 
-function isRecordBody(node: Nested): node is RecordBody {
-  return node.type in RECORD_KINDS;
+/** The offset past the whitespace and comments that follow `at`. */
+function afterTrivia(text: string, comments: OxcComment[], at: number): number {
+  let next = at;
+  let comment: OxcComment | undefined;
+  do {
+    while (/\s/.test(text.charAt(next))) next += 1;
+    comment = comments.find((candidate) => candidate.start === next);
+    next = comment?.end ?? next;
+  } while (comment !== undefined);
+
+  return next;
 }
 
-/** Every record body and every other comment-owning construct in the tree, in visiting order. */
-function nestedOf(program: Program): Nested[] {
-  const found: Nested[] = [];
-  const collect = (node: Nested): void => {
-    found.push(node);
+/** The record bodies and the owned regions of the tree. A static block owns its braces only: a comment between
+ *  `static` and the brace is the member's. An expression-bodied arrow owns its body, parentheses included. */
+function constructsOf(program: Program, text: string, comments: OxcComment[]): Constructs {
+  const records: RecordBody[] = [];
+  const owned: Owned[] = [];
+  const record = (node: RecordBody): void => {
+    records.push(node);
+    owned.push(node);
+  };
+  const own = (node: Owned): void => {
+    owned.push(node);
   };
   new Visitor({
-    TSInterfaceBody: collect,
-    ClassBody: collect,
-    TSTypeLiteral: collect,
-    TSEnumBody: collect,
-    BlockStatement: collect,
-    StaticBlock: collect,
-    ObjectExpression: collect,
-    ArrayExpression: collect,
+    TSInterfaceBody: record,
+    ClassBody: record,
+    TSTypeLiteral: record,
+    TSEnumBody: record,
+    BlockStatement: own,
+    ObjectExpression: own,
+    ArrayExpression: own,
+    StaticBlock: (node) => {
+      own({ start: afterTrivia(text, comments, node.start + "static".length), end: node.end });
+    },
+    ArrowFunctionExpression: (node) => {
+      if (node.expression) own(node.body);
+    },
   }).visit(program);
-  return found;
+  return { records, owned };
 }
 
 /** The statement as a `const` statement, or null for any other. */
 function constStatement(node: ModuleStatement): ConstStatement | null {
   const declaration = node.type === "ExportNamedDeclaration" ? node.declaration : node;
-  if (declaration?.type !== "VariableDeclaration" || declaration.kind !== "const") {
-    return null;
-  }
+  if (declaration?.type !== "VariableDeclaration" || declaration.kind !== "const") return null;
 
   return { node, declarators: declaration.declarations };
 }
@@ -192,15 +213,11 @@ function constRuns(program: Program): ConstStatement[][] {
       continue;
     }
 
-    if (run.length > 0) {
-      runs.push(run);
-    }
+    if (run.length > 0) runs.push(run);
     run = [];
   }
 
-  if (run.length > 0) {
-    runs.push(run);
-  }
+  if (run.length > 0) runs.push(run);
 
   return runs;
 }
@@ -209,9 +226,7 @@ function constRuns(program: Program): ConstStatement[][] {
  *  its doc reads as a field's does. */
 function memberKind(node: Node): MemberKind {
   const kind = "kind" in node ? node.kind : undefined;
-  if (kind === "get" || kind === "set") {
-    return "field";
-  }
+  if (kind === "get" || kind === "set") return "field";
 
   return METHOD_TYPES.has(node.type) ? "method" : "field";
 }
@@ -219,16 +234,7 @@ function memberKind(node: Node): MemberKind {
 /** The end of the `,` or `;` that follows an offset past whitespace and comments, or the offset itself: oxc ends an
  *  enum member or a declarator before its separator, and a comment between the two is the member's. */
 function delimiterEnd(text: string, comments: OxcComment[], end: number): number {
-  let at = end;
-  let comment: OxcComment | undefined;
-  do {
-    while (/\s/.test(text.charAt(at))) {
-      at += 1;
-    }
-    comment = comments.find((candidate) => candidate.start === at);
-    at = comment?.end ?? at;
-  } while (comment !== undefined);
-
+  const at = afterTrivia(text, comments, end);
   return text.charAt(at) === "," || text.charAt(at) === ";" ? at + 1 : end;
 }
 
@@ -261,9 +267,7 @@ function contiguousAbove(candidates: Comment[], line: number): Comment[] {
   let next = line;
   for (const comment of [...candidates].reverse()) {
     const onItemLine = taken.length === 0 && comment.endLine === line;
-    if (comment.endLine !== next - 1 && !onItemLine) {
-      break;
-    }
+    if (comment.endLine !== next - 1 && !onItemLine) break;
     taken.unshift(comment);
     next = comment.line;
   }
@@ -297,18 +301,18 @@ function commentsWithin(
     }));
 }
 
-/** The comments on a span's own lines: within it, outside any construct nested in it that owns its own. */
+/** The comments on a span's own lines: within it, outside any owned region nested in it. */
 function commentsInside(
   comments: OxcComment[],
-  nested: Nested[],
+  owned: Owned[],
   span: Span,
   table: LineTable,
 ): Comment[] {
-  const inner = nested.filter((node) => within(node, span.start, span.end));
-  const owned = comments.filter(
+  const inner = owned.filter((node) => within(node, span.start, span.end));
+  const outside = comments.filter(
     (comment) => !inner.some((node) => within(comment, node.start, node.end)),
   );
-  return commentsWithin(owned, span.start, span.end, table);
+  return commentsWithin(outside, span.start, span.end, table);
 }
 
 /** The comments between two offsets. `from` is the end of the item above, or of what opens the block: a brace, the
@@ -339,7 +343,7 @@ interface Attribution {
 function attribute(
   spans: Span[],
   comments: OxcComment[],
-  nested: Nested[],
+  owned: Owned[],
   table: LineTable,
   { openAt, closeAt, opens }: Attribution,
 ): Item[] {
@@ -348,22 +352,18 @@ function attribute(
     line: table.lineOf(span.start),
     endLine: table.endLineOf(span.end),
     above: [],
-    inside: commentsInside(comments, nested, span, table),
+    inside: commentsInside(comments, owned, span, table),
     trailing: null,
   }));
   spans.forEach((span, index) => {
     const from = index === 0 ? openAt : spans[index - 1].end;
     const gap = gapComments(comments, from, span.start, table);
-    if (gap.trailing !== null && index > 0) {
-      items[index - 1].trailing = gap.trailing;
-    }
+    if (gap.trailing !== null && index > 0) items[index - 1].trailing = gap.trailing;
 
     const first = index === 0;
     items[index].above =
       first && opens === "statement" ? contiguousAbove(gap.above, items[0].line) : gap.above;
-    if (first && opens === "brace" && gap.trailing !== null) {
-      items[0].above.unshift(gap.trailing);
-    }
+    if (first && opens === "brace" && gap.trailing !== null) items[0].above.unshift(gap.trailing);
   });
   const last = items.length - 1;
   items[last].trailing ??= gapComments(comments, spans[last].end, closeAt, table).trailing;
@@ -379,24 +379,21 @@ export function isTypeScript(relPath: string): boolean {
  *  oxc reads the language off the file name, so a `.d.ts` parses as a declaration file. */
 export function parseSource(relPath: string, text: string): Source | null {
   const parsed = parseSync(relPath, text);
-  if (parsed.errors.length > 0) {
-    return null;
-  }
+  if (parsed.errors.length > 0) return null;
 
   const table = new LineTable(text);
   const comments = parsed.comments;
   const program = parsed.program;
-  const nested = nestedOf(program);
+  const { records: bodies, owned } = constructsOf(program, text, comments);
   const toDelimiter = (span: Span): Span => ({
     ...span,
     end: delimiterEnd(text, comments, span.end),
   });
-  const records: Block[] = nested
-    .filter(isRecordBody)
+  const records: Block[] = bodies
     .filter((body) => membersOf(body).length > 0)
     .map((body) => ({
       kind: RECORD_KINDS[body.type],
-      items: attribute(membersOf(body).map(memberSpan).map(toDelimiter), comments, nested, table, {
+      items: attribute(membersOf(body).map(memberSpan).map(toDelimiter), comments, owned, table, {
         openAt: body.start,
         closeAt: body.end,
         opens: "brace",
@@ -408,7 +405,7 @@ export function parseSource(relPath: string, text: string): Source | null {
     const after = program.body[program.body.indexOf(run[run.length - 1].node) + 1];
     return {
       kind: "const block",
-      items: attribute(run.flatMap(declaratorSpans).map(toDelimiter), comments, nested, table, {
+      items: attribute(run.flatMap(declaratorSpans).map(toDelimiter), comments, owned, table, {
         openAt: before?.end ?? 0,
         closeAt: after?.start ?? text.length,
         opens: "statement",

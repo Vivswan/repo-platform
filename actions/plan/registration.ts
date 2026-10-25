@@ -32,13 +32,9 @@ export function unknownModuleProblems(
 // A nested list or mapping is named by shape: JSON.stringify throws on the
 // cycle a YAML alias can build, which would turn a bad entry into a crash.
 function describeEntry(entry: unknown): string {
-  if (Array.isArray(entry)) {
-    return "(a list)";
-  }
+  if (Array.isArray(entry)) return "(a list)";
 
-  if (typeof entry === "object" && entry !== null) {
-    return "(a mapping)";
-  }
+  if (typeof entry === "object" && entry !== null) return "(a mapping)";
 
   return JSON.stringify(entry) ?? String(entry);
 }
@@ -115,9 +111,7 @@ const slug = z
 function judged(problem: (value: string) => string | null) {
   return z.string().superRefine((value, ctx) => {
     const message = problem(value);
-    if (message !== null) {
-      ctx.addIssue({ code: "custom", message });
-    }
+    if (message !== null) ctx.addIssue({ code: "custom", message });
   });
 }
 
@@ -173,17 +167,13 @@ export const registrationSchema = z.strictObject({
         )
         .superRefine((roots, ctx) => {
           const message = includeListProblem(roots);
-          if (message !== null) {
-            ctx.addIssue({ code: "custom", message });
-          }
+          if (message !== null) ctx.addIssue({ code: "custom", message });
         })
         .optional(),
     })
     .superRefine((site, ctx) => {
       const message = includeWithoutDocsProblem(site.path, site.include ?? []);
-      if (message !== null) {
-        ctx.addIssue({ code: "custom", message, path: ["include"] });
-      }
+      if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
     })
     .optional(),
   labels: z.record(z.string(), label).optional(),
@@ -209,9 +199,7 @@ export function parseRegistration(text: string, label = REGISTRATION_PATH): Regi
   }
 
   const modules = readModules(data, label);
-  if (modules.modules === null) {
-    return { errors: modules.errors };
-  }
+  if (modules.modules === null) return { errors: modules.errors };
 
   const result = registrationSchema.safeParse(data);
   if (!result.success) {

@@ -47,20 +47,14 @@ export interface SyncReport extends SyncOutcome {
 export function holdReasons(outcome: SyncOutcome): string[] {
   const reasons: string[] = [];
   for (const row of outcome.written) {
-    if (row.change === "held") {
-      reasons.push(`${row.path} held: ${row.detail}`);
-    }
+    if (row.change === "held") reasons.push(`${row.path} held: ${row.detail}`);
     if (row.change === "region added") {
       reasons.push(`${row.path}: the managed region was added above repository-owned content`);
     }
   }
-  for (const row of outcome.replaced) {
-    reasons.push(`local edits replaced in ${row.path}`);
-  }
+  for (const row of outcome.replaced) reasons.push(`local edits replaced in ${row.path}`);
   for (const row of outcome.retired) {
-    if (row.outcome === "held") {
-      reasons.push(`retirement of ${row.path} held: ${row.detail}`);
-    }
+    if (row.outcome === "held") reasons.push(`retirement of ${row.path} held: ${row.detail}`);
     if (row.outcome === "region removed") {
       reasons.push(
         `retirement of ${row.path}: the managed region was removed and the repository-owned content kept`,
@@ -68,13 +62,9 @@ export function holdReasons(outcome: SyncOutcome): string[] {
     }
   }
   for (const row of outcome.mirrors) {
-    if (row.outcome === "replaced") {
-      reasons.push(`mirror ${row.target} replaced: ${row.detail}`);
-    }
+    if (row.outcome === "replaced") reasons.push(`mirror ${row.target} replaced: ${row.detail}`);
   }
-  for (const note of outcome.notes) {
-    reasons.push(`registration: ${note}`);
-  }
+  for (const note of outcome.notes) reasons.push(`registration: ${note}`);
   return reasons;
 }
 
@@ -108,9 +98,7 @@ export function unifiedDiff(
   });
   // formatPatch ends the text with one newline of its own.
   const lines = patch.slice(0, -1).split("\n");
-  if (lines.length <= cap) {
-    return lines.join("\n");
-  }
+  if (lines.length <= cap) return lines.join("\n");
   return `${lines.slice(0, cap).join("\n")}\n... (${lines.length - cap} more diff lines)`;
 }
 

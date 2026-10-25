@@ -81,11 +81,8 @@ describe("spawn env is live process.env", () => {
       });
     } finally {
       for (const [key, value] of Object.entries(saved)) {
-        if (value === undefined) {
-          delete process.env[key];
-        } else {
-          process.env[key] = value;
-        }
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
       }
     }
   });

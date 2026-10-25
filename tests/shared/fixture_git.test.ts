@@ -35,9 +35,7 @@ function originAndWork(committed: boolean): string {
   fixtureGit(work, ["remote", "add", "origin", origin]);
   writeFileSync(join(work, "a.txt"), "a\n");
   fixtureGit(work, ["add", "-A"]);
-  if (committed) {
-    fixtureGit(work, ["commit", "-q", "-m", "a"]);
-  }
+  if (committed) fixtureGit(work, ["commit", "-q", "-m", "a"]);
   return work;
 }
 
@@ -52,9 +50,7 @@ const AMBIENT = {
 
 describe("fixtureGit", () => {
   afterEach(() => {
-    for (const key of Object.keys(AMBIENT)) {
-      delete process.env[key];
-    }
+    for (const key of Object.keys(AMBIENT)) delete process.env[key];
   });
 
   // Auto maintenance racing the next command's read of loose objects is a flake nothing else names.

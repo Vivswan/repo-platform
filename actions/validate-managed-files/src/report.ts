@@ -10,9 +10,7 @@ import { type Integrity, readVerdict } from "./verdict.ts";
 /** Unless the clear step succeeded, the validator never ran: any verdict on disk is stale or planted, so it is not
  *  read without a successful clear. */
 function judgedIntegrity(clearOutcome: string): Integrity {
-  if (clearOutcome === "success") {
-    return readVerdict(requireEnv("VERDICT"));
-  }
+  if (clearOutcome === "success") return readVerdict(requireEnv("VERDICT"));
 
   return {
     kind: "not-judged",

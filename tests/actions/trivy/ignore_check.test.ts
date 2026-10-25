@@ -146,9 +146,7 @@ describe("checkIgnoreFile", () => {
 describe("the ignore_check step", () => {
   const run = (files: Record<string, string>) => {
     const dir = temp.dir("trivy-ignore-");
-    for (const [name, text] of Object.entries(files)) {
-      writeFileSync(join(dir, name), text);
-    }
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
     const output = join(dir, "output.txt");
     writeFileSync(output, "");
     const result = boundedSpawnSync([process.execPath, SCRIPT], {

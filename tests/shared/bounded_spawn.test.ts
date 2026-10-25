@@ -75,11 +75,8 @@ describe("boundedSpawnSync", () => {
           boundedSpawnSync([bunExe, "-e", `await Bun.sleep(${BACKSTOP_MS})`], { timeoutMs: 250 }),
         ).toThrow(/exceeded the 250ms harness bound \(stretched to 2000ms for load\)/);
       } finally {
-        if (previous === undefined) {
-          delete process.env.TEST_TIME_SCALE;
-        } else {
-          process.env.TEST_TIME_SCALE = previous;
-        }
+        if (previous === undefined) delete process.env.TEST_TIME_SCALE;
+        else process.env.TEST_TIME_SCALE = previous;
       }
     },
     harnessBound(5_000),

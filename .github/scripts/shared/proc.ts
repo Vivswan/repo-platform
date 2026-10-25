@@ -40,21 +40,15 @@ export type SignalCode = string | number | null | undefined;
 
 /** The signal's number, whichever form bun reported it in; undefined for no signal or a name the platform lacks. */
 function signalNumber(signalCode: SignalCode): number | undefined {
-  if (typeof signalCode === "number") {
-    return signalCode;
-  }
-  if (!signalCode) {
-    return undefined;
-  }
+  if (typeof signalCode === "number") return signalCode;
+  if (!signalCode) return undefined;
   return (constants.signals as Record<string, number | undefined>)[signalCode];
 }
 
 /** Bash-style exit code: the command's own, or 128+signal when it was
  * killed (a signal-terminated child reports exitCode null). */
 export function exitCodeOf(proc: { exitCode: number | null; signalCode?: SignalCode }): number {
-  if (proc.exitCode !== null) {
-    return proc.exitCode;
-  }
+  if (proc.exitCode !== null) return proc.exitCode;
   const signal = signalNumber(proc.signalCode);
   return signal === undefined ? 1 : 128 + signal;
 }
@@ -114,9 +108,7 @@ export function passthrough(
 
 export function must(command: string[], options: Omit<RunOptions, "timeoutMs"> = {}): void {
   const exitCode = passthrough(command, options);
-  if (exitCode !== 0) {
-    process.exit(exitCode);
-  }
+  if (exitCode !== 0) process.exit(exitCode);
 }
 
 /** The deadline line is printed here because a SIGKILLed child usually dies without printing anything. */
@@ -134,8 +126,6 @@ export function mustCapture(command: string[], options: RunOptions = {}): string
     console.error(`command timed out after ${timeout}ms: ${redactCommand(command)}`);
     process.exit(timeoutExitCode(proc));
   }
-  if (proc.exitCode !== 0) {
-    process.exit(exitCodeOf(proc));
-  }
+  if (proc.exitCode !== 0) process.exit(exitCodeOf(proc));
   return proc.stdout.toString().replace(/\n+$/, "");
 }

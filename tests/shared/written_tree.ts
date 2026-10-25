@@ -77,9 +77,7 @@ export function writtenTree(root: string, build: string): SyncReport {
   const migrate = boundedSpawnSync([process.execPath, MIGRATE, join(root, "migrations"), target], {
     env: { ...fixtureGitEnv(), RUNNER_TEMP: join(root, "temp") },
   });
-  if (migrate.exitCode !== 0) {
-    throw new Error(`migrate.ts failed: ${migrate.stderr}`);
-  }
+  if (migrate.exitCode !== 0) throw new Error(`migrate.ts failed: ${migrate.stderr}`);
 
   write(target, IGNORED_PATH, "1.2.3\n");
   write(target, MANIFEST_NAME, `{"${IGNORED_PATH}": {"class": "managed"}}\n`);

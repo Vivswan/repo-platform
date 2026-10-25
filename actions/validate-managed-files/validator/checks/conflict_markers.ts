@@ -34,9 +34,7 @@ export function checkConflictMarkers(ctx: Context): Finding[] {
   const findings: Finding[] = [];
   for (const rel of ctx.files) {
     const suffix = extname(rel);
-    if (!TEXT_SUFFIXES.has(suffix) && suffix !== "") {
-      continue;
-    }
+    if (!TEXT_SUFFIXES.has(suffix) && suffix !== "") continue;
 
     let content: string;
     try {

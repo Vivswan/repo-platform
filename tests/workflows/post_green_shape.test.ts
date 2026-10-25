@@ -25,9 +25,7 @@ function ancestorsOf(jobs: Record<string, Job>, id: string): Set<string> {
   const seen = new Set<string>();
   const stack = [...(jobs[id].needs ?? [])];
   for (let need = stack.pop(); need !== undefined; need = stack.pop()) {
-    if (seen.has(need)) {
-      continue;
-    }
+    if (seen.has(need)) continue;
     seen.add(need);
     stack.push(...(jobs[need].needs ?? []));
   }
@@ -36,13 +34,9 @@ function ancestorsOf(jobs: Record<string, Job>, id: string): Set<string> {
 
 /** A need's `result` as the dependent reads it: `skipped` for one that did not run and was not failed. */
 function needResult(need: string, ran: Set<string>, failed: string[]): string {
-  if (ran.has(need)) {
-    return "success";
-  }
+  if (ran.has(need)) return "success";
 
-  if (failed.includes(need)) {
-    return "failure";
-  }
+  if (failed.includes(need)) return "failure";
 
   return "skipped";
 }
@@ -90,24 +84,18 @@ function jobsRunning(
       pending.push(id);
       continue;
     }
-    if (failed.includes(id)) {
-      continue;
-    }
+    if (failed.includes(id)) continue;
     const context: Record<string, string> = {
       "github.event_name": event,
       "github.ref": ref,
       ...needsContext(needs, ran, failed, outputs),
     };
-    if (headRef !== undefined) {
-      context["github.head_ref"] = headRef;
-    }
+    if (headRef !== undefined) context["github.head_ref"] = headRef;
     const condition = job.if ?? "";
     const statusFunction = /\b(always|cancelled|success|failure)\(\)/.test(condition);
     const chainRan = [...ancestorsOf(jobs, id)].every((need) => ran.has(need));
     const passes = condition === "" || evaluateCondition(condition, context);
-    if (passes && (statusFunction || chainRan)) {
-      ran.add(id);
-    }
+    if (passes && (statusFunction || chainRan)) ran.add(id);
   }
   return [...ran];
 }

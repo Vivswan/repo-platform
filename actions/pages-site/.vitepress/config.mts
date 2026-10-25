@@ -132,9 +132,7 @@ for (const tree of sidebarTrees(files)) {
     siteTitle: title,
     indexPages,
   });
-  if (tree.prefix === "") {
-    continue;
-  }
+  if (tree.prefix === "") continue;
 
   const dir = tree.prefix.slice(0, -1);
   locales[dir] = { label: nativeName(dir), lang: dir };
@@ -166,15 +164,11 @@ export default defineConfigWithTheme<FleetThemeConfig>({
             postcssPlugin: "fleet-drop-carbon-fonts",
             Once(root) {
               root.walkAtRules("import", (rule) => {
-                if (/^(url\(\s*)?["']?https?:/.test(rule.params)) {
-                  rule.remove();
-                }
+                if (/^(url\(\s*)?["']?https?:/.test(rule.params)) rule.remove();
               });
               root.walkAtRules("font-face", (rule) => {
                 rule.walkDecls("font-family", (decl) => {
-                  if (/^["']?Mona Sans["']?$/.test(decl.value)) {
-                    rule.remove();
-                  }
+                  if (/^["']?Mona Sans["']?$/.test(decl.value)) rule.remove();
                 });
               });
             },
@@ -196,9 +190,7 @@ export default defineConfigWithTheme<FleetThemeConfig>({
         ? { title: untitledPageTitle(pageData.filePath, pageData.frontmatter.name) }
         : {}),
     };
-    if (!isLandingFile(pageData.filePath, includePages)) {
-      return source;
-    }
+    if (!isLandingFile(pageData.filePath, includePages)) return source;
 
     return {
       ...source,

@@ -75,9 +75,7 @@ const EXTENSIONS = new Set([
  *  everywhere" must include .githooks/pre-commit and friends. */
 function isCheckable(name: string): boolean {
   const dot = name.lastIndexOf(".");
-  if (dot === -1) {
-    return true;
-  }
+  if (dot === -1) return true;
 
   return EXTENSIONS.has(name.slice(dot));
 }
@@ -172,13 +170,9 @@ type ScriptContext = { cjk: boolean; devanagari: boolean };
 
 function violation(code: number, context: ScriptContext): string | null {
   const control = CONTROL_NAMES[code];
-  if (control !== undefined) {
-    return control;
-  }
+  if (control !== undefined) return control;
 
-  if (code <= 0x7e) {
-    return null;
-  }
+  if (code <= 0x7e) return null;
 
   if (CJK_PUNCTUATION.has(code)) {
     return context.cjk ? null : `CJK punctuation ${hex(code)} in a non-CJK file (use ASCII)`;
@@ -188,9 +182,7 @@ function violation(code: number, context: ScriptContext): string | null {
     return null;
   }
 
-  if (NAMES[code]) {
-    return NAMES[code];
-  }
+  if (NAMES[code]) return NAMES[code];
 
   if (FORBIDDEN.test(String.fromCodePoint(code))) {
     const range = RANGES.find(([lo, hi]) => code >= lo && code <= hi);
@@ -218,27 +210,21 @@ function isJudged(relPath: string): boolean {
 
 const failures: string[] = [];
 for (const relPath of repositoryFiles(ROOT, { untracked: true })) {
-  if (!isJudged(relPath) || isExempt(relPath)) {
-    continue;
-  }
+  if (!isJudged(relPath) || isExempt(relPath)) continue;
 
   const content = readFileSync(join(ROOT, relPath), "utf-8");
   const context = { cjk: CJK_TEXT.test(content), devanagari: DEVANAGARI_TEXT.test(content) };
   content.split("\n").forEach((line, index) => {
     for (const ch of line) {
       const message = violation(ch.codePointAt(0)!, context);
-      if (message) {
-        failures.push(`${relPath}:${index + 1} ${message}`);
-      }
+      if (message) failures.push(`${relPath}:${index + 1} ${message}`);
     }
   });
 }
 
 if (failures.length > 0) {
   console.error("Typographic look-alike characters found:\n");
-  for (const failure of failures) {
-    console.error(`  ${failure}`);
-  }
+  for (const failure of failures) console.error(`  ${failure}`);
   console.error(`\n${failures.length} occurrence(s). Replace them with plain ASCII equivalents.`);
   process.exit(1);
 }

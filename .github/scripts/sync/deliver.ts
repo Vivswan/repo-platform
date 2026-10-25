@@ -47,9 +47,7 @@ export function prTitle(build: string): string {
 }
 
 export function tail(path: string, bytes = TAIL_BYTES): string {
-  if (!existsSync(path)) {
-    return "";
-  }
+  if (!existsSync(path)) return "";
   const size = statSync(path).size;
   const buffer = readFileSync(path);
   const cut = buffer.subarray(Math.max(0, size - bytes)).toString("utf-8");
@@ -70,9 +68,7 @@ export function failureBody(input: {
   deliverLog: string;
 }): string {
   const block = (title: string, text: string) => {
-    if (text === "") {
-      return [];
-    }
+    if (text === "") return [];
     const fence = fenceFor(text);
     return ["", `## ${title}`, "", `${fence}text`, text.replace(/\n$/, ""), fence];
   };
@@ -94,9 +90,7 @@ export function failureBody(input: {
 export const BODY_CAP = 60_000;
 
 export function truncatedLines(text: string, budget: number): string {
-  if (text.length <= budget) {
-    return text;
-  }
+  if (text.length <= budget) return text;
   const cut = text.lastIndexOf("\n", budget);
   return text.slice(0, cut <= 0 ? budget : cut);
 }
@@ -113,9 +107,7 @@ const lineCount = (text: string): number =>
 function fences(text: string): { markup: string; closed: boolean }[] {
   const found: { markup: string; closed: boolean }[] = [];
   for (const token of markdown.parse(text, {})) {
-    if (token.type !== "fence" || token.map === null) {
-      continue;
-    }
+    if (token.type !== "fence" || token.map === null) continue;
     const [start, end] = token.map;
     found.push({ markup: token.markup, closed: end - start === lineCount(token.content) + 2 });
   }
@@ -136,9 +128,7 @@ function cutSection(section: string, room: number): string {
   const heading = headingEnd === -1 ? section : section.slice(0, headingEnd);
   const longest = fences(section).reduce((max, fence) => Math.max(max, fence.markup.length), 0);
   const reserve = cutMarker(section.length).length + (longest === 0 ? 0 : longest + 1);
-  if (room < heading.length + reserve) {
-    return "";
-  }
+  if (room < heading.length + reserve) return "";
   const kept = truncatedLines(section, room - reserve);
   return `${closedFences(kept)}${cutMarker(section.length - kept.length)}`;
 }
@@ -157,17 +147,11 @@ function sections(report: string): string[] {
 /** Section by section, the Review section (the hold reasons) takes its room right after the header and the replaced-edit diffs last:
  *  a diff can carry lines of any length. */
 export function boundedReport(report: string, cap = BODY_CAP): string {
-  if (report.length <= cap) {
-    return report;
-  }
+  if (report.length <= cap) return report;
   const parts = sections(report);
   const rank = (index: number): number => {
-    if (index === 0) {
-      return 0;
-    }
-    if (parts[index].startsWith(`\n${REVIEW_HEADING}`)) {
-      return 1;
-    }
+    if (index === 0) return 0;
+    if (parts[index].startsWith(`\n${REVIEW_HEADING}`)) return 1;
     return parts[index].startsWith(`\n${REPLACED_HEADING}`) ? 3 : 2;
   };
   const order = parts.map((_, index) => index).sort((a, b) => rank(a) - rank(b) || a - b);
@@ -318,9 +302,7 @@ class Delivery {
       ...(extraEnv === undefined ? {} : { env: extraEnv }),
     });
     this.log(`$ ${label} -> exit ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
-    if (result.stderr !== "") {
-      this.log(result.stderr.replace(/\n$/, ""));
-    }
+    if (result.stderr !== "") this.log(result.stderr.replace(/\n$/, ""));
     return result.exitCode === 0 ? { ok: true, stdout: result.stdout } : { ok: false };
   }
 
@@ -332,18 +314,14 @@ class Delivery {
   /** A failed call files the failure and never returns; the stdout otherwise. */
   must(argv: string[], reason: string, label = commandLabel(argv)): string {
     const call = this.run(argv, label);
-    if (!call.ok) {
-      this.fileFailure(reason);
-    }
+    if (!call.ok) this.fileFailure(reason);
     return call.stdout;
   }
 
   /** An open report outranks an older closed one: it is the one being watched, so a clean run closes it and a failure refreshes it. */
   findFailureIssue(): { number: string; state: string } | "" | null {
     const login = this.run(["gh", "api", "user", "--jq", ".login"]);
-    if (!login.ok) {
-      return null;
-    }
+    if (!login.ok) return null;
     // gh refuses `--slurp` beside `--jq`, so the filter runs per page and
     // prints one line per matching issue; created-ascending, the first
     // line across the pages is the oldest.
@@ -371,9 +349,7 @@ class Delivery {
       "gh api issues GET",
       { ISSUE_TITLE: FAILURE_ISSUE_TITLE },
     );
-    if (!list.ok) {
-      return null;
-    }
+    if (!list.ok) return null;
     const reports = list.stdout
       .split("\n")
       .filter((line) => line !== "")
@@ -400,9 +376,7 @@ class Delivery {
       }),
     );
     const found = this.findFailureIssue();
-    if (found === null) {
-      process.exit(1);
-    }
+    if (found === null) process.exit(1);
     const write =
       found === ""
         ? this.run(
@@ -435,9 +409,7 @@ class Delivery {
             ],
             "gh api issues PATCH",
           );
-    if (!write.ok) {
-      process.exit(1);
-    }
+    if (!write.ok) process.exit(1);
     this.verdict("failed");
     process.exit(0);
   }
@@ -445,9 +417,7 @@ class Delivery {
   /** The open failure issue, if there is one, is closed with a healthy-again note. */
   closeFailureIssue(): void {
     const found = this.findFailureIssue();
-    if (found === null || found === "" || found.state !== "open") {
-      return;
-    }
+    if (found === null || found === "" || found.state !== "open") return;
     const bodyFile = join(this.runnerTemp, "failure-issue-close.md");
     writeFileSync(
       bodyFile,
@@ -517,9 +487,7 @@ class Delivery {
       "reading the sync pull request's auto-merge state failed",
       "gh pr view",
     );
-    if (armed.trim() !== "true") {
-      return;
-    }
+    if (armed.trim() !== "true") return;
     this.must(
       ["gh", "pr", "merge", number, "-R", this.target, "--disable-auto"],
       "disarming the sync pull request's auto-merge failed",
@@ -530,9 +498,7 @@ class Delivery {
   /** A selection reverted on the default branch, say, leaves the open sync PR carrying stale files that must never merge. */
   closeObsoletePr(): void {
     const existing = this.openPr();
-    if (existing === null) {
-      return;
-    }
+    if (existing === null) return;
     this.disarm(existing.number);
     this.must(
       [
@@ -640,12 +606,8 @@ class Delivery {
 
   /** The sync end to end: nothing staged ends it unchanged, a dispatched branch gets one commit, the default branch a PR. */
   async deliver(): Promise<void> {
-    if (env("CHECKOUT_OUTCOME") !== "success") {
-      this.fileFailure("the target checkout failed");
-    }
-    if (env("WRITER_OUTCOME") !== "success") {
-      this.fileFailure("the writer exited with an error");
-    }
+    if (env("CHECKOUT_OUTCOME") !== "success") this.fileFailure("the target checkout failed");
+    if (env("WRITER_OUTCOME") !== "success") this.fileFailure("the writer exited with an error");
     const summary = JSON.parse(
       readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8"),
     ) as SyncReport;
@@ -678,9 +640,7 @@ class Delivery {
       this.git("symbolic-ref", "HEAD"),
       "git symbolic-ref failed in the target",
     ).trim();
-    if (!head.startsWith("refs/heads/")) {
-      this.fileFailure("the target checkout is not on a branch");
-    }
+    if (!head.startsWith("refs/heads/")) this.fileFailure("the target checkout is not on a branch");
     const base = head.slice("refs/heads/".length);
     if (this.branch !== "") {
       await this.deliverOntoBranch(report);
@@ -695,9 +655,7 @@ class Delivery {
     // An armed PR is disarmed before the branch moves: the incoming
     // revision may need review; re-arming below is the clean path's call.
     const existing = this.openPr();
-    if (existing !== null) {
-      this.disarm(existing.number);
-    }
+    if (existing !== null) this.disarm(existing.number);
 
     // The lease is the branch's remote tip, so a concurrent writer fails loudly.
     const lease = this.must(
@@ -756,6 +714,4 @@ class Delivery {
   }
 }
 
-if (import.meta.main) {
-  await new Delivery().deliver();
-}
+if (import.meta.main) await new Delivery().deliver();

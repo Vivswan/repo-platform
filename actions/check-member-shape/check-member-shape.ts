@@ -69,9 +69,7 @@ export function check(root: string): Verdict {
   let managedSkipped = 0;
   let generatedSkipped = 0;
   for (const relPath of repositoryFiles(root, { untracked: false })) {
-    if (!isJudged(relPath)) {
-      continue;
-    }
+    if (!isJudged(relPath)) continue;
 
     const text = readFileSync(join(root, relPath), "utf-8");
     if (isGenerated(text)) {
@@ -90,13 +88,9 @@ export function check(root: string): Verdict {
       continue;
     }
 
-    if (judged.length === 0) {
-      continue;
-    }
+    if (judged.length === 0) continue;
     found.add(relPath);
-    if (!allow.allowed.has(relPath)) {
-      findings.push(...judged);
-    }
+    if (!allow.allowed.has(relPath)) findings.push(...judged);
   }
 
   const allowlistErrors = [
@@ -163,9 +157,7 @@ export function report(outcome: Outcome): string {
     parts.push("", `${managedSkipped} managed file(s) skipped; ${PLATFORM_NAME} owns them.`);
   }
 
-  if (generatedSkipped > 0) {
-    parts.push("", `${generatedSkipped} generated file(s) skipped.`);
-  }
+  if (generatedSkipped > 0) parts.push("", `${generatedSkipped} generated file(s) skipped.`);
 
   return `${parts.join("\n")}\n`;
 }

@@ -84,9 +84,7 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
   try {
     config = parseFilesConfig(text, label);
   } catch (error) {
-    if (!(error instanceof FilesConfigError)) {
-      throw error;
-    }
+    if (!(error instanceof FilesConfigError)) throw error;
 
     throw new PlanError(error.problems.map((problem) => `${label}: ${problem}`));
   }
@@ -95,9 +93,7 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
   const problems: string[] = [];
   const required = (key: (typeof REQUIRED_DEFAULTS)[keyof PlanDefaults]): string => {
     const owners = declaring(modules, key);
-    if (owners.length === 1) {
-      return owners[0][key] ?? "";
-    }
+    if (owners.length === 1) return owners[0][key] ?? "";
     problems.push(
       owners.length === 0
         ? `${label}: modules: no module declares ${key} - the plan reads it as the default`
@@ -106,9 +102,7 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
     return "";
   };
   const defaults: PlanDefaults = { docsPath: required(REQUIRED_DEFAULTS.docsPath) };
-  if (problems.length > 0) {
-    throw new PlanError(problems);
-  }
+  if (problems.length > 0) throw new PlanError(problems);
 
   return {
     modules,
@@ -150,9 +144,7 @@ export function selectModules(input: PlanInput): Module[] {
     input.registration.modules,
     input.modules.map((module) => module.name),
   );
-  if (problems.length > 0) {
-    throw new PlanError(problems);
-  }
+  if (problems.length > 0) throw new PlanError(problems);
 
   const selected = new Set(input.registration.modules);
   return input.modules.filter((module) => selected.has(module.name));
@@ -228,9 +220,7 @@ export const SECURITY_LABEL = "security-nightly";
 
 /** Personal-account code scanning is public-only, so a private repository gets no CodeQL. */
 export function codeqlLanguages(selected: Module[], isPrivate: boolean): string[] {
-  if (isPrivate) {
-    return [];
-  }
+  if (isPrivate) return [];
 
   return [...new Set(selected.flatMap((m) => m.codeql_languages ?? []))];
 }
@@ -348,22 +338,16 @@ export function readRegistration(root: string): Registration {
   }
 
   const read = parseRegistration(readFileSync(path, "utf-8"));
-  if ("errors" in read) {
-    throw new PlanError(read.errors);
-  }
+  if ("errors" in read) throw new PlanError(read.errors);
 
   return read.registration;
 }
 
 /** The API fallback keeps an empty input from reading as public. */
 export function resolvePrivate(input: string, repository: string): boolean {
-  if (input === "true") {
-    return true;
-  }
+  if (input === "true") return true;
 
-  if (input === "false") {
-    return false;
-  }
+  if (input === "false") return false;
 
   if (input !== "") {
     throw new PlanError([`private input must be true, false, or empty; got '${input}'`]);
@@ -401,9 +385,7 @@ function main(): number {
       mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
   };
   const plan = mode === "site" ? planSite(input) : planCi(input);
-  for (const [name, value] of Object.entries(outputsOf(plan))) {
-    setOutput(name, value);
-  }
+  for (const [name, value] of Object.entries(outputsOf(plan))) setOutput(name, value);
 
   return 0;
 }
@@ -413,9 +395,7 @@ if (import.meta.main) {
     process.exit(main());
   } catch (err) {
     if (err instanceof PlanError) {
-      for (const problem of err.problems) {
-        error(problem);
-      }
+      for (const problem of err.problems) error(problem);
       process.exit(1);
     }
     setFailed(messageOf(err));

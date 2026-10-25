@@ -51,9 +51,7 @@ type Overlay = { repository?: { homepage?: unknown } | null };
  *  settings loader reads it. */
 function readOverlay(text: string): { doc: Document; js: Overlay } | null {
   const doc = parseDocument(text);
-  if (doc.errors.length > 0) {
-    return null;
-  }
+  if (doc.errors.length > 0) return null;
   try {
     return { doc, js: (doc.toJS() ?? {}) as Overlay };
   } catch {
@@ -66,19 +64,13 @@ function readOverlay(text: string): { doc: Document; js: Overlay } | null {
  *  decides whether the cut took exactly the pair: the edited text must read as the original minus that one key. */
 export function judgeOverlay(text: string, repository: () => string | null): Judgment {
   const read = readOverlay(text);
-  if (read === null) {
-    return { verdict: "absent" };
-  }
+  if (read === null) return { verdict: "absent" };
   const { doc, js: before } = read;
   const value = before.repository?.homepage;
-  if (value === undefined) {
-    return { verdict: "absent" };
-  }
+  if (value === undefined) return { verdict: "absent" };
   const empty = value === null || (typeof value === "string" && value.trim() === "");
   if (!empty) {
-    if (typeof value !== "string") {
-      return { verdict: "kept" };
-    }
+    if (typeof value !== "string") return { verdict: "kept" };
     const own = repository();
     if (own === null) {
       return {
@@ -86,9 +78,7 @@ export function judgeOverlay(text: string, repository: () => string | null): Jud
         reason: "the checkout's origin does not name a GitHub repository",
       };
     }
-    if (!isOwnAddress(value, own)) {
-      return { verdict: "kept" };
-    }
+    if (!isOwnAddress(value, own)) return { verdict: "kept" };
   }
   const repositoryMap = doc.get("repository", true);
   const pair = isMap(repositoryMap)
@@ -140,9 +130,7 @@ function main(checkout: string | undefined): number {
     }
   }
   const path = join(checkout, OVERLAY);
-  if (standing(path)?.isFile() !== true) {
-    return 0;
-  }
+  if (standing(path)?.isFile() !== true) return 0;
   const judged = judgeOverlay(readFileSync(path, "utf-8"), () => {
     const origin = capture(["git", "-C", checkout, "remote", "get-url", "origin"]);
     return origin.exitCode === 0 ? repositoryOf(origin.stdout) : null;
@@ -151,14 +139,10 @@ function main(checkout: string | undefined): number {
     console.error(`${RUNG}: ${OVERLAY}: ${judged.reason}; settle the homepage line by hand`);
     return 1;
   }
-  if (judged.verdict !== "removed") {
-    return 0;
-  }
+  if (judged.verdict !== "removed") return 0;
   writeFileSync(path, judged.text);
   console.log(OVERLAY);
   return 0;
 }
 
-if (import.meta.main) {
-  process.exit(main(process.argv[2]));
-}
+if (import.meta.main) process.exit(main(process.argv[2]));

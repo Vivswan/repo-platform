@@ -179,9 +179,7 @@ function hasDuplicateKey(resolved: string): boolean {
       if (lastString !== null && scopes.length > 0) {
         const key = JSON.parse(lastString) as string;
         const scope = scopes[scopes.length - 1];
-        if (scope.has(key)) {
-          return true;
-        }
+        if (scope.has(key)) return true;
         scope.add(key);
       }
       lastString = null;

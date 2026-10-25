@@ -39,13 +39,9 @@ const SILENT = { exitCode: 0, stdout: "", stderr: "" };
 function checkout(overlay: string | null, origin: string | null = ORIGIN): string {
   const root = temp.dir("migration-0002-");
   fixtureGit(root, ["init", "-q"]);
-  if (origin !== null) {
-    fixtureGit(root, ["remote", "add", "origin", origin]);
-  }
+  if (origin !== null) fixtureGit(root, ["remote", "add", "origin", origin]);
   mkdirSync(join(root, ".github"));
-  if (overlay !== null) {
-    writeFileSync(join(root, OVERLAY), overlay);
-  }
+  if (overlay !== null) writeFileSync(join(root, OVERLAY), overlay);
   return root;
 }
 
@@ -143,11 +139,8 @@ describe("0002-homepage-unmanaged", () => {
   ])("$reason is a no-op", ({ overlay }) => {
     const root = checkout(overlay, null);
     expect(run(root)).toEqual(SILENT);
-    if (overlay === null) {
-      expect(existsSync(join(root, OVERLAY))).toBe(false);
-    } else {
-      expect(readFileSync(join(root, OVERLAY), "utf-8")).toBe(overlay);
-    }
+    if (overlay === null) expect(existsSync(join(root, OVERLAY))).toBe(false);
+    else expect(readFileSync(join(root, OVERLAY), "utf-8")).toBe(overlay);
   });
 
   // One judge: the edited text must read as the original minus the one key. These spellings lose a flow separator

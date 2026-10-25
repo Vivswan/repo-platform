@@ -47,13 +47,9 @@ function main(checkout: string | undefined): number {
     }
   }
   const path = join(checkout, MANIFEST);
-  if (standing(path)?.isFile() !== true) {
-    return 0;
-  }
+  if (standing(path)?.isFile() !== true) return 0;
   const { text, restamped } = restampLinkRecords(readFileSync(path, "utf-8"));
-  if (restamped === 0) {
-    return 0;
-  }
+  if (restamped === 0) return 0;
   writeFileSync(path, text);
   console.error(
     `0001-link-records-are-mirrors: restamped ${restamped} link record(s) in ${MANIFEST}`,
@@ -62,6 +58,4 @@ function main(checkout: string | undefined): number {
   return 0;
 }
 
-if (import.meta.main) {
-  process.exit(main(process.argv[2]));
-}
+if (import.meta.main) process.exit(main(process.argv[2]));

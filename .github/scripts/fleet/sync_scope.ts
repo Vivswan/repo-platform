@@ -18,12 +18,8 @@ export type ScopeEntryKind = "all" | Visibility | "slug" | "modules" | "invalid"
 
 export function classifyEntry(entry: string): ScopeEntryKind {
   const folded = entry.toLowerCase();
-  if (folded === "all" || folded === "public" || folded === "private") {
-    return folded;
-  }
-  if (folded.startsWith(MODULES_PREFIX)) {
-    return "modules";
-  }
+  if (folded === "all" || folded === "public" || folded === "private") return folded;
+  if (folded.startsWith(MODULES_PREFIX)) return "modules";
   return isSlug(entry) ? "slug" : "invalid";
 }
 
@@ -107,9 +103,7 @@ export function parseScope(
   roster: ReadonlySet<string>,
 ): Scope | { kind: "error"; message: string } {
   const trimmed = raw.trim();
-  if (trimmed === "" || trimmed.toLowerCase() === "all") {
-    return { kind: "all" };
-  }
+  if (trimmed === "" || trimmed.toLowerCase() === "all") return { kind: "all" };
   const entries = trimmed.split(",").map((entry) => entry.trim());
   if (entries.includes("")) {
     return {
@@ -120,29 +114,19 @@ export function parseScope(
   }
   const tally = tallyEntries(entries, roster);
   const problem = tallyProblem(tally, roster);
-  if (problem !== null) {
-    return { kind: "error", message: problem };
-  }
+  if (problem !== null) return { kind: "error", message: problem };
   return { kind: "list", visibility: tally.visibility, slugs: tally.slugs, modules: tally.modules };
 }
 
 export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): boolean {
-  if (scope.kind === "all") {
-    return true;
-  }
-  if (scope.slugs.has(repo.toLowerCase())) {
-    return true;
-  }
-  if (scope.visibility.size === 0) {
-    return scope.modules.length > 0;
-  }
+  if (scope.kind === "all") return true;
+  if (scope.slugs.has(repo.toLowerCase())) return true;
+  if (scope.visibility.size === 0) return scope.modules.length > 0;
   return scope.visibility.has(isPrivate ? "private" : "public");
 }
 
 export function modulesFilterFor(scope: Scope, repo: string): Set<string>[] | null {
-  if (scope.kind !== "list" || scope.modules.length === 0) {
-    return null;
-  }
+  if (scope.kind !== "list" || scope.modules.length === 0) return null;
   return scope.slugs.has(repo.toLowerCase()) ? null : scope.modules;
 }
 
@@ -156,9 +140,7 @@ export function modulesAdmit(
 
 /** Counts only: a left-out repo may be private. */
 export function modulesLeftOutLine(scope: Scope, leftOut: number): string | null {
-  if (scope.kind !== "list" || scope.modules.length === 0) {
-    return null;
-  }
+  if (scope.kind !== "list" || scope.modules.length === 0) return null;
   return `modules filter: ${leftOut} adopted ${leftOut === 1 ? "repo" : "repos"} left out (selecting none of the listed module sets)`;
 }
 
@@ -168,9 +150,7 @@ export function scopeRefusal(
   known: ReadonlySet<string>,
   owner: string,
 ): string | null {
-  if (scope.kind === "all") {
-    return null;
-  }
+  if (scope.kind === "all") return null;
   const slugs = [...scope.slugs];
   const missing = slugs.filter((slug) => !known.has(slug)).length;
   if (missing > 0) {
@@ -203,9 +183,7 @@ export function branchDispatchRefusal(
     scope.slugs.size === 1 &&
     scope.visibility.size === 0 &&
     scope.modules.length === 0;
-  if (oneSlug) {
-    return null;
-  }
+  if (oneSlug) return null;
   return "branch takes exactly one owner/name in repo: the sync commits onto that one repository's branch (no list, no all, no visibility token, no modules: filter)";
 }
 
@@ -216,9 +194,7 @@ export type AddModules = { names: string[] } | { error: string };
  *  take it as given. */
 export function parseAddModules(raw: string, roster: readonly string[]): AddModules {
   const trimmed = raw.trim();
-  if (trimmed === "") {
-    return { names: [] };
-  }
+  if (trimmed === "") return { names: [] };
   const entries = trimmed.split(",").map((entry) => entry.trim().toLowerCase());
   if (entries.includes("")) {
     return {

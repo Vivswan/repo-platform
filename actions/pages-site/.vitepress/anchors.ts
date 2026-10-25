@@ -13,13 +13,9 @@ import type { Token } from "markdown-it";
  *    `## Use &amp;amp;`     -> `use-amp` on both
  *    `&amp;` inside backticks -> the text "&amp;", as on GitHub */
 function tokenText(token: Token): string {
-  if (token.type === "text") {
-    return decodeHTML(token.content);
-  }
+  if (token.type === "text") return decodeHTML(token.content);
 
-  if (token.type === "code_inline") {
-    return token.content;
-  }
+  if (token.type === "code_inline") return token.content;
 
   return "";
 }

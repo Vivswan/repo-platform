@@ -59,9 +59,7 @@ export function placeholderDefaults(config: FilesConfig): PlaceholderDefaults {
   const defaults: PlaceholderValues = {};
   const by: Partial<Record<PlaceholderName, string>> = {};
   const declare = (name: string, value: string, module: string, where: string) => {
-    if (!isPlaceholderName(name)) {
-      return;
-    }
+    if (!isPlaceholderName(name)) return;
     const earlier = by[name];
     if (earlier !== undefined) {
       problems.push(
@@ -77,9 +75,7 @@ export function placeholderDefaults(config: FilesConfig): PlaceholderDefaults {
       const { key, default: value, color, description } = data.tracking_label;
       const where = `modules.${module}.tracking_label`;
       declare(`${key}_label`, value, module, where);
-      if (color !== undefined) {
-        declare(`${key}_label_color`, color, module, where);
-      }
+      if (color !== undefined) declare(`${key}_label_color`, color, module, where);
       if (description !== undefined) {
         declare(`${key}_label_description`, description, module, where);
       }
@@ -106,9 +102,7 @@ export function trackingTuples(config: FilesConfig): TrackingTuples {
   const problems: string[] = [];
   for (const [module, data] of Object.entries<ModuleData>(config.modules)) {
     const tracking = data.tracking_label;
-    if (tracking === undefined) {
-      continue;
-    }
+    if (tracking === undefined) continue;
     if (tracking.color !== undefined && tracking.description !== undefined) {
       tuples[module] = { color: tracking.color, description: tracking.description };
     } else if (config.settings !== null) {
@@ -138,9 +132,7 @@ function useOf(sources: Map<string, SourceUse>, source: string): SourceUse {
 /** One more entry reading the source; a split entry's region is one the source may not mention. */
 function countRead(use: SourceUse, entry: FileEntry): void {
   use.entries += 1;
-  if (entry.class === "split") {
-    use.regions.add(entry.region);
-  }
+  if (entry.class === "split") use.regions.add(entry.region);
 }
 
 /** Every tree source by path with how the entries read it; a fetched source is not in the tree and is left out. */
@@ -148,22 +140,16 @@ function sourceUses(config: FilesConfig): Map<string, SourceUse> {
   const sources = new Map<string, SourceUse>();
   const allModules = Object.keys(config.modules);
   for (const entry of config.files) {
-    if ("render" in entry) {
-      continue;
-    }
+    if ("render" in entry) continue;
     // A fetched source is not in the tree; renderRegion refuses a body mentioning the markers at render time.
     if (typeof entry.source === "string") {
       const own = useOf(sources, entry.source);
       countRead(own, entry);
-      if (entry.blocks !== undefined) {
-        own.withBlocks += 1;
-      }
+      if (entry.blocks !== undefined) own.withBlocks += 1;
     }
     // A block file is spliced into the source, so it is read like one but may not carry the anchor itself.
     for (const { source } of blockSources(config, entry, allModules)) {
-      if (typeof source !== "string") {
-        continue;
-      }
+      if (typeof source !== "string") continue;
       countRead(useOf(sources, source), entry);
     }
   }
@@ -181,9 +167,7 @@ function sourceProblems(config: FilesConfig, text: string, use: SourceUse): stri
     problems.push(`uses unlisted placeholder(s) ${unknown.map((n) => `{{${n}}}`).join(", ")}`);
   }
   const anchor = spliced ? blocksAnchorProblem(text) : null;
-  if (anchor !== null) {
-    problems.push(anchor);
-  }
+  if (anchor !== null) problems.push(anchor);
   for (const region of use.regions) {
     if (mentionsMarkers(text, region === "hash" ? HASH_REGION_MARKERS : HTML_REGION_MARKERS)) {
       problems.push(`mentions the ${region} region markers the writer adds itself`);
@@ -216,9 +200,7 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
     }
   }
   problems.push(...readLayers(config, tree).problems);
-  if (problems.length > 0) {
-    throw new FilesConfigError(label, problems);
-  }
+  if (problems.length > 0) throw new FilesConfigError(label, problems);
 }
 
 /** The writer writes the manifest last, over whatever sits at its path, so an entry there would be written, recorded, and then silently replaced. */
@@ -240,9 +222,7 @@ export function loadFilesConfig(filesPath: string, tree: string): WriterFilesCon
     ...problems,
     ...manifestPathProblems(config),
   ];
-  if (all.length > 0) {
-    throw new FilesConfigError(label, all);
-  }
+  if (all.length > 0) throw new FilesConfigError(label, all);
   verifySources(config, tree);
   return { ...config, defaults, trackingTuples: tracking.tuples };
 }

@@ -46,9 +46,7 @@ const loadAction = (name: string): Action => loadYaml(`actions/${name}/action.ym
 function expressionsOf(node: unknown): string[] {
   const found = [...JSON.stringify(node).matchAll(EXPRESSION)].map((m) => m[1]);
   const condition = (node as { if?: unknown }).if;
-  if (typeof condition === "string") {
-    found.push(condition);
-  }
+  if (typeof condition === "string") found.push(condition);
   return found;
 }
 
@@ -59,9 +57,7 @@ function expressionsOf(node: unknown): string[] {
  *  passes here and is caught by the step's own test. */
 function writesKey(text: string, key: string, form: "run" | "script"): boolean {
   const name = key.replaceAll("-", "\\-");
-  if (form === "run") {
-    return new RegExp(`(["']|echo\\s+)${name}=[^\\n]*GITHUB_OUTPUT`).test(text);
-  }
+  if (form === "run") return new RegExp(`(["']|echo\\s+)${name}=[^\\n]*GITHUB_OUTPUT`).test(text);
   const lines = text.replaceAll("\\n", "\n");
   return (
     new RegExp(`(^|["'\`])${name}=`, "m").test(lines) ||
@@ -97,9 +93,7 @@ function stepWrites(actionName: string, step: Step, key: string): boolean {
     return writesKey(run, key, "run") || scripts.some((script) => writesKey(script, key, "script"));
   }
   const own = OWN_ACTION.exec(String(step.uses));
-  if (own === null) {
-    return true;
-  }
+  if (own === null) return true;
   return Object.hasOwn(loadAction(own[1]).outputs ?? {}, key);
 }
 
@@ -145,9 +139,7 @@ function manifestProblems(name: string, action: Action): string[] {
     problems.push(
       ...judge(`step ${index + 1} (${String(step.name ?? step.id)})`, expressionsOf(step), earlier),
     );
-    if (typeof step.id === "string") {
-      earlier.add(step.id);
-    }
+    if (typeof step.id === "string") earlier.add(step.id);
   });
   for (const [output, spec] of Object.entries(action.outputs ?? {})) {
     problems.push(...judge(`outputs.${output}`, expressionsOf(spec), new Set(byId.keys())));
@@ -157,12 +149,8 @@ function manifestProblems(name: string, action: Action): string[] {
 
 /** A starter block's fragment is an indented sequence with no `jobs:` above it, so the walk takes every array. */
 function callSites(node: unknown, path: string): [string, Caller][] {
-  if (Array.isArray(node)) {
-    return node.flatMap((item, i) => callSites(item, `${path}[${i}]`));
-  }
-  if (node === null || typeof node !== "object") {
-    return [];
-  }
+  if (Array.isArray(node)) return node.flatMap((item, i) => callSites(item, `${path}[${i}]`));
+  if (node === null || typeof node !== "object") return [];
   const record = node as Record<string, unknown>;
   const own: [string, Caller][] =
     typeof record.uses === "string" && OWN_ACTION.test(record.uses)
@@ -176,9 +164,7 @@ function callSites(node: unknown, path: string): [string, Caller][] {
 function callerProblems(caller: Caller, actions: Map<string, Action>): string[] {
   const name = OWN_ACTION.exec(caller.uses)?.[1] ?? "";
   const action = actions.get(name);
-  if (action === undefined) {
-    return [`no action '${name}'`];
-  }
+  if (action === undefined) return [`no action '${name}'`];
   const declared = action.inputs ?? {};
   const passed = Object.keys(caller.with ?? {});
   const problems = passed
@@ -246,9 +232,7 @@ test("every with: key a workflow, a starter, or a composite passes to a platform
   const passed = new Map(ACTION_NAMES.map((name) => [name, new Set<string>()]));
   for (const [, caller] of sites) {
     const name = OWN_ACTION.exec(caller.uses)?.[1] ?? "";
-    for (const key of Object.keys(caller.with ?? {})) {
-      passed.get(name)?.add(key);
-    }
+    for (const key of Object.keys(caller.with ?? {})) passed.get(name)?.add(key);
   }
   const unpassed = Object.fromEntries(
     [...actions].map(([name, action]) => [
@@ -278,9 +262,7 @@ function stepArrays(node: unknown): Step[][] {
     );
     return steps && node.length > 0 ? [node as Step[]] : node.flatMap(stepArrays);
   }
-  if (node === null || typeof node !== "object") {
-    return [];
-  }
+  if (node === null || typeof node !== "object") return [];
   return Object.values(node as Record<string, unknown>).flatMap(stepArrays);
 }
 
@@ -289,16 +271,12 @@ export function undeclaredOutputReads(steps: Step[], actions: Map<string, Action
   const ownAction = new Map<string, string>();
   for (const step of steps) {
     const own = OWN_ACTION.exec(String(step.uses ?? ""));
-    if (own !== null && typeof step.id === "string") {
-      ownAction.set(step.id, own[1]);
-    }
+    if (own !== null && typeof step.id === "string") ownAction.set(step.id, own[1]);
   }
   const problems: string[] = [];
   for (const [, id, key] of JSON.stringify(steps).matchAll(STEP_REF)) {
     const name = ownAction.get(id);
-    if (key === undefined || name === undefined) {
-      continue;
-    }
+    if (key === undefined || name === undefined) continue;
     const action = actions.get(name);
     if (action === undefined || !Object.hasOwn(action.outputs ?? {}, key)) {
       problems.push(`steps.${id}.outputs.${key}: ${name} declares no output '${key}'`);

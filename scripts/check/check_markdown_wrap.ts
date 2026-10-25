@@ -25,9 +25,7 @@ type Unterminated = "fence" | "comment" | null;
 function blankFrontmatter(lines: string[]): void {
   const close = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
   const blank = lines.findIndex((line) => line.trim() === "");
-  if (lines[0].trim() === "---" && close !== -1 && close < blank) {
-    lines.fill("", 0, close + 1);
-  }
+  if (lines[0].trim() === "---" && close !== -1 && close < blank) lines.fill("", 0, close + 1);
 }
 
 /** The 1-based lines a prose token wraps onto; none for any other token. */
@@ -36,15 +34,11 @@ function wrappedLines(
   token: Token,
   [start, stop]: [number, number],
 ): number[] {
-  if (!PROSE_TOKENS.has(token.type)) {
-    return [];
-  }
+  if (!PROSE_TOKENS.has(token.type)) return [];
   const end = token.type === "heading_open" ? stop - 1 : stop;
   const wrapped: number[] = [];
   for (let line = start + 1; line < end; line++) {
-    if (lines[line].trim() !== "") {
-      wrapped.push(line + 1);
-    }
+    if (lines[line].trim() !== "") wrapped.push(line + 1);
   }
   return wrapped;
 }
@@ -70,16 +64,12 @@ function unterminatedBy(token: Token, [start, stop]: [number, number]): Untermin
 export function scanMarkdown(content: string): { hits: number[]; unterminated: Unterminated } {
   const lines = content.split("\n");
   // A final newline: every fence content line then carries its LF, and a blank line always follows the frontmatter.
-  if (lines[lines.length - 1] !== "") {
-    lines.push("");
-  }
+  if (lines[lines.length - 1] !== "") lines.push("");
   blankFrontmatter(lines);
   const hits: number[] = [];
   let unterminated: Unterminated = null;
   for (const token of md.parse(lines.join("\n"), {})) {
-    if (token.map === null) {
-      continue;
-    }
+    if (token.map === null) continue;
     hits.push(...wrappedLines(lines, token, token.map));
     unterminated = unterminatedBy(token, token.map) ?? unterminated;
   }
@@ -124,15 +114,11 @@ function main(): void {
   const tracked = proc.stdout.split("\0").filter(Boolean);
   const failures: string[] = [];
   for (const path of tracked) {
-    if (isChecked(path)) {
-      failures.push(...fileFailures(path));
-    }
+    if (isChecked(path)) failures.push(...fileFailures(path));
   }
   if (failures.length > 0) {
     console.error("Hard-wrapped markdown found:\n");
-    for (const failure of failures) {
-      console.error(`  ${failure}`);
-    }
+    for (const failure of failures) console.error(`  ${failure}`);
     console.error(
       `\n${failures.length} occurrence(s). Markdown prose is one source line per paragraph, list item, or quote paragraph.`,
     );
@@ -141,6 +127,4 @@ function main(): void {
   console.log("Markdown wrap check passed.");
 }
 
-if (import.meta.main) {
-  main();
-}
+if (import.meta.main) main();

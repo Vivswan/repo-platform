@@ -98,13 +98,9 @@ const listSchema: z.ZodType<ModuleList> = z.unknown().transform((value, ctx) => 
   // The shape is picked before parsing: a union of the two reports a failed element as "any: Invalid input",
   // losing its index and type.
   const parsed = (Array.isArray(value) ? names : derived).safeParse(value);
-  if (parsed.success) {
-    return parsed.data;
-  }
+  if (parsed.success) return parsed.data;
 
-  for (const issue of parsed.error.issues) {
-    ctx.addIssue({ ...issue, code: "custom" });
-  }
+  for (const issue of parsed.error.issues) ctx.addIssue({ ...issue, code: "custom" });
 
   return z.NEVER;
 });
@@ -143,22 +139,16 @@ const refSchema = z.strictObject({
     .regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/, "not a plain path (letters, digits, . _ - /)")
     .superRefine((path, ctx) => {
       const problem = pathProblem(path);
-      if (problem !== null) {
-        ctx.addIssue({ code: "custom", message: problem });
-      }
+      if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
     }),
 });
 
 /** The shape is picked before parsing, as listSchema does, so a bad ref field keeps its name. */
 const sourceSchema: z.ZodType<Source> = z.unknown().transform((value, ctx) => {
   const parsed = (typeof value === "string" ? z.string().min(1) : refSchema).safeParse(value);
-  if (parsed.success) {
-    return parsed.data;
-  }
+  if (parsed.success) return parsed.data;
 
-  for (const issue of parsed.error.issues) {
-    ctx.addIssue({ ...issue, code: "custom" });
-  }
+  for (const issue of parsed.error.issues) ctx.addIssue({ ...issue, code: "custom" });
 
   return z.NEVER;
 });
@@ -231,14 +221,10 @@ const moduleDataShape = z.looseObject({
 const moduleDataSchema = moduleDataShape.superRefine((data, ctx) => {
   // Refined, not a catchall: zod folds a catchall into an index signature the typed keys contradict.
   for (const [key, value] of Object.entries(data)) {
-    if (Object.hasOwn(moduleDataShape.shape, key)) {
-      continue;
-    }
+    if (Object.hasOwn(moduleDataShape.shape, key)) continue;
 
     const parsed = names.safeParse(value);
-    if (parsed.success) {
-      continue;
-    }
+    if (parsed.success) continue;
 
     for (const issue of parsed.error.issues) {
       ctx.addIssue({ ...issue, code: "custom", path: [key, ...issue.path] });
@@ -295,18 +281,12 @@ export function refKey(ref: UpstreamRef): string {
 export function upstreamRefs(files: FileEntry[]): UpstreamRef[] {
   const refs = new Map<string, UpstreamRef>();
   for (const entry of files) {
-    if ("render" in entry) {
-      continue;
-    }
+    if ("render" in entry) continue;
 
     for (const source of [entry.source, ...Object.values(entry.sources)]) {
-      if (typeof source === "string") {
-        continue;
-      }
+      if (typeof source === "string") continue;
 
-      if (!refs.has(refKey(source))) {
-        refs.set(refKey(source), source);
-      }
+      if (!refs.has(refKey(source))) refs.set(refKey(source), source);
     }
   }
 
@@ -325,20 +305,14 @@ export function blockSources(
   entry: FileEntry,
   modules: string[],
 ): Block[] {
-  if ("render" in entry) {
-    return [];
-  }
+  if ("render" in entry) return [];
 
   const values = new Set(entry.always);
   const lists = entry.blocks === undefined ? [] : blockLists(config.modules, entry.blocks);
   for (const [module, listed] of lists) {
-    if (!modules.includes(module)) {
-      continue;
-    }
+    if (!modules.includes(module)) continue;
 
-    for (const value of listed) {
-      values.add(value);
-    }
+    for (const value of listed) values.add(value);
   }
 
   return [...values].map((value) => ({ value, source: entry.sources[value] }));
@@ -355,13 +329,9 @@ export class FilesConfigError extends Error {
 
 /** Only the provable cases; anything subtler reads as overlapping. */
 export function mutuallyExclusive(a: When | null, b: When | null): boolean {
-  if (a === null || b === null) {
-    return false;
-  }
+  if (a === null || b === null) return false;
 
-  if (a.private !== undefined && b.private !== undefined && a.private !== b.private) {
-    return true;
-  }
+  if (a.private !== undefined && b.private !== undefined && a.private !== b.private) return true;
 
   const forbidsAll = (list: string[] | undefined, other: When) =>
     list?.every((name) => other.without?.includes(name)) ?? false;
@@ -379,9 +349,7 @@ export function mutuallyExclusive(a: When | null, b: When | null): boolean {
  *  so `{modules: [a, b], private: false}` and `{private: false, modules: [b, a]}`
  *  compare equal. */
 export function whenKey(when: When | null): string {
-  if (when === null) {
-    return "null";
-  }
+  if (when === null) return "null";
 
   const sorted = (list: string[] | undefined) =>
     list === undefined ? undefined : [...list].sort();
@@ -395,9 +363,7 @@ export function whenKey(when: When | null): string {
 
 /** Only the provable cases; anything subtler is refused. */
 export function starterCoverage(rendered: When | null, starters: (When | null)[]): boolean {
-  if (rendered === null) {
-    return starters.length === 1 && starters[0] === null;
-  }
+  if (rendered === null) return starters.length === 1 && starters[0] === null;
 
   const key = whenKey(rendered);
   return starters.some((when) => whenKey(when) === key);
@@ -411,9 +377,7 @@ export interface CheckedFilesConfig {
 
 /** The module-data keys a when clause reads through `declaring`. */
 function declaredKeys(when: WrittenWhen | null): string[] {
-  if (when === null) {
-    return [];
-  }
+  if (when === null) return [];
 
   return LIST_KEYS.flatMap((key) => {
     const list = when[key];
@@ -430,15 +394,11 @@ function protoProblems(raw: unknown): string[] {
       : null;
   const problems: string[] = [];
   const doc = record(raw);
-  if (doc === null) {
-    return problems;
-  }
+  if (doc === null) return problems;
 
   for (const [module, data] of Object.entries(record(doc.modules) ?? {})) {
     for (const [key, list] of Object.entries(record(data) ?? {})) {
-      if (Object.hasOwn(moduleDataShape.shape, key) || !Array.isArray(list)) {
-        continue;
-      }
+      if (Object.hasOwn(moduleDataShape.shape, key) || !Array.isArray(list)) continue;
       list.forEach((value, index) => {
         if (value === "__proto__") {
           problems.push(`modules.${module}.${key}.${index}: not a block name`);
@@ -470,9 +430,7 @@ function parsedDocument(text: string, label: string): ConfigData {
   }
 
   const proto = protoProblems(raw);
-  if (proto.length > 0) {
-    throw new FilesConfigError(label, proto);
-  }
+  if (proto.length > 0) throw new FilesConfigError(label, proto);
 
   const result = configSchema.safeParse(raw);
   if (!result.success) {
@@ -511,17 +469,13 @@ function resolveWhen(
   modules: Record<string, ModuleData>,
   problems: string[],
 ): When | null {
-  if (written === null) {
-    return null;
-  }
+  if (written === null) return null;
 
   const moduleNames = Object.keys(modules);
   const when: When = { ...(written.private === undefined ? {} : { private: written.private }) };
   for (const key of LIST_KEYS) {
     const list = written[key];
-    if (list === undefined) {
-      continue;
-    }
+    if (list === undefined) continue;
 
     const resolved = moduleList(list, modules);
     problems.push(...listProblems(where, list, resolved, moduleNames));
@@ -538,9 +492,7 @@ function blockListProblems(data: ConfigData): string[] {
   for (const key of blockKeys) {
     for (const [module, values] of Object.entries(data.modules)) {
       const list = values[key];
-      if (list === undefined) {
-        continue;
-      }
+      if (list === undefined) continue;
 
       if (
         !Array.isArray(list) ||
@@ -615,9 +567,7 @@ function fetchProblems(entry: WrittenEntry, where: string): string[] {
     problems.push(`${where}: replace applies to entries fetching an upstream source or blocks`);
   }
 
-  if (entry.render === undefined) {
-    return problems;
-  }
+  if (entry.render === undefined) return problems;
 
   const fetching = (["source", "blocks", "always", "sources", "replace"] as const).filter(
     (key) => entry[key] !== undefined,
@@ -635,9 +585,7 @@ function fetchProblems(entry: WrittenEntry, where: string): string[] {
 
 /** A tree path is checked and made tree-relative here, so every reader past the loader joins it under --tree as is. */
 function treeSource(what: string, source: Source, where: string, problems: string[]): Source {
-  if (typeof source !== "string") {
-    return source;
-  }
+  if (typeof source !== "string") return source;
 
   if (!source.startsWith(SOURCE_PREFIX) || pathProblem(source) !== null) {
     problems.push(`${where}: ${what} '${source}' must be a clean path under ${SOURCE_PREFIX}`);
@@ -669,13 +617,9 @@ function sourcedEntry(
     ),
     ...(entry.replace === undefined ? {} : { replace: entry.replace }),
   };
-  if (entry.class === "managed") {
-    return { ...base, class: "managed" };
-  }
+  if (entry.class === "managed") return { ...base, class: "managed" };
 
-  if (entry.class === "starter") {
-    return { ...base, class: "starter" };
-  }
+  if (entry.class === "starter") return { ...base, class: "starter" };
 
   if (entry.region === undefined) {
     problems.push(`${where}: a split entry needs a region (hash or html)`);
@@ -692,9 +636,7 @@ function fileEntryOf(
 ): FileEntry {
   const where = `files: ${entry.path}`;
   const problem = pathProblem(entry.path);
-  if (problem !== null) {
-    problems.push(`${where}: path ${problem}`);
-  }
+  if (problem !== null) problems.push(`${where}: path ${problem}`);
 
   const when = resolveWhen(where, entry.when ?? null, modules, problems);
   problems.push(...classProblems(entry, where));
@@ -722,9 +664,7 @@ function readKeys(data: ConfigData): Set<string> {
     ]),
   );
   for (const layer of data.settings?.layers ?? []) {
-    for (const key of declaredKeys(layer.when ?? null)) {
-      keys.add(key);
-    }
+    for (const key of declaredKeys(layer.when ?? null)) keys.add(key);
   }
 
   return keys;
@@ -737,9 +677,7 @@ function moduleKeyProblems(data: ConfigData): string[] {
   const problems: string[] = [];
   for (const [module, moduleData] of Object.entries(data.modules)) {
     for (const key of Object.keys(moduleData)) {
-      if (Object.hasOwn(moduleDataShape.shape, key) || read.has(key)) {
-        continue;
-      }
+      if (Object.hasOwn(moduleDataShape.shape, key) || read.has(key)) continue;
 
       problems.push(`modules.${module}.${key}: no file entry or settings layer reads it`);
     }
@@ -778,17 +716,11 @@ function overlayProblems(entry: RenderedEntry, index: number, files: FileEntry[]
   const where = `files: ${entry.path}`;
   const target = entry.overlay;
   const problem = pathProblem(target);
-  if (problem !== null) {
-    problems.push(`${where}: overlay ${target}, which ${problem}`);
-  }
+  if (problem !== null) problems.push(`${where}: overlay ${target}, which ${problem}`);
 
-  if (target === entry.path) {
-    problems.push(`${where}: overlay names its own path`);
-  }
+  if (target === entry.path) problems.push(`${where}: overlay names its own path`);
 
-  if (target === MANIFEST_NAME) {
-    problems.push(`${where}: overlay names the manifest`);
-  }
+  if (target === MANIFEST_NAME) problems.push(`${where}: overlay names the manifest`);
 
   const atTarget = files.filter((other) => other.path === target);
   if (atTarget.length === 0 || atTarget.some((other) => other.class !== "starter")) {
@@ -816,9 +748,7 @@ function overlayProblems(entry: RenderedEntry, index: number, files: FileEntry[]
 function renderedEntryProblems(files: FileEntry[]): string[] {
   const problems: string[] = [];
   for (const [index, entry] of files.entries()) {
-    if ("render" in entry) {
-      problems.push(...overlayProblems(entry, index, files));
-    }
+    if ("render" in entry) problems.push(...overlayProblems(entry, index, files));
   }
 
   return problems;
@@ -902,9 +832,7 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
 
 export function parseFilesConfig(text: string, label = "files.yml"): FilesConfig {
   const { config, problems } = checkFilesConfig(text, label);
-  if (problems.length > 0) {
-    throw new FilesConfigError(label, problems);
-  }
+  if (problems.length > 0) throw new FilesConfigError(label, problems);
 
   return config;
 }

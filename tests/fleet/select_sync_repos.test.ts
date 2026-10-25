@@ -317,9 +317,7 @@ describe("select_sync_repos.ts", () => {
       });
       for (const channel of publicChannels(r)) {
         expect(channel).not.toContain("hidden-server");
-        if (withheld !== undefined) {
-          expect(channel).not.toContain(withheld);
-        }
+        if (withheld !== undefined) expect(channel).not.toContain(withheld);
       }
     },
     TEST_TIMEOUT_MS,
@@ -345,16 +343,10 @@ describe("select_sync_repos.ts", () => {
     { scope, transport, branch, manual, addModules }: Refusal,
   ): Record<string, string> {
     const inputs: Record<string, string> = { repo: scope };
-    if (branch !== undefined) {
-      inputs.branch = branch;
-    }
-    if (addModules !== undefined) {
-      inputs.add_modules = addModules;
-    }
+    if (branch !== undefined) inputs.branch = branch;
+    if (addModules !== undefined) inputs.add_modules = addModules;
     const env = transport === "the call input" ? { ONLY_REPO: scope } : payloadEnv(name, inputs);
-    if (manual === true) {
-      env.MANUAL = "true";
-    }
+    if (manual === true) env.MANUAL = "true";
     return env;
   }
 
@@ -368,12 +360,8 @@ describe("select_sync_repos.ts", () => {
         .filter((entry) => entry.startsWith("modules:"))
         .flatMap((entry) => entry.slice("modules:".length).split("+")),
     ];
-    if (branch !== undefined) {
-      values.push(branch);
-    }
-    if (addModules !== undefined) {
-      values.push(...addModules.split(",").filter((v) => v !== ""));
-    }
+    if (branch !== undefined) values.push(branch);
+    if (addModules !== undefined) values.push(...addModules.split(",").filter((v) => v !== ""));
     return values;
   }
 
@@ -468,9 +456,7 @@ describe("select_sync_repos.ts", () => {
         rows: null,
       });
       const withheld = withheldValues(scenario);
-      if (named === undefined) {
-        expect(withheld.length).toBeGreaterThan(0);
-      }
+      if (named === undefined) expect(withheld.length).toBeGreaterThan(0);
       // The selector folds case, so an echo would be lowercased.
       for (const channel of publicChannels(r)) {
         for (const value of withheld) {

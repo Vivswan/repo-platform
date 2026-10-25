@@ -8,9 +8,7 @@ export function env(name: string, fallback = ""): string {
 
 export function requireEnv(name: string): string {
   const value = process.env[name];
-  if (value === undefined || value === "") {
-    throw new Error(`${name} must be set`);
-  }
+  if (value === undefined || value === "") throw new Error(`${name} must be set`);
 
   return value;
 }
@@ -31,13 +29,9 @@ export function childExit(proc: {
   exitCode: number | null;
   signalCode?: string | number | null;
 }): ChildExit {
-  if (proc.exitedDueToTimeout === true) {
-    return { kind: "timed-out" };
-  }
+  if (proc.exitedDueToTimeout === true) return { kind: "timed-out" };
 
-  if (proc.exitCode !== null) {
-    return { kind: "exited", code: proc.exitCode };
-  }
+  if (proc.exitCode !== null) return { kind: "exited", code: proc.exitCode };
 
   return {
     kind: "signaled",
@@ -76,13 +70,9 @@ export function capture(command: string[], options: RunOptions): RunResult {
 }
 
 export function failureDetail(result: RunResult): string {
-  if (result.exit.kind === "timed-out") {
-    return "timed out";
-  }
+  if (result.exit.kind === "timed-out") return "timed out";
 
-  if (result.exit.kind === "signaled") {
-    return `died on ${result.exit.signal}`;
-  }
+  if (result.exit.kind === "signaled") return `died on ${result.exit.signal}`;
 
   const line = result.stderr
     .split("\n")

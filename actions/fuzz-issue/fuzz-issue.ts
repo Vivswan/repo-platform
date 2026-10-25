@@ -266,9 +266,7 @@ export function closeComment(env: NodeJS.ProcessEnv, stream: Stream): string {
 /** A composite's `required: true` only documents: the runner passes an empty string for an omitted input. */
 function requireInput(variable: string, input: string): string {
   const value = process.env[variable];
-  if (!value) {
-    throw new Error(`the ${input} input is required`);
-  }
+  if (!value) throw new Error(`the ${input} input is required`);
 
   return value;
 }
@@ -301,9 +299,7 @@ function main(): void {
   if (mode === "resolve") {
     text = closeComment(process.env, stream);
   } else {
-    for (const [variable, input] of REPORT_INPUTS) {
-      requireInput(variable, input);
-    }
+    for (const [variable, input] of REPORT_INPUTS) requireInput(variable, input);
     text = artifactsDir
       ? buildBody(failureDirs(artifactsDir), process.env, process.env.ARTIFACT_NAME || "", stream)
       : buildGenericBody(process.env);

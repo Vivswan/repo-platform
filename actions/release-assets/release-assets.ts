@@ -49,9 +49,7 @@ export function inspectAssets(
     }
   }
 
-  if (!present) {
-    log.notice("the release has no assets; nothing to attest");
-  }
+  if (!present) log.notice("the release has no assets; nothing to attest");
 
   return present;
 }

@@ -38,9 +38,7 @@ export function gitResolvedCommit(revspec: string, options: RunOptions = {}): st
  * A listing without a full sha on the ref's line is an errored look too: the remote never abbreviates, so a short one is garbage. */
 export function gitRemoteRef(remote: string, ref: string, options: RunOptions = {}): string {
   const probe = answered(["ls-remote", "--exit-code", remote, ref], { ...options, noExit: 2 });
-  if (probe.exitCode === 2) {
-    return "";
-  }
+  if (probe.exitCode === 2) return "";
   const line = probe.stdout.split("\n").find((entry) => entry.endsWith(`\t${ref}`));
   const sha = line === undefined ? "" : line.slice(0, line.indexOf("\t"));
   if (!/^[0-9a-f]{40}$/.test(sha)) {

@@ -38,9 +38,7 @@ function problemsOf(run: () => unknown): string[] {
   try {
     run();
   } catch (error) {
-    if (error instanceof FilesConfigError) {
-      return error.problems;
-    }
+    if (error instanceof FilesConfigError) return error.problems;
     throw error;
   }
   return [];
@@ -107,9 +105,7 @@ describe("placeholderDefaults", () => {
   ])("$reason", ({ text, defaults, problems }) => {
     const result = placeholderDefaults(parseFilesConfig(text));
     expect(result.problems).toEqual(problems);
-    if (defaults !== undefined) {
-      expect(result.defaults).toEqual(defaults);
-    }
+    if (defaults !== undefined) expect(result.defaults).toEqual(defaults);
   });
 });
 

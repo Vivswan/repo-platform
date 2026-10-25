@@ -16,8 +16,7 @@
         "noNestedTernary": "error",
         "noUselessElse": "error",
         "noNegationElse": "error",
-        "noParameterAssign": "error",
-        "useBlockStatements": "error"
+        "noParameterAssign": "error"
       },
       "suspicious": { "noAssignInExpressions": "error", "noUnusedExpressions": "error" },
       "performance": { "noBarrelFile": "error", "noReExportAll": "error" },

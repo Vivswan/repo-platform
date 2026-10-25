@@ -16,9 +16,7 @@ export const CHECK_ENTRY = "actions/validate-managed-files/check.ts";
 export function checkerSurface(root: string): string[] {
   const seen = new Set<string>();
   const visit = (path: string) => {
-    if (seen.has(path)) {
-      return;
-    }
+    if (seen.has(path)) return;
     seen.add(path);
     const source = readFileSync(join(root, path), "utf-8");
     for (const [, spec] of source.matchAll(/(?:from|import)\s+"(\.[^"]+)"/g)) {

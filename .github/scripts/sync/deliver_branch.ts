@@ -137,18 +137,14 @@ class BranchDelivery {
       timeoutMs: DELIVERY_CALL_BOUND_MS,
       ...(env === undefined ? {} : { env }),
     });
-    if (result.stderr !== "") {
-      console.error(result.stderr.replace(/\n$/, ""));
-    }
+    if (result.stderr !== "") console.error(result.stderr.replace(/\n$/, ""));
     return { ok: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr };
   }
 
   /** A nonzero exit fails the job with `reason`; the stdout otherwise. */
   must(argv: string[], reason: string): string {
     const call = this.run(argv);
-    if (!call.ok) {
-      fail(reason);
-    }
+    if (!call.ok) fail(reason);
     return call.stdout;
   }
 
@@ -184,9 +180,7 @@ class BranchDelivery {
       ),
       { MARKER: COMMENT_MARKER, LOGIN: COMMENT_LOGIN },
     );
-    if (!found.ok) {
-      fail("listing the pull request's comments failed");
-    }
+    if (!found.ok) fail("listing the pull request's comments failed");
     const id = found.stdout.trim().split("\n")[0] ?? "";
     this.must(
       id === ""
@@ -287,6 +281,4 @@ class BranchDelivery {
   }
 }
 
-if (import.meta.main) {
-  new BranchDelivery().deliver();
-}
+if (import.meta.main) new BranchDelivery().deliver();

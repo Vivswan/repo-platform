@@ -11,9 +11,7 @@ function source(pages: Record<string, [string, number | null, string | null]>): 
   return {
     page(file): PageMeta {
       const page = pages[file];
-      if (page === undefined) {
-        throw new Error(`no fixture page ${file}`);
-      }
+      if (page === undefined) throw new Error(`no fixture page ${file}`);
       return { title: page[0], order: page[1], group: page[2] };
     },
   };

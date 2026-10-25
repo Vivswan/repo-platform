@@ -21,9 +21,7 @@ export function splitLines(data: Buffer): Buffer[] {
 export function joinLines(lines: Buffer[]): Buffer {
   const parts: Buffer[] = [];
   lines.forEach((line, index) => {
-    if (index > 0) {
-      parts.push(NEWLINE);
-    }
+    if (index > 0) parts.push(NEWLINE);
     parts.push(line);
   });
   return Buffer.concat(parts);
@@ -31,9 +29,7 @@ export function joinLines(lines: Buffer[]): Buffer {
 
 export function stripCr(line: Buffer): Buffer {
   let end = line.length;
-  while (end > 0 && line[end - 1] === 0x0d) {
-    end--;
-  }
+  while (end > 0 && line[end - 1] === 0x0d) end--;
   return line.subarray(0, end);
 }
 

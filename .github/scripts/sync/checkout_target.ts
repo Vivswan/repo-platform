@@ -40,9 +40,7 @@ const cloned = logged(
   ],
   "git clone",
 );
-if (cloned !== 0) {
-  process.exit(cloned);
-}
+if (cloned !== 0) process.exit(cloned);
 process.exit(
   logged(
     ["git", "-C", targetDir, "remote", "set-url", "origin", `https://github.com/${target}.git`],

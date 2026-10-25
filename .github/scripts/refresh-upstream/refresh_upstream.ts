@@ -31,9 +31,7 @@ export type PinKind = (typeof PIN_KINDS)[number];
 async function api(repository: string, path: string, fetch: Fetch): Promise<unknown> {
   const headers: Record<string, string> = { accept: "application/vnd.github+json" };
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (token) {
-    headers.authorization = `Bearer ${token}`;
-  }
+  if (token) headers.authorization = `Bearer ${token}`;
   const url = `${API_HOST}/repos/${repository}/${path}`;
   const body = await fetch(url, headers);
   try {
@@ -65,9 +63,7 @@ export function pins(refs: UpstreamRef[]): CommitPin[] {
   for (const { repository, sha, path } of refs) {
     const key = `${repository}@${sha}`;
     const pin = seen.get(key) ?? { repository, sha, paths: [] };
-    if (!pin.paths.includes(path)) {
-      pin.paths.push(path);
-    }
+    if (!pin.paths.includes(path)) pin.paths.push(path);
     seen.set(key, pin);
   }
   return [...seen.values()].map((pin) => ({ ...pin, paths: [...pin.paths].sort() }));
@@ -149,9 +145,7 @@ function versionFrom(value: unknown, pattern: RegExp, what: string): string {
     throw new Error(`${what}: expected a string, got ${typeof value}`);
   }
   const match = pattern.exec(value);
-  if (!match) {
-    throw new Error(`${what}: '${value}' does not match ${pattern}`);
-  }
+  if (!match) throw new Error(`${what}: '${value}' does not match ${pattern}`);
   return match[1];
 }
 
@@ -246,9 +240,7 @@ function majorJumps(bumps: Bump[]): string {
 
 function section(bump: Bump): string {
   const head = `## ${bump.name}: \`${shown(bump, bump.from)}\` -> \`${shown(bump, bump.to)}\``;
-  if (bump.kind === "release") {
-    return head;
-  }
+  if (bump.kind === "release") return head;
   const blocks = [...bump.diffs].map(
     ([path, diff]) => `### ${path}\n\n\`\`\`\`diff\n${diff}\n\`\`\`\``,
   );
@@ -304,9 +296,7 @@ async function refreshCommitPins(files: FilesSource, host: string, fetch: Fetch)
     bumps.push({ kind: "commit", name: pin.repository, from: pin.sha, to: head, diffs });
     rewritten = repin(rewritten, pin, head);
   }
-  if (bumps.length > 0) {
-    writeFileSync(files.path, rewritten);
-  }
+  if (bumps.length > 0) writeFileSync(files.path, rewritten);
   return bumps;
 }
 
@@ -328,9 +318,7 @@ async function refreshReleasePins(
   }
   for (const pin of moved) {
     writeFileSync(join(root, pin.file), `${pin.latest}\n`);
-    if (pin.file !== BUN_PIN_FILE) {
-      continue;
-    }
+    if (pin.file !== BUN_PIN_FILE) continue;
     for (const dir of typesBunDirs(root)) {
       must(["bun", "add", "--dev", "--exact", `@types/bun@${pin.latest}`], {
         cwd: join(root, dir),
@@ -352,9 +340,7 @@ export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bum
   const path = join(root, "files.yml");
   const text = readFileSync(path, "utf-8");
   const config = parseFilesConfig(text);
-  if (kind === "commit") {
-    return refreshCommitPins({ path, text, config }, host, fetch);
-  }
+  if (kind === "commit") return refreshCommitPins({ path, text, config }, host, fetch);
   return refreshReleasePins(config, root, fetch);
 }
 
@@ -369,9 +355,7 @@ async function main(argv: string[]): Promise<number> {
     return 2;
   }
   const bumps = await refresh({ kind, root: REPO_ROOT, host: RAW_HOST, fetch: fetchText });
-  if (bumps.length === 0) {
-    console.log(`every ${kind} pin is current`);
-  }
+  if (bumps.length === 0) console.log(`every ${kind} pin is current`);
   if (process.env.GITHUB_OUTPUT) {
     setOutput("bumps", proseBumps(bumps));
     setOutput("body", prBody(kind, bumps));

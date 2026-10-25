@@ -35,9 +35,7 @@ afterAll(() => setSystemTime());
 
 const reportDir = (root: string, name: string, report?: string): void => {
   mkdirSync(join(root, name), { recursive: true });
-  if (report !== undefined) {
-    writeFileSync(join(root, name, "report.md"), report);
-  }
+  if (report !== undefined) writeFileSync(join(root, name, "report.md"), report);
 };
 
 describe("the cuts", () => {
@@ -301,9 +299,7 @@ describe("buildBody", () => {
     name = (i: number) => `target-${i}`,
   ) => {
     const root = temp.dir("budget-");
-    for (let i = 0; i < count; i++) {
-      reportDir(root, name(i), report(i));
-    }
+    for (let i = 0; i < count; i++) reportDir(root, name(i), report(i));
     return root;
   };
   const line = "x".repeat(68);

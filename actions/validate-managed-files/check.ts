@@ -51,9 +51,7 @@ function listPaths(root: string): string[] {
   const listed = capture(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
     cwd: root,
   });
-  if (listed.exitCode !== 0) {
-    throw new Error(`git ls-files failed in the target: ${listed.stderr}`);
-  }
+  if (listed.exitCode !== 0) throw new Error(`git ls-files failed in the target: ${listed.stderr}`);
 
   return listed.stdout.split("\0").filter((path) => path !== "");
 }
@@ -61,9 +59,7 @@ function listPaths(root: string): string[] {
 function walk(root: string, prefix = ""): string[] {
   return readdirSync(join(root, prefix), { withFileTypes: true }).flatMap((dirent) => {
     const rel = prefix === "" ? dirent.name : `${prefix}/${dirent.name}`;
-    if (rel === ".git") {
-      return [];
-    }
+    if (rel === ".git") return [];
 
     return dirent.isDirectory() ? walk(root, rel) : [rel];
   });
@@ -79,9 +75,7 @@ function underLink(root: string, path: string, links: Map<string, boolean>): boo
       links.set(dir, linked);
     }
 
-    if (linked) {
-      return true;
-    }
+    if (linked) return true;
   }
 
   return false;
@@ -91,9 +85,7 @@ function treeOf(root: string, paths: string[]): Tree {
   const tree: Tree = new Map();
   const links = new Map<string, boolean>();
   for (const path of paths) {
-    if (underLink(root, path, links)) {
-      continue;
-    }
+    if (underLink(root, path, links)) continue;
 
     const abs = join(root, path);
     const stat = lstatOrNull(abs);
@@ -111,32 +103,23 @@ function copy(tree: Tree, from: string, to: string): void {
   for (const [path, entry] of tree) {
     const dest = join(to, path);
     mkdirSync(dirname(dest), { recursive: true });
-    if (entry.kind === "link") {
-      symlinkSync(entry.target, dest);
-    } else {
-      copyFileSync(join(from, path), dest);
-    }
+    if (entry.kind === "link") symlinkSync(entry.target, dest);
+    else copyFileSync(join(from, path), dest);
   }
 }
 
 /** Bytes, never decoded text: an invalid sequence and U+FFFD decode alike. */
 function same(a: Entry, b: Entry): boolean {
-  if (a.kind === "file" && b.kind === "file") {
-    return a.bytes.equals(b.bytes);
-  }
+  if (a.kind === "file" && b.kind === "file") return a.bytes.equals(b.bytes);
 
-  if (a.kind === "link" && b.kind === "link") {
-    return a.target.equals(b.target);
-  }
+  if (a.kind === "link" && b.kind === "link") return a.target.equals(b.target);
 
   return false;
 }
 
 /** What the diff shows for an entry: a file's text, a link as one `-> target` line, nothing for an absent path. */
 function shown(entry: Entry | undefined): string {
-  if (entry === undefined) {
-    return "";
-  }
+  if (entry === undefined) return "";
 
   return entry.kind === "file"
     ? entry.bytes.toString("utf-8")
@@ -144,13 +127,9 @@ function shown(entry: Entry | undefined): string {
 }
 
 function verdictOf(before: Entry | undefined, after: Entry | undefined, build: string): string {
-  if (before === undefined) {
-    return `${build} would create it`;
-  }
+  if (before === undefined) return `${build} would create it`;
 
-  if (after === undefined) {
-    return `${build} would remove it`;
-  }
+  if (after === undefined) return `${build} would remove it`;
 
   return `differs from what ${build} writes`;
 }
@@ -162,9 +141,7 @@ function finding(
   after: Entry | undefined,
   build: string,
 ): string[] {
-  if (before !== undefined && after !== undefined && same(before, after)) {
-    return [];
-  }
+  if (before !== undefined && after !== undefined && same(before, after)) return [];
 
   const verdict = verdictOf(before, after, build);
   const was = shown(before);
@@ -237,6 +214,4 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-if (import.meta.main) {
-  process.exit(await main(process.argv.slice(2)));
-}
+if (import.meta.main) process.exit(await main(process.argv.slice(2)));

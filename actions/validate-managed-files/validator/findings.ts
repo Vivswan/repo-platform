@@ -10,9 +10,7 @@ export function error(message: string): Finding {
  *  "the validator never ran" (src/verdict.ts reads the file as one of its two witnesses). */
 export function writeReport(findings: readonly Finding[], env: NodeJS.ProcessEnv): void {
   const path = env.FINDINGS_FILE;
-  if (path === undefined || path === "") {
-    return;
-  }
+  if (path === undefined || path === "") return;
 
   const text =
     findings.length === 0
@@ -23,9 +21,7 @@ export function writeReport(findings: readonly Finding[], env: NodeJS.ProcessEnv
 
 export function print(findings: readonly Finding[]): number {
   if (findings.length > 0) {
-    for (const finding of findings) {
-      console.error(`error: ${finding.message}`);
-    }
+    for (const finding of findings) console.error(`error: ${finding.message}`);
     console.error(`\n${findings.length} error(s).`);
     return 1;
   }

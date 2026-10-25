@@ -136,9 +136,7 @@ export function pinnedLychee(): string | null {
     throw new Error(`${path} --version exited ${version.exitCode}:\n${version.stderr}`);
   }
   const printed = version.stdout.trim();
-  if (printed === pinned) {
-    return path;
-  }
+  if (printed === pinned) return path;
   console.warn(
     `${path} is ${printed}, not ${pinned}: the live link check is skipped here and runs in the action`,
   );

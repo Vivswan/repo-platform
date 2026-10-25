@@ -18,9 +18,7 @@ const AMBIENT_GIT = /^GIT_(CONFIG_(COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)|DIR|INDEX
 export function fixtureGitEnv(): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (!AMBIENT_GIT.test(key)) {
-      env[key] = value;
-    }
+    if (!AMBIENT_GIT.test(key)) env[key] = value;
   }
   env.GIT_CONFIG_GLOBAL = FIXTURE_GITCONFIG;
   return env;
@@ -28,8 +26,6 @@ export function fixtureGitEnv(): Record<string, string | undefined> {
 
 export function fixtureGit(cwd: string, args: string[]): string {
   const proc = boundedSpawnSync(["git", "-C", cwd, ...args], { env: fixtureGitEnv() });
-  if (proc.exitCode !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
-  }
+  if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
   return proc.stdout.trimEnd();
 }

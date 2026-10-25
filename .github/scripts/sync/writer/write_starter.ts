@@ -8,13 +8,9 @@ export function writeStarter(
   path: string,
   content: () => string | { missing: string[] },
 ): WriteOutcome | { missing: string[] } {
-  if (probe(target, path).kind !== "absent") {
-    return { change: "unchanged" };
-  }
+  if (probe(target, path).kind !== "absent") return { change: "unchanged" };
   const rendered = content();
-  if (typeof rendered !== "string") {
-    return rendered;
-  }
+  if (typeof rendered !== "string") return rendered;
   writeFile(target, path, Buffer.from(rendered, "utf-8"));
   return { change: "created" };
 }
