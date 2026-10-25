@@ -6,11 +6,10 @@ import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 const MIGRATE = new URL("../../.github/scripts/sync/migrate.ts", import.meta.url).pathname;
-
-/** A rung that appends its name and its argument to the checkout's log, reports two paths (one shared by every
- *  rung), speaks on stderr, then exits as told. */
 const rung = (exit: number) =>
   [
+    // A rung that appends its name and its argument to the checkout's log, reports two paths (one shared by every
+    // rung), speaks on stderr, then exits as told.
     'import { appendFileSync } from "node:fs";',
     'import { basename, join } from "node:path";',
     "const name = basename(import.meta.path);",
@@ -23,7 +22,9 @@ const rung = (exit: number) =>
 
 function rungs(files: Record<string, string>): string {
   const dir = temp.dir("migrate-rungs-");
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+  for (const [name, text] of Object.entries(files)) {
+    writeFileSync(join(dir, name), text);
+  }
   return dir;
 }
 

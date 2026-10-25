@@ -29,12 +29,19 @@ function verdict(conclusion: string): string {
 interface Scenario {
   /** m0 predates files.yml; m1..m3 carry it; side is off main. */
   tag?: "m0" | "m1" | "m2" | "m3" | "side";
+
+  /** The tag pushed as an annotated tag made by hand, not a lightweight one. */
   annotated?: boolean;
+
   /** The operator's checkout already holds a local `stable` tag at this commit from an earlier fetch. */
   staleLocalTag?: "m0" | "m1" | "m2" | "m3" | "side";
+
+  /** The conclusion the stub gh answers; success unless a scenario says otherwise. */
   conclusion?: string;
+
   /** The git question a stubbed git answers with exit 128 (every other call reaches the real git). */
   gitErrorsOn?: GitQuestion;
+
   /** Origin's main sits at m2 (the tag already names m3) until the resolver's tag fetch lands; then a push advances it to m3. */
   mainAdvancesAfterTagFetch?: boolean;
 }
@@ -103,12 +110,15 @@ function run(scenario: Scenario): Outcome {
   }
   if (scenario.gitErrorsOn !== undefined || scenario.mainAdvancesAfterTagFetch === true) {
     const real = Bun.which("git");
-    if (real === null) throw new Error("git is not on PATH");
+    if (real === null) {
+      throw new Error("git is not on PATH");
+    }
+    // The advance lands the instant the tag fetch returns: the narrowest window between the resolver's two fetches.
+    const advanceMain = `if [ "$1" = fetch ] && [[ "$*" == *${TAG}* ]]; then ${JSON.stringify(real)} "$@"; rc=$?; ${JSON.stringify(real)} -C ${JSON.stringify(origin)} update-ref refs/heads/main ${m3}; exit $rc; fi`;
     const stub =
-      scenario.gitErrorsOn !== undefined
-        ? `if ${GIT_ERRORS[scenario.gitErrorsOn]}; then echo 'fatal: stubbed' >&2; exit 128; fi`
-        : // The advance lands the instant the tag fetch returns: the narrowest window between the resolver's two fetches.
-          `if [ "$1" = fetch ] && [[ "$*" == *${TAG}* ]]; then ${JSON.stringify(real)} "$@"; rc=$?; ${JSON.stringify(real)} -C ${JSON.stringify(origin)} update-ref refs/heads/main ${m3}; exit $rc; fi`;
+      scenario.gitErrorsOn === undefined
+        ? advanceMain
+        : `if ${GIT_ERRORS[scenario.gitErrorsOn]}; then echo 'fatal: stubbed' >&2; exit 128; fi`;
     writeFileSync(
       join(bin, "git"),
       ["#!/usr/bin/env bash", stub, `exec ${JSON.stringify(real)} "$@"`, ""].join("\n"),
@@ -205,7 +215,9 @@ describe("resolve_build.ts behavior (real git)", () => {
     ({ scenario, says, ghCalls }) => {
       const r = run(scenario);
       expect(r.exitCode).toBe(1);
-      for (const line of says) expect(r.output).toContain(line);
+      for (const line of says) {
+        expect(r.output).toContain(line);
+      }
       expect(r.output).not.toContain("refusing to guess");
       expect(r.ghCalls).toHaveLength(ghCalls);
       expect(r.outputs).toEqual({});

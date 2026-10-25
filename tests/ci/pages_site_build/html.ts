@@ -14,14 +14,18 @@ export function select(html: string, selector: string): MatchedElement[] {
       element(element) {
         const match: MatchedElement = { attrs: Object.fromEntries(element.attributes), text: "" };
         found.push(match);
-        if (!element.canHaveContent) return;
+        if (!element.canHaveContent) {
+          return;
+        }
         open = match;
         element.onEndTag(() => {
           open = undefined;
         });
       },
       text(chunk) {
-        if (open) open.text += chunk.text;
+        if (open) {
+          open.text += chunk.text;
+        }
       },
     })
     .transform(html);

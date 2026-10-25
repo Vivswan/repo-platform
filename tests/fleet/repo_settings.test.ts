@@ -29,7 +29,9 @@ const REPO_ROOT = resolve(import.meta.dir, "../..");
 const OWN_OVERLAY = join(REPO_ROOT, ".github/settings.local.yml");
 const FILES = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
 const SETTINGS = FILES.settings;
-if (SETTINGS === null) throw new Error("files.yml declares no settings block");
+if (SETTINGS === null) {
+  throw new Error("files.yml declares no settings block");
+}
 const LAYER_TREE = join(REPO_ROOT, SOURCE_PREFIX);
 const OVERRIDE = join(LAYER_TREE, SETTINGS.override);
 
@@ -163,7 +165,9 @@ test("a ruleset no layer declares is deleted, and an overlay asking to keep unde
     [loadLayer(join(LAYER_TREE, SETTINGS.baseline)), overlay, loadOverrideLayer(OVERRIDE)],
     "the fold",
   );
-  if ("refused" in folded) throw new Error(folded.refused);
+  if ("refused" in folded) {
+    throw new Error(folded.refused);
+  }
   // The bytes the apply reads, not the fold's object: the render writes these.
   const rendered = parseYaml(folded.yaml) as Record<string, unknown>;
   expect(rendered.rulesets).toMatchObject({ _undeclared: "delete" });

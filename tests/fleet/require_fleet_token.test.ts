@@ -14,10 +14,9 @@ import { boundedSpawnSync } from "../shared/bounded_spawn";
 const ROOT = join(import.meta.dir, "../..");
 const SCRIPT = ".github/scripts/fleet/require_fleet_token.ts";
 const PATH = process.env.PATH ?? "";
-
-// One ::error:: line naming the secret, the environment, and the recipe. The runner unescapes %25 back to %, so the
-// recipe's own query string reaches the log intact where a raw % would misparse the workflow command.
 const ERROR_LINE = new RegExp(
+  // One ::error:: line naming the secret, the environment, and the recipe. The runner unescapes %25 back to %, so
+  // the recipe's own query string reaches the log intact where a raw % would misparse the workflow command.
   `^::error::[^\\n]*\\b${FLEET_SECRET}\\b[^\\n]*\\b${FLEET_ENVIRONMENT}\\b[^\\n]*` +
     `${RegExp.escape(PAT_RECIPE_URL.replaceAll("%", "%25"))}[^\\n]*\\n$`,
 );

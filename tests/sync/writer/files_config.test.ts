@@ -38,7 +38,9 @@ function problemsOf(run: () => unknown): string[] {
   try {
     run();
   } catch (error) {
-    if (error instanceof FilesConfigError) return error.problems;
+    if (error instanceof FilesConfigError) {
+      return error.problems;
+    }
     throw error;
   }
   return [];
@@ -53,11 +55,11 @@ function writeTree(root: string, files: Record<string, string>): void {
 
 describe("placeholderDefaults", () => {
   // The registration may leave a label unset, so a source may use `{{x_label}}` only when a module declares its
-  // default; without this gate the sync would hold every row of a repository over a data-file mistake.
+  // default; without this gate the sync would hold every row of a repository over a data-file mistake. A refused
+  // document's row leaves defaults unasserted: they reach no consumer.
   test.each<{
     reason: string;
     text: string;
-    /** Absent on a refused document: its defaults reach no consumer. */
     defaults?: Record<string, string>;
     problems: string[];
   }>([
@@ -105,7 +107,9 @@ describe("placeholderDefaults", () => {
   ])("$reason", ({ text, defaults, problems }) => {
     const result = placeholderDefaults(parseFilesConfig(text));
     expect(result.problems).toEqual(problems);
-    if (defaults !== undefined) expect(result.defaults).toEqual(defaults);
+    if (defaults !== undefined) {
+      expect(result.defaults).toEqual(defaults);
+    }
   });
 });
 

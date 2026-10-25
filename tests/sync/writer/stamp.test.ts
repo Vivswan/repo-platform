@@ -32,17 +32,24 @@ const REGISTRATION =
   "except: [CLAUDE.md, .github/agents.md, .github/copilot-instructions.md]\n";
 
 interface Platform {
+  /** The checkout the commits below were made in. */
   root: string;
+
   /** The e2e fixture tree as committed. */
   base: string;
+
   /** A docs file: off the checker and written nowhere. */
   docs: string;
+
   /** A docs-site theme file under actions/: off the checker and written nowhere. */
   theme: string;
+
   /** A byte changed under the checker. */
   checker: string;
+
   /** A byte changed under files/, which the sync writes. */
   files: string;
+
   /** A dependency version moved: the lockfile alone. */
   lock: string;
 }
@@ -119,12 +126,18 @@ function recorded(targetDir: string): unknown {
 }
 
 interface Second {
+  /** The case, as the test's name. */
   reason: string;
+
   /** The commit the first sync records, then the build of the second. */
   builds: (p: Platform) => [string, string];
+
   /** A change to the target between the two syncs. */
   between?: (targetDir: string) => void;
+
+  /** The commit the second sync's manifest records. */
   stamp: (p: Platform) => string;
+
   /** Whether the second sync leaves every byte but the manifest as it stood just before it ran. */
   treeKept: boolean;
 }
@@ -212,8 +225,11 @@ describe("the manifest's commit under the stamp rule", () => {
       before.delete(MANIFEST_NAME);
       after.delete(MANIFEST_NAME);
     }
-    if (treeKept) expect(after).toEqual(before);
-    else expect(after).not.toEqual(before);
+    if (treeKept) {
+      expect(after).toEqual(before);
+    } else {
+      expect(after).not.toEqual(before);
+    }
   });
 
   test("a recorded commit the build checkout's history lacks fails the run before anything is written", () => {
@@ -249,7 +265,9 @@ const OFF_SURFACE = [
 describe("the checker surface", () => {
   test("is check.ts's import closure: the writer in, the stable-run and operator files out", () => {
     const surface = checkerSurface(REPO_ROOT);
-    for (const path of surface) expect(existsSync(join(REPO_ROOT, path))).toBe(true);
+    for (const path of surface) {
+      expect(existsSync(join(REPO_ROOT, path))).toBe(true);
+    }
     expect(surface).toContain(CHECK_ENTRY);
     expect(surface).toContain(".github/scripts/sync/writer/sync.ts");
     expect(surface).toContain("actions/pages-site/.vitepress/conventions.ts");

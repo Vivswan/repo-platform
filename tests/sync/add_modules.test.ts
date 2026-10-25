@@ -104,7 +104,9 @@ describe("add_modules.ts", () => {
     if (linked !== null) {
       writeFileSync(join(root, "outside.yml"), linked);
       symlinkSync(join(root, "outside.yml"), path);
-    } else if (registration !== null) writeFileSync(path, registration);
+    } else if (registration !== null) {
+      writeFileSync(path, registration);
+    }
     const result = boundedSpawnSync(["bun", SCRIPT], {
       cwd: root,
       env: { ...process.env, ADD_MODULES: addModules, TARGET_DIR: target },
@@ -114,12 +116,12 @@ describe("add_modules.ts", () => {
 
   // The step runs on every row, so a run with the plan's empty output must touch nothing and say nothing; the stdout is
   // the log the failure issue carries, so a refusal is one ::error:: line there, and the file stays as it was. A
-  // registration that is a link is refused as the writer refuses it, before the edit could land outside the target.
+  // registration that is a link is refused as the writer refuses it, before the edit could land outside the target
+  // (the linked column is that outside file's content).
   test.each<{
     reason: string;
     addModules: string;
     registration: string | null;
-    /** The registration as a link to a file outside the target, with this content. */
     linked?: string;
     expected: { exitCode: number; stdout: string; registration: string | null };
   }>([

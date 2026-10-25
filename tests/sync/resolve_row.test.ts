@@ -13,23 +13,42 @@ import { parseGithubEnv } from "../shared/github_output";
 import { STUB_GIT_FAIL_REFUSAL, writeStubGit } from "../shared/stub_git";
 import { tempDirs } from "../shared/temp_dir";
 
+/** The scratch directories, removed after the file. */
 const temp = tempDirs();
+
+/** The token the row keys are derived under. */
 const PAT = "stub-token";
+
 /** Under this run id the raw digest of BEEF's slug spells its bare name: the input the key's grouping exists for. */
 const RUN_ID = "759";
+
+/** The plan's key for a repository, under PAT and RUN_ID. */
 const keyOf = rowKeyOf(PAT, RUN_ID);
+
+/** Main's tip: the checkout's GITHUB_SHA and the stub's answer to TIP_READ alike. */
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
+
+/** A tip newer than SHA, for the settings row that finds main moved on. */
 const NEWER_SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4";
+
+/** Public, so a row may print it. */
 const PUBLIC = "Vivswan/pub-repo";
+
+/** Private, in mixed case. */
 const HIDDEN = "Vivswan/Hidden-Server";
+
 /** Private, hex-only name: four characters a raw digest can spell. */
 const BEEF = "Vivswan/beef";
+
 /** Private, named for the matrix's own structural word. */
 const INCLUDE = "Vivswan/include";
+
 /** Selected by the plan, revoked from the grant before this row ran: in no listing. */
 const GONE = "Vivswan/Revoked-mid-run";
+
 /** The one network call a row makes: the listing discovery.ts reads. */
 const LISTING = "gh api user/repos --method GET --paginate --slurp -F per_page=100";
+
 /** The settings row's newest-wins read of main's tip, before its listing (fleet/newest_main.ts). */
 const TIP_READ = "git ls-remote --exit-code origin refs/heads/main";
 
@@ -41,17 +60,16 @@ const rows: Row[] = [
   { repo: INCLUDE, private: true },
 ];
 
+/** One run; env is the variables GITHUB_ENV carries, read back as the runner reads them. */
 interface Run {
   exitCode: number;
   stdout: string;
   stderr: string;
-  /** The variables GITHUB_ENV carries, read back as the runner reads them. */
   env: Record<string, string>;
   calls: string[];
 }
 
-/** The two workflows' entry scripts: one resolver, each with its own GITHUB_ENV contract. The
- *  settings row asks newest wins (docs/platform/settings-apply.md) before its listing; the sync row asks nothing. */
+/** The two workflows' entry scripts: one resolver each, with its own GITHUB_ENV contract. */
 const ENTRIES = [
   {
     script: "sync/resolve_row.ts",
@@ -59,6 +77,7 @@ const ENTRIES = [
     handOn: (row: Row) => ({ TARGET: row.repo, TARGET_PRIVATE: String(row.private) }),
     newestWins: false,
   },
+  // The settings row asks newest wins (docs/platform/settings-apply.md) before its listing; the sync row asks nothing.
   {
     script: "fleet/resolve_settings_target.ts",
     label: "resolve_settings_target",
@@ -352,8 +371,12 @@ describe("the matrix rows", () => {
     { name: "beef", repo: BEEF, how: "its raw digest spells it" },
     { name: "include", repo: INCLUDE, how: "the matrix's structural word" },
   ])("a private repository named $name ($how) is spelled nowhere in the matrix", ({ repo }) => {
-    if (repo === BEEF) expect(keyOf(BEEF).replaceAll("~", "")).toContain("beef");
-    for (const form of maskForms(repo)) expect(text).not.toContain(form);
+    if (repo === BEEF) {
+      expect(keyOf(BEEF).replaceAll("~", "")).toContain("beef");
+    }
+    for (const form of maskForms(repo)) {
+      expect(text).not.toContain(form);
+    }
   });
 
   // The general property behind the two names above, cross-file with shared/mask.ts: no piece between the matrix's

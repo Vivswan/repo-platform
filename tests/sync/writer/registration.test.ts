@@ -52,8 +52,11 @@ describe("placeholderValues", () => {
         private: String(isPrivate),
       });
     } finally {
-      if (runnerZone === undefined) delete process.env.TZ;
-      else process.env.TZ = runnerZone;
+      if (runnerZone === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = runnerZone;
+      }
     }
   });
 
@@ -139,7 +142,9 @@ describe("readRegistration", () => {
       writeFileSync(join(target, "elsewhere.yml"), `modules: [bun]\n${PROJECT_YAML}`);
       symlinkSync("elsewhere.yml", join(target, ".repo-platform.yml"));
     }
-    if (text !== undefined) writeFileSync(join(target, ".repo-platform.yml"), text);
+    if (text !== undefined) {
+      writeFileSync(join(target, ".repo-platform.yml"), text);
+    }
     if (typeof expected === "string") {
       expect(() => readRegistration(target)).toThrow(expected);
     } else {

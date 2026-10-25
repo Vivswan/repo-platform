@@ -109,7 +109,9 @@ const CONFIG = (() => {
 
 function registration(text: string) {
   const read = parseRegistration(`${text}project: {name: Demo, slug: demo, description: Mine}\n`);
-  if ("errors" in read) throw new Error(read.errors.join("\n"));
+  if ("errors" in read) {
+    throw new Error(read.errors.join("\n"));
+  }
   return read.registration;
 }
 
@@ -132,7 +134,9 @@ function rendered(overrides: Partial<SettingsRenderInput> = {}): {
   doc: Record<string, unknown>;
 } {
   const result = renderSettings(input(overrides));
-  if ("held" in result) throw new Error(`held: ${result.held}`);
+  if ("held" in result) {
+    throw new Error(`held: ${result.held}`);
+  }
   return { text: result.content, doc: parseYaml(result.content) as Record<string, unknown> };
 }
 
@@ -140,8 +144,6 @@ const held = (overrides: Partial<SettingsRenderInput>) => {
   const result = renderSettings(input(overrides));
   return "held" in result ? result.held : `rendered:\n${result.content}`;
 };
-
-/** A name-keyed section's entries out of the fold's `{entries, _undeclared}` wrapper. */
 const entries = (section: unknown) =>
   (section as { entries: Record<string, unknown>[] } | undefined)?.entries;
 const names = (section: unknown) => (entries(section) ?? []).map((entry) => entry.name);

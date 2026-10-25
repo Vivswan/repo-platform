@@ -35,12 +35,12 @@ const PUSH_REFUSAL =
   "! [remote rejected] HEAD -> feat/take-the-module (protected branch hook declined)";
 const REAL_GIT = Bun.which("git") ?? "git";
 
-// The build checkout answers its commit; the target checkout answers what each row stages (NUL-separated paths),
-// the tip's author, and the commit before and after the sync commit. With STUB_REAL_GIT set, every target call but
-// the push runs the real git over the fixture checkout.
 const GIT_LINES = [
+  // With STUB_REAL_GIT set, every target call but the push runs the real git over the fixture checkout.
   'if [ -n "${STUB_REAL_GIT:-}" ]; then case "$*" in "-C target "*) case " $* " in *" push "*) ;; *) exec "$STUB_REAL_GIT" "$@" ;; esac ;; esac; fi',
   'case "$*" in',
+  // The build checkout answers its commit; the target checkout answers what each row stages (NUL-separated paths),
+  // the tip's author, and the commit before and after the sync commit.
   `  "-C build rev-parse HEAD") echo "${BUILD}" ;;`,
   '  *" diff --cached --name-only -z --no-renames") printf "%b" "${STUB_CHANGED:-}" ;;',
   '  *" log -1 --format=%an") echo "${STUB_AUTHOR:-}" ;;',
@@ -49,8 +49,8 @@ const GIT_LINES = [
   `  *" push "*) if [ "\${STUB_PUSH_FAIL:-}" = 1 ]; then echo "${PUSH_REFUSAL}" >&2; exit 1; fi ;;`,
   "esac",
 ];
-// The comment body travels as `-F body=@<file>`; the stub copies it out so the test reads what GitHub would show.
 const GH_LINES = [
+  // The comment body travels as `-F body=@<file>`; the stub copies it out so the test reads what GitHub would show.
   'for a in "$@"; do case "$a" in body=@*) cp "${a#body=@}" "$STUB_COMMENT_OUT" ;; esac; done',
   'case "$*" in',
   `  *" DELETE "*"/labels/"*) case "\${STUB_LABEL:-ok}" in 404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; fail) echo "gh: Forbidden (HTTP 403)" >&2; exit 1 ;; esac ;;`,
@@ -58,15 +58,19 @@ const GH_LINES = [
   "esac",
 ];
 
+/** The run's inputs; written builds a real checkout under root/target and answers the writer's summary over it, so
+ *  git then runs for real. */
 interface Options {
   migrate?: "success" | "failure";
   writer?: "success" | "failure" | "skipped";
   hold?: boolean;
   stub?: Record<string, string>;
-  /** Builds a real checkout under root/target and answers the writer's summary over it; git then runs for real. */
   written?: (root: string) => SyncReport;
 }
 
+/** What the run left behind:
+ *    commentMethod  the comment call that carried the body: POST creates on the issue, PATCH replaces the found comment by its id
+ *    commitSubject  the `-m` the sync commit was made with, null when no commit was made */
 interface Run {
   exitCode: number;
   stdout: string;
@@ -74,11 +78,9 @@ interface Run {
   target: string;
   labelRemoved: boolean;
   comment: string | null;
-  /** The comment call that carried the body: POST creates on the issue, PATCH replaces the found comment by its id. */
   commentMethod: string | null;
   commentEndpoint: string | null;
   committed: boolean;
-  /** The `-m` the sync commit was made with, null when no commit was made. */
   commitSubject: string | null;
   pushAttempted: boolean;
   pushLease: string | null;

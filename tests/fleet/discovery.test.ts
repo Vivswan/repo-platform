@@ -92,11 +92,15 @@ describe("captureNetwork", () => {
     const offenders: string[] = [];
     let bounded = 0;
     for (const entry of readdirSync(dir)) {
-      if (!entry.endsWith(".ts")) continue;
+      if (!entry.endsWith(".ts")) {
+        continue;
+      }
       const source = readFileSync(join(dir, entry), "utf-8");
       bounded += source.match(/\bcaptureNetwork\(\s*\[\s*"(?:gh|curl)"/g)?.length ?? 0;
       const bare = source.match(BARE);
-      for (const match of bare ?? []) offenders.push(`${entry}: ${match.replace(/\s+/g, " ")}`);
+      for (const match of bare ?? []) {
+        offenders.push(`${entry}: ${match.replace(/\s+/g, " ")}`);
+      }
     }
     expect(offenders).toEqual([]);
     // The scan read the scripts that make network calls, not an empty or
@@ -181,15 +185,21 @@ describe("the dispatch inputs", () => {
   function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
     const saved = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
     for (const [key, value] of Object.entries(vars)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
     }
     try {
       fn();
     } finally {
       for (const [key, value] of Object.entries(saved)) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
       }
     }
   }

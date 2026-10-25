@@ -224,7 +224,8 @@ describe("select_sync_repos.ts", () => {
   });
 
   // The scope as the call input passes it (ONLY_REPO; post-green's sync-fleet leg sends `public` or `all`), or as the
-  // dispatch payload, which may name a private repository or a branch of private work and so never prints.
+  // dispatch payload, which may name a private repository or a branch of private work and so never prints. The
+  // addModules column is the plan's add_modules output: the admitted names, roster order, comma-joined.
   test.each<{
     reason: string;
     scope: string;
@@ -232,7 +233,6 @@ describe("select_sync_repos.ts", () => {
     rows: Run["rows"];
     stdout: string;
     withheld?: string;
-    /** The plan's add_modules output: the admitted names, roster order, comma-joined. */
     addModules?: string;
   }>([
     {
@@ -317,16 +317,17 @@ describe("select_sync_repos.ts", () => {
       });
       for (const channel of publicChannels(r)) {
         expect(channel).not.toContain("hidden-server");
-        if (withheld !== undefined) expect(channel).not.toContain(withheld);
+        if (withheld !== undefined) {
+          expect(channel).not.toContain(withheld);
+        }
       }
     },
     TEST_TIMEOUT_MS,
   );
 
-  // A refused plan echoes no entry: an entry may be a private slug and this log is public. A push probe answering neither
-  // 200 nor a permission code is refused too: probed for adoption instead, the repository would be selected and the
-  // writer's push would fail per row, late; that refusal names its repository, which discovery listed as public.
-  test.each<{
+  /** A dispatch the selector refuses; named is the one entry the refusal may name, when the selector has already read
+   *  it as public. */
+  interface Refusal {
     reason: string;
     scope: string;
     transport: "the call input" | "the dispatch payload";
@@ -335,9 +336,51 @@ describe("select_sync_repos.ts", () => {
     addModules?: string;
     discoveredList?: typeof discovered;
     error: string;
-    /** The one entry the refusal may name, when the selector has already read it as public. */
     named?: string;
-  }>([
+  }
+
+  /** The scope as the call input (ONLY_REPO), or the typed inputs on the dispatch payload. */
+  function refusalEnv(
+    name: string,
+    { scope, transport, branch, manual, addModules }: Refusal,
+  ): Record<string, string> {
+    const inputs: Record<string, string> = { repo: scope };
+    if (branch !== undefined) {
+      inputs.branch = branch;
+    }
+    if (addModules !== undefined) {
+      inputs.add_modules = addModules;
+    }
+    const env = transport === "the call input" ? { ONLY_REPO: scope } : payloadEnv(name, inputs);
+    if (manual === true) {
+      env.MANUAL = "true";
+    }
+    return env;
+  }
+
+  /** Every value the refusal must withhold: the scope's slugs but the named one, its module names, the branch, and
+   *  the add_modules names. */
+  function withheldValues({ scope, branch, addModules, named }: Refusal): string[] {
+    const entries = scope.split(",").map((entry) => entry.trim());
+    const values = [
+      ...entries.filter((entry) => entry.includes("/") && entry !== named),
+      ...entries
+        .filter((entry) => entry.startsWith("modules:"))
+        .flatMap((entry) => entry.slice("modules:".length).split("+")),
+    ];
+    if (branch !== undefined) {
+      values.push(branch);
+    }
+    if (addModules !== undefined) {
+      values.push(...addModules.split(",").filter((v) => v !== ""));
+    }
+    return values;
+  }
+
+  // A refused plan echoes no entry: an entry may be a private slug and this log is public. A push probe answering neither
+  // 200 nor a permission code is refused too: probed for adoption instead, the repository would be selected and the
+  // writer's push would fail per row, late; that refusal names its repository, which discovery listed as public.
+  test.each<Refusal>([
     {
       reason: "a list with one miss fails the whole plan",
       scope: "Vivswan/steady,Vivswan/hidden-servr",
@@ -413,28 +456,10 @@ describe("select_sync_repos.ts", () => {
     },
   ])(
     "$reason: refused before any row is written",
-    ({
-      reason,
-      scope,
-      transport,
-      branch,
-      manual,
-      addModules,
-      discoveredList = discovered,
-      error,
-      named,
-    }) => {
+    (scenario) => {
+      const { reason, discoveredList = discovered, error, named } = scenario;
       const name = `refused-${Bun.hash(reason).toString(16)}`;
-      const env: Record<string, string> =
-        transport === "the call input"
-          ? { ONLY_REPO: scope }
-          : payloadEnv(name, {
-              repo: scope,
-              ...(branch === undefined ? {} : { branch }),
-              ...(addModules === undefined ? {} : { add_modules: addModules }),
-            });
-      if (manual === true) env.MANUAL = "true";
-      const r = run(name, env, discoveredList);
+      const r = run(name, refusalEnv(name, scenario), discoveredList);
       expect(r).toEqual({
         exitCode: 1,
         stdout: errorLine(error),
@@ -442,20 +467,15 @@ describe("select_sync_repos.ts", () => {
         outputs: {},
         rows: null,
       });
+      const withheld = withheldValues(scenario);
+      if (named === undefined) {
+        expect(withheld.length).toBeGreaterThan(0);
+      }
       // The selector folds case, so an echo would be lowercased.
-      const entries = scope.split(",").map((entry) => entry.trim());
-      const withheld = [
-        ...entries.filter((entry) => entry.includes("/") && entry !== named),
-        ...entries
-          .filter((entry) => entry.startsWith("modules:"))
-          .flatMap((entry) => entry.slice("modules:".length).split("+")),
-        ...(branch === undefined ? [] : [branch]),
-        ...(addModules === undefined ? [] : addModules.split(",").filter((v) => v !== "")),
-      ];
-      if (named === undefined) expect(withheld.length).toBeGreaterThan(0);
       for (const channel of publicChannels(r)) {
-        for (const value of withheld)
+        for (const value of withheld) {
           expect(channel.toLowerCase()).not.toContain(value.toLowerCase());
+        }
       }
     },
     TEST_TIMEOUT_MS,

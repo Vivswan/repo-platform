@@ -17,10 +17,6 @@ import { spawnPushProbeServer } from "../shared/push_probe_server";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
-
-// End-to-end harness against a stub `gh` on PATH and a loopback push advertisement; PROBE_RETRY_DELAY_MS is zeroed so the retry loop costs no wall time.
-// PRIVATE personas' every public line says "a private repository" while the masks cover the slug,
-// and the matrix output names no target at all: each row rides as its index and the plan's key.
 const PERSONAS: { name: string; private: boolean }[] = [
   { name: "deadapi", private: false },
   { name: "deadprobe", private: false },
@@ -43,6 +39,9 @@ const ALL_MASKS = PRIVATE_SLUGS.flatMap(maskForms).length;
 const RUN_ID = "4242";
 const keyOf = rowKeyOf("stub-token", RUN_ID);
 
+// End-to-end harness against a stub `gh` on PATH and a loopback push advertisement; PROBE_RETRY_DELAY_MS is zeroed so the retry loop costs no wall time.
+// PRIVATE personas' every public line says "a private repository" while the masks cover the slug,
+// and the matrix output names no target at all: each row rides as its index and the plan's key.
 describe("select_settings_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_settings_repos.ts");
   const root = temp.dir("select-settings-");
@@ -142,11 +141,10 @@ describe("select_settings_repos.ts", () => {
   });
   afterAll(() => probes.stop());
 
+  /** One run; stdout is without the leading ::add-mask:: lines, whose registered values masked carries in order. */
   interface Run {
     exitCode: number;
-    /** stdout without the leading ::add-mask:: lines. */
     stdout: string;
-    /** The values the ::add-mask:: lines registered, in order. */
     masked: string[];
     stderr: string;
     outputs: Record<string, string>;
@@ -232,7 +230,9 @@ describe("select_settings_repos.ts", () => {
       throw new Error(`no count and matrix outputs in: ${JSON.stringify(result.outputs)}`);
     }
     expect(Object.keys(result.outputs).sort()).toEqual(["count", "matrix"]);
-    for (const form of PRIVATE_SLUGS.flatMap(maskForms)) expect(matrix).not.toContain(form);
+    for (const form of PRIVATE_SLUGS.flatMap(maskForms)) {
+      expect(matrix).not.toContain(form);
+    }
     const rows = JSON.parse(matrix) as { row: number; key: string }[];
     expect(rows.map((row) => row.row)).toEqual(rows.map((_, index) => index));
     const slugs = PERSONAS.map((persona) => `Vivswan/${persona.name}`);
@@ -360,7 +360,9 @@ describe("select_settings_repos.ts", () => {
 
   test("every discovered private slug is masked in every spelling before anything else prints", () => {
     for (const slug of PRIVATE_SLUGS) {
-      for (const form of maskForms(slug)) expect(main.masked).toContain(form);
+      for (const form of maskForms(slug)) {
+        expect(main.masked).toContain(form);
+      }
     }
     expect(main.masked).toHaveLength(ALL_MASKS);
     // The masks are the first lines: the run() split above consumed them
@@ -443,7 +445,9 @@ describe("select_settings_repos.ts", () => {
         outputs: { count: String(repos.length), repos },
         summary,
       });
-      for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-");
+      for (const channel of publicChannels(r)) {
+        expect(channel).not.toContain("hidden-");
+      }
     },
     TEST_TIMEOUT_MS,
   );
@@ -507,8 +511,9 @@ describe("select_settings_repos.ts", () => {
         outputs: { count: String(repos.length), repos },
         summary,
       });
-      for (const channel of publicChannels(r))
+      for (const channel of publicChannels(r)) {
         expect(channel.toLowerCase()).not.toContain("hidden-");
+      }
     },
     TEST_TIMEOUT_MS,
   );
@@ -557,7 +562,9 @@ describe("select_settings_repos.ts", () => {
         outputs: { count: String(repos.length), repos },
         summary: "",
       });
-      for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-server");
+      for (const channel of publicChannels(r)) {
+        expect(channel).not.toContain("hidden-server");
+      }
     },
     TEST_TIMEOUT_MS,
   );
@@ -613,7 +620,9 @@ describe("select_settings_repos.ts", () => {
         outputs: {},
         summary: "",
       });
-      for (const channel of publicChannels(r)) expect(channel).not.toContain(withheld);
+      for (const channel of publicChannels(r)) {
+        expect(channel).not.toContain(withheld);
+      }
     },
     TEST_TIMEOUT_MS,
   );

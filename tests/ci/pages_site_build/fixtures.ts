@@ -24,13 +24,16 @@ import { parseGithubOutput } from "../../shared/github_output.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
 import type { TempDirs } from "../../shared/temp_dir.ts";
 
+/** The action's build entry. */
 export const BUILD_TS = resolve(import.meta.dir, "../../../actions/pages-site/build.ts");
 
-/** A vitepress build of five tiers runs well under this on CI runners; it
- *  is a hang bound, not a deadline (boundedSpawnSync stretches it for load). */
+/** A hang bound, not a deadline: a five-tier vitepress build runs well under it on CI (boundedSpawnSync stretches it for load). */
 export const BUILD_TIMEOUT_MS = 180_000;
+
+/** The test's own cap, above the build bound and stretched the same way. */
 export const TEST_TIMEOUT_MS = harnessBound(200_000);
 
+/** The title siteConfig declares unless a caller overrides it. */
 export const SITE_TITLE = "Fixture Site";
 
 /** The CONFIG env the action step sets, from the plan or the caller. */
@@ -53,18 +56,20 @@ export function siteConfig(
   });
 }
 
+/** The build's directories. RUNNER_TEMP is handed over as a symlink because macOS /tmp is such an alias, and a build
+ *  that does not realpath its scratch base sees the build root under two spellings, on which vitepress's path-keyed
+ *  route resolution reports every internal link dead. */
 export interface RunnerTemp {
-  /** What RUNNER_TEMP is set to: a SYMLINK to the real directory. macOS
-   *  /tmp is such an alias, and a build that does not realpath its scratch
-   *  base sees the build root under two spellings, on which vitepress's
-   *  path-keyed route resolution reports every internal link dead. */
+  /** What RUNNER_TEMP is set to: a symlink to the real directory. */
   alias: string;
+
   /** The build's scratch directory, under the real path. */
   scratch: string;
+
   /** The served root: the directory Pages serves at `/`, lychee's root. */
   served: string;
-  /** The assembled artifact: the served root at the site's base path, so
-   *  the served root itself for a user site (base path `/`). */
+
+  /** The assembled artifact: the served root at the site's base path, so the served root itself for a user site. */
   site: string;
 }
 
@@ -131,7 +136,9 @@ export function pinnedLychee(): string | null {
     throw new Error(`${path} --version exited ${version.exitCode}:\n${version.stderr}`);
   }
   const printed = version.stdout.trim();
-  if (printed === pinned) return path;
+  if (printed === pinned) {
+    return path;
+  }
   console.warn(
     `${path} is ${printed}, not ${pinned}: the live link check is skipped here and runs in the action`,
   );
@@ -238,17 +245,14 @@ export function versionLabels(site: string): string[] {
   return index.versions.map((entry) => entry.label);
 }
 
+/** The escape byte the ansi fence's color codes open with. */
 const ESC = "\x1b";
 
-/** Every custom-block kind the theme styles, both syntaxes: GitHub alerts
- *  (retitled in sentence case by custom-blocks.ts) and ::: containers,
- *  plus a highlighted code block, an ansi fence (the one language shiki
- *  colors from the theme's terminal palette, not its token colors), and a
- *  mermaid fence whose `{{ }}` hexagon would fail the build as a Vue
- *  interpolation without the mount's v-pre. */
+/** Every custom-block kind the theme styles, both syntaxes, plus a highlighted, an ansi, and a mermaid fence. */
 const ALERTS_MD = [
   "# Alerts",
   "",
+  // GitHub alerts, retitled in sentence case by custom-blocks.ts.
   "> [!NOTE]",
   "> a note",
   "",
@@ -281,10 +285,12 @@ const ALERTS_MD = [
   'const s = "x";',
   "```",
   "",
+  // The one language shiki colors from the theme's terminal palette, not its token colors.
   "```ansi",
   `${ESC}[31mERROR${ESC}[0m plain`,
   "```",
   "",
+  // The `{{ }}` hexagon would fail the build as a Vue interpolation without the mount's v-pre.
   "```mermaid",
   "graph TD",
   '  A["x <b>& y</b>"] -->|"go"| B{{done}}',
@@ -292,13 +298,13 @@ const ALERTS_MD = [
   "",
 ].join("\n");
 
-/** The built mermaid mount: the source once, HTML-escaped, inside the
- *  fallback pre (the client reads it back as text). */
+/** The built mermaid mount: the source once, HTML-escaped, inside the fallback pre (the client reads it back as text). */
 export const MERMAID_MOUNT_HTML =
   '<div class="fleet-mermaid"><pre class="fleet-mermaid-source">' +
   "graph TD\n  A[&quot;x &lt;b&gt;&amp; y&lt;/b&gt;&quot;] --&gt;|&quot;go&quot;| B{{done}}" +
   "</pre></div>";
 
+/** The setup page every docs tier carries: a table and two sections. */
 const SETUP_MD =
   "# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n\n" +
   "## Install steps\n\nOne, then two.\n\n## Upgrade steps\n\nThree.\n";
@@ -316,12 +322,17 @@ function docsReadme(skills: string): string {
     skills
   );
 }
+
+/** The landing page's skill links at the tag: the one skill and its install heading. */
 const SKILL_LINKS_AT_TAG =
   "\nSee the [alpha skill](skills/alpha/) and how to [install it](skills/alpha/#install).\n";
+
+/** The landing page's skill links at HEAD: the skills landing too, and a heading that does not exist. */
 const SKILL_LINKS_AT_HEAD =
   "\nSee the [skills](skills/), the [alpha skill](skills/alpha/), how to " +
   "[install it](skills/alpha/#install), and [nothing](skills/alpha/#nope).\n";
 
+/** A skill with an h1, links to its reference page and a sibling skill, plugin metadata, and an install heading. */
 const ALPHA_SKILL = [
   "---",
   "name: alpha",
@@ -340,29 +351,29 @@ const ALPHA_SKILL = [
   "",
 ].join("\n");
 
-/** A README-less skill with frontmatter alone: no h1, so the page is
- *  titled by its name and described by its description. */
+/** A README-less skill with frontmatter alone: no h1, so the page is titled by its name and described by its description. */
 const BETA_SKILL = "---\nname: beta\ndescription: Beta does things.\n---\n\nBody of beta.\n";
 
-/** A skill whose name says nothing (blank) and no h1: titled by its file
- *  name, in the document title and the sidebar alike. */
+/** A skill whose name says nothing (blank) and no h1: titled by its file name, in the document title and the sidebar alike. */
 const GAMMA_SKILL = "---\nname: '   '\n---\n\nBody of gamma.\n";
 
 /** The agent links the skill back in repository space; the skill links the agent the same way at HEAD. */
 const ONE_AGENT =
   "---\nname: one\n---\n\nUses the [alpha skill](../../skills/alpha/SKILL.md#install).\n";
 
+/** The fixture repository's owner/name. */
 export const FLEET_REPO = "fixture-owner/fixture-repo";
+
 /** A project site: served under the repository's name. */
 export const FLEET_BASE = "/fixture-repo/";
 
-/** The include roots as a registration lists them, child first: a staging that followed list order would land
- *  agents/ where its parent has yet to be copied. */
+/** The include roots as a registration lists them, child first: a staging in list order would land agents/ where its parent has yet to be copied. */
 export const FLEET_INCLUDE = [
   { path: "agents", mount: "skills/agents", page: "AGENT.md" },
   { path: "skills", mount: "skills", page: "SKILL.md" },
 ];
 
+/** The action's env for the fleet fixture: the hook's dist, and a config with the include roots and a link-rot label. */
 export const FLEET_ENV = {
   SITE_DIR: "dist",
   CONFIG: siteConfig({ site_title: "Fixture Docs", include: FLEET_INCLUDE, link_rot_label: "rot" }),

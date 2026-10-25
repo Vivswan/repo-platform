@@ -11,7 +11,6 @@ import { tempDirs } from "../shared/temp_dir";
 const ROOT = join(import.meta.dir, "../..");
 const SHA = "000000000000000000000000000000000000000a";
 const OTHER = "cccccccccccccccccccccccccccccccccccccccc";
-/** The env name settings-repos.yml passes the call input under; the script reads it by this literal. */
 const SOURCE_SHA = "SOURCE_SHA";
 const dirs = tempDirs();
 
@@ -245,7 +244,11 @@ describe("the CLI", () => {
       FAKE_CHECK_RUNS: GREEN.stdout,
       ...overrides,
     };
-    for (const [name, value] of Object.entries(env)) if (value === undefined) delete env[name];
+    for (const [name, value] of Object.entries(env)) {
+      if (value === undefined) {
+        delete env[name];
+      }
+    }
     const proc = boundedSpawnSync(["bun", script], { env });
     return {
       ...proc,
