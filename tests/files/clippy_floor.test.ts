@@ -1,7 +1,8 @@
 // A clippy.toml threshold is dead without its lint in the Cargo.toml table, and
 // a wiring slip in files.yml lands neither file: the writer over the real
 // files.yml lands both for the rust module, with the header's placeholder
-// rendered, and nothing without it.
+// rendered, and nothing without it. The test reads the two rust files alone,
+// so every upstream file is a stub and never the network.
 
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -16,8 +17,6 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const FILES_TREE = join(REPO_ROOT, "files");
 const BUILD = "0".repeat(40);
-
-// This test reads the two rust files alone, so every upstream file is a stub and never the network.
 const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
 const upstream = await spawnStubUpstream(config, temp.dir("clippy-floor-upstream-"));
 afterAll(() => upstream.stop());
