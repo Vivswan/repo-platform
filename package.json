@@ -31,6 +31,9 @@
     "@vivswan/github-settings-as-code": "next",
     "diff": "9.0.0",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
+  },
+  "resolutions": {
+    "@vivswan/github-settings-as-code/zod": "4.6.7"
   }
 }
