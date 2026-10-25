@@ -26,7 +26,7 @@ Shapes the schema pins: `project.slug` is kebab-case; `site.path` is one lowerca
 One line each, the `description` of each module in the platform's `files.yml`:
 
 - `bun`: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
-- `uv`: Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff docstring gate)
+- `uv`: Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff floor)
 - `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
 - `site`: one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme)
 - `release-please`: release-please releases through the fleet's release pipeline, plus autorelease labels

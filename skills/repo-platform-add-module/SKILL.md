@@ -32,7 +32,7 @@ One line each, the `description` of each module in the platform's `files.yml`.
 | Module | What it gives the repo |
 |---|---|
 | `bun` | TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS) |
-| `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff docstring gate) |
+| `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff floor) |
 | `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
 | `site` | one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme) |
 | `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels |
@@ -48,7 +48,8 @@ From the platform's `files.yml`. Managed files are rewritten on every sync; star
 | Module | Files | Class |
 |---|---|---|
 | `bun` | `.bun-version` | managed |
-| `uv`, `rust` | no file of their own | - |
+| `uv` | `ruff.toml`, the Python lint floor the repository's `pyproject.toml` builds on | managed |
+| `rust` | no file of its own | - |
 | every toolchain | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml` | split; managed |
 | every toolchain but `rust` | `.github/workflows/auto-format.yml` | starter |
 | `site` | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | - |

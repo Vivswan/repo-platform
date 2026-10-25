@@ -82,11 +82,12 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 | Step | Runs on | Notes |
 | --- | --- | --- |
-| `plan` | every event, the schedule included | a failed plan fails the job and skips every check step; its outputs gate knip and every job beside |
+| `plan` | every event, the schedule included | a failed plan fails the job and skips every check step; its outputs gate ruff, knip, and every job beside |
 | `validate-managed-files` | every push and pull request | its report step fails in place on anything but a clean verdict; the sticky-comment steps after it run on `!cancelled()` |
 | `typography`, `file-size`, `shell-complexity`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps), [shell complexity](fleet-guidelines.md#shell-is-a-straight-line-of-commands)) |
 | `zizmor` | every push and pull request | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
 | `trivy` | every push and pull request | the blocking half of the [security scans](modules/security-scans.md) |
+| `ruff` | uv repositories once a sync has written `ruff.toml` | the [Python lint floor](modules/python.md) at a pinned ruff; a repository before its first sync stands down with a notice |
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
 
 - **Beside it, one job each:** `semgrep` and `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix, on public repositories with an analyzable toolchain), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts.

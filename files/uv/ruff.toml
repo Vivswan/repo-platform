@@ -1,11 +1,27 @@
 # This file is managed by {{github_username}}/repo-platform.
 # Local edits are replaced on the next sync.
-# The fleet's Python docstring floor (docs/modules/python.md). The repository's own ruff settings live in
-# pyproject.toml under [tool.ruff], which this file extends, so they apply beneath the floor.
+# The fleet's Python lint floor (docs/modules/python.md). The repository's own ruff settings live in pyproject.toml
+# under [tool.ruff], which this file extends, so they apply beneath the floor: the selection grows there, and a
+# threshold set there yields to the one below.
 extend = "pyproject.toml"
 
 [lint]
-extend-select = ["D2", "D3", "D4"]
+extend-select = ["C90", "PLR", "PLW", "RET", "PIE", "C4", "PERF", "ERA", "N", "ARG", "PTH", "RUF", "ANN", "D2", "D3", "D4"]
+# The presence rules (D1) are unselected, never ignored: an ignore here is applied last and would defeat a
+# repository's own selection of them.
+ignore = [
+  "PLR2004", # a literal beside its comparison reads better than a one-use constant
+  "D202", # a blank line after the docstring sets it apart from the body
+]
+
+[lint.mccabe]
+max-complexity = 12
+
+[lint.pylint]
+max-branches = 12
+max-statements = 50
+max-args = 8
+max-returns = 6
 
 [lint.pydocstyle]
 convention = "google"

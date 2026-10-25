@@ -111,6 +111,22 @@ jobs:
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: $/actions/trivy
 
+      # ruff reads the managed ruff.toml, the fleet's Python lint floor (docs/modules/python.md), at the version the uv
+      # starters' format lines share (tests/files/ruff_floor.test.ts); a ruff minor can add rules to a selected family,
+      # so the pin moves by hand. A repository registered before its first sync has no ruff.toml yet, so ruff stands
+      # down then; once a sync has recorded the file, a deleted one is validate-managed-files' red.
+      - id: uv
+        if: >-
+          !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' &&
+          contains(steps.plan.outputs.modules, '"uv"')
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - id: ruff
+        if: ${{ !cancelled() && steps.uv.outcome == 'success' && hashFiles('ruff.toml') != '' }}
+        run: uvx ruff@0.17.2 check --no-fix --no-fix-only .
+      - name: Note why ruff stood down
+        if: ${{ !cancelled() && steps.uv.outcome == 'success' && steps.ruff.outcome == 'skipped' }}
+        run: echo "::notice::ruff stood down, this repository has no ruff.toml until its first sync writes it"
+
       # knip resolves imports through node_modules, so the repository's own bun installs first, and last among the
       # checks, so trivy and the base checks judge the checkout before node_modules exists.
       #

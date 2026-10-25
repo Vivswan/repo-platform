@@ -29,7 +29,7 @@ modules:
     agents_toolchain: [bun]
     toolchain_steps: [bun]
   uv:
-    description: Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff docstring gate)
+    description: Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff floor)
     codeql_languages: [python]
     dependabot_ecosystems: [uv]
     gitignore_sources: [Python]
