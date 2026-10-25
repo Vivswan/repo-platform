@@ -3,6 +3,7 @@ import { maskForms } from "../../.github/scripts/shared/mask.ts";
 
 // A made-up slug shaped like a private repository's; no such repository exists.
 const HIDDEN = "Vivswan/Hidden-Server";
+
 /** The exact-case and lower-case spellings a job log carries of the name, one per line. */
 const SPELLINGS = [
   "Vivswan/Hidden-Server",
@@ -16,6 +17,7 @@ const SPELLINGS = [
   "Hidden-Server",
   "hidden-server",
 ].join("\n");
+
 /** The runner's masker: every case-sensitive substring occurrence of a registered value, overlapping
  *  and adjacent matches merged into one `***`, so a value inside a longer one shows nothing of either. */
 function runnerMask(log: string, values: string[]): string {

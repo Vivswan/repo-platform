@@ -17,7 +17,9 @@ import { REPO_ROOT } from "../shared/action_step";
 
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
 const config = parseFilesConfig(read("files.yml"));
-if (config.settings === null) throw new Error("files.yml declares no settings layers");
+if (config.settings === null) {
+  throw new Error("files.yml declares no settings layers");
+}
 const settings = config.settings;
 
 function layerLabelNames(rel: string): string[] {
@@ -31,8 +33,9 @@ function moduleLayer(module: string): string {
   const layer = settings.layers.find(
     (entry) => JSON.stringify(entry.when) === JSON.stringify({ modules: [module] }),
   );
-  if (layer === undefined)
+  if (layer === undefined) {
     throw new Error(`files.yml declares no settings layer for the ${module} module`);
+  }
   return layer.source;
 }
 
@@ -70,8 +73,9 @@ describe("labels other tools recreate are declared where their module is selecte
   )("dependabot: the %s module's ecosystem labels in its own layer", (module, ecosystems) => {
     const labels = ecosystems.map((ecosystem) => {
       const label = DEPENDABOT_LANGUAGE_LABELS[ecosystem];
-      if (label === undefined)
+      if (label === undefined) {
         throw new Error(`no dependabot language label known for ${ecosystem}`);
+      }
       return label;
     });
     expect(layerLabelNames(moduleLayer(module))).toEqual(expect.arrayContaining(labels));

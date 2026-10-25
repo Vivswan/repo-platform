@@ -67,7 +67,9 @@ describe("spawn env is live process.env", () => {
       if (value === undefined) {
         expect(process.env[key]).toBeDefined();
         delete process.env[key];
-      } else process.env[key] = value;
+      } else {
+        process.env[key] = value;
+      }
     }
     try {
       expect(capture(["sh", "-c", shell], { env, timeoutMs: 2000 })).toEqual({
@@ -79,8 +81,11 @@ describe("spawn env is live process.env", () => {
       });
     } finally {
       for (const [key, value] of Object.entries(saved)) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
       }
     }
   });

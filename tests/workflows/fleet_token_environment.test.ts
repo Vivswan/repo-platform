@@ -38,27 +38,38 @@ const workflows = readdirSync(join(root, workflowsDir))
     doc: parseYaml(readFileSync(join(root, workflowsDir, name), "utf8")) as Workflow,
   }));
 
-// Fails closed: a secrets read that is not a literal OTHER name counts as this one. Actions ignores case, and a
-// workflow-level `env` is every job's.
 const NAMED_SECRET =
   /\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)\b|\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\])/gi;
-const strings = (node: unknown): string[] =>
-  typeof node === "string"
-    ? [node]
-    : typeof node === "object" && node !== null
-      ? Object.entries(node).flatMap(([key, value]) => [key, ...strings(value)])
-      : [];
-const readsSecret = (...nodes: unknown[]) =>
-  strings(nodes)
+
+/** Every string in the node, keys included, depth first. */
+function strings(node: unknown): string[] {
+  if (typeof node === "string") {
+    return [node];
+  }
+
+  if (typeof node === "object" && node !== null) {
+    return Object.entries(node).flatMap(([key, value]) => [key, ...strings(value)]);
+  }
+
+  return [];
+}
+
+/** Whether an expression anywhere in the nodes reads the secret. Fails closed: a secrets read that is not a literal
+ *  OTHER name counts as this one. Actions ignores case, and a workflow-level `env` is every job's. */
+function readsSecret(...nodes: unknown[]): boolean {
+  return strings(nodes)
     .flatMap((text) => [...text.matchAll(/\$\{\{([\s\S]*)\}\}/g)].map(([, e]) => e))
     .some((expression) => {
       let named = false;
       const rest = expression.replace(NAMED_SECRET, (_, dot, bracket) => {
-        if ((dot ?? bracket).toUpperCase() === SECRET) named = true;
+        if ((dot ?? bracket).toUpperCase() === SECRET) {
+          named = true;
+        }
         return "";
       });
       return named || /\bsecrets\b/i.test(rest);
     });
+}
 
 describe(`the ${SECRET} readers`, () => {
   const readers = workflows.flatMap(({ rel, doc }) =>
@@ -100,7 +111,9 @@ describe(`the ${SECRET} readers`, () => {
     expect(declaring).toEqual([]);
     const reachesEnvironment = (rel: string, seen = new Set<string>()): boolean => {
       const doc = workflows.find((workflow) => workflow.rel === rel)?.doc;
-      if (doc === undefined || seen.has(rel)) return false;
+      if (doc === undefined || seen.has(rel)) {
+        return false;
+      }
       seen.add(rel);
       return Object.values(doc.jobs).some(
         (job) =>

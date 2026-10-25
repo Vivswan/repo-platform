@@ -170,7 +170,9 @@ describe("allGreenFailure", () => {
       allGreenFailure("o/r", SHA, ghReturning([{ status: "queued", conclusion: null }]), NO_WAIT),
       allGreenFailure("o/r", SHA, ghFailing(1, "gh: HTTP 502\n"), NO_WAIT),
     ];
-    for (const reason of pending) expect(verdictPending(reason ?? "")).toBe(true);
+    for (const reason of pending) {
+      expect(verdictPending(reason ?? "")).toBe(true);
+    }
     const final = allGreenFailure("o/r", SHA, ghReturning([{ conclusion: "failure" }]), NO_WAIT);
     expect(verdictPending(final ?? "")).toBe(false);
   });

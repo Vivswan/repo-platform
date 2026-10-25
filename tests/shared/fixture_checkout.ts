@@ -19,6 +19,8 @@ export function checkout(
     writeFileSync(join(root, rel), text);
   }
   const names = Object.keys(tracked);
-  if (names.length > 0) fixtureGit(root, ["add", "--", ...names]);
+  if (names.length > 0) {
+    fixtureGit(root, ["add", "--", ...names]);
+  }
   return root;
 }

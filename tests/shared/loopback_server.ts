@@ -15,7 +15,9 @@ export async function spawnLoopback(argv: string[], label: string): Promise<Loop
   let text = "";
   while (!text.includes("\n")) {
     const { value, done } = await reader.read();
-    if (done) throw new Error(`the ${label} exited before printing its port`);
+    if (done) {
+      throw new Error(`the ${label} exited before printing its port`);
+    }
     text += new TextDecoder().decode(value);
   }
   return { host: `http://127.0.0.1:${text.trim()}`, stop: () => proc.kill() };

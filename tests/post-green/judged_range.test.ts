@@ -13,7 +13,6 @@ import { tempDirs } from "../shared/temp_dir";
 const temp = tempDirs();
 
 const ZEROS = "0".repeat(40);
-// git's empty tree, the base a branch-creating push is read from.
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 describe("resolveBase", () => {
@@ -121,7 +120,9 @@ describe("resolveBase", () => {
   test("a git that errors on the resolve question is fatal at the leg, never read as an absent commit", () => {
     // The stub errors on the base's resolve alone and hands every other call to the real git.
     const real = Bun.which("git");
-    if (real === null) throw new Error("git is not on PATH");
+    if (real === null) {
+      throw new Error("git is not on PATH");
+    }
     const bin = join(root, "erroring-git-bin");
     mkdirSync(bin, { recursive: true });
     writeFileSync(

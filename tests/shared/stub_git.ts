@@ -8,9 +8,10 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+// The dead remote: git's exit and stderr as the stub answers them, and the refusal shared/git_yes_no.ts prints for it.
+
 export const STUB_GIT_FAIL_EXIT = 128;
 export const STUB_GIT_FAIL_STDERR = "fatal: unable to access 'origin': Could not resolve host";
-/** What the tip read's caller prints for the dead remote (shared/git_yes_no.ts). */
 export const STUB_GIT_FAIL_REFUSAL = `git ls-remote could not answer (exit ${STUB_GIT_FAIL_EXIT}); refusing to guess: ${STUB_GIT_FAIL_STDERR}`;
 
 export function writeStubGit(bin: string): void {

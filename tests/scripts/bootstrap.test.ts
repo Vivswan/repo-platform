@@ -11,7 +11,9 @@ const temp = tempDirs();
 
 function plant(base: string, path: string, files: string[]): void {
   mkdirSync(join(base, path), { recursive: true });
-  for (const file of files) writeFileSync(join(base, path, file), "");
+  for (const file of files) {
+    writeFileSync(join(base, path, file), "");
+  }
 }
 
 describe("bunLockDirs", () => {
@@ -69,7 +71,9 @@ describe("installHooks", () => {
     const base = temp.dir("bootstrap-hooks-");
     const sibling = temp.dir("bootstrap-hooks-worktree-");
     const decoy = temp.dir("bootstrap-hooks-decoy-");
-    for (const repo of [base, decoy]) fixtureGit(repo, ["init", "-q", "-b", "main"]);
+    for (const repo of [base, decoy]) {
+      fixtureGit(repo, ["init", "-q", "-b", "main"]);
+    }
     mkdirSync(join(base, HOOKS_PATH));
     writeFileSync(join(base, HOOKS_PATH, "pre-commit"), sentinel("base"), { mode: 0o755 });
     fixtureGit(base, ["add", "-A"]);

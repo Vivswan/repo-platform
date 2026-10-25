@@ -10,8 +10,9 @@ import { loadAction, REPO_ROOT, runBashStep, type StepRun, stepNamed } from "../
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
-// buildBody stamps the UTC day at call time, so the clock is frozen for the file and the expected date is a literal.
 const DATE = "2026-03-04";
+
+// buildBody stamps the UTC day at call time, so the clock is frozen for the file and the expected date is a literal.
 beforeAll(() => setSystemTime(new Date(`${DATE}T12:00:00Z`)));
 afterAll(() => setSystemTime());
 

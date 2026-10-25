@@ -26,8 +26,11 @@ function ignoredByGit(section: string, rel: string, kind: "dir" | "file"): boole
   writeFileSync(join(repo, ".gitignore"), section);
   const abs = join(repo, rel);
   mkdirSync(dirname(abs), { recursive: true });
-  if (kind === "dir") mkdirSync(abs);
-  else writeFileSync(abs, "");
+  if (kind === "dir") {
+    mkdirSync(abs);
+  } else {
+    writeFileSync(abs, "");
+  }
   const probe = boundedSpawnSync(
     ["git", "-C", repo, "-c", "core.excludesFile=/dev/null", "check-ignore", "-q", rel],
     { env: fixtureGitEnv() },
@@ -72,10 +75,13 @@ interface WorkspaceCheckout {
 }
 
 function checkoutPath(step: Step): string | null {
-  if (!step.uses?.startsWith("actions/checkout@")) return null;
-  const path = step.with?.path;
-  if (typeof path !== "string" || path === "." || path.startsWith("${{ runner.temp }}"))
+  if (!step.uses?.startsWith("actions/checkout@")) {
     return null;
+  }
+  const path = step.with?.path;
+  if (typeof path !== "string" || path === "." || path.startsWith("${{ runner.temp }}")) {
+    return null;
+  }
   return path.replace(/\/+$/, "");
 }
 
@@ -83,9 +89,12 @@ function checkoutPath(step: Step): string | null {
  *  step, so both always count; a job checking out into subdirectories alone has no tree a sibling could land in. */
 function checkedOutStepLists(rel: string, text: string, fragment: boolean): Step[][] {
   const stubbed = text.replaceAll(/^\{\{blocks\}\}$/gm, "").replaceAll(/\{\{[\w-]+\}\}/g, "x");
-  if (fragment) return [parseYaml(`steps:\n${stubbed}`).steps ?? []];
-  if (rel.endsWith("action.yml"))
+  if (fragment) {
+    return [parseYaml(`steps:\n${stubbed}`).steps ?? []];
+  }
+  if (rel.endsWith("action.yml")) {
     return [(parseYaml(stubbed) as { runs: { steps: Step[] } }).runs.steps];
+  }
   return Object.values((parseYaml(stubbed) as Workflow).jobs ?? {})
     .map((job) => job.steps ?? [])
     .filter((steps) =>

@@ -51,25 +51,35 @@ const CHECKS_JOB = "standard-checks";
 const checksJob = fleet.jobs[CHECKS_JOB];
 const checkSteps = checksJob?.steps ?? [];
 const label = (step: Step) => step.id ?? step.name ?? step.uses ?? "";
-/** The action a `uses:` names by its `$/` path, or undefined for any other reference. */
 const PLATFORM_ACTION_PREFIX = "$/actions/";
-const platformAction = (uses: string | undefined): string | undefined =>
-  uses?.startsWith(PLATFORM_ACTION_PREFIX) ? uses.slice(PLATFORM_ACTION_PREFIX.length) : undefined;
-/** GitHub accepts `${{ }}` around an `if:`, so it is stripped before the condition is parsed. */
-const unwrapped = (condition: string | undefined) =>
-  (condition ?? "").trim().replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1");
-// The status functions and hashFiles are the runner's, not the expression language's, so the parser is told their names.
 const RUNNER_FUNCTIONS = ["success", "failure", "cancelled", "always", "hashFiles"].map((name) => ({
   name,
   minArgs: 0,
   maxArgs: 255,
 }));
 const CONTEXTS = ["github", "needs", "steps", "inputs", "matrix", "secrets"];
+
+/** The action a `uses:` names by its `$/` path, or undefined for any other reference. */
+function platformAction(uses: string | undefined): string | undefined {
+  return uses?.startsWith(PLATFORM_ACTION_PREFIX)
+    ? uses.slice(PLATFORM_ACTION_PREFIX.length)
+    : undefined;
+}
+
+/** GitHub accepts `${{ }}` around an `if:`, so it is stripped before the condition is parsed. */
+function unwrapped(condition: string | undefined): string {
+  return (condition ?? "").trim().replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1");
+}
+
 /** The top-level conjuncts of a condition as GitHub's own parser reads them (so an `&&` inside a string literal or a
- *  parenthesis splits nothing), each as its source text; a condition that is not an `&&` chain is one clause. */
-const clausesOf = (condition: string | undefined): string[] => {
+ *  parenthesis splits nothing), each as its source text; a condition that is not an `&&` chain is one clause. The
+ *  parser is told the runner's own names (its status functions and hashFiles) and the contexts, or a valid condition
+ *  fails to parse. */
+function clausesOf(condition: string | undefined): string[] {
   const source = unwrapped(condition);
-  if (source === "") return [""];
+  if (source === "") {
+    return [""];
+  }
   const { tokens: lexed } = new Lexer(source).lex();
   const tree = new Parser(lexed, CONTEXTS, RUNNER_FUNCTIONS).parse();
   const conjuncts =
@@ -81,18 +91,70 @@ const clausesOf = (condition: string | undefined): string[] => {
   let depth = 0;
   let from = tokens[0];
   for (const [at, token] of tokens.entries()) {
-    if (token.type === TokenType.LEFT_PAREN) depth += 1;
-    if (token.type === TokenType.RIGHT_PAREN) depth -= 1;
+    if (token.type === TokenType.LEFT_PAREN) {
+      depth += 1;
+    }
+    if (token.type === TokenType.RIGHT_PAREN) {
+      depth -= 1;
+    }
     const splits = depth === 0 && token.type === TokenType.AND && conjuncts > 1;
-    if (!splits && at < tokens.length - 1) continue;
+    if (!splits && at < tokens.length - 1) {
+      continue;
+    }
     const to = splits ? tokens[at - 1] : token;
     clauses.push(source.slice(offset(from.range.start), offset(to.range.end)));
     from = tokens[at + 1];
   }
-  if (clauses.length !== conjuncts)
+  if (clauses.length !== conjuncts) {
     throw new Error(`${source}: ${clauses.length} clauses sliced, the parser read ${conjuncts}`);
+  }
   return clauses;
-};
+}
+
+/** A context access's dotted path (bracket access with a literal index included), or undefined for any other
+ *  expression. */
+function pathOf(expr: Expr): string | undefined {
+  if (expr instanceof ContextAccess) {
+    return expr.name.lexeme;
+  }
+
+  if (expr instanceof IndexAccess && expr.index instanceof Literal) {
+    return `${pathOf(expr.expr)}.${expr.index.literal.coerceString()}`;
+  }
+
+  return undefined;
+}
+
+/** Every literal prefix a `startsWith(github.head_ref, ...)` call anywhere in the expression tests. */
+function headRefPrefixes(expr: Expr): string[] {
+  if (expr instanceof FunctionCall) {
+    const [subject, prefix] = expr.args;
+    const testsHeadRef =
+      expr.functionName.lexeme.toLowerCase() === "startswith" &&
+      pathOf(subject) === "github.head_ref";
+    if (testsHeadRef && prefix instanceof Literal) {
+      return [prefix.literal.coerceString()];
+    }
+    return expr.args.flatMap(headRefPrefixes);
+  }
+  if (expr instanceof Logical) {
+    return expr.args.flatMap(headRefPrefixes);
+  }
+  if (expr instanceof Grouping) {
+    return headRefPrefixes(expr.group);
+  }
+  if (expr instanceof Unary) {
+    return headRefPrefixes(expr.expr);
+  }
+  return [];
+}
+
+/** The head-ref prefixes a condition tests, read by GitHub's own parser so spacing, quoting, and bracket access read
+ *  as GitHub reads them. */
+function prefixesOf(condition: string | undefined): string[] {
+  const { tokens } = new Lexer(unwrapped(condition)).lex();
+  return headRefPrefixes(new Parser(tokens, CONTEXTS, RUNNER_FUNCTIONS).parse());
+}
 
 describe("fleet.yml", () => {
   // A step or job whose condition is not !cancelled() or always() is skipped by an earlier failure (a bare one implies
@@ -219,26 +281,34 @@ describe("fleet.yml", () => {
 
     const SCHEDULE_RUNS = new Set([CHECKS_JOB, "codeql"]);
     const SCHEDULE_ALONE = new Set(["trivy-nightly"]);
-    const sides = Object.entries(fleet.jobs).map(([name, job]) => {
+    const sideOf = (job: Job): string => {
       const clauses = clausesOf(job.if);
-      const side = clauses.includes(ONLY_ON_SCHEDULE)
-        ? "schedule only"
-        : clauses.includes(SKIP_ON_SCHEDULE) ||
-            clauses.includes("github.event_name == 'pull_request'")
-          ? "never on the schedule"
-          : "every event";
-      return [name, side];
-    });
-    expect(sides).toEqual(
-      Object.keys(fleet.jobs).map((name) => [
-        name,
-        SCHEDULE_RUNS.has(name)
-          ? "every event"
-          : SCHEDULE_ALONE.has(name)
-            ? "schedule only"
-            : "never on the schedule",
-      ]),
-    );
+      if (clauses.includes(ONLY_ON_SCHEDULE)) {
+        return "schedule only";
+      }
+
+      if (
+        clauses.includes(SKIP_ON_SCHEDULE) ||
+        clauses.includes("github.event_name == 'pull_request'")
+      ) {
+        return "never on the schedule";
+      }
+
+      return "every event";
+    };
+    const expectedSide = (name: string): string => {
+      if (SCHEDULE_RUNS.has(name)) {
+        return "every event";
+      }
+
+      if (SCHEDULE_ALONE.has(name)) {
+        return "schedule only";
+      }
+
+      return "never on the schedule";
+    };
+    const sides = Object.entries(fleet.jobs).map(([name, job]) => [name, sideOf(job)]);
+    expect(sides).toEqual(Object.keys(fleet.jobs).map((name) => [name, expectedSide(name)]));
     expect(fleet.jobs.codeql?.if).toContain(
       `(github.event_name != 'schedule' || needs.${CHECKS_JOB}.outputs.weekly == 'true')`,
     );
@@ -251,25 +321,35 @@ describe("fleet.yml", () => {
   // A wire to another name is a swap nothing else catches, so it fails here too.
   const actionOutputs = (uses: string): string[] | null => {
     const name = platformAction(uses);
-    if (name === undefined) return null;
+    if (name === undefined) {
+      return null;
+    }
     const path = join(ROOT, "actions", name, "action.yml");
-    if (!existsSync(path)) return [];
+    if (!existsSync(path)) {
+      return [];
+    }
     const action = parseYaml(readFileSync(path, "utf8")) as { outputs?: Record<string, unknown> };
     return Object.keys(action.outputs ?? {});
   };
   /** Why `steps.<id>.outputs.<name>` inside `job` resolves to nothing, or null when a declared output sets it. */
   const stepOutputGap = (job: Job, id: string, output: string): string | null => {
     const step = job.steps?.find((candidate) => candidate.id === id);
-    if (step === undefined) return `no step '${id}'`;
+    if (step === undefined) {
+      return `no step '${id}'`;
+    }
     const declared = step.uses === undefined ? null : actionOutputs(step.uses);
-    if (declared === null) return null;
+    if (declared === null) {
+      return null;
+    }
     return declared.includes(output) ? null : `'${step.uses}' declares no output '${output}'`;
   };
   /** Why `needs.<job>.outputs.<name>` resolves to nothing, or null when the job wires it to a step that sets it; a call
    *  job's outputs are the called workflow's. */
   const jobOutputGap = (workflow: Workflow, jobName: string, output: string): string | null => {
     const job = workflow.jobs[jobName];
-    if (job === undefined) return `no job '${jobName}'`;
+    if (job === undefined) {
+      return `no job '${jobName}'`;
+    }
     if (job.uses !== undefined) {
       const called = /^\$\/\.github\/workflows\/(.+)$/.exec(job.uses)?.[1];
       return called === undefined
@@ -277,22 +357,31 @@ describe("fleet.yml", () => {
         : callOutputGap(loadWorkflow(called), output);
     }
     const value = job.outputs?.[output];
-    if (value === undefined) return `job '${jobName}' declares no output '${output}'`;
+    if (value === undefined) {
+      return `job '${jobName}' declares no output '${output}'`;
+    }
     const wired = /^\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
-    if (wired === null)
+    if (wired === null) {
       return `job '${jobName}' output '${output}' is ${value}, not one step output`;
-    if (wired[2] !== output)
+    }
+    if (wired[2] !== output) {
       return `job '${jobName}' output '${output}' is wired to steps.${wired[1]}.outputs.${wired[2]}, another name`;
+    }
     return stepOutputGap(job, wired[1], wired[2]);
   };
   /** Why a caller's `needs.<call>.outputs.<name>` resolves to nothing, or null when the called workflow wires it through. */
   const callOutputGap = (called: Workflow, output: string): string | null => {
     const value = called.on.workflow_call.outputs?.[output]?.value;
-    if (value === undefined) return `workflow_call declares no output '${output}'`;
+    if (value === undefined) {
+      return `workflow_call declares no output '${output}'`;
+    }
     const wired = /^\$\{\{ jobs\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
-    if (wired === null) return `workflow_call output '${output}' is ${value}, not one job output`;
-    if (wired[2] !== output)
+    if (wired === null) {
+      return `workflow_call output '${output}' is ${value}, not one job output`;
+    }
+    if (wired[2] !== output) {
       return `workflow_call output '${output}' is wired to jobs.${wired[1]}.outputs.${wired[2]}, another name`;
+    }
     return jobOutputGap(called, wired[1], wired[2]);
   };
 
@@ -305,36 +394,30 @@ describe("fleet.yml", () => {
         "owner",
       ),
     ) as Workflow;
-    // GitHub's own parser, so spacing, quoting, and bracket access read as GitHub reads them.
-    const pathOf = (expr: Expr): string | undefined =>
-      expr instanceof ContextAccess
-        ? expr.name.lexeme
-        : expr instanceof IndexAccess && expr.index instanceof Literal
-          ? `${pathOf(expr.expr)}.${expr.index.literal.coerceString()}`
-          : undefined;
-    const headRefPrefixes = (expr: Expr): string[] => {
-      if (expr instanceof FunctionCall) {
-        const [subject, prefix] = expr.args;
-        return expr.functionName.lexeme.toLowerCase() === "startswith" &&
-          pathOf(subject) === "github.head_ref" &&
-          prefix instanceof Literal
-          ? [prefix.literal.coerceString()]
-          : expr.args.flatMap(headRefPrefixes);
-      }
-      if (expr instanceof Logical) return expr.args.flatMap(headRefPrefixes);
-      if (expr instanceof Grouping) return headRefPrefixes(expr.group);
-      if (expr instanceof Unary) return headRefPrefixes(expr.expr);
-      return [];
-    };
-    const prefixesOf = (condition: string | undefined) => {
-      const { tokens } = new Lexer(unwrapped(condition)).lex();
-      return headRefPrefixes(new Parser(tokens, CONTEXTS, RUNNER_FUNCTIONS).parse());
-    };
     expect({
       releasePr: prefixesOf(fleet.jobs["release-pr"]?.if),
       releaseGate: prefixesOf(skeleton.jobs["release-gate"]?.if),
     }).toEqual({ releasePr: [RELEASE_BRANCH_PREFIX], releaseGate: [RELEASE_BRANCH_PREFIX] });
   });
+
+  /** The gaps behind one job's reads of needs.*.outputs.* and steps.*.outputs.*, wherever in the job they sit. */
+  const jobReadGaps = (jobName: string, job: Job): string[] => {
+    const gaps: string[] = [];
+    const text = JSON.stringify(job);
+    for (const [, needed, output] of text.matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
+      const gap = jobOutputGap(fleet, needed, output);
+      if (gap !== null) {
+        gaps.push(`fleet.yml job '${jobName}' reads needs.${needed}.outputs.${output}: ${gap}`);
+      }
+    }
+    for (const [, id, output] of text.matchAll(/steps\.([\w-]+)\.outputs\.([\w-]+)/g)) {
+      const gap = stepOutputGap(job, id, output);
+      if (gap !== null) {
+        gaps.push(`fleet.yml job '${jobName}' reads steps.${id}.outputs.${output}: ${gap}`);
+      }
+    }
+    return gaps;
+  };
 
   test("every output read resolves to a step that sets it: the skeleton's through fleet.yml's workflow_call, the jobs', and the steps'", () => {
     const gaps: string[] = [];
@@ -344,20 +427,12 @@ describe("fleet.yml", () => {
     );
     for (const output of skeletonReads) {
       const gap = callOutputGap(fleet, output);
-      if (gap !== null) gaps.push(`skeleton reads needs.platform.outputs.${output}: ${gap}`);
+      if (gap !== null) {
+        gaps.push(`skeleton reads needs.platform.outputs.${output}: ${gap}`);
+      }
     }
     for (const [jobName, job] of Object.entries(fleet.jobs)) {
-      const text = JSON.stringify(job);
-      for (const [, needed, output] of text.matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-        const gap = jobOutputGap(fleet, needed, output);
-        if (gap !== null)
-          gaps.push(`fleet.yml job '${jobName}' reads needs.${needed}.outputs.${output}: ${gap}`);
-      }
-      for (const [, id, output] of text.matchAll(/steps\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-        const gap = stepOutputGap(job, id, output);
-        if (gap !== null)
-          gaps.push(`fleet.yml job '${jobName}' reads steps.${id}.outputs.${output}: ${gap}`);
-      }
+      gaps.push(...jobReadGaps(jobName, job));
     }
     expect({ gaps, skeletonReadsWalked: [...skeletonReads].length > 0 }).toEqual({
       gaps: [],

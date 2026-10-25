@@ -31,11 +31,9 @@ interface Scenario {
   conclusion?: string;
   ref?: string;
   brokenOrigin?: boolean;
-  /** The stale read a racing mover would push its lease from. */
   staleReadAt?: "m1" | "m2";
   ancestryProbeErrors?: boolean;
   sourceProbeErrors?: boolean;
-  /** ls-remote answers "no tag" (exit 2) but a descendant holds the pipe past the probe's deadline. */
   lsRemoteHangs?: boolean;
 }
 
@@ -48,6 +46,32 @@ interface Outcome {
   m1: string;
   m2: string;
   m3: string;
+}
+
+/** The git stub's lines for the scenario's failing probes, each answering one subcommand before the real git runs. */
+function stubbedGitLines(scenario: Scenario, shas: Record<string, string>): string[] {
+  const lines: string[] = [];
+  // A racing mover's stale read, the tip its lease is pushed from.
+  if (scenario.staleReadAt !== undefined) {
+    lines.push(
+      `if [ "$1" = ls-remote ]; then printf '%s\\t%s\\n' ${shas[scenario.staleReadAt]} ${TAG}; exit 0; fi`,
+    );
+  }
+  if (scenario.ancestryProbeErrors === true) {
+    lines.push(
+      `if [ "$1" = merge-base ] && [ "$4" != origin/main ]; then echo 'fatal: stubbed' >&2; exit 128; fi`,
+    );
+  }
+  // "No tag" (exit 2) while a descendant holds the pipe past the probe's deadline.
+  if (scenario.lsRemoteHangs === true) {
+    lines.push(`if [ "$1" = ls-remote ]; then sleep 10 & exit 2; fi`);
+  }
+  if (scenario.sourceProbeErrors === true) {
+    lines.push(
+      `if [ "$1" = rev-parse ] && [ "$3" = --quiet ]; then echo 'fatal: stubbed' >&2; exit 128; fi`,
+    );
+  }
+  return lines;
 }
 
 function run(scenario: Scenario): Outcome {
@@ -104,28 +128,12 @@ function run(scenario: Scenario): Outcome {
       fixtureGit(work, ["push", "--quiet", "origin", `${at}:${TAG}`]);
     }
   }
-  const stubbedGit: string[] = [];
-  if (scenario.staleReadAt !== undefined) {
-    stubbedGit.push(
-      `if [ "$1" = ls-remote ]; then printf '%s\\t%s\\n' ${shas[scenario.staleReadAt]} ${TAG}; exit 0; fi`,
-    );
-  }
-  if (scenario.ancestryProbeErrors === true) {
-    stubbedGit.push(
-      `if [ "$1" = merge-base ] && [ "$4" != origin/main ]; then echo 'fatal: stubbed' >&2; exit 128; fi`,
-    );
-  }
-  if (scenario.lsRemoteHangs === true) {
-    stubbedGit.push(`if [ "$1" = ls-remote ]; then sleep 10 & exit 2; fi`);
-  }
-  if (scenario.sourceProbeErrors === true) {
-    stubbedGit.push(
-      `if [ "$1" = rev-parse ] && [ "$3" = --quiet ]; then echo 'fatal: stubbed' >&2; exit 128; fi`,
-    );
-  }
+  const stubbedGit = stubbedGitLines(scenario, shas);
   if (stubbedGit.length > 0) {
     const real = Bun.which("git");
-    if (real === null) throw new Error("git is not on PATH");
+    if (real === null) {
+      throw new Error("git is not on PATH");
+    }
     writeFileSync(
       join(bin, "git"),
       ["#!/usr/bin/env bash", ...stubbedGit, `exec ${JSON.stringify(real)} "$@"`, ""].join("\n"),
@@ -170,9 +178,13 @@ function run(scenario: Scenario): Outcome {
           env: fixtureGitEnv(),
         },
       );
-      if (probe.exitCode === 0) return probe.stdout.trimEnd();
+      if (probe.exitCode === 0) {
+        return probe.stdout.trimEnd();
+      }
       // --verify --quiet exits 1 for an absent ref; anything else is a failed look, never an absence.
-      if (probe.exitCode === 1) return "";
+      if (probe.exitCode === 1) {
+        return "";
+      }
       throw new Error(
         `git rev-parse ${TAG} in origin failed (exit ${probe.exitCode}): ${probe.stderr}`,
       );
@@ -307,7 +319,9 @@ describe("move_stable.ts behavior (real git)", () => {
     const r = run(scenario);
     expect(r.exitCode).toBe(exitCode);
     expect(r.output).toContain(message);
-    if (not !== undefined) expect(r.output).not.toContain(not);
+    if (not !== undefined) {
+      expect(r.output).not.toContain(not);
+    }
     expect(r.outputs).toEqual({});
     expect(r.originTag()).toBe(scenario.tag === undefined ? "" : r[scenario.tag]);
   });

@@ -7,6 +7,8 @@ import { join } from "node:path";
 export interface ArgvStub {
   /** The directory to prepend to PATH. */
   bin: string;
+
+  /** Every call so far, each as the stub's name followed by its arguments. */
   calls(): string[][];
 }
 

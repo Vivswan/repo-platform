@@ -26,24 +26,22 @@ interface Workflow {
   concurrency?: Concurrency;
   jobs: Record<string, Job>;
 }
+/** One caller job to called workflow pair; `heldByChain` is every group the caller job and each caller above it hold,
+ *  lowercased, since GitHub reads group names case-insensitively. */
 interface Call {
   site: string;
   job: Job;
   ceiling: Permissions;
   called: Workflow;
-  /** Every group the caller job and each caller above it hold, lowercased (GitHub reads group names case-insensitively). */
   heldByChain: Set<string>;
 }
 
 const ROOT = join(import.meta.dir, "../..");
 const RANK: Record<string, number> = { none: 0, read: 1, write: 2 };
-
-// The skeleton is the fleet's ci.yml: its `./` calls resolve against the starters beside it, its @stable calls against
-// this repository's workflows, whose own `$/` calls resolve against the workflows beside them.
+const SKELETON = "files/base/.github/workflows/ci.yml";
 const CALLER_ROOTS = [".github/workflows", "files/base/.github/workflows"];
 const LOCAL_CALL = /^[.$]\/\.github\/workflows\/(.+)$/;
 const PLATFORM_CALL = new RegExp(`^${PLATFORM_SLUG}/(\\.github/workflows/.+)@`);
-// A called run keyed per run_id, falling back to the cron's lane: the caller passes the input the branch reads and holds the literal.
 const FALLBACK_LANE =
   /^\$\{\{ inputs\.([\w-]+) != '' && format\('[\w-]+-called-\{0\}', github\.run_id\) \|\| '([\w-]+)' \}\}$/;
 
@@ -55,10 +53,14 @@ function load(rel: string): Workflow {
   return parseYaml(text) as Workflow;
 }
 
-/** A reusable workflow of this repository, whichever spelling the caller uses; a third-party call is GitHub's alone to judge. */
+/** A reusable workflow of this repository, whichever spelling the caller uses; a third-party call is GitHub's alone to
+ *  judge. The skeleton is the fleet's ci.yml: its `./` calls resolve against the starters beside it, its @stable calls
+ *  against this repository's workflows, whose own `$/` calls resolve against the workflows beside them. */
 function calledPath(uses: string, callerRoot: string): string | null {
   const local = LOCAL_CALL.exec(uses);
-  if (local !== null) return `${callerRoot}/${local[1]}`;
+  if (local !== null) {
+    return `${callerRoot}/${local[1]}`;
+  }
   return PLATFORM_CALL.exec(uses)?.[1] ?? null;
 }
 
@@ -69,9 +71,13 @@ const workflowFiles = (root: string) =>
 
 const lanesOf = (workflow: Workflow): [string, string][] => {
   const lanes: [string, string][] = [];
-  if (workflow.concurrency !== undefined) lanes.push(["workflow", workflow.concurrency.group]);
+  if (workflow.concurrency !== undefined) {
+    lanes.push(["workflow", workflow.concurrency.group]);
+  }
   for (const [id, job] of Object.entries(workflow.jobs)) {
-    if (job.concurrency !== undefined) lanes.push([`job '${id}'`, job.concurrency.group]);
+    if (job.concurrency !== undefined) {
+      lanes.push([`job '${id}'`, job.concurrency.group]);
+    }
   }
   return lanes;
 };
@@ -80,12 +86,15 @@ const lanesOf = (workflow: Workflow): [string, string][] => {
 function deriveCalls(): Call[] {
   const bySite = new Map<string, Call>();
   const visit = (callerRel: string, chain: string[], held: Set<string>) => {
-    if (chain.includes(callerRel))
+    if (chain.includes(callerRel)) {
       throw new Error(`call cycle: ${[...chain, callerRel].join(" -> ")}`);
+    }
     const caller = load(callerRel);
     for (const [callerJob, job] of Object.entries(caller.jobs)) {
       const calledRel = job.uses === undefined ? null : calledPath(job.uses, dirname(callerRel));
-      if (calledRel === null) continue;
+      if (calledRel === null) {
+        continue;
+      }
       const heldHere = new Set([
         ...held,
         ...[caller.concurrency?.group, job.concurrency?.group]
@@ -93,54 +102,151 @@ function deriveCalls(): Call[] {
           .map((group) => group.toLowerCase()),
       ]);
       const site = `${callerRel} job '${callerJob}' -> ${calledRel}`;
-      const known = bySite.get(site);
-      if (known === undefined) {
-        bySite.set(site, {
-          site,
-          job,
-          ceiling: job.permissions ?? caller.permissions,
-          called: load(calledRel),
-          heldByChain: heldHere,
-        });
-      } else {
-        for (const group of heldHere) known.heldByChain.add(group);
+      const known = bySite.get(site) ?? {
+        site,
+        job,
+        ceiling: job.permissions ?? caller.permissions,
+        called: load(calledRel),
+        heldByChain: new Set<string>(),
+      };
+      bySite.set(site, known);
+      for (const group of heldHere) {
+        known.heldByChain.add(group);
       }
       visit(calledRel, [...chain, callerRel], heldHere);
     }
   };
-  for (const rel of CALLER_ROOTS.flatMap(workflowFiles)) visit(rel, [], new Set());
+  for (const rel of CALLER_ROOTS.flatMap(workflowFiles)) {
+    visit(rel, [], new Set());
+  }
   return [...bySite.values()];
 }
 
 const CALLS = deriveCalls();
 
-// A read-all or write-all shorthand is refused on either side, not expanded: the ceiling is read per scope, and a shorthand
-// hides which scopes a job holds.
-const isMapping = (value: unknown): value is Record<string, string> =>
-  typeof value === "object" && value !== null;
+/** A per-scope grant. A read-all or write-all shorthand is refused on either side, not expanded: the ceiling is read
+ *  per scope, and a shorthand hides which scopes a job holds. */
+function isMapping(value: unknown): value is Record<string, string> {
+  return typeof value === "object" && value !== null;
+}
 
-test("every called job's permissions fit its caller job's ceiling", () => {
-  const overCeiling: string[] = [];
-  for (const { site, ceiling, called } of CALLS) {
-    if (!isMapping(ceiling)) {
-      overCeiling.push(`${site}: caller grant is ${String(ceiling)}, not a per-scope mapping`);
+/** Every scope a called job holds over its caller job's ceiling, one line each. */
+function overCeilingGaps({ site, ceiling, called }: Call): string[] {
+  if (!isMapping(ceiling)) {
+    return [`${site}: caller grant is ${String(ceiling)}, not a per-scope mapping`];
+  }
+  const gaps: string[] = [];
+  for (const [calledJob, raw] of Object.entries(called.jobs)) {
+    const grant = raw.permissions ?? called.permissions;
+    if (grant === undefined) {
       continue;
     }
-    for (const [calledJob, raw] of Object.entries(called.jobs)) {
-      const grant = raw.permissions ?? called.permissions;
-      if (grant === undefined) continue;
-      if (!isMapping(grant)) {
-        overCeiling.push(`${site} job '${calledJob}': grant is ${grant}, not a per-scope mapping`);
-        continue;
-      }
-      for (const [scope, level] of Object.entries(grant)) {
-        const allowed = ceiling[scope] ?? "none";
-        if ((RANK[level] ?? Infinity) > (RANK[allowed] ?? -1)) {
-          overCeiling.push(`${site} job '${calledJob}': ${scope}: ${level} exceeds ${allowed}`);
-        }
+    if (!isMapping(grant)) {
+      gaps.push(`${site} job '${calledJob}': grant is ${grant}, not a per-scope mapping`);
+      continue;
+    }
+    for (const [scope, level] of Object.entries(grant)) {
+      const allowed = ceiling[scope] ?? "none";
+      if ((RANK[level] ?? Infinity) > (RANK[allowed] ?? -1)) {
+        gaps.push(`${site} job '${calledJob}': ${scope}: ${level} exceeds ${allowed}`);
       }
     }
   }
+  return gaps;
+}
+
+function raiseTo(union: Record<string, string>, grant: Record<string, string>): void {
+  for (const [scope, level] of Object.entries(grant)) {
+    if ((RANK[level] ?? Infinity) > (RANK[union[scope] ?? "none"] ?? -1)) {
+      union[scope] = level;
+    }
+  }
+}
+
+/** Raises `union` by every running job below the workflow, following each call once (`seen`). */
+function absorbGrants(
+  callerRel: string,
+  workflow: Workflow,
+  union: Record<string, string>,
+  seen: Set<string>,
+): void {
+  for (const [id, job] of Object.entries(workflow.jobs)) {
+    const calledRel = job.uses === undefined ? null : calledPath(job.uses, dirname(callerRel));
+    if (calledRel !== null) {
+      if (!seen.has(calledRel)) {
+        seen.add(calledRel);
+        absorbGrants(calledRel, load(calledRel), union, seen);
+      }
+      continue;
+    }
+    const grant = job.permissions ?? workflow.permissions;
+    if (!isMapping(grant)) {
+      throw new Error(`${callerRel} job '${id}': grant is ${String(grant)}`);
+    }
+    raiseTo(union, grant);
+  }
+}
+
+/** The highest level per scope any running job behind the calls asks; a call job's own grant is a ceiling, not a need. */
+function unionOfGrants(platformCalls: Call[]): Record<string, string> {
+  const union: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const call of platformCalls) {
+    const calledRel = calledPath(call.job.uses ?? "", dirname(SKELETON)) ?? "";
+    if (!seen.has(calledRel)) {
+      seen.add(calledRel);
+      absorbGrants(calledRel, call.called, union, seen);
+    }
+  }
+  return union;
+}
+
+/** The lane findings of one call: a fallback lane must be keyed on an input the caller passes and named for the caller
+ *  job's own lane; any other lane must not be one the caller chain holds. */
+function laneFindings({ site, job, called, heldByChain }: Call): string[] {
+  const findings: string[] = [];
+  for (const [where, group] of lanesOf(called)) {
+    const fallback = FALLBACK_LANE.exec(group);
+    if (fallback === null) {
+      if (heldByChain.has(group.toLowerCase())) {
+        findings.push(`${site} ${where}: group '${group}' is held by the caller chain`);
+      }
+      continue;
+    }
+    const [, input, lane] = fallback;
+    if (!(input in (job.with ?? {}))) {
+      findings.push(
+        `${site} ${where}: keys the called run on inputs.${input}, which the caller does not pass`,
+      );
+    }
+    if (job.concurrency?.group.toLowerCase() !== lane.toLowerCase()) {
+      findings.push(
+        `${site} ${where}: falls back to '${lane}', the caller job holds ${job.concurrency?.group}`,
+      );
+    }
+  }
+  return findings;
+}
+
+/** The lanes of every callable workflow whose group reads github.workflow, the CALLER's name inside a called run. */
+function lanesReadingGithubWorkflow(): string[] {
+  const findings: string[] = [];
+  for (const rel of CALLER_ROOTS.flatMap(workflowFiles)) {
+    const workflow = load(rel);
+    if (!JSON.stringify(workflow.on).includes("workflow_call")) {
+      continue;
+    }
+    for (const [where, group] of lanesOf(workflow)) {
+      if (group.includes("github.workflow")) {
+        findings.push(`${rel} ${where}: '${group}' reads github.workflow`);
+      }
+    }
+  }
+  return findings;
+}
+
+test("every called job's permissions fit its caller job's ceiling", () => {
+  const overCeiling = CALLS.flatMap(overCeilingGaps);
   // One resolved pair per caller root proves the derivation reached both, and the nested pair that it descended through
   // a platform call, so an empty root or a flat walk cannot pass quietly.
   const controls = [
@@ -160,78 +266,26 @@ test("every called job's permissions fit its caller job's ceiling", () => {
 // platform job asked) would sit granted fleet-wide. A call job's own grant is a ceiling, not a need: the union reads the
 // running jobs below it.
 test("the skeleton's platform calls share one block, and the block is exactly the union of what the jobs behind them ask", () => {
-  const SKELETON = "files/base/.github/workflows/ci.yml";
   const platformCalls = CALLS.filter(
     (call) => call.site.startsWith(`${SKELETON} job`) && PLATFORM_CALL.test(call.job.uses ?? ""),
   );
-  const union: Record<string, string> = {};
-  const seen = new Set<string>();
-  const absorb = (callerRel: string, workflow: Workflow) => {
-    for (const [id, job] of Object.entries(workflow.jobs)) {
-      const calledRel = job.uses === undefined ? null : calledPath(job.uses, dirname(callerRel));
-      if (calledRel !== null) {
-        if (!seen.has(calledRel)) {
-          seen.add(calledRel);
-          absorb(calledRel, load(calledRel));
-        }
-        continue;
-      }
-      const grant = job.permissions ?? workflow.permissions;
-      if (!isMapping(grant)) throw new Error(`${callerRel} job '${id}': grant is ${String(grant)}`);
-      for (const [scope, level] of Object.entries(grant)) {
-        if ((RANK[level] ?? Infinity) > (RANK[union[scope] ?? "none"] ?? -1)) union[scope] = level;
-      }
-    }
-  };
-  for (const call of platformCalls) {
-    const calledRel = calledPath(call.job.uses ?? "", dirname(SKELETON)) ?? "";
-    if (!seen.has(calledRel)) {
-      seen.add(calledRel);
-      absorb(calledRel, call.called);
-    }
-  }
   const blocks = new Set(platformCalls.map((call) => JSON.stringify(call.ceiling)));
   expect({
     calls: platformCalls.length > 1,
     blocks: [...blocks].map((block) => JSON.parse(block) as Permissions),
-  }).toEqual({ calls: true, blocks: [union] });
+  }).toEqual({ calls: true, blocks: [unionOfGrants(platformCalls)] });
 });
 
 // The sync and settings lanes are single-writer only while the cron run and the post-green call spell ONE literal: the
 // callee keys a called run per run_id and falls back to the lane its caller job holds by name, so a rename on either side
 // lets the two runs write the fleet at once, both green.
 test("no called lane is one its caller chain holds or reads github.workflow; a fallback lane is the caller job's by name", () => {
-  const findings: string[] = [];
-  const fallbackSites: string[] = [];
-  for (const { site, job, called, heldByChain } of CALLS) {
-    for (const [where, group] of lanesOf(called)) {
-      const fallback = FALLBACK_LANE.exec(group);
-      if (fallback !== null) {
-        const [, input, lane] = fallback;
-        fallbackSites.push(site);
-        if (!(input in (job.with ?? {}))) {
-          findings.push(
-            `${site} ${where}: keys the called run on inputs.${input}, which the caller does not pass`,
-          );
-        }
-        if (job.concurrency?.group.toLowerCase() !== lane.toLowerCase()) {
-          findings.push(
-            `${site} ${where}: falls back to '${lane}', the caller job holds ${job.concurrency?.group}`,
-          );
-        }
-      } else if (heldByChain.has(group.toLowerCase())) {
-        findings.push(`${site} ${where}: group '${group}' is held by the caller chain`);
-      }
-    }
-  }
-  for (const rel of CALLER_ROOTS.flatMap(workflowFiles)) {
-    const workflow = load(rel);
-    if (!JSON.stringify(workflow.on).includes("workflow_call")) continue;
-    for (const [where, group] of lanesOf(workflow)) {
-      if (group.includes("github.workflow"))
-        findings.push(`${rel} ${where}: '${group}' reads github.workflow`);
-    }
-  }
+  const findings = [...CALLS.flatMap(laneFindings), ...lanesReadingGithubWorkflow()];
+  const fallbackSites = CALLS.flatMap((call) =>
+    lanesOf(call.called)
+      .filter(([, group]) => FALLBACK_LANE.test(group))
+      .map(() => call.site),
+  );
   // The armed controls: the two fallback-shaped callees were seen, and the sync callee's chain holds ci.yml's run lane as
   // well as the sync-fleet job's, so the walk descended through the post-green call.
   const syncSite =

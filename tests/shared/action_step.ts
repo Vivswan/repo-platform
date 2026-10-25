@@ -23,7 +23,9 @@ export function loadAction(rel: string): Action {
 
 export function stepNamed(action: Action, name: string): Step {
   const step = action.runs.steps.find((s) => s.name === name);
-  if (step === undefined) throw new Error(`no step named '${name}'`);
+  if (step === undefined) {
+    throw new Error(`no step named '${name}'`);
+  }
   return step;
 }
 
@@ -36,8 +38,12 @@ export interface StepRun {
 
 export function fill(text: string, fills: Record<string, string>): string {
   let filled = text;
-  for (const [expr, value] of Object.entries(fills)) filled = filled.replaceAll(expr, value);
-  if (filled.includes("${{")) throw new Error(`unresolved expression in ${filled}`);
+  for (const [expr, value] of Object.entries(fills)) {
+    filled = filled.replaceAll(expr, value);
+  }
+  if (filled.includes("${{")) {
+    throw new Error(`unresolved expression in ${filled}`);
+  }
   return filled;
 }
 

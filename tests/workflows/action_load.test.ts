@@ -4,6 +4,8 @@
 //   dependency-review -> pull requests only: its upstream action refuses every other event
 //   release-assets    -> never: it reads a draft release by tag, and this repository cuts no releases
 
+// `shipped` is the platform's own manifest walk, nested actions included, so this test and the shipping read one list.
+
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,7 +27,6 @@ interface Job {
 }
 
 const PULL_REQUESTS_ONLY = "github.event_name == 'pull_request'";
-// The recursive manifest walk, so a nested action is shipped and judged by the same list.
 const shipped = actionManifestPaths(join(REPO_ROOT, "actions")).map(dirname);
 const ci = parseYaml(readFileSync(join(REPO_ROOT, ".github/workflows/ci.yml"), "utf8")) as {
   jobs: Record<string, Job>;
@@ -36,7 +37,9 @@ const ci = parseYaml(readFileSync(join(REPO_ROOT, ".github/workflows/ci.yml"), "
 function runsOn(job: Job, step: Step): string {
   const advisory = (owner: Job | Step) =>
     owner["continue-on-error"] !== undefined && owner["continue-on-error"] !== false;
-  if (advisory(job) || advisory(step)) return "under continue-on-error";
+  if (advisory(job) || advisory(step)) {
+    return "under continue-on-error";
+  }
   const narrowing = [job.if, step.if]
     .map((condition) => (condition ?? "").trim())
     .filter((condition) => condition !== "" && condition !== "always()")
@@ -50,7 +53,9 @@ test("every shipped action is run, so loaded, by a gating job's step on every pu
   for (const job of gating) {
     for (const step of ci.jobs[job].steps ?? []) {
       const dir = /^\$\/(actions\/.+)$/.exec(step.uses ?? "")?.[1];
-      if (dir !== undefined) runs.get(dir)?.add(runsOn(ci.jobs[job], step));
+      if (dir !== undefined) {
+        runs.get(dir)?.add(runsOn(ci.jobs[job], step));
+      }
     }
   }
   const judged = Object.fromEntries(

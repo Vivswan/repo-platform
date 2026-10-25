@@ -3,13 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { type BoundedSpawnResult, boundedSpawnSync } from "./bounded_spawn";
 import { harnessBound } from "./harness_bound";
 
-// Fixtures run through process.execPath, never a PATH lookup: several
-// arms pass hermetic envs with no PATH at all.
+// Fixtures run through process.execPath, never a PATH lookup: several arms pass hermetic envs with no PATH at all.
 const bunExe = process.execPath;
 
-// Every hanging fixture self-exits after BACKSTOP_MS (10 s, stretched like the
-// bounds it outlasts): if the wrapper's bound is ever broken, the arm fails its
-// assertion then instead of wedging the run - the forced-red direction stays bounded too.
+// Every hanging fixture self-exits after this (stretched like the bounds it outlasts), so a broken wrapper bound fails the arm's assertion instead of wedging the run.
 const BACKSTOP_MS = harnessBound(10_000);
 
 describe("boundedSpawnSync", () => {
@@ -78,8 +75,11 @@ describe("boundedSpawnSync", () => {
           boundedSpawnSync([bunExe, "-e", `await Bun.sleep(${BACKSTOP_MS})`], { timeoutMs: 250 }),
         ).toThrow(/exceeded the 250ms harness bound \(stretched to 2000ms for load\)/);
       } finally {
-        if (previous === undefined) delete process.env.TEST_TIME_SCALE;
-        else process.env.TEST_TIME_SCALE = previous;
+        if (previous === undefined) {
+          delete process.env.TEST_TIME_SCALE;
+        } else {
+          process.env.TEST_TIME_SCALE = previous;
+        }
       }
     },
     harnessBound(5_000),

@@ -49,11 +49,15 @@ test.each([
       step.if === undefined || evaluateCondition(step.if, night);
     const gaps: string[] = [];
     for (const [at, later] of steps.entries()) {
-      if (hasStatusFunction(later.if ?? "")) continue;
+      if (hasStatusFunction(later.if ?? "")) {
+        continue;
+      }
       const earlier = steps
         .slice(0, at)
         .filter((step) => nights.some((night) => runs(step, night) && runs(later, night)));
-      for (const step of earlier) gaps.push(`'${later.name}' after '${step.name}'`);
+      for (const step of earlier) {
+        gaps.push(`'${later.name}' after '${step.name}'`);
+      }
     }
     expect({ steps: steps.length > 1, gaps }).toEqual({ steps: true, gaps: [] });
   },

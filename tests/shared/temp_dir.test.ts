@@ -1,3 +1,6 @@
+// tempDirs probed through child bun processes. Every probe and every child's TMPDIR sits under one root this file
+// removes ITSELF: a stubbed-out helper removal leaks its fixture, and that leak must not reach the real temp directory.
+
 import { afterAll, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -14,9 +17,6 @@ import { tempDirs } from "./temp_dir";
 
 const helper = join(import.meta.dir, "temp_dir.ts");
 const temp = tempDirs();
-// Every probe and every child's TMPDIR sits under this root, which the
-// file removes ITSELF: a stubbed-out helper removal leaks its fixture,
-// and that leak must not reach the real temp directory.
 const root = temp.dir("temp-dir-test-");
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -121,7 +121,9 @@ describe("tempDirs", () => {
       const r = runProbe(body, flags, env);
       expectOutcome(r, { exitCode, fixtureSurvives: false });
       expect(r.inner !== undefined).toBe(inner === true);
-      if (r.inner !== undefined) expect(existsSync(r.inner)).toBe(false);
+      if (r.inner !== undefined) {
+        expect(existsSync(r.inner)).toBe(false);
+      }
     },
   );
 

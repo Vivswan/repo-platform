@@ -27,35 +27,52 @@ import {
 function walk(rel: string): string[] {
   const found: string[] = [];
   for (const name of readdirSync(join(REPO_ROOT, rel)).sort()) {
-    if (name === "node_modules") continue;
+    if (name === "node_modules") {
+      continue;
+    }
     const child = `${rel}/${name}`;
     const stat = lstatSync(join(REPO_ROOT, child));
-    if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) found.push(...walk(child));
-    else found.push(child);
+    if (stat.isSymbolicLink()) {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      found.push(...walk(child));
+    } else {
+      found.push(child);
+    }
   }
   return found;
 }
 
-const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
+function read(rel: string): string {
+  return readFileSync(join(REPO_ROOT, rel), "utf-8");
+}
+
+function exists(rel: string): boolean {
+  return existsSync(join(REPO_ROOT, rel));
+}
+
+// The sites judged: the sources the fleet executes (the writer's tree, this repository's workflows, the action
+// manifests), for self pins also the docs and skills, whose examples spell the shape a reader copies, and the callable
+// workflow names a stem may resolve to.
 
 const MANIFESTS = actionManifestPaths(join(REPO_ROOT, "actions"));
-/** The sources the fleet executes: the writer's tree, this repository's workflows, and the action manifests. */
 const PIN_SITES = [...walk("files"), ...walk(".github/workflows"), ...MANIFESTS];
-/** Plus the docs and skills, whose examples spell the shape a reader copies. */
 const SELF_PIN_SITES = [...PIN_SITES, ...walk("docs"), ...walk("skills")];
-
 const callable = callableWorkflowNames(
   walk(".github/workflows").map((path) => ({ path, text: read(path) })),
 );
-const exists = (rel: string) => existsSync(join(REPO_ROOT, rel));
 
 /** True when pinact settles the line itself: a full version it verifies, or no version comment at all (its code 005). False is
  *  the gap: a comment pinact reads as a version but leaves unverified, sha included. The branches follow pinact's classifier order. */
 export function pinactJudgesComment(comment: string): boolean {
   const version = comment.replace(/^tag=/, "");
-  if (!/^v?\d/.test(version)) return true;
-  if (/\b[0-9a-f]{40}\b/.test(version)) return false;
+  if (!/^v?\d/.test(version)) {
+    return true;
+  }
+  if (/\b[0-9a-f]{40}\b/.test(version)) {
+    return false;
+  }
   return /^v?\d+\.\d+\.\d+\S*$/.test(version);
 }
 
@@ -71,7 +88,9 @@ export function splitPins(pins: Pin[]): string[] {
   const byAction = new Map<string, Map<string, string[]>>();
   for (const pin of pins) {
     const action = pin.action.toLowerCase();
-    if (action === self) continue;
+    if (action === self) {
+      continue;
+    }
     const refs = byAction.get(action) ?? new Map<string, string[]>();
     refs.set(pin.ref, [...(refs.get(pin.ref) ?? []), pin.file]);
     byAction.set(action, refs);
@@ -91,8 +110,12 @@ export function callableWorkflowNames(files: { path: string; text: string }[]): 
     .filter((f) => {
       const doc: unknown = parseYaml(f.text);
       const on = doc && typeof doc === "object" ? (doc as Record<string, unknown>).on : undefined;
-      if (typeof on === "string") return on === "workflow_call";
-      if (Array.isArray(on)) return on.includes("workflow_call");
+      if (typeof on === "string") {
+        return on === "workflow_call";
+      }
+      if (Array.isArray(on)) {
+        return on.includes("workflow_call");
+      }
       return on !== null && typeof on === "object" && "workflow_call" in on;
     })
     .map((f) => f.path.slice(dir.length))
@@ -107,8 +130,9 @@ export function resolves(
   callable: readonly string[],
 ): boolean {
   const workflows = ".github/workflows/";
-  if (path.startsWith(workflows))
+  if (path.startsWith(workflows)) {
     return callable.includes(path.slice(workflows.length)) && exists(path);
+  }
   return [`${path}/action.yml`, `${path}/action.yaml`].some(exists);
 }
 

@@ -66,7 +66,9 @@ describe("main", () => {
       ["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@x.test", ...args],
       { env: fixtureGitEnv() },
     );
-    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
+    if (proc.exitCode !== 0) {
+      throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
+    }
     return proc.stdout.trimEnd();
   }
 
