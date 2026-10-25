@@ -8,9 +8,7 @@ import { env } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
 
-/** A stalled-network backstop, not a latency budget: the slowest call is the paginated user/repos
- * listing, and two minutes covers several hundred repos. The plan jobs' timeout-minutes are sized
- * from this. */
+/** A stalled-network backstop, not a latency budget: two minutes covers the paginated user/repos listing of several hundred repos, and the plan jobs' timeout-minutes are sized from it. */
 export const NETWORK_TIMEOUT_MS = 120_000;
 
 /** A killed child usually dies silently, so an expiry appends its own stderr line. The line names
@@ -23,8 +21,7 @@ export function captureNetwork(command: string[], timeoutMs = NETWORK_TIMEOUT_MS
   return result;
 }
 
-// user/repos reports the USER's permissions, not the fine-grained token's grant, so this is only a
-// pre-filter: push_probe.ts asks per repo.
+// user/repos reports the USER's permissions, not the fine-grained token's grant, so this is only a pre-filter: push_probe.ts asks per repo.
 const userReposPages = z.array(
   z.array(
     z.object({
@@ -70,7 +67,9 @@ export interface DiscoveredRepo {
 export const PRIVATE_DISPLAY = "a private repository";
 
 export function selectedLine(rows: DiscoveredRepo[], prefix: string, none: string): string {
-  if (rows.length === 0) return none;
+  if (rows.length === 0) {
+    return none;
+  }
   const publicSlugs = rows.filter((row) => !row.private).map((row) => row.repo);
   const hidden = rows.length - publicSlugs.length;
   const parts = [
@@ -87,8 +86,7 @@ export function discoverOwnerRepos(owner: string, label: string): DiscoveredRepo
     .map((repo) => ({ repo: repo.full_name, private: repo.private !== false }));
 }
 
-// One malformed entry rejects the whole list: a silently dropped row would skip its repo's
-// visibility decision.
+// One malformed entry rejects the whole list: a silently dropped row would skip its repo's visibility decision.
 const discoveredListSchema = z.array(z.looseObject({ repo: z.string(), private: z.boolean() }));
 
 /** Null, not a throw: the caller then fails with a fixed message and never echoes the payload,
@@ -98,8 +96,7 @@ export function parseDiscovered(data: unknown): DiscoveredRepo[] | null {
   return result.success ? result.data : null;
 }
 
-// nullish: schedule and release events carry no `inputs` key, and an inputs-less API dispatch
-// writes `"inputs": null`.
+// nullish: schedule and release events carry no `inputs` key, and an inputs-less API dispatch writes `"inputs": null`.
 const dispatchEvent = z.object({
   inputs: z
     .object({
@@ -113,7 +110,9 @@ const dispatchEvent = z.object({
 /** Read from the event payload on disk, never step env: the values may name a private repository
  * and its work, and the runner prints step env into the public log group. */
 function dispatchInputs(): { repo: string; branch: string; addModules: string } {
-  if (env("GITHUB_EVENT_PATH") === "") return { repo: "", branch: "", addModules: "" };
+  if (env("GITHUB_EVENT_PATH") === "") {
+    return { repo: "", branch: "", addModules: "" };
+  }
   const event = parseJsonWith(
     dispatchEvent,
     readFileSync(env("GITHUB_EVENT_PATH"), "utf-8"),
@@ -168,7 +167,9 @@ function replaceAllFoldingCase(text: string, needle: string, replacement: string
  * slugs instead of hiding anything. Substring on purpose: garbling an innocent embedding is
  * cosmetic, printing a private name is not. */
 export function scrubSlug(detail: string, slug: string, display: string): string {
-  if (display === slug) return detail;
+  if (display === slug) {
+    return detail;
+  }
   const scrubbed = replaceAllFoldingCase(detail, slug, display);
   return replaceAllFoldingCase(scrubbed, slug.split("/").pop() ?? slug, display);
 }

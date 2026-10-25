@@ -14,7 +14,9 @@ export const PAT_RECIPE_URL = `https://github.com/settings/personal-access-token
 
 export function requireFleetToken(env: NodeJS.ProcessEnv = process.env): string {
   const token = env.PAT ?? "";
-  if (token !== "") return token;
+  if (token !== "") {
+    return token;
+  }
   return fail(
     `the fleet token is not set: ${FLEET_SECRET} read as empty, and only a secret of this repository's ${FLEET_ENVIRONMENT} environment reaches this job. ` +
       `Create a fine-grained PAT with the permissions pre-selected at ${PAT_RECIPE_URL}, grant it the managed repositories, ` +
@@ -22,4 +24,6 @@ export function requireFleetToken(env: NodeJS.ProcessEnv = process.env): string 
   );
 }
 
-if (import.meta.main) requireFleetToken();
+if (import.meta.main) {
+  requireFleetToken();
+}

@@ -19,18 +19,26 @@ const UNKNOWN_LAYOUT = `${REGISTRATION_PATH}: the modules list could not be exte
  *  before its `]`. */
 function spliced(text: string, seq: YAMLSeq, names: readonly string[]): string | null {
   if (seq.flow === true) {
-    if (seq.range === null || seq.range === undefined) return null;
+    if (seq.range === null || seq.range === undefined) {
+      return null;
+    }
     const close = seq.range[1] - 1;
-    if (text[close] !== "]") return null;
+    if (text[close] !== "]") {
+      return null;
+    }
     const joint = seq.items.length === 0 ? "" : ", ";
     return `${text.slice(0, close)}${joint}${names.join(", ")}${text.slice(close)}`;
   }
   const last = seq.items.at(-1) as Node | undefined;
-  if (last === undefined || last.range === null || last.range === undefined) return null;
+  if (last === undefined || last.range === null || last.range === undefined) {
+    return null;
+  }
   const [start, valueEnd] = last.range;
   const lineStart = text.lastIndexOf("\n", start - 1) + 1;
   const dash = text.indexOf("-", lineStart);
-  if (dash < 0 || dash > start) return null;
+  if (dash < 0 || dash > start) {
+    return null;
+  }
   const indent = text.slice(lineStart, dash);
   const lineEnd = text.indexOf("\n", valueEnd);
   const at = lineEnd === -1 ? text.length : lineEnd;
@@ -49,12 +57,18 @@ export function withModules(text: string, names: readonly string[]): Extended {
     };
   }
   const read = readModules(doc.toJS());
-  if (read.modules === null) return { error: read.errors.join("\n") };
+  if (read.modules === null) {
+    return { error: read.errors.join("\n") };
+  }
   const added = names.filter((name) => !read.modules?.includes(name));
-  if (added.length === 0) return { text, added };
+  if (added.length === 0) {
+    return { text, added };
+  }
   const seq = doc.get("modules");
   const edited = isSeq(seq) ? spliced(text, seq, added) : null;
-  if (edited === null) return { error: UNKNOWN_LAYOUT };
+  if (edited === null) {
+    return { error: UNKNOWN_LAYOUT };
+  }
   const back = declaredModules(edited);
   if (back === null || back.join("\n") !== [...read.modules, ...added].join("\n")) {
     return { error: UNKNOWN_LAYOUT };
@@ -68,7 +82,9 @@ function main(): number {
   const names = env("ADD_MODULES")
     .split(",")
     .filter((name) => name !== "");
-  if (names.length === 0) return 0;
+  if (names.length === 0) {
+    return 0;
+  }
   const target = env("TARGET_DIR", "target");
   let bytes: Buffer | null;
   try {
@@ -76,9 +92,13 @@ function main(): number {
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
-  if (bytes === null) fail(`${REGISTRATION_PATH}: missing from the target repository`);
+  if (bytes === null) {
+    fail(`${REGISTRATION_PATH}: missing from the target repository`);
+  }
   const extended = withModules(bytes.toString("utf-8"), names);
-  if ("error" in extended) fail(extended.error);
+  if ("error" in extended) {
+    fail(extended.error);
+  }
   if (extended.added.length === 0) {
     console.log(
       "add_modules: every dispatched module is already selected; the registration is unchanged",
@@ -90,4 +110,6 @@ function main(): number {
   return 0;
 }
 
-if (import.meta.main) process.exit(main());
+if (import.meta.main) {
+  process.exit(main());
+}

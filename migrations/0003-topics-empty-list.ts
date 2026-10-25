@@ -26,7 +26,9 @@ type Overlay = { repository?: { topics?: unknown } | null };
  *  which the parser reports only when the value is read. An empty or comments-only file reads as `{}`. */
 function readOverlay(text: string): { doc: Document; js: Overlay } | null {
   const doc = parseDocument(text);
-  if (doc.errors.length > 0) return null;
+  if (doc.errors.length > 0) {
+    return null;
+  }
   try {
     return { doc, js: (doc.toJS() ?? {}) as Overlay };
   } catch {
@@ -39,10 +41,14 @@ function readOverlay(text: string): { doc: Document; js: Overlay } | null {
  *  with `[]` in its place, or the line is left for a human. */
 export function judgeOverlay(text: string): Judgment {
   const read = readOverlay(text);
-  if (read === null) return { verdict: "absent" };
+  if (read === null) {
+    return { verdict: "absent" };
+  }
   const { doc, js: before } = read;
   const value = before.repository?.topics;
-  if (value === undefined) return { verdict: "absent" };
+  if (value === undefined) {
+    return { verdict: "absent" };
+  }
   if (!(value === null || (typeof value === "string" && value.trim() === ""))) {
     return { verdict: "kept" };
   }
@@ -56,8 +62,8 @@ export function judgeOverlay(text: string): Judgment {
   }
   const node = isNode(pair.value) ? pair.value : null;
   // A valueless key parses to an empty node right after its colon, so the list gets the space the colon lacks.
-  const valueStart = node?.range != null ? node.range[0] : keyRange[1] + 1;
-  const valueEnd = node?.range != null ? node.range[1] : keyRange[1] + 1;
+  const valueStart = node?.range == null ? keyRange[1] + 1 : node.range[0];
+  const valueEnd = node?.range == null ? keyRange[1] + 1 : node.range[1];
   // A block scalar's range runs to the end of its lines, comment and newline included, and the read-back below
   // compares values alone, so the edit is made only where the value sits on the key's line.
   if (/[\n#]/.test(text.slice(valueStart, valueEnd))) {
@@ -100,16 +106,22 @@ function main(checkout: string | undefined): number {
     }
   }
   const path = join(checkout, OVERLAY);
-  if (standing(path)?.isFile() !== true) return 0;
+  if (standing(path)?.isFile() !== true) {
+    return 0;
+  }
   const judged = judgeOverlay(readFileSync(path, "utf-8"));
   if (judged.verdict === "refused") {
     console.error(`${RUNG}: ${OVERLAY}: ${judged.reason}; settle the topics line by hand`);
     return 1;
   }
-  if (judged.verdict !== "respelled") return 0;
+  if (judged.verdict !== "respelled") {
+    return 0;
+  }
   writeFileSync(path, judged.text);
   console.log(OVERLAY);
   return 0;
 }
 
-if (import.meta.main) process.exit(main(process.argv[2]));
+if (import.meta.main) {
+  process.exit(main(process.argv[2]));
+}

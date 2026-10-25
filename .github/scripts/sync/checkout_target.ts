@@ -9,10 +9,11 @@ import { env, requireEnv } from "../shared/gha.ts";
 import { capture, redactText } from "../shared/proc.ts";
 import { tokenUrl } from "../shared/token_url.ts";
 
+// The step's inputs; a dispatched branch is the clone's branch, which resolve_row.ts already proved exists.
+
 const target = requireEnv("TARGET");
 const targetDir = env("TARGET_DIR", "target");
 const logFile = join(requireEnv("RUNNER_TEMP"), "checkout.log");
-/** A dispatched branch is the clone's branch; resolve_row.ts already proved it exists. */
 const branch = readDispatchBranch();
 
 function logged(argv: string[], label: string): number {
@@ -39,7 +40,9 @@ const cloned = logged(
   ],
   "git clone",
 );
-if (cloned !== 0) process.exit(cloned);
+if (cloned !== 0) {
+  process.exit(cloned);
+}
 process.exit(
   logged(
     ["git", "-C", targetDir, "remote", "set-url", "origin", `https://github.com/${target}.git`],

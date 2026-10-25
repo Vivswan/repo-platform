@@ -32,6 +32,7 @@ const COMMENT_MARKER = `<!-- ${PLATFORM_NAME} sync-branch -->`;
 /** The login the repository token comments under. */
 const COMMENT_LOGIN = "github-actions[bot]";
 
+/** A repository-token push cannot carry a change under it; such a sync is reported in the comment instead. */
 const WORKFLOWS_DIR = ".github/workflows/";
 
 type Outcome =
@@ -45,6 +46,7 @@ type Outcome =
 /** GitHub holds the pull_request run a repository-token push creates for approval; the auto-format starter's notice says the same. */
 const APPROVAL_LINE =
   "GitHub holds the new head's pull_request run for approval, so its checks stay unreported until you approve the run from the merge box or push a commit of your own.";
+
 /** The unchanged tip may be the operator's branch dispatch's commit, whose fleet-token push created an ordinary run. */
 const RELABEL_APPROVAL_LINE =
   "If a label run pushed this tip, GitHub holds its pull_request run for approval; approve it from the merge box or push a commit of your own.";
@@ -98,21 +100,35 @@ function commentBody(
 }
 
 class BranchDelivery {
+  /** The run's scratch directory, holding the writer's summary and log. */
   readonly runnerTemp = requireEnv("RUNNER_TEMP");
+
+  /** The repository the pull request and its branch belong to. */
   readonly repository = requireEnv("GITHUB_REPOSITORY");
+
+  /** The pull request whose branch is synced, and which gets the comment. */
   readonly prNumber = requireEnv("PR_NUMBER");
+
+  /** The pull request's head branch, the one synced onto. */
   readonly branch = requireEnv("BRANCH");
+
+  /** This run's page, linked from the comment. */
   readonly runUrl = requireEnv("RUN_URL");
+
+  /** The platform commit the build checkout is at. */
   readonly build = mustCapture(["git", "-C", "build", "rev-parse", "HEAD"]);
 
+  /** A git argv against the target clone. */
   git(...args: string[]): string[] {
     return ["git", "-C", "target", ...args];
   }
 
+  /** A gh api argv; under the repository token, so comments and label removals appear as the bot login. */
   api(...args: string[]): string[] {
     return ["gh", "api", ...args];
   }
 
+  /** One bounded call; its stderr is echoed to the job log once it returns. */
   run(
     argv: string[],
     env?: Record<string, string>,
@@ -121,13 +137,18 @@ class BranchDelivery {
       timeoutMs: DELIVERY_CALL_BOUND_MS,
       ...(env === undefined ? {} : { env }),
     });
-    if (result.stderr !== "") console.error(result.stderr.replace(/\n$/, ""));
+    if (result.stderr !== "") {
+      console.error(result.stderr.replace(/\n$/, ""));
+    }
     return { ok: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr };
   }
 
+  /** A nonzero exit fails the job with `reason`; the stdout otherwise. */
   must(argv: string[], reason: string): string {
     const call = this.run(argv);
-    if (!call.ok) fail(reason);
+    if (!call.ok) {
+      fail(reason);
+    }
     return call.stdout;
   }
 
@@ -141,12 +162,12 @@ class BranchDelivery {
         `repos/${this.repository}/issues/${this.prNumber}/labels/${encodeURIComponent(SYNC_LABEL)}`,
       ),
     );
-    if (!removed.ok && !/HTTP 404/.test(removed.stderr))
+    if (!removed.ok && !/HTTP 404/.test(removed.stderr)) {
       fail(`removing the ${SYNC_LABEL} label failed`);
+    }
   }
 
-  /** One comment per pull request: the marker under this bot's login finds the earlier one, which is replaced (a human
-   *  can start a comment with the marker; the login is the token's own). */
+  /** One comment per pull request: the marker under this bot's login finds the earlier one, which is replaced (a human can start a comment with the marker; the login is the token's own). */
   comment(outcome: Outcome): void {
     const bodyFile = join(this.runnerTemp, "sync-branch-comment.md");
     writeFileSync(
@@ -163,7 +184,9 @@ class BranchDelivery {
       ),
       { MARKER: COMMENT_MARKER, LOGIN: COMMENT_LOGIN },
     );
-    if (!found.ok) fail("listing the pull request's comments failed");
+    if (!found.ok) {
+      fail("listing the pull request's comments failed");
+    }
     const id = found.stdout.trim().split("\n")[0] ?? "";
     this.must(
       id === ""
@@ -187,6 +210,7 @@ class BranchDelivery {
     );
   }
 
+  /** The branch sync end to end; every outcome ends as the one comment on the pull request. */
   deliver(): void {
     this.removeLabel();
     const migrate = requireEnv("MIGRATE_OUTCOME");
@@ -263,4 +287,6 @@ class BranchDelivery {
   }
 }
 
-if (import.meta.main) new BranchDelivery().deliver();
+if (import.meta.main) {
+  new BranchDelivery().deliver();
+}

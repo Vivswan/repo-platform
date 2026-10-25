@@ -20,7 +20,9 @@ export interface GreenWaitOptions {
  *  own timeout. Throws rather than exiting: the CLI wrapper owns the process exit. */
 function boundedMs(name: string, fallback: number): number {
   const raw = env(name, "");
-  if (raw === "") return fallback;
+  if (raw === "") {
+    return fallback;
+  }
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`${name} must be a non-negative number of milliseconds (got '${raw}')`);
@@ -44,10 +46,14 @@ export function waitForGreen(
       options.gh === undefined
         ? allGreenFailure(repository, sha, undefined, { deadlineMs: 0 })
         : allGreenFailure(repository, sha, options.gh, { deadlineMs: 0 });
-    if (reason === null) return null;
+    if (reason === null) {
+      return null;
+    }
     // A final verdict fails now; a pending one (verdictPending lives next
     // to the reason strings it matches) deserves this loop's deadline.
-    if (!verdictPending(reason)) return reason;
+    if (!verdictPending(reason)) {
+      return reason;
+    }
     if (Date.now() - started >= deadlineMs) {
       return `${reason} (and the ${Math.round(deadlineMs / 60_000)}-minute wait for a verdict is over)`;
     }
@@ -81,7 +87,9 @@ function main(): void {
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
-  if (refusal !== null) fail(refusal);
+  if (refusal !== null) {
+    fail(refusal);
+  }
   console.log(`commit ${sha.slice(0, 12)} is green; the settings apply may proceed`);
 }
 
@@ -93,7 +101,9 @@ export function tipRefusal(
   options: GreenWaitOptions = {},
 ): string | null {
   const notGreen = waitForGreen(repository, sha, options);
-  if (notGreen === null) return null;
+  if (notGreen === null) {
+    return null;
+  }
   return (
     `refusing the settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
     "This workflow writes settings fleet-wide from this checkout's layer files, and its " +
@@ -121,7 +131,9 @@ export function calledRefusal(
     );
   }
   const notGreen = allGreenFailure(repository, sha, options.gh, options.wait);
-  if (notGreen === null) return null;
+  if (notGreen === null) {
+    return null;
+  }
   return (
     `refusing the called settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
     "The caller must be needs-ordered behind the all-green job of the same run, so a verdict " +

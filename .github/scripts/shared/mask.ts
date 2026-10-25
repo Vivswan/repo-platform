@@ -2,8 +2,7 @@
 // can reach a public log. The masker matches case-sensitive substrings: the slug covers every URL
 // spelling of itself, and the bare name covers the slug; a name under the floor rides the slug alone.
 
-/** The bare name is masked from four characters: a shorter one appears
- *  inside too many innocent words for a substring masker. */
+/** The bare name is masked from four characters: a shorter one appears inside too many innocent words for a substring masker. */
 export const MIN_MASKED_NAME = 4;
 
 export function maskForms(slug: string): string[] {

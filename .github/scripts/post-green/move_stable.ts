@@ -14,10 +14,9 @@ import { must, mustCapture } from "../shared/proc.ts";
 
 const TAG = `refs/tags/${DELIVERY_REF}`;
 const repository = requireEnv("GITHUB_REPOSITORY");
-
-// Main only: a dispatch aimed at a branch would run that branch's copy of
-// this script with a push-capable token.
 const ref = env("GITHUB_REF");
+
+// Main only: a dispatch aimed at a branch would run that branch's copy of this script with a push-capable token.
 if (ref !== "" && ref !== "refs/heads/main") {
   fail(
     `the stable tag moves from main only, but this run was dispatched on '${ref}'. Re-run the workflow on the main branch.`,
@@ -37,9 +36,10 @@ if (
     `refusing to move the stable tag: ${short} is not a commit on main. The tag names main history only; dispatch with a main commit's sha.`,
   );
 }
-// The green gate at the commit being named: the caller's needs edge already
-// gated the call, and this read is the sole gate on a dispatch.
+
+// The green gate at the commit being named: the caller's needs edge already gated the call, and this read is the sole gate on a dispatch.
 const notGreen = allGreenFailure(repository, sourceSha);
+
 if (notGreen !== null) {
   fail(
     `refusing to move the stable tag: main commit ${short} is not green - ${notGreen}. Get CI to a successful run on that commit, then re-run.`,
@@ -48,6 +48,7 @@ if (notGreen !== null) {
 
 // For an annotated tag the listed value is the tag object, which is what the lease must name.
 const previous = gitRemoteRef("origin", TAG, { timeoutMs: PROBE_TIMEOUT_MS });
+
 let previousCommit = "";
 if (previous !== "") {
   must(["git", "fetch", "--quiet", "origin", `+${TAG}:${TAG}`]);

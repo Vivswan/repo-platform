@@ -38,7 +38,9 @@ function main(): number {
   // No-op handlers replace bun's default disposition, which would end the
   // process ahead of the finally; the build shares the terminal's process
   // group, takes the signal, and returns its exit code the normal way.
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => {});
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.on(signal, () => {});
+  }
   const scratch = mkdtempSync(join(tmpdir(), `${PLATFORM_NAME}-docs-check-`));
   try {
     return passthrough(["bun", join(REPO_ROOT, "actions", "pages-site", "build.ts")], {
@@ -58,4 +60,6 @@ function main(): number {
   }
 }
 
-if (import.meta.main) process.exit(main());
+if (import.meta.main) {
+  process.exit(main());
+}

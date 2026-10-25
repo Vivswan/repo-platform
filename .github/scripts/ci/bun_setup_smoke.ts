@@ -10,26 +10,37 @@ const REPO_ROOT = resolve(import.meta.dir, "../../..");
 /** The previous minor's .0 always exists: every bun minor line starts at .0. */
 export function earlierRelease(version: string): string {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
-  if (match === null) throw new Error(`not a release version: '${version}'`);
+  if (match === null) {
+    throw new Error(`not a release version: '${version}'`);
+  }
   const [major, minor, patch] = match.slice(1).map(Number);
-  if (patch > 0) return `${major}.${minor}.${patch - 1}`;
-  if (minor > 0) return `${major}.${minor - 1}.0`;
+  if (patch > 0) {
+    return `${major}.${minor}.${patch - 1}`;
+  }
+  if (minor > 0) {
+    return `${major}.${minor - 1}.0`;
+  }
   throw new Error(`no release before ${version}`);
 }
 
+/** The action's outputs from one call; `version` is what `path` printed when it was resolved. */
 export interface CallOutputs {
   path: string;
   installed: string;
-  /** The action's `version` output: what `path` printed when it was resolved. */
   version: string;
 }
 
 export interface SmokeReading {
   /** The manifests' pin, first on PATH before the first call. */
   current: string;
+
   /** An earlier release, so not the bun first on PATH before the second call. */
   previous: string;
+
+  /** The call made with `current` first on PATH. */
   first: CallOutputs;
+
+  /** The call made with `previous` first on PATH. */
   second: CallOutputs;
 }
 
@@ -38,10 +49,12 @@ export function smokeProblems(reading: SmokeReading): string[] {
   const problems: string[] = [];
   const expect = (call: "first" | "second", pin: string, installed: string) => {
     const outputs = reading[call];
-    if (!outputs.path.startsWith("/"))
+    if (!outputs.path.startsWith("/")) {
       problems.push(`${call} path is not absolute: '${outputs.path}'`);
-    if (outputs.version !== pin)
+    }
+    if (outputs.version !== pin) {
       problems.push(`${call} version is '${outputs.version}', pin is '${pin}'`);
+    }
     if (outputs.installed !== installed) {
       problems.push(`${call} installed is '${outputs.installed}', expected ${installed}`);
     }
@@ -81,13 +94,19 @@ function judge(): number {
   };
   console.log(JSON.stringify(reading, null, 2));
   const problems = smokeProblems(reading);
-  for (const problem of problems) error(`bun-setup smoke: ${problem}`);
+  for (const problem of problems) {
+    error(`bun-setup smoke: ${problem}`);
+  }
   return problems.length === 0 ? 0 : 1;
 }
 
 function main(argv: string[]): number {
-  if (argv.length === 1 && argv[0] === "plant") return plant();
-  if (argv.length === 1 && argv[0] === "judge") return judge();
+  if (argv.length === 1 && argv[0] === "plant") {
+    return plant();
+  }
+  if (argv.length === 1 && argv[0] === "judge") {
+    return judge();
+  }
   console.error("usage: bun_setup_smoke.ts plant|judge");
   return 2;
 }

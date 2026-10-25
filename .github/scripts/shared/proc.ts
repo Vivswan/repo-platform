@@ -5,8 +5,7 @@
 
 import { constants } from "node:os";
 
-/** A bound on hanging, not an operational deadline: above every legitimate run (whole-tree pushes, validators, writer runs)
- * and inside the 10-minute job timeouts, so a wedged call dies named instead of as a runner-level kill. */
+/** A bound on hanging, not an operational deadline: above every legitimate run (whole-tree pushes, validators, writer runs) and inside the 10-minute job timeouts, so a wedged call dies named instead of as a runner-level kill. */
 export const DEFAULT_HANG_BOUND_MS = 300_000;
 
 export interface RunOptions {
@@ -15,13 +14,12 @@ export interface RunOptions {
   timeoutMs?: number;
 }
 
+/** `pid` is kept so cleanup-sensitive callers can verify the child is gone after the run. */
 export interface RunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
   timedOut: boolean;
-  /** The child's pid, recorded so cleanup-sensitive callers can verify
-   * the process is gone after the run. */
   pid: number;
 }
 
@@ -40,17 +38,25 @@ export function redactCommand(command: string[]): string {
 /** bun reports the killing signal by name or, since 1.4.3's types, by number; either becomes the shell's 128 + N. */
 export type SignalCode = string | number | null | undefined;
 
+/** The signal's number, whichever form bun reported it in; undefined for no signal or a name the platform lacks. */
+function signalNumber(signalCode: SignalCode): number | undefined {
+  if (typeof signalCode === "number") {
+    return signalCode;
+  }
+  if (!signalCode) {
+    return undefined;
+  }
+  return (constants.signals as Record<string, number | undefined>)[signalCode];
+}
+
 /** Bash-style exit code: the command's own, or 128+signal when it was
  * killed (a signal-terminated child reports exitCode null). */
 export function exitCodeOf(proc: { exitCode: number | null; signalCode?: SignalCode }): number {
-  if (proc.exitCode !== null) return proc.exitCode;
-  const signal =
-    typeof proc.signalCode === "number"
-      ? proc.signalCode
-      : proc.signalCode
-        ? (constants.signals as Record<string, number | undefined>)[proc.signalCode]
-        : undefined;
-  return signal !== undefined ? 128 + signal : 1;
+  if (proc.exitCode !== null) {
+    return proc.exitCode;
+  }
+  const signal = signalNumber(proc.signalCode);
+  return signal === undefined ? 1 : 128 + signal;
 }
 
 /** 124 (timeout(1)'s convention) over a clean exit 0: a piped run can reach the deadline after the child exited, and an expiry
@@ -108,7 +114,9 @@ export function passthrough(
 
 export function must(command: string[], options: Omit<RunOptions, "timeoutMs"> = {}): void {
   const exitCode = passthrough(command, options);
-  if (exitCode !== 0) process.exit(exitCode);
+  if (exitCode !== 0) {
+    process.exit(exitCode);
+  }
 }
 
 /** The deadline line is printed here because a SIGKILLed child usually dies without printing anything. */
@@ -126,6 +134,8 @@ export function mustCapture(command: string[], options: RunOptions = {}): string
     console.error(`command timed out after ${timeout}ms: ${redactCommand(command)}`);
     process.exit(timeoutExitCode(proc));
   }
-  if (proc.exitCode !== 0) process.exit(exitCodeOf(proc));
+  if (proc.exitCode !== 0) {
+    process.exit(exitCodeOf(proc));
+  }
   return proc.stdout.toString().replace(/\n+$/, "");
 }

@@ -31,7 +31,9 @@ export type PinKind = (typeof PIN_KINDS)[number];
 async function api(repository: string, path: string, fetch: Fetch): Promise<unknown> {
   const headers: Record<string, string> = { accept: "application/vnd.github+json" };
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (token) headers.authorization = `Bearer ${token}`;
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
   const url = `${API_HOST}/repos/${repository}/${path}`;
   const body = await fetch(url, headers);
   try {
@@ -51,10 +53,10 @@ export async function headSha(repository: string, fetch: Fetch): Promise<string>
   return sha;
 }
 
+/** An upstream ref's pin and every file files.yml fetches at it, sorted. */
 export interface CommitPin {
   repository: string;
   sha: string;
-  /** Every file files.yml fetches at this pin, sorted. */
   paths: string[];
 }
 
@@ -63,7 +65,9 @@ export function pins(refs: UpstreamRef[]): CommitPin[] {
   for (const { repository, sha, path } of refs) {
     const key = `${repository}@${sha}`;
     const pin = seen.get(key) ?? { repository, sha, paths: [] };
-    if (!pin.paths.includes(path)) pin.paths.push(path);
+    if (!pin.paths.includes(path)) {
+      pin.paths.push(path);
+    }
     seen.set(key, pin);
   }
   return [...seen.values()].map((pin) => ({ ...pin, paths: [...pin.paths].sort() }));
@@ -101,20 +105,19 @@ export function repin(
     .reduce((out, [start, end]) => `${out.slice(0, start)}${to}${out.slice(end)}`, text);
 }
 
+/** `name` is the repository of a commit pin or the module of a release pin. `diffs` maps each fetched path whose body,
+ *  normalized as the writer fetches it, differs between the two commits to its unified diff; `refreshCommitPins`, the
+ *  one constructor, builds a commit bump only from a non-empty map. */
 export type Bump =
   | {
       kind: "commit";
-      /** The repository. */
       name: string;
       from: string;
       to: string;
-      /** Path to its unified diff between the two commits, normalized as the writer fetches it; unchanged paths are
-       *  absent, and `refresh`, the one constructor, builds a bump only from a non-empty map. */
       diffs: Map<string, string>;
     }
   | {
       kind: "release";
-      /** The module. */
       name: string;
       from: string;
       to: string;
@@ -146,7 +149,9 @@ function versionFrom(value: unknown, pattern: RegExp, what: string): string {
     throw new Error(`${what}: expected a string, got ${typeof value}`);
   }
   const match = pattern.exec(value);
-  if (!match) throw new Error(`${what}: '${value}' does not match ${pattern}`);
+  if (!match) {
+    throw new Error(`${what}: '${value}' does not match ${pattern}`);
+  }
   return match[1];
 }
 
@@ -241,7 +246,9 @@ function majorJumps(bumps: Bump[]): string {
 
 function section(bump: Bump): string {
   const head = `## ${bump.name}: \`${shown(bump, bump.from)}\` -> \`${shown(bump, bump.to)}\``;
-  if (bump.kind === "release") return head;
+  if (bump.kind === "release") {
+    return head;
+  }
   const blocks = [...bump.diffs].map(
     ([path, diff]) => `### ${path}\n\n\`\`\`\`diff\n${diff}\n\`\`\`\``,
   );
@@ -261,46 +268,54 @@ export function prBody(kind: PinKind, bumps: Bump[]): string {
   return [...banner, ...bumps.map(section), FOOTER[kind]].join("\n\n");
 }
 
+/** `root` is the checkout holding files.yml and the files/ tree; `host` the raw-content host commit pins are diffed through. */
 export interface Refresh {
   kind: PinKind;
-  /** The checkout holding files.yml and the files/ tree. */
   root: string;
-  /** The raw-content host commit pins are diffed through. */
   host: string;
   fetch: Fetch;
 }
 
-/** Moves every pin of the kind that upstream moved and returns the bumps. Every fetch and every verdict come before any
- *  write: an unreachable upstream or a downgrade aborts before a pin moves, so "nothing moved" (which lets the workflow
- *  close a stale refresh PR) is never a view that could not look. A commit pin moves only when a fetched file's
- *  normalized body moved with it: a HEAD that changes other paths alone leaves the pin. */
-export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bump[]> {
-  const configPath = join(root, "files.yml");
-  const text = readFileSync(configPath, "utf-8");
-  const config = parseFilesConfig(text);
-  if (kind === "commit") {
-    const bumps: Bump[] = [];
-    let rewritten = text;
-    for (const pin of pins(upstreamRefs(config.files))) {
-      const head = await headSha(pin.repository, fetch);
-      if (head === pin.sha) {
-        console.log(`${pin.repository}: ${pin.sha} is HEAD`);
-        continue;
-      }
-      const diffs = await commitDiffs(pin, head, host, fetch);
-      if (diffs.size === 0) {
-        console.log(
-          `${pin.repository}: ${pin.sha} -> ${head} changes no fetched file; the pin stays`,
-        );
-        continue;
-      }
-      console.log(`${pin.repository}: ${pin.sha} -> ${head}`);
-      bumps.push({ kind: "commit", name: pin.repository, from: pin.sha, to: head, diffs });
-      rewritten = repin(rewritten, pin, head);
+/** files.yml as read: the parsed config beside the text the commit pins are rewritten in. */
+interface FilesSource {
+  path: string;
+  text: string;
+  config: FilesConfig;
+}
+
+/** A commit pin moves only when a fetched file's normalized body moved with it: a HEAD that changes other paths alone leaves the pin. */
+async function refreshCommitPins(files: FilesSource, host: string, fetch: Fetch): Promise<Bump[]> {
+  const bumps: Bump[] = [];
+  let rewritten = files.text;
+  for (const pin of pins(upstreamRefs(files.config.files))) {
+    const head = await headSha(pin.repository, fetch);
+    if (head === pin.sha) {
+      console.log(`${pin.repository}: ${pin.sha} is HEAD`);
+      continue;
     }
-    if (bumps.length > 0) writeFileSync(configPath, rewritten);
-    return bumps;
+    const diffs = await commitDiffs(pin, head, host, fetch);
+    if (diffs.size === 0) {
+      console.log(
+        `${pin.repository}: ${pin.sha} -> ${head} changes no fetched file; the pin stays`,
+      );
+      continue;
+    }
+    console.log(`${pin.repository}: ${pin.sha} -> ${head}`);
+    bumps.push({ kind: "commit", name: pin.repository, from: pin.sha, to: head, diffs });
+    rewritten = repin(rewritten, pin, head);
   }
+  if (bumps.length > 0) {
+    writeFileSync(files.path, rewritten);
+  }
+  return bumps;
+}
+
+/** The bun pin also moves every package's `@types/bun`, so the types never trail the runtime. */
+async function refreshReleasePins(
+  config: FilesConfig,
+  root: string,
+  fetch: Fetch,
+): Promise<Bump[]> {
   const moved: (ReleasePin & { latest: string })[] = [];
   for (const pin of releasePins(config, root)) {
     const latest = await latestRelease(pin, fetch);
@@ -313,7 +328,9 @@ export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bum
   }
   for (const pin of moved) {
     writeFileSync(join(root, pin.file), `${pin.latest}\n`);
-    if (pin.file !== BUN_PIN_FILE) continue;
+    if (pin.file !== BUN_PIN_FILE) {
+      continue;
+    }
     for (const dir of typesBunDirs(root)) {
       must(["bun", "add", "--dev", "--exact", `@types/bun@${pin.latest}`], {
         cwd: join(root, dir),
@@ -328,6 +345,19 @@ export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bum
   }));
 }
 
+/** Moves every pin of the kind that upstream moved and returns the bumps. Every fetch and every verdict come before any
+ *  write: an unreachable upstream or a downgrade aborts before a pin moves, so "nothing moved" (which lets the workflow
+ *  close a stale refresh PR) is never a view that could not look. */
+export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bump[]> {
+  const path = join(root, "files.yml");
+  const text = readFileSync(path, "utf-8");
+  const config = parseFilesConfig(text);
+  if (kind === "commit") {
+    return refreshCommitPins({ path, text, config }, host, fetch);
+  }
+  return refreshReleasePins(config, root, fetch);
+}
+
 function isPinKind(value: string | undefined): value is PinKind {
   return (PIN_KINDS as readonly string[]).includes(value ?? "");
 }
@@ -339,7 +369,9 @@ async function main(argv: string[]): Promise<number> {
     return 2;
   }
   const bumps = await refresh({ kind, root: REPO_ROOT, host: RAW_HOST, fetch: fetchText });
-  if (bumps.length === 0) console.log(`every ${kind} pin is current`);
+  if (bumps.length === 0) {
+    console.log(`every ${kind} pin is current`);
+  }
   if (process.env.GITHUB_OUTPUT) {
     setOutput("bumps", proseBumps(bumps));
     setOutput("body", prBody(kind, bumps));

@@ -10,8 +10,9 @@ export const MAIN_REF = "refs/heads/main";
  *  "superseded" it would stand the newest run down. */
 export function remoteMainTip(options: RunOptions = {}): string {
   const tip = gitRemoteRef("origin", MAIN_REF, options);
-  if (tip === "")
+  if (tip === "") {
     throw new Error(`origin holds no ${MAIN_REF}; refusing to guess which run is newest`);
+  }
   return tip;
 }
 

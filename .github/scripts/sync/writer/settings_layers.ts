@@ -67,7 +67,9 @@ export function namedModules(config: LayerSources): Module[] {
  *  reads. An empty document is an empty layer. */
 export function readLayer(text: string, where: string): Layer {
   const parsed = parseSettingsDoc(text);
-  if (parsed.isErr()) throw new Error(`${where}: ${parsed.error.reason.split("\n")[0]}`);
+  if (parsed.isErr()) {
+    throw new Error(`${where}: ${parsed.error.reason.split("\n")[0]}`);
+  }
   return { name: where, doc: parsed.value };
 }
 
@@ -84,15 +86,17 @@ export function loadLayer(path: string): Layer {
 export function readFleetLayer(text: string, where: string): Layer {
   const layer = readLayer(text, where);
   const judged = foldSettings([layer], where);
-  if ("refused" in judged) throw new Error(judged.refused);
+  if ("refused" in judged) {
+    throw new Error(judged.refused);
+  }
   return layer;
 }
 
-/** The library's own pairing of label entries, the one its union replaces
- *  by: a label claims its name and, renaming, its new name too, folded as
- *  GitHub folds them. Read once so a library bump that drops it fails here;
- *  actions/plan/reserved_labels.ts reads the same claims without the
- *  library, and its test pins the two readings to each other. */
+// The library's own pairing of label entries, the one its union replaces by: a label claims its name and, renaming, its
+// new name too, folded as GitHub folds them. actions/plan/reserved_labels.ts reads the same claims without the library,
+// and its test pins the two readings to each other.
+
+/** Read once, so a library bump that drops the pairing fails here. */
 const LABEL_LAYERING: NonNullable<SectionModule["layering"]> = (() => {
   const layering = sectionModule("labels").layering;
   if (layering === undefined) {
@@ -100,6 +104,7 @@ const LABEL_LAYERING: NonNullable<SectionModule["layering"]> = (() => {
   }
   return layering;
 })();
+
 export function labelClaims(entry: Record<string, unknown>): readonly string[] {
   return LABEL_LAYERING.keys(entry) ?? [];
 }
@@ -108,14 +113,17 @@ export function labelClaims(entry: Record<string, unknown>): readonly string[] {
  *  plain list as the fleet writes them or the `{_undeclared, entries}`
  *  wrapper the fold leaves; none for an absent or opted-out section. */
 export function sectionEntries(doc: unknown, section: string): Record<string, unknown>[] {
-  if (!isMapping(doc)) return [];
+  if (!isMapping(doc)) {
+    return [];
+  }
   const declared = doc[section];
-  const entries = Array.isArray(declared)
-    ? declared
-    : isMapping(declared) && Array.isArray(declared.entries)
-      ? declared.entries
-      : [];
-  return entries.filter(isMapping);
+  if (Array.isArray(declared)) {
+    return declared.filter(isMapping);
+  }
+  if (isMapping(declared) && Array.isArray(declared.entries)) {
+    return declared.entries.filter(isMapping);
+  }
+  return [];
 }
 
 /** Every layer folded low to high, the library's own `mode: render`
@@ -129,12 +137,14 @@ export function foldSettings(
   where: string,
 ): { settings: SettingsDoc; yaml: string } | { refused: string } {
   const merged = mergeSettings(layers, { source: where, layering: "deep", io: silentIo() });
-  if (merged.isErr()) return { refused: describeProblem(merged.error) };
+  if (merged.isErr()) {
+    return { refused: describeProblem(merged.error) };
+  }
   return { settings: merged.value.settings, yaml: merged.value.yaml };
 }
 
+/** `layers` is by tree-relative path, in declaration order. */
 export interface ReadLayers {
-  /** By tree-relative path, in declaration order. */
   layers: Map<string, Layer>;
   problems: string[];
 }
@@ -164,7 +174,9 @@ export function readLayers(config: LayerSources, tree: string): ReadLayers {
 
 export function loadLayers(config: LayerSources, tree: string): Map<string, Layer> {
   const { layers, problems } = readLayers(config, tree);
-  if (problems.length > 0) throw new Error(problems.join("\n"));
+  if (problems.length > 0) {
+    throw new Error(problems.join("\n"));
+  }
   return layers;
 }
 

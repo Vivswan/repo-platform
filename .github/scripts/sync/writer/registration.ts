@@ -6,9 +6,13 @@ import { existingFile } from "./target_files.ts";
 /** The grammar names the file in every message, so none is prefixed here. A module name files.yml does not know is judged there, not here. */
 export function readRegistration(target: string): Registration {
   const bytes = existingFile(target, REGISTRATION_PATH);
-  if (bytes === null) throw new Error(`${REGISTRATION_PATH}: missing from the target repository`);
+  if (bytes === null) {
+    throw new Error(`${REGISTRATION_PATH}: missing from the target repository`);
+  }
   const read = parseRegistration(bytes.toString("utf-8"));
-  if ("errors" in read) throw new Error(read.errors.join("\n"));
+  if ("errors" in read) {
+    throw new Error(read.errors.join("\n"));
+  }
   return read.registration;
 }
 
@@ -39,7 +43,9 @@ export interface RepositorySlug {
 
 export function parseRepositorySlug(slug: string): RepositorySlug {
   const match = /^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)$/.exec(slug);
-  if (match === null) throw new Error(`repository must be owner/name, got '${slug}'`);
+  if (match === null) {
+    throw new Error(`repository must be owner/name, got '${slug}'`);
+  }
   return { owner: match[1], name: match[2] };
 }
 
@@ -73,7 +79,9 @@ export function placeholderValues(
     site_label: labels.site ?? defaults.site_label,
   };
   for (const [name, value] of Object.entries(optional)) {
-    if (value !== undefined) values[name as PlaceholderName] = value;
+    if (value !== undefined) {
+      values[name as PlaceholderName] = value;
+    }
   }
   return values;
 }

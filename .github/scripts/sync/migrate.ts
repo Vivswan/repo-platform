@@ -36,11 +36,15 @@ function main(argv: string[]): number {
   const written = new Set<string>();
   for (const rung of rungsOf(dir)) {
     for (const path of mustCapture(["bun", rung, resolve(checkout)]).split("\n")) {
-      if (path !== "") written.add(path);
+      if (path !== "") {
+        written.add(path);
+      }
     }
   }
   writeFileSync(out, [...written].map((path) => `${path}\0`).join(""));
   return 0;
 }
 
-if (import.meta.main) process.exit(main(process.argv.slice(2)));
+if (import.meta.main) {
+  process.exit(main(process.argv.slice(2)));
+}

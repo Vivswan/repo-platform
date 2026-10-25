@@ -1,7 +1,7 @@
 import { cleanManagedRegion } from "../../../../actions/shared/grammar.ts";
 import { sha256 } from "../../../../actions/shared/values.ts";
-import { mirrorKind, type Records, readRecord } from "./manifest.ts";
-import { probe, removeFile, writeFile } from "./target_files.ts";
+import { type ManifestRecord, mirrorKind, type Records, readRecord } from "./manifest.ts";
+import { type Found, probe, removeFile, writeFile } from "./target_files.ts";
 
 export type RetireOutcome = "deleted" | "region removed" | "held" | "released";
 
@@ -22,10 +22,13 @@ export type Judgement =
   | { verdict: "handover"; kept: Buffer }
   | { verdict: "foreign"; reason: string };
 
+/** A foreign verdict; the reason reaches the report row. */
 const foreign = (reason: string): Judgement => ({ verdict: "foreign", reason });
 
 /** Lines with their terminators, so joining them gives the text back. */
 const lines = (text: string) => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+
+/** A line of whitespace alone, the kind the seam merges. */
 const blank = (line: string) => line.trim() === "";
 
 /** The region usually opened the file, so blank lines that would lead a headless file go; every other byte is the repository's own and stays.
@@ -36,54 +39,85 @@ export function joinHalves(above: string, below: string): string {
   const tail = lines(below);
   const contentEnd = head.findLastIndex((line) => !blank(line)) + 1;
   const contentStart = tail.findIndex((line) => !blank(line));
-  if (contentStart === -1) return head.slice(0, contentEnd).join("");
+  if (contentStart === -1) {
+    return head.slice(0, contentEnd).join("");
+  }
   const seam = [...head.slice(contentEnd), ...tail.slice(0, contentStart)];
   const gap = contentEnd > 0 ? seam.slice(0, 1) : [];
   return [...head.slice(0, contentEnd), ...gap, ...tail.slice(contentStart)].join("");
 }
 
+/** A recorded symbolic link is judged by its target string, never read through. */
+function judgeLink(found: Exclude<Found, { kind: "absent" }>, hash: string): Judgement {
+  if (found.kind !== "link") {
+    return foreign("a regular file sits where a link is recorded");
+  }
+  if (sha256(found.target) !== hash) {
+    return foreign("the path is a symbolic link whose target is not the recorded one");
+  }
+  return { verdict: "own" };
+}
+
+/** A split's halves outside its region are the repository's own: a handover keeps them, and the region goes. */
+function judgeSplit(bytes: Buffer, record: Extract<ManifestRecord, { class: "split" }>): Judgement {
+  // latin1 round-trips every byte, so the kept halves are the file's own.
+  const text = bytes.toString("latin1");
+  const slice = cleanManagedRegion(text, { begin: record.begin, end: record.end });
+  if (slice === null) {
+    return foreign("the managed-region markers are missing or malformed");
+  }
+  if (sha256(Buffer.from(slice.region, "latin1")) !== record.hash) {
+    return foreign("the managed region was edited");
+  }
+  if (slice.above === "" && slice.below === "") {
+    return { verdict: "own" };
+  }
+  if (slice.above.trim() === "" && slice.below.trim() === "") {
+    return { verdict: "blank" };
+  }
+  return {
+    verdict: "handover",
+    kept: Buffer.from(joinHalves(slice.above, slice.below), "latin1"),
+  };
+}
+
 export function judge(target: string, path: string, records: Records): Judgement {
   const record = readRecord(records[path]);
-  if (record === null) return { verdict: "unrecorded" };
-  if (record.class === "starter") return foreign("a starter is repo-owned");
-  const linkRecorded = record.class === "mirror" && mirrorKind(record) === "symlink";
+  if (record === null) {
+    return { verdict: "unrecorded" };
+  }
+  if (record.class === "starter") {
+    return foreign("a starter is repo-owned");
+  }
   const found = probe(target, path);
-  if (found.kind === "absent") return { verdict: "own" };
-  if (linkRecorded) {
-    if (found.kind !== "link") return foreign("a regular file sits where a link is recorded");
-    return sha256(found.target) === record.hash
-      ? { verdict: "own" }
-      : foreign("the path is a symbolic link whose target is not the recorded one");
+  if (found.kind === "absent") {
+    return { verdict: "own" };
   }
-  if (found.kind === "link")
+  if (record.class === "mirror" && mirrorKind(record) === "symlink") {
+    return judgeLink(found, record.hash);
+  }
+  if (found.kind === "link") {
     return foreign("a symbolic link sits where a regular file is recorded");
-  if (record.class === "split") {
-    // latin1 round-trips every byte, so the kept halves are the file's own.
-    const text = found.bytes.toString("latin1");
-    const slice = cleanManagedRegion(text, { begin: record.begin, end: record.end });
-    if (slice === null) return foreign("the managed-region markers are missing or malformed");
-    if (sha256(Buffer.from(slice.region, "latin1")) !== record.hash) {
-      return foreign("the managed region was edited");
-    }
-    if (slice.above.trim() === "" && slice.below.trim() === "") {
-      return slice.above === "" && slice.below === "" ? { verdict: "own" } : { verdict: "blank" };
-    }
-    return {
-      verdict: "handover",
-      kept: Buffer.from(joinHalves(slice.above, slice.below), "latin1"),
-    };
   }
-  return sha256(found.bytes) === record.hash
-    ? { verdict: "own" }
-    : foreign("the content differs from the last write");
+  if (record.class === "split") {
+    return judgeSplit(found.bytes, record);
+  }
+  if (sha256(found.bytes) !== record.hash) {
+    return foreign("the content differs from the last write");
+  }
+  return { verdict: "own" };
 }
 
 /** A class flip rewrites the whole file, so repository-owned content around a split region is as much a reason as any other.
  *  Blank lines around the region are not. */
 export function keepReason(target: string, path: string, records: Records): string | null {
   const judgement = judge(target, path, records);
-  if (judgement.verdict === "own" || judgement.verdict === "blank") return null;
-  if (judgement.verdict === "unrecorded") return "no record of the platform writing it";
+  if (judgement.verdict === "own" || judgement.verdict === "blank") {
+    return null;
+  }
+  if (judgement.verdict === "unrecorded") {
+    return "no record of the platform writing it";
+  }
   if (judgement.verdict === "handover") {
     return "the file carries repository-owned content outside the managed region";
   }
@@ -107,9 +141,13 @@ export function retire(target: string, stale: string[], records: Records): Retir
   const rows: RetireRow[] = [];
   const detail = "no longer selected";
   for (const path of stale) {
-    if (probe(target, path).kind === "absent") continue;
+    if (probe(target, path).kind === "absent") {
+      continue;
+    }
     const judgement = judge(target, path, records);
-    if (judgement.verdict === "unrecorded") continue;
+    if (judgement.verdict === "unrecorded") {
+      continue;
+    }
     if (judgement.verdict === "own" || judgement.verdict === "blank") {
       removeFile(target, path);
       delete records[path];

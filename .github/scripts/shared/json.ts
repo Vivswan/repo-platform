@@ -39,7 +39,9 @@ function exitOnThrow<T>(parse: () => T): T {
   try {
     return parse();
   } catch (err) {
-    if (!(err instanceof JsonShapeError)) throw err;
+    if (!(err instanceof JsonShapeError)) {
+      throw err;
+    }
     error(err.message);
     process.exit(1);
   }

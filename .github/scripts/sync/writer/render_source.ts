@@ -24,7 +24,9 @@ type SourcedEntry = ManagedEntry | StarterEntry | SplitEntry;
 /** A fetched block carries no heading of its own, so the region's comment syntax names it and its origin; a tree block
  *  writes its own, and an entry without a region takes the body bare. */
 export function blockHeading(region: RegionKind | null, title: string): string {
-  if (region === null) return "";
+  if (region === null) {
+    return "";
+  }
   return region === "hash" ? `## ${title}\n` : `<!-- ${title} -->\n`;
 }
 
@@ -63,7 +65,9 @@ export function renderSourced(
     typeof entry.source === "string" ? raw(entry.source) : `${fetched(entry.source)}\n`;
   const spliced = spliceBlocks(source, blocks);
   const missing = missingPlaceholders(spliced, values);
-  if (missing.length > 0) return { missing };
+  if (missing.length > 0) {
+    return { missing };
+  }
   const body = substitute(spliced, values);
   return region === null ? body : renderRegion(body, regionMarkers(region));
 }

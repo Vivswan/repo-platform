@@ -34,7 +34,9 @@ export async function fetchText(
     throw new Error(`GET ${url} failed before a response (network, TLS, or timeout)`);
   }
   // 200 alone: a 204 or 206 is "ok" to fetch and would render an empty or partial block.
-  if (response.status !== 200) throw new Error(`GET ${url} failed: HTTP ${response.status}`);
+  if (response.status !== 200) {
+    throw new Error(`GET ${url} failed: HTTP ${response.status}`);
+  }
   try {
     return await response.text();
   } catch {
@@ -48,7 +50,9 @@ export class UpstreamBodies {
 
   body(ref: UpstreamRef): string {
     const body = this.bodies.get(refKey(ref));
-    if (body === undefined) throw new Error(`${refKey(ref)} was not fetched`);
+    if (body === undefined) {
+      throw new Error(`${refKey(ref)} was not fetched`);
+    }
     return body;
   }
 }
@@ -61,7 +65,9 @@ export async function fetchUpstream(
   const bodies = new Map<string, string>();
   for (const ref of refs) {
     const key = refKey(ref);
-    if (!bodies.has(key)) bodies.set(key, normalizeUpstream(await fetchImpl(`${host}/${key}`)));
+    if (!bodies.has(key)) {
+      bodies.set(key, normalizeUpstream(await fetchImpl(`${host}/${key}`)));
+    }
   }
   return new UpstreamBodies(bodies);
 }

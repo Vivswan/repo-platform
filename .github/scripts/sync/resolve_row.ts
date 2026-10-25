@@ -71,11 +71,19 @@ export function resolveTarget(
   const owner = requireEnv("OWNER");
   const rows = discoverOwnerRepos(owner, `${script}: user/repos response`);
   const resolved = resolveRow(rows, rowKey, keyOf);
-  if ("refusal" in resolved) fail(`${resolved.refusal}; re-run the workflow`);
-  for (const form of maskForms(resolved.target.repo)) setSecret(form);
+  if ("refusal" in resolved) {
+    fail(`${resolved.refusal}; re-run the workflow`);
+  }
+  for (const form of maskForms(resolved.target.repo)) {
+    setSecret(form);
+  }
   const refusal = admit(resolved.target);
-  if (refusal !== null) fail(refusal);
-  for (const [name, value] of Object.entries(handOn(resolved.target))) exportVariable(name, value);
+  if (refusal !== null) {
+    fail(refusal);
+  }
+  for (const [name, value] of Object.entries(handOn(resolved.target))) {
+    exportVariable(name, value);
+  }
 }
 
 /** A dispatched branch the target does not carry, or its default branch, refuses here, so the row prints the unresolved
@@ -84,7 +92,9 @@ export function resolveTarget(
  *  pattern against ref SUFFIXES (`refs/heads/nested/refs/heads/x` answers a probe for `refs/heads/x`). */
 export function branchRefusal(target: DiscoveredRepo): string | null {
   const branch = readDispatchBranch();
-  if (branch === "") return null;
+  if (branch === "") {
+    return null;
+  }
   const ref = `refs/heads/${branch}`;
   const probe = captureNetwork([
     "git",

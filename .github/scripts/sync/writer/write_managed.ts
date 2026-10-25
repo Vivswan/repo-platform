@@ -21,13 +21,19 @@ export function writeManaged(
 ): WriteOutcome {
   const bytes = Buffer.from(content, "utf-8");
   const found = probe(target, path);
-  if (found.kind === "link") return { change: "held", reason: LINK_IN_THE_WAY };
+  if (found.kind === "link") {
+    return { change: "held", reason: LINK_IN_THE_WAY };
+  }
   if (found.kind === "absent") {
     writeFile(target, path, bytes);
     return { change: "created" };
   }
-  if (found.bytes.equals(bytes)) return { change: "unchanged" };
+  if (found.bytes.equals(bytes)) {
+    return { change: "unchanged" };
+  }
   writeFile(target, path, bytes);
-  if (recorded !== null && sha256(found.bytes) === recorded) return { change: "updated" };
+  if (recorded !== null && sha256(found.bytes) === recorded) {
+    return { change: "updated" };
+  }
   return { change: "replaced local edits", replaced: found.bytes.toString("utf-8") };
 }

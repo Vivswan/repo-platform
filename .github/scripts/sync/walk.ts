@@ -8,8 +8,11 @@ export function walkFiles(root: string): string[] {
     for (const name of readdirSync(join(root, rel))) {
       const childRel = rel ? `${rel}/${name}` : name;
       const stat = lstatSync(join(root, childRel));
-      if (stat.isDirectory()) visit(childRel);
-      else if (stat.isFile()) found.push(childRel);
+      if (stat.isDirectory()) {
+        visit(childRel);
+      } else if (stat.isFile()) {
+        found.push(childRel);
+      }
     }
   };
   visit("");

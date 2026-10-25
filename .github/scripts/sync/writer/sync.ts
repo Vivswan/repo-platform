@@ -8,7 +8,7 @@ import {
   selectEntries,
   upstreamRefs,
 } from "../../../../actions/plan/files_config.ts";
-import { declaredMirrors, ownedPaths } from "../../../../actions/plan/mirrors.ts";
+import { declaredMirrors, type OwnedPaths, ownedPaths } from "../../../../actions/plan/mirrors.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import { pathProblem } from "../../../../actions/shared/repo_path.ts";
@@ -62,6 +62,7 @@ import { type WriteOutcome, writeManaged } from "./write_managed.ts";
 import { writeSplit } from "./write_split.ts";
 import { writeStarter } from "./write_starter.ts";
 
+/** The writer's flags; `upstream` is the raw-content host every upstream ref is fetched from. */
 export interface SyncOptions {
   files: string;
   tree: string;
@@ -69,13 +70,12 @@ export interface SyncOptions {
   build: string;
   repository: string;
   private: boolean;
-  /** The raw-content host every upstream ref is fetched from. */
   upstream: string;
 }
 
+/** A starter's `content` is empty: it is rendered inside its writer only on creation, and nothing reads it, since no
+ *  mirror copies a starter and no diff is reported for one. */
 interface Rendered {
-  /** A starter's content is rendered inside its writer only on creation, so it is empty here.
-   *  Nothing reads it, since no mirror copies a starter and no diff is reported for one. */
   content: string;
   record: ManifestRecord;
   write: (recorded: string | null) => WriteOutcome | { missing: string[] };
@@ -115,7 +115,9 @@ function render(
       overlayPath,
       owner: facts.slug.owner,
     });
-    if ("held" in rendered) return rendered;
+    if ("held" in rendered) {
+      return rendered;
+    }
     return {
       content: rendered.content,
       record: { class: "managed", hash: sha256(rendered.content) },
@@ -131,7 +133,9 @@ function render(
     };
   }
   const body = text();
-  if (typeof body !== "string") return body;
+  if (typeof body !== "string") {
+    return body;
+  }
   if (entry.class === "split") {
     const markers = regionMarkers(entry.region);
     return {
@@ -151,13 +155,53 @@ function alreadyWritten(found: Found, content: string): boolean {
   return found.kind === "file" && found.bytes.equals(Buffer.from(content, "utf-8"));
 }
 
+/** `content` is what a mirror would copy, or a replaced edit is diffed against; `detail` the stale record a write set
+ *  aside, for the row. */
 interface Written {
   outcome: WriteOutcome;
   record: ManifestRecord;
-  /** What a mirror would copy, or a replaced edit is diffed against. */
   content: string;
-  /** The stale record a write set aside, for the row's detail. */
   detail?: string;
+}
+
+/** The write over a file whose record carries another class than the entry declares (`flipped`), and which is not
+ *  already the rendered content. A file the platform does not vouch for is judged unrecorded and the flip noted. */
+function writeOverFlip(
+  options: SyncOptions,
+  entry: FileEntry,
+  records: Records,
+  rendered: Rendered,
+  found: Exclude<Found, { kind: "absent" }>,
+  flipped: ManifestRecord["class"],
+): Written | { missing: string[] } {
+  if (keepReason(options.target, entry.path, records) !== null) {
+    const outcome = rendered.write(null);
+    if ("missing" in outcome) {
+      return outcome;
+    }
+    return {
+      outcome,
+      record: rendered.record,
+      content: rendered.content,
+      detail: `class changed from ${flipped} to ${entry.class}; the record was stale, so the file was judged unrecorded`,
+    };
+  }
+  // A file staying a file is overwritten in place, which keeps its mode;
+  // only a link becoming a file is removed first.
+  if (found.kind === "file") {
+    writeFile(options.target, entry.path, Buffer.from(rendered.content, "utf-8"));
+    return { outcome: { change: "updated" }, record: rendered.record, content: rendered.content };
+  }
+  removeFile(options.target, entry.path);
+  const outcome = rendered.write(null);
+  if ("missing" in outcome) {
+    return outcome;
+  }
+  return {
+    outcome: outcome.change === "created" ? { change: "updated" } : outcome,
+    record: rendered.record,
+    content: rendered.content,
+  };
 }
 
 /** A record under another class than the entry declares is a class flip.
@@ -173,42 +217,25 @@ function writeEntry(
   records: Records,
 ): Written | { missing: string[] } | { held: string } {
   const rendered = render(options, config, entry, modules, facts);
-  if ("missing" in rendered || "held" in rendered) return rendered;
+  if ("missing" in rendered || "held" in rendered) {
+    return rendered;
+  }
   const previous = readRecord(records[entry.path]);
   const recorded = previous === null || previous.class === "starter" ? null : previous.hash;
   const flipped =
     previous !== null && previous.class !== entry.class && entry.class !== "starter"
       ? previous.class
       : null;
-  const found = flipped === null ? null : probe(options.target, entry.path);
-  if (found !== null && found.kind !== "absent" && !alreadyWritten(found, rendered.content)) {
-    if (keepReason(options.target, entry.path, records) !== null) {
-      const outcome = rendered.write(null);
-      if ("missing" in outcome) return outcome;
-      return {
-        outcome,
-        record: rendered.record,
-        content: rendered.content,
-        detail: `class changed from ${flipped} to ${entry.class}; the record was stale, so the file was judged unrecorded`,
-      };
+  if (flipped !== null) {
+    const found = probe(options.target, entry.path);
+    if (found.kind !== "absent" && !alreadyWritten(found, rendered.content)) {
+      return writeOverFlip(options, entry, records, rendered, found, flipped);
     }
-    // A file staying a file is overwritten in place, which keeps its mode;
-    // only a link becoming a file is removed first.
-    if (found.kind === "file") {
-      writeFile(options.target, entry.path, Buffer.from(rendered.content, "utf-8"));
-      return { outcome: { change: "updated" }, record: rendered.record, content: rendered.content };
-    }
-    removeFile(options.target, entry.path);
-    const outcome = rendered.write(null);
-    if ("missing" in outcome) return outcome;
-    return {
-      outcome: outcome.change === "created" ? { change: "updated" } : outcome,
-      record: rendered.record,
-      content: rendered.content,
-    };
   }
   const outcome = rendered.write(recorded);
-  if ("missing" in outcome) return outcome;
+  if ("missing" in outcome) {
+    return outcome;
+  }
   return { outcome, record: rendered.record, content: rendered.content };
 }
 
@@ -230,6 +257,230 @@ function wroteChange(
   );
 }
 
+/** What one run's steps share: the inputs, the notes they add to, and the manifest they build. */
+interface Run {
+  options: SyncOptions;
+  config: WriterFilesConfig;
+  facts: Facts;
+  modules: string[];
+  records: Records;
+  notes: string[];
+  next: Map<string, ManifestRecord>;
+}
+
+/** The outputs of the entry writes the report and the mirrors read; `templates` is a Map so a written path named
+ *  `__proto__` stays an own key of the report's object. */
+interface Writes {
+  rows: WrittenRow[];
+  replaced: SyncReport["replaced"];
+  templates: Map<string, SyncReport["templates"][string]>;
+  written: Map<string, Buffer>;
+}
+
+/** A carried record never overwrites one this run wrote. */
+function carry(run: Run, path: string): void {
+  const record = readRecord(run.records[path]);
+  if (record !== null && !run.next.has(path)) {
+    run.next.set(path, record);
+  }
+}
+
+/** A stale record is retired only when its path is one the writer could have written; one whose path no files.yml entry
+ *  declares now (a hand edit, or an entry deleted from files.yml) is noted, which holds the PR. */
+function markStale(run: Run, path: string, declared: ReadonlySet<string>, stale: string[]): void {
+  const problem = pathProblem(path);
+  if (problem !== null) {
+    run.notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
+    return;
+  }
+  stale.push(path);
+  if (!declared.has(path) && occupant(run.options.target, path) !== null) {
+    run.notes.push(
+      `manifest record for \`${path}\` had no writer: no files.yml entry declares the path now; ` +
+        "it is retired as a stale record (the Retired row has the outcome)",
+    );
+  }
+}
+
+function unreadableRecords(count: number): Error {
+  return new Error(
+    `${count} manifest ${count === 1 ? "record is" : "records are"} not a shape the writer ` +
+      "records (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a " +
+      "mirror kind other than symlink, a split without its grammar or markers); fix the manifest (git history " +
+      "has the stamped original; the class table is actions/shared/manifest.ts), then dispatch the sync again",
+  );
+}
+
+/** The manifest's records sorted for retirement. Manifest keys are target-repo content, so the refusal of an unreadable
+ *  record carries a count alone. */
+function judgeRecords(
+  run: Run,
+  entryPaths: ReadonlySet<string>,
+  declared: ReadonlySet<string>,
+): { stale: string[]; released: RetireRow[] } {
+  const excepted = new Set(run.facts.registration.except ?? []);
+  const stale: string[] = [];
+  const released: RetireRow[] = [];
+  let unreadable = 0;
+  for (const [path, entry] of Object.entries(run.records)) {
+    if (path === MANIFEST_NAME) {
+      continue;
+    }
+    const record = readRecord(entry);
+    if (record === null) {
+      unreadable++;
+      continue;
+    }
+    // A mirror record is mirrors.ts's to carry or drop: `except` retires no record, it drops the target from the declarations.
+    if (record.class === "mirror") {
+      continue;
+    }
+    if (excepted.has(path)) {
+      released.push(release(path, run.records));
+      continue;
+    }
+    if (entryPaths.has(path) || record.class === "starter") {
+      continue;
+    }
+    markStale(run, path, declared, stale);
+  }
+  if (unreadable > 0) {
+    throw unreadableRecords(unreadable);
+  }
+  return { stale, released };
+}
+
+function heldRow(entry: FileEntry, detail: string): WrittenRow {
+  return { path: entry.path, class: entry.class, change: "held", detail };
+}
+
+/** Notes each unset placeholder once across the run, and returns the held row's detail naming them all. */
+function noteMissingPlaceholders(notes: string[], missing: readonly string[]): string {
+  for (const name of missing) {
+    const note = `placeholder \`{{${name}}}\` has no value: set ${PLACEHOLDER_SOURCE[name as PlaceholderName]} in ${REGISTRATION_PATH}`;
+    if (!notes.includes(note)) {
+      notes.push(note);
+    }
+  }
+  const tokens = missing.map((name) => `{{${name}}}`).join(", ");
+  return `no value for ${tokens}`;
+}
+
+function recordWrite(run: Run, entry: FileEntry, result: Written, writes: Writes): void {
+  const { outcome, record, content } = result;
+  // A held path keeps its previous record: the file is still that write.
+  if (outcome.change === "held") {
+    carry(run, entry.path);
+  } else {
+    run.next.set(entry.path, record);
+  }
+  writes.rows.push({
+    path: entry.path,
+    class: entry.class,
+    change: outcome.change,
+    detail: outcome.change === "held" ? outcome.reason : (result.detail ?? ""),
+  });
+  // The mapping this write applied, for a reader judging the written file against its template. A starter found
+  // current is the repository's own content, neither rendered nor compared, so only one this run created is the
+  // template's. A split write adds region markers and a block anchor is removed, filled or not, so neither keeps
+  // the template's lines.
+  const fromTemplate = entry.class !== "starter" || outcome.change === "created";
+  if (
+    outcome.change !== "held" &&
+    fromTemplate &&
+    "source" in entry &&
+    typeof entry.source === "string"
+  ) {
+    writes.templates.set(entry.path, {
+      source: entry.source,
+      lineMapped: entry.class !== "split" && entry.blocks === undefined,
+    });
+  }
+  if (outcome.change === "replaced local edits") {
+    writes.replaced.push({
+      path: entry.path,
+      diff: unifiedDiff(entry.path, outcome.replaced, content),
+    });
+  }
+  // A held file is not one this sync wrote, so no mirror copies it.
+  if ((entry.class === "managed" || entry.class === "split") && outcome.change !== "held") {
+    const found = probe(run.options.target, entry.path);
+    if (found.kind === "file") {
+      writes.written.set(entry.path, found.bytes);
+    }
+  }
+}
+
+function writeEntries(run: Run, entries: readonly FileEntry[]): Writes {
+  const writes: Writes = { rows: [], replaced: [], templates: new Map(), written: new Map() };
+  for (const entry of entries) {
+    // The class writers hold a link in the way; anything else they refuse
+    // loudly, and the sync must still end in a report.
+    const taken = occupant(run.options.target, entry.path);
+    if (taken === "a directory" || taken === "something that is not a regular file") {
+      carry(run, entry.path);
+      writes.rows.push(
+        heldRow(entry, `${taken} sits at the path, and the writer will not replace it`),
+      );
+      continue;
+    }
+    const result = writeEntry(run.options, run.config, entry, run.modules, run.facts, run.records);
+    if ("held" in result) {
+      carry(run, entry.path);
+      writes.rows.push(heldRow(entry, result.held));
+      continue;
+    }
+    if ("missing" in result) {
+      carry(run, entry.path);
+      writes.rows.push(heldRow(entry, noteMissingPlaceholders(run.notes, result.missing)));
+      continue;
+    }
+    recordWrite(run, entry, result, writes);
+  }
+  return writes;
+}
+
+/** A mirror record no declaration reaches now (removed from the registration, excepted, or its glob no longer matches)
+ *  leaves the manifest with a note; the copy stays as the repository's own. A path under a linked directory is never
+ *  looked up (the link may loop); its record is noted too. */
+function noteDroppedMirrors(run: Run): void {
+  for (const [path, entry] of Object.entries(run.records)) {
+    if (readRecord(entry)?.class !== "mirror" || run.next.has(path) || pathProblem(path) !== null) {
+      continue;
+    }
+    if (
+      blockedAncestor(run.options.target, path)?.is !== "a symbolic link" &&
+      lstatOrNull(join(run.options.target, path)) === null
+    ) {
+      continue;
+    }
+    run.notes.push(
+      `manifest record for \`${path}\` dropped: no mirror in files.yml or ${REGISTRATION_PATH} reaches it now, so ` +
+        "the file is the repository's own (a mirror declared again adopts it while it still holds " +
+        "the source's content)",
+    );
+  }
+}
+
+/** The mirrors applied over this run's writes: their records join the manifest, their replaced edits the report. */
+function mirrorWrites(run: Run, writes: Writes, owned: OwnedPaths): MirrorRow[] {
+  const mirrors = applyMirrors(
+    run.options.target,
+    declaredMirrors(run.config, run.facts.registration),
+    writes.written,
+    owned,
+    run.records,
+  );
+  for (const [path, record] of mirrors.records) {
+    run.next.set(path, record);
+  }
+  for (const { path, before, after } of mirrors.replaced) {
+    writes.replaced.push({ path, diff: unifiedDiff(path, before, after) });
+  }
+  noteDroppedMirrors(run);
+  return mirrors.rows;
+}
+
 export async function runSync(options: SyncOptions): Promise<SyncReport> {
   const config = loadFilesConfig(options.files, options.tree);
   const slug = parseRepositorySlug(options.repository);
@@ -243,7 +494,9 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
     upstream: await fetchUpstream(upstreamRefs(config.files), options.upstream),
   };
   const { records, commit: recorded, problem } = readRecords(options.target);
-  if (problem !== null) notes.push(`${problem}; every existing file is judged as unrecorded`);
+  if (problem !== null) {
+    notes.push(`${problem}; every existing file is judged as unrecorded`);
+  }
   const manifestBefore = existingFile(options.target, MANIFEST_NAME);
   // Read before the writes: a recorded commit the checkout's history lacks fails the run before a byte moves. `files.yml`
   // sits at the platform root, which is the checkout the diff reads.
@@ -258,7 +511,6 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
     except: registration.except,
   };
   const entries = selectEntries(config, selection);
-  const entryPaths = new Set(entries.map((entry) => entry.path));
   const declared = new Set([
     ...config.files.map((entry) => entry.path),
     ...config.mirrors.flatMap((mirror) => mirror.targets),
@@ -268,176 +520,30 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
       .filter((path) => !declared.has(path))
       .map((path) => `\`except\` names \`${path}\`, a path no files.yml entry writes`),
   );
-  // A stale record at a path no files.yml entry declares (a hand edit, or an entry deleted from files.yml) is one the writer cannot account for.
-  // Its retirement is noted, which holds the PR.
-  // Manifest keys are target-repo content, so a stale record is retired only when its path is one the writer could have written.
-  // For the same reason the refusal below carries a count alone.
-  const excepted = new Set(registration.except ?? []);
-  const stale: string[] = [];
-  const released: RetireRow[] = [];
-  let unreadable = 0;
-  for (const [path, entry] of Object.entries(records)) {
-    if (path === MANIFEST_NAME) continue;
-    const record = readRecord(entry);
-    if (record === null) {
-      unreadable++;
-      continue;
-    }
-    // A mirror record is mirrors.ts's to carry or drop: `except` retires no record, it drops the target from the declarations.
-    if (record.class === "mirror") continue;
-    if (excepted.has(path)) {
-      released.push(release(path, records));
-      continue;
-    }
-    if (entryPaths.has(path) || record.class === "starter") continue;
-    const problem = pathProblem(path);
-    if (problem !== null) {
-      notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
-      continue;
-    }
-    stale.push(path);
-    if (!declared.has(path) && occupant(options.target, path) !== null) {
-      notes.push(
-        `manifest record for \`${path}\` had no writer: no files.yml entry declares the path now; ` +
-          "it is retired as a stale record (the Retired row has the outcome)",
-      );
-    }
-  }
-  if (unreadable > 0) {
-    throw new Error(
-      `${unreadable} manifest ${unreadable === 1 ? "record is" : "records are"} not a shape the writer ` +
-        "records (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a " +
-        "mirror kind other than symlink, a split without its grammar or markers); fix the manifest (git history " +
-        "has the stamped original; the class table is actions/shared/manifest.ts), then dispatch the sync again",
-    );
-  }
-  const owned = ownedPaths(config, selection, stale);
-  const retired = [...retire(options.target, stale, records), ...released];
-
   // A Map, so a path named like an inherited property (constructor) is
   // looked up like any other.
   const next = new Map<string, ManifestRecord>();
-  // A carried record never overwrites one this run wrote.
-  const carry = (path: string) => {
-    const record = readRecord(records[path]);
-    if (record !== null && !next.has(path)) next.set(path, record);
-  };
+  const run: Run = { options, config, facts, modules: selected, records, notes, next };
+
+  const entryPaths = new Set(entries.map((entry) => entry.path));
+  const { stale, released } = judgeRecords(run, entryPaths, declared);
+  const owned = ownedPaths(config, selection, stale);
+  const retired = [...retire(options.target, stale, records), ...released];
   for (const row of retired) {
-    if (row.outcome === "held") carry(row.path);
-  }
-  const written = new Map<string, Buffer>();
-  const rows: WrittenRow[] = [];
-  const replaced: SyncReport["replaced"] = [];
-  // A Map, so a written path named `__proto__` stays an own key of the report's object.
-  const templates = new Map<string, SyncReport["templates"][string]>();
-  for (const entry of entries) {
-    // The class writers hold a link in the way; anything else they refuse
-    // loudly, and the sync must still end in a report.
-    const taken = occupant(options.target, entry.path);
-    if (taken === "a directory" || taken === "something that is not a regular file") {
-      carry(entry.path);
-      rows.push({
-        path: entry.path,
-        class: entry.class,
-        change: "held",
-        detail: `${taken} sits at the path, and the writer will not replace it`,
-      });
-      continue;
-    }
-    const result = writeEntry(options, config, entry, selected, facts, records);
-    if ("held" in result) {
-      carry(entry.path);
-      rows.push({ path: entry.path, class: entry.class, change: "held", detail: result.held });
-      continue;
-    }
-    if ("missing" in result) {
-      for (const name of result.missing) {
-        const note = `placeholder \`{{${name}}}\` has no value: set ${PLACEHOLDER_SOURCE[name as PlaceholderName]} in ${REGISTRATION_PATH}`;
-        if (!notes.includes(note)) notes.push(note);
-      }
-      carry(entry.path);
-      const tokens = result.missing.map((name) => `{{${name}}}`).join(", ");
-      rows.push({
-        path: entry.path,
-        class: entry.class,
-        change: "held",
-        detail: `no value for ${tokens}`,
-      });
-      continue;
-    }
-    const { outcome, record, content } = result;
-    // A held path keeps its previous record: the file is still that write.
-    if (outcome.change === "held") carry(entry.path);
-    else next.set(entry.path, record);
-    rows.push({
-      path: entry.path,
-      class: entry.class,
-      change: outcome.change,
-      detail: outcome.change === "held" ? outcome.reason : (result.detail ?? ""),
-    });
-    // The mapping this write applied, for a reader judging the written file against its template. A starter found
-    // current is the repository's own content, neither rendered nor compared, so only one this run created is the
-    // template's. A split write adds region markers and a block anchor is removed, filled or not, so neither keeps
-    // the template's lines.
-    const fromTemplate = entry.class !== "starter" || outcome.change === "created";
-    if (
-      outcome.change !== "held" &&
-      fromTemplate &&
-      "source" in entry &&
-      typeof entry.source === "string"
-    ) {
-      templates.set(entry.path, {
-        source: entry.source,
-        lineMapped: entry.class !== "split" && entry.blocks === undefined,
-      });
-    }
-    if (outcome.change === "replaced local edits") {
-      replaced.push({ path: entry.path, diff: unifiedDiff(entry.path, outcome.replaced, content) });
-    }
-    // A held file is not one this sync wrote, so no mirror copies it.
-    if ((entry.class === "managed" || entry.class === "split") && outcome.change !== "held") {
-      const found = probe(options.target, entry.path);
-      if (found.kind === "file") written.set(entry.path, found.bytes);
+    if (row.outcome === "held") {
+      carry(run, row.path);
     }
   }
 
-  const mirrors = applyMirrors(
-    options.target,
-    declaredMirrors(config, registration),
-    written,
-    owned,
-    records,
-  );
-  for (const [path, record] of mirrors.records) next.set(path, record);
-  for (const { path, before, after } of mirrors.replaced) {
-    replaced.push({ path, diff: unifiedDiff(path, before, after) });
-  }
-  // A mirror record no declaration reaches now (removed from the
-  // registration, excepted, or its glob no longer matches) leaves the manifest
-  // with a note; the copy stays as the repository's own. A path under a linked
-  // directory is never looked up (the link may loop); its record is noted too.
-  for (const [path, entry] of Object.entries(records)) {
-    if (readRecord(entry)?.class !== "mirror" || next.has(path) || pathProblem(path) !== null) {
-      continue;
-    }
-    if (
-      blockedAncestor(options.target, path)?.is !== "a symbolic link" &&
-      lstatOrNull(join(options.target, path)) === null
-    ) {
-      continue;
-    }
-    notes.push(
-      `manifest record for \`${path}\` dropped: no mirror in files.yml or ${REGISTRATION_PATH} reaches it now, so ` +
-        "the file is the repository's own (a mirror declared again adopts it while it still holds " +
-        "the source's content)",
-    );
-  }
+  const writes = writeEntries(run, entries);
+  const mirrorRows = mirrorWrites(run, writes, owned);
+
   const manifest = Object.fromEntries(next);
   const commit = judgedCommit({
     recorded,
     build: options.build,
     checkerMoved,
-    wroteChange: wroteChange(rows, retired, mirrors.rows, {
+    wroteChange: wroteChange(writes.rows, retired, mirrorRows, {
       before: manifestBefore,
       after: renderManifest(manifest, recorded ?? options.build),
     }),
@@ -447,12 +553,12 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
     build: options.build,
     modules: selected,
     private: options.private,
-    written: rows,
-    templates: Object.fromEntries(templates),
-    replaced,
+    written: writes.rows,
+    templates: Object.fromEntries(writes.templates),
+    replaced: writes.replaced,
     retired,
     notes,
-    mirrors: mirrors.rows,
+    mirrors: mirrorRows,
   });
 }
 
@@ -484,7 +590,9 @@ async function main(argv: string[]): Promise<number> {
       upstream: flags.upstream ?? RAW_HOST,
     });
   } catch (error) {
-    if (error instanceof MirrorFailure) fail(error.lines);
+    if (error instanceof MirrorFailure) {
+      fail(error.lines);
+    }
     fail(error instanceof Error ? error.message : String(error));
   }
   if (flags.summary !== undefined) {
@@ -494,4 +602,6 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-if (import.meta.main) process.exit(await main(process.argv.slice(2)));
+if (import.meta.main) {
+  process.exit(await main(process.argv.slice(2)));
+}
