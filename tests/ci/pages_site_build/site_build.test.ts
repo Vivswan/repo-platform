@@ -4,7 +4,7 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { tierRouteGuard } from "../../../actions/pages-site/.vitepress/theme/tier-routes.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 import {
@@ -14,13 +14,16 @@ import {
   commitAll,
   deployLinkCheckArgs,
   describeRun,
+  FLEET_BASE,
   FLEET_ENV,
   FLEET_REPO,
   fleetRepo,
   initRepo,
   isFile,
   linkCheckInputs,
+  linkCheckRemap,
   MERMAID_MOUNT_HTML,
+  ownedBy,
   pinnedLychee,
   present,
   type RunnerTemp,
@@ -30,6 +33,7 @@ import {
   runnerTemp,
   SEALED_DEAD_LINK,
   SITE_TITLE,
+  siteConfig,
   TEST_TIMEOUT_MS,
   versionLabels,
 } from "./fixtures.ts";
@@ -49,7 +53,7 @@ let latestAssets = "";
 beforeAll(() => {
   workspace = temp.dir("pages-site-fleet-");
   fleetRepo(workspace);
-  runner = runnerTemp(temp, FLEET_REPO);
+  runner = runnerTemp(temp, FLEET_BASE);
   built = buildSite(workspace, FLEET_REPO, runner, FLEET_ENV);
   if (built.exitCode !== 0)
     throw new Error(`the fleet fixture's build failed: ${describeRun(built)}`);
@@ -94,11 +98,39 @@ describe("the artifact a deploy lands", () => {
     expect(built.outputs).toEqual({
       "publish": "true",
       "site-dir": site,
-      "link-check-args": deployLinkCheckArgs(runner, FLEET_REPO),
+      "link-check-args": deployLinkCheckArgs(runner),
+      "link-rot-ignore": join(runner.scratch, "link-rot.lycheeignore"),
       "link-rot-label": "rot",
       "link-rot-color": "",
       "link-rot-description": "",
       "site-title": "Fixture Docs",
+    });
+    // Own is the artifact's top level under the base: the website's pages (the glob-named one as a browser spells
+    // it), the docs mount, and the base itself; a sibling project site on the same origin is not. The remap lives in
+    // the scratch directory's lychee.toml and the nightly's ignore list opens with the same regex.
+    const remap = linkCheckRemap(runner);
+    expect(remap.replacement).toBe(`${Bun.pathToFileURL(site).href}$1`);
+    expect(readFileSync(join(runner.scratch, "link-rot.lycheeignore"), "utf-8")).toBe(
+      `${remap.pattern}\n`,
+    );
+    expect(
+      ownedBy(remap.pattern, {
+        base: "https://fixture-owner.github.io/fixture-repo/",
+        docs: "https://fixture-owner.github.io/fixture-repo/docs/latest/",
+        globNamed: "https://fixture-owner.github.io/fixture-repo/[guide].html",
+        extensionless: "https://fixture-owner.github.io/fixture-repo/[guide]",
+        asset: "https://fixture-owner.github.io/fixture-repo/assets/app.js",
+        sibling: "https://fixture-owner.github.io/other-repo/",
+        userSiteRoot: "https://fixture-owner.github.io/",
+      }),
+    ).toEqual({
+      base: true,
+      docs: true,
+      globNamed: true,
+      extensionless: true,
+      asset: true,
+      sibling: false,
+      userSiteRoot: false,
     });
   });
 
@@ -474,11 +506,7 @@ describe("the link check over the whole artifact", () => {
   test.skipIf(lychee === null)(
     "lychee, run as the step runs it, fails on the website's links into missing docs pages (the glob-named page's included) and the docs' link to a missing anchor, naming each",
     () => {
-      const check = runLinkCheck(
-        lychee ?? "",
-        built.outputs["link-check-args"],
-        dirname(dirname(site)),
-      );
+      const check = runLinkCheck(lychee ?? "", built.outputs["link-check-args"], runner.scratch);
       expect(check.exitCode, describeRun(check)).toBe(2);
       expect(check.stdout).toContain(`### Errors in ${site}/index.html`);
       expect(check.stdout).toMatch(
@@ -513,8 +541,8 @@ describe("link strictness on HEAD", () => {
       cpSync(workspace, rotten, { recursive: true });
       const setup = join(rotten, "docs", "setup.md");
       writeFileSync(setup, `${readFileSync(setup, "utf-8")}\n${SEALED_DEAD_LINK}`);
-      const deploy = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_REPO), FLEET_ENV);
-      const check = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_REPO), {
+      const deploy = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_BASE), FLEET_ENV);
+      const check = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_BASE), {
         CHECK: "true",
         CONFIG: FLEET_ENV.CONFIG,
       });
@@ -561,7 +589,8 @@ describe("layouts that build no docs tier", () => {
         ...NO_LINK_ROT,
         "publish": "true",
         "site-dir": runner.site,
-        "link-check-args": deployLinkCheckArgs(runner, FLEET_REPO),
+        "link-check-args": deployLinkCheckArgs(runner),
+        "link-rot-ignore": join(runner.scratch, "link-rot.lycheeignore"),
         "site-title": SITE_TITLE,
       }),
     },
@@ -584,13 +613,14 @@ describe("layouts that build no docs tier", () => {
         "publish": "false",
         "site-dir": "",
         "link-check-args": "",
+        "link-rot-ignore": "",
         "site-title": SITE_TITLE,
       }),
     },
   ])("$layout", (row) => {
     const repo = temp.dir("pages-site-layout-");
     row.fixture(repo);
-    const runner = runnerTemp(temp, FLEET_REPO);
+    const runner = runnerTemp(temp, FLEET_BASE);
     const result = buildSite(repo, FLEET_REPO, runner, row.env);
     expect(result.exitCode, describeRun(result)).toBe(0);
     expect(result.stdout).not.toMatch(/vitepress|building docs tier/);
@@ -602,4 +632,101 @@ describe("layouts that build no docs tier", () => {
     for (const line of row.stdout) expect(result.stdout).toContain(line);
     expect(result.outputs).toEqual(row.outputs(runner));
   });
+});
+
+describe("a user site", () => {
+  // GitHub serves the repository named <owner>.github.io, in whatever case, at the origin's root. Laid out under
+  // /<repo>/ like a project site, the hook would build for a base path Pages never serves, and lychee would resolve
+  // every root-absolute link under a directory the page is not in.
+  const USER_SITE_REPO = "fixture-owner/Fixture-Owner.github.io";
+  let runner: RunnerTemp;
+  let result: BuildResult;
+
+  beforeAll(() => {
+    const repo = temp.dir("pages-site-user-");
+    mkdirSync(join(repo, "dist"), { recursive: true });
+    writeFileSync(
+      join(repo, "dist", "index.html"),
+      '<html><head><link rel="icon" href="/favicon.ico"></head><body>USER-SITE ' +
+        '<a href="https://fixture-owner.github.io/about">about</a> ' +
+        '<a href="https://fixture-owner.github.io/my%20page">a page with a space in its name</a> ' +
+        '<a href="https://fixture-owner.github.io/other-project/">a project site</a></body></html>\n',
+    );
+    writeFileSync(join(repo, "dist", "favicon.ico"), "");
+    writeFileSync(join(repo, "dist", "about.html"), "<html><body>About</body></html>\n");
+    writeFileSync(join(repo, "dist", "my page.html"), "<html><body>Spaced</body></html>\n");
+    writeFileSync(
+      join(repo, ".lycheeignore"),
+      "# hosts behind a bot wall\n^https://example\\.invalid/\n",
+    );
+    initRepo(repo);
+    commitAll(repo, "user site");
+    runner = runnerTemp(temp, "/");
+    result = buildSite(repo, USER_SITE_REPO, runner, {
+      SITE_DIR: "dist",
+      CONFIG: siteConfig({ docs_path: null }),
+    });
+  });
+
+  // The origin is shared with the owner's project sites (https://owner.github.io/<repo>/), so own links are the
+  // artifact's top-level entries, not the origin: a user site's deploy once failed on its link to a sibling project
+  // site, read as a missing page of the artifact. A link is read as its author spelled it, so an entry matches every
+  // percent-spelling of its name.
+  test("is assembled at the served root itself, the directory uploaded and lychee's root, owning its own entries on the bare origin", () => {
+    expect(result.exitCode, describeRun(result)).toBe(0);
+    expect(runner.site).toBe(runner.served);
+    expect(readSite(runner.site, "index.html")).toContain("USER-SITE");
+    expect(result.outputs).toMatchObject({
+      "publish": "true",
+      "site-dir": runner.served,
+      "link-check-args": deployLinkCheckArgs(runner),
+      "link-rot-ignore": join(runner.scratch, "link-rot.lycheeignore"),
+    });
+    const remap = linkCheckRemap(runner);
+    expect(remap.replacement).toBe(`${Bun.pathToFileURL(runner.served).href}$1`);
+    // The crawl's ignore list: the own links first, then the repository's own list as it stands.
+    expect(readFileSync(join(runner.scratch, "link-rot.lycheeignore"), "utf-8")).toBe(
+      `${remap.pattern}\n# hosts behind a bot wall\n^https://example\\.invalid/\n`,
+    );
+    expect(
+      ownedBy(remap.pattern, {
+        root: "https://fixture-owner.github.io/",
+        bareOrigin: "https://fixture-owner.github.io",
+        page: "https://fixture-owner.github.io/about",
+        pageHtml: "https://fixture-owner.github.io/about.html",
+        spaced: "https://fixture-owner.github.io/my%20page",
+        spacedOtherCase: "https://fixture-owner.github.io/my%20PAGE",
+        spacedEncodedLetters: "https://fixture-owner.github.io/%6dy%20page",
+        icon: "https://fixture-owner.github.io/favicon.ico",
+        sibling: "https://fixture-owner.github.io/other-project/",
+        prefixOfAPage: "https://fixture-owner.github.io/about-us",
+      }),
+    ).toEqual({
+      root: true,
+      bareOrigin: true,
+      page: true,
+      pageHtml: true,
+      spaced: true,
+      spacedOtherCase: false,
+      spacedEncodedLetters: true,
+      icon: true,
+      sibling: false,
+      prefixOfAPage: false,
+    });
+  });
+
+  test.skipIf(pinnedLychee() === null)(
+    "lychee resolves its root-absolute link and its origin-spelled links (one percent-encoded) in the artifact, and leaves the sibling project site's link to the network",
+    () => {
+      const check = runLinkCheck(
+        pinnedLychee() ?? "",
+        result.outputs["link-check-args"],
+        runner.scratch,
+      );
+      expect(check.exitCode, describeRun(check)).toBe(0);
+      expect(check.stdout).toContain("| ✅ Successful  | 3     |");
+      expect(check.stdout).not.toContain("other-project");
+    },
+    TEST_TIMEOUT_MS,
+  );
 });

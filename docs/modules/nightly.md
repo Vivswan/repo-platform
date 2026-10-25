@@ -4,7 +4,7 @@ order: 140
 
 # Nightly
 
-Selecting the `nightly` module gives a repository a `nightly.yml` starter workflow ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/nightly/.github/workflows/nightly.yml)): a nightly CI stream for the checks too slow (or too dependent on the outside world) to run on every PR, with automatic [tracking-issue](tracking-issues.md) filing. Issue lifecycle, release gating, renaming `labels.nightly`, and deselecting the module are shared machinery, owned by [Tracking issues](tracking-issues.md).
+Selecting the `nightly` module gives a repository a `nightly.yml` starter workflow ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/nightly/.github/workflows/nightly.yml)): a nightly CI stream for the checks too slow (or too dependent on the outside world) to run on every PR, with automatic [tracking-issue](tracking-issues.md) filing. Issue lifecycle and release gating are shared machinery, owned by [Tracking issues](tracking-issues.md); renaming `labels.nightly` and deselecting the module are [the add-module skill's](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-add-module/SKILL.md#module-keys).
 
 Like the fuzzer starter it is written once and then repo-owned: the checks are repo-specific, so the starter carries the shared machinery and leaves the check steps to you.
 
@@ -26,20 +26,12 @@ A human cancelling an in-flight run files an issue too, because the report job c
 
 **No failure reports:** this stream passes no `artifacts-dir`, so the [fuzz-issue action](tracking-issues.md#the-action) never looks for failure reports: the issue body always points at the run log. A stream that DOES write per-failure reports wants the fuzzer module's [failure-report contract](fuzzer.md#the-failure-report-contract-v1) instead.
 
-## Module parameter (registration key)
-
-| Key in `.repo-platform.yml` | Meaning | Default |
-|---|---|---|
-| `labels.nightly` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | the nightly module's `tracking_label` default in [files.yml](../../files.yml) |
-
-The label is a registration key rather than a starter edit alone; [Tracking issues: the label is the stream](tracking-issues.md#the-label-is-the-stream) has the reasoning, the reserved-name rules, and why `labels.nightly` must differ from `labels.fuzzer`.
+**The `labels.nightly` key** names the stream's label ([the registration reference](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-new-project/references/registration.md#keys) has the key and its default). Why it is a registration key rather than a starter edit alone, the reserved-name rules, and why it must differ from `labels.fuzzer` are [Tracking issues: the label is the stream](tracking-issues.md#the-label-is-the-stream).
 
 ## Customizing the starter
 
 - **Replace the placeholder** in the `checks` job with the repository's own nightly checks. Until you do, the step is a green no-op that prints a warning; an uncustomized starter never files issues.
 
-- **Candidates:** everything the managed ci.yml does NOT run per-PR. Port the setup and run steps into the `checks` job, or add them as sibling jobs and extend the `report` job's `needs` list and red/green conditions to fold in each result. The report job already decides red or green from the `needs` results, so one green job cannot close an issue another job just filed.
+- **Moving real checks in,** as steps of `checks` or as sibling jobs the `report` job folds in, is [the add-module skill's worked example](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-add-module/references/worked-examples.md#adding-nightly-to-a-repo-that-already-has-fuzzer). A sibling that must be conditional folds its `skipped` state into one side of the report job's conditions explicitly, or the report job does nothing that night.
 
 - **A nightly.yml seeded before the release-gate hook existed** adds the `release-gate` sibling job itself (`uses: ./.github/workflows/release-gate.yml`), lists it in the report job's `needs`, and folds its result into both conditions as the current starter spells them. A starter is never rewritten, so no sync brings it.
-
-- **Keep sibling jobs unconditional:** a sibling skipped by its own `if:` reports `result == 'skipped'`, which matches neither the red nor the green condition, and the report job silently does nothing that night. If a sibling must be conditional, fold its `skipped` state into one side explicitly.

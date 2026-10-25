@@ -5,20 +5,15 @@ group: Start here
 
 # Fleet guidelines
 
-Conventions every managed repository follows, whether the file is managed by sync or repo-owned. Each entry names what enforces it; "review only" means nothing in CI does.
+Conventions every managed repository follows, whether the file is managed by sync or repo-owned. A rule a check enforces is the check's to state when it fires, so this page keeps the rest: each entry names what enforces it, and "review" means nothing in CI does.
 
 | Guideline | Enforced by |
 |---|---|
 | [Sticky PR comments](#sticky-pr-comments) | review |
-| [Pinned actions](#pinned-actions) | pinact and `tests/workflows/delivery_pins.test.ts` in repo-platform (landing); zizmor in every fleet push and PR run; Dependabot bumps the pins |
-| [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` step; the settings override layer (squash-only); review for the type |
-| [Plain ASCII punctuation](#plain-ascii-punctuation) | the `typography` step |
-| [Shell is a straight line of commands](#shell-is-a-straight-line-of-commands) | the `shell-complexity` step; repo-platform's own `shell-complexity` job judges its sync templates written |
+| [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check and the `commit-names` step for the grammar; review for the type |
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); review elsewhere |
-| [Managed vs repo-owned files](#managed-vs-repo-owned-files) | the managed files check; the writer's starter rule |
-| [Split files: the managed region](#split-files-the-managed-region) | the writer's split write; the managed files check |
 | [AGENTS.md keeps what the skills do not](#agentsmd-keeps-what-the-skills-do-not) | review |
-| [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`, and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)) |
+| [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md` for what earns a comment; the `main` ruleset for thread resolution; review for the reply |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [The boundary repairs or refuses](#the-boundary-repairs-or-refuses) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
@@ -29,168 +24,21 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Sticky PR comments
 
-**Rule:** a workflow that comments on a PR uses `marocchino/sticky-pull-request-comment`, pinned by full sha with the version tag in a trailing comment, `header: <repo>/<workflow-stem>`, upserting in place, and never swallowing a failure (no `continue-on-error`, no `|| true`).
-
-**The one exception:** composite actions alone may set `continue-on-error` on the step. They post under the calling job's token, which a fork PR grants no write, so their comment is a convenience sink beside the step summary.
-
-**Why:** one comment per workflow that edits itself on later runs, instead of a new comment per run.
-
-**How** (repo-platform's managed workflows use `repo-platform/<stem>`):
-
-```yaml
-- uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
-  with:
-    header: my-repo/auto-format
-    message: ...
-```
+**Rule:** a workflow that comments on a PR uses `marocchino/sticky-pull-request-comment` with `header: <repo>/<workflow-stem>` (repo-platform's managed workflows use `repo-platform/<stem>`), upserting in place and never swallowing a failure (no `continue-on-error`, no `|| true`): one comment per workflow that edits itself on later runs. A composite action alone may set `continue-on-error` on its comment step, since a fork PR grants its token no write.
 
 **Enforced by:** review.
 
-## Pinned actions
-
-**Rule:** every action outside this repository, the owner's other repositories included, is pinned by full commit sha with the release tag in a trailing comment, `uses: actions/checkout@<40-hex sha> # v7.0.1`. The same action carries the same sha everywhere repo-platform ships it.
-
-**Why:** a moving tag lets upstream change what the fleet runs without a PR anywhere. The sha freezes the code, the comment keeps the version readable, and Dependabot bumps both together.
-
-**Exceptions:**
-
-- **The platform's own channel:** `Vivswan/repo-platform/...@stable` references in the starters stay on the moving `stable` tag on purpose. It is the green-gated delivery channel ([build-provenance](platform/build-provenance.md)), so a pinned sha there would freeze the fleet on one green commit. Between platform files the reference is GitHub's `$/` path, which resolves at the running commit, so one run reads one commit ([one commit per run](platform/build-provenance.md#one-commit-per-run)).
-
-- **An action that publishes no version tags** is pinned to a branch commit with the branch in the comment, `uses: <owner>/<action>@<40-hex sha> # main`, the sha alone naming the version. [.github/pinact.yaml](../.github/pinact.yaml) skips each such action at a full sha only; the same action at a moving ref is judged like any other. Today that is `Vivswan/skills`, whose validate-skills action repo-platform's own ci.yml runs on its skills catalog.
-
-- **How `Vivswan/skills` is held:** [tests/workflows/ci_shape.test.ts](../tests/workflows/ci_shape.test.ts) holds its lines to one sha and the branch comment, which pinact reads as no comment.
-
-**Enforced by, in repo-platform (landing):** [pinact](https://github.com/suzuki-shunsuke/pinact) `run -check -verify-comment` in ci.yml's `actionlint` job, over this checkout and the two fleet trees the writer lands from `files/`.
-
-- **What pinact refuses:** a third-party ref that is not a full sha, a sha without a version comment (pinact code 005), and a comment whose tag GitHub does not resolve to that very sha (code 001). So a dangling sha, a dangling tag, and a stale comment all fail before the fleet receives them.
-
-- **What the delivery pins test refuses:** [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) refuses a numeric comment pinact reads as a version but does not verify (`# v7`, `# v7.0`, `# v7-beta`). Such a line passes pinact unverified, sha included.
-
-- **One sha per action repo-wide** is the same test's other refusal. Dependabot's grouped PR ([dependabot.yml](../files/base/.github/dependabot.yml)) moves every site it reaches at once, and the `files/` sources are outside its reach, so a bump PR here updates them by hand, commented examples included, and the test fails it until they match. The fleet receives them through the next sync.
-
-- **Which sites Dependabot reaches:** the entry lists `/.github/actions/*` beside `/`, since `/` alone reads `.github/workflows`, so the pins inside a composite action (the site-build hook) are bumped in the same PR.
-
-**Enforced by, in every managed repository:** [actions/zizmor](../actions/zizmor/action.yml) under the fleet policy.
-
-- **`unpinned-uses`:** hash-pin for everything but the platform's own actions, so a `@main` platform ref passes here where pinact refuses it.
-- **The online `impostor-commit`:** a sha outside the named repository's own history.
-
-**Not judged, on purpose:**
-
-- **A commented example pin** (the toolchain blocks of the managed `checks.yml`) never executes, so pinact does not read it. The delivery pins test still reads its comment shape and its sha, so an example spells the full version and rides the same sha too.
-
 ## Conventional Commits, squash-merged
 
-**Rule:** PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/) as [commitlint](https://commitlint.js.org/)'s config-conventional judges them, with one scope per subject. PRs squash-merge, so the PR title becomes the commit subject.
+**Rule:** the type names what the change does to behavior, not the shape of the diff: observable behavior that moved is a `fix`, a `feat`, or a `perf`, even when the work began as a refactor, and `refactor` means the existing tests pass unchanged. release-please hides `refactor` (with `chore`, `test`, and `docs`) from the release notes, so a fix titled that way vanishes from them.
 
-**Type:** the type names what the change does to behavior, not the shape of the diff. Observable behavior that moved for a user or an integrator makes it a `fix`, a `feat`, or a `perf`, even when the work began as a refactor or is mostly a move. `refactor` means the existing tests pass unchanged and no observable behavior moved.
-
-**Refused:**
-
-- a scope list (`fix(sync,writer): ...`: split the change or pick the scope that names it)
-- a Sentence-case description (`fix: Repair installer`)
-- a trailing period
-
-**Exempt:** merge, revert, reapply, fixup, squash, amend, and bare version-number subjects (commitlint's default ignores, applied to the subject line). No line has a length cap.
-
-**Why:** release-please derives versions and changelogs from the subjects. Its default changelog sections list `feat`, `fix`, and `perf` and hide `refactor`, `chore`, `test`, and `docs`, so a non-breaking fix titled `refactor` vanishes from the release notes. One merged fix titled that way is already missing from a fleet repository's release notes.
-
-**How:** `fix(sync): ...`, `feat(writer)!: ...`, `docs: ...`.
-
-**Enforced by:** one judge, actions/validate-commit-names.
-
-- **On the PR title:** the [`pr-title` check](settings.md#the-pr-title-ruleset) (pr-title module).
-- **On the commit subjects:** the `commit-names` step of fleet.yml's `standard-checks` job (in repo-platform's own ci.yml, a `commit-names` job).
-- **Squash-only merging with the PR title as subject:** the [settings override layer](settings.md), applied to every managed repository.
-
-**Review only, the type:** before landing, read the diff's shape against the title's purpose. A `refactor` whose existing test now expects a different output has the wrong title.
-
-## Plain ASCII punctuation
-
-**Rule:** no curly quotes, em-dashes, or invisible unicode in any text file git tracks or would track, outside vendored installs and build output (the action's directory skip list); an ignored path is never judged.
-
-**Why:** look-alike characters break greps, diffs, and agent edits that match on plain text.
-
-**How:** `"..."`, `'...'`, `-`; a file that must carry non-ASCII goes in `.typography-allow.local`.
-
-**Enforced by:** the `typography` step of `standard-checks` ([actions/check-typography](../actions/check-typography/action.yml)).
-
-## Shell is a straight line of commands
-
-**Rule:** an inline shell body (a workflow or composite-action `run:` step, a moon task `script`, a Containerfile `RUN`, a `*.sh`, `*.ps1`, or `*.bat` file, a tracked extensionless file whose shebang names a shell) may carry one level of a construct. A construct inside another, or a function at any depth, is a TypeScript script run by bun.
-
-- **Depth 1, allowed:** an `if`, `for`, `while`, `until`, `case`, `||` chain, or tested command substitution whose body holds only plain commands.
-- **Depth 2, refused:** any construct inside another: an `if` inside a `for`, a `case` inside an `if`, a `||` inside an `if` body, a tested `$(...)` inside a loop or an `if`.
-- **A function is refused at any depth:** a function is a script asking to be TypeScript.
-
-Refused:
-
-```bash
-for f in *; do
-  if [ -f "$f" ]; then cat "$f"; fi
-done
-```
-
-Allowed:
-
-```bash
-if [ -f x ]; then cat x; fi
-```
-
-**Why:** bash-only defects cost review rounds: `set -e` does not reach a failed command inside a tested `$(...)`, macOS ships bash 3.2, and `grep`'s locale and PCRE behaviour differ by runner. A script has types, a test, and one runtime.
-
-**How:** the constructs the depth rule counts, per dialect:
-
-| Dialect | Parsed by | Constructs |
-| --- | --- | --- |
-| bash, sh, zsh (an unset `shell:` is bash, or pwsh on a Windows `runs-on`) | mvdan/sh, shfmt's parser, as bash | `if`, `case`, `for`, `while`, `until`, a `\|\|` chain, a `$(...)` fed to `test`, `[`, or `[[`; a function is refused outright |
-| PowerShell (`pwsh`, `powershell`, `*.ps1`, `*.psm1`) | PowerShell's own parser, through `pwsh` | `if`, `switch`, `for`, `foreach`, `while`, `do`, `try`, a `\|\|` chain; a function is refused outright |
-| cmd (`shell: cmd`, `*.bat`, `*.cmd`) | tokens, after dropping `rem` and `::` lines: no parser exists for cmd | `if`, `for`, `\|\|`, counted by keyword rather than structure: one passes, two or more are refused, so a three-way `\|\|` chain is refused where bash passes it; a `goto`, a `:label`, or a `call :label` is refused outright |
-
-- **Allowed at any depth:** commands joined by newlines, `&&`, or pipes; redirects; `set -e` and `set -o pipefail`; assignments, `${X:-default}` included; `echo "k=$(v)" >> "$GITHUB_OUTPUT"`.
-- **cmd over-reports:** a token scan cannot tell a keyword inside a quoted argument from the real thing, so it counts both; the allow-list is the remedy.
-- **zsh parses as bash:** mvdan/sh's zsh support is experimental, so a zsh-only expansion is a "does not parse" finding; the allow-list is the remedy.
-- **pwsh must be on the runner** when a PowerShell body exists; the step fails naming it, never skips.
-- **Exempt:** a block that must stay shell goes in `.shell-complexity-allow.local` as `path # reason`, the reason mandatory; an entry whose file has no refused construct left fails as stale.
-- **Skipped and counted:** a file with the managed header (repo-platform owns it), and a yaml file that does not parse (the check warns). Vendored installs and build output are never read (`node_modules`, `vendor`, `third_party`, `dist`, `build`, `.venv`), nor the directories a caller names in the action's `skip` input (repo-platform names `files`, its sync templates, judged written).
-
-**Enforced by:** the `shell-complexity` step of fleet.yml's `standard-checks` job ([actions/check-shell-complexity](../actions/check-shell-complexity/action.yml)). repo-platform's own `shell-complexity` job runs the same action over this checkout and over the fleet trees its writer lands: the templates under `files/` are judged written, never raw, with the managed files included and each finding reported against its template.
+**Enforced by:** review of the type (read the diff's shape against the title's purpose before landing); the grammar is the `pr-title` check's and the `commit-names` step's, and squash-only merging with the PR title as subject is the [settings override layer](settings.md)'s.
 
 ## Markdown prose is never hard-wrapped
 
-**Rule:** one source line per paragraph, list item, or quote paragraph.
+**Rule:** one source line per paragraph, list item, or quote paragraph, so a one-word edit diffs as one line and a soft-wrapping viewer shows no ragged breaks.
 
-**Why:** a wrapped paragraph diffs as many changed lines for a one-word edit, and renders as ragged breaks in soft-wrapping viewers.
-
-**How:** write the paragraph on one line and let the viewer wrap it.
-
-**Enforced by:** `bun run wrap:check` in repo-platform; review elsewhere.
-
-
-## Managed vs repo-owned files
-
-**Rule:** a file whose header says `This file is managed by <owner>/repo-platform.` changes only through sync PRs, and so does the rendered `.github/settings.yml` (its header says `Generated by repo-platform - do not edit.`). A repo-owned starter (`checks.yml`, `post-green.yml`, `.github/settings.local.yml`, ...) is written once and never overwritten.
-
-**Why:** an edit to a managed file is overwritten by the next sync PR, so the change belongs in repo-platform.
-
-**How:** change the source under `files/` in repo-platform; the starters are the `class: starter` entries of its [files.yml](../files.yml).
-
-**Enforced by:**
-
-- **Managed files:** the managed files check ([actions/validate-managed-files](../actions/validate-managed-files/action.yml)), byte to byte against the recorded commit's write.
-- **Starters:** the writer, which writes one only when the path is absent and never touches it again ([platform/sync/writer.md](platform/sync/writer.md#classes)).
-
-## Split files: the managed region
-
-**Rule:** a split file (`.gitignore`, `.github/CODEOWNERS`, `AGENTS.md`, ...) is optional repo-owned content above a BEGIN marker line, managed content, an END marker line, and optional repo-owned content below. The ownership manifest declares the markers per file. Repo-owned content goes outside the region; inside it, the content stays exactly as rendered.
-
-**Why:** the sync rewrites every split file structurally instead of merging it: the fresh managed region, the repository's own sides byte-for-byte around it. A platform retraction can never eat a local side, and a local side can never resurrect retracted managed lines.
-
-**The cost of an edit INSIDE the region:** it is replaced on every sync, reported as a replaced local edit with its diff, and the PR is held for review.
-
-**How:** put local content above the BEGIN marker or below the END marker.
-
-**Enforced by:** the writer's split write ([write_split.ts](../.github/scripts/sync/writer/write_split.ts), the class table in [platform/sync/writer.md](platform/sync/writer.md#classes)); the managed files check on the region.
+**Enforced by:** `bun run wrap:check`, in repo-platform alone; review elsewhere.
 
 ## AGENTS.md keeps what the skills do not
 
@@ -200,15 +48,9 @@ if [ -f x ]; then cat x; fi
 
 ## Copilot review comments are advisory
 
-**Rule:** Copilot code review comments only on a defect it can demonstrate in the diff. Rejecting one is a valid outcome ([Copilot code review](settings.md#copilot-code-review) owns why): reply with the reason, then resolve the thread.
+**Rule:** rejecting a Copilot review comment is a valid outcome: reply with the reason, then resolve the thread ("Resolve conversation", or GraphQL `resolveReviewThread`). What earns a comment is the managed `.github/instructions/review.instructions.md` (source: `files/base/.github/instructions/review.instructions.md`); whether a review blocks is the settings layers' ([Copilot code review](settings.md#copilot-code-review)).
 
-**Why:** speculative hardening and unenforced style opinions cost review time without catching a bug.
-
-**How:** the rules Copilot reads are the managed `.github/instructions/review.instructions.md` (source: `files/base/.github/instructions/review.instructions.md` in repo-platform).
-
-**Resolving the thread** is the UI's "Resolve conversation", or GraphQL `resolveReviewThread`. It is required: the managed `main` ruleset sets `required_review_thread_resolution`, so an unresolved thread blocks the merge whatever the reply says.
-
-**Enforced by:** that file for what earns a comment (written to every repository), and the settings layers for whether a review blocks ([Copilot code review](settings.md#copilot-code-review)).
+**Enforced by:** review of the reply; the `main` ruleset's thread resolution blocks the merge on an unresolved thread whatever the reply says.
 
 ## No backwards-compatibility code
 
@@ -233,7 +75,7 @@ if [ -f x ]; then cat x; fi
 
 **Healing runs toward the declaration, never away from it.** A settings-apply tool heals the live settings when they drift from the user's yaml. Healing the yaml from the live settings is the forbidden direction. The comment on a healing step states the rule in one line and does not argue for it ([short comments](#short-comments)).
 
-**A tool's block inside a user's file splits by the same test.** User-supplied values in the block are the user's: a malformation is reported, naming the key and the fix, never healed. The shape is the tool's: a [schema migration](#no-backwards-compatibility-code) may rewrite the block. In a block the tool renders whole, an edit is [replaced](#split-files-the-managed-region) toward the declaration and the diff is reported. Nothing outside the block is touched.
+**A tool's block inside a user's file splits by the same test.** User-supplied values in the block are the user's: a malformation is reported, naming the key and the fix, never healed. The shape is the tool's: a [schema migration](#no-backwards-compatibility-code) may rewrite the block. In a block the tool renders whole, an edit is [replaced](platform/sync/writer.md#classes) toward the declaration and the diff is reported. Nothing outside the block is touched.
 
 **A failure that happens on its own needs no check in front of it.** The tool's own failure is the boundary's refusal. A missing package, a stale lockfile, a version conflict, or a wrong toolchain fails the build or the gate when it happens and is fixed then. A pre-check that restates the tool's failure is deleted. A test stays for behavior the code does not enforce.
 
@@ -243,50 +85,15 @@ The specimen: a 500-line pre-commit script comparing installed packages against 
 
 ## Short comments
 
-**Rule:** a comment says what the code cannot show, in one to three lines. A comment block or file header past its warn cap ([the caps table](#file-size-caps)) is a warning.
+**Rule:** a comment says what the code cannot show, in one to three lines; one grown into a paragraph is narration (delete it) or a workaround defense (fix the code), since the code is the single source of truth. A block that must stay long (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, the reason mandatory.
 
-**Why:** a comment grown into a paragraph is narration (delete it) or a workaround defense (fix the code); the code is the single source of truth.
-
-**How:** cut the comment to its constraint.
-
-**A block that must stay long** (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone. The reason is mandatory: a bare marker exempts nothing and warns itself.
-
-**Enforced by:** the comment caps of the `file-size` step ([file size caps](#file-size-caps)), warn only, never a failure.
+**Enforced by:** the comment caps of the `file-size` step ([file size caps](#file-size-caps)), warn only, never a failure; review for content.
 
 ## Action and workflow descriptions
 
-**Rule:** an action's `description:`, a workflow's header comment, and a `workflow_call` or `workflow_dispatch` input or output description open with one orienting sentence saying what the thing does, then carry one fact per short paragraph.
+**Rule:** an action's `description:`, a workflow's header comment, and a `workflow_call` or `workflow_dispatch` input or output description open with one orienting sentence, then carry one fact per paragraph of one to three sentences, under 70 words, with no semicolon chain.
 
-- **A literal block** (`|`) carries an action's description, so its paragraphs and lists keep their line breaks.
-- **A paragraph** is one to three sentences, under 70 words, with no semicolon chain.
-- **An enumerable set** is an indented `-` list.
-- **The caller's obligations** (permissions, inputs it must pass, PATH requirements) are stated plainly.
-- **An input or output description** is one sentence, or two short ones.
-- **A fact the code or a docs page owns** is one sentence plus the file or page name, never restated at length.
-- **No GitHub expression in any description:** GitHub evaluates an expression delimiter in action metadata at load time, so one failed every consumer's job.
-
-**Why:** the description is what the GitHub UI and an agent read first about the action, so a wall of text costs the reader there what it costs on a docs page.
-
-**How:** the yamllint action's description, before and after.
-
-```yaml
-description: >-
-  The fleet's YAML lint step: installs the yamllint pinned in this action's
-  requirements.txt and lints the caller's checkout in strict mode (warnings
-  fail too), honoring the repository's own .yamllint config. One
-  implementation for every managed repo, so the install, the version, and
-  the invocation cannot drift per repository.
-```
-
-```yaml
-description: |
-  Installs the yamllint pinned in this action's requirements.txt and lints the caller's checkout with it, the fleet's YAML lint step.
-
-  It lints in strict mode, so warnings fail too. The repository's own .yamllint config is honored.
-
-  One implementation for every managed repository, so the install, the version, and the
-  invocation cannot drift per repository.
-```
+**The shape:** an action's description in a literal block (`|`), an enumerable set as a `-` list, an input or output in one sentence, the caller's obligations (permissions, inputs, PATH) stated plainly, and a fact a file or page owns as one sentence plus its name.
 
 **Enforced by:** `tests/actions/action_metadata.test.ts` in repo-platform refuses an expression delimiter in any action's name or descriptions; review for the shape.
 
@@ -304,7 +111,7 @@ A hook is a tracked executable file, with `core.hooksPath` naming its folder, so
 
 A hook runs only the checks the repository's own toolchain provides (bun here; uv in a Python repository). A check that needs another runtime or a separately installed binary, yamllint, actionlint, and gitleaks among them, is CI's: the shipped workflow runs it on every pull request and push to main, for every repository alike.
 
-**Enforced by:** review; repo-platform ships no hook.
+**Enforced by:** review. repo-platform's own hook is the tracked [.githooks/pre-commit](../.githooks/pre-commit), which `bun run bootstrap` installs through `core.hooksPath` ([scripts/bootstrap.ts](../scripts/bootstrap.ts)); it runs the static checks and fails, and never writes.
 
 ## File size caps
 

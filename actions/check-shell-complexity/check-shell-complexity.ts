@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 // Shell may carry one level of a construct; a construct inside another, or a function at any depth, is a TypeScript
-// script run by bun. Policy: docs/fleet-guidelines.md.
+// script run by bun. The constructs counted per dialect are the list in action.yml's description.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

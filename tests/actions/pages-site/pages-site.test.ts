@@ -26,6 +26,7 @@ import {
   assertDocsLanding,
   assertIncludePages,
   copyInto,
+  ownEntries,
   resolvePrebuilt,
   stageIncludes,
   tierStrictLinks,
@@ -44,6 +45,7 @@ import {
   versionsIndex,
   versionTags,
 } from "../../../actions/pages-site/lib.ts";
+import { ownLinksPattern } from "../../../actions/shared/pages_site.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
 import { parseGithubOutput } from "../../shared/github_output.ts";
@@ -222,6 +224,147 @@ describe("planMount", () => {
   ])("%s", (_reason, tags, tiers, index) => {
     expect(planMount(docs, tags)).toEqual(tiers);
     expect(versionsIndex(tags)).toEqual(index);
+  });
+});
+
+describe("ownLinksPattern", () => {
+  // A user site shares its origin with every project site of the owner (https://owner.github.io/<repo>/), so "own"
+  // cannot be the origin: a user site's deploy failed its link check on a link to one of the owner's project sites,
+  // read as a missing page of the artifact. Own is what the artifact holds at its top level.
+  const site = { origin: "https://owner.github.io", basePath: "/" };
+  const pattern = new RegExp(
+    ownLinksPattern(site, [
+      "about",
+      "about.html",
+      "index",
+      "index.html",
+      "assets",
+      "caf\u00e9",
+      "my page",
+    ]),
+  );
+  const remap = (url: string) => url.replace(pattern, "file:///site$1");
+
+  test("a user site owns its root, its top-level entries and their extensionless twins, and nothing else on the origin", () => {
+    expect({
+      root: remap("https://owner.github.io/"),
+      bareOrigin: remap("https://owner.github.io"),
+      rootFragment: remap("https://owner.github.io#top"),
+      page: remap("https://owner.github.io/about"),
+      pageHtml: remap("https://owner.github.io/about.html?x=1"),
+      underDir: remap("https://owner.github.io/assets/a.css"),
+      sibling: remap("https://owner.github.io/cloud-project/"),
+      siblingDeep: remap("https://owner.github.io/cloud-project/docs#x"),
+      prefixOfAnEntry: remap("https://owner.github.io/about-us"),
+      otherOrigin: remap("https://other.github.io/about"),
+    }).toEqual({
+      root: "file:///site/",
+      bareOrigin: "file:///site",
+      rootFragment: "file:///site#top",
+      page: "file:///site/about",
+      pageHtml: "file:///site/about.html?x=1",
+      underDir: "file:///site/assets/a.css",
+      sibling: "https://owner.github.io/cloud-project/",
+      siblingDeep: "https://owner.github.io/cloud-project/docs#x",
+      prefixOfAnEntry: "https://owner.github.io/about-us",
+      otherOrigin: "https://other.github.io/about",
+    });
+  });
+
+  // lychee reads a link as its author spelled it and never normalizes it, so an entry matches every spelling of its
+  // name: the href a browser serializes, hex in either case, a kept character percent-encoded. A literal percent in
+  // a file name is `%25` in the only href that reaches it.
+  test("an entry is matched in every percent-spelling of its name, and in no other name", () => {
+    const spelled = new RegExp(
+      ownLinksPattern(site, [
+        "caf\u00e9",
+        "my page",
+        "a%20b",
+        "[guide].html",
+        "it's",
+        "a\\b.html",
+        "c\td",
+      ]),
+    );
+    expect({
+      nonAscii: spelled.test("https://owner.github.io/caf%C3%A9/missing"),
+      nonAsciiLowerHex: spelled.test("https://owner.github.io/caf%c3%a9/"),
+      rawNonAscii: spelled.test("https://owner.github.io/caf\u00e9/"),
+      spaced: spelled.test("https://owner.github.io/my%20page"),
+      literalPercent: spelled.test("https://owner.github.io/a%2520b/"),
+      literalPercentDecoded: spelled.test("https://owner.github.io/a%20b/"),
+      brackets: spelled.test("https://owner.github.io/[guide].html"),
+      bracketsEncoded: spelled.test("https://owner.github.io/%5Bguide%5D.html"),
+      apostrophe: spelled.test("https://owner.github.io/it's"),
+      apostropheEncoded: spelled.test("https://owner.github.io/it%27s"),
+      letterEncoded: spelled.test("https://owner.github.io/%6Dy%20page"),
+      otherCase: spelled.test("https://owner.github.io/My%20page"),
+      backslash: spelled.test("https://owner.github.io/a%5Cb.html"),
+      backslashAsSlash: spelled.test("https://owner.github.io/a/b.html"),
+      tab: spelled.test("https://owner.github.io/c%09d"),
+      tabDropped: spelled.test("https://owner.github.io/cd"),
+    }).toEqual({
+      nonAscii: true,
+      nonAsciiLowerHex: true,
+      rawNonAscii: false,
+      spaced: true,
+      literalPercent: true,
+      literalPercentDecoded: false,
+      brackets: true,
+      bracketsEncoded: true,
+      apostrophe: true,
+      apostropheEncoded: true,
+      letterEncoded: true,
+      otherCase: false,
+      backslash: true,
+      backslashAsSlash: false,
+      tab: true,
+      tabDropped: false,
+    });
+  });
+
+  test("a project site's base keeps a sibling project out and a glob-named entry is matched literally", () => {
+    const project = new RegExp(
+      ownLinksPattern({ origin: "https://owner.github.io", basePath: "/repo/" }, [
+        "[guide].html",
+        "docs",
+      ]),
+    );
+    expect({
+      ownDocs: project.test("https://owner.github.io/repo/docs/latest/"),
+      ownGlobNamed: project.test("https://owner.github.io/repo/[guide].html"),
+      base: project.test("https://owner.github.io/repo/"),
+      sibling: project.test("https://owner.github.io/repo2/docs/"),
+      userSiteRoot: project.test("https://owner.github.io/"),
+    }).toEqual({
+      ownDocs: true,
+      ownGlobNamed: true,
+      base: true,
+      sibling: false,
+      userSiteRoot: false,
+    });
+  });
+});
+
+describe("ownEntries", () => {
+  // Pages serves a page under its extensionless name, a directory never: a directory named like a page would own the
+  // name without the extension, and a sibling site of that name on a user site's origin would read as a missing page.
+  test("an html file owns its extensionless name too, a directory named like one does not", () => {
+    const site = temp.dir("own-entries-");
+    writeFileSync(join(site, "about.html"), "");
+    writeFileSync(join(site, "notes.HTM"), "");
+    writeFileSync(join(site, "favicon.ico"), "");
+    mkdirSync(join(site, "cloud-project.html"));
+    mkdirSync(join(site, "assets"));
+    expect(ownEntries(site)).toEqual([
+      "about",
+      "about.html",
+      "assets",
+      "cloud-project.html",
+      "favicon.ico",
+      "notes",
+      "notes.HTM",
+    ]);
   });
 });
 

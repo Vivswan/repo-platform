@@ -7,7 +7,7 @@ group: Start here
 
 Every repository in the fleet - repo-platform included - gates merges on a required status check named `all-green`: the check run of an ordinary CI job. This page covers the gate, the work that runs after it on main, and repo-platform's fleet-sync label from the PR's side; repo-platform's own post-green run and the gate's residuals are [platform/post-green.md](platform/post-green.md), and setting a repository up is [new-repo.md](new-repo.md).
 
-- **The job** needs every gating job, runs on `if: always()`, and judges the results through [re-actors/alls-green](https://github.com/re-actors/alls-green), a third-party action pinned by sha like every other ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)).
+- **The job** needs every gating job, runs on `if: always()`, and judges the results through [re-actors/alls-green](https://github.com/re-actors/alls-green), a third-party action pinned by sha like every other ([build-provenance.md](platform/build-provenance.md)).
 - **Where it lives:** the managed skeleton's job is in [files/base/.github/workflows/ci.yml](../files/base/.github/workflows/ci.yml); repo-platform's own is in its [ci.yml](../.github/workflows/ci.yml).
 
 **The judgment, whole:** every needed result must be `success`, or `skipped` for a job named in `allowed-skips`. Anything else (`failure`, `cancelled`, a skip the list does not name) fails the gate, and the step summary lists every job with its result.
@@ -48,7 +48,7 @@ Each entry is what you see, what it means, and what to do.
 **`pr-title` waiting (repos with the pr-title module).**
 
 - **Means:** its own required check, outside this gate; the workflow re-runs on open/edit/reopen/push ([the pr-title ruleset](settings.md#the-pr-title-ruleset)).
-- **Do:** fix the title to what commitlint accepts under config-conventional plus one scope ([the grammar](fleet-guidelines.md#conventional-commits-squash-merged): no scope list, no Sentence-case description, no trailing period).
+- **Do:** fix the title to what commitlint accepts under config-conventional plus one scope (no scope list, no Sentence-case description, no trailing period).
 
 ## What gates what
 
@@ -84,7 +84,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | --- | --- | --- |
 | `plan` | every event, the schedule included | a failed plan fails the job and skips every check step; its outputs gate ruff, knip, and every job beside |
 | `validate-managed-files` | every push and pull request | its report step fails in place on anything but a clean verdict; the sticky-comment steps after it run on `!cancelled()` |
-| `typography`, `file-size`, `shell-complexity`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps), [shell complexity](fleet-guidelines.md#shell-is-a-straight-line-of-commands)) |
+| `typography`, `file-size`, `shell-complexity`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps), [shell complexity](../actions/check-shell-complexity/action.yml)) |
 | `zizmor` | every push and pull request | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
 | `trivy` | every push and pull request | the blocking half of the [security scans](modules/security-scans.md) |
 | `ruff` | uv repositories once a sync has written `ruff.toml` | the [Python lint floor](modules/python.md) at a pinned ruff; a repository before its first sync stands down with a notice |
@@ -109,7 +109,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 - **Its action-load check:** the `action-load` job runs the shipped actions no other gating job runs, with inputs that change nothing, so GitHub's own loader judges their manifests here before `stable` moves; the guarantee and its one exception are [build-provenance.md](platform/build-provenance.md#the-delivery-ref-is-a-tag-on-main)'s.
 
-- **Its skills checks:** `validate-skills` (structure, offline) and `skills-discovery` (the real `npx skills` listing, so its own job) run [Vivswan/skills' validate-skills action](https://github.com/Vivswan/skills/tree/main/.github/actions/validate-skills) on this repository's own skills catalog. The action is pinned by sha like every other third-party action ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)).
+- **Its skills checks:** `validate-skills` (structure, offline) and `skills-discovery` (the real `npx skills` listing, so its own job) run [Vivswan/skills' validate-skills action](https://github.com/Vivswan/skills/tree/main/.github/actions/validate-skills) on this repository's own skills catalog. The action is pinned by sha like every other third-party action ([build-provenance.md](platform/build-provenance.md)).
 
 - **Its docs shape and wording check:** the `docs-check` job runs [Vale](https://vale.sh) over README.md and every page under docs/ with the skills repository's styles, read from a checkout at the validate-skills sha: a paragraph or list item over 70 words, or a word or phrase from the unslop and natural-writing skills' lists, fails the job, naming the line. The binary is a pinned release verified by sha256, as pinact is.
 
@@ -221,7 +221,7 @@ One label on the PR, before it merges.
 | Label | Syncs now | Notes |
 | --- | --- | --- |
 | `fleet-sync:public` | every public managed repo | the default choice |
-| `fleet-sync:all` | the whole fleet, the same run the weekly cron performs | private repos burn paid Actions minutes, so the weekly sync normally carries them |
+| `fleet-sync:all` | the whole fleet, the same run the weekly cron performs | private repos burn paid Actions minutes, so the weekly sync normally carries them; only when necessary, with the repository owner's approval |
 
 - **A direct push:** a commit no pull request produced carries no label and never syncs from its own merge.
 

@@ -106,6 +106,7 @@ gh run watch -R Vivswan/repo-platform <id> --exit-status
 | `plan: N rows` | how many repositories the run resolved |
 | `row i: unchanged` | the repo already holds every file; no PR |
 | `row i: PR opened` / `PR refreshed` | the sync PR is there, with its report |
+| `row i: branch pushed` | a branch dispatch's clean row: one commit on that branch, no PR |
 | `row i: failed, report filed in the target repository` | read the `[repo-platform] sync failed` issue in the repo |
 | `row i: failed before the target was resolved; re-run the workflow` | the run broke before reaching the repo |
 

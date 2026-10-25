@@ -422,6 +422,9 @@ jobs:
         uses: $/actions/lychee-verdict
         with:
           exit-code: "0"
+      # No inputs: it reads this repository's own coordinates from the runner's environment.
+      - id: site-urls
+        uses: $/actions/site-urls
       # Resolve mode over a stream no issue carries closes nothing, and the token could not.
       - id: fuzz-issue
         uses: $/actions/fuzz-issue

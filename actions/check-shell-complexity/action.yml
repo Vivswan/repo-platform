@@ -11,10 +11,23 @@ description: |
   Containerfile RUN instructions, *.sh, *.bash, *.zsh, *.ps1, *.psm1, *.bat, and *.cmd files, and a tracked
   extensionless file whose shebang names one of those shells.
 
-  - Parsers: mvdan/sh for bash, sh, and zsh; pwsh's own parser for PowerShell, so pwsh must be on PATH when a
-    PowerShell body exists (the step fails naming it otherwise).
-  - cmd is read by tokens after dropping rem lines: nesting is counted by keyword, a keyword inside a quoted argument
-    counts, and a three-way `||` chain is refused where bash passes it.
+  The constructs the depth rule counts, per dialect:
+
+  - bash, sh, zsh (an unset `shell:` is bash, or pwsh on a Windows `runs-on`), parsed by mvdan/sh as bash: `if`, `case`,
+    `for`, `while`, `until`, a `||` chain, a `$(...)` fed to `test`, `[`, or `[[`; a function is refused outright.
+  - PowerShell (`pwsh`, `powershell`, `*.ps1`, `*.psm1`), parsed by PowerShell's own parser through `pwsh`: `if`, `switch`,
+    `for`, `foreach`, `while`, `do`, `try`, a `||` chain; a function is refused outright.
+  - cmd (`shell: cmd`, `*.bat`, `*.cmd`), read by tokens after dropping `rem` and `::` lines since no parser exists for cmd:
+    `if`, `for`, `||`, counted by keyword, one passes and two or more are refused; a `goto`, a `:label`, or a `call :label`
+    is refused outright.
+
+  - Allowed at any depth: commands joined by newlines, `&&`, or pipes; redirects; `set -e` and `set -o pipefail`;
+    assignments, `${X:-default}` included; `echo "k=$(v)" >> "$GITHUB_OUTPUT"`.
+  - cmd over-reports: a token scan cannot tell a keyword inside a quoted argument from the real thing, so it counts
+    both, and a three-way `||` chain is refused where bash passes it; the allow-list is the remedy.
+  - zsh parses as bash: mvdan/sh's zsh support is experimental, so a zsh-only expansion is a "does not parse" finding;
+    the allow-list is the remedy.
+  - pwsh must be on PATH when a PowerShell body exists: the step fails naming it, never skips.
   - Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it). Warned and skipped: a yaml
     file the reader cannot parse.
   - Never read: vendored installs and build output (node_modules, vendor, third_party, dist, build, .venv), and the directories
@@ -22,7 +35,8 @@ description: |
 
   Findings are one table in the step summary and the log annotations on every event, plus a sticky PR comment on
   pull_request events, deleted when there is nothing to say (the calling job needs pull-requests: write for it).
-  Exemptions: `.shell-complexity-allow.local`, one path per line with a `# reason`.
+  Exemptions: `.shell-complexity-allow.local`, one `path # reason` per line, the reason mandatory; an entry whose file has
+  no refused construct left fails as stale.
 
 inputs:
   skip:

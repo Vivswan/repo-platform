@@ -1,6 +1,6 @@
 # Per-module reference: files, keys, companion steps, removal
 
-The roster and every file are in the platform's `files.yml`; the module docs (`docs/<module>.md` where one exists) are the depth. Managed files are rewritten on every sync, starters are written once and then repo-owned, split files carry the module's block inside their managed region.
+The roster and every file are in the platform's `files.yml`; the module docs (`docs/modules/<module>.md` where one exists) are the depth. Managed files are rewritten on every sync, starters are written once and then repo-owned, split files carry the module's block inside their managed region.
 
 ## Base (every managed repo, no module needed)
 

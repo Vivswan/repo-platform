@@ -15,6 +15,9 @@ One version per toolchain, fleet-wide, spelled once: a version dotfile under `fi
 
 bun is the one pinned toolchain. uv floats on its setup action's default, and the rust blocks' setup action installs the toolchain the repository's `rust-toolchain.toml` names (stable when there is none), so rust version selection stays repository-owned.
 
+- **Dependabot's bun PRs** install with the lockfile Dependabot wrote; a PR whose frozen install fails is fixed by hand, or by re-running Dependabot on it.
+- **A known limitation, accepted:** Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2 ([dependabot-core#15848](https://github.com/dependabot/dependabot-core/issues/15848)), so a Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
+
 The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.txt` pins the yamllint the action installs, and dependabot's pip entry for that directory bumps it. The action is the one yamllint gate; this repository runs no yamllint locally, since the hook runs bun's own checks alone (fleet-guidelines, "Pre-commit hooks only check").
 
 The fleet's ruff step is not a module pin either: the version is spelled inline, `uvx ruff@<version>`, in fleet.yml's `ruff` step and in the uv starters' format lines, and tests/files/ruff_floor.test.ts holds every site to one version. It is bumped by hand, never by the refresh: a ruff minor can add rules to a selected family, so a bump changes the [Python lint floor](modules/python.md) and is reviewed as one.
