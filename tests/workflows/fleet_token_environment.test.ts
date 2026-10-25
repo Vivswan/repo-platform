@@ -5,11 +5,13 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ContextAccess, type Expr, IndexAccess, Literal } from "@actions/expressions/ast";
 import { parse as parseYaml } from "yaml";
 import {
   FLEET_ENVIRONMENT as ENVIRONMENT,
   FLEET_SECRET as SECRET,
 } from "../../.github/scripts/fleet/require_fleet_token.ts";
+import { parseExpression, subexpressions } from "../shared/github_expression.ts";
 
 const root = join(import.meta.dir, "../..");
 const workflowsDir = ".github/workflows";
@@ -38,9 +40,6 @@ const workflows = readdirSync(join(root, workflowsDir))
     doc: parseYaml(readFileSync(join(root, workflowsDir, name), "utf8")) as Workflow,
   }));
 
-const NAMED_SECRET =
-  /\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)\b|\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\])/gi;
-
 /** Every string in the node, keys included, depth first. */
 function strings(node: unknown): string[] {
   if (typeof node === "string") {
@@ -54,22 +53,45 @@ function strings(node: unknown): string[] {
   return [];
 }
 
-/** Whether an expression anywhere in the nodes reads the secret. Fails closed: a secrets read that is not a literal
- *  OTHER name counts as this one. Actions ignores case, and a workflow-level `env` is every job's. */
+function isSecretsContext(expr: Expr): boolean {
+  return expr instanceof ContextAccess && expr.name.lexeme.toLowerCase() === "secrets";
+}
+
+/** Whether the expression reads the secret: `secrets.<name>` by dot or literal bracket, in any case (Actions ignores
+ *  it). Fails closed: a read of `secrets` under no literal key (`toJSON(secrets)`, `secrets[inputs.name]`) counts as
+ *  this one. */
+function readsSecretIn(expr: Expr): boolean {
+  if (expr instanceof IndexAccess && isSecretsContext(expr.expr)) {
+    const key = expr.index instanceof Literal ? expr.index.literal.coerceString() : null;
+    return key === null || key.toUpperCase() === SECRET;
+  }
+
+  return isSecretsContext(expr) || subexpressions(expr).some(readsSecretIn);
+}
+
+/** Whether a `${{ }}` expression anywhere in the nodes reads the secret, as the runner parses it: a `'secrets.X'`
+ *  inside a string literal is text. A workflow-level `env` is every job's. */
 function readsSecret(...nodes: unknown[]): boolean {
   return strings(nodes)
-    .flatMap((text) => [...text.matchAll(/\$\{\{([\s\S]*)\}\}/g)].map(([, e]) => e))
-    .some((expression) => {
-      let named = false;
-      const rest = expression.replace(NAMED_SECRET, (_, dot, bracket) => {
-        if ((dot ?? bracket).toUpperCase() === SECRET) {
-          named = true;
-        }
-        return "";
-      });
-      return named || /\bsecrets\b/i.test(rest);
-    });
+    .flatMap((text) => [...text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map(([, source]) => source))
+    .some((source) => readsSecretIn(parseExpression(source).tree));
 }
+
+// The reader is GitHub's own parser, so `'secrets.X'` inside a string literal is text, not a read, and a read of
+// `secrets` under a key the expression computes, or under none, fails closed.
+describe("readsSecret", () => {
+  test.each<[string, boolean]>([
+    [`\${{ format('secrets.${SECRET}') }}`, false],
+    [`\${{ secrets.${SECRET} }}`, true],
+    [`\${{ secrets['${SECRET.toLowerCase()}'] }}`, true],
+    ["${{ secrets.GITHUB_TOKEN }}", false],
+    ["${{ toJSON(secrets) }}", true],
+    ["${{ secrets[inputs.name] }}", true],
+    [`\${{ github.ref }} \${{ secrets.${SECRET} }}`, true],
+  ])("%s reads it: %p", (text, expected) => {
+    expect(readsSecret({ env: { X: text } })).toBe(expected);
+  });
+});
 
 describe(`the ${SECRET} readers`, () => {
   const readers = workflows.flatMap(({ rel, doc }) =>

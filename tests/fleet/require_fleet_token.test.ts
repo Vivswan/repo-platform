@@ -1,5 +1,6 @@
 // GitHub hands a job that cannot read the fleet PAT the empty string, never a failure, so this guard is the one
-// place an absent token turns red before a fleet write.
+// place an absent token turns red before a fleet write. The runner unescapes %25 back to %, so the expected error
+// line carries the recipe's query string with %25 where a raw % would misparse the workflow command.
 
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -15,8 +16,6 @@ const ROOT = join(import.meta.dir, "../..");
 const SCRIPT = ".github/scripts/fleet/require_fleet_token.ts";
 const PATH = process.env.PATH ?? "";
 const ERROR_LINE = new RegExp(
-  // One ::error:: line naming the secret, the environment, and the recipe. The runner unescapes %25 back to %, so
-  // the recipe's own query string reaches the log intact where a raw % would misparse the workflow command.
   `^::error::[^\\n]*\\b${FLEET_SECRET}\\b[^\\n]*\\b${FLEET_ENVIRONMENT}\\b[^\\n]*` +
     `${RegExp.escape(PAT_RECIPE_URL.replaceAll("%", "%25"))}[^\\n]*\\n$`,
 );

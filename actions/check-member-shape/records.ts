@@ -1,15 +1,20 @@
 // The record model the member-shape rules judge: every record (an interface body, a class body, a type literal, an
-// enum body) and every block of adjacent module-level `const` declarations, each item with the comments that belong
-// to it. The TypeScript is read by oxc-parser (TypeScript 7 is the native port and exposes no in-process compiler
-// API); line numbers come from offsets through one line-start table.
+// enum body) and every block of adjacent module-level `const` statements, each member or declarator with the comments
+// that belong to it. The TypeScript is read by oxc-parser (TypeScript 7 is the native port and exposes no in-process
+// compiler API); line numbers come from offsets through one line-start table.
 
 import type {
+  ArrayExpression,
+  BlockStatement,
   ClassBody,
   Node,
+  ObjectExpression,
   Program,
+  StaticBlock,
   TSEnumBody,
   TSInterfaceBody,
   TSTypeLiteral,
+  VariableDeclarator,
 } from "@oxc-project/types";
 import { type Comment as OxcComment, parseSync, Visitor } from "oxc-parser";
 
@@ -30,12 +35,12 @@ export interface Comment {
   endLine: number;
 }
 
-/** A member of a record or one `const` statement of a block. */
+/** A member of a record or one declarator of a block's `const` statements. */
 export interface Item {
-  /** Field or method; a `const` statement is a field. */
+  /** Field or method; a module constant is a field. */
   kind: MemberKind;
 
-  /** The item's own first line: its `export` keyword or first decorator, never its comment. */
+  /** The item's own first line: its `export` keyword or first decorator, never its comment; a later declarator's own. */
   line: number;
 
   /** The line its last character sits on. */
@@ -43,6 +48,9 @@ export interface Item {
 
   /** The comments above the item that belong to it, top to bottom, whatever blank lines sit between. */
   above: Comment[];
+
+  /** The comments on the item's own lines, from its first to its last, outside any nested construct that owns its own. */
+  inside: Comment[];
 
   /** A comment after the item on its last line belongs to it, never to the item below. */
   trailing: Comment | null;
@@ -62,6 +70,24 @@ export interface Source {
 
 type RecordBody = TSInterfaceBody | ClassBody | TSTypeLiteral | TSEnumBody;
 type ModuleStatement = Program["body"][number];
+
+/** A construct whose comments are its own, never an enclosing member's: a record body (its members are judged on
+ *  their own), a function body (code comments, not a doc comment), an object or array literal (its entries'). */
+type Nested = RecordBody | BlockStatement | StaticBlock | ObjectExpression | ArrayExpression;
+
+/** What the attribution reads of a member or a declarator: its kind and the offsets its own lines span, its
+ *  delimiter included. */
+interface Span {
+  kind: MemberKind;
+  start: number;
+  end: number;
+}
+
+/** One `const` statement with its declarators, each a constant of its own. */
+interface ConstStatement {
+  node: ModuleStatement;
+  declarators: VariableDeclarator[];
+}
 
 /** Each record body's node type, as a finding's block names it. */
 const RECORD_KINDS: Readonly<Record<RecordBody["type"], RecordKind>> = {
@@ -122,33 +148,47 @@ function membersOf(body: RecordBody): Node[] {
   return "members" in body ? body.members : body.body;
 }
 
-/** Every record body in the tree, nested ones included, in visiting order. */
-function recordBodies(program: Program): RecordBody[] {
-  const found: RecordBody[] = [];
-  const collect = (body: RecordBody): void => {
-    found.push(body);
+function isRecordBody(node: Nested): node is RecordBody {
+  return node.type in RECORD_KINDS;
+}
+
+/** Every record body and every other comment-owning construct in the tree, in visiting order. */
+function nestedOf(program: Program): Nested[] {
+  const found: Nested[] = [];
+  const collect = (node: Nested): void => {
+    found.push(node);
   };
   new Visitor({
     TSInterfaceBody: collect,
     ClassBody: collect,
     TSTypeLiteral: collect,
     TSEnumBody: collect,
+    BlockStatement: collect,
+    StaticBlock: collect,
+    ObjectExpression: collect,
+    ArrayExpression: collect,
   }).visit(program);
   return found;
 }
 
-function isConstStatement(node: Node): boolean {
+/** The statement as a `const` statement, or null for any other. */
+function constStatement(node: ModuleStatement): ConstStatement | null {
   const declaration = node.type === "ExportNamedDeclaration" ? node.declaration : node;
-  return declaration?.type === "VariableDeclaration" && declaration.kind === "const";
+  if (declaration?.type !== "VariableDeclaration" || declaration.kind !== "const") {
+    return null;
+  }
+
+  return { node, declarators: declaration.declarations };
 }
 
 /** The maximal runs of adjacent `const` statements in the module body. */
-function constRuns(program: Program): ModuleStatement[][] {
-  const runs: ModuleStatement[][] = [];
-  let run: ModuleStatement[] = [];
+function constRuns(program: Program): ConstStatement[][] {
+  const runs: ConstStatement[][] = [];
+  let run: ConstStatement[] = [];
   for (const statement of program.body) {
-    if (isConstStatement(statement)) {
-      run.push(statement);
+    const constant = constStatement(statement);
+    if (constant !== null) {
+      run.push(constant);
       continue;
     }
 
@@ -165,24 +205,53 @@ function constRuns(program: Program): ModuleStatement[][] {
   return runs;
 }
 
-/** A class member's span starts at its first decorator. */
-function startOf(node: Node): number {
-  const decorators = "decorators" in node ? (node.decorators ?? []) : [];
-  return Math.min(node.start, ...decorators.map((decorator) => decorator.start));
+/** An accessor is a field wherever it is declared (a class, an interface, a type literal): it stands for a value, and
+ *  its doc reads as a field's does. */
+function memberKind(node: Node): MemberKind {
+  const kind = "kind" in node ? node.kind : undefined;
+  if (kind === "get" || kind === "set") {
+    return "field";
+  }
+
+  return METHOD_TYPES.has(node.type) ? "method" : "field";
 }
 
-/** Where an item's own declaration begins past its prefix (decorators, modifiers, `export`): a comment before it
- *  inside the item is the item's, misplaced. */
-function prefixEnd(node: Node): number {
-  if ("key" in node) {
-    return node.key.start;
-  }
+/** The end of the `,` or `;` that follows an offset past whitespace and comments, or the offset itself: oxc ends an
+ *  enum member or a declarator before its separator, and a comment between the two is the member's. */
+function delimiterEnd(text: string, comments: OxcComment[], end: number): number {
+  let at = end;
+  let comment: OxcComment | undefined;
+  do {
+    while (/\s/.test(text.charAt(at))) {
+      at += 1;
+    }
+    comment = comments.find((candidate) => candidate.start === at);
+    at = comment?.end ?? at;
+  } while (comment !== undefined);
 
-  if (node.type === "ExportNamedDeclaration" && node.declaration !== null) {
-    return node.declaration.start;
-  }
+  return text.charAt(at) === "," || text.charAt(at) === ";" ? at + 1 : end;
+}
 
-  return startOf(node);
+/** A class member's span starts at its first decorator. */
+function memberSpan(node: Node): Span {
+  const decorators = "decorators" in node ? (node.decorators ?? []) : [];
+  return {
+    kind: memberKind(node),
+    start: Math.min(node.start, ...decorators.map((decorator) => decorator.start)),
+    end: node.end,
+  };
+}
+
+/** Each declarator of a `const` statement as a constant of its own: the first spans from the statement's start (its
+ *  `export` or `const` keyword), the last to the statement's end, so the statement's comments and its line are the
+ *  first's. */
+function declaratorSpans({ node, declarators }: ConstStatement): Span[] {
+  const last = declarators.length - 1;
+  return declarators.map((declarator, index) => ({
+    kind: "field",
+    start: index === 0 ? node.start : declarator.start,
+    end: index === last ? node.end : declarator.end,
+  }));
 }
 
 /** The comments directly above `line` (or opening on it) with no blank line among them, from the end of
@@ -209,6 +278,10 @@ interface Gap {
   above: Comment[];
 }
 
+function within(inner: { start: number; end: number }, from: number, to: number): boolean {
+  return inner.start >= from && inner.end <= to;
+}
+
 /** The comments lying within two offsets, by their lines. */
 function commentsWithin(
   comments: OxcComment[],
@@ -217,11 +290,25 @@ function commentsWithin(
   table: LineTable,
 ): Comment[] {
   return comments
-    .filter((comment) => comment.start >= from && comment.end <= to)
+    .filter((comment) => within(comment, from, to))
     .map((comment) => ({
       line: table.lineOf(comment.start),
       endLine: table.endLineOf(comment.end),
     }));
+}
+
+/** The comments on a span's own lines: within it, outside any construct nested in it that owns its own. */
+function commentsInside(
+  comments: OxcComment[],
+  nested: Nested[],
+  span: Span,
+  table: LineTable,
+): Comment[] {
+  const inner = nested.filter((node) => within(node, span.start, span.end));
+  const owned = comments.filter(
+    (comment) => !inner.some((node) => within(comment, node.start, node.end)),
+  );
+  return commentsWithin(owned, span.start, span.end, table);
 }
 
 /** The comments between two offsets. `from` is the end of the item above, or of what opens the block: a brace, the
@@ -246,51 +333,40 @@ interface Attribution {
   opens: "brace" | "statement";
 }
 
-/** An accessor is a field wherever it is declared (a class, an interface, a type literal): it stands for a value, and
- *  its doc reads as a field's does. */
-function memberKind(node: Node): MemberKind {
-  const kind = "kind" in node ? node.kind : undefined;
-  if (kind === "get" || kind === "set") {
-    return "field";
-  }
-
-  return METHOD_TYPES.has(node.type) ? "method" : "field";
-}
-
 /** The items of one block, with each comment given to the item it belongs to: a comment on the line an item ends on
- *  trails that item; every other comment between two items, or inside the lower item's prefix, is the lower item's.
- *  A blank-separated comment above a const block's first item is the group's tell, not the item's. */
+ *  trails that item; every other comment between two items is the lower item's, and one on an item's own lines is
+ *  that item's. A blank-separated comment above a const block's first item is the group's tell, not the item's. */
 function attribute(
-  nodes: Node[],
+  spans: Span[],
   comments: OxcComment[],
+  nested: Nested[],
   table: LineTable,
   { openAt, closeAt, opens }: Attribution,
 ): Item[] {
-  const items: Item[] = nodes.map((node) => ({
-    kind: memberKind(node),
-    line: table.lineOf(startOf(node)),
-    endLine: table.endLineOf(node.end),
+  const items: Item[] = spans.map((span) => ({
+    kind: span.kind,
+    line: table.lineOf(span.start),
+    endLine: table.endLineOf(span.end),
     above: [],
+    inside: commentsInside(comments, nested, span, table),
     trailing: null,
   }));
-  nodes.forEach((node, index) => {
-    const from = index === 0 ? openAt : nodes[index - 1].end;
-    const gap = gapComments(comments, from, startOf(node), table);
+  spans.forEach((span, index) => {
+    const from = index === 0 ? openAt : spans[index - 1].end;
+    const gap = gapComments(comments, from, span.start, table);
     if (gap.trailing !== null && index > 0) {
       items[index - 1].trailing = gap.trailing;
     }
 
     const first = index === 0;
-    const above =
+    items[index].above =
       first && opens === "statement" ? contiguousAbove(gap.above, items[0].line) : gap.above;
-    const misplaced = commentsWithin(comments, startOf(node), prefixEnd(node), table);
-    items[index].above = [...above, ...misplaced];
     if (first && opens === "brace" && gap.trailing !== null) {
       items[0].above.unshift(gap.trailing);
     }
   });
   const last = items.length - 1;
-  items[last].trailing ??= gapComments(comments, nodes[last].end, closeAt, table).trailing;
+  items[last].trailing ??= gapComments(comments, spans[last].end, closeAt, table).trailing;
   return items;
 }
 
@@ -310,23 +386,29 @@ export function parseSource(relPath: string, text: string): Source | null {
   const table = new LineTable(text);
   const comments = parsed.comments;
   const program = parsed.program;
-  const records: Block[] = recordBodies(program)
+  const nested = nestedOf(program);
+  const toDelimiter = (span: Span): Span => ({
+    ...span,
+    end: delimiterEnd(text, comments, span.end),
+  });
+  const records: Block[] = nested
+    .filter(isRecordBody)
     .filter((body) => membersOf(body).length > 0)
     .map((body) => ({
       kind: RECORD_KINDS[body.type],
-      items: attribute(membersOf(body), comments, table, {
+      items: attribute(membersOf(body).map(memberSpan).map(toDelimiter), comments, nested, table, {
         openAt: body.start,
         closeAt: body.end,
         opens: "brace",
       }),
     }));
   const constBlocks: Block[] = constRuns(program).map((run) => {
-    const index = program.body.indexOf(run[0]);
+    const index = program.body.indexOf(run[0].node);
     const before = index === 0 ? program.hashbang : program.body[index - 1];
-    const after = program.body[program.body.indexOf(run[run.length - 1]) + 1];
+    const after = program.body[program.body.indexOf(run[run.length - 1].node) + 1];
     return {
       kind: "const block",
-      items: attribute(run, comments, table, {
+      items: attribute(run.flatMap(declaratorSpans).map(toDelimiter), comments, nested, table, {
         openAt: before?.end ?? 0,
         closeAt: after?.start ?? text.length,
         opens: "statement",

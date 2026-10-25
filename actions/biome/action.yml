@@ -5,8 +5,8 @@ description: |
 
   - Configuration: the repository's own biome.json, whatever it extends; the floor a managed biome.json carries
     applies last, so a rule it sets stays set, and the local layer adds beneath it.
-  - The bypasses are a `// biome-ignore lint/<group>/<rule>: <reason>` on the line, or a path override in the
-    repository's own biome layer.
+  - The one bypass is a path override in the repository's own biome layer, with its reason beside it; a finding is
+    split or raised there, never silenced inline with a biome-ignore comment.
   - A finding fails the step; the caller installs nothing for it, since the action brings its own biome.
 
 runs:

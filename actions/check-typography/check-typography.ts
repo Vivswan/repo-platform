@@ -137,7 +137,7 @@ const CONTROL_NAMES: Record<number, string> = {
   13: "carriage return (use LF line endings)",
 };
 
-/** Single look-alikes by name, checked before the ranges. */
+/** The single confusable characters by name, checked before the ranges. */
 const NAMES: Record<number, string> = {
   65292: 'full-width comma (use ", " with a trailing space)',
   160: "non-breaking space (use a regular space)",

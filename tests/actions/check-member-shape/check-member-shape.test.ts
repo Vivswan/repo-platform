@@ -1,7 +1,9 @@
 // The four rules ride on oxc-parser's node vocabulary and comment spans (external: a bump that renamed a body node or
 // dropped a comment's span would judge nothing, green), the readability principle that a comment-free record is never
 // asked for structure (the controls), and the attribution conventions no source declares: a trailing comment belongs
-// to its line's item, a blank-separated comment above a const block's first item is the group's tell.
+// to its line's item, a comment on an item's own lines is that item's unless a nested record, function body, or
+// literal owns it, each declarator of a const statement is a constant, and a blank-separated comment above a const
+// block's first item is the group's tell.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -218,6 +220,31 @@ describe("the rules, per record kind and construct", () => {
       "a comment between export and const is the constant's, misplaced",
       "export /* A. */ const A = 1;\n",
       ["1: one-line-comment"],
+    ],
+    [
+      "a comment between const and the name is the constant's, misplaced",
+      "const /* A. */ A = 1;\n",
+      ["1: one-line-comment"],
+    ],
+    [
+      "a comment inside a member's span (after its type, before its `;`) is the member's: on its line, so a finding, and the next is bare and packed",
+      "interface A {\n  a: string /* A. */;\n  b: string;\n}\n",
+      ["2: one-line-comment", "3: all-or-none", "3: blank-line-between-members"],
+    ],
+    [
+      "control: a comment inside a nested record is that record's, never the enclosing field's, and a comment inside a method body is code, not a doc comment",
+      "interface A {\n  a: {\n    // x\n    x: 1;\n    y: 2;\n  };\n  b: string;\n}\nclass C {\n  m(): void {\n    // step\n  }\n  x = 1;\n}\n",
+      ["5: all-or-none", "5: blank-line-between-members"],
+    ],
+    [
+      "an enum member runs to its comma: a comment before the comma on a later line is the member's, so a finding, and the next is bare and packed",
+      "enum E {\n  A\n  /* A. */,\n  B,\n}\n",
+      ["3: one-line-comment", "4: all-or-none", "4: blank-line-between-members"],
+    ],
+    [
+      "each declarator of a const statement is a constant: the statement's comment is the first's, glued to the bare second",
+      "/** A. */\nconst A = 1,\n  B = 2;\n",
+      ["2: constant-spacing", "3: all-or-none"],
     ],
     [
       "a comment on a record's opening-brace line is the first member's: on its line, so a finding, and the next is bare and packed",

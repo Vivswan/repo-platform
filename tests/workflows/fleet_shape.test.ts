@@ -6,20 +6,18 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Lexer, Parser } from "@actions/expressions";
 import {
   ContextAccess,
   type Expr,
   FunctionCall,
-  Grouping,
   IndexAccess,
   Literal,
   Logical,
-  Unary,
 } from "@actions/expressions/ast";
 import { TokenType } from "@actions/expressions/lexer";
 import { parse as parseYaml } from "yaml";
 import { RELEASE_BRANCH_PREFIX } from "../../actions/shared/platform.ts";
+import { parseExpression, subexpressions } from "../shared/github_expression.ts";
 
 interface Step {
   id?: string;
@@ -52,12 +50,6 @@ const checksJob = fleet.jobs[CHECKS_JOB];
 const checkSteps = checksJob?.steps ?? [];
 const label = (step: Step) => step.id ?? step.name ?? step.uses ?? "";
 const PLATFORM_ACTION_PREFIX = "$/actions/";
-const RUNNER_FUNCTIONS = ["success", "failure", "cancelled", "always", "hashFiles"].map((name) => ({
-  name,
-  minArgs: 0,
-  maxArgs: 255,
-}));
-const CONTEXTS = ["github", "needs", "steps", "inputs", "matrix", "secrets"];
 
 /** The action a `uses:` names by its `$/` path, or undefined for any other reference. */
 function platformAction(uses: string | undefined): string | undefined {
@@ -72,16 +64,13 @@ function unwrapped(condition: string | undefined): string {
 }
 
 /** The top-level conjuncts of a condition as GitHub's own parser reads them (so an `&&` inside a string literal or a
- *  parenthesis splits nothing), each as its source text; a condition that is not an `&&` chain is one clause. The
- *  parser is told the runner's own names (its status functions and hashFiles) and the contexts, or a valid condition
- *  fails to parse. */
+ *  parenthesis splits nothing), each as its source text; a condition that is not an `&&` chain is one clause. */
 function clausesOf(condition: string | undefined): string[] {
   const source = unwrapped(condition);
   if (source === "") {
     return [""];
   }
-  const { tokens: lexed } = new Lexer(source).lex();
-  const tree = new Parser(lexed, CONTEXTS, RUNNER_FUNCTIONS).parse();
+  const { tokens: lexed, tree } = parseExpression(source);
   const conjuncts =
     tree instanceof Logical && tree.operator.type === TokenType.AND ? tree.args.length : 1;
   const tokens = lexed.filter((token) => token.type !== TokenType.EOF);
@@ -135,25 +124,15 @@ function headRefPrefixes(expr: Expr): string[] {
     if (testsHeadRef && prefix instanceof Literal) {
       return [prefix.literal.coerceString()];
     }
-    return expr.args.flatMap(headRefPrefixes);
   }
-  if (expr instanceof Logical) {
-    return expr.args.flatMap(headRefPrefixes);
-  }
-  if (expr instanceof Grouping) {
-    return headRefPrefixes(expr.group);
-  }
-  if (expr instanceof Unary) {
-    return headRefPrefixes(expr.expr);
-  }
-  return [];
+
+  return subexpressions(expr).flatMap(headRefPrefixes);
 }
 
 /** The head-ref prefixes a condition tests, read by GitHub's own parser so spacing, quoting, and bracket access read
  *  as GitHub reads them. */
 function prefixesOf(condition: string | undefined): string[] {
-  const { tokens } = new Lexer(unwrapped(condition)).lex();
-  return headRefPrefixes(new Parser(tokens, CONTEXTS, RUNNER_FUNCTIONS).parse());
+  return headRefPrefixes(parseExpression(unwrapped(condition)).tree);
 }
 
 describe("fleet.yml", () => {

@@ -20,8 +20,9 @@ export interface Finding {
   rule: Rule;
 }
 
-/** Whether an item has a comment at all, above it or trailing it. */
-const carries = (item: Item): boolean => item.above.length > 0 || item.trailing !== null;
+/** Whether an item has a comment at all: above it, on its own lines, or trailing it. */
+const carries = (item: Item): boolean =>
+  item.above.length > 0 || item.inside.length > 0 || item.trailing !== null;
 
 /** The items the comment-shape rules judge. */
 const isField = (item: Item): boolean => item.kind === "field";
@@ -56,7 +57,7 @@ function blankLineBetweenMembers(block: Block, lines: string[]): number[] {
 }
 
 /** A field's comment is one comment of one line directly above it: not stacked, not a multi-line block, not parted
- *  from the field by a blank line, and not trailing the field on its last line. */
+ *  from the field by a blank line, not on the field's own lines, and not trailing the field on its last line. */
 function oneLineComment(block: Block): number[] {
   const found: number[] = [];
   for (const item of block.items.filter(isField)) {
@@ -64,12 +65,13 @@ function oneLineComment(block: Block): number[] {
       found.push(item.trailing.line);
     }
 
-    if (item.above.length === 0) {
+    const comments = [...item.above, ...item.inside];
+    if (comments.length === 0) {
       continue;
     }
 
-    const [comment] = item.above;
-    const oneLine = item.above.length === 1 && comment.line === comment.endLine;
+    const [comment] = comments;
+    const oneLine = comments.length === 1 && comment.line === comment.endLine;
     if (!(oneLine && comment.endLine === item.line - 1)) {
       found.push(comment.line);
     }

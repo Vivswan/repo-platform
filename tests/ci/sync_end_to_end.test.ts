@@ -38,16 +38,18 @@ const droppedMirrorNote = (path: string) =>
 const HASH_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 const HASH_END = "# END REPO-PLATFORM MANAGED";
 const OLD_REGION = `${HASH_BEGIN}\n# old managed region\nnode_modules/\n${HASH_END}\n`;
-const BUN_REGION_PREFIX =
-  // The region up to the END marker: the base, the three OS blocks every repository takes, then the module blocks in
-  // files.yml order; the upstream bodies arrive normalized (`Icon[\r]`, trailing spaces).
-  `${HASH_BEGIN}\n# Generated from github/gitignore - do not edit between the markers.\n` +
-  "node_modules/\n" +
-  "## Windows (github/gitignore Global/Windows.gitignore)\nThumbs.db\n\n" +
-  "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\nIcon?\n\n" +
-  "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n\n" +
-  "## Node (github/gitignore Node.gitignore)\n*.log\n\n" +
-  "## Bun (github/gitignore Bun.gitignore)\nbun.lockb\n\n";
+const BUN_REGION_PREFIX = [
+  // The region up to the END marker, the upstream bodies normalized (`Icon[\r]`, trailing spaces): the base,
+  `${HASH_BEGIN}\n# Generated from github/gitignore - do not edit between the markers.\n`,
+  "node_modules/\n",
+  // the three OS blocks every repository takes,
+  "## Windows (github/gitignore Global/Windows.gitignore)\nThumbs.db\n\n",
+  "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\nIcon?\n\n",
+  "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n\n",
+  // then the module blocks in files.yml order.
+  "## Node (github/gitignore Node.gitignore)\n*.log\n\n",
+  "## Bun (github/gitignore Bun.gitignore)\nbun.lockb\n\n",
+].join("");
 const REGION_WITH_FUZZER = `${BUN_REGION_PREFIX}## Fuzzer\n/.fuzz-failures/\n${HASH_END}\n`;
 const OLD_LICENSE = "MIT License\n\nCopyright (c) 2020 Someone\n";
 const OLD_CI = "name: platform ci v1\n";
