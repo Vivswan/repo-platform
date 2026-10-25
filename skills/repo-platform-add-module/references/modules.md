@@ -11,9 +11,9 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 
 ## Toolchains: bun / uv / rust
 
-- Managed: the version dotfile for bun (`.bun-version`, fleet-pinned). Public repos with bun/uv: fleet CI runs CodeQL for their language.
+- Managed: the version dotfile for bun (`.bun-version`, fleet-pinned); the clippy thresholds for rust (`clippy.toml`, read by every crate under the root). Public repos with bun/uv: fleet CI runs CodeQL for their language.
 - Blocks: a gitignore section and a Toolchain section in `AGENTS.md` (split files), and a Dependabot ecosystem entry (the managed `.github/dependabot.yml`).
-- Starter: `auto-format.yml` for every toolchain but rust, written only when absent. An existing `auto-format.yml`, `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
+- Starter: `auto-format.yml` for every toolchain but rust, and the `Cargo.toml` workspace root with the lint floor for rust, written only when absent. An existing `auto-format.yml`, `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
 - Removal: the version dotfile is retired; the blocks leave the split regions and the managed `.github/dependabot.yml`. `auto-format.yml` stays. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
 
 ## site

@@ -1,0 +1,12 @@
+# This file is managed by {{github_username}}/repo-platform.
+# Local edits are replaced on the next sync.
+# The thresholds of the fleet's readability floor (docs/modules/rust.md); the lints themselves are the root Cargo.toml's
+# [workspace.lints.clippy]. clippy reads the nearest clippy.toml up the tree, so this root file reaches every member crate,
+# and a member's own clippy.toml would shadow it whole: a member carries none.
+
+# A ninth parameter is a struct argument or a builder.
+too-many-arguments-threshold = 8
+# A function past a hundred lines holds two nameable concepts.
+too-many-lines-threshold = 100
+# Branching past this nests what a guard, a `continue`, or a split would flatten.
+cognitive-complexity-threshold = 15
