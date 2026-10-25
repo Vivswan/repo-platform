@@ -14,7 +14,10 @@ export type Integrity =
  *  as an empty findings file) is absent. */
 function reportText(path: string): string | null {
   try {
-    if (!lstatSync(path).isFile()) return null;
+    if (!lstatSync(path).isFile()) {
+      return null;
+    }
+
     return readFileSync(path, "utf8").replace(/\n+$/, "");
   } catch {
     return null;
@@ -40,15 +43,18 @@ function judgeReport(code: number, findingsFile: string): Integrity {
   if (findings === null) {
     return { kind: "not-judged", reason: `the validator exited ${code} before reporting` };
   }
+
   if (code === 0 && findings !== "") {
     return { kind: "not-judged", reason: "the validator exited 0 yet reported findings" };
   }
+
   if (code !== 0 && findings === "") {
     return {
       kind: "not-judged",
       reason: `the validator exited ${code} without reporting a finding`,
     };
   }
+
   return code === 0 ? { kind: "clean" } : { kind: "findings", findings };
 }
 
@@ -67,6 +73,7 @@ function serialized(verdict: Integrity): string {
       ordered = { kind: verdict.kind, reason: verdict.reason };
       break;
   }
+
   return `${JSON.stringify(ordered)}\n`;
 }
 
@@ -89,7 +96,11 @@ export function readVerdict(path: string): Integrity {
   } catch {
     return none;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return none;
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return none;
+  }
+
   const record = parsed as Record<string, unknown>;
   const shape = (...keys: string[]): boolean =>
     Object.keys(record).sort().join(",") === ["kind", ...keys].sort().join(",") &&
@@ -102,5 +113,6 @@ export function readVerdict(path: string): Integrity {
   } else if (record.kind === "not-judged" && shape("reason") && record.reason !== "") {
     verdict = { kind: "not-judged", reason: record.reason as string };
   }
+
   return verdict !== null && serialized(verdict) === text ? verdict : none;
 }

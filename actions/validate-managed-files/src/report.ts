@@ -7,16 +7,20 @@ import { env, requireEnv } from "../../shared/action_runtime.ts";
 import { PLATFORM_NAME } from "../../shared/platform.ts";
 import { type Integrity, readVerdict } from "./verdict.ts";
 
-// Unless the clear step succeeded, the validator never ran: any verdict on
-// disk is stale or planted, so it is not read without a successful clear.
-const clearOutcome = env("CLEAR_OUTCOME");
-const verdict: Integrity =
-  clearOutcome === "success"
-    ? readVerdict(requireEnv("VERDICT"))
-    : {
-        kind: "not-judged",
-        reason: `the scratch root could not be cleared (clear step outcome: ${clearOutcome || "none"})`,
-      };
+/** Unless the clear step succeeded, the validator never ran: any verdict on disk is stale or planted, so it is not
+ *  read without a successful clear. */
+function judgedIntegrity(clearOutcome: string): Integrity {
+  if (clearOutcome === "success") {
+    return readVerdict(requireEnv("VERDICT"));
+  }
+
+  return {
+    kind: "not-judged",
+    reason: `the scratch root could not be cleared (clear step outcome: ${clearOutcome || "none"})`,
+  };
+}
+
+const verdict = judgedIntegrity(env("CLEAR_OUTCOME"));
 const outputFile = requireEnv("GITHUB_OUTPUT");
 const runUrl = requireEnv("RUN_URL");
 const summaryFile = requireEnv("GITHUB_STEP_SUMMARY");
@@ -36,6 +40,7 @@ switch (verdict.kind) {
     integrity = `Not judged: ${verdict.reason}. See the [run log](${runUrl}). ${FAILS}`;
     break;
 }
+
 const blocking = verdict.kind !== "clean";
 
 const body = `### Managed files check\n\n${integrity}`;

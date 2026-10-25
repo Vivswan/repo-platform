@@ -4,12 +4,19 @@
 //
 // DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal imports only.
 
+/** The GitHub account the platform repository lives under. */
 export const PLATFORM_OWNER = "Vivswan";
+
+/** Spelled once: tests/actions/platform.test.ts pins every string derived from it against the literal the fleet carries. */
 export const PLATFORM_NAME = "repo-platform";
+
+/** owner/name: the `uses:` coordinate. */
 export const PLATFORM_SLUG = `${PLATFORM_OWNER}/${PLATFORM_NAME}`;
 
 /** The registration a repository carries on its default branch to adopt the platform. */
 export const REGISTRATION_PATH = `.${PLATFORM_NAME}.yml`;
+
+/** The rendered manifest's path in every managed repository. */
 export const MANIFEST_NAME = `.github/${PLATFORM_NAME}-manifest.json`;
 
 /** Where the rendered settings document lands; files.yml's `render: settings` row declares the same path. */
@@ -26,18 +33,23 @@ export const MANAGED_HEADER_PATTERN = new RegExp(
   `\\bThis file is managed by [\\w.-]+/${PLATFORM_NAME}\\b`,
 );
 
+/** The sync's git identity: its author name, and its noreply address's local part. */
 export const SYNC_BOT = `${PLATFORM_NAME}-sync`;
 
 /** The moving tag the fleet's `uses:` pins ride (docs/platform/build-provenance.md); post-green's mover pushes refs/tags/<this>. */
 export const DELIVERY_REF = "stable";
 
+/** The branch the sync delivers from in every managed repository; its pull request merges it. */
 export const AUTOMATION_BRANCH = `automation/${PLATFORM_NAME}`;
+
+/** The title of the issue the sync files in a repository it could not deliver to. */
 export const FAILURE_ISSUE_TITLE = `[${PLATFORM_NAME}] sync failed`;
+
+/** How every sync pull request's title opens. */
 export const SYNC_PR_TITLE_PREFIX = `chore: sync ${PLATFORM_NAME} build`;
 
 /** A human's label on a pull request: the repository's sync-branch workflow syncs the branch and takes the label off. */
 export const SYNC_LABEL = `${PLATFORM_NAME}:sync`;
 
-/** release-please names its release PR branch `release-please--branches--<target>`; fleet.yml's release-pr job and the
- *  skeleton's release-gate job spell this prefix in YAML, tests/workflows/fleet_shape.test.ts holds them to it. */
+/** release-please names its release PR branch `release-please--branches--<target>`; fleet.yml's release-pr job and the skeleton's release-gate job spell this prefix in YAML, tests/workflows/fleet_shape.test.ts holds them to it. */
 export const RELEASE_BRANCH_PREFIX = "release-please--";

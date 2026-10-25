@@ -17,6 +17,8 @@ import {
 
 /** The `.css` suffix routes the module through Vite's CSS pipeline like a file. */
 export const TOKENS_CSS_ID = "virtual:fleet-tokens.css";
+
+/** The selector list a shared token is written under. */
 const BOTH_MODES = ":root,\n.dark";
 
 function block(
@@ -61,7 +63,9 @@ export function themeTokensCss(): string {
   lines.push("", ...modeBlock(":root", "light"));
   lines.push("", ...modeBlock(".dark", "dark"));
   HUES.forEach((hue, slot) => {
-    if (slot === 0) return;
+    if (slot === 0) {
+      return;
+    }
     lines.push("", ...block(`html[data-fleet-hue="${slot}"]`, hueDeclarations(hue.light)));
     lines.push("", ...block(`html.dark[data-fleet-hue="${slot}"]`, hueDeclarations(hue.dark)));
   });

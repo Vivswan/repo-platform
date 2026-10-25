@@ -24,9 +24,15 @@ type LabelKey = keyof typeof CUSTOM_BLOCK_LABELS;
 export function alertTitlesRule(md: MarkdownRenderer): void {
   md.core.ruler.after("github-alerts", "alert_titles", (state) => {
     for (const token of state.tokens) {
-      if (token.type !== "github_alert_open") continue;
+      if (token.type !== "github_alert_open") {
+        continue;
+      }
+
       const { title, type } = token.meta as { title: string; type: string };
-      if (title !== type.toUpperCase()) continue;
+      if (title !== type.toUpperCase()) {
+        continue;
+      }
+
       const key = `${type}Label`;
       if (!(key in CUSTOM_BLOCK_LABELS)) {
         throw new Error(`GitHub alert type '${type}' has no sentence-case label`);

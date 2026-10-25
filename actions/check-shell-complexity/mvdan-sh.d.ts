@@ -30,13 +30,13 @@ declare module "mvdan-sh" {
   export interface Parser {
     Parse(source: string, name: string): Node;
   }
+  /** `Walk` visits every node depth-first; after a node's children it visits `null` once when `visit` returned true. */
   const mvdan: {
     syntax: {
       NewParser(...options: unknown[]): Parser;
       Variant(variant: number): unknown;
       LangBash: number;
       NodeType(node: Node): string;
-      /** Visits every node depth-first; after a node's children it visits `null` once when `visit` returned true. */
       Walk(root: Node, visit: (node: Node | null) => boolean): void;
     };
   };

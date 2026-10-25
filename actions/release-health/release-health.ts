@@ -44,20 +44,28 @@ const gh: GhRunner = async (args) => {
   if (code !== 0) {
     throw new Error(`gh ${args.join(" ")} failed (${code}): ${stderr.trim()}`);
   }
+
   return stdout;
 };
 
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
-/** One value across the fleet; files/release-please/settings.yml declares the two labels (tests/files/label_names.test.ts). */
+/** The issue label that blocks a release. One value across the fleet; files/release-please/settings.yml declares the two labels (tests/files/label_names.test.ts). */
 export const BLOCKER_LABEL = "release-blocker";
+
+/** The release PR label that ships a release despite its failing gates; the other of the two. */
 export const OVERRIDE_LABEL = "release-override";
+
+/** The lowest alert severity the security gate fails on. */
 export const SECURITY_THRESHOLD: Severity = "high";
 
-/** release-please's own labels on a merged release PR: pending until the cut tags it (tests/files/label_names.test.ts). */
+/** release-please's label on a merged release PR until the cut tags it (tests/files/label_names.test.ts). */
 export const PENDING_LABEL = "autorelease: pending";
+
+/** release-please's label once the cut tagged it. */
 export const TAGGED_LABEL = "autorelease: tagged";
+
 /** A label this young is a cut still in flight, not a parked release. */
 const PENDING_GRACE_MINUTES = 30;
 
@@ -70,8 +78,12 @@ export type ModeContext =
   | { mode: "after-refresh"; eventPath: string };
 
 export interface Config {
+  /** The mode, with the event payload or the commit sha that mode needs. */
   context: ModeContext;
+
+  /** owner/name. */
   repo: string;
+
   /** Tracking-issue stream labels; empty disables the tracking gates. */
   trackingLabels: string[];
 }
@@ -82,6 +94,7 @@ function parseLabel(name: string, value: string): string {
       `${name} must be a plain label (letters, digits, ._:- and spaces; no leading dash), got '${value}'`,
     );
   }
+
   return value;
 }
 
@@ -92,13 +105,18 @@ export function parseTrackingLabels(env: NodeJS.ProcessEnv): string[] {
   const labels: string[] = [];
   for (const token of (env.TRACKING_LABELS ?? "").split(",")) {
     const label = token.trim();
-    if (label === "") continue;
+    if (label === "") {
+      continue;
+    }
     parseLabel("TRACKING_LABELS", label);
     const key = label.toLowerCase();
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      continue;
+    }
     seen.add(key);
     labels.push(label);
   }
+
   return labels;
 }
 
@@ -119,6 +137,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     if (!env.GITHUB_SHA) {
       throw new Error("GITHUB_SHA is required in release mode");
     }
+
     if (!env.GITHUB_REF_NAME) {
       throw new Error("GITHUB_REF_NAME is required in release mode");
     }
@@ -164,16 +183,19 @@ export async function overrideFromPullRequest(
   if (!existsSync(eventPath)) {
     return { active: false, reason: `no event payload at ${eventPath}` };
   }
+
   const payload = JSON.parse(readFileSync(eventPath, "utf8")) as { pull_request?: PrPayload };
   const pr = payload.pull_request;
   if (!pr?.number) {
     return { active: false, reason: "event payload carries no pull_request" };
   }
+
   const json = await run(["pr", "view", String(pr.number), "--repo", repo, "--json", "labels"]);
   const labels = ((JSON.parse(json) as PrPayload).labels ?? []).map((label) => label.name);
   if (hasLabel(labels, overrideLabel)) {
     return { active: true, prNumber: pr.number };
   }
+
   return { active: false, reason: `no '${overrideLabel}' label on PR #${pr.number}` };
 }
 
@@ -183,11 +205,10 @@ export interface ReleasePr {
 }
 
 export interface ReleaseLookup {
-  /** The merged release-please PR, or undefined when the commit is not a
-   * release-PR merge. */
+  /** The merged release-please PR, or undefined when the commit is not a release-PR merge. */
   pr: ReleasePr | undefined;
-  /** Unmerged release-please PRs associated with the commit; reported in
-   * the trivial-pass notice, never gated on. */
+
+  /** Unmerged release-please PRs associated with the commit; reported in the trivial-pass notice, never gated on. */
   unmerged: number[];
 }
 
@@ -230,6 +251,7 @@ export async function findReleasePr(
       `cannot pick the release PR for ${sha}: ${merged.length} merged release-please PRs are associated (${numbers})`,
     );
   }
+
   const pr = merged[0];
   return {
     pr: pr
@@ -250,6 +272,7 @@ export async function branchHead(run: GhRunner, repo: string, ref: string): Prom
   if (!sha) {
     throw new Error(`repos/${repo}/git/ref/heads/${ref} carries no object sha`);
   }
+
   return sha;
 }
 
@@ -290,6 +313,7 @@ export async function stalePendingGuard(
     if (Number.isNaN(mergedAt)) {
       throw new Error(`PR #${pr.number} carries an unreadable mergedAt '${pr.mergedAt}'`);
     }
+
     return mergedAt < cutoff;
   });
   if (stale.length === 0) {
@@ -298,6 +322,7 @@ export async function stalePendingGuard(
     );
     return 0;
   }
+
   const list = stale.map((pr) => `#${pr.number}`).join(", ");
   log.error(
     `merged release PR(s) ${list} have worn '${PENDING_LABEL}' for over ${PENDING_GRACE_MINUTES} minutes, ` +
@@ -308,8 +333,7 @@ export async function stalePendingGuard(
   return 1;
 }
 
-/** gh issue list returns at most this many entries; a count that hits it is
- * reported as "at least" so the message never understates the backlog. */
+/** gh issue list returns at most this many entries; a count that hits it is reported as "at least" so the message never understates the backlog. */
 const ISSUE_LIMIT = 100;
 
 export async function issueGate(
@@ -339,6 +363,7 @@ export async function issueGate(
   if (issues.length === 0) {
     return { gate, status: "pass", summary: `no open '${label}' issues` };
   }
+
   const count = issues.length >= ISSUE_LIMIT ? `at least ${issues.length}` : `${issues.length}`;
   const list = issues.map((issue) => `#${issue.number}`).join(", ");
   return {
@@ -373,10 +398,12 @@ export async function securityGate(
       : "";
     throw new Error(`security gate could not read the Dependabot alerts (${message})${remedy}`);
   }
+
   const alerts = JSON.parse(json) as Array<{ number: number }>;
   if (alerts.length === 0) {
     return { gate, status: "pass", summary: `no open Dependabot alerts at or above ${threshold}` };
   }
+
   const list = alerts.map((alert) => `#${alert.number}`).join(", ");
   return {
     gate,
@@ -386,13 +413,15 @@ export async function securityGate(
   };
 }
 
-/** GitHub answers update-branch with 202 and merges afterwards, so the head is re-read this many times, this far apart. */
+/** GitHub answers update-branch with 202 and merges afterwards, so the head is re-read this many times... */
 export const UPDATE_BRANCH_POLLS = 30;
+
+/** ...this far apart, in milliseconds. */
 export const UPDATE_BRANCH_POLL_MS = 2_000;
 
+/** The PR a run judged; `headSha` is the head the run was started for, before release-please's propose. */
 export interface JudgedPullRequest {
   number: number;
-  /** The head the run was started for, before release-please's propose. */
   headSha: string;
   base: string;
 }
@@ -408,6 +437,7 @@ export function judgedPullRequest(eventPath: string): JudgedPullRequest {
       `${eventPath} carries no pull_request with a number, a head sha, and a base ref`,
     );
   }
+
   return { number: pr.number, headSha: pr.head.sha, base: pr.base.ref };
 }
 
@@ -421,6 +451,7 @@ export async function pullRequestHead(
   if (!sha) {
     throw new Error(`repos/${repo}/pulls/${number} carries no head sha`);
   }
+
   return sha;
 }
 
@@ -443,14 +474,18 @@ export async function refreshVerdict(
   const tip = checkoutTip(base);
   const baseMoved = async (): Promise<boolean> => {
     const head = await branchHead(run, repo, base);
-    if (head === tip) return false;
+    if (head === tip) {
+      return false;
+    }
     log.error(
       `${base} moved to ${head.slice(0, 7)} since this run checked it out at ${tip.slice(0, 7)}; this run cannot tell whether the refresh saw that commit, and its own green run refreshes the release PR`,
     );
     return true;
   };
   const refreshed = async (head: string): Promise<number> => {
-    if (await baseMoved()) return 1;
+    if (await baseMoved()) {
+      return 1;
+    }
     log.notice(`release PR #${number} refreshed to ${head}; approve its run from the merge box`);
     return 0;
   };
@@ -468,7 +503,10 @@ export async function refreshVerdict(
     );
     return 1;
   }
-  if (await baseMoved()) return 1;
+
+  if (await baseMoved()) {
+    return 1;
+  }
   log.info(
     `release-please left PR #${number} at ${judged.slice(0, 7)}: its body is unchanged, so the commits it lacks add no changelog line and merging ${base} loses none; asking GitHub to update the branch`,
   );
@@ -487,11 +525,49 @@ export async function refreshVerdict(
       return refreshed(head);
     }
   }
+
   const waited = (UPDATE_BRANCH_POLLS * UPDATE_BRANCH_POLL_MS) / 1000;
   log.error(
     `Release PR is behind ${base} and GitHub's branch update has not moved it within ${waited} s; its version and changelog would miss commits already on ${base}. Do not merge; release-please refreshes the PR after the next green run on ${base}.`,
   );
   return 1;
+}
+
+/** What the release mode found behind the merged `sha`: the release PR's override, or null for an ordinary push,
+ *  which has nothing to gate. Either way the outputs say so (`release-cut`, and `head-current` for a push, whose
+ *  newer run refreshes the release PR). */
+async function resolveReleaseMode(
+  run: GhRunner,
+  repo: string,
+  context: { sha: string; ref: string },
+  setOutput: (name: string, value: string) => void,
+  log: Log,
+): Promise<Override | null> {
+  const { sha, ref } = context;
+  const { pr, unmerged } = await findReleasePr(run, repo, sha);
+  setOutput("release-cut", pr === undefined ? "false" : "true");
+  if (pr !== undefined) {
+    if (hasLabel(pr.labels, OVERRIDE_LABEL)) {
+      return { active: true, prNumber: pr.number };
+    }
+
+    return { active: false, reason: `no '${OVERRIDE_LABEL}' label on release PR #${pr.number}` };
+  }
+
+  const open =
+    unmerged.length > 0
+      ? ` (open release PR(s) associated: ${unmerged.map((n) => `#${n}`).join(", ")})`
+      : "";
+  log.notice(`release health: ${sha} is not a release-PR merge; nothing to gate${open}`);
+  const head = await branchHead(run, repo, ref);
+  setOutput("head-current", head === sha ? "true" : "false");
+  if (head !== sha) {
+    log.notice(
+      `${ref} moved to ${head.slice(0, 7)} since ${sha.slice(0, 7)} was judged; the newer run refreshes the release PR`,
+    );
+  }
+
+  return null;
 }
 
 export async function runHealthCheck(
@@ -506,34 +582,17 @@ export async function runHealthCheck(
   if (cfg.context.mode === "after-propose") {
     return stalePendingGuard(run, cfg.repo, now, log);
   }
+
   if (cfg.context.mode === "after-refresh") {
     return refreshVerdict(run, cfg.repo, cfg.context.eventPath, log, sleep, checkoutTip);
   }
-  let override: Override;
-  if (cfg.context.mode === "release") {
-    const { sha, ref } = cfg.context;
-    const { pr, unmerged } = await findReleasePr(run, cfg.repo, sha);
-    setOutput("release-cut", pr === undefined ? "false" : "true");
-    if (pr === undefined) {
-      const open =
-        unmerged.length > 0
-          ? ` (open release PR(s) associated: ${unmerged.map((n) => `#${n}`).join(", ")})`
-          : "";
-      log.notice(`release health: ${sha} is not a release-PR merge; nothing to gate${open}`);
-      const head = await branchHead(run, cfg.repo, ref);
-      setOutput("head-current", head === sha ? "true" : "false");
-      if (head !== sha) {
-        log.notice(
-          `${ref} moved to ${head.slice(0, 7)} since ${sha.slice(0, 7)} was judged; the newer run refreshes the release PR`,
-        );
-      }
-      return 0;
-    }
-    override = hasLabel(pr.labels, OVERRIDE_LABEL)
-      ? { active: true, prNumber: pr.number }
-      : { active: false, reason: `no '${OVERRIDE_LABEL}' label on release PR #${pr.number}` };
-  } else {
-    override = await overrideFromPullRequest(run, cfg.repo, cfg.context.eventPath, OVERRIDE_LABEL);
+
+  const override =
+    cfg.context.mode === "release"
+      ? await resolveReleaseMode(run, cfg.repo, cfg.context, setOutput, log)
+      : await overrideFromPullRequest(run, cfg.repo, cfg.context.eventPath, OVERRIDE_LABEL);
+  if (override === null) {
+    return 0;
   }
 
   const overrideHint = `or apply the '${OVERRIDE_LABEL}' label to the release PR and re-run this check`;
@@ -581,6 +640,7 @@ export async function runHealthCheck(
     for (const failure of failures) {
       log.warning(`${failure.gate} gate failed: ${failure.problem}`);
     }
+
     const names = failures.map((failure) => failure.gate).join(", ");
     log.notice(
       `OVERRIDE: the '${OVERRIDE_LABEL}' label on release PR #${override.prNumber} bypassed ${failures.length} failing gate(s) (${names}); this release ships despite them`,
@@ -591,6 +651,7 @@ export async function runHealthCheck(
   for (const failure of failures) {
     log.error(`${failure.gate} gate failed: ${failure.problem}. To release: ${failure.advice}`);
   }
+
   return 1;
 }
 
@@ -602,6 +663,7 @@ async function main(): Promise<number> {
     core.error(messageOf(error));
     return 1;
   }
+
   return runHealthCheck(cfg, gh, core, core.setOutput);
 }
 

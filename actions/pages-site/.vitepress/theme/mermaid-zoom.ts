@@ -11,8 +11,7 @@ export interface Shown {
   diagram: HTMLElement;
 }
 
-/** An object opens the view, null closes it, and a fresh object for the mount already on show redraws the copy: a
- *  render pass keeps the diagram element and swaps the SVG inside it, so only the object's identity carries the news. */
+/** An object opens the view, null closes it, and a fresh object for the mount already on show redraws the copy: a render pass keeps the diagram element and swaps the SVG inside it, so only the object's identity carries the news. */
 export const shown = shallowRef<Shown | null>(null);
 
 /** The mount's zoom button, made once; a mount whose diagram is on show gets the copy redrawn from the fresh SVG (a
@@ -29,16 +28,23 @@ export function attachZoom(mount: HTMLElement, diagram: HTMLElement): void {
     });
     mount.append(button);
   }
-  if (shown.value?.mount === mount) shown.value = { mount, diagram };
+
+  if (shown.value?.mount === mount) {
+    shown.value = { mount, diagram };
+  }
 }
 
 export function detachZoom(mount: HTMLElement): void {
   mount.querySelector(`:scope > .${ZOOM_BUTTON_CLASS}`)?.remove();
-  if (shown.value?.mount === mount) shown.value = null;
+  if (shown.value?.mount === mount) {
+    shown.value = null;
+  }
 }
 
 /** Closes a view whose mount is not among the page's `mounts`: the view sits on <body>, outside the content a route
  *  change swaps, and the browser's Back and Forward reach a page under a modal. */
 export function closeZoomOutside(mounts: readonly HTMLElement[]): void {
-  if (shown.value !== null && !mounts.includes(shown.value.mount)) shown.value = null;
+  if (shown.value !== null && !mounts.includes(shown.value.mount)) {
+    shown.value = null;
+  }
 }

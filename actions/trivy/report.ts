@@ -10,9 +10,13 @@ import { IGNORE_FILE } from "./ignore_check.ts";
 
 export const SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] as const;
 export type Severity = (typeof SEVERITIES)[number];
+
+/** The nightly scan's scanners; the replay must run the same. */
 export const SCANNERS = "vuln,misconfig,secret";
+
 /** The nightly scan's filter; the replay must see what the scan saw. */
 export const SCAN_SEVERITY = "HIGH,CRITICAL";
+
 /** The report's row cap: the issue shows the heading plus 60 lines. */
 export const MAX_ROWS = 50;
 
@@ -26,68 +30,81 @@ export interface TargetReport {
   findings: Finding[];
 }
 
+interface Vulnerability {
+  VulnerabilityID?: string;
+  PkgName?: string;
+  InstalledVersion?: string;
+  FixedVersion?: string;
+  Severity?: string;
+  Title?: string;
+  PrimaryURL?: string;
+}
+
+interface Misconfiguration {
+  ID?: string;
+  Title?: string;
+  Severity?: string;
+  Resolution?: string;
+  PrimaryURL?: string;
+  CauseMetadata?: { StartLine?: number };
+}
+
+interface Secret {
+  RuleID?: string;
+  Title?: string;
+  Severity?: string;
+  StartLine?: number;
+}
+
 interface TrivyResult {
   Target?: string;
-  Vulnerabilities?: {
-    VulnerabilityID?: string;
-    PkgName?: string;
-    InstalledVersion?: string;
-    FixedVersion?: string;
-    Severity?: string;
-    Title?: string;
-    PrimaryURL?: string;
-  }[];
-  Misconfigurations?: {
-    ID?: string;
-    Title?: string;
-    Severity?: string;
-    Resolution?: string;
-    PrimaryURL?: string;
-    CauseMetadata?: { StartLine?: number };
-  }[];
-  Secrets?: {
-    RuleID?: string;
-    Title?: string;
-    Severity?: string;
-    StartLine?: number;
-  }[];
+  Vulnerabilities?: Vulnerability[];
+  Misconfigurations?: Misconfiguration[];
+  Secrets?: Secret[];
 }
 
 function severity(value: string | undefined): Severity {
   return (SEVERITIES as readonly string[]).includes(value ?? "") ? (value as Severity) : "UNKNOWN";
 }
 
+function vulnerabilityFinding(v: Vulnerability): Finding {
+  const fix = v.FixedVersion ? `fixed in ${v.FixedVersion}` : "no fix released";
+  return {
+    severity: severity(v.Severity),
+    line: `${v.VulnerabilityID} ${v.PkgName} ${v.InstalledVersion} (${fix}): ${v.Title ?? ""} ${v.PrimaryURL ?? ""}`.trim(),
+  };
+}
+
+function misconfigurationFinding(m: Misconfiguration): Finding {
+  const at = m.CauseMetadata?.StartLine === undefined ? "" : ` line ${m.CauseMetadata.StartLine}`;
+  return {
+    severity: severity(m.Severity),
+    line: `${m.ID}${at}: ${m.Title ?? ""}. ${m.Resolution ?? ""} ${m.PrimaryURL ?? ""}`.trim(),
+  };
+}
+
+function secretFinding(s: Secret): Finding {
+  const at = s.StartLine === undefined ? "" : ` line ${s.StartLine}`;
+  return { severity: severity(s.Severity), line: `${s.RuleID}${at}: ${s.Title ?? ""}`.trim() };
+}
+
 export function collectFindings(json: unknown): TargetReport[] {
   const results = (json as { Results?: TrivyResult[] } | null)?.Results ?? [];
   const reports: TargetReport[] = [];
   for (const result of results) {
-    const findings: Finding[] = [];
-    for (const v of result.Vulnerabilities ?? []) {
-      const fix = v.FixedVersion ? `fixed in ${v.FixedVersion}` : "no fix released";
-      findings.push({
-        severity: severity(v.Severity),
-        line: `${v.VulnerabilityID} ${v.PkgName} ${v.InstalledVersion} (${fix}): ${v.Title ?? ""} ${v.PrimaryURL ?? ""}`.trim(),
-      });
+    const findings: Finding[] = [
+      ...(result.Vulnerabilities ?? []).map(vulnerabilityFinding),
+      ...(result.Misconfigurations ?? []).map(misconfigurationFinding),
+      ...(result.Secrets ?? []).map(secretFinding),
+    ];
+    if (findings.length === 0) {
+      continue;
     }
-    for (const m of result.Misconfigurations ?? []) {
-      const at =
-        m.CauseMetadata?.StartLine === undefined ? "" : ` line ${m.CauseMetadata.StartLine}`;
-      findings.push({
-        severity: severity(m.Severity),
-        line: `${m.ID}${at}: ${m.Title ?? ""}. ${m.Resolution ?? ""} ${m.PrimaryURL ?? ""}`.trim(),
-      });
-    }
-    for (const s of result.Secrets ?? []) {
-      const at = s.StartLine === undefined ? "" : ` line ${s.StartLine}`;
-      findings.push({
-        severity: severity(s.Severity),
-        line: `${s.RuleID}${at}: ${s.Title ?? ""}`.trim(),
-      });
-    }
-    if (findings.length === 0) continue;
+
     findings.sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
     reports.push({ target: result.Target ?? "(unnamed target)", findings });
   }
+
   return reports;
 }
 
@@ -114,8 +131,9 @@ export function reportBody(report: TargetReport): string {
     "",
     ...report.findings.slice(0, MAX_ROWS).map((f) => `- ${f.severity} ${f.line}`),
   ];
-  if (count > MAX_ROWS)
+  if (count > MAX_ROWS) {
     lines.push(`- and ${count - MAX_ROWS} more; the run's artifact carries the full JSON`);
+  }
   lines.push("");
   return lines.join("\n");
 }
@@ -128,8 +146,11 @@ export function directoryName(target: string, taken: Set<string>): string {
     const digest = createHash("sha256").update(target).digest("hex").slice(0, 8);
     base = `${base.slice(0, MAX_NAME - digest.length - 1)}-${digest}`;
   }
+
   let name = base;
-  for (let n = 2; taken.has(name); n++) name = `${base}-${n}`;
+  for (let n = 2; taken.has(name); n++) {
+    name = `${base}-${n}`;
+  }
   taken.add(name);
   return name;
 }
@@ -146,6 +167,7 @@ export function writeReports(reports: TargetReport[], reportDir: string, results
   if (reports.length > 0 && results !== undefined) {
     copyFileSync(results, join(reportDir, RESULTS_NAME));
   }
+
   const taken = new Set<string>([RESULTS_NAME]);
   for (const report of reports) {
     const dir = join(reportDir, directoryName(report.target, taken));
@@ -173,6 +195,7 @@ function main(): number {
   for (const report of reports) {
     console.log(`  ${report.target}: ${severitySummary(report.findings)}`);
   }
+
   return 0;
 }
 

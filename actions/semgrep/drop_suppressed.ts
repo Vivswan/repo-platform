@@ -18,9 +18,12 @@ interface Sarif {
 
 export function dropSuppressed(sarif: Sarif): Sarif {
   for (const run of sarif.runs ?? []) {
-    if (run.results === undefined) continue;
+    if (run.results === undefined) {
+      continue;
+    }
     run.results = run.results.filter((result) => (result.suppressions ?? []).length === 0);
   }
+
   return sarif;
 }
 

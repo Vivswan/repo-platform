@@ -11,8 +11,10 @@ export type TreeEntry = "file" | "directory" | "symlink" | "other";
 export interface TreeProbe {
   /** As lstat sees it: a link is a link, whatever it points at. */
   standing(path: string): TreeEntry | null;
+
   /** Through the link, as stat sees it; any failure to look is a no. */
   linksToFile(path: string): boolean;
+
   /** The names in the directory, sorted; "" is the root. */
   list(dir: string): string[];
 }
@@ -34,54 +36,84 @@ export function segmentPattern(segment: string): RegExp {
   );
 }
 
+/** One expansion in progress: the pattern's segments, the tree they are matched against, and the paths found. */
+interface Walk {
+  probe: TreeProbe;
+  segments: string[];
+  out: string[];
+}
+
+/** How the walk goes on at a name a `*` segment matched (the table on expandPattern): probed, riding literally from
+ *  here, or not at all. */
+function matchedStep(walk: Walk, path: string, final: boolean): "probed" | "unprobed" | null {
+  if (pathProblem(path) !== null) {
+    return "unprobed";
+  }
+
+  const standing = walk.probe.standing(path);
+  if (standing === null) {
+    return null;
+  }
+
+  if (standing === "symlink") {
+    return final || !walk.probe.linksToFile(path) ? "unprobed" : null;
+  }
+
+  const wanted = final ? "file" : "directory";
+  return standing === wanted ? "probed" : null;
+}
+
+function walkSegment(walk: Walk, prefix: string, index: number, unprobed: boolean): void {
+  const { probe, segments, out } = walk;
+  if (index === segments.length) {
+    out.push(prefix);
+    return;
+  }
+
+  const segment = segments[index];
+  const rel = (name: string) => (prefix === "" ? name : `${prefix}/${name}`);
+  if (!segment.includes("*")) {
+    const next = rel(segment);
+    const stop = unprobed || pathProblem(next) !== null || probe.standing(next) === "symlink";
+    walkSegment(walk, next, index + 1, stop);
+    return;
+  }
+
+  if (unprobed) {
+    out.push(rel(segments.slice(index).join("/")));
+    return;
+  }
+
+  if (probe.standing(prefix) !== "directory") {
+    return;
+  }
+
+  const final = index === segments.length - 1;
+  const names = segmentPattern(segment);
+  for (const name of probe.list(prefix)) {
+    if (!names.test(name)) {
+      continue;
+    }
+
+    const path = rel(name);
+    const step = matchedStep(walk, path, final);
+    if (step !== null) {
+      walkSegment(walk, path, index + 1, step === "unprobed");
+    }
+  }
+}
+
 /** Probing stops at a symbolic link, or at a prefix pathProblem refuses, and the rest of the pattern rides along literally
  *  (`skills/link/sub/*.md`) so the claim's judge fails the path by its linked ancestor or by name rather than dropping it silently.
  *    link in a literal segment, or in the final segment            -> rides literally
  *    link matched by a `*` directory segment, not provably a file  -> rides literally
  *    link matched by a `*` directory segment, resolving to a file  -> skipped, like a file */
 export function expandPattern(probe: TreeProbe, pattern: string): string[] {
-  if (!pattern.includes("*")) return [pattern];
-  const segments = pattern.split("/");
-  const out: string[] = [];
-  const walk = (prefix: string, index: number, unprobed: boolean): void => {
-    if (index === segments.length) {
-      out.push(prefix);
-      return;
-    }
-    const segment = segments[index];
-    const rel = (name: string) => (prefix === "" ? name : `${prefix}/${name}`);
-    if (!segment.includes("*")) {
-      const next = rel(segment);
-      walk(
-        next,
-        index + 1,
-        unprobed || pathProblem(next) !== null || probe.standing(next) === "symlink",
-      );
-      return;
-    }
-    if (unprobed) {
-      out.push(rel(segments.slice(index).join("/")));
-      return;
-    }
-    if (probe.standing(prefix) !== "directory") return;
-    const final = index === segments.length - 1;
-    const names = segmentPattern(segment);
-    for (const name of probe.list(prefix)) {
-      if (!names.test(name)) continue;
-      const path = rel(name);
-      if (pathProblem(path) !== null) {
-        walk(path, index + 1, true);
-        continue;
-      }
-      const standing = probe.standing(path);
-      if (standing === null) continue;
-      if (standing === "symlink") {
-        if (final || !probe.linksToFile(path)) walk(path, index + 1, true);
-      } else if (final ? standing === "file" : standing === "directory") {
-        walk(path, index + 1, false);
-      }
-    }
-  };
-  walk("", 0, false);
-  return out.sort();
+  if (!pattern.includes("*")) {
+    return [pattern];
+  }
+
+  const walk: Walk = { probe, segments: pattern.split("/"), out: [] };
+  walkSegment(walk, "", 0, false);
+  return walk.out.sort();
 }

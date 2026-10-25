@@ -11,7 +11,10 @@ export type LayerSources = Pick<FilesConfig, "modules" | "settings">;
 
 export function declaredLayers(config: LayerSources): string[] {
   const { settings } = config;
-  if (settings === null) return [];
+  if (settings === null) {
+    return [];
+  }
+
   return [settings.baseline, ...settings.layers.map((layer) => layer.source), settings.override];
 }
 
@@ -39,7 +42,11 @@ function layerLabelEntries(config: LayerSources, tree: string): Record<string, u
     if (!isMapping(layer)) {
       throw new Error(`settings layer ${SOURCE_PREFIX}${rel}: must be a YAML mapping`);
     }
-    if (layer.labels === undefined || layer.labels === null) continue;
+
+    if (layer.labels === undefined || layer.labels === null) {
+      continue;
+    }
+
     const labels = isMapping(layer.labels) ? layer.labels.entries : layer.labels;
     if (!Array.isArray(labels)) {
       throw new Error(`settings layer ${SOURCE_PREFIX}${rel}: labels must be a list of mappings`);
@@ -53,6 +60,7 @@ function layerLabelEntries(config: LayerSources, tree: string): Record<string, u
       entries.push(label);
     });
   }
+
   return entries;
 }
 
@@ -67,8 +75,11 @@ export function reservedLabelNames(config: LayerSources, tree: string): Set<stri
   const names = new Set<string>();
   for (const label of layerLabelEntries(config, tree)) {
     names.add(String(label.name).toLowerCase());
-    if (typeof label.new_name === "string") names.add(label.new_name.toLowerCase());
+    if (typeof label.new_name === "string") {
+      names.add(label.new_name.toLowerCase());
+    }
   }
+
   return names;
 }
 
@@ -78,8 +89,10 @@ export function declaredLabelTuple(config: LayerSources, tree: string, name: str
   if (label === undefined) {
     throw new Error(`no declared settings layer carries the label '${name}'`);
   }
+
   if (typeof label.color !== "string" || typeof label.description !== "string") {
     throw new Error(`the declared label '${name}' needs a string color and description`);
   }
+
   return { name, color: label.color, description: label.description };
 }

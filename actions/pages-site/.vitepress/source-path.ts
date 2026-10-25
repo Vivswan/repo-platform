@@ -18,6 +18,9 @@ export function sourcePathOf(
   filePath: string,
 ): string {
   const root = owningRoot(includes, filePath);
-  if (root === undefined) return `${docsDir}/${filePath}`;
+  if (root === undefined) {
+    return `${docsDir}/${filePath}`;
+  }
+
   return `${root.path}/${filePath.slice(root.mount.length + 1)}`;
 }

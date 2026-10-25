@@ -1,5 +1,8 @@
 // The four member-shape rules (the code-standards skill's "Members stand alone" and "On a variable, field, or
 // constant"): readability first, so a record or block where no item carries a comment is never asked for structure.
+// one-line-comment and all-or-none govern fields and module constants; a method's doc comment follows the
+// doc-comment rule and may run longer, and it neither asks the fields for a comment nor is asked for one.
+// blank-line-between-members governs every member, field or method, once any member carries a comment.
 
 import type { Block, Item, Source } from "./records.ts";
 
@@ -20,6 +23,9 @@ export interface Finding {
 /** Whether an item has a comment at all, above it or trailing it. */
 const carries = (item: Item): boolean => item.above.length > 0 || item.trailing !== null;
 
+/** The items the comment-shape rules judge. */
+const isField = (item: Item): boolean => item.kind === "field";
+
 /** Where the item begins for a reader: its comment's line or its own, whichever is first (a misplaced one is below). */
 const firstLineOf = (item: Item): number => Math.min(item.line, item.above[0]?.line ?? item.line);
 
@@ -37,6 +43,7 @@ function blankLineBetweenMembers(block: Block, lines: string[]): number[] {
     if (index === 0) {
       return;
     }
+
     const gapFrom = block.items[index - 1].endLine + 1;
     const gapTo = firstLineOf(item);
     const gap = Array.from({ length: gapTo - gapFrom }, (_, i) => gapFrom + i);
@@ -48,32 +55,38 @@ function blankLineBetweenMembers(block: Block, lines: string[]): number[] {
   return found;
 }
 
-/** An item's comment is one comment of one line directly above it: not stacked, not a multi-line block, not parted
- *  from the item by a blank line, and not trailing the item on its last line. */
+/** A field's comment is one comment of one line directly above it: not stacked, not a multi-line block, not parted
+ *  from the field by a blank line, and not trailing the field on its last line. */
 function oneLineComment(block: Block): number[] {
   const found: number[] = [];
-  for (const item of block.items) {
+  for (const item of block.items.filter(isField)) {
     if (item.trailing !== null) {
       found.push(item.trailing.line);
     }
+
     if (item.above.length === 0) {
       continue;
     }
+
     const [comment] = item.above;
     const oneLine = item.above.length === 1 && comment.line === comment.endLine;
     if (!(oneLine && comment.endLine === item.line - 1)) {
       found.push(comment.line);
     }
   }
+
   return found;
 }
 
-/** Within one block, every item carries a comment or none does; each bare item of a half-commented block is a finding. */
+/** Within one block, every field carries a comment or none does; each bare field of a half-commented block is a
+ *  finding. A method's doc comment counts for neither side. */
 function allOrNone(block: Block): number[] {
-  if (block.items.every(carries) || !block.items.some(carries)) {
+  const fields = block.items.filter(isField);
+  if (fields.every(carries) || !fields.some(carries)) {
     return [];
   }
-  return block.items.filter((item) => !carries(item)).map((item) => item.line);
+
+  return fields.filter((item) => !carries(item)).map((item) => item.line);
 }
 
 /** A commented module-level constant has a blank line (or the file start) before its comment and a blank line (or
@@ -82,6 +95,7 @@ function constantSpacing(block: Block, lines: string[]): number[] {
   if (block.kind !== "const block") {
     return [];
   }
+
   return block.items
     .filter(carries)
     .filter((item) => {
@@ -107,5 +121,6 @@ export function judge(path: string, source: Source): Finding[] {
     add("all-or-none", allOrNone(block));
     add("constant-spacing", constantSpacing(block, source.lines));
   }
+
   return findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
 }

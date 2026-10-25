@@ -23,6 +23,7 @@ const gh: GhRunner = (args) => {
   if (!succeeded(result.exit)) {
     throw new Error(`gh ${args.join(" ")} failed: ${failureDetail(result)}`);
   }
+
   return result.stdout;
 };
 
@@ -47,7 +48,11 @@ export function inspectAssets(
       present = true;
     }
   }
-  if (!present) log.notice("the release has no assets; nothing to attest");
+
+  if (!present) {
+    log.notice("the release has no assets; nothing to attest");
+  }
+
   return present;
 }
 

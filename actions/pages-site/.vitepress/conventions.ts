@@ -2,10 +2,7 @@
 // Imports nothing: build.ts copies .vitepress/ into every build root, where an import reaching outside resolves to nothing.
 // The plan action also imports it with none of pages-site's dependencies installed.
 
-/** ISO 639-1 primary language subtags: the locale-directory convention
- *  accepts exactly `<lang>` or `<lang>-<region>` with a two-letter primary
- *  from this set, so an ordinary docs directory (api/, cli/) can never be
- *  mistaken for a translation tree. */
+/** ISO 639-1 primary language subtags: the locale-directory convention accepts exactly `<lang>` or `<lang>-<region>` with a two-letter primary from this set, so an ordinary docs directory (api/, cli/) can never be mistaken for a translation tree. */
 const ISO_639_1 = new Set(
   (
     "aa ab ae af ak am an ar as av ay az ba be bg bh bi bm bn bo br bs ca ce ch co cr cs cu " +
@@ -18,6 +15,7 @@ const ISO_639_1 = new Set(
   ).split(" "),
 );
 
+/** `<lang>` or `<lang>-<region>`, the primary captured for the set above. */
 const LOCALE_DIR_RE = /^([a-z]{2})(-[a-z0-9]{2,8})?$/;
 
 export function isLocaleDir(name: string): boolean {
@@ -30,16 +28,17 @@ export function isUnwalkedEntry(name: string): boolean {
   return name.startsWith(".") || name === "node_modules";
 }
 
-/** The landing-page basenames: a docs/ tag needs one to render.
- *  A page with one is laid out as a landing wherever it serves (deriveRewrites decides which owns the directory URL). */
+/** The landing-page basenames: a docs/ tag needs one to render, and a page with one is laid out as a landing wherever it serves (deriveRewrites decides which owns the directory URL). */
 export const LANDING_FILES: ReadonlySet<string> = new Set(["README.md", "index.md"]);
 
 /** docs/modules/site.md, "Other roots on the site". */
 export interface IncludeRoot {
   /** Repo-relative source directory (`skills`). */
   path: string;
+
   /** URL path under the docs mount (`skills` -> `<mount>skills/`). */
   mount: string;
+
   /** The file that serves as each child directory's page (`SKILL.md`). */
   page: string;
 }
@@ -56,8 +55,8 @@ export function owningRoot<T extends { mount: string }>(
     .sort((a, b) => b.mount.length - a.mount.length)[0];
 }
 
+/** The docs half of a site: mounted under the URL segment `path` beside a website, with the other roots it includes. */
 export interface DocsConfig {
-  /** The URL segment the docs mount under beside a website. */
   path: string;
   include: IncludeRoot[];
 }
@@ -89,6 +88,7 @@ export function relPathProblem(value: string): string | null {
       "letters, digits, dots, underscores, or dashes, with no empty, '.', or '..' segments"
     );
   }
+
   return null;
 }
 
@@ -104,24 +104,28 @@ export function includeMountProblem(mount: string): string | null {
   if (segments.some((segment) => !URL_SEGMENT_RE.test(segment))) {
     return "must be lowercase URL segments (letters, digits, dashes, underscores) joined by single slashes";
   }
+
   if (isLocaleDir(segments[0])) {
     return (
       "reads as a locale directory (docs/<lang>/ is a translation tree by convention) - " +
       "mount the root under another name"
     );
   }
+
   if (segments.some(isUnwalkedEntry)) {
     return (
       "has a segment the site never walks (dot-prefixed or node_modules), so its pages " +
       "would get no routes - mount the root under another name"
     );
   }
+
   if (segments[0] === "public") {
     return (
       "starts with public/, which VitePress copies to the site root as static files " +
       "instead of rendering - mount the root under another name"
     );
   }
+
   return null;
 }
 
@@ -129,12 +133,15 @@ export function includePageProblem(page: string): string | null {
   if (!PATH_SEGMENT_RE.test(page) || !page.endsWith(".md")) {
     return "must be a plain markdown file name (SKILL.md)";
   }
+
   if (page === "index.md") {
     return "is index.md, which is a directory's page already - name the file the include renames to it";
   }
+
   if (isUnwalkedEntry(page)) {
     return "is a name the site never walks (dot-prefixed), so no directory's page would get a route - name a visible file";
   }
+
   return null;
 }
 
@@ -157,5 +164,6 @@ export function includeListProblem(
       return `lists one ${key} twice - every root needs its own ${key}`;
     }
   }
+
   return null;
 }

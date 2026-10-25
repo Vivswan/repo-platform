@@ -26,15 +26,21 @@ export function recordedCommit(root: string): { commit: string } | { problem: st
         problem: `${MANIFEST_NAME} cannot be read (${code}); restore the file from git history or ${RESYNC}`,
       };
     }
+
     return {
       problem: `${MANIFEST_NAME} is missing; every sync writes it, so restore it from git history or ${RESYNC}`,
     };
   }
+
   const parsed = parseManifestFiles(text);
-  if (parsed.problem !== null) return { problem: `${MANIFEST_NAME} ${parsed.problem}; ${REVERT}` };
+  if (parsed.problem !== null) {
+    return { problem: `${MANIFEST_NAME} ${parsed.problem}; ${REVERT}` };
+  }
+
   const commit = parsed.files[MANIFEST_NAME]?.commit;
   if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) {
     return { problem: `${MANIFEST_NAME} names no full 40-hex commit in its own entry; ${REVERT}` };
   }
+
   return { commit };
 }

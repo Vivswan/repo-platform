@@ -12,7 +12,10 @@ export default defineComponent({
     const { theme, page } = useData<{ docsSiteFacts?: ProjectFacts }>();
     return () => {
       const facts = theme.value.docsSiteFacts;
-      if (facts === undefined) return null;
+      if (facts === undefined) {
+        return null;
+      }
+
       const { label, sha, url } = facts.provenance;
       // page.filePath is the repository path already: config.mts's
       // transformPageData resolves the staged path to its source root.

@@ -16,7 +16,10 @@ export type ModuleList = string[] | { declaring: string };
 /** files_config.ts derives an entry's default source from the first `modules` name, so a derived list keeps the
  *  modules block's order. */
 export function moduleList(list: ModuleList, modules: Readonly<Record<string, unknown>>): string[] {
-  if (Array.isArray(list)) return list;
+  if (Array.isArray(list)) {
+    return list;
+  }
+
   return Object.keys(modules).filter((name) => {
     const data = modules[name];
     return typeof data === "object" && data !== null && Object.hasOwn(data, list.declaring);
@@ -27,7 +30,10 @@ export function moduleList(list: ModuleList, modules: Readonly<Record<string, un
 export interface Selection {
   /** Selected modules. */
   modules: readonly string[];
+
+  /** Whether the repository is private, what a `private` clause reads. */
   private: boolean;
+
   /** The registration's `except`: no entry at one of these paths is selected. Absent means none. */
   except?: readonly string[];
 }
@@ -35,7 +41,10 @@ export interface Selection {
 /** Whether one `when` clause holds for the repository: a files.yml entry's (through `selects`) or a settings layer's.
  *  Absent clauses hold. */
 export function applies(when: When | null, selection: Selection): boolean {
-  if (when === null) return true;
+  if (when === null) {
+    return true;
+  }
+
   const selected = (name: string) => selection.modules.includes(name);
   return (
     (when.modules ?? []).every(selected) &&

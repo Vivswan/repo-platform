@@ -8,7 +8,10 @@ export function env(name: string, fallback = ""): string {
 
 export function requireEnv(name: string): string {
   const value = process.env[name];
-  if (value === undefined || value === "") throw new Error(`${name} must be set`);
+  if (value === undefined || value === "") {
+    throw new Error(`${name} must be set`);
+  }
+
   return value;
 }
 
@@ -22,14 +25,20 @@ export type ChildExit =
   | { kind: "signaled"; signal: string }
   | { kind: "timed-out" };
 
+/** bun names the signal or, since 1.4.3's types, numbers it. */
 export function childExit(proc: {
   exitedDueToTimeout?: boolean;
   exitCode: number | null;
-  // bun names the signal or, since 1.4.3's types, numbers it.
   signalCode?: string | number | null;
 }): ChildExit {
-  if (proc.exitedDueToTimeout === true) return { kind: "timed-out" };
-  if (proc.exitCode !== null) return { kind: "exited", code: proc.exitCode };
+  if (proc.exitedDueToTimeout === true) {
+    return { kind: "timed-out" };
+  }
+
+  if (proc.exitCode !== null) {
+    return { kind: "exited", code: proc.exitCode };
+  }
+
   return {
     kind: "signaled",
     signal: proc.signalCode == null ? "an unknown signal" : String(proc.signalCode),
@@ -46,12 +55,11 @@ export interface RunResult {
   stderr: string;
 }
 
+/** `timeoutMs` is the hard deadline, REQUIRED: on expiry the child is SIGKILLed and the result reports `timed-out`.
+ *  A `gh` call that hangs on a billed runner would otherwise fail the job on the clock, not on a verdict. */
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
-  /** Hard deadline in milliseconds, REQUIRED: on expiry the child is
-   *  SIGKILLed and the result reports `timed-out`. A `gh` call that hangs on
-   *  a billed runner would otherwise fail the job on the clock, not on a verdict. */
   timeoutMs: number;
 }
 
@@ -68,8 +76,14 @@ export function capture(command: string[], options: RunOptions): RunResult {
 }
 
 export function failureDetail(result: RunResult): string {
-  if (result.exit.kind === "timed-out") return "timed out";
-  if (result.exit.kind === "signaled") return `died on ${result.exit.signal}`;
+  if (result.exit.kind === "timed-out") {
+    return "timed out";
+  }
+
+  if (result.exit.kind === "signaled") {
+    return `died on ${result.exit.signal}`;
+  }
+
   const line = result.stderr
     .split("\n")
     .find((l) => l.trim() !== "")

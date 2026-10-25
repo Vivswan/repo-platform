@@ -46,13 +46,20 @@ function checkFindings(short: string, exitCode: number, output: string): string 
 }
 
 function judgeCheck(result: RunResult, short: string): Integrity {
-  if (result.stderr !== "") console.error(result.stderr);
+  if (result.stderr !== "") {
+    console.error(result.stderr);
+  }
+
   const output = result.stdout.replace(/\n+$/, "");
   const exit = result.exit;
-  if (exit.kind === "exited" && exit.code === 0) return { kind: "clean" };
+  if (exit.kind === "exited" && exit.code === 0) {
+    return { kind: "clean" };
+  }
+
   if (exit.kind === "exited" && (exit.code === 1 || exit.code === 2) && output !== "") {
     return { kind: "findings", findings: checkFindings(short, exit.code, output) };
   }
+
   return notJudged(
     `${PLATFORM_NAME}'s check at ${short} ended without a verdict (${failureDetail(result)})`,
   );
@@ -101,10 +108,12 @@ async function judgeAtRecordedCommit(paths: Paths, commit: string): Promise<Inte
         "the recorded commit must be one it holds",
     );
   }
+
   const visibility = requireEnv("REPOSITORY_PRIVATE");
   if (visibility !== "true" && visibility !== "false") {
     return notJudged(`the private input must be true or false, not "${visibility}"`);
   }
+
   const installed = run([paths.bun, "install", "--frozen-lockfile", "--silent"], {
     cwd: paths.platform,
     timeoutMs: STEP_TIMEOUT_MS,
@@ -112,6 +121,7 @@ async function judgeAtRecordedCommit(paths: Paths, commit: string): Promise<Inte
   if (!succeeded(installed)) {
     return notJudged(`installing ${PLATFORM_NAME}'s dependencies at ${short} failed`);
   }
+
   const checked = capture(
     [
       paths.bun,
@@ -141,8 +151,14 @@ function hygiene(paths: Paths): Integrity {
 }
 
 function merge(a: Integrity, b: Integrity): Integrity {
-  if (a.kind === "not-judged" || b.kind === "clean") return a;
-  if (b.kind === "not-judged" || a.kind === "clean") return b;
+  if (a.kind === "not-judged" || b.kind === "clean") {
+    return a;
+  }
+
+  if (b.kind === "not-judged" || a.kind === "clean") {
+    return b;
+  }
+
   return { kind: "findings", findings: `${a.findings}\n\n${b.findings}` };
 }
 
@@ -164,9 +180,14 @@ async function main(): Promise<number> {
   const verdict = merge(judged, hygiene(paths));
   writeVerdict(paths.verdictFile, verdict);
   // The writer's output is captured into the verdict, never printed, so this is the log's one line for the whole.
-  if (verdict.kind === "not-judged") error(verdict.reason);
-  else if (verdict.kind === "clean") console.log("Verdict: clean.");
-  else console.log("Verdict: findings; the report step carries them to the step summary.");
+  if (verdict.kind === "not-judged") {
+    error(verdict.reason);
+  } else if (verdict.kind === "clean") {
+    console.log("Verdict: clean.");
+  } else {
+    console.log("Verdict: findings; the report step carries them to the step summary.");
+  }
+
   return verdict.kind === "clean" ? 0 : 1;
 }
 

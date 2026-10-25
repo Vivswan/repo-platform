@@ -27,8 +27,7 @@ export interface MediaOverride {
   value: string;
 }
 
-/** Written on :root AND .dark: carbon's own .dark block sets several of them (brand-1, brand-2) directly, and the
- *  .dark declaration is what outranks it. */
+/** Written on :root AND .dark: carbon's own .dark block sets several of them (brand-1, brand-2) directly, and the .dark declaration is what outranks it. */
 export const SHARED_TOKENS = {
   fonts: {
     "--vp-font-family-base": '"Wix Madefor Text Variable", "Segoe UI", system-ui, sans-serif',
@@ -160,6 +159,7 @@ export const SHARED_TOKENS = {
   },
 } as const satisfies Record<string, Record<TokenName, SharedValue>>;
 
+/** The three custom properties a hue writes, by role. */
 export const HUE_TOKENS = {
   hue: "--fleet-hue",
   band: "--fleet-hue-band",
@@ -168,16 +168,15 @@ export const HUE_TOKENS = {
 
 export type HueValues = Record<keyof typeof HUE_TOKENS, string>;
 
+/** A hue by name: `light` is the deep variant, ink on paper grounds; `dark` the light variant, chalk on night
+ *  grounds. */
 export interface Hue extends Record<ScreenMode, HueValues> {
   name: string;
-  /** The deep variant, ink on paper grounds. */
   light: HueValues;
-  /** The light variant, chalk on night grounds. */
   dark: HueValues;
 }
 
-/** The hue set by slot: `data-fleet-hue="N"` is HUES[N]; slot 0 is the
- *  default, written into the mode blocks themselves. */
+/** The hue set by slot: `data-fleet-hue="N"` is HUES[N]; slot 0 is the default, written into the mode blocks themselves. */
 export const HUES: readonly Hue[] = [
   {
     name: "amber",
@@ -211,14 +210,14 @@ export const HUES: readonly Hue[] = [
   },
 ];
 
-/** On paper every hue is the ink: a dark-mode hue printed from a dark
- *  screen would sit at 2:1 on white. */
+/** On paper every hue is the ink: a dark-mode hue printed from a dark screen would sit at 2:1 on white. */
 export const PRINT_HUE: HueValues = {
   hue: "#1c1f26",
   band: "rgba(20, 24, 32, 0.1)",
   soft: "rgba(20, 24, 32, 0.28)",
 };
 
+/** The tokens that change with the mode, by group: a value per screen mode and, where paper differs, for print. */
 export const MODE_TOKENS = {
   grounds: {
     "--vp-c-bg": { light: "#f3f4f6", dark: "#16181d", print: "#ffffff" },
@@ -332,12 +331,16 @@ export function modeValues(mode: Mode): Map<TokenName, string> {
   for (const group of Object.values(MODE_TOKENS)) {
     for (const [name, perMode] of Object.entries(group) as [TokenName, ModeValues][]) {
       const value = perMode[mode];
-      if (value !== undefined) values.set(name, value);
+      if (value !== undefined) {
+        values.set(name, value);
+      }
     }
   }
+
   const hue = mode === "print" ? PRINT_HUE : HUES[0][mode];
   for (const [key, name] of Object.entries(HUE_TOKENS) as [keyof HueValues, TokenName][]) {
     values.set(name, hue[key]);
   }
+
   return values;
 }

@@ -53,7 +53,10 @@ export default {
       // show the default hue without this.
       const facts: ProjectFacts | undefined = ctx.siteData.value.themeConfig.docsSiteFacts;
       const root = document.documentElement;
-      if (facts && root.dataset.fleetHue === undefined) root.dataset.fleetHue = String(facts.hue);
+      if (facts && root.dataset.fleetHue === undefined) {
+        root.dataset.fleetHue = String(facts.hue);
+      }
+
       const versions: { link: string }[] = ctx.siteData.value.themeConfig.docsSiteVersions ?? [];
       ctx.router.onBeforeRouteChange = tierRouteGuard(
         ctx.siteData.value.base,

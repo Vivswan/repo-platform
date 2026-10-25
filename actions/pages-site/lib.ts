@@ -18,27 +18,33 @@ import {
  *  parsed): the plan action's site mode resolves it from the registration,
  *  a registration-less caller passes it as JSON. */
 export interface SiteConfig {
+  /** The site's title, the nav bar's heading. */
   siteTitle: string;
+
   /** Null is the docs half turned off: docs/ is left out even when it exists. */
   docs: DocsConfig | null;
+
   /** "" disables the nightly external-link check. */
   linkRotLabel: string;
-  /** The tuple the link-rot issue's label is created with. */
+
+  /** The link-rot label's color, half of the tuple the label is created with. */
   linkRotColor: string;
+
+  /** The other half: the label's description. */
   linkRotDescription: string;
 }
 
+/** The docs half, at `path`, a site-root-relative URL prefix ("/" or "/<segment>/"), with the roots it includes. */
 export interface DocsMount {
   kind: "docs";
-  /** Site-root-relative URL prefix: "/" or "/<segment>/". */
   path: string;
   include: readonly IncludeRoot[];
 }
 
+/** The website half, always at the root; `dist` is the hook's dist directory, relative to the repository root. */
 export interface PrebuiltMount {
   kind: "prebuilt";
   path: "/";
-  /** The hook's dist directory, relative to the repository root. */
   dist: string;
 }
 
@@ -49,34 +55,41 @@ export interface Layout {
 }
 
 export interface Tier {
+  /** Which build this is: the check build (`single`), a named tier, a tag, or the root. */
   kind: "single" | "latest" | "tag" | "stable" | "root";
+
+  /** The git ref the tier is built from. */
   ref: string;
-  /** The version identity handed to the build (DOCS_SITE_CURRENT): "" for
-   *  the check build, "latest", "stable", or the tag - the root tier
-   *  carries the newest served tag's identity, or "latest" while none
-   *  serve. */
+
+  /** The version identity handed to the build (DOCS_SITE_CURRENT): "" for the check build, "latest", "stable", or the tag - the root tier carries the newest served tag's identity, or "latest" while none serve. */
   version: string;
+
   /** Artifact path relative to the site root, "" or "<dir>/.../". */
   rel: string;
 }
 
 export function validateRelPath(value: string, what: string): void {
   const problem = relPathProblem(value);
-  if (problem !== null) throw new Error(`${what} '${value}' ${problem}`);
+  if (problem !== null) {
+    throw new Error(`${what} '${value}' ${problem}`);
+  }
 }
 
-const judged = (problem: (value: string) => string | null) =>
-  z.string().superRefine((value, ctx) => {
+function judged(problem: (value: string) => string | null) {
+  return z.string().superRefine((value, ctx) => {
     const message = problem(value);
-    if (message !== null) ctx.addIssue({ code: "custom", message });
+    if (message !== null) {
+      ctx.addIssue({ code: "custom", message });
+    }
   });
-// These reach the step outputs and the page title as one line each.
+}
+
+/** These reach the step outputs and the page title as one line each. */
 const oneLine = z.string().refine((value) => !/[\r\n]/.test(value), {
   message: "must be one line - it contains a line break",
 });
 
-/** conventions.ts's SiteConfigJson read back. Refusals are the interface: a configuration the assembler would
- *  misbuild must never reach it. */
+/** conventions.ts's SiteConfigJson read back. Refusals are the interface: a configuration the assembler would misbuild must never reach it. */
 const siteConfigSchema: z.ZodType<SiteConfigJson> = z
   .strictObject({
     // The plan's schema already requires project.name; a hand-written document meets the same bar here.
@@ -92,7 +105,9 @@ const siteConfigSchema: z.ZodType<SiteConfigJson> = z
       )
       .superRefine((roots, ctx) => {
         const message = includeListProblem(roots);
-        if (message !== null) ctx.addIssue({ code: "custom", message });
+        if (message !== null) {
+          ctx.addIssue({ code: "custom", message });
+        }
       }),
     link_rot_label: oneLine,
     link_rot_color: oneLine,
@@ -100,7 +115,9 @@ const siteConfigSchema: z.ZodType<SiteConfigJson> = z
   })
   .superRefine((config, ctx) => {
     const message = includeWithoutDocsProblem(config.docs_path, config.include);
-    if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
+    if (message !== null) {
+      ctx.addIssue({ code: "custom", message, path: ["include"] });
+    }
   });
 
 /** Parse the config input (a JSON object); every issue is reported, one line each, as the plan's readers spell them. */
@@ -113,6 +130,7 @@ export function parseSiteConfig(json: string): SiteConfig {
       `the config input is not valid JSON (${error instanceof Error ? error.message : String(error)}): ${json}`,
     );
   }
+
   const result = siteConfigSchema.safeParse(data);
   if (!result.success) {
     throw new Error(
@@ -121,6 +139,7 @@ export function parseSiteConfig(json: string): SiteConfig {
         .join("\n")}`,
     );
   }
+
   const config = result.data;
   return {
     siteTitle: config.site_title,
@@ -170,9 +189,9 @@ export function mountRel(mountPath: string): string {
 const LATEST = "latest";
 const STABLE = "stable";
 
+/** A named tier; `label` is the dropdown's label and the tier's directory name under the mount. */
 interface VersionTier {
   kind: "latest" | "stable" | "tag";
-  /** The dropdown's label and the tier's directory name under the mount. */
   label: string;
   ref: string;
 }
@@ -211,9 +230,9 @@ export function reservedRootEntries(tags: string[]): Set<string> {
   return new Set([LATEST, STABLE, "versions.json", ...tags]);
 }
 
+/** A dropdown entry; `path` is the mount-root-relative path of the version's directory. */
 export interface VersionEntry {
   label: string;
-  /** Mount-root-relative path of the version's directory. */
   path: string;
 }
 
@@ -237,6 +256,7 @@ export function urlBase(rootBase: string, rel: string): string {
 export interface TierScope {
   /** Artifact path relative to the site root, "" or "<dir>/.../". */
   rel: string;
+
   /** Built from HEAD: its links are the author's to fix today. */
   strict: boolean;
 }

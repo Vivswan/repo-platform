@@ -19,6 +19,11 @@ export type RecordKind = "interface" | "class" | "type literal" | "enum";
 /** A record, or a block of adjacent module-level `const` statements. */
 export type BlockKind = RecordKind | "const block";
 
+/** What an item is to the rules: a field (a property, an accessor, an index signature, an enum member, a module
+ *  constant) answers for its comment's shape; a method (a method, a constructor, a call or construct signature) carries
+ *  a doc comment of any length. */
+export type MemberKind = "field" | "method";
+
 /** A comment by its 1-based lines. */
 export interface Comment {
   line: number;
@@ -27,6 +32,9 @@ export interface Comment {
 
 /** A member of a record or one `const` statement of a block. */
 export interface Item {
+  /** Field or method; a `const` statement is a field. */
+  kind: MemberKind;
+
   /** The item's own first line: its `export` keyword or first decorator, never its comment. */
   line: number;
 
@@ -55,13 +63,26 @@ export interface Source {
 type RecordBody = TSInterfaceBody | ClassBody | TSTypeLiteral | TSEnumBody;
 type ModuleStatement = Program["body"][number];
 
+/** Each record body's node type, as a finding's block names it. */
 const RECORD_KINDS: Readonly<Record<RecordBody["type"], RecordKind>> = {
   TSInterfaceBody: "interface",
   ClassBody: "class",
   TSTypeLiteral: "type literal",
   TSEnumBody: "enum",
 };
+
+/** TypeScript in every flavor oxc reads as such. */
 const TS_EXTENSIONS: ReadonlySet<string> = new Set(["ts", "mts", "cts", "tsx"]);
+
+/** The member node types that are methods, an accessor's `kind` aside. */
+const METHOD_TYPES: ReadonlySet<string> = new Set([
+  "MethodDefinition",
+  "TSAbstractMethodDefinition",
+  "TSMethodSignature",
+  "TSCallSignatureDeclaration",
+  "TSConstructSignatureDeclaration",
+  "StaticBlock",
+]);
 
 /** The lines of a file in order, so an offset maps to a 1-based line by a binary search over the line starts. Span
  *  ends are exclusive, so endLineOf reads the character before the end. */
@@ -88,6 +109,7 @@ class LineTable {
         high = mid - 1;
       }
     }
+
     return low + 1;
   }
 
@@ -129,14 +151,17 @@ function constRuns(program: Program): ModuleStatement[][] {
       run.push(statement);
       continue;
     }
+
     if (run.length > 0) {
       runs.push(run);
     }
     run = [];
   }
+
   if (run.length > 0) {
     runs.push(run);
   }
+
   return runs;
 }
 
@@ -152,9 +177,11 @@ function prefixEnd(node: Node): number {
   if ("key" in node) {
     return node.key.start;
   }
+
   if (node.type === "ExportNamedDeclaration" && node.declaration !== null) {
     return node.declaration.start;
   }
+
   return startOf(node);
 }
 
@@ -171,6 +198,7 @@ function contiguousAbove(candidates: Comment[], line: number): Comment[] {
     taken.unshift(comment);
     next = comment.line;
   }
+
   return taken;
 }
 
@@ -218,6 +246,17 @@ interface Attribution {
   tellAllowed: boolean;
 }
 
+/** An accessor is a field wherever it is declared (a class, an interface, a type literal): it stands for a value, and
+ *  its doc reads as a field's does. */
+function memberKind(node: Node): MemberKind {
+  const kind = "kind" in node ? node.kind : undefined;
+  if (kind === "get" || kind === "set") {
+    return "field";
+  }
+
+  return METHOD_TYPES.has(node.type) ? "method" : "field";
+}
+
 /** The items of one block, with each comment given to the item it belongs to: a comment on the line an item ends on
  *  trails that item; every other comment between two items, or inside the lower item's prefix, is the lower item's. */
 function attribute(
@@ -227,6 +266,7 @@ function attribute(
   { openAt, closeAt, tellAllowed }: Attribution,
 ): Item[] {
   const items: Item[] = nodes.map((node) => ({
+    kind: memberKind(node),
     line: table.lineOf(startOf(node)),
     endLine: table.endLineOf(node.end),
     above: [],
@@ -238,6 +278,7 @@ function attribute(
     if (gap.trailing !== null && index > 0) {
       items[index - 1].trailing = gap.trailing;
     }
+
     const isTell = index === 0 && tellAllowed;
     const above = isTell ? contiguousAbove(gap.above, items[index].line) : gap.above;
     const misplaced = commentsWithin(comments, startOf(node), prefixEnd(node), table);

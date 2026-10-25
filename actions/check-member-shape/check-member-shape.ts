@@ -11,7 +11,7 @@ import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
 import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
 import { isGenerated, isManaged } from "../shared/managed_header.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
-import { repositoryFiles } from "../shared/repository_files.ts";
+import { EXEMPT_DIRS, repositoryFiles } from "../shared/repository_files.ts";
 import { isTypeScript, parseSource } from "./records.ts";
 import { type Finding, judge } from "./rules.ts";
 
@@ -22,11 +22,8 @@ export const ALLOWLIST_FILE = ".member-shape-allow.local";
 export const REASON_RULE =
   "an allowlist entry needs a reason a reader accepts (vendored or upstream-shaped, generated but missed by the header exemption, a shape an external contract fixes)";
 
-/** Directory names whose contents are vendored or generated wholesale, as check-file-size exempts them. */
-const EXEMPT_DIRS = new Set(["node_modules", "vendor", "third_party", "goldens", "__snapshots__"]);
-
 /** The one-line fix list every failure ends with. */
-const REMEDY = `Add the blank lines, make the comment one line directly above the item, comment every member or none, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`;
+const REMEDY = `Add the blank lines, make the comment one line directly above the item, comment every field or none, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`;
 
 /** A tracked path the check reads: TypeScript outside the exempt directories. */
 function isJudged(relPath: string): boolean {
@@ -75,20 +72,24 @@ export function check(root: string): Verdict {
     if (!isJudged(relPath)) {
       continue;
     }
+
     const text = readFileSync(join(root, relPath), "utf-8");
     if (isGenerated(text)) {
       generatedSkipped += 1;
       continue;
     }
+
     if (isManaged(text)) {
       managedSkipped += 1;
       continue;
     }
+
     const judged = judgeFile(relPath, text);
     if (judged === null) {
       unparsed.push(relPath);
       continue;
     }
+
     if (judged.length === 0) {
       continue;
     }
@@ -97,6 +98,7 @@ export function check(root: string): Verdict {
       findings.push(...judged);
     }
   }
+
   const allowlistErrors = [
     ...allow.failures,
     ...staleEntries(allow, found, ALLOWLIST_FILE, "every record and constant in shape"),
@@ -121,6 +123,7 @@ export function report(outcome: Outcome): string {
     parts.push(`The check did not run to completion: ${outcome.message}`);
     return `${parts.join("\n")}\n`;
   }
+
   const { findings, unparsed, allowlistErrors, managedSkipped, generatedSkipped } = outcome.verdict;
   if (outcome.state === "clean") {
     parts.push("Every record and constant is in shape.");
@@ -134,9 +137,11 @@ export function report(outcome: Outcome): string {
         ...findings.map((finding) => `| \`${finding.path}\` | ${finding.line} | ${finding.rule} |`),
       );
     }
+
     if (allowlistErrors.length > 0) {
       parts.push("", `### ${ALLOWLIST_FILE}`, "", ...allowlistErrors.map((error) => `- ${error}`));
     }
+
     if (unparsed.length > 0) {
       parts.push(
         "",
@@ -153,12 +158,15 @@ export function report(outcome: Outcome): string {
       ),
     );
   }
+
   if (managedSkipped > 0) {
     parts.push("", `${managedSkipped} managed file(s) skipped; ${PLATFORM_NAME} owns them.`);
   }
+
   if (generatedSkipped > 0) {
     parts.push("", `${generatedSkipped} generated file(s) skipped.`);
   }
+
   return `${parts.join("\n")}\n`;
 }
 

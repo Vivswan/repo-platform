@@ -25,6 +25,7 @@ export function baseTip(base: string): string {
       `origin/${base} does not resolve in this checkout (${failureDetail(read)}); the check needs a full-history checkout of the PR head`,
     );
   }
+
   return read.stdout.trim();
 }
 
@@ -33,8 +34,14 @@ function headContains(sha: string): boolean {
   const probe = capture(["git", "merge-base", "--is-ancestor", sha, "HEAD"], {
     timeoutMs: GIT_HANG_BOUND_MS,
   });
-  if (probe.exit.kind === "exited" && probe.exit.code === 0) return true;
-  if (probe.exit.kind === "exited" && probe.exit.code === 1) return false;
+  if (probe.exit.kind === "exited" && probe.exit.code === 0) {
+    return true;
+  }
+
+  if (probe.exit.kind === "exited" && probe.exit.code === 1) {
+    return false;
+  }
+
   throw new Error(`git merge-base could not answer (${failureDetail(probe)}); refusing to guess`);
 }
 

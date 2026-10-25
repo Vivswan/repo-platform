@@ -87,35 +87,42 @@ function note(text: string): VNode {
   return h("span", { class: "fleet-facts-note" }, text);
 }
 
+/** The card's first section: the repository, then the homepage and the topics where the project has them. */
+function aboutRows(facts: ProjectFacts): VNode[] {
+  const about: VNode[] = [
+    row(
+      "Repository",
+      h(
+        "a",
+        { class: "fleet-facts-repository", href: facts.repoUrl },
+        slashBreakable(facts.repository),
+      ),
+    ),
+  ];
+  if (facts.homepage !== null) {
+    about.push(
+      row("Homepage", h("a", { href: facts.homepage }, slashBreakable(shortUrl(facts.homepage)))),
+    );
+  }
+
+  if (facts.topics.length > 0) {
+    about.push(row("Topics", topicChips(facts.topics)));
+  }
+
+  return about;
+}
+
 export default defineComponent({
   name: "FactsPanel",
   setup() {
     const { theme, frontmatter } = useData<FactsTheme>();
     return () => {
       const facts = theme.value.docsSiteFacts;
-      if (frontmatter.value.fleetLanding !== true || facts === undefined) return null;
-
-      const about: VNode[] = [
-        row(
-          "Repository",
-          h(
-            "a",
-            { class: "fleet-facts-repository", href: facts.repoUrl },
-            slashBreakable(facts.repository),
-          ),
-        ),
-      ];
-      if (facts.homepage !== null) {
-        about.push(
-          row(
-            "Homepage",
-            h("a", { href: facts.homepage }, slashBreakable(shortUrl(facts.homepage))),
-          ),
-        );
+      if (frontmatter.value.fleetLanding !== true || facts === undefined) {
+        return null;
       }
-      if (facts.topics.length > 0) about.push(row("Topics", topicChips(facts.topics)));
 
-      const sections: VNode[] = [section(about)];
+      const sections: VNode[] = [section(aboutRows(facts))];
 
       if (facts.toolchains.length > 0) {
         sections.push(

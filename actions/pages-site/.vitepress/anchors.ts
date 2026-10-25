@@ -8,20 +8,25 @@ import { decodeHTML } from "entities";
 import { slug } from "github-slugger";
 import type { Token } from "markdown-it";
 
-/** The anchor plugin's getTokensText hook: text decoded ONCE, code spans literal.
+/** Text decoded ONCE, a code span literal, any other token nothing.
  *  VitePress's text_join joins an entity back as its markup and an escaped `\&` as `&amp;`, so one decode is the text GitHub slugs.
  *    `## Use &amp;amp;`     -> `use-amp` on both
  *    `&amp;` inside backticks -> the text "&amp;", as on GitHub */
+function tokenText(token: Token): string {
+  if (token.type === "text") {
+    return decodeHTML(token.content);
+  }
+
+  if (token.type === "code_inline") {
+    return token.content;
+  }
+
+  return "";
+}
+
+/** The anchor plugin's getTokensText hook. */
 export function headingText(tokens: Token[]): string {
-  return tokens
-    .map((token) =>
-      token.type === "text"
-        ? decodeHTML(token.content)
-        : token.type === "code_inline"
-          ? token.content
-          : "",
-    )
-    .join("");
+  return tokens.map(tokenText).join("");
 }
 
 /** github-slugger is the reference implementation of GitHub's rule, so a heading ending in an emoji slugs to a trailing hyphen on both.

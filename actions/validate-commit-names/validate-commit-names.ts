@@ -35,6 +35,7 @@ function eventPayload(): EventPayload {
   if (!eventPath) {
     throw new Error("GITHUB_EVENT_PATH is required.");
   }
+
   return JSON.parse(readFileSync(eventPath, "utf8")) as EventPayload;
 }
 
@@ -64,6 +65,7 @@ function judged(): Commit[] {
     if (!base || !head) {
       throw new Error("pull_request event is missing base/head SHAs.");
     }
+
     return rangeCommits(base, head);
   }
 
@@ -73,6 +75,7 @@ function judged(): Commit[] {
     if (before && after && !zeroSha.test(before) && rangeJudgeable(before, after)) {
       return rangeCommits(before, after);
     }
+
     const listed = payload.commits ?? [];
     // GitHub truncates the push payload's commit list at 20 entries; at
     // exactly 20 there is no way to tell truncation from a 20-commit push.
@@ -81,6 +84,7 @@ function judged(): Commit[] {
         "push payload may be truncated (it lists 20 commits, GitHub's cap) and the base..head range is not resolvable here; commits beyond the payload, if any, were not validated",
       );
     }
+
     return listed.map(({ id, message }) => ({ sha: id, message }));
   }
 
@@ -97,15 +101,21 @@ async function judge(commit: Commit): Promise<number> {
     await writeStdout(`commit ${commit.sha}: the message is empty\n`);
     return 1;
   }
+
   return report(await commitlint(commit.message));
 }
 
 async function main(): Promise<number> {
   const title = process.env.PR_TITLE ?? "";
-  if (title !== "") return report(await commitlint(title));
+  if (title !== "") {
+    return report(await commitlint(title));
+  }
   // Every commit gets its verdict before the step fails.
   let status = 0;
-  for (const commit of judged()) status = Math.max(status, await judge(commit));
+  for (const commit of judged()) {
+    status = Math.max(status, await judge(commit));
+  }
+
   return status;
 }
 

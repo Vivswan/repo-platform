@@ -12,7 +12,7 @@ import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
 import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
 import { COMMENT_LINE, isGenerated, isManaged } from "../shared/managed_header.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
-import { repositoryFiles } from "../shared/repository_files.ts";
+import { EXEMPT_DIRS, repositoryFiles } from "../shared/repository_files.ts";
 
 export type Kind = "source" | "test" | "workflow" | "shell" | "markdown";
 export type Tier = "hard" | "warn";
@@ -25,33 +25,37 @@ export interface Caps {
   lines: Readonly<Record<Kind, number>>;
 }
 
+/** The failing tier, in lines, by kind. Fleet-wide, like every cap here: the fleet takes the action from `@stable`. */
 export const HARD: Caps = {
   lines: { source: 2000, test: 3200, workflow: 1000, shell: 1000, markdown: 1300 },
 };
+
+/** The annotating tier's share of the hard cap. */
 const WARN_RATIO = 0.8;
+
 /** The annotating tier: derived from HARD so the two can never disagree. */
 export const WARN: Caps = {
   lines: Object.fromEntries(
     Object.entries(HARD.lines).map(([kind, cap]) => [kind, Math.round(cap * WARN_RATIO)]),
   ) as Caps["lines"],
 };
-/** Maximum line width, in code points, for every kind but PROSE: one tier, a
- *  failure. Below it, line length is the per-language formatter's to judge. */
+
+/** Maximum line width, in code points, for every kind but PROSE: one tier, a failure. Below it, line length is the per-language formatter's to judge. */
 export const HARD_WIDTH = 256;
-/** Maximum comment block length, in lines, by scope: one annotating tier,
- *  never a failure, so not derived from any hard cap. Fleet-wide, like every
- *  cap here: the fleet takes the action from `@stable`. */
+
+/** Maximum comment block length, in lines, by scope: one annotating tier, never a failure, so not derived from any hard cap. */
 export const COMMENT_CAPS: Readonly<Record<CommentScope, number>> = { block: 10, header: 25 };
-/** The per-block exemption, on a comment line inside the block (a comment
- *  line directly above it is part of it); the reason after it is mandatory. */
+
+/** The per-block exemption, on a comment line inside the block (a comment line directly above it is part of it); the reason after it is mandatory. */
 export const COMMENT_MARKER = "comment-cap: ignore";
-/** Prose has no width cap and no comment cap: the fleet writes one source
- *  line per paragraph, so its lines are long by design, and its `#` headings
- *  are not comments. */
+
+/** Prose has no width cap and no comment cap: the fleet writes one source line per paragraph, so its lines are long by design, and its `#` headings are not comments. */
 const PROSE: Kind = "markdown";
 
+/** The repo-owned allowlist at the checkout root; `.local` is the never-synced suffix. */
 export const ALLOWLIST_FILE = ".file-size-allow.local";
 
+/** Extensions of a source file, matched lower-cased. */
 const SOURCE_EXTENSIONS = new Set([
   "ts",
   "tsx",
@@ -76,17 +80,21 @@ const SOURCE_EXTENSIONS = new Set([
   "hh",
   "hpp",
 ]);
+
+/** Extensions of a shell script, matched lower-cased. */
 const SHELL_EXTENSIONS = new Set(["sh", "bash", "zsh"]);
+
+/** Directory names that make a source file a test; the kind by extension is decided first. */
 const TEST_DIRS = new Set(["test", "tests", "__tests__"]);
-/** Test files by name: the JS/Python/Go conventions, and Rust's sibling
- *  test modules (`foo_tests.rs`, `tests.rs`, `proptests.rs`). */
+
+/** Test files by name: the JS/Python/Go conventions, and Rust's sibling test modules (`foo_tests.rs`, `tests.rs`, `proptests.rs`). */
 const TEST_NAME =
   /(\.test\.|_test\.|\.spec\.|_spec\.|^test_|_tests\.rs$|^tests\.rs$|^proptests\.rs$)/;
-/** Directory names whose contents are vendored or generated wholesale. */
-const EXEMPT_DIRS = new Set(["node_modules", "vendor", "third_party", "goldens", "__snapshots__"]);
 
-/** Marker-fenced generated regions inside otherwise hand-written files. */
+/** Opens a generated region inside an otherwise hand-written file: masked from marker to marker, both lines included. */
 const REGION_BEGIN = /\bBEGIN GENERATED\b/;
+
+/** Closes it; a region never closed is not masked at all. */
 const REGION_END = /\bEND GENERATED\b/;
 
 function extensionOf(relPath: string): string {
@@ -99,7 +107,10 @@ function extensionOf(relPath: string): string {
 export function classify(relPath: string): Kind | null {
   const segments = relPath.split("/");
   const dirs = segments.slice(0, -1);
-  if (dirs.some((dir) => EXEMPT_DIRS.has(dir))) return null;
+  if (dirs.some((dir) => EXEMPT_DIRS.has(dir))) {
+    return null;
+  }
+
   const name = segments[segments.length - 1];
   const ext = extensionOf(relPath);
   const workflowsDir =
@@ -109,11 +120,19 @@ export function classify(relPath: string): Kind | null {
   if ((workflowsDir && (ext === "yml" || ext === "yaml")) || /^action\.ya?ml$/.test(name)) {
     return "workflow";
   }
-  if (SHELL_EXTENSIONS.has(ext)) return "shell";
-  if (ext === "md") return "markdown";
+
+  if (SHELL_EXTENSIONS.has(ext)) {
+    return "shell";
+  }
+
+  if (ext === "md") {
+    return "markdown";
+  }
+
   if (SOURCE_EXTENSIONS.has(ext)) {
     return TEST_NAME.test(name) || dirs.some((dir) => TEST_DIRS.has(dir)) ? "test" : "source";
   }
+
   return null;
 }
 
@@ -121,7 +140,10 @@ export function classify(relPath: string): Kind | null {
  *  CRLF file's `\r` is not width. */
 function splitLines(text: string): string[] {
   const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
-  if (lines[lines.length - 1] === "") lines.pop();
+  if (lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+
   return lines;
 }
 
@@ -137,11 +159,19 @@ function generatedRegionMask(lines: string[]): boolean[] {
   let begin = -1;
   lines.forEach((line, index) => {
     if (begin === -1) {
-      if (!REGION_BEGIN.test(line)) return;
-      if (REGION_END.test(line)) mask[index] = true;
-      else begin = index;
+      if (!REGION_BEGIN.test(line)) {
+        return;
+      }
+
+      if (REGION_END.test(line)) {
+        mask[index] = true;
+      } else {
+        begin = index;
+      }
     } else if (REGION_END.test(line)) {
-      for (let i = begin; i <= index; i++) mask[i] = true;
+      for (let i = begin; i <= index; i++) {
+        mask[i] = true;
+      }
       begin = -1;
     }
   });
@@ -151,17 +181,18 @@ function generatedRegionMask(lines: string[]): boolean[] {
 /** A shebang is `#!` and an interpreter path. Rust's `#![...]` attribute is not one. */
 const SHEBANG = /^#!\s*\//;
 
+/** A run of comment lines. `line` is its first, 1-based; `markers` holds every exemption marker in the block, each
+ *  with its 1-based line and the text after it on that line, up to the next marker. */
 interface CommentBlock {
-  /** The block's first line, 1-based. */
   line: number;
   length: number;
   scope: CommentScope;
-  /** Every exemption marker in the block: its 1-based line and the text after
-   *  it on that line, up to the next marker. */
   markers: { line: number; reason: string }[];
 }
 
+/** The marker as a whole word, every occurrence in a block. */
 const MARKER = new RegExp(`\\b${COMMENT_MARKER}\\b`, "g");
+
 /** A reason has a letter or digit in it, in any script: a closing delimiter alone after the marker is none. */
 const REASONED = /[\p{L}\p{N}]/u;
 
@@ -172,7 +203,10 @@ function commentBlocks(lines: readonly string[], skip: readonly boolean[]): Comm
   let start = -1;
   let headerAhead = true;
   const end = (at: number): void => {
-    if (start === -1) return;
+    if (start === -1) {
+      return;
+    }
+
     const markers: CommentBlock["markers"] = [];
     for (let row = start; row < at; row++) {
       const matches = [...lines[row].matchAll(MARKER)];
@@ -199,7 +233,9 @@ function commentBlocks(lines: readonly string[], skip: readonly boolean[]): Comm
     } else if (row === 0 && SHEBANG.test(line)) {
       return;
     } else if (COMMENT_LINE.test(line)) {
-      if (start === -1) start = row;
+      if (start === -1) {
+        start = row;
+      }
     } else {
       end(row);
       headerAhead = false;
@@ -227,8 +263,14 @@ export type Finding =
   | (FindingBase & { measure: "marker"; tier: "warn"; line: number });
 
 function exceeded(value: number, hard: number, warn: number): { tier: Tier; cap: number } | null {
-  if (value > hard) return { tier: "hard", cap: hard };
-  if (value > warn) return { tier: "warn", cap: warn };
+  if (value > hard) {
+    return { tier: "hard", cap: hard };
+  }
+
+  if (value > warn) {
+    return { tier: "warn", cap: warn };
+  }
+
   return null;
 }
 
@@ -241,11 +283,19 @@ export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
   if (lineCount !== null) {
     findings.push({ path, kind, ...lineCount, measure: "lines", value: counted });
   }
-  if (kind === PROSE) return findings;
+
+  if (kind === PROSE) {
+    return findings;
+  }
   lines.forEach((line, index) => {
-    if (generated[index] || isUnbreakable(line)) return;
+    if (generated[index] || isUnbreakable(line)) {
+      return;
+    }
+
     const width = [...line].length;
-    if (width <= HARD_WIDTH) return;
+    if (width <= HARD_WIDTH) {
+      return;
+    }
     findings.push({
       path,
       kind,
@@ -262,7 +312,11 @@ export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
         findings.push({ path, kind, tier: "warn", measure: "marker", line: marker.line });
       }
     }
-    if (markers.some((marker) => REASONED.test(marker.reason))) continue;
+
+    if (markers.some((marker) => REASONED.test(marker.reason))) {
+      continue;
+    }
+
     const cap = COMMENT_CAPS[scope];
     if (length > cap) {
       findings.push({
@@ -277,6 +331,7 @@ export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
       });
     }
   }
+
   return findings;
 }
 
@@ -316,10 +371,13 @@ export const REASON_RULE =
 export interface Verdict {
   /** Hard-tier findings on files the allowlist does not name. */
   failures: (Finding & { tier: "hard" })[];
+
   /** Warn-tier findings on files the allowlist does not name. */
   warnings: (Finding & { tier: "warn" })[];
+
   /** Allowlist defects: entries without a reason, and stale entries. */
   allowlistErrors: string[];
+
   /** Files skipped for carrying the platform's managed header: a fleet repository cannot fix such a file. */
   managedSkipped: number;
 }
@@ -332,18 +390,30 @@ export function check(root: string): Verdict {
   let managedSkipped = 0;
   for (const relPath of repositoryFiles(root, { untracked: false })) {
     const kind = classify(relPath);
-    if (kind === null) continue;
+    if (kind === null) {
+      continue;
+    }
+
     const text = readFileSync(join(root, relPath), "utf-8");
-    if (isGenerated(text)) continue;
+    if (isGenerated(text)) {
+      continue;
+    }
+
     if (isManaged(text)) {
       managedSkipped += 1;
       continue;
     }
+
     const judged = judgeFile(relPath, kind, text);
-    if (judged.length === 0) continue;
+    if (judged.length === 0) {
+      continue;
+    }
     found.add(relPath);
-    if (!allowed.has(relPath)) findings.push(...judged);
+    if (!allowed.has(relPath)) {
+      findings.push(...judged);
+    }
   }
+
   const allowlistErrors = [
     ...allow.failures,
     ...staleEntries(allow, found, ALLOWLIST_FILE, "under every cap"),
@@ -375,6 +445,7 @@ export function report(outcome: Outcome): string {
     parts.push(`The check did not run to completion: ${outcome.message}`);
     return `${parts.join("\n")}\n`;
   }
+
   const { failures, warnings, allowlistErrors, managedSkipped } = outcome.verdict;
   if (outcome.state === "clean") {
     parts.push("Every file is under its caps.");
@@ -388,6 +459,7 @@ export function report(outcome: Outcome): string {
     if (rows.length > 0) {
       parts.push("", "| File | Size | Tier | Cap |", "| --- | --- | --- | --- |", ...rows);
     }
+
     if (allowlistErrors.length > 0) {
       parts.push("", `### ${ALLOWLIST_FILE}`, "", ...allowlistErrors.map((error) => `- ${error}`));
     }
@@ -396,9 +468,11 @@ export function report(outcome: Outcome): string {
       `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
     );
   }
+
   if (managedSkipped > 0) {
     parts.push("", `${managedSkipped} managed file(s) skipped; ${PLATFORM_NAME} owns them.`);
   }
+
   return `${parts.join("\n")}\n`;
 }
 

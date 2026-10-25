@@ -28,13 +28,13 @@ export interface Core {
   summary: { addRaw(text: string): { write(): Promise<unknown> } };
 }
 
+/** What one check hands the shared main; `errors` are the annotations any one of which fails the run. */
 export interface CheckProgram<Verdict> {
   name: string;
   check(root: string): Verdict | Promise<Verdict>;
   outcomeOf(verdict: Verdict): Outcome<Verdict>;
   report(outcome: Outcome<Verdict>): string;
   warnings(verdict: Verdict): Annotation[];
-  /** Any one fails the run. */
   errors(verdict: Verdict): Annotation[];
   passed(verdict: Verdict): string;
   failed(count: number): string;
@@ -42,7 +42,10 @@ export interface CheckProgram<Verdict> {
 
 /** The one optional argument is the checkout root; the current directory otherwise. */
 export function rootOf(argv: string[]): string {
-  if (argv.length > 1) throw new Error(`unexpected argument(s): ${argv.slice(1).join(" ")}`);
+  if (argv.length > 1) {
+    throw new Error(`unexpected argument(s): ${argv.slice(1).join(" ")}`);
+  }
+
   return resolve(argv[0] ?? ".");
 }
 
@@ -53,12 +56,23 @@ export async function runCheck<Verdict>(
 ): Promise<never> {
   // Cleared first, so a crash below leaves no comment body behind.
   const reportPath = process.env.REPORT_PATH;
-  if (reportPath) rmSync(reportPath, { force: true });
+  if (reportPath) {
+    rmSync(reportPath, { force: true });
+  }
+
   const emit = async (outcome: Outcome<Verdict>): Promise<void> => {
     const body = program.report(outcome);
-    if (reportPath && outcome.state === "findings") writeFileSync(reportPath, body);
-    if (process.env.GITHUB_STEP_SUMMARY) await core.summary.addRaw(body).write();
-    if (process.env.GITHUB_OUTPUT) core.setOutput("report", outcome.state);
+    if (reportPath && outcome.state === "findings") {
+      writeFileSync(reportPath, body);
+    }
+
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      await core.summary.addRaw(body).write();
+    }
+
+    if (process.env.GITHUB_OUTPUT) {
+      core.setOutput("report", outcome.state);
+    }
   };
   // core prints `::error ::` (a stray space) for a properties object whose every value is unset, so an unanchored
   // annotation passes none.
@@ -76,10 +90,16 @@ export async function runCheck<Verdict>(
     await emit({ state: "error", message });
     process.exit(1);
   }
-  for (const warning of program.warnings(verdict)) annotate("warning", warning);
+
+  for (const warning of program.warnings(verdict)) {
+    annotate("warning", warning);
+  }
+
   const errors = program.errors(verdict);
   if (errors.length > 0) {
-    for (const error of errors) annotate("error", error);
+    for (const error of errors) {
+      annotate("error", error);
+    }
     console.error(program.failed(errors.length));
   } else {
     console.log(program.passed(verdict));

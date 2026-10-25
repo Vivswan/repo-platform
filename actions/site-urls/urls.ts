@@ -42,7 +42,9 @@ if (import.meta.main) {
       workspace: requireEnv("GITHUB_WORKSPACE"),
       defaultBranch: requireEnv("DEFAULT_BRANCH"),
     });
-    for (const [name, value] of Object.entries(urls)) setOutput(name, value);
+    for (const [name, value] of Object.entries(urls)) {
+      setOutput(name, value);
+    }
   } catch (cause) {
     setFailed(messageOf(cause));
   }

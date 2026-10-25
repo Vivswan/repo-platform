@@ -32,8 +32,14 @@ export function unknownModuleProblems(
 // A nested list or mapping is named by shape: JSON.stringify throws on the
 // cycle a YAML alias can build, which would turn a bad entry into a crash.
 function describeEntry(entry: unknown): string {
-  if (Array.isArray(entry)) return "(a list)";
-  if (typeof entry === "object" && entry !== null) return "(a mapping)";
+  if (Array.isArray(entry)) {
+    return "(a list)";
+  }
+
+  if (typeof entry === "object" && entry !== null) {
+    return "(a mapping)";
+  }
+
   return JSON.stringify(entry) ?? String(entry);
 }
 
@@ -44,6 +50,7 @@ export function readModules(
   if (!isMapping(data)) {
     return { modules: null, errors: [`${label}: top level must be a mapping`] };
   }
+
   const raw: unknown = data.modules;
   const key = "modules";
   if (raw === undefined) {
@@ -56,9 +63,11 @@ export function readModules(
       ],
     };
   }
+
   if (!Array.isArray(raw)) {
     return { modules: null, errors: [`${label}: ${key} must be a list of module names`] };
   }
+
   const errors: string[] = [];
   const seen = new Set<string>();
   const modules: string[] = [];
@@ -67,6 +76,7 @@ export function readModules(
       errors.push(`${label}: ${key} entry ${describeEntry(entry)} is not a module name`);
       continue;
     }
+
     if (seen.has(entry)) {
       errors.push(`${label}: duplicate ${key} entry "${entry}"`);
       continue;
@@ -74,9 +84,11 @@ export function readModules(
     seen.add(entry);
     modules.push(entry);
   }
+
   if (errors.length > 0) {
     return { modules: null, errors };
   }
+
   return { modules, errors: [] };
 }
 
@@ -89,6 +101,7 @@ export function declaredModules(registrationText: string): string[] | null {
   } catch {
     return null;
   }
+
   return readModules(data).modules;
 }
 
@@ -98,19 +111,28 @@ const slug = z
     /^[a-z0-9]+(-[a-z0-9]+)*$/,
     "must be kebab-case (lowercase letters and digits, dash-separated)",
   );
-const judged = (problem: (value: string) => string | null) =>
-  z.string().superRefine((value, ctx) => {
+
+function judged(problem: (value: string) => string | null) {
+  return z.string().superRefine((value, ctx) => {
     const message = problem(value);
-    if (message !== null) ctx.addIssue({ code: "custom", message });
+    if (message !== null) {
+      ctx.addIssue({ code: "custom", message });
+    }
   });
+}
+
 const urlSegment = judged(urlSegmentProblem);
 const relativePath = judged(relPathProblem);
-// The sync substitutes these into quoted YAML scalars verbatim, so a quote,
-// a backslash, or a control character would change the document it lands in.
-const plainText = (what: string) =>
-  z.string().refine((value) => !/["\\\p{Cc}]/u.test(value), {
+
+/** The sync substitutes these into quoted YAML scalars verbatim, so a quote, a backslash, or a control character
+ *  would change the document it lands in. */
+function plainText(what: string) {
+  return z.string().refine((value) => !/["\\\p{Cc}]/u.test(value), {
     message: `${what} must not contain double quotes, backslashes, or control characters`,
   });
+}
+
+/** A label as GitHub accepts it and gh takes it as a flag value (LABEL_RE). */
 const label = z
   .string()
   .regex(
@@ -118,9 +140,7 @@ const label = z
     "must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters",
   );
 
-/** One grammar for both documents that declare mirrors: files.yml's fleet list (actions/plan/files_config.ts) and the
- *  registration's own. `kind` is how each target carries the source: its bytes, or a relative symbolic link to it
- *  (docs/platform/sync/mirrors.md). */
+/** One grammar for both documents that declare mirrors: files.yml's fleet list and the registration's own. `kind` is how a target carries the source: its bytes, or a relative symbolic link to it (docs/platform/sync/mirrors.md). */
 export const mirrorsSchema = z.array(
   z.strictObject({
     source: z.string().min(1),
@@ -153,13 +173,17 @@ export const registrationSchema = z.strictObject({
         )
         .superRefine((roots, ctx) => {
           const message = includeListProblem(roots);
-          if (message !== null) ctx.addIssue({ code: "custom", message });
+          if (message !== null) {
+            ctx.addIssue({ code: "custom", message });
+          }
         })
         .optional(),
     })
     .superRefine((site, ctx) => {
       const message = includeWithoutDocsProblem(site.path, site.include ?? []);
-      if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
+      if (message !== null) {
+        ctx.addIssue({ code: "custom", message, path: ["include"] });
+      }
     })
     .optional(),
   labels: z.record(z.string(), label).optional(),
@@ -183,8 +207,12 @@ export function parseRegistration(text: string, label = REGISTRATION_PATH): Regi
     const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
     return { errors: [`${label}: YAML parse error: ${detail}`] };
   }
+
   const modules = readModules(data, label);
-  if (modules.modules === null) return { errors: modules.errors };
+  if (modules.modules === null) {
+    return { errors: modules.errors };
+  }
+
   const result = registrationSchema.safeParse(data);
   if (!result.success) {
     return {
@@ -193,5 +221,6 @@ export function parseRegistration(text: string, label = REGISTRATION_PATH): Regi
       ),
     };
   }
+
   return { registration: { ...result.data, modules: modules.modules } };
 }

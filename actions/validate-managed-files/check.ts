@@ -47,17 +47,24 @@ function listPaths(root: string): string[] {
   if (top.exitCode !== 0 || realpathSync(top.stdout.trimEnd()) !== realpathSync(root)) {
     return walk(root);
   }
+
   const listed = capture(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
     cwd: root,
   });
-  if (listed.exitCode !== 0) throw new Error(`git ls-files failed in the target: ${listed.stderr}`);
+  if (listed.exitCode !== 0) {
+    throw new Error(`git ls-files failed in the target: ${listed.stderr}`);
+  }
+
   return listed.stdout.split("\0").filter((path) => path !== "");
 }
 
 function walk(root: string, prefix = ""): string[] {
   return readdirSync(join(root, prefix), { withFileTypes: true }).flatMap((dirent) => {
     const rel = prefix === "" ? dirent.name : `${prefix}/${dirent.name}`;
-    if (rel === ".git") return [];
+    if (rel === ".git") {
+      return [];
+    }
+
     return dirent.isDirectory() ? walk(root, rel) : [rel];
   });
 }
@@ -71,8 +78,12 @@ function underLink(root: string, path: string, links: Map<string, boolean>): boo
       linked = lstatOrNull(join(root, dir))?.isSymbolicLink() === true;
       links.set(dir, linked);
     }
-    if (linked) return true;
+
+    if (linked) {
+      return true;
+    }
   }
+
   return false;
 }
 
@@ -80,7 +91,10 @@ function treeOf(root: string, paths: string[]): Tree {
   const tree: Tree = new Map();
   const links = new Map<string, boolean>();
   for (const path of paths) {
-    if (underLink(root, path, links)) continue;
+    if (underLink(root, path, links)) {
+      continue;
+    }
+
     const abs = join(root, path);
     const stat = lstatOrNull(abs);
     if (stat?.isSymbolicLink()) {
@@ -89,6 +103,7 @@ function treeOf(root: string, paths: string[]): Tree {
       tree.set(path, { kind: "file", bytes: readFileSync(abs) });
     }
   }
+
   return tree;
 }
 
@@ -96,24 +111,48 @@ function copy(tree: Tree, from: string, to: string): void {
   for (const [path, entry] of tree) {
     const dest = join(to, path);
     mkdirSync(dirname(dest), { recursive: true });
-    if (entry.kind === "link") symlinkSync(entry.target, dest);
-    else copyFileSync(join(from, path), dest);
+    if (entry.kind === "link") {
+      symlinkSync(entry.target, dest);
+    } else {
+      copyFileSync(join(from, path), dest);
+    }
   }
 }
 
 /** Bytes, never decoded text: an invalid sequence and U+FFFD decode alike. */
 function same(a: Entry, b: Entry): boolean {
-  if (a.kind === "file" && b.kind === "file") return a.bytes.equals(b.bytes);
-  if (a.kind === "link" && b.kind === "link") return a.target.equals(b.target);
+  if (a.kind === "file" && b.kind === "file") {
+    return a.bytes.equals(b.bytes);
+  }
+
+  if (a.kind === "link" && b.kind === "link") {
+    return a.target.equals(b.target);
+  }
+
   return false;
 }
 
 /** What the diff shows for an entry: a file's text, a link as one `-> target` line, nothing for an absent path. */
 function shown(entry: Entry | undefined): string {
-  if (entry === undefined) return "";
+  if (entry === undefined) {
+    return "";
+  }
+
   return entry.kind === "file"
     ? entry.bytes.toString("utf-8")
     : `-> ${entry.target.toString("utf-8")}`;
+}
+
+function verdictOf(before: Entry | undefined, after: Entry | undefined, build: string): string {
+  if (before === undefined) {
+    return `${build} would create it`;
+  }
+
+  if (after === undefined) {
+    return `${build} would remove it`;
+  }
+
+  return `differs from what ${build} writes`;
 }
 
 /** `before` is the repository, `after` the writer's copy; the diff's + lines are what the writer writes. */
@@ -123,13 +162,11 @@ function finding(
   after: Entry | undefined,
   build: string,
 ): string[] {
-  if (before !== undefined && after !== undefined && same(before, after)) return [];
-  const verdict =
-    before === undefined
-      ? `${build} would create it`
-      : after === undefined
-        ? `${build} would remove it`
-        : `differs from what ${build} writes`;
+  if (before !== undefined && after !== undefined && same(before, after)) {
+    return [];
+  }
+
+  const verdict = verdictOf(before, after, build);
   const was = shown(before);
   const is = shown(after);
   // Equal text under an unequal verdict is a byte-only edit when both sides are of one kind; a presence or kind change
@@ -140,6 +177,7 @@ function finding(
       ? [`${path}: ${verdict}`, "(the bytes differ where the decoded text does not)"]
       : [`${path}: ${verdict}`];
   }
+
   return [`${path}: ${verdict}`, unifiedDiff(path, was, is)];
 }
 
@@ -152,9 +190,11 @@ async function main(argv: string[]): Promise<number> {
   if (flags.private !== "true" && flags.private !== "false") {
     fail("--private must be true or false");
   }
+
   if (!/^[0-9a-f]{40}$/.test(flags.build)) {
     fail("--build must be the platform commit's full sha (40 lowercase hex characters)");
   }
+
   const target = resolve(flags.target);
   const short = flags.build.slice(0, 12);
   const scratch = mkdtempSync(join(tmpdir(), `${PLATFORM_NAME}-check-`));
@@ -180,6 +220,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(lines.join("\n"));
       return 2;
     }
+
     const after = treeOf(scratch, walk(scratch));
     const paths = [...new Set([...before.keys(), ...after.keys()])].sort();
     // A hold leaves the path as it stands, so the bytes alone would read it as clean.
@@ -196,4 +237,6 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-if (import.meta.main) process.exit(await main(process.argv.slice(2)));
+if (import.meta.main) {
+  process.exit(await main(process.argv.slice(2)));
+}

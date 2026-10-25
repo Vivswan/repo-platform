@@ -64,8 +64,36 @@ describe("the rules, per record kind and construct", () => {
     ],
     [
       "class: the comment above a decorator is the member's; the bare property is the finding",
-      "class C {\n  /** m */\n  @dec()\n  m(): void {}\n\n  x = 1;\n}\n",
+      "class C {\n  /** m */\n  @dec()\n  m = 1;\n\n  x = 1;\n}\n",
       ["6: all-or-none"],
+    ],
+    // Methods: one-line-comment and all-or-none govern fields and constants (the skill's "On a variable, field, or
+    // constant"); a method's doc comment follows the doc-comment rule and may run longer. blank-line-between-members
+    // still counts every member once any carries a comment.
+    [
+      "class: a method documented over two lines asks the bare, spaced fields for nothing",
+      "class C {\n  a = 1;\n\n  b = 2;\n\n  /** m\n   *  more */\n  m(): void {}\n}\n",
+      [],
+    ],
+    [
+      "class: the same documented method among packed fields: the blank-line rule still arms, the comment rules stay silent",
+      "class C {\n  a = 1;\n  /** m\n   *  more */\n  m(): void {}\n  b = 2;\n}\n",
+      ["3: blank-line-between-members", "6: blank-line-between-members"],
+    ],
+    [
+      "interface: a documented method signature among spaced bare properties passes",
+      "interface A {\n  a: string;\n\n  b: string;\n\n  /** Does m, at length,\n   *  on two lines. */\n  m(): void;\n}\n",
+      [],
+    ],
+    [
+      "class: an accessor is a field (its comment asks the bare property for one), a constructor a method (asked for nothing)",
+      "class C {\n  /** The value. */\n  get v(): number {\n    return 1;\n  }\n\n  x = 1;\n\n  constructor() {}\n}\n",
+      ["7: all-or-none"],
+    ],
+    [
+      "interface: an accessor signature is a field too (oxc spells it as a method signature with a `get` kind): its two-line doc and the bare property are findings",
+      "interface A {\n  /** Value\n   * details. */\n  get v(): number;\n\n  x: number;\n}\n",
+      ["2: one-line-comment", "6: all-or-none"],
     ],
     [
       "class: spread members with no comment anywhere pass, whatever the spacing",
@@ -348,7 +376,7 @@ describe("the CLI", () => {
   };
   const POSTED = gateValue("Post the findings as a sticky PR comment");
   const DELETED = gateValue("Remove a stale sticky comment");
-  const REMEDY = `Add the blank lines, make the comment one line directly above the item, comment every member or none, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`;
+  const REMEDY = `Add the blank lines, make the comment one line directly above the item, comment every field or none, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`;
   const findingsBody = [
     "## Member shape check",
     "",
@@ -363,7 +391,7 @@ describe("the CLI", () => {
     "",
     "- `src/broken.ts`",
     "",
-    `Add the blank lines, make the comment one line directly above the item, comment every member or none, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+    `Add the blank lines, make the comment one line directly above the item, comment every field or none, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
     "",
     "1 managed file(s) skipped; repo-platform owns them.",
     "",
