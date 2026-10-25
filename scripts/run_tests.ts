@@ -70,7 +70,7 @@ async function main(argv: string[]): Promise<number> {
   }
   const scratch = mkdtempSync(join(tmpdir(), `${PLATFORM_NAME}-tests-`));
   try {
-    // Async on purpose (biome.json exempts this file from the Bun.spawn ban):
+    // Async on purpose (biome.local.jsonc exempts this file from the Bun.spawn ban):
     // a synchronous spawn would hold the signal until the child exited on
     // its own. Inherited stdio, so there is no pipe to drain and no hang to
     // bound beyond the child's own life.

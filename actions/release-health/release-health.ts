@@ -570,15 +570,22 @@ async function resolveReleaseMode(
   return null;
 }
 
+/** What a test replaces: the clock, the wait between polls, and the checkout's tip read. */
+interface Seams {
+  readonly now?: Date;
+  readonly sleep?: (ms: number) => Promise<void>;
+  readonly checkoutTip?: (base: string) => string;
+}
+
 export async function runHealthCheck(
   cfg: Config,
   run: GhRunner,
   log: Log,
   setOutput: (name: string, value: string) => void,
-  now: Date = new Date(),
-  sleep: (ms: number) => Promise<void> = Bun.sleep,
-  checkoutTip: (base: string) => string = baseTip,
+  seams: Seams = {},
 ): Promise<number> {
+  const { now = new Date(), sleep = Bun.sleep, checkoutTip = baseTip } = seams;
+
   if (cfg.context.mode === "after-propose") {
     return stalePendingGuard(run, cfg.repo, now, log);
   }

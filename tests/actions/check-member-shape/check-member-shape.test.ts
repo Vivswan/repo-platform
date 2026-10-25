@@ -219,6 +219,16 @@ describe("the rules, per record kind and construct", () => {
       "export /* A. */ const A = 1;\n",
       ["1: one-line-comment"],
     ],
+    [
+      "a comment on a record's opening-brace line is the first member's: on its line, so a finding, and the next is bare and packed",
+      "interface A { /** a */ a: string;\n  b: string;\n}\n",
+      ["1: one-line-comment", "2: all-or-none", "2: blank-line-between-members"],
+    ],
+    [
+      "control: a comment trailing the statement before a const block is that statement's, so the block stays comment-free",
+      "f(); // done\nconst A = 1;\nconst B = 2;\n",
+      [],
+    ],
     // oxc reads the language off the file name: forced to plain TypeScript, a declaration file's `const A: number;`
     // is a parse error and the file would be warned past instead of judged.
     [

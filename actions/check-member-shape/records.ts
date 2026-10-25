@@ -242,8 +242,8 @@ interface Attribution {
   /** The offset the last item's trailing comment must end before. */
   closeAt: number;
 
-  /** Whether a blank-separated comment above the FIRST item is the group's tell (a const block) or the item's own. */
-  tellAllowed: boolean;
+  /** A record's brace, whose line's comment is the first member's, or the statement before a const block, whose line's comment is its own. */
+  opens: "brace" | "statement";
 }
 
 /** An accessor is a field wherever it is declared (a class, an interface, a type literal): it stands for a value, and
@@ -258,12 +258,13 @@ function memberKind(node: Node): MemberKind {
 }
 
 /** The items of one block, with each comment given to the item it belongs to: a comment on the line an item ends on
- *  trails that item; every other comment between two items, or inside the lower item's prefix, is the lower item's. */
+ *  trails that item; every other comment between two items, or inside the lower item's prefix, is the lower item's.
+ *  A blank-separated comment above a const block's first item is the group's tell, not the item's. */
 function attribute(
   nodes: Node[],
   comments: OxcComment[],
   table: LineTable,
-  { openAt, closeAt, tellAllowed }: Attribution,
+  { openAt, closeAt, opens }: Attribution,
 ): Item[] {
   const items: Item[] = nodes.map((node) => ({
     kind: memberKind(node),
@@ -279,10 +280,14 @@ function attribute(
       items[index - 1].trailing = gap.trailing;
     }
 
-    const isTell = index === 0 && tellAllowed;
-    const above = isTell ? contiguousAbove(gap.above, items[index].line) : gap.above;
+    const first = index === 0;
+    const above =
+      first && opens === "statement" ? contiguousAbove(gap.above, items[0].line) : gap.above;
     const misplaced = commentsWithin(comments, startOf(node), prefixEnd(node), table);
     items[index].above = [...above, ...misplaced];
+    if (first && opens === "brace" && gap.trailing !== null) {
+      items[0].above.unshift(gap.trailing);
+    }
   });
   const last = items.length - 1;
   items[last].trailing ??= gapComments(comments, nodes[last].end, closeAt, table).trailing;
@@ -312,7 +317,7 @@ export function parseSource(relPath: string, text: string): Source | null {
       items: attribute(membersOf(body), comments, table, {
         openAt: body.start,
         closeAt: body.end,
-        tellAllowed: false,
+        opens: "brace",
       }),
     }));
   const constBlocks: Block[] = constRuns(program).map((run) => {
@@ -324,7 +329,7 @@ export function parseSource(relPath: string, text: string): Source | null {
       items: attribute(run, comments, table, {
         openAt: before?.end ?? 0,
         closeAt: after?.start ?? text.length,
-        tellAllowed: true,
+        opens: "statement",
       }),
     };
   });

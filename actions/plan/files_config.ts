@@ -93,8 +93,10 @@ const names = z.array(z.string().min(1)).min(1);
 /** A derived module list: the modules declaring a key. */
 const derived = z.strictObject({ declaring: z.string().min(1) });
 
-/** Expanded once, by resolveWhen, so every reader past the loader sees plain names. The shape is picked before parsing because a union of the two reports a failed element as "any: Invalid input", losing its index and type. */
+/** Expanded once, by resolveWhen, so every reader past the loader sees plain names. */
 const listSchema: z.ZodType<ModuleList> = z.unknown().transform((value, ctx) => {
+  // The shape is picked before parsing: a union of the two reports a failed element as "any: Invalid input",
+  // losing its index and type.
   const parsed = (Array.isArray(value) ? names : derived).safeParse(value);
   if (parsed.success) {
     return parsed.data;
@@ -225,8 +227,9 @@ const moduleDataShape = z.looseObject({
   pin: pinSchema.optional(),
 });
 
-/** Every key outside the shape is a many-of key (a block list a file entry's `blocks` names), so a word there is refused and blockLists reads it as a list. Refined, not a catchall: zod folds a catchall into an index signature the typed keys contradict. */
+/** Every key outside the shape is a many-of key (a block list a file entry's `blocks` names): a word there is refused, and blockLists reads it as a list. */
 const moduleDataSchema = moduleDataShape.superRefine((data, ctx) => {
+  // Refined, not a catchall: zod folds a catchall into an index signature the typed keys contradict.
   for (const [key, value] of Object.entries(data)) {
     if (Object.hasOwn(moduleDataShape.shape, key)) {
       continue;

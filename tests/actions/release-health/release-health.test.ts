@@ -518,7 +518,7 @@ describe("runHealthCheck", () => {
       gh.run,
       recorder(lines),
       (name, value) => outputs.push(`${name}=${value}`),
-      NOW,
+      { now: NOW },
     );
     return { exit, lines, outputs, calls: gh.calls };
   }
@@ -870,17 +870,13 @@ describe("runHealthCheck", () => {
     const gh = fakeGh(fixture);
     const lines: Line[] = [];
     const sleeps: number[] = [];
-    const exit = await runHealthCheck(
-      afterRefreshConfig(),
-      gh.run,
-      recorder(lines),
-      () => {},
-      NOW,
-      async (ms) => {
+    const exit = await runHealthCheck(afterRefreshConfig(), gh.run, recorder(lines), () => {}, {
+      now: NOW,
+      sleep: async (ms) => {
         sleeps.push(ms);
       },
-      () => TIP,
-    );
+      checkoutTip: () => TIP,
+    });
     return { exit, lines, outputs: [], calls: gh.calls, sleeps };
   }
   test.each<{ reason: string; fixture: Fixture; expected: Run & { sleeps: number[] } }>([
@@ -1026,15 +1022,11 @@ describe("runHealthCheck", () => {
     async ({ fixture, rejects, calls }) => {
       const gh = fakeGh(fixture);
       const lines: Line[] = [];
-      const attempt = runHealthCheck(
-        afterRefreshConfig(),
-        gh.run,
-        recorder(lines),
-        () => {},
-        NOW,
-        async () => {},
-        () => TIP,
-      );
+      const attempt = runHealthCheck(afterRefreshConfig(), gh.run, recorder(lines), () => {}, {
+        now: NOW,
+        sleep: async () => {},
+        checkoutTip: () => TIP,
+      });
       expect([
         await rejection(attempt),
         gh.calls,

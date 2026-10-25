@@ -1,0 +1,228 @@
+// The repository's own layer: exclusions, formatter, lint preferences, plugins. biome.json holds the floor and extends this file.
+{
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": ["**", "!.github/repo-platform-manifest.json"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "quoteProperties": "preserve",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useNodejsImportProtocol": "error",
+        "useImportType": "error"
+      },
+      "suspicious": {
+        "noTemplateCurlyInString": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "actions/**",
+        ".github/scripts/**",
+        "scripts/**",
+        "!**/*.test.ts",
+        "!actions/shared/platform.ts",
+        "!migrations/**"
+      ],
+      "plugins": ["./biome/platform_name.grit"]
+    },
+    {
+      "includes": ["tests/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  },
+                  "node:fs/promises": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["tests/shared/temp_dir.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["tests/ci/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  },
+                  "node:fs/promises": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  }
+                },
+                "patterns": [
+                  {
+                    "group": ["**/.github/**"],
+                    "message": "a CI harness runs the script as a subprocess; an in-process import tests the module inside bun-test, not the script CI runs"
+                  }
+                ]
+              }
+            },
+            "noCommonJs": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["tests/ci/bun_setup_smoke.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  },
+                  "node:fs/promises": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  }
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/.github/**",
+                      "!**/.github/scripts/ci/bun_setup_smoke",
+                      "!**/.github/scripts/ci/bun_setup_smoke.ts"
+                    ],
+                    "message": "a CI harness runs the script as a subprocess; an in-process import tests the module inside bun-test, not the script CI runs"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "scripts/**",
+        ".github/scripts/**",
+        "tests/**",
+        "!.github/scripts/shared/proc.ts",
+        "!tests/shared/bounded_spawn.ts",
+        "!tests/fleet/select_settings_repos.test.ts",
+        "!tests/fleet/select_sync_repos.test.ts"
+      ],
+      "plugins": ["./biome/spawn_sync.grit"]
+    },
+    {
+      "includes": [
+        "scripts/**",
+        ".github/scripts/**",
+        "tests/**",
+        "actions/**",
+        "!scripts/run_tests.ts",
+        "!tests/actions/pages-site/headless_chrome.ts",
+        "!tests/shared/loopback_server.ts",
+        "!actions/release-health/release-health.ts"
+      ],
+      "plugins": ["./biome/spawn_async.grit"]
+    },
+    {
+      "includes": [
+        "scripts/**",
+        ".github/scripts/**",
+        "actions/**",
+        "!actions/validate-commit-names/commitlint.ts"
+      ],
+      "plugins": ["./biome/stream_write.grit"]
+    },
+    // A migration rung is frozen once shipped and never edited, so its complexity is never paid again.
+    {
+      "includes": ["migrations/**"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off"
+          }
+        }
+      }
+    },
+    // hasDuplicateKey is a character-level token walk over known-valid JSON; a split threads five locals through a record for no reading gain.
+    {
+      "includes": ["actions/shared/manifest.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": {
+              "level": "error",
+              "options": {
+                "maxAllowedComplexity": 35
+              }
+            }
+          }
+        }
+      }
+    },
+    // A test table is data, not a function body.
+    {
+      "includes": ["tests/**"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveLinesPerFunction": "off"
+          }
+        }
+      }
+    }
+  ]
+}

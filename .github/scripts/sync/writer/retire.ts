@@ -52,9 +52,11 @@ function judgeLink(found: Exclude<Found, { kind: "absent" }>, hash: string): Jud
   if (found.kind !== "link") {
     return foreign("a regular file sits where a link is recorded");
   }
+
   if (sha256(found.target) !== hash) {
     return foreign("the path is a symbolic link whose target is not the recorded one");
   }
+
   return { verdict: "own" };
 }
 
@@ -66,15 +68,19 @@ function judgeSplit(bytes: Buffer, record: Extract<ManifestRecord, { class: "spl
   if (slice === null) {
     return foreign("the managed-region markers are missing or malformed");
   }
+
   if (sha256(Buffer.from(slice.region, "latin1")) !== record.hash) {
     return foreign("the managed region was edited");
   }
+
   if (slice.above === "" && slice.below === "") {
     return { verdict: "own" };
   }
+
   if (slice.above.trim() === "" && slice.below.trim() === "") {
     return { verdict: "blank" };
   }
+
   return {
     verdict: "handover",
     kept: Buffer.from(joinHalves(slice.above, slice.below), "latin1"),
@@ -86,25 +92,32 @@ export function judge(target: string, path: string, records: Records): Judgement
   if (record === null) {
     return { verdict: "unrecorded" };
   }
+
   if (record.class === "starter") {
     return foreign("a starter is repo-owned");
   }
+
   const found = probe(target, path);
   if (found.kind === "absent") {
     return { verdict: "own" };
   }
+
   if (record.class === "mirror" && mirrorKind(record) === "symlink") {
     return judgeLink(found, record.hash);
   }
+
   if (found.kind === "link") {
     return foreign("a symbolic link sits where a regular file is recorded");
   }
+
   if (record.class === "split") {
     return judgeSplit(found.bytes, record);
   }
+
   if (sha256(found.bytes) !== record.hash) {
     return foreign("the content differs from the last write");
   }
+
   return { verdict: "own" };
 }
 

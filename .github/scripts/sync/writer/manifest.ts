@@ -55,16 +55,20 @@ export function readRecord(entry: ManifestEntryShape | undefined): ManifestRecor
   if (entry === undefined || !isRecordedClass(entry.class)) {
     return null;
   }
+
   if (strayFields(RECORD_FIELDS[entry.class], entry).length > 0) {
     return null;
   }
+
   if (entry.class === "starter") {
     return { class: "starter" };
   }
+
   const hash = entry.hash;
   if (typeof hash !== "string" || !HASH_RE.test(hash)) {
     return null;
   }
+
   switch (entry.class) {
     case "managed":
       return { class: "managed", hash };
