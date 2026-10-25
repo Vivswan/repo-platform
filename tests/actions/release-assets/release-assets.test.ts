@@ -23,6 +23,7 @@ function fakeGh(assets: string[]): { run: GhRunner; calls: string[][] } {
 }
 
 // fleet-release-publish.yml runs with no checkout, so every call names the repository.
+
 const VIEW = ["release", "view", TAG, "--repo", REPO, "--json", "assets"];
 const DELETE = ["release", "delete-asset", TAG, BUNDLE, "--yes", "--repo", REPO];
 /** A log line as the recorder saw it: core's method, then the message. */

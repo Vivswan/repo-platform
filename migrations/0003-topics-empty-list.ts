@@ -56,8 +56,8 @@ export function judgeOverlay(text: string): Judgment {
   }
   const node = isNode(pair.value) ? pair.value : null;
   // A valueless key parses to an empty node right after its colon, so the list gets the space the colon lacks.
-  const valueStart = node?.range != null ? node.range[0] : keyRange[1] + 1;
-  const valueEnd = node?.range != null ? node.range[1] : keyRange[1] + 1;
+  const valueStart = node?.range == null ? keyRange[1] + 1 : node.range[0];
+  const valueEnd = node?.range == null ? keyRange[1] + 1 : node.range[1];
   // A block scalar's range runs to the end of its lines, comment and newline included, and the read-back below
   // compares values alone, so the edit is made only where the value sits on the key's line.
   if (/[\n#]/.test(text.slice(valueStart, valueEnd))) {

@@ -1,5 +1,5 @@
 // Two facts that would drift silently: the uv module's wiring lands ruff.toml, and every `uvx ruff` site spells one
-// pinned version.
+// pinned version. The test reads ruff.toml alone, so every upstream file is a stub and never the network.
 
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -13,7 +13,6 @@ import { spawnStubUpstream } from "../shared/upstream_server";
 const temp = tempDirs();
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const FLOOR = "ruff.toml";
-/** Where a ruff version is spelled: the fleet gate and every uv starter the writer ships. */
 const RUFF_SITES = [
   ".github/workflows/fleet.yml",
   ...readdirSync(join(REPO_ROOT, "files/uv"), { recursive: true, encoding: "utf-8" })
@@ -21,7 +20,6 @@ const RUFF_SITES = [
     .filter((rel) => statSync(join(REPO_ROOT, rel)).isFile()),
 ];
 
-// This test reads ruff.toml alone, so every upstream file is a stub and never the network.
 const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
 const upstream = await spawnStubUpstream(config, temp.dir("ruff-floor-upstream-"));
 afterAll(() => upstream.stop());

@@ -32,17 +32,24 @@ const REGISTRATION =
   "except: [CLAUDE.md, .github/agents.md, .github/copilot-instructions.md]\n";
 
 interface Platform {
+  /** The checkout the commits below were made in. */
   root: string;
+
   /** The e2e fixture tree as committed. */
   base: string;
+
   /** A docs file: off the checker and written nowhere. */
   docs: string;
+
   /** A docs-site theme file under actions/: off the checker and written nowhere. */
   theme: string;
+
   /** A byte changed under the checker. */
   checker: string;
+
   /** A byte changed under files/, which the sync writes. */
   files: string;
+
   /** A dependency version moved: the lockfile alone. */
   lock: string;
 }
@@ -119,12 +126,18 @@ function recorded(targetDir: string): unknown {
 }
 
 interface Second {
+  /** The case, as the test's name. */
   reason: string;
+
   /** The commit the first sync records, then the build of the second. */
   builds: (p: Platform) => [string, string];
+
   /** A change to the target between the two syncs. */
   between?: (targetDir: string) => void;
+
+  /** The commit the second sync's manifest records. */
   stamp: (p: Platform) => string;
+
   /** Whether the second sync leaves every byte but the manifest as it stood just before it ran. */
   treeKept: boolean;
 }

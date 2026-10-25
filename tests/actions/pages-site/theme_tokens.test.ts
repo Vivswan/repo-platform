@@ -16,7 +16,6 @@ const ACTION = resolve(import.meta.dir, "../../../actions/pages-site");
 const THEME = join(ACTION, ".vitepress/theme");
 const CONFIG = join(ACTION, ".vitepress/config.mts");
 const CARBON = join(ACTION, "node_modules/vitepress-carbon/dist");
-// shiki is the action's dependency, not the root's.
 const { createCssVariablesTheme } = (await import(Bun.resolveSync("shiki", ACTION))) as {
   createCssVariablesTheme: (options: { variablePrefix: string }) => unknown;
 };

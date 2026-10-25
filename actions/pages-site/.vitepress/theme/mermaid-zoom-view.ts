@@ -18,8 +18,12 @@ import type { PropType } from "vue";
 import { defineComponent, h, onBeforeUnmount, onMounted, shallowRef, watch } from "vue";
 import { type Shown, shown } from "./mermaid-zoom.ts";
 
+/** The dialog's class, the stylesheet's hook. */
 const VIEW_CLASS = "fleet-mermaid-view";
+
+/** How far one arrow press scrolls the stage. */
 const KEY_PAN_PIXELS = 40;
+
 /** The arrows scroll the stage, so ArrowRight reveals the right side. */
 const PAN_KEYS: Readonly<Record<string, readonly [number, number]>> = {
   ArrowLeft: [1, 0],
@@ -37,6 +41,7 @@ function fill(canvas: HTMLElement, diagram: HTMLElement): void {
   const svg = diagram.querySelector<SVGSVGElement>(":scope > svg");
   canvas.replaceChildren();
   if (svg === null) return;
+
   const copy = svg.cloneNode(true) as SVGSVGElement;
   const size = naturalSize(svg);
   copy.style.maxWidth = "none";
@@ -47,8 +52,9 @@ function fill(canvas: HTMLElement, diagram: HTMLElement): void {
   canvas.append(copy);
 }
 
-const control = (text: string, onClick: () => void) =>
-  h("button", { type: "button", onClick }, text);
+function control(text: string, onClick: () => void) {
+  return h("button", { type: "button", onClick }, text);
+}
 
 /** The dialog's body, mounted while the view is open, so Panzoom lives exactly as long as its canvas. */
 const Body = defineComponent({
@@ -73,14 +79,20 @@ const Body = defineComponent({
     /** A chord (Alt, Ctrl, Meta) stays the browser's: Alt+ArrowLeft is Back. */
     function onKey(event: KeyboardEvent): void {
       if (event.altKey || event.ctrlKey || event.metaKey) return;
+
       const pan = PAN_KEYS[event.key];
       if (pan !== undefined) {
         const step = KEY_PAN_PIXELS / panzoom.getScale();
         panzoom.pan(pan[0] * step, pan[1] * step, { relative: true });
-      } else if (event.key === "+" || event.key === "=") panzoom.zoomIn({ animate: false });
-      else if (event.key === "-") panzoom.zoomOut({ animate: false });
-      else if (event.key === "0") place();
-      else return;
+      } else if (event.key === "+" || event.key === "=") {
+        panzoom.zoomIn({ animate: false });
+      } else if (event.key === "-") {
+        panzoom.zoomOut({ animate: false });
+      } else if (event.key === "0") {
+        place();
+      } else {
+        return;
+      }
       event.preventDefault();
     }
     onMounted(() => {

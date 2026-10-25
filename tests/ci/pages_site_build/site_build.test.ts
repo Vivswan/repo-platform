@@ -55,8 +55,9 @@ beforeAll(() => {
   fleetRepo(workspace);
   runner = runnerTemp(temp, FLEET_BASE);
   built = buildSite(workspace, FLEET_REPO, runner, FLEET_ENV);
-  if (built.exitCode !== 0)
+  if (built.exitCode !== 0) {
     throw new Error(`the fleet fixture's build failed: ${describeRun(built)}`);
+  }
   site = runner.site;
   latestIndex = readSite(site, "docs/latest/index.html");
   latestAssets = readAssets(site, "docs/latest/assets");
@@ -557,14 +558,13 @@ describe("link strictness on HEAD", () => {
 
 describe("layouts that build no docs tier", () => {
   // docs/modules/site.md's two Layout rows a deploy settles without vitepress; the refused layouts are resolvePrebuilt's
-  // and assertDocsLanding's unit tables.
+  // and assertDocsLanding's unit tables. An absent path of "." is the site directory itself.
   const NO_LINK_ROT = { "link-rot-label": "", "link-rot-color": "", "link-rot-description": "" };
   test.each<{
     layout: string;
     fixture: (repo: string) => void;
     env: Record<string, string>;
     pages: [string, string][];
-    /** Paths under the site that must not exist; "." is the site directory itself. */
     absent: string[];
     stdout: string[];
     outputs: (runner: RunnerTemp) => Record<string, string>;

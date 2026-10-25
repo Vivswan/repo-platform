@@ -6,6 +6,7 @@
 export interface PagesSite {
   /** `https://<owner>.github.io`, the owner lowercased the way Pages serves it. */
   origin: string;
+
   /** `/` for the owner's user site, the repository named `<owner>.github.io` in any case; `/<repo>/` otherwise. */
   basePath: string;
 }
@@ -21,12 +22,7 @@ export function pagesSite(repository: string): PagesSite {
   };
 }
 
-/** The regex matching the site's own URLs and nothing else on the origin: the base followed by one of `entries` (the
- *  artifact's top-level names) and a delimiter, or the base itself, the tail captured as `$1` for a remap (Rust regex
- *  has no lookahead). Entries rather than the base alone, because a user site's base is the bare origin, which it
- *  shares with every project site of the owner (`/<repo>/`). */
-/** The characters the URL parser would not keep as a path's own: `%` starts an escape, `\\` becomes `/` under https,
- *  and the whitespace is dropped. Spelled as the href to such a file must spell them. */
+/** The characters the URL parser would not keep as a path's own: `%` starts an escape, `\\` becomes `/` under https, and the whitespace is dropped. Spelled as the href to such a file must spell them. */
 const MANGLED: Record<string, string> = {
   "%": "%25",
   "\\": "%5C",
@@ -35,6 +31,10 @@ const MANGLED: Record<string, string> = {
   "\r": "%0D",
 };
 
+/** The regex matching the site's own URLs and nothing else on the origin: the base followed by one of `entries` (the
+ *  artifact's top-level names) and a delimiter, or the base itself, the tail captured as `$1` for a remap (Rust regex
+ *  has no lookahead). Entries rather than the base alone, because a user site's base is the bare origin, which it
+ *  shares with every project site of the owner (`/<repo>/`). */
 export function ownLinksPattern(site: PagesSite, entries: string[]): string {
   const base = RegExp.escape(site.origin + site.basePath.slice(0, -1));
   const own = entries.map(segmentPattern).join("|");
@@ -55,11 +55,13 @@ function segmentPattern(name: string): string {
       pattern += `%${hexClass(part.slice(1))}`;
       continue;
     }
+
     for (const char of part) {
       const hex = char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0");
       pattern += `(?:${RegExp.escape(char)}|%${hexClass(hex)})`;
     }
   }
+
   return pattern;
 }
 

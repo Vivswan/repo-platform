@@ -8,8 +8,9 @@ export function isSlug(value: unknown): value is string {
   return typeof value === "string" && SLUG_RE.test(value);
 }
 
+// A modules filter is `modules:<a>+<b>`: inside one filter the names are joined with "+", since the entry list already spends the comma.
+
 const MODULES_PREFIX = "modules:";
-// Inside one filter the names are joined with "+" (the entry list already spends the comma).
 const MODULES_JOINER = "+";
 
 export type Visibility = "public" | "private";
@@ -28,6 +29,73 @@ export type Scope =
   | { kind: "all" }
   | { kind: "list"; visibility: Set<Visibility>; slugs: Set<string>; modules: Set<string>[] };
 
+/** What one pass over the entries collected: the selection, and the counts the refusals are worded from. */
+interface Tally {
+  visibility: Set<Visibility>;
+  slugs: Set<string>;
+  modules: Set<string>[];
+  entries: number;
+  invalid: number;
+  alls: number;
+  moduleNames: number;
+  emptyModuleNames: number;
+  unknownModules: number;
+}
+
+function tallyEntries(entries: readonly string[], roster: ReadonlySet<string>): Tally {
+  const tally: Tally = {
+    visibility: new Set(),
+    slugs: new Set(),
+    modules: [],
+    entries: entries.length,
+    invalid: 0,
+    alls: 0,
+    moduleNames: 0,
+    emptyModuleNames: 0,
+    unknownModules: 0,
+  };
+  for (const entry of entries) {
+    const kind = classifyEntry(entry);
+    if (kind === "all") {
+      tally.alls++;
+    } else if (kind === "slug") {
+      tally.slugs.add(entry.toLowerCase());
+    } else if (kind === "invalid") {
+      tally.invalid++;
+    } else if (kind === "modules") {
+      const names = entry
+        .slice(MODULES_PREFIX.length)
+        .split(MODULES_JOINER)
+        .map((name) => name.trim().toLowerCase());
+      tally.emptyModuleNames += names.filter((name) => name === "").length;
+      tally.moduleNames += names.length;
+      tally.unknownModules += names.filter((name) => name !== "" && !roster.has(name)).length;
+      tally.modules.push(new Set(names));
+    } else {
+      tally.visibility.add(kind);
+    }
+  }
+  return tally;
+}
+
+/** The refusal a tally earns, or null; each message carries counts alone, since the entries may be private slugs. */
+function tallyProblem(tally: Tally, roster: ReadonlySet<string>): string | null {
+  if (tally.alls > 0) {
+    return '"all" mixes with nothing: pass all alone, or public, private, and owner/name slugs';
+  }
+  if (tally.invalid > 0) {
+    return `${tally.invalid} of ${tally.entries} scope entries ${tally.invalid === 1 ? "is" : "are"} neither owner/name slugs nor public/private (values withheld - they may be private slugs)`;
+  }
+  if (tally.emptyModuleNames > 0) {
+    return `a modules: filter has an empty module name: write modules:<name>, or modules:<a>${MODULES_JOINER}<b> for the repos selecting every listed module`;
+  }
+  const { unknownModules, moduleNames } = tally;
+  if (unknownModules > 0) {
+    return `${unknownModules} of ${moduleNames} module names in the modules: filters ${unknownModules === 1 ? "is not a module" : "are not modules"} files.yml knows (values withheld - this log is public); the modules are: ${[...roster].join(", ")}`;
+  }
+  return null;
+}
+
 /** Messages carry counts, never entries: a dispatch entry may be a private slug and the caller's log is public. A filter naming a
  *  module outside `roster` (modules.ts's moduleRoster) is refused here, before any repository is probed. */
 export function parseScope(
@@ -44,55 +112,10 @@ export function parseScope(
         "the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma",
     };
   }
-  const visibility = new Set<Visibility>();
-  const slugs = new Set<string>();
-  const modules: Set<string>[] = [];
-  let invalid = 0;
-  let alls = 0;
-  let emptyModuleNames = 0;
-  let moduleNames = 0;
-  let unknownModules = 0;
-  for (const entry of entries) {
-    const kind = classifyEntry(entry);
-    if (kind === "all") alls++;
-    else if (kind === "slug") slugs.add(entry.toLowerCase());
-    else if (kind === "invalid") invalid++;
-    else if (kind === "modules") {
-      const names = entry
-        .slice(MODULES_PREFIX.length)
-        .split(MODULES_JOINER)
-        .map((name) => name.trim().toLowerCase());
-      emptyModuleNames += names.filter((name) => name === "").length;
-      moduleNames += names.length;
-      unknownModules += names.filter((name) => name !== "" && !roster.has(name)).length;
-      modules.push(new Set(names));
-    } else visibility.add(kind);
-  }
-  if (alls > 0) {
-    return {
-      kind: "error",
-      message: '"all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
-    };
-  }
-  if (invalid > 0) {
-    return {
-      kind: "error",
-      message: `${invalid} of ${entries.length} scope entries ${invalid === 1 ? "is" : "are"} neither owner/name slugs nor public/private (values withheld - they may be private slugs)`,
-    };
-  }
-  if (emptyModuleNames > 0) {
-    return {
-      kind: "error",
-      message: `a modules: filter has an empty module name: write modules:<name>, or modules:<a>${MODULES_JOINER}<b> for the repos selecting every listed module`,
-    };
-  }
-  if (unknownModules > 0) {
-    return {
-      kind: "error",
-      message: `${unknownModules} of ${moduleNames} module names in the modules: filters ${unknownModules === 1 ? "is not a module" : "are not modules"} files.yml knows (values withheld - this log is public); the modules are: ${[...roster].join(", ")}`,
-    };
-  }
-  return { kind: "list", visibility, slugs, modules };
+  const tally = tallyEntries(entries, roster);
+  const problem = tallyProblem(tally, roster);
+  if (problem !== null) return { kind: "error", message: problem };
+  return { kind: "list", visibility: tally.visibility, slugs: tally.slugs, modules: tally.modules };
 }
 
 export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): boolean {

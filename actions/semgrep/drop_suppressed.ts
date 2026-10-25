@@ -21,6 +21,7 @@ export function dropSuppressed(sarif: Sarif): Sarif {
     if (run.results === undefined) continue;
     run.results = run.results.filter((result) => (result.suppressions ?? []).length === 0);
   }
+
   return sarif;
 }
 

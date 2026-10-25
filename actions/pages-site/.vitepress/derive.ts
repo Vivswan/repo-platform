@@ -22,6 +22,7 @@ export function walkMarkdown(srcDir: string, prefix = ""): string[] {
   const files: string[] = [];
   for (const name of readdirSync(join(srcDir, prefix)).sort()) {
     if (isUnwalkedEntry(name)) continue;
+
     const rel = prefix === "" ? name : `${prefix}/${name}`;
     if (statSync(join(srcDir, rel)).isDirectory()) {
       files.push(...walkMarkdown(srcDir, rel));
@@ -29,6 +30,7 @@ export function walkMarkdown(srcDir: string, prefix = ""): string[] {
       files.push(rel);
     }
   }
+
   return files;
 }
 
@@ -39,6 +41,7 @@ export function includeIndexPages(
   return files.filter((file) => {
     const root = owningRoot(includes, file);
     if (root === undefined) return false;
+
     const parts = file.slice(root.mount.length + 1).split("/");
     return parts.length === 2 && parts[1] === root.page;
   });
@@ -54,16 +57,20 @@ export function deriveRewrites(
   const claimed = new Set<string>();
   for (const file of indexPages) {
     if (!present.has(file)) continue;
+
     const index = file.replace(/[^/]+$/, "index.md");
     if (present.has(index) || claimed.has(index)) continue;
     rewrites[file] = index;
     claimed.add(index);
   }
+
   for (const file of files) {
     if (file !== "README.md" && !file.endsWith("/README.md")) continue;
+
     const index = file.replace(/README\.md$/, "index.md");
     if (!present.has(index) && !claimed.has(index)) rewrites[file] = index;
   }
+
   return rewrites;
 }
 
@@ -101,19 +108,23 @@ function text(value: unknown): string | null {
 
 function frontmatterOrder(file: string, value: unknown): number | null {
   if (value === undefined || value === null) return null;
+
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`${file}: frontmatter 'order' must be a number, got ${JSON.stringify(value)}`);
   }
+
   return value;
 }
 
 function frontmatterGroup(file: string, value: unknown): string | null {
   if (value === undefined || value === null) return null;
+
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(
       `${file}: frontmatter 'group' must be a non-empty string, got ${JSON.stringify(value)}`,
     );
   }
+
   return value.trim();
 }
 
@@ -126,5 +137,6 @@ export function routeOf(file: string, rewrites: Record<string, string>): string 
     const dir = segments.slice(0, -1).join("/");
     return dir === "" ? "/" : `/${dir}/`;
   }
+
   return `/${effective.slice(0, -".md".length)}`;
 }

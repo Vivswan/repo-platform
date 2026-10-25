@@ -12,8 +12,6 @@ const RUNG = new URL("../../migrations/0001-link-records-are-mirrors.ts", import
 const HASH = sha256("AGENTS.md");
 const UP = sha256("../AGENTS.md");
 
-/** The writer's layout: one record per line, the last without a comma. */
-const manifestOf = (lines: string[]) => `{\n  "files": {\n${lines.join(",\n")}\n  }\n}\n`;
 const linked = [
   `    ".github/agents.md": {"class": "link", "hash": "${UP}"}`,
   `    "AGENTS.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- B -->", "end": "<!-- E -->", "hash": "${HASH}"}`,
@@ -30,6 +28,11 @@ const restamped = [
   linked[4],
   linked[5],
 ];
+
+/** The writer's layout: one record per line, the last without a comma. */
+function manifestOf(lines: string[]): string {
+  return `{\n  "files": {\n${lines.join(",\n")}\n  }\n}\n`;
+}
 
 function checkout(manifest: string | null): string {
   const root = temp.dir("migration-0001-");

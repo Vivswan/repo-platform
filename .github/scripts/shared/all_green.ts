@@ -5,15 +5,13 @@ import { parseJsonWith } from "./json.ts";
 import { lastLine } from "./lines.ts";
 import { capture, type RunResult } from "./proc.ts";
 
-/** The gate check's name - the same context branch protection requires
- * (files/settings/override.yml) and the ci.yml all-green job's own
- * check run carries (a job's check run is named by its job id). */
+/** The gate check's name: the context branch protection requires (files/settings/override.yml) and the ci.yml all-green job's own check run carries (a job's check run is named by its job id). */
 export const CHECK_NAME = "all-green";
 
-/** A third-party app's look-alike check never vouches: only checks the github-actions app created
- * count. */
+/** A third-party app's look-alike check never vouches: only checks the github-actions app created count. */
 const CHECK_APP = "github-actions";
 
+/** The check-runs listing, down to the fields the verdict reads. */
 const checkRunsSchema = z.object({
   check_runs: z.array(
     z.object({
@@ -25,13 +23,15 @@ const checkRunsSchema = z.object({
   ),
 });
 
+type CheckRun = z.infer<typeof checkRunsSchema>["check_runs"][number];
+
 /** Injectable gh runner so tests never touch the network. */
 export type GhRunner = (command: string[]) => RunResult;
 
-/** capture()'s default hang bound is five minutes; a probe of the remote (this gate read, the tag mover's ls-remote) that
- * slow is a stalled connection, and every caller waits on it. */
+/** capture()'s default hang bound is five minutes; a probe of the remote (this gate read, the tag mover's ls-remote) that slow is a stalled connection, and every caller waits on it. */
 export const PROBE_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? "15000");
 
+/** The production runner: gh under the probe bound. */
 const boundedCapture: GhRunner = (command) => capture(command, { timeoutMs: PROBE_TIMEOUT_MS });
 
 /** Injectable so tests never sleep. The default deadline covers a re-run's gate job finishing
@@ -60,6 +60,22 @@ export function verdictPending(reason: string): boolean {
     reason.includes(`no ${CHECK_NAME} verdict check exists`) ||
     reason.includes("check runs failed")
   );
+}
+
+/** The reason once the deadline passed: a completed verdict's conclusion, else that no check or only a pending one exists. */
+function expiredReason(checks: readonly CheckRun[], deadlineMs: number): string {
+  const completed = checks.find((check) => check.status === "completed");
+  if (completed !== undefined) {
+    return `its ${CHECK_NAME} verdict concluded '${completed.conclusion}'`;
+  }
+  const waited = Math.round(deadlineMs / 1000);
+  if (checks.length === 0) {
+    return (
+      `no ${CHECK_NAME} verdict check exists there (waited ${waited}s)` +
+      " - CI has not vouched for the commit; re-run the sha's CI run (the all-green job posts the check) if one should exist"
+    );
+  }
+  return `its ${CHECK_NAME} verdict is still '${checks[0].status}' after ${waited}s`;
 }
 
 /** Any completed success vouches: every verdict at one sha judged the same tree, so a later failure
@@ -99,14 +115,7 @@ export function allGreenFailure(
     }
     const remaining = deadlineMs - (Date.now() - started);
     if (remaining <= 0) {
-      const completed = checks.find((check) => check.status === "completed");
-      if (completed !== undefined) {
-        return `its ${CHECK_NAME} verdict concluded '${completed.conclusion}'`;
-      }
-      return checks.length === 0
-        ? `no ${CHECK_NAME} verdict check exists there (waited ${Math.round(deadlineMs / 1000)}s)` +
-            " - CI has not vouched for the commit; re-run the sha's CI run (the all-green job posts the check) if one should exist"
-        : `its ${CHECK_NAME} verdict is still '${checks[0].status}' after ${Math.round(deadlineMs / 1000)}s`;
+      return expiredReason(checks, deadlineMs);
     }
     sleep(Math.min(sleepMs, remaining));
   }

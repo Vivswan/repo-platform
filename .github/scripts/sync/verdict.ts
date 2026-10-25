@@ -10,13 +10,16 @@ import { env, requireEnv } from "../shared/gha.ts";
 export const DELIVERY_VERDICTS = ["unchanged", "opened", "refreshed", "pushed", "failed"] as const;
 export type DeliveryVerdict = (typeof DELIVERY_VERDICTS)[number];
 
+/** The deliver step's verdict, in RUNNER_TEMP, which the plan's summary reads. */
 export const VERDICT_FILE = "verdict.txt";
 
 /** The selector's rows ({repo, private}, real slugs) in RUNNER_TEMP, which the plan counts. */
 export const ROWS_FILE = "rows.json";
 
+/** The row line for a plan row whose deliver step never ran. */
 export const UNRESOLVED = "failed before the target was resolved; re-run the workflow";
 
+/** The row line's tail per verdict. */
 export const ROW_LINES: Record<DeliveryVerdict, string> = {
   unchanged: "unchanged",
   opened: "PR opened",

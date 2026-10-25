@@ -29,7 +29,9 @@ function writerClaims(tree: string): Set<string> {
   const claims = new Set<string>();
   for (const layer of loadLayers(CONFIG, tree).values()) {
     const labels = (layer.doc as { labels?: Record<string, unknown>[] }).labels ?? [];
-    for (const entry of labels) for (const claim of labelClaims(entry)) claims.add(claim);
+    for (const entry of labels) {
+      for (const claim of labelClaims(entry)) claims.add(claim);
+    }
   }
   return claims;
 }

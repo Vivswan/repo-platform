@@ -11,6 +11,7 @@ export function error(message: string): Finding {
 export function writeReport(findings: readonly Finding[], env: NodeJS.ProcessEnv): void {
   const path = env.FINDINGS_FILE;
   if (path === undefined || path === "") return;
+
   const text =
     findings.length === 0
       ? ""

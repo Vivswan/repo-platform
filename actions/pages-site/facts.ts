@@ -9,18 +9,32 @@ import { isMapping } from "../shared/values.ts";
 export interface ProjectFacts {
   /** owner/name */
   repository: string;
+
+  /** The repository on its server, no trailing slash. */
   repoUrl: string;
+
+  /** The settings file's `repository.description`; null when unset. */
   description: string | null;
+
+  /** The settings file's `repository.homepage` as an http(s) URL; null when unset or neither a URL nor a host. */
   homepage: string | null;
+
+  /** The settings file's `repository.topics`, trimmed and in order. */
   topics: string[];
+
+  /** The toolchains the version dotfiles pin, in TOOLCHAIN_FILES order. */
   toolchains: { name: string; version: string }[];
+
+  /** The license by name and file; null without a LICENSE.md. */
   license: { name: string; path: string } | null;
-  /** The docs tree the pages render from, repo-relative: the prefix that
-   *  turns a page's staged path into its repository path. */
+
+  /** The docs tree the pages render from, repo-relative: the prefix that turns a page's staged path into its repository path. */
   docsDir: string;
+
+  /** The tier's ref as a label, its commit, and the commit's URL. */
   provenance: { label: string; sha: string; url: string };
-  /** 0..5, a stable hash of the repository name: the theme's per-repo
-   *  accent, so a repository keeps its color across theme updates. */
+
+  /** 0..5, a stable hash of the repository name: the theme's per-repo accent, so a repository keeps its color across theme updates. */
   hue: number;
 }
 
@@ -37,13 +51,16 @@ type Identity = Pick<ProjectFacts, "description" | "homepage" | "topics">;
 
 export type FactsReader = (path: string) => string | null;
 
+/** The one license file the card reads. */
 const LICENSE_FILE = "LICENSE.md";
+
+/** How far into the file the name is looked for: a heading, else the opening paragraphs. */
 const LICENSE_HEAD_LINES = 20;
+
+/** The card's name when the text has neither a heading nor a recognized opening. */
 const LICENSE_FALLBACK = "See LICENSE.md";
 
-/** Known licenses by the wording their standard texts open with, anchored
- *  so only a title that starts with the name canonicalizes: "Not the MIT
- *  License" and a body line mentioning MIT keep a custom license's name. */
+/** Known licenses by the wording their standard texts open with, anchored so only a title that starts with the name canonicalizes: "Not the MIT License" and a body line mentioning MIT keep a custom license's name. */
 const KNOWN_LICENSES: [RegExp, string][] = [
   [/^MIT License\b/i, "MIT"],
   [/^Apache License,?\s+(?:Version\s+)?2\.0\b/i, "Apache-2.0"],
@@ -57,6 +74,7 @@ const KNOWN_LICENSES: [RegExp, string][] = [
   [/^CC0\b/, "CC0"],
 ];
 
+/** The version dotfiles the card reads, in display order, each with the reader of its version. */
 const TOOLCHAIN_FILES: { name: string; path: string; version: (text: string) => string | null }[] =
   [
     { name: "Bun", path: ".bun-version", version: pinnedVersion },
@@ -115,15 +133,24 @@ function looksLikeHost(text: string): boolean {
 function homepageUrl(value: unknown): string | null {
   const text = nonEmptyString(value);
   if (text === null) return null;
+
   if (/^https?:\/\//i.test(text)) return httpUrl(text);
+
   return looksLikeHost(text) ? httpUrl(`https://${text}`) : null;
 }
 
 /** Topics as one comma-separated string or a YAML list, the two shapes
  *  the settings apply accepts. */
+function topicEntries(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === "string") return value.split(",");
+
+  return [];
+}
+
 function splitTopics(value: unknown): string[] {
-  const entries = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
-  return entries
+  return topicEntries(value)
     .filter((topic): topic is string => typeof topic === "string")
     .map((topic) => topic.trim())
     .filter((topic) => topic !== "");
@@ -142,6 +169,7 @@ function parseYamlRecord(text: string): Record<string, unknown> | null {
 function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null {
   const text = read(SETTINGS_PATH);
   if (text === null) return null;
+
   const settings = parseYamlRecord(text);
   return settings !== null && isMapping(settings.repository) ? settings.repository : null;
 }
@@ -160,8 +188,10 @@ function firstHeading(lines: string[]): string | null {
   for (const [index, line] of lines.entries()) {
     const atx = /^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
     if (atx !== null) return atx[1];
+
     if (line.trim() !== "" && /^\s*(=+|-+)\s*$/.test(lines[index + 1] ?? "")) return line.trim();
   }
+
   return null;
 }
 
@@ -176,6 +206,7 @@ function paragraphs(lines: string[]): string[][] {
       current = [];
     }
   }
+
   return current.length > 0 ? [...result, current] : result;
 }
 
@@ -192,6 +223,7 @@ function licenseName(text: string): string {
   const lines = text.split("\n").slice(0, LICENSE_HEAD_LINES);
   const heading = firstHeading(lines);
   if (heading !== null) return knownLicense(heading) ?? heading;
+
   const [opening, next] = paragraphs(lines);
   const candidates = [opening?.join(" "), next?.[0]].filter((entry) => entry !== undefined);
   return candidates.map(knownLicense).find((name) => name !== null) ?? LICENSE_FALLBACK;
@@ -208,6 +240,7 @@ export function hueOf(name: string): number {
   for (const byte of new TextEncoder().encode(name)) {
     hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
   }
+
   return hash % 6;
 }
 

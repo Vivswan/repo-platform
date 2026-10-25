@@ -10,9 +10,9 @@ import {
   type SplitShapes,
 } from "./grammar.ts";
 
-/** Every class a recorded entry can carry. The sync writer's record union (sync/writer/manifest.ts) is pinned to
- *  this table, so a class one side learns reaches the other or the build fails. */
+/** Every class a recorded entry can carry. The sync writer's record union (sync/writer/manifest.ts) is pinned to this table, so a class one side learns reaches the other or the build fails. */
 const RECORDED_CLASSES = ["managed", "split", "starter", "mirror"] as const;
+
 export type RecordedClass = (typeof RECORDED_CLASSES)[number];
 const RECORDED_CLASS_SET: ReadonlySet<string> = new Set(RECORDED_CLASSES);
 
@@ -44,18 +44,23 @@ type SplitDeclarationField = {
 
 /** Every value stays unknown because manifest text is target-repo content on updates: consumers validate what they use. */
 export type ManifestEntryShape = {
+  /** The class as the manifest spells it; isRecordedClass narrows it where a consumer needs one of RECORDED_CLASSES. */
   class: string;
+
+  /** The written bytes' hash on a managed, split, or mirror record; null on the manifest's own entry. */
   hash?: unknown;
+
+  /** The split grammar's id, on a split record alone. */
   grammar?: unknown;
+
   /** A mirror's materialization: "symlink" when the path is a link to the source; absent for a copy. */
   kind?: unknown;
+
   /** The manifest's own entry alone: the platform commit the repository is judged against. */
   commit?: unknown;
 } & { [F in SplitDeclarationField]?: unknown };
 
-/** The closed entry-field vocabulary, the runtime twin of ManifestEntryShape: `satisfies` refuses
- *  a stranger and the AssertNever pin refuses an omission (a new grammar's tuple joins here or the
- *  build fails). */
+/** The closed entry-field vocabulary, the runtime twin of ManifestEntryShape: `satisfies` refuses a stranger and the AssertNever pin refuses an omission (a new grammar's tuple joins here or the build fails). */
 const ENTRY_FIELDS = [
   "class",
   "hash",
@@ -64,14 +69,13 @@ const ENTRY_FIELDS = [
   "commit",
   ...MANAGED_REGION_WIRE_FIELDS,
 ] as const satisfies readonly (keyof ManifestEntryShape)[];
+
 /** Compile-time only. @public */
 export type EntryFieldsExhaustive = AssertNever<
   Exclude<keyof ManifestEntryShape, (typeof ENTRY_FIELDS)[number]>
 >;
 
-/** The fields a record of each class carries; the sync writer reads a previous record through this table, so a field on
- *  the wrong class is a hand edit it refuses. The manifest's own entry (managed, hash null, the commit) is no record of
- *  a written file and is not judged here. */
+/** The fields a record of each class carries; the sync writer reads a previous record through it, so a field on the wrong class is a hand edit it refuses. The manifest's own entry (managed, hash null, the commit) records no written file; unjudged here. */
 export const RECORD_FIELDS = {
   managed: ["class", "hash"],
   split: ["class", "hash", "grammar", ...MANAGED_REGION_WIRE_FIELDS],
@@ -97,6 +101,7 @@ export function parseManifestFiles(
     // log. Standalone zone - no shared/ redaction helpers here.
     return { files: null, problem: "does not parse as a manifest (invalid JSON)" };
   }
+
   const manifest = parsed as { files?: unknown } | null;
   if (
     manifest === null ||
@@ -110,6 +115,7 @@ export function parseManifestFiles(
       problem: "does not parse as a manifest (no top-level 'files' mapping)",
     };
   }
+
   const files = manifest.files as Record<string, unknown>;
   // A null entry is refused because a consumer would throw at entry.class, turning warn-and-continue contracts into hard failures.
   for (const value of Object.values(files)) {
@@ -135,6 +141,7 @@ export function parseManifestFiles(
         "binds a key more than once (JSON consumers silently keep the last value, so a duplicate - an entry path or a field inside one - silently changes what the manifest declares)",
     };
   }
+
   return { files: files as Record<string, ManifestEntryShape>, problem: null };
 }
 
@@ -161,6 +168,7 @@ function hasDuplicateKey(resolved: string): boolean {
       }
       continue;
     }
+
     if (ch === '"') {
       inString = true;
       stringStart = i;
@@ -185,5 +193,6 @@ function hasDuplicateKey(resolved: string): boolean {
       lastString = null;
     }
   }
+
   return false;
 }

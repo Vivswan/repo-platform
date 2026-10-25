@@ -19,19 +19,23 @@ import { tempDirs } from "../../shared/temp_dir";
 import { snapshotTree } from "../../shared/tree_snapshot";
 import { spawnStubUpstream } from "../../shared/upstream_server";
 
+// The check runs the real files.yml, whose refs are fetched: every upstream file is a stub and never the network.
+
 const temp = tempDirs();
 const REPO_ROOT = new URL("../../..", import.meta.url).pathname;
-// The check runs the real files.yml, whose refs are fetched: every upstream file is a stub and never the network.
 const upstream = await spawnStubUpstream(
   parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
   temp.dir("check-upstream-"),
 );
 afterAll(() => upstream.stop());
+
+// The fixtures record BUILD as the commit they were synced at; REGISTRATION is the least the writer accepts, and
+// MANAGED a managed file of the bun module small enough to diff whole.
+
 const CHECK = join(REPO_ROOT, "actions/validate-managed-files/check.ts");
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const BUILD = "abcdef0123456789abcdef0123456789abcdef01";
 const REGISTRATION = "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n";
-/** A managed file of the bun module, small enough to diff whole. */
 const MANAGED = ".typography-allow";
 
 /** A repository this checkout's writer synced at BUILD, so the check has nothing to report. */

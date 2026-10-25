@@ -25,16 +25,18 @@ const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const SHORT = COMMIT.slice(0, 12);
 const FAILS = "This FAILS the check.";
 
-// The sticky-comment steps gate on `report`'s two values and are continue-on-error, so a value the script
-// spells one way and the manifest another is a comment never posted or never deleted, green. Both literals
-// are read from the manifest's `if` lines, never spelled here.
 const action = loadAction("actions/validate-managed-files/action.yml");
+
+/** The sticky-comment steps gate on `report`'s two values and are continue-on-error, so a value the script spells one
+ *  way and the manifest another is a comment never posted or never deleted, green. Both literals are read from the
+ *  manifest's `if` lines, never spelled here. */
 function commentGates(): { post: string; remove: string } {
   const gateOf = (id: string): string => {
     const step = action.runs.steps.find((s) => s.id === id);
     const match = /steps\.report\.outputs\.report == '([a-z]+)'/.exec(String(step?.if));
-    if (match === null)
+    if (match === null) {
       throw new Error(`step '${id}' does not gate on steps.report.outputs.report`);
+    }
     return match[1];
   };
   return { post: gateOf("post-comment"), remove: gateOf("delete-comment") };
@@ -66,12 +68,18 @@ const read = (path: string): string => {
 };
 
 interface Scenario {
+  /** Overrides of the run step's environment. */
   env?: Record<string, string>;
+
+  /** A verdict written for the report step alone, the run skipped: "absent" writes none, "garbage" an unreadable one. */
   verdict?: Integrity | "absent" | "garbage";
+
+  /** What the report step reads as the clear step's outcome; default success. */
   clearOutcome?: string;
-  /** A platform checkout of the scenario's own making (a git repository for freshness), returning the commit to
-   *  judge at; default a plain tree judged at COMMIT. */
+
+  /** A platform checkout of the scenario's own making (a git repository for freshness), returning the commit to judge at; default a plain tree judged at COMMIT. */
   platform?: (dir: string) => string;
+
   /** The platform's package.json; a malformed one fails the install. */
   packageJson?: string;
 }
@@ -83,7 +91,6 @@ interface Outcome {
   outputs: string;
   summary: string;
   comment: string;
-  /** The argv the recorded commit's check.ts received; null when it never ran. */
   checkArgv: string[] | null;
   checkout: string;
 }
@@ -170,7 +177,6 @@ const notJudged = (text: string) =>
 const PASSED = `${HEADING}Passed - this repository is what repo-platform writes at the commit it was synced with.\n`;
 const BLOCKED = { reportExit: 1, outputs: `report=${REPORT.post}\n` };
 const CLEAN = { reportExit: 0, outputs: `report=${REPORT.remove}\n` };
-/** The one interface between the action at stable and every recorded commit's check.ts. */
 const CHECK_ARGV = (checkout: string) => [
   "--target",
   checkout,
@@ -310,6 +316,7 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       ...gate,
       summary: `${NO_TAG}${outcome.comment}`,
       comment,
+      // The argv is the one interface between the action at stable and every recorded commit's check.ts.
       checkArgv: CHECK_ARGV(outcome.checkout),
       checkout: outcome.checkout,
     });

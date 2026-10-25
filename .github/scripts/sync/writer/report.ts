@@ -6,12 +6,11 @@ import type { MirrorRow } from "./mirrors.ts";
 import type { RetireRow } from "./retire.ts";
 import type { Change } from "./write_managed.ts";
 
+/** `detail` is why a held row was not written, or the stale record a write set aside; empty otherwise. */
 export interface WrittenRow {
   path: string;
   class: FileClass;
   change: Change;
-  /** Why a held row was not written, or the stale record a write set
-   *  aside; empty otherwise. */
   detail: string;
 }
 
@@ -27,12 +26,12 @@ export interface TemplateRecord {
   lineMapped: boolean;
 }
 
+/** `templates` is by written path, for every sourced entry this run wrote or found current. */
 export interface SyncOutcome {
   build: string;
   modules: string[];
   private: boolean;
   written: WrittenRow[];
-  /** By written path, for every sourced entry this run wrote or found current. */
   templates: Record<string, TemplateRecord>;
   replaced: ReplacedEdit[];
   retired: RetireRow[];
@@ -103,16 +102,16 @@ export function unifiedDiff(
   return `${lines.slice(0, cap).join("\n")}\n... (${lines.length - cap} more diff lines)`;
 }
 
-/** Registration values and manifest paths reach the report verbatim; a
- *  newline inside one would end its cell, list item, or heading and let the
- *  rest of the value open a Markdown block of its own (a heading, a fence). */
+/** Registration values and manifest paths reach the report verbatim; a newline inside one would end its cell, list item, or heading and let the rest of the value open a Markdown block of its own (a heading, a fence). */
 const oneLine = (text: string) => text.replace(/[\r\n]+/g, " ");
 
+/** An inline code span, flattened first: a newline would end it. */
 const code = (text: string) => `\`${oneLine(text)}\``;
 
 /** A pipe inside a cell would split it; the escape keeps the column count. */
 const cell = (text: string) => oneLine(text).replaceAll("|", "\\|");
 
+/** A list item, flattened first: a newline would end it. */
 const bullet = (text: string) => `- ${oneLine(text)}`;
 
 /** A diff line quoting the target's own content may open with backticks

@@ -19,6 +19,9 @@ interface Job {
   steps?: Step[];
 }
 
+// The jobs under test from the three workflows; the skeleton's `uses:` lines carry the owner placeholder, which YAML
+// reads as a flow mapping, so it is filled before parsing.
+
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
 const job = (
   parseYaml(read(".github/workflows/fleet-release.yml")) as { jobs: Record<string, Job> }
@@ -26,7 +29,6 @@ const job = (
 const releasePrJob = (
   parseYaml(read(".github/workflows/fleet.yml")) as { jobs: Record<string, Job> }
 ).jobs["release-pr"];
-// The skeleton's `uses:` lines carry the owner placeholder, which YAML reads as a flow mapping.
 const skeleton = parseYaml(
   read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
 ) as { jobs: Record<string, Job> };

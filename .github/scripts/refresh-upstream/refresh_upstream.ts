@@ -51,10 +51,10 @@ export async function headSha(repository: string, fetch: Fetch): Promise<string>
   return sha;
 }
 
+/** An upstream ref's pin and every file files.yml fetches at it, sorted. */
 export interface CommitPin {
   repository: string;
   sha: string;
-  /** Every file files.yml fetches at this pin, sorted. */
   paths: string[];
 }
 
@@ -101,20 +101,19 @@ export function repin(
     .reduce((out, [start, end]) => `${out.slice(0, start)}${to}${out.slice(end)}`, text);
 }
 
+/** `name` is the repository of a commit pin or the module of a release pin. `diffs` maps each fetched path whose body,
+ *  normalized as the writer fetches it, differs between the two commits to its unified diff; `refreshCommitPins`, the
+ *  one constructor, builds a commit bump only from a non-empty map. */
 export type Bump =
   | {
       kind: "commit";
-      /** The repository. */
       name: string;
       from: string;
       to: string;
-      /** Path to its unified diff between the two commits, normalized as the writer fetches it; unchanged paths are
-       *  absent, and `refresh`, the one constructor, builds a bump only from a non-empty map. */
       diffs: Map<string, string>;
     }
   | {
       kind: "release";
-      /** The module. */
       name: string;
       from: string;
       to: string;
@@ -261,46 +260,52 @@ export function prBody(kind: PinKind, bumps: Bump[]): string {
   return [...banner, ...bumps.map(section), FOOTER[kind]].join("\n\n");
 }
 
+/** `root` is the checkout holding files.yml and the files/ tree; `host` the raw-content host commit pins are diffed through. */
 export interface Refresh {
   kind: PinKind;
-  /** The checkout holding files.yml and the files/ tree. */
   root: string;
-  /** The raw-content host commit pins are diffed through. */
   host: string;
   fetch: Fetch;
 }
 
-/** Moves every pin of the kind that upstream moved and returns the bumps. Every fetch and every verdict come before any
- *  write: an unreachable upstream or a downgrade aborts before a pin moves, so "nothing moved" (which lets the workflow
- *  close a stale refresh PR) is never a view that could not look. A commit pin moves only when a fetched file's
- *  normalized body moved with it: a HEAD that changes other paths alone leaves the pin. */
-export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bump[]> {
-  const configPath = join(root, "files.yml");
-  const text = readFileSync(configPath, "utf-8");
-  const config = parseFilesConfig(text);
-  if (kind === "commit") {
-    const bumps: Bump[] = [];
-    let rewritten = text;
-    for (const pin of pins(upstreamRefs(config.files))) {
-      const head = await headSha(pin.repository, fetch);
-      if (head === pin.sha) {
-        console.log(`${pin.repository}: ${pin.sha} is HEAD`);
-        continue;
-      }
-      const diffs = await commitDiffs(pin, head, host, fetch);
-      if (diffs.size === 0) {
-        console.log(
-          `${pin.repository}: ${pin.sha} -> ${head} changes no fetched file; the pin stays`,
-        );
-        continue;
-      }
-      console.log(`${pin.repository}: ${pin.sha} -> ${head}`);
-      bumps.push({ kind: "commit", name: pin.repository, from: pin.sha, to: head, diffs });
-      rewritten = repin(rewritten, pin, head);
+/** files.yml as read: the parsed config beside the text the commit pins are rewritten in. */
+interface FilesSource {
+  path: string;
+  text: string;
+  config: FilesConfig;
+}
+
+/** A commit pin moves only when a fetched file's normalized body moved with it: a HEAD that changes other paths alone leaves the pin. */
+async function refreshCommitPins(files: FilesSource, host: string, fetch: Fetch): Promise<Bump[]> {
+  const bumps: Bump[] = [];
+  let rewritten = files.text;
+  for (const pin of pins(upstreamRefs(files.config.files))) {
+    const head = await headSha(pin.repository, fetch);
+    if (head === pin.sha) {
+      console.log(`${pin.repository}: ${pin.sha} is HEAD`);
+      continue;
     }
-    if (bumps.length > 0) writeFileSync(configPath, rewritten);
-    return bumps;
+    const diffs = await commitDiffs(pin, head, host, fetch);
+    if (diffs.size === 0) {
+      console.log(
+        `${pin.repository}: ${pin.sha} -> ${head} changes no fetched file; the pin stays`,
+      );
+      continue;
+    }
+    console.log(`${pin.repository}: ${pin.sha} -> ${head}`);
+    bumps.push({ kind: "commit", name: pin.repository, from: pin.sha, to: head, diffs });
+    rewritten = repin(rewritten, pin, head);
   }
+  if (bumps.length > 0) writeFileSync(files.path, rewritten);
+  return bumps;
+}
+
+/** The bun pin also moves every package's `@types/bun`, so the types never trail the runtime. */
+async function refreshReleasePins(
+  config: FilesConfig,
+  root: string,
+  fetch: Fetch,
+): Promise<Bump[]> {
   const moved: (ReleasePin & { latest: string })[] = [];
   for (const pin of releasePins(config, root)) {
     const latest = await latestRelease(pin, fetch);
@@ -326,6 +331,17 @@ export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bum
     from: version,
     to: latest,
   }));
+}
+
+/** Moves every pin of the kind that upstream moved and returns the bumps. Every fetch and every verdict come before any
+ *  write: an unreachable upstream or a downgrade aborts before a pin moves, so "nothing moved" (which lets the workflow
+ *  close a stale refresh PR) is never a view that could not look. */
+export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bump[]> {
+  const path = join(root, "files.yml");
+  const text = readFileSync(path, "utf-8");
+  const config = parseFilesConfig(text);
+  if (kind === "commit") return refreshCommitPins({ path, text, config }, host, fetch);
+  return refreshReleasePins(config, root, fetch);
 }
 
 function isPinKind(value: string | undefined): value is PinKind {

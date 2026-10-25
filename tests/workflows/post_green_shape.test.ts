@@ -20,6 +20,45 @@ interface Concurrency {
   "cancel-in-progress": string | boolean;
 }
 
+/** Every job `id` transitively needs. */
+function ancestorsOf(jobs: Record<string, Job>, id: string): Set<string> {
+  const seen = new Set<string>();
+  const stack = [...(jobs[id].needs ?? [])];
+  for (let need = stack.pop(); need !== undefined; need = stack.pop()) {
+    if (seen.has(need)) continue;
+    seen.add(need);
+    stack.push(...(jobs[need].needs ?? []));
+  }
+  return seen;
+}
+
+/** A need's `result` as the dependent reads it: `skipped` for one that did not run and was not failed. */
+function needResult(need: string, ran: Set<string>, failed: string[]): string {
+  if (ran.has(need)) return "success";
+
+  if (failed.includes(need)) return "failure";
+
+  return "skipped";
+}
+
+/** What a job's condition reads of its needs: each one's `result`, and each output of the run as the need wrote it, or
+ *  '' for a need that did not run. */
+function needsContext(
+  needs: string[],
+  ran: Set<string>,
+  failed: string[],
+  outputs: Record<string, string>,
+): Record<string, string> {
+  const context: Record<string, string> = {};
+  for (const need of needs) {
+    context[`needs.${need}.result`] = needResult(need, ran, failed);
+    for (const [name, value] of Object.entries(outputs)) {
+      context[`needs.${need}.outputs.${name}`] = ran.has(need) ? value : "";
+    }
+  }
+  return context;
+}
+
 /** Simulates GitHub's own rules, which the body mirrors; `outputs` stands in for the step outputs
  * of every job that ran. "A failure or skip applies to all jobs in the dependency chain from the
  * point of failure or skip onwards", even through a job a status function let continue.
@@ -36,16 +75,6 @@ function jobsRunning(
   headRef?: string,
 ): string[] {
   const ran = new Set<string>();
-  const ancestors = (id: string): Set<string> => {
-    const seen = new Set<string>();
-    const stack = [...(jobs[id].needs ?? [])];
-    for (let need = stack.pop(); need !== undefined; need = stack.pop()) {
-      if (seen.has(need)) continue;
-      seen.add(need);
-      stack.push(...(jobs[need].needs ?? []));
-    }
-    return seen;
-  };
   const pending = Object.keys(jobs);
   while (pending.length > 0) {
     const id = pending.shift() as string;
@@ -56,21 +85,15 @@ function jobsRunning(
       continue;
     }
     if (failed.includes(id)) continue;
-    const context: Record<string, string> = { "github.event_name": event, "github.ref": ref };
+    const context: Record<string, string> = {
+      "github.event_name": event,
+      "github.ref": ref,
+      ...needsContext(needs, ran, failed, outputs),
+    };
     if (headRef !== undefined) context["github.head_ref"] = headRef;
-    for (const need of needs) {
-      context[`needs.${need}.result`] = ran.has(need)
-        ? "success"
-        : failed.includes(need)
-          ? "failure"
-          : "skipped";
-      for (const [name, value] of Object.entries(outputs)) {
-        context[`needs.${need}.outputs.${name}`] = ran.has(need) ? value : "";
-      }
-    }
     const condition = job.if ?? "";
     const statusFunction = /\b(always|cancelled|success|failure)\(\)/.test(condition);
-    const chainRan = [...ancestors(id)].every((need) => ran.has(need));
+    const chainRan = [...ancestorsOf(jobs, id)].every((need) => ran.has(need));
     const passes = condition === "" || evaluateCondition(condition, context);
     if (passes && (statusFunction || chainRan)) ran.add(id);
   }

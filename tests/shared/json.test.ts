@@ -2,6 +2,9 @@
 // entry file. Bun's raw SyntaxError quotes the offending fragment ('Unexpected identifier "..."'), which
 // can be target-derived (private repo names, descriptions): malformed JSON must never echo the input.
 
+// The entry lives under the OS temp dir, outside the repo tree, and imports zod by its resolved path: a bare "zod"
+// there would auto-install from the global cache and the network.
+
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,8 +17,6 @@ import { tempDirs } from "./temp_dir";
 const temp = tempDirs();
 
 const jsonPath = join(import.meta.dir, "../../.github/scripts/shared/json.ts");
-// The entry lives under the OS temp dir, outside the repo tree: a bare "zod" there would
-// auto-install from the global cache and the network.
 const zodPath = fileURLToPath(import.meta.resolve("zod"));
 
 const root = temp.dir("json-proc-");

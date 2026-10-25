@@ -21,9 +21,12 @@ import {
 
 /** Other scopes (private, slugs, modules: filters) are dispatch-only: sync_scope.ts owns that grammar. */
 const scopeSchema = z.enum(["all", "public"]);
+
 export type FleetSyncScope = z.infer<typeof scopeSchema>;
 
+/** The label family; the suffix names the scope. */
 const LABEL_PREFIX = "fleet-sync:";
+
 /** This repository's overlay: the one place the fleet-sync labels are declared, since only its pull requests carry them. */
 export const FLEET_SYNC_OVERLAY = resolve(import.meta.dir, "..", "..", "settings.local.yml");
 
@@ -83,9 +86,7 @@ export function readDirective(labels: readonly string[], known: FleetSyncLabels)
   return { kind: "fleet-sync", scope: scopes[0] };
 }
 
-// repos/{repo}/commits/{sha}/pulls lists every pull request the commit reached. The one whose
-// merge_commit_sha IS the commit is the merge that produced it; a closed unmerged pull request,
-// or one that merely contained the commit, carries another sha or none.
+// repos/{repo}/commits/{sha}/pulls lists every pull request the commit reached; the one whose merge_commit_sha IS the commit is the merge that produced it (a closed unmerged pull request, or one that merely contained it, carries another sha or none).
 const associatedPulls = z.array(
   z.object({
     number: z.number(),
@@ -117,6 +118,47 @@ function mergedPullLabels(repository: string, commit: string): string[] | null {
   return merged[0].labels.map((label) => label.name);
 }
 
+/** The directive of the pull request that merged `commit`; none for a commit no pull request produced. */
+function commitDirective(repository: string, commit: string, known: FleetSyncLabels): Directive {
+  const labels = mergedPullLabels(repository, commit);
+  if (labels === null) return { kind: "none" };
+  return readDirective(labels, known);
+}
+
+/** The scope the range's merges opted into, the widest winning; null when no merge carried a label. */
+function rangeScope(
+  commits: readonly string[],
+  repository: string,
+  sha: string,
+  known: FleetSyncLabels,
+): { scope: FleetSyncScope | null } | { failure: string } {
+  let scope: FleetSyncScope | null = null;
+  for (const commit of commits) {
+    const short = commit.slice(0, 12);
+    let directive: Directive;
+    try {
+      directive = commitDirective(repository, commit, known);
+    } catch (error) {
+      // Every commit's lookup is fatal, the older ones included: a label
+      // that cannot be read must fail the leg, never quietly disarm it.
+      return { failure: `${short}: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    if (directive.kind === "none") continue;
+    if (directive.kind === "error") {
+      // Only the judged commit's labels are this run's fault; failing on an
+      // older one would poison every range that starts below it.
+      if (commit === sha) return { failure: `${short}: ${directive.error}` };
+      warning(
+        `${short}: ${directive.error}; the commit contributes nothing to this range, and only the judged commit's labels fail this leg`,
+      );
+      continue;
+    }
+    if (scope !== "all") scope = directive.scope;
+    notice(`fleet-sync label on ${short}: ${directive.scope}`);
+  }
+  return { scope };
+}
+
 function main(): number {
   const { sha, before } = judgedRangeEnv();
   const repository = requireEnv("GITHUB_REPOSITORY");
@@ -129,33 +171,9 @@ function main(): number {
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
   }
-  let scope: FleetSyncScope | null = null;
-  for (const commit of rangeCommits(cwd, sha, base)) {
-    let labels: string[] | null;
-    try {
-      labels = mergedPullLabels(repository, commit);
-    } catch (error) {
-      // Every commit's lookup is fatal, the older ones included: a label
-      // that cannot be read must fail the leg, never quietly disarm it.
-      return fail(
-        `${commit.slice(0, 12)}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-    if (labels === null) continue;
-    const directive = readDirective(labels, known);
-    if (directive.kind === "none") continue;
-    if (directive.kind === "error") {
-      // Only the judged commit's labels are this run's fault; failing on an
-      // older one would poison every range that starts below it.
-      if (commit === sha) return fail(`${commit.slice(0, 12)}: ${directive.error}`);
-      warning(
-        `${commit.slice(0, 12)}: ${directive.error}; the commit contributes nothing to this range, and only the judged commit's labels fail this leg`,
-      );
-      continue;
-    }
-    if (scope !== "all") scope = directive.scope;
-    notice(`fleet-sync label on ${commit.slice(0, 12)}: ${directive.scope}`);
-  }
+  const found = rangeScope(rangeCommits(cwd, sha, base), repository, sha, known);
+  if ("failure" in found) return fail(found.failure);
+  const { scope } = found;
   const range = rangeLabel(sha, base);
   if (scope === null) {
     notice(`${range} carries no fleet-sync label; the fleet picks it up on the weekly sync`);

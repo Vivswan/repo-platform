@@ -42,11 +42,11 @@ export function sidebarTrees(files: string[]): { prefix: string; files: string[]
 export interface SidebarOptions {
   /** Roots the level: a locale tree's sidebar starts inside it. */
   prefix?: string;
-  /** A landing row titled exactly like the site reads "Overview": the
-   *  title already heads the nav bar right above the sidebar. */
+
+  /** A landing row titled exactly like the site reads "Overview": the title already heads the nav bar right above the sidebar. */
   siteTitle?: string;
-  /** The include roots' page files (derive.ts's includeIndexPages), served
-   *  at their directory URLs like READMEs. */
+
+  /** The include roots' page files (derive.ts's includeIndexPages), served at their directory URLs like READMEs. */
   indexPages?: readonly string[];
 }
 
@@ -64,10 +64,11 @@ export function deriveSidebar(
   return sidebarLevel(options.prefix ?? "", context, options.siteTitle ?? null);
 }
 
+/** What one level's rows derive from; `includePages` are the include roots' page files: articles, whatever they are
+ *  named. */
 interface LevelContext {
   files: string[];
   rewrites: Record<string, string>;
-  /** The include roots' page files: articles, whatever they are named. */
   includePages: ReadonlySet<string>;
   source: PageSource;
 }
@@ -85,11 +86,15 @@ function sidebarLevel(
     const text = landing && meta.title === siteTitle ? "Overview" : meta.title;
     const row = { text, link: navigable(routeOf(file, context.rewrites)) };
     const previous = items[items.length - 1];
-    if (meta.group === null) items.push(row);
-    else if (previous?.items !== undefined && previous.text === meta.group)
+    if (meta.group === null) {
+      items.push(row);
+    } else if (previous?.items !== undefined && previous.text === meta.group) {
       previous.items.push(row);
-    else items.push({ text: meta.group, items: [row] });
+    } else {
+      items.push({ text: meta.group, items: [row] });
+    }
   }
+
   for (const dir of level.dirs) {
     items.push({
       text: dirTitle(dir),
@@ -97,6 +102,7 @@ function sidebarLevel(
       items: sidebarLevel(`${prefix}${dir}/`, context, siteTitle),
     });
   }
+
   return items;
 }
 
@@ -106,9 +112,9 @@ interface LevelPage {
   landing: boolean;
 }
 
+/** One directory's pages and, in file order, its subdirectories. */
 interface Level {
   pages: LevelPage[];
-  /** The level's subdirectories, in file order. */
   dirs: string[];
 }
 
@@ -149,9 +155,11 @@ function grouped(pages: LevelPage[]): LevelPage[] {
       members.push(page);
       continue;
     }
+
     const run = [page];
     if (page.meta.group !== null) byGroup.set(page.meta.group, run);
     runs.push(run);
   }
+
   return runs.flat();
 }

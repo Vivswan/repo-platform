@@ -72,6 +72,7 @@ const discovered = parseDiscovered(
     "select_sync_repos: discovered list",
   ),
 );
+
 if (discovered === null) {
   error("select_sync_repos: the discovered list must be a JSON array of {repo, private} objects");
   process.exit(1);

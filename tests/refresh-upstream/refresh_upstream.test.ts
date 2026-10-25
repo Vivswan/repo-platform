@@ -132,7 +132,9 @@ describe("the release pins", () => {
       expect(() => decideBump(pinned, fetched, "bun")).toThrow(
         `bun: upstream latest ${fetched} is OLDER than the pinned ${pinned} (a backport release surfacing as latest?)`,
       );
-    } else expect(decideBump(pinned, fetched, "bun")).toBe(verdict);
+    } else {
+      expect(decideBump(pinned, fetched, "bun")).toBe(verdict);
+    }
   });
 
   // Anchored and escaped: an unanchored match would pin a canary or a foreign tag silently, and a template character

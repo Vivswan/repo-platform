@@ -11,20 +11,15 @@ import { loadAction, REPO_ROOT, stepNamed } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { tempDirs } from "../../shared/temp_dir";
 
+/** The config the action names, so a `with.config` the action drops or moves is a config these rows stop finding. */
+function fleetConfig(): string {
+  const step = stepNamed(loadAction("actions/typos/action.yml"), "Check spelling");
+  const input = String((step.with as Record<string, string>).config);
+  return input.replace("${{ github.action_path }}", join(REPO_ROOT, "actions/typos"));
+}
+
 const temp = tempDirs();
-// The config the action names, so a `with.config` the action drops or moves is a config these rows stop finding.
-const configInput = String(
-  (
-    stepNamed(loadAction("actions/typos/action.yml"), "Check spelling").with as Record<
-      string,
-      string
-    >
-  ).config,
-);
-const FLEET_CONFIG = configInput.replace(
-  "${{ github.action_path }}",
-  join(REPO_ROOT, "actions/typos"),
-);
+const FLEET_CONFIG = fleetConfig();
 const typosBinary = Bun.which("typos");
 const typosRequired = process.env.TYPOS_REQUIRED === "1";
 const endToEnd = typosBinary === null && !typosRequired ? test.skip : test;

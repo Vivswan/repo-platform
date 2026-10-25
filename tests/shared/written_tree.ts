@@ -9,12 +9,18 @@ import { MANIFEST_NAME } from "../../actions/shared/platform.ts";
 import { boundedSpawnSync } from "./bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "./fixture_git";
 
+/** The migrations runner the fixture rung runs under. */
 const MIGRATE = join(import.meta.dir, "../../.github/scripts/sync/migrate.ts");
 
+/** A written path the checkout's .gitignore covers, so `git add --all` skips it. */
 export const IGNORED_PATH = ".bun-version";
+
 /** A written path git reads as a character class, beside the sibling that class matches. */
 export const BRACKETED_PATH = "docs/[x].md";
+
+/** The sibling the bracketed path's glob form matches, edited on disk and reported by nothing. */
 export const SIBLING_PATH = "docs/x.md";
+
 /** The one path the fixture rung edits and reports. */
 export const MIGRATED_PATH = "notes.md";
 
@@ -28,7 +34,9 @@ export const WRITTEN_DIFF = [
   "old.yml",
 ].sort();
 
+/** A path neither on disk nor tracked, for a summary row git cannot stage. */
 export const MISSING_PATH = "missing.txt";
+
 /** git's own line when a summary row names a path that is neither on disk nor tracked. */
 export const MISSING_PATH_LINE = `fatal: pathspec ':(literal)${MISSING_PATH}' did not match any files`;
 

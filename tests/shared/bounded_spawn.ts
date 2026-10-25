@@ -6,13 +6,16 @@ import { harnessBound } from "./harness_bound";
 export const SPAWN_TIMEOUT_MS = 15_000;
 
 export interface BoundedSpawnOptions {
+  /** The child's working directory; absent is this process's. */
   cwd?: string;
-  /** Verbatim, no process.env spread (hermetic envs stay hermetic); absent is
-   * bun's own default, a snapshot of the environment at process start. */
+
+  /** Verbatim, no process.env spread (hermetic envs stay hermetic); absent is bun's own default, a snapshot of the environment at process start. */
   env?: Record<string, string | undefined>;
+
+  /** Bytes the child reads on stdin, or "ignore" for none; absent is bun's own default. */
   stdin?: Uint8Array | "ignore";
-  /** A bound on hanging, not an operational deadline, stretched by tests/shared/harness_bound.ts's
-   * scale: callers with slow children (whole-tree writer runs) pass a generous one. */
+
+  /** A bound on hanging, not an operational deadline, stretched by harness_bound.ts's scale: callers with slow children (whole-tree writer runs) pass a generous one. */
   timeoutMs?: number;
 }
 

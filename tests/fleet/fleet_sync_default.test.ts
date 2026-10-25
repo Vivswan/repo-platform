@@ -268,6 +268,8 @@ describe("main", () => {
 
   type File = { filename: string; previous_filename?: string };
   type Comment = { id: number; body: string };
+  /** What the gh stub answers about the pull request; changedFiles is its own count, the listing's length unless a
+   *  scenario says otherwise. */
   interface Scenario {
     files: File[][];
     labels: string[];
@@ -275,7 +277,6 @@ describe("main", () => {
     comments: Comment[];
     base?: string;
     state?: "open" | "closed";
-    /** The pull request's own count; the listing's length unless a scenario says otherwise. */
     changedFiles?: number;
     stubEnv?: Record<string, string>;
   }

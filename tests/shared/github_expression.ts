@@ -1,5 +1,6 @@
-// GitHub's own expression language over a context of dotted keys, for tests that judge a workflow's conditions as
-// GitHub reads them rather than by their spelling.
+// GitHub's own expression language (@actions/expressions), for tests that read a workflow's `${{ }}` as the runner
+// does rather than by its spelling: spacing, quoting, and bracket access included. The parser rejects a context or
+// a runner function it was not told, so the lists are the runner's own.
 
 import { data, Evaluator, Lexer, Parser } from "@actions/expressions";
 import {
@@ -11,13 +12,23 @@ import {
   Logical,
   Unary,
 } from "@actions/expressions/ast";
+import type { Token } from "@actions/expressions/lexer";
 import { truthy } from "@actions/expressions/result";
 
-const CONTEXTS = ["github", "needs", "steps", "inputs", "matrix", "secrets"];
-
-// The status functions are the workflow runner's, not the expression language's: a step or job whose condition passed
-// is judged here only when its chain ran or a status function let it continue, so always() reads true and cancelled()
-// false.
+const CONTEXTS = [
+  "github",
+  "env",
+  "vars",
+  "job",
+  "jobs",
+  "steps",
+  "runner",
+  "secrets",
+  "strategy",
+  "matrix",
+  "needs",
+  "inputs",
+];
 const STATUS_FUNCTIONS = new Map(
   [
     ["always", true],
@@ -33,7 +44,10 @@ const STATUS_FUNCTIONS = new Map(
   ]),
 );
 
-/** A key nobody set reads as null, as an unrun job's output does in Actions. */
+/** Whether the condition holds over the context. A key nobody set reads as null, as an unrun job's output does in
+ *  Actions. The status functions are the workflow runner's, not the expression language's: a step or job whose
+ *  condition passed counts as run only when its chain ran or a status function let it continue, so always() reads
+ *  true and cancelled() false here. */
 export function evaluateCondition(expression: string, context: Record<string, string>): boolean {
   const contexts = new data.Dictionary();
   for (const [path, value] of Object.entries(context)) {
@@ -57,28 +71,41 @@ export function evaluateCondition(expression: string, context: Record<string, st
 }
 
 const STATUS_FUNCTION_NAMES = new Set(["success", "failure", "cancelled", "always"]);
-// The parser needs every runner function's name and arity, hashFiles included, or a valid condition fails to parse.
 const RUNNER_FUNCTIONS = [...STATUS_FUNCTION_NAMES, "hashFiles"].map((name) => ({
   name,
   minArgs: 0,
   maxArgs: 255,
 }));
 
-const calls = (expr: Expr): string[] => {
-  if (expr instanceof FunctionCall)
-    return [expr.functionName.lexeme.toLowerCase(), ...expr.args.flatMap(calls)];
-  if (expr instanceof Logical) return expr.args.flatMap(calls);
-  if (expr instanceof Grouping) return calls(expr.group);
-  if (expr instanceof Unary) return calls(expr.expr);
-  if (expr instanceof Binary) return [...calls(expr.left), ...calls(expr.right)];
-  if (expr instanceof IndexAccess) return [...calls(expr.expr), ...calls(expr.index)];
+/** The tokens and the tree of one expression's source, the `${{ }}` already stripped. */
+export function parseExpression(source: string): { tokens: Token[]; tree: Expr } {
+  const { tokens } = new Lexer(source).lex();
+  return { tokens, tree: new Parser(tokens, CONTEXTS, RUNNER_FUNCTIONS).parse() };
+}
+
+/** The direct subexpressions of a node (none for a literal or a context name), so a walk needs no case per type. */
+export function subexpressions(expr: Expr): Expr[] {
+  if (expr instanceof Unary) return [expr.expr];
+
+  if (expr instanceof Binary) return [expr.left, expr.right];
+
+  if (expr instanceof Logical || expr instanceof FunctionCall) return expr.args;
+
+  if (expr instanceof Grouping) return [expr.group];
+
+  if (expr instanceof IndexAccess) return [expr.expr, expr.index];
+
   return [];
-};
+}
+
+/** Every function the expression calls, by lower-cased name, outermost first. */
+function calls(expr: Expr): string[] {
+  const own = expr instanceof FunctionCall ? [expr.functionName.lexeme.toLowerCase()] : [];
+  return [...own, ...subexpressions(expr).flatMap(calls)];
+}
 
 /** Whether the condition calls a status function anywhere, as GitHub's parser reads it: a quoted "always()" is a
  *  string, and a call with blanks inside the parentheses or in another case is still the call. */
 export function hasStatusFunction(condition: string): boolean {
-  const { tokens } = new Lexer(condition).lex();
-  const tree = new Parser(tokens, CONTEXTS, RUNNER_FUNCTIONS).parse();
-  return calls(tree).some((name) => STATUS_FUNCTION_NAMES.has(name));
+  return calls(parseExpression(condition).tree).some((name) => STATUS_FUNCTION_NAMES.has(name));
 }

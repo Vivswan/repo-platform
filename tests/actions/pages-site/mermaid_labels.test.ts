@@ -30,8 +30,30 @@ const PAGE = "/fixture-repo/latest/";
 const FONT = `${SHARED_TOKENS.code["--vp-code-font-size"]} ${SHARED_TOKENS.fonts["--vp-font-family-mono"]}`;
 const SCENARIO_TIMEOUT_MS = harnessBound(60_000);
 
-/** The reported node (its second line wraps into a third at mermaid's
- *  wrapping width), then the flowchart it was reported in. */
+interface Label {
+  text: string;
+  lines: number;
+  width: number;
+  height: number;
+}
+
+interface Settled {
+  states: string[];
+  faceLoaded: boolean;
+  overflowing: string[];
+  foldLines: number;
+  labels: Label[];
+  faceReadyAtRender: boolean;
+}
+
+// The page and the scripts run on it, where the name does not say it all:
+//   DOCS_MD               the reported node (its second line wraps into a third at mermaid's wrapping width), then
+//                         the flowchart it was reported in
+//   TIMELINE_SCRIPT       installed before any page script: whether the mono face was usable when the first mount
+//                         reported a state
+//   WHEN_MERMAID_FETCHED  the mermaid chunk fetched means the pass is past its import and, with the face held,
+//                         waiting on it
+
 const DOCS_MD = `# Fixture
 
 \`\`\`mermaid
@@ -61,24 +83,6 @@ flowchart TD
 \`\`\`
 `;
 
-interface Label {
-  text: string;
-  lines: number;
-  width: number;
-  height: number;
-}
-
-interface Settled {
-  states: string[];
-  faceLoaded: boolean;
-  overflowing: string[];
-  foldLines: number;
-  labels: Label[];
-  faceReadyAtRender: boolean;
-}
-
-/** Installed before any page script: records whether the mono face was
- *  usable at the moment the first mount reported a state. */
 const TIMELINE_SCRIPT = `(() => {
   const timeline = { faceReadyAtRender: null };
   window.__fleetTimeline = timeline;
@@ -102,8 +106,6 @@ const WHEN_SETTLED = `new Promise((resolve) => {
   }).observe(document, { subtree: true, attributes: true, attributeFilter: ["data-state"] });
 })`;
 
-/** Resolves once the mermaid chunk has been fetched: the pass is then past
- *  its import and, with the face held, waiting on it. */
 const WHEN_MERMAID_FETCHED = `new Promise((resolve) => {
   const fetched = () =>
     performance.getEntriesByType("resource").some((entry) => /mermaid/.test(entry.name));

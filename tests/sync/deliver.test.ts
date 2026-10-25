@@ -40,10 +40,9 @@ const REPORT = "## Sync report\n\n| Build |\n| --- |\n| x |\n";
 const PR_URL = `https://github.com/${TARGET}/pull/7`;
 const REAL_GIT = Bun.which("git") ?? "git";
 
-// With STUB_REAL_GIT set, every call but the network ones (push, ls-remote) runs the real git over the fixture checkout.
-// Like the real gh, the stub refuses `--slurp` beside `--jq` before any request.
 const GIT_LINES = [
   'printf "git %s\\n" "$*" >>"$STUB_SEQUENCE"',
+  // With STUB_REAL_GIT set, every call but the network ones (push, ls-remote) runs the real git over the fixture checkout.
   'if [ -n "${STUB_REAL_GIT:-}" ]; then case " $* " in *" push "*|*" ls-remote "*) ;; *) exec "$STUB_REAL_GIT" "$@" ;; esac; fi',
   'case "$*" in',
   '  *" add -f -- "*) if [ "${STUB_ADD_FAIL:-}" = 1 ]; then echo "fatal: unable to stage" >&2; exit 128; fi ;;',
@@ -61,6 +60,7 @@ const GIT_LINES = [
 ];
 const GH_LINES = [
   'printf "gh %s\\n" "$*" >>"$STUB_SEQUENCE"',
+  // Like the real gh, the stub refuses `--slurp` beside `--jq` before any request.
   'if [[ " $* " == *" --slurp "* && ( " $* " == *" --jq "* || " $* " == *" -q "* || " $* " == *" --template "* || " $* " == *" -t "* ) ]]; then echo "the \\`--slurp\\` option is not supported with \\`--jq\\` or \\`--template\\`" >&2; exit 1; fi',
   'case "$*" in',
   '  "${STUB_GH_FAIL:-<none>}"*) echo "gh: HTTP 502" >&2; exit 1 ;;',
@@ -73,22 +73,25 @@ const GH_LINES = [
   "esac",
 ];
 
+/** The run's inputs, three of them past the outcome flags:
+ *    addModules   the plan's add_modules output, as the row's step env carries it
+ *    checkoutLog  the clone log checkout_target.ts left behind, when any
+ *    written      builds a real checkout under root/target and answers the writer's summary over it; git then runs for real */
 interface Options {
   hold?: boolean;
   manual?: boolean;
   branch?: string;
-  /** The plan's add_modules output, as the row's step env carries it. */
   addModules?: string;
   public?: boolean;
   writer?: "success" | "failure" | "skipped";
   checkout?: "success" | "failure";
-  /** The clone log checkout_target.ts left behind, when any. */
   checkoutLog?: string;
   stub?: Record<string, string>;
-  /** Builds a real checkout under root/target and answers the writer's summary over it; git then runs for real. */
   written?: (root: string) => SyncReport;
 }
 
+/** What the run left behind; summary is the job summary (GITHUB_STEP_SUMMARY), empty unless a branch delivery wrote
+ *  its report there. */
 interface Run {
   exitCode: number;
   stdout: string;
@@ -99,7 +102,6 @@ interface Run {
   gh: string[][];
   issueBody: string | null;
   sequence: string[];
-  /** The job summary (GITHUB_STEP_SUMMARY), empty unless a branch delivery wrote its report there. */
   summary: string;
   target: string;
 }
@@ -120,8 +122,9 @@ function run(options: Options = {}): Run {
   };
   writeFileSync(join(runnerTemp, "summary.json"), JSON.stringify(summary));
   writeFileSync(join(runnerTemp, "sync.log"), REPORT);
-  if (options.checkoutLog !== undefined)
+  if (options.checkoutLog !== undefined) {
     writeFileSync(join(runnerTemp, "checkout.log"), options.checkoutLog);
+  }
   const sequenceFile = join(root, "sequence.log");
   writeFileSync(sequenceFile, "");
   const summaryFile = join(root, "step-summary.md");
@@ -775,6 +778,7 @@ describe("boundedReport", () => {
 
   // The ranking: the Review section takes its room first, then the tables and notes, then the diffs; a section
   // with no room left leaves no trace rather than a dangling heading, and one marker stands for each cut section.
+  // An `accounted` row reads that marker's exact count back from the cut section's kept prefix.
   const reasons = (count: number) =>
     Array.from({ length: count }, (_, i) => `- mirror skills/${i}/LICENSE.md refused`).join("\n");
   const header = "## Sync report\n";
@@ -790,7 +794,6 @@ describe("boundedReport", () => {
     tail: string | RegExp;
     present: string[];
     absent: string[];
-    /** The exact count the one marker accounts for, when the cut section's kept prefix can be read back. */
     accounted?: (bounded: string) => number;
   }>([
     {
@@ -897,8 +900,9 @@ describe("boundedReport", () => {
       expect(bounded.length).toBeLessThanOrEqual(cap);
       expect(bounded.startsWith(header)).toBe(true);
       expect(bounded.endsWith(review)).toBe(true);
-      if (bounded === `${header}${review}`) seen.dropped++;
-      else {
+      if (bounded === `${header}${review}`) {
+        seen.dropped++;
+      } else {
         expect(bounded.startsWith(`${header}\n### Written\n`)).toBe(true);
         expect(omitted(bounded)).toHaveLength(1);
         seen.headed++;

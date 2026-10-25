@@ -1,0 +1,37 @@
+name: Biome
+description: |
+  Lints the caller's checkout with the fleet's pinned biome, under the biome.json the checkout holds. Lint only:
+  format is not judged here.
+
+  - Configuration: the repository's own biome.json, whatever it extends; the floor a managed biome.json carries
+    applies last, so a rule it sets stays set, and the local layer adds beneath it.
+  - The one bypass is a path override in the repository's own biome layer, with its reason beside it; a finding is
+    split or raised there, never silenced inline with a biome-ignore comment.
+  - A finding fails the step; the caller installs nothing for it, since the action brings its own biome.
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: $/actions/bun-setup
+      with:
+        from: ${{ github.action_path }}
+
+    # One biome for the fleet, pinned in package.json; tests/actions/biome runs the same one.
+    - name: Install biome
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      # --production: dev deps (@types/bun, typescript) are editor/typecheck tooling. No
+      # --silent: a failed install must name itself in the caller's log.
+      run: '"$ACTION_BUN" install --frozen-lockfile --production'
+
+    # Under node, as `npx biome` runs it, from the caller's checkout so its biome.json is the one read.
+    - name: Lint
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/node_modules/.bin/biome" lint

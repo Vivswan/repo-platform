@@ -10,13 +10,13 @@ import { existsSync, readdirSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { must } from "../.github/scripts/shared/proc.ts";
 
+/** The platform checkout, one level above scripts/. */
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
 /** The fleet's bun pin, the one spelling of the version (docs/toolchains.md). */
 export const BUN_PIN_FILE = "files/bun/.bun-version";
 
-/** The tracked hook folder. Git resolves a relative core.hooksPath against the root of the worktree a hook runs in, so
- *  the one setting in the shared config serves every worktree, each of which has the folder because it is tracked. */
+/** The tracked hook folder. Git resolves a relative core.hooksPath against the root of the worktree a hook runs in, so the one setting in the shared config serves every worktree, each of which has the folder because it is tracked. */
 export const HOOKS_PATH = ".githooks";
 
 /** A git hook exports GIT_DIR, GIT_INDEX_FILE, and GIT_WORK_TREE, which would route the write to the repository

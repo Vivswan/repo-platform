@@ -35,7 +35,8 @@ function selection(overrides: Partial<Selection> = {}): Selection {
   return { modules: [], private: false, ...overrides };
 }
 
-/** The fleet layers a selection stacks, as renderSettings reads them below the overlay and the override. */
+// The fleet layers a selection stacks, as renderSettings reads them below the overlay and the override, and their fold.
+
 const fleetLayers = (s: Selection) =>
   layerPaths(CONFIG, s).map((rel) => loadLayer(join(TREE, rel)));
 const fleetFold = (s: Selection): SettingsDoc => {

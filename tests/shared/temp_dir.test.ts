@@ -1,3 +1,6 @@
+// tempDirs probed through child bun processes. Every probe and every child's TMPDIR sits under one root this file
+// removes ITSELF: a stubbed-out helper removal leaks its fixture, and that leak must not reach the real temp directory.
+
 import { afterAll, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -14,9 +17,6 @@ import { tempDirs } from "./temp_dir";
 
 const helper = join(import.meta.dir, "temp_dir.ts");
 const temp = tempDirs();
-// Every probe and every child's TMPDIR sits under this root, which the
-// file removes ITSELF: a stubbed-out helper removal leaks its fixture,
-// and that leak must not reach the real temp directory.
 const root = temp.dir("temp-dir-test-");
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -204,12 +204,11 @@ describe("the biome ban on bare mkdtemp under tests/", () => {
   ].join("\n");
 
   test("a bare import reds under tests/ with the helper's path, the helper alone is exempt by path", () => {
-    // The repo's own biome.json, so the overrides under test are the shipped ones; vcs is off
-    // because the fixture root has no .git and biome refuses to read a gitignore it cannot find.
+    // The shipped biome pair, byte for byte; vcs is off on the command line since the fixture root has no .git.
     const lintRoot = join(root, "biome-ban");
-    const config = JSON.parse(readFileSync(join(repoRoot, "biome.json"), "utf-8"));
     const files: Record<string, string> = {
-      "biome.json": JSON.stringify({ ...config, vcs: { enabled: false } }),
+      "biome.json": readFileSync(join(repoRoot, "biome.json"), "utf-8"),
+      "biome.local.jsonc": readFileSync(join(repoRoot, "biome.local.jsonc"), "utf-8"),
       "tests/x/bare.test.ts": bare,
       "tests/shared/temp_dir.ts": helperSource,
       // The same bytes one file over: what the exemption is scoped by is the path, not the content.
@@ -229,7 +228,13 @@ describe("the biome ban on bare mkdtemp under tests/", () => {
       writeFileSync(join(lintRoot, rel), content);
     }
     const r = boundedSpawnSync(
-      [join(repoRoot, "node_modules", ".bin", "biome"), "lint", "--reporter=json", "."],
+      [
+        join(repoRoot, "node_modules", ".bin", "biome"),
+        "lint",
+        "--reporter=json",
+        "--vcs-enabled=false",
+        ".",
+      ],
       { cwd: lintRoot },
     );
     const report = JSON.parse(r.stdout) as {

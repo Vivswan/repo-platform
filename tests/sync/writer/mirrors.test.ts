@@ -89,7 +89,6 @@ const failure = (source: string, target: string, problem: string): MirrorProblem
   target,
   problem,
 });
-/** A pattern's failure names the declared pattern and the path it expanded to. */
 const expands = (source: string, pattern: string, path: string, verdict: string): MirrorProblem =>
   failure(source, pattern, `the pattern expands to '${path}', which ${verdict}`);
 
@@ -800,8 +799,9 @@ describe("applyMirrors with kind symlink", () => {
     },
   ])("$reason", (scenario) => {
     const root = tree(scenario.files);
-    for (const [path, target] of Object.entries(scenario.links))
+    for (const [path, target] of Object.entries(scenario.links)) {
       symlinkSync(target, join(root, path));
+    }
     const { rows, replaced, records } = applyMirrors(
       root,
       { fleet: [], own: scenario.own },

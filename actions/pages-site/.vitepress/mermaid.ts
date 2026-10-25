@@ -9,26 +9,35 @@ import type { MarkdownRenderer } from "vitepress";
 type RenderRule = NonNullable<MarkdownRenderer["renderer"]["rules"]["fence"]>;
 type Token = Parameters<RenderRule>[0][number];
 
+/** The mount's class: the theme's component renders the diagram into it. */
 export const MERMAID_CLASS = "fleet-mermaid";
+
+/** The class of the mount's child holding the diagram's source text. */
 export const MERMAID_SOURCE_CLASS = "fleet-mermaid-source";
-/** The info string's first word, so `mermaid {1}` and `mermaid:line-numbers`
- *  count and `mermaidjs` does not. */
+
+/** The info string's first word, so `mermaid {1}` and `mermaid:line-numbers` count and `mermaidjs` does not. */
 const MERMAID_INFO = /^mermaid(?![\w-])/;
-/** VitePress's code-group container marks its first fence `active` in the
- *  info string (its own fence wrapper reads and strips the same marker). */
+
+/** VitePress's code-group container marks its first fence `active` in the info string (its own fence wrapper reads and strips the same marker). */
 const ACTIVE_MARKER = / active( |$)/;
+
+/** A mermaid fence between this token and CODE_GROUP_CLOSE is a tab of VitePress's code-group container, and is rendered as one. */
 const CODE_GROUP_OPEN = "container_code-group_open";
+
+/** Groups nest, so inCodeGroup walks back counting these against the opens. */
 const CODE_GROUP_CLOSE = "container_code-group_close";
 
 function inCodeGroup(tokens: Token[], idx: number): boolean {
   let closed = 0;
   for (let i = idx - 1; i >= 0; i -= 1) {
-    if (tokens[i].type === CODE_GROUP_CLOSE) closed += 1;
-    else if (tokens[i].type === CODE_GROUP_OPEN) {
+    if (tokens[i].type === CODE_GROUP_CLOSE) {
+      closed += 1;
+    } else if (tokens[i].type === CODE_GROUP_OPEN) {
       if (closed === 0) return true;
       closed -= 1;
     }
   }
+
   return false;
 }
 
@@ -44,11 +53,13 @@ export function mermaidRule(md: MarkdownRenderer): void {
   md.renderer.rules.fence = (tokens, idx, options, env, self) => {
     const token = tokens[idx];
     if (!MERMAID_INFO.test(token.info.trim())) return installed(tokens, idx, options, env, self);
+
     const classes = [MERMAID_CLASS];
     if (inCodeGroup(tokens, idx)) {
       classes.push("vp-block");
       if (ACTIVE_MARKER.test(token.info)) classes.push("active");
     }
+
     const source = md.utils.escapeHtml(token.content.replace(/\n$/, ""));
     return `<div class="${classes.join(" ")}" v-pre><pre class="${MERMAID_SOURCE_CLASS}">${source}</pre></div>\n`;
   };

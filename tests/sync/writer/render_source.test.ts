@@ -24,8 +24,6 @@ const OS_BLOCKS =
   "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n\n";
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const REF = (path: string) => `{repository: github/gitignore, sha: ${SHA}, path: ${path}}`;
-
-// The fixture upstream read straight from disk: the same bytes the e2e test serves over loopback.
 const fromDisk = (url: string) =>
   Bun.file(join(FIXTURES, "upstream", url.split("/").slice(6).join("/"))).text();
 const bodies = await fetchUpstream(upstreamRefs(config.files), "http://upstream", fromDisk);

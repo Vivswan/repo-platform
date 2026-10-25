@@ -18,8 +18,9 @@ import { tempDirs } from "../shared/temp_dir";
 import { snapshotTree } from "../shared/tree_snapshot";
 import { spawnUpstream } from "../shared/upstream_server";
 
-const temp = tempDirs();
 // The fixture's github/gitignore, served over loopback: the writer fetches its registered blocks from here, never the network.
+
+const temp = tempDirs();
 const upstream = await spawnUpstream(join(import.meta.dir, "sync_end_to_end/fixtures/upstream"));
 afterAll(() => upstream.stop());
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
@@ -37,16 +38,18 @@ const droppedMirrorNote = (path: string) =>
 const HASH_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 const HASH_END = "# END REPO-PLATFORM MANAGED";
 const OLD_REGION = `${HASH_BEGIN}\n# old managed region\nnode_modules/\n${HASH_END}\n`;
-/** The .gitignore region the fixture writes for bun up to the END marker: the base, the three OS blocks every repository
- *  takes, then the module blocks in files.yml order; the upstream bodies arrive normalized (`Icon[\r]`, trailing spaces). */
-const BUN_REGION_PREFIX =
-  `${HASH_BEGIN}\n# Generated from github/gitignore - do not edit between the markers.\n` +
-  "node_modules/\n" +
-  "## Windows (github/gitignore Global/Windows.gitignore)\nThumbs.db\n\n" +
-  "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\nIcon?\n\n" +
-  "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n\n" +
-  "## Node (github/gitignore Node.gitignore)\n*.log\n\n" +
-  "## Bun (github/gitignore Bun.gitignore)\nbun.lockb\n\n";
+const BUN_REGION_PREFIX = [
+  // The region up to the END marker, the upstream bodies normalized (`Icon[\r]`, trailing spaces): the base,
+  `${HASH_BEGIN}\n# Generated from github/gitignore - do not edit between the markers.\n`,
+  "node_modules/\n",
+  // the three OS blocks every repository takes,
+  "## Windows (github/gitignore Global/Windows.gitignore)\nThumbs.db\n\n",
+  "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\nIcon?\n\n",
+  "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n\n",
+  // then the module blocks in files.yml order.
+  "## Node (github/gitignore Node.gitignore)\n*.log\n\n",
+  "## Bun (github/gitignore Bun.gitignore)\nbun.lockb\n\n",
+].join("");
 const REGION_WITH_FUZZER = `${BUN_REGION_PREFIX}## Fuzzer\n/.fuzz-failures/\n${HASH_END}\n`;
 const OLD_LICENSE = "MIT License\n\nCopyright (c) 2020 Someone\n";
 const OLD_CI = "name: platform ci v1\n";
@@ -57,7 +60,6 @@ const OLD_SECURITY = "# Security policy (old home)\n";
 const HTML_BEGIN = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
 const HTML_END = "<!-- END REPO-PLATFORM MANAGED -->";
 const OLD_CONTRIBUTING_REGION = `${HTML_BEGIN}\n# old contributing guide\n${HTML_END}\n`;
-// A repository-owned head and tail around the region: a blank line on each side of it, a CRLF line, and no trailing newline.
 const CONTRIBUTING_HEAD = "# Contributing\n\n";
 const CONTRIBUTING_TAIL = "\nHouse rules:\r\n- open a PR";
 const STARTER = "name: my fuzz\non: workflow_dispatch\n";
@@ -81,10 +83,9 @@ const noWriterNote = (path: string) =>
   `manifest record for \`${path}\` had no writer: no files.yml entry declares the path now; ` +
   "it is retired as a stale record (the Retired row has the outcome)";
 const NEW_LICENSE = `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`;
-// The repository's overlay: identity keys, a ruleset of its own, comment
-// lines, a CRLF line, and no trailing newline, so the starter's hands-off
-// rule is checked byte for byte.
 const OWN_OVERLAY = [
+  // Identity keys, a ruleset of its own, comment lines, a CRLF line, and no trailing newline, so the starter's
+  // hands-off rule is checked byte for byte.
   "---",
   "# Demo's OWN settings, applied by OwnerOrg/repo-platform",
   "repository:",
@@ -756,7 +757,8 @@ describe("sync.ts end to end", () => {
 
 describe("sync.ts over a repository whose settings or overlay path is taken", () => {
   // The settings render edge cases of #215: a directory the render does not read through, a rendered document
-  // with no record, one under a stale starter record.
+  // with no record, one under a stale starter record. The holds column lists the hold reasons about the two
+  // settings paths, in report order.
   const THEIRS = "# an overlay someone already wrote\nrepository:\n  private: false\n";
   // A document an earlier sync rendered, its manifest record since lost.
   const RENDERED_STALE =
@@ -776,7 +778,6 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
     reason: string;
     seed: (target: string) => void;
     rows: Summary["written"];
-    /** The hold reasons about the two settings paths, in report order. */
     holds: string[];
     still: (target: string) => void;
   }>([

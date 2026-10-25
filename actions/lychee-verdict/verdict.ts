@@ -8,7 +8,9 @@ export type Verdict = { found: boolean } | { error: string };
 
 export function lycheeVerdict(exitCode: string): Verdict {
   if (exitCode === "0") return { found: false };
+
   if (exitCode === "2") return { found: true };
+
   return {
     error: `lychee published no verdict: exit code '${exitCode}' (0 = clean, 2 = broken links)`,
   };

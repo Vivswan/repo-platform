@@ -10,10 +10,9 @@ import {
   scopeSelects,
 } from "../../.github/scripts/fleet/sync_scope.ts";
 
-// The real roster: the filter tests name real modules so a renamed module
-// fails here, not in a fleet run.
-const ROSTER = new Set(moduleRoster());
+// The real roster: the filter tests name real modules so a renamed module fails here, not in a fleet run.
 
+const ROSTER = new Set(moduleRoster());
 const ALL: Scope = { kind: "all" };
 const list = (
   visibility: ("public" | "private")[],

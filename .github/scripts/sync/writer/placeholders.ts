@@ -25,13 +25,13 @@ export type PlaceholderName = (typeof PLACEHOLDER_NAMES)[number];
 /** Partial: a name without a value is one no listed source uses, and the loader refuses a source that does. */
 export type PlaceholderValues = Partial<Record<PlaceholderName, string>>;
 
+/** Where an entry's module blocks are spliced into its source. */
 export const BLOCKS_ANCHOR = "{{blocks}}";
 
 // A `$` before the braces is a GitHub Actions expression (`${{ github.sha }}`), not a placeholder, and rides through untouched.
 const TOKEN_RE = /(\$?)\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}/g;
 
-/** Substituted values land inside quoted YAML scalars verbatim, so a
- *  quote, a backslash, or a control character would change the document. */
+/** Substituted values land inside quoted YAML scalars verbatim, so a quote, a backslash, or a control character would change the document. */
 const UNSAFE_VALUE_RE = /["\\\p{Cc}]/u;
 
 export function isPlaceholderName(name: string): name is PlaceholderName {

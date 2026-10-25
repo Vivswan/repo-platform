@@ -100,6 +100,7 @@ test.each(SCREEN_MODES)(
 
 // The mermaid theme bakes literal colors into every diagram's SVG, so its text meets the same bar on the ground it is drawn over.
 // The hue is a border color only, so it may not move any of these pairs.
+
 const MERMAID_TEXT_PAIRS: [string, string][] = [
   ["primaryTextColor", "primaryColor"],
   ["secondaryTextColor", "secondaryColor"],

@@ -24,14 +24,22 @@ import { readMigrated } from "./migrate.ts";
 import { type DeliveryVerdict, VERDICT_FILE } from "./verdict.ts";
 import { REPLACED_HEADING, REVIEW_HEADING, type SyncReport } from "./writer/report.ts";
 
+/** The checkout step's log in RUNNER_TEMP, tailed into the failure issue. */
 export const CHECKOUT_LOG = "checkout.log";
+
+/** The writer's report in RUNNER_TEMP: the PR body's source, and tailed into the failure issue. */
 export const SYNC_LOG = "sync.log";
+
+/** This step's own call log in RUNNER_TEMP, tailed into the failure issue. */
 export const DELIVER_LOG = "deliver.log";
+
+/** The writer's SyncReport as JSON, in RUNNER_TEMP. */
 export const SUMMARY_FILE = "summary.json";
+
+/** How much of each log's end the failure issue quotes. */
 export const TAIL_BYTES = 20_000;
-/** Every subprocess here is one gh call, one git network call, or one
- *  local git call on the clone, each answering in seconds, so the fleet's
- *  stalled-network bound applies. */
+
+/** Every subprocess here is one gh call, one git network call, or one local git call on the clone, each answering in seconds, so the fleet's stalled-network bound applies. */
 export const DELIVERY_CALL_BOUND_MS = NETWORK_TIMEOUT_MS;
 
 export function prTitle(build: string): string {
@@ -78,8 +86,7 @@ export function failureBody(input: {
   ].join("\n");
 }
 
-/** GitHub refuses a PR body past 65,536 characters, and gh would fail
- *  after the branch is pushed; the report is cut under this. */
+/** GitHub refuses a PR body past 65,536 characters, and gh would fail after the branch is pushed; the report is cut under this. */
 export const BODY_CAP = 60_000;
 
 export function truncatedLines(text: string, budget: number): string {
@@ -88,6 +95,7 @@ export function truncatedLines(text: string, budget: number): string {
   return text.slice(0, cut <= 0 ? budget : cut);
 }
 
+/** The parser the body cut reads fences through; `html` so a details block is its own token, not paragraph text. */
 const markdown = new MarkdownIt({ html: true });
 
 /** Lines as markdown-it counts them: a final newline ends a line and starts none. */
@@ -248,29 +256,46 @@ function commandLabel(argv: string[]): string {
 type Call = { ok: true; stdout: string } | { ok: false };
 
 class Delivery {
+  /** The run's scratch directory: the writer's summary and logs, and this step's body files. */
   readonly runnerTemp = requireEnv("RUNNER_TEMP");
+
+  /** The owner/name slug the sync delivers to. */
   readonly target = requireEnv("TARGET");
+
+  /** The clone, relative to the workspace. */
   readonly targetDir = env("TARGET_DIR", "target");
+
+  /** The platform commit delivered, a full sha. */
   readonly build = requireEnv("BUILD");
+
+  /** This run's page, linked from the PR body and the failure issue. */
   readonly runUrl = requireEnv("RUN_URL");
+
   /** docs/platform/sync/operator.md, "Syncing a branch". */
   readonly branch = readDispatchBranch();
+
   /** The plan's admitted names, comma-joined (docs/platform/sync/operator.md, "Adding modules"). */
   readonly addModules = env("ADD_MODULES");
+
+  /** This step's call log, tailed into the failure issue. */
   readonly logFile = join(this.runnerTemp, DELIVER_LOG);
 
+  /** The log starts empty, so every line it quotes is this run's. */
   constructor() {
     writeFileSync(this.logFile, "");
   }
 
+  /** One line to the delivery log, redacted as the failure issue will quote it. */
   log(line: string): void {
     appendFileSync(this.logFile, `${redactText(line)}\n`);
   }
 
+  /** The row's outcome, which the plan reads after the step. */
   verdict(value: DeliveryVerdict): void {
     writeFileSync(join(this.runnerTemp, VERDICT_FILE), `${value}\n`);
   }
 
+  /** One bounded call, logged under its label; a failure logs its stderr and yields no stdout. */
   run(argv: string[], label = commandLabel(argv), extraEnv?: Record<string, string>): Call {
     const result = capture(argv, {
       timeoutMs: DELIVERY_CALL_BOUND_MS,
@@ -281,18 +306,19 @@ class Delivery {
     return result.exitCode === 0 ? { ok: true, stdout: result.stdout } : { ok: false };
   }
 
+  /** A git argv against the clone. */
   git(...args: string[]): string[] {
     return ["git", "-C", this.targetDir, ...args];
   }
 
+  /** A failed call files the failure and never returns; the stdout otherwise. */
   must(argv: string[], reason: string, label = commandLabel(argv)): string {
     const call = this.run(argv, label);
     if (!call.ok) this.fileFailure(reason);
     return call.stdout;
   }
 
-  /** An open report outranks an older closed one: it is the one being
-   *  watched, so a clean run closes it and a failure refreshes it. */
+  /** An open report outranks an older closed one: it is the one being watched, so a clean run closes it and a failure refreshes it. */
   findFailureIssue(): { number: string; state: string } | "" | null {
     const login = this.run(["gh", "api", "user", "--jq", ".login"]);
     if (!login.ok) return null;
@@ -334,6 +360,7 @@ class Delivery {
     return reports.find((report) => report.state === "open") ?? reports[0] ?? "";
   }
 
+  /** Files or refreshes the failure issue, writes the failed verdict, and exits 0: the row failed, not the plan. */
   fileFailure(reason: string): never {
     this.log(`filing the failure report: ${reason}`);
     const bodyFile = join(this.runnerTemp, "failure-issue-body.md");
@@ -387,6 +414,7 @@ class Delivery {
     process.exit(0);
   }
 
+  /** The open failure issue, if there is one, is closed with a healthy-again note. */
   closeFailureIssue(): void {
     const found = this.findFailureIssue();
     if (found === null || found === "" || found.state !== "open") return;
@@ -490,6 +518,93 @@ class Delivery {
     this.log(`closed the obsolete sync pull request #${existing.number} and deleted its branch`);
   }
 
+  /** The PR body on disk, since `gh` reads it from a file. */
+  writePrBody(report: string, staged: readonly string[]): string {
+    const bodyFile = join(this.runnerTemp, "pr-body.md");
+    writeFileSync(
+      bodyFile,
+      prBody({
+        operator: requireEnv("GITHUB_REPOSITORY"),
+        build: this.build,
+        runUrl: this.runUrl,
+        report,
+        addModules: this.addModules,
+        registrationChanged: staged.includes(REGISTRATION_PATH),
+      }),
+    );
+    return bodyFile;
+  }
+
+  /** The sync PR opened, or the open one refreshed onto the pushed branch; `number` is empty when gh printed no URL. */
+  openOrRefreshPr(
+    existing: { number: string } | null,
+    base: string,
+    bodyFile: string,
+  ): { number: string; outcome: DeliveryVerdict } {
+    if (existing === null) {
+      const created = this.must(
+        [
+          "gh",
+          "pr",
+          "create",
+          "-R",
+          this.target,
+          "--base",
+          base,
+          "--head",
+          AUTOMATION_BRANCH,
+          "--title",
+          prTitle(this.build),
+          "--body-file",
+          bodyFile,
+        ],
+        "creating the sync pull request failed",
+        "gh pr create",
+      );
+      return { number: created.trim().split("/").pop() ?? "", outcome: "opened" };
+    }
+    // The base follows the checkout: the default branch may have been
+    // renamed while the PR was open.
+    this.must(
+      [
+        "gh",
+        "pr",
+        "edit",
+        existing.number,
+        "-R",
+        this.target,
+        "--base",
+        base,
+        "--title",
+        prTitle(this.build),
+        "--body-file",
+        bodyFile,
+      ],
+      "refreshing the sync pull request failed",
+      "gh pr edit",
+    );
+    return { number: existing.number, outcome: "refreshed" };
+  }
+
+  /** Auto-merge is armed unless the report holds, the run is manual, or modules are being added; the reason it stays off is logged. */
+  armAutoMerge(summary: SyncReport, number: string): void {
+    if (summary.hold) {
+      this.log("auto-merge left off: the report holds the PR for review");
+    } else if (env("MANUAL") === "true") {
+      this.log("auto-merge left off: manual run");
+    } else if (this.addModules !== "") {
+      this.log("auto-merge left off: the run adds modules to the registration");
+    } else if (number !== "") {
+      // A refused arm (auto-merge disabled in the target) is the target's
+      // choice: the PR waits for a human, and the log says so.
+      this.run(
+        ["gh", "pr", "merge", number, "-R", this.target, "--squash", "--auto"],
+        "gh pr merge --auto",
+      );
+    }
+  }
+
+  /** The sync end to end: nothing staged ends it unchanged, a dispatched branch gets one commit, the default branch a PR. */
   async deliver(): Promise<void> {
     if (env("CHECKOUT_OUTCOME") !== "success") this.fileFailure("the target checkout failed");
     if (env("WRITER_OUTCOME") !== "success") this.fileFailure("the writer exited with an error");
@@ -550,80 +665,9 @@ class Delivery {
     );
     this.push(AUTOMATION_BRANCH, lease.trim().split("\t")[0] ?? "", "the automation branch");
 
-    const bodyFile = join(this.runnerTemp, "pr-body.md");
-    writeFileSync(
-      bodyFile,
-      prBody({
-        operator: requireEnv("GITHUB_REPOSITORY"),
-        build: this.build,
-        runUrl: this.runUrl,
-        report,
-        addModules: this.addModules,
-        registrationChanged: staged.includes(REGISTRATION_PATH),
-      }),
-    );
-    let number: string;
-    let outcome: DeliveryVerdict;
-    if (existing === null) {
-      const created = this.must(
-        [
-          "gh",
-          "pr",
-          "create",
-          "-R",
-          this.target,
-          "--base",
-          base,
-          "--head",
-          AUTOMATION_BRANCH,
-          "--title",
-          prTitle(this.build),
-          "--body-file",
-          bodyFile,
-        ],
-        "creating the sync pull request failed",
-        "gh pr create",
-      );
-      number = created.trim().split("/").pop() ?? "";
-      outcome = "opened";
-    } else {
-      // The base follows the checkout: the default branch may have been
-      // renamed while the PR was open.
-      this.must(
-        [
-          "gh",
-          "pr",
-          "edit",
-          existing.number,
-          "-R",
-          this.target,
-          "--base",
-          base,
-          "--title",
-          prTitle(this.build),
-          "--body-file",
-          bodyFile,
-        ],
-        "refreshing the sync pull request failed",
-        "gh pr edit",
-      );
-      number = existing.number;
-      outcome = "refreshed";
-    }
-    if (summary.hold) {
-      this.log("auto-merge left off: the report holds the PR for review");
-    } else if (env("MANUAL") === "true") {
-      this.log("auto-merge left off: manual run");
-    } else if (this.addModules !== "") {
-      this.log("auto-merge left off: the run adds modules to the registration");
-    } else if (number !== "") {
-      // A refused arm (auto-merge disabled in the target) is the target's
-      // choice: the PR waits for a human, and the log says so.
-      this.run(
-        ["gh", "pr", "merge", number, "-R", this.target, "--squash", "--auto"],
-        "gh pr merge --auto",
-      );
-    }
+    const bodyFile = this.writePrBody(report, staged);
+    const { number, outcome } = this.openOrRefreshPr(existing, base, bodyFile);
+    this.armAutoMerge(summary, number);
     this.closeFailureIssue();
     this.verdict(outcome);
   }
@@ -633,6 +677,7 @@ class Delivery {
     return tokenUrl(this.target, requireEnv("PAT"));
   }
 
+  /** A lease-guarded force push through the credentialed URL. */
   push(branch: string, lease: string, what: string): void {
     this.must(
       this.git(
@@ -647,9 +692,7 @@ class Delivery {
     );
   }
 
-  /** One commit onto the dispatched branch, no PR and no issue: the failure issue is the default-branch sync's, and the
-   *  branch's own PR carries this commit. The lease is the commit the row cloned, so a commit pushed to the branch
-   *  meanwhile fails the push instead of being overwritten. */
+  /** One commit onto the dispatched branch, no PR and no issue: the failure issue is the default-branch sync's, and the branch's own PR carries this commit. The lease is the commit the row cloned, so a commit pushed meanwhile fails the push. */
   async deliverOntoBranch(report: string): Promise<void> {
     const tip = this.must(
       this.git("rev-parse", "HEAD"),

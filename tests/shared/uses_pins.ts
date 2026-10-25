@@ -1,9 +1,15 @@
 import { PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform";
 
 export interface Pin {
+  /** The source the line was read from, as handed to the extractor. */
   file: string;
+
+  /** The reference's first two path segments, `owner/name`, a sub-path dropped. */
   action: string;
+
+  /** The text after the `@`: a sha, a tag, or a branch. */
   ref: string;
+
   /** The trailing `# <tag>` comment naming what the ref was pinned from, or null when the line carries none. */
   version: string | null;
 }
@@ -27,11 +33,16 @@ export function extractUsesPins(text: string, file: string): Pin[] {
 }
 
 export interface SelfPin {
+  /** The source the line was read from, as handed to the extractor. */
   file: string;
+
   /** The owner slot as written: the `github_username` placeholder or a literal owner. */
   owner: string;
+
   /** The pin's stem after the owner: <name>/<path>. */
   stem: string;
+
+  /** The text after the `@`, up to a blank or a quote. */
   ref: string;
 }
 

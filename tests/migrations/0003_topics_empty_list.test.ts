@@ -11,8 +11,8 @@ const OVERLAY = ".github/settings.local.yml";
 
 /** The starter's shape as the fleet holds it: a comment above the identity keys, a CRLF line, an owner's ruleset,
  *  and no trailing newline, so the respelling is checked byte for byte around the one value it changes. */
-const overlayWith = (topicsLine: string) =>
-  [
+function overlayWith(topicsLine: string): string {
+  return [
     "---",
     "# Demo's OWN settings overlay",
     "repository:",
@@ -26,6 +26,8 @@ const overlayWith = (topicsLine: string) =>
     '    topics: ""',
     "    rules: [{type: deletion}]",
   ].join("\n");
+}
+
 const MIGRATED = overlayWith("  topics: []");
 const SILENT = { exitCode: 0, stdout: "", stderr: "" };
 

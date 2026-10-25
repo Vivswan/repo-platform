@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { fill } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { tempDirs } from "../../shared/temp_dir";
 
@@ -68,18 +69,12 @@ function runStep(
   path: string,
   root: string,
 ): { exitCode: number; stdout: string; outputs: Record<string, string> } {
-  const fill = (text: string): string => {
-    let filled = text;
-    for (const [expr, value] of Object.entries(fills)) filled = filled.replaceAll(expr, value);
-    if (filled.includes("${{")) throw new Error(`unresolved expression in ${filled}`);
-    return filled;
-  };
   const outputs = join(root, `${String(step.id)}-outputs.txt`);
   writeFileSync(outputs, "");
   const env = Object.fromEntries(
-    Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [k, fill(v)]),
+    Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [k, fill(v, fills)]),
   );
-  const proc = boundedSpawnSync([...RUNNER_BASH, fill(String(step.run))], {
+  const proc = boundedSpawnSync([...RUNNER_BASH, fill(String(step.run), fills)], {
     env: { ...env, PATH: `${path}:${toolsDir(root)}`, GITHUB_OUTPUT: outputs },
   });
   return {

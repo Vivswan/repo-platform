@@ -120,11 +120,12 @@ function probeRendered(slug: string, display: string): ProbeResult<true> {
   return { kind: "retry", detail: probe.stderr.replace(/\n+$/, "") };
 }
 
-// No answer after the retries warns rather than notices: a silently dropped repo would heal nothing
-// tonight.
+// No answer after the retries warns rather than notices: a silently dropped repo would heal nothing tonight.
 const ATTEMPTS = 3;
+
 // Test knob: the harness sets it to 0 so retry coverage does not sleep.
 const RETRY_DELAY_MS = Number(env("PROBE_RETRY_DELAY_MS", "5000"));
+
 async function probe<T>(
   label: string,
   fn: (slug: string, display: string) => ProbeResult<T> | Promise<ProbeResult<T>>,
@@ -153,10 +154,13 @@ async function probe<T>(
 const discovered = discoverOwnerRepos(owner, "select_settings_repos: user/repos response");
 // Before anything else prints: the masker covers what a scrub might miss.
 for (const row of discovered) {
-  if (row.private) for (const form of maskForms(row.repo)) setSecret(form);
+  if (row.private) {
+    for (const form of maskForms(row.repo)) setSecret(form);
+  }
 }
 
 // A slug the probes later DROP is a notice or a counted refusal after the probes, so a valid scope may select nothing.
+
 const known = new Set(discovered.map((row) => row.repo.toLowerCase()));
 const refusal = scopeRefusal(scope, known, owner);
 if (refusal !== null) {

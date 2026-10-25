@@ -37,18 +37,24 @@ function walk(rel: string): string[] {
   return found;
 }
 
-const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
+function read(rel: string): string {
+  return readFileSync(join(REPO_ROOT, rel), "utf-8");
+}
+
+function exists(rel: string): boolean {
+  return existsSync(join(REPO_ROOT, rel));
+}
+
+// The sites judged: the sources the fleet executes (the writer's tree, this repository's workflows, the action
+// manifests), for self pins also the docs and skills, whose examples spell the shape a reader copies, and the callable
+// workflow names a stem may resolve to.
 
 const MANIFESTS = actionManifestPaths(join(REPO_ROOT, "actions"));
-/** The sources the fleet executes: the writer's tree, this repository's workflows, and the action manifests. */
 const PIN_SITES = [...walk("files"), ...walk(".github/workflows"), ...MANIFESTS];
-/** Plus the docs and skills, whose examples spell the shape a reader copies. */
 const SELF_PIN_SITES = [...PIN_SITES, ...walk("docs"), ...walk("skills")];
-
 const callable = callableWorkflowNames(
   walk(".github/workflows").map((path) => ({ path, text: read(path) })),
 );
-const exists = (rel: string) => existsSync(join(REPO_ROOT, rel));
 
 /** True when pinact settles the line itself: a full version it verifies, or no version comment at all (its code 005). False is
  *  the gap: a comment pinact reads as a version but leaves unverified, sha included. The branches follow pinact's classifier order. */
@@ -107,8 +113,9 @@ export function resolves(
   callable: readonly string[],
 ): boolean {
   const workflows = ".github/workflows/";
-  if (path.startsWith(workflows))
+  if (path.startsWith(workflows)) {
     return callable.includes(path.slice(workflows.length)) && exists(path);
+  }
   return [`${path}/action.yml`, `${path}/action.yaml`].some(exists);
 }
 

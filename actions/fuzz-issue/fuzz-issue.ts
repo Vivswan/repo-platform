@@ -16,11 +16,15 @@ import {
 import { basename, join } from "node:path";
 import { setOutput } from "@actions/core";
 
+/** Lines of a report a summarized block quotes; a block shown in full is uncapped. */
 const REPORT_LINES = 60;
+
 /** GitHub caps an issue or comment body at 65,536 characters; stay comfortably under it. */
 const MAX_BODY = 60_000;
+
 /** Small enough that the header, footer, notice, and one full block always fit inside MAX_BODY. */
 const MAX_BLOCK_CHARS = 8_000;
+
 /** Contract v1: failure directory names are plain identifiers. */
 const DIR_NAME = /^[A-Za-z0-9._-]+$/;
 
@@ -28,6 +32,7 @@ export function failureDirs(root: string): string[] {
   if (!existsSync(root)) {
     return [];
   }
+
   return readdirSync(root)
     .filter((name) => DIR_NAME.test(name))
     .flatMap((name) => {
@@ -54,9 +59,11 @@ export function head(text: string, lines: number, chars: number): string {
   if (all.length > 0 && all[all.length - 1] === "") {
     all.pop();
   }
+
   if (all.length <= lines && all.join("\n").length <= chars) {
     return text.trimEnd();
   }
+
   const marker = (cut: number) => `\n... (${cut} more lines)`;
   // Reserved at the largest count it can name, so the marker never overflows.
   const reserve = marker(all.length).length;
@@ -70,6 +77,7 @@ export function head(text: string, lines: number, chars: number): string {
     kept.push(line);
     used = next;
   }
+
   return `${kept.join("\n")}${marker(all.length - kept.length)}`;
 }
 
@@ -77,6 +85,7 @@ export function capChars(text: string, max: number): string {
   if (text.length <= max) {
     return text;
   }
+
   const marker = "\n... (truncated)";
   const keep = Math.max(0, max - marker.length);
   return text.slice(0, keep) + marker;
@@ -89,6 +98,7 @@ export function runUrl(env: NodeJS.ProcessEnv): string {
   if (!server || !repo || !runId) {
     return "";
   }
+
   return `${server}/${repo}/actions/runs/${runId}`;
 }
 
@@ -100,6 +110,7 @@ export function blockTitle(dir: string, report: string): string {
   if (first) {
     return first;
   }
+
   return report ? basename(dir) : `${basename(dir)} (no report.md)`;
 }
 
@@ -157,6 +168,7 @@ export function buildBody(
     if (url) {
       parts.push("", `Run: ${url}`);
     }
+
     return parts.join("\n");
   }
 
@@ -227,6 +239,7 @@ export function buildGenericBody(env: NodeJS.ProcessEnv): string {
   if (facts.length > 0) {
     parts.push("", ...facts);
   }
+
   return parts.join("\n");
 }
 
@@ -254,6 +267,7 @@ export function closeComment(env: NodeJS.ProcessEnv, stream: Stream): string {
 function requireInput(variable: string, input: string): string {
   const value = process.env[variable];
   if (!value) throw new Error(`the ${input} input is required`);
+
   return value;
 }
 
@@ -274,10 +288,12 @@ function main(): void {
   if (stream !== "fuzz" && stream !== "generic") {
     throw new Error(`unknown STREAM '${stream}' (expected fuzz or generic)`);
   }
+
   const runnerTemp = process.env.RUNNER_TEMP;
   if (!runnerTemp || !process.env.GITHUB_OUTPUT) {
     throw new Error("RUNNER_TEMP and GITHUB_OUTPUT are required (the runner sets both)");
   }
+
   const artifactsDir = process.env.ARTIFACTS_DIR;
   let text: string;
   if (mode === "resolve") {

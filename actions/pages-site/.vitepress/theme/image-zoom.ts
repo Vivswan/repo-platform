@@ -9,7 +9,9 @@ import mediumZoom, { type Zoom } from "medium-zoom";
 import { onContentUpdated } from "vitepress";
 import { defineComponent } from "vue";
 
+/** Article images, minus those inside a link or a button, which already act on a click. */
 const IMAGE_SELECTOR = ".vp-doc img:not(a img, button img)";
+
 /** Carbon's root, everything on the page but what medium-zoom appends to <body>. */
 const PAGE_SELECTOR = ".Layout";
 

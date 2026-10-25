@@ -9,11 +9,16 @@ import type { Subprocess } from "bun";
 import { exitCodeOf } from "../.github/scripts/shared/proc.ts";
 import { PLATFORM_NAME } from "../actions/shared/platform.ts";
 
+/** The checkout, one level above scripts/. */
 const REPO_ROOT = resolve(import.meta.dir, "..");
-// tests/ is the one root: knip.jsonc keeps a test file under actions/ out of
-// the entries, so one there is an unused-file finding.
+
+// tests/ is the one root: knip.jsonc keeps a test file under actions/ out of the entries, so one there is an unused-file finding.
 const DEFAULT_TARGETS = ["./tests"];
+
+/** Relayed to the bun child, so the run ends the way the terminal asked. */
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+/** How many leftover temp entries the failure names; the rest is a count. */
 const LISTED_LEFTOVERS = 20;
 
 /** bun runs no afterAll hook in a file a name filter empties (tests/shared/temp_dir.test.ts pins it), and a signal-killed child may have
@@ -51,7 +56,7 @@ async function main(argv: string[]): Promise<number> {
   for (const signal of FORWARDED_SIGNALS) process.on(signal, () => child?.kill(signal));
   const scratch = mkdtempSync(join(tmpdir(), `${PLATFORM_NAME}-tests-`));
   try {
-    // Async on purpose (biome.json exempts this file from the Bun.spawn ban):
+    // Async on purpose (biome.local.jsonc exempts this file from the Bun.spawn ban):
     // a synchronous spawn would hold the signal until the child exited on
     // its own. Inherited stdio, so there is no pipe to drain and no hang to
     // bound beyond the child's own life.

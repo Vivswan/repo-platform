@@ -7,8 +7,10 @@ import { join, resolve } from "node:path";
 import { AmbiguousCharacters, InvisibleCharacters } from "monaco-editor/base/common/strings.js";
 import { repositoryFiles } from "../shared/repository_files.ts";
 
+/** The checkout judged: the first argument, else the working directory. */
 const ROOT = resolve(process.argv[2] ?? ".");
-// Directories a repository may track whose files the check still leaves alone: vendored installs, build output, agent state.
+
+/** Directories a repository may track whose files the check still leaves alone: vendored installs, build output, agent state. */
 const SKIP_DIRS = new Set([
   "node_modules",
   ".output",
@@ -27,6 +29,8 @@ const SKIP_DIRS = new Set([
   ".claude",
   ".codex",
 ]);
+
+/** Extensions the check reads; an extensionless file (a hook) is read too. */
 const EXTENSIONS = new Set([
   ".ts",
   ".tsx",
@@ -72,11 +76,14 @@ const EXTENSIONS = new Set([
 function isCheckable(name: string): boolean {
   const dot = name.lastIndexOf(".");
   if (dot === -1) return true;
+
   return EXTENSIONS.has(name.slice(dot));
 }
 
-// .typography-allow is written by the sync in managed repos; .typography-allow.local is repo-owned and never synced.
+/** .typography-allow is written by the sync in managed repos; .typography-allow.local is repo-owned and never synced. */
 const ALLOW_FILES = [join(ROOT, ".typography-allow"), join(ROOT, ".typography-allow.local")];
+
+/** The path prefixes the allow files exempt, blank and `#` lines dropped. */
 const ALLOWED_PREFIXES = ALLOW_FILES.flatMap((file) =>
   existsSync(file)
     ? readFileSync(file, "utf-8")
@@ -90,25 +97,26 @@ function isExempt(relPath: string): boolean {
   return ALLOWED_PREFIXES.some((prefix) => relPath === prefix || relPath.startsWith(prefix));
 }
 
-// VS Code's unicode-highlight data, straight from monaco-editor. An empty
-// locale set selects the _common + _default confusables (what VS Code
-// highlights regardless of user locale).
+/** VS Code's unicode-highlight data, straight from monaco-editor. An empty locale set selects the _common + _default confusables (what VS Code highlights regardless of user locale). */
 const AMBIGUOUS = AmbiguousCharacters.getInstance(new Set());
 
-// CJK sentence punctuation, allowed only in files that also carry CJK text
-// (file-level, not line-level: CJK sentences wrap across lines).
-// U+FF0C deliberately absent: the full-width comma is banned everywhere.
+/** CJK sentence punctuation, allowed only in files that also carry CJK text (file-level, not line-level: CJK sentences wrap across lines). U+FF0C deliberately absent: the full-width comma is banned everywhere. */
 const CJK_PUNCTUATION = new Set([0x3001, 0x3002, 0x300c, 0x300d]);
-// Hiragana/Katakana, CJK ideographs (+ ext A), Hangul, compatibility forms.
+
+/** Hiragana/Katakana, CJK ideographs (+ ext A), Hangul, compatibility forms. */
 const CJK_TEXT = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]/u;
-// Devanagari block; exempt in files with Devanagari letters.
+
+/** Devanagari block; exempt in files with Devanagari letters. */
 const DEVANAGARI_BLOCK = [0x0900, 0x097f];
+
+/** Devanagari letters: the script's presence in a file. */
 const DEVANAGARI_TEXT = /[\u0904-\u0939\u0958-\u095F]/u;
 
-// Escapes, not literals: this file must never fail its own check.
+/** Escapes, not literals: this file must never fail its own check. */
 const FORBIDDEN =
   /[\u00A0\u00AB\u00AD\u00B1\u00B4\u00BB\u00D7\u00F7\u02BC\u2000-\u2015\u2018-\u201F\u2026\u2028-\u202F\u2032-\u2037\u2039\u203A\u2060\u2066-\u2069\u2212\u2248\u3000\uFEFF\uFF01-\uFF5E]/u;
 
+/** Look-alike ranges by name, the first match naming a code point FORBIDDEN caught. */
 const RANGES: [number, number, string][] = [
   [0x2018, 0x201f, "curly quote (use ' or \")"],
   [0x2010, 0x2015, "dash look-alike (use -)"],
@@ -120,6 +128,14 @@ const RANGES: [number, number, string][] = [
   [0xff01, 0xff5e, "full-width character (use the ASCII form)"],
 ];
 
+/** Monaco's invisible-control trio (tab is a formatter's domain and \n never reaches here: lines are split on it), named before the ASCII fast path so it cannot hide them. */
+const CONTROL_NAMES: Record<number, string> = {
+  11: "vertical tab/form feed (delete it)",
+  12: "vertical tab/form feed (delete it)",
+  13: "carriage return (use LF line endings)",
+};
+
+/** The single confusable characters by name, checked before the ranges. */
 const NAMES: Record<number, string> = {
   65292: 'full-width comma (use ", " with a trailing space)',
   160: "non-breaking space (use a regular space)",
@@ -153,33 +169,36 @@ function hex(code: number): string {
 type ScriptContext = { cjk: boolean; devanagari: boolean };
 
 function violation(code: number, context: ScriptContext): string | null {
-  // Control characters: tab is a formatter's domain and \n never reaches here
-  // (lines are split on it); the rest of monaco's invisible-control trio is
-  // flagged explicitly so the ASCII fast path below can't hide them.
-  if (code === 0x0b || code === 0x0c) return "vertical tab/form feed (delete it)";
-  if (code === 0x0d) return "carriage return (use LF line endings)";
+  const control = CONTROL_NAMES[code];
+  if (control !== undefined) return control;
+
   if (code <= 0x7e) return null;
+
   if (CJK_PUNCTUATION.has(code)) {
     return context.cjk ? null : `CJK punctuation ${hex(code)} in a non-CJK file (use ASCII)`;
   }
+
   if (context.devanagari && code >= DEVANAGARI_BLOCK[0] && code <= DEVANAGARI_BLOCK[1]) {
     return null;
   }
+
   if (NAMES[code]) return NAMES[code];
+
   if (FORBIDDEN.test(String.fromCodePoint(code))) {
-    for (const [lo, hi, label] of RANGES) {
-      if (code >= lo && code <= hi) return label;
-    }
-    return `disallowed character ${hex(code)}`;
+    const range = RANGES.find(([lo, hi]) => code >= lo && code <= hi);
+    return range?.[2] ?? `disallowed character ${hex(code)}`;
   }
+
   if (InvisibleCharacters.isInvisibleCharacter(code)) {
     return `invisible character ${hex(code)} (delete it)`;
   }
+
   const twin = AMBIGUOUS.getPrimaryConfusable(code);
   if (twin !== undefined) {
     const ascii = twin === 0x20 ? "a regular space" : `"${String.fromCodePoint(twin)}"`;
     return `ambiguous character ${hex(code)} (use ${ascii})`;
   }
+
   return null;
 }
 
@@ -192,6 +211,7 @@ function isJudged(relPath: string): boolean {
 const failures: string[] = [];
 for (const relPath of repositoryFiles(ROOT, { untracked: true })) {
   if (!isJudged(relPath) || isExempt(relPath)) continue;
+
   const content = readFileSync(join(ROOT, relPath), "utf-8");
   const context = { cjk: CJK_TEXT.test(content), devanagari: DEVANAGARI_TEXT.test(content) };
   content.split("\n").forEach((line, index) => {

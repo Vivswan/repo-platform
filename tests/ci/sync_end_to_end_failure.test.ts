@@ -19,9 +19,9 @@ const TARGET = "OwnerOrg/demo";
 const PAT = "ghp_SENTINEL";
 const RUN_URL = "https://github.com/OwnerOrg/repo-platform/actions/runs/1";
 
-// The real gh refuses `--slurp` beside `--jq` as a flag error before any
-// request; the stub does the same, then answers the failure path's calls.
 const GH_LINES = [
+  // The real gh refuses `--slurp` beside `--jq` as a flag error before any request; the stub does the same, then
+  // answers the failure path's calls.
   'if [[ " $* " == *" --slurp "* && ( " $* " == *" --jq "* || " $* " == *" -q "* || " $* " == *" --template "* || " $* " == *" -t "* ) ]]; then echo "the \\`--slurp\\` option is not supported with \\`--jq\\` or \\`--template\\`" >&2; exit 1; fi',
   'case "$*" in',
   '  "api user "*) echo token-bot ;;',

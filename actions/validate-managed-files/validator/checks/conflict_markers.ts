@@ -35,12 +35,14 @@ export function checkConflictMarkers(ctx: Context): Finding[] {
   for (const rel of ctx.files) {
     const suffix = extname(rel);
     if (!TEXT_SUFFIXES.has(suffix) && suffix !== "") continue;
+
     let content: string;
     try {
       content = STRICT_UTF8.decode(readFileSync(join(ctx.root, rel)));
     } catch {
       continue;
     }
+
     if (hasConflictMarker(content)) {
       findings.push(
         error(
@@ -50,5 +52,6 @@ export function checkConflictMarkers(ctx: Context): Finding[] {
       );
     }
   }
+
   return findings;
 }

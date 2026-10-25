@@ -7,10 +7,11 @@ import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 import { spawnStubUpstream } from "../shared/upstream_server";
 
+// The lint reads workflows, so every upstream file is a stub and never the network.
+
 const temp = tempDirs();
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 const SCRIPT = join(REPO_ROOT, ".github/scripts/ci/write_fleet_lint_tree.ts");
-// The lint reads workflows, so every upstream file is a stub and never the network.
 const FILES = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
 const upstream = await spawnStubUpstream(FILES, temp.dir("fleet-lint-upstream-"));
 afterAll(() => upstream.stop());

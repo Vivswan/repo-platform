@@ -36,19 +36,18 @@ export const HTML_REGION_MARKERS: RegionMarkers = {
  *  is a compile error, not a runtime gap). */
 export type AssertNever<T extends never> = T;
 
-/** The managed-region declaration's wire fields as a tuple: `satisfies`
- *  refuses a stranger, the AssertNever pin refuses an omission. */
+/** The managed-region declaration's wire fields as a tuple: `satisfies` refuses a stranger, the AssertNever pin refuses an omission. */
 export const MANAGED_REGION_WIRE_FIELDS = ["begin", "end"] as const satisfies readonly Exclude<
   keyof ManagedRegionSplit,
   "grammar"
 >[];
+
 /** Compile-time only. @public */
 export type ManagedRegionWireFieldsExhaustive = AssertNever<
   Exclude<Exclude<keyof ManagedRegionSplit, "grammar">, (typeof MANAGED_REGION_WIRE_FIELDS)[number]>
 >;
 
-/** The grammar ids the manifest may name, as runtime data for the
- *  UNTRUSTED-input check below. */
+/** The grammar ids the manifest may name, as runtime data for the UNTRUSTED-input check below. */
 export const GRAMMAR_IDS: readonly GrammarId[] = ["managed-region"];
 
 /** Manifest text rides through a target checkout, so a grammar id is validated here before the cast. */
@@ -66,9 +65,9 @@ export function isMarkerLine(line: string, marker: string): boolean {
   return line.trim() === marker;
 }
 
+/** One line of a split file; `end` is the index just past its newline (or end of content). */
 export interface Line {
   text: string;
-  /** Index just past the line's newline (or end of content). */
   end: number;
 }
 
@@ -81,7 +80,9 @@ export function splitLines(content: string): Line[] {
       start = i + 1;
     }
   }
+
   if (start < content.length) out.push({ text: content.slice(start), end: content.length });
+
   return out;
 }
 
@@ -105,10 +106,12 @@ export function splitManagedRegion(content: string, markers: RegionMarkers): Reg
   const lines = splitLines(content);
   const begin = lines.findIndex((line) => isMarkerLine(line.text, markers.begin));
   if (begin === -1) return null;
+
   const end = lines.findIndex(
     (line, index) => index > begin && isMarkerLine(line.text, markers.end),
   );
   if (end === -1) return null;
+
   const regionStart = begin === 0 ? 0 : lines[begin - 1].end;
   return {
     above: content.slice(0, regionStart),
@@ -124,5 +127,6 @@ export function cleanManagedRegion(content: string, markers: RegionMarkers): Reg
     (marker) => markerLineCount(content, marker) === 1 && substringCount(content, marker) === 1,
   );
   if (!clean) return null;
+
   return splitManagedRegion(content, markers);
 }

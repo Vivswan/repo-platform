@@ -16,6 +16,7 @@ const scopeToken = /^[A-Za-z0-9._/-]+$/;
 const scopeOne = (parsed) => {
   const scope = parsed.scope ?? (/^\w*\(\)/.test(parsed.header ?? "") ? "" : null);
   if (scope === null || scopeToken.test(scope)) return [true];
+
   return [
     false,
     "one scope per subject, spelled [A-Za-z0-9._/-]: split the change or pick the scope that names it",

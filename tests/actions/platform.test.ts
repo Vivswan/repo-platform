@@ -77,7 +77,7 @@ describe("the platform slug and every string the fleet observes derived from it"
   });
 });
 
-/** Every plugin biome.json names, so a copied config resolves them beside it. */
+/** Every plugin the biome pair names, so a copied config resolves them beside it. */
 function biomePlugins(repoRoot: string): Record<string, string> {
   return Object.fromEntries(
     readdirSync(join(repoRoot, "biome"))
@@ -89,7 +89,6 @@ function biomePlugins(repoRoot: string): Record<string, string> {
 // The ban that keeps the name above the one spelling: Biome's plugin over every code tree but the tests and platform.ts itself.
 test("a string, a template, and a regex literal each red under actions/, scripts/, and .github/scripts/; a test file and platform.ts are exempt", () => {
   const lintRoot = temp.dir("platform-name-ban-");
-  const config = JSON.parse(readFileSync(join(REPO_ROOT, "biome.json"), "utf-8"));
   const literals = [
     'export const branch = "automation/repo-platform";',
     "export const title = `[${branch}] Repo-Platform`;",
@@ -98,7 +97,8 @@ test("a string, a template, and a regex literal each red under actions/, scripts
     "",
   ].join("\n");
   const files: Record<string, string> = {
-    "biome.json": JSON.stringify({ ...config, vcs: { enabled: false } }),
+    "biome.json": readFileSync(join(REPO_ROOT, "biome.json"), "utf-8"),
+    "biome.local.jsonc": readFileSync(join(REPO_ROOT, "biome.local.jsonc"), "utf-8"),
     ...biomePlugins(REPO_ROOT),
     "actions/x/x.ts": literals,
     "scripts/x.ts": literals,
@@ -112,7 +112,13 @@ test("a string, a template, and a regex literal each red under actions/, scripts
     writeFileSync(join(lintRoot, rel), content);
   }
   const r = boundedSpawnSync(
-    [join(REPO_ROOT, "node_modules", ".bin", "biome"), "lint", "--reporter=json", "."],
+    [
+      join(REPO_ROOT, "node_modules", ".bin", "biome"),
+      "lint",
+      "--reporter=json",
+      "--vcs-enabled=false",
+      ".",
+    ],
     { cwd: lintRoot },
   );
   const report = JSON.parse(r.stdout) as {

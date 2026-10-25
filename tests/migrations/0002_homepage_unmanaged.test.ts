@@ -10,13 +10,12 @@ import { tempDirs } from "../shared/temp_dir";
 const temp = tempDirs();
 const RUNG = new URL("../../migrations/0002-homepage-unmanaged.ts", import.meta.url).pathname;
 const OVERLAY = ".github/settings.local.yml";
-/** The URL checkout_target.ts leaves on origin, for OwnerOrg/Demo. */
 const ORIGIN = "https://github.com/OwnerOrg/Demo.git";
 
 /** The starter's shape as the fleet holds it: a comment above the identity keys, a CRLF line, an owner's ruleset,
  *  and no trailing newline, so the deletion is checked byte for byte around the one line it removes. */
-const overlayWith = (homepageLine: string | null) =>
-  [
+function overlayWith(homepageLine: string | null): string {
+  return [
     "---",
     "# Demo's OWN settings overlay",
     "repository:",
@@ -31,10 +30,12 @@ const overlayWith = (homepageLine: string | null) =>
     "    homepage: kept-elsewhere",
     "    rules: [{type: deletion}]",
   ].join("\n");
+}
+
 const MIGRATED = overlayWith(null);
 const SILENT = { exitCode: 0, stdout: "", stderr: "" };
 
-/** A clone as the sync leaves it: a git checkout whose origin names the repository. */
+/** A clone as the sync leaves it: a git checkout whose origin is the URL checkout_target.ts sets, naming the repository. */
 function checkout(overlay: string | null, origin: string | null = ORIGIN): string {
   const root = temp.dir("migration-0002-");
   fixtureGit(root, ["init", "-q"]);

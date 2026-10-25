@@ -12,12 +12,14 @@
  *  of them, so the base prefix alone cannot tell its own pages from another version's. */
 function leavesTier(path: string, base: string, tierRoots: readonly string[]): boolean {
   if (!path.startsWith(base)) return true;
+
   return tierRoots.some((root) => root !== base && path.startsWith(root));
 }
 
 export interface Browser {
   /** The path the document was served for (location.pathname). */
   here: () => string;
+
   /** A full page load of `to`. */
   leave: (to: string) => void;
 }

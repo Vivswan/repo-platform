@@ -67,10 +67,10 @@ function writesKey(text: string, key: string, form: "run" | "script"): boolean {
   );
 }
 
-/** A key may leave through a shared module the script imports (the checks' one main writes `report=`), so each
- *  script's relative imports are read with it, one level deep. */
 const RELATIVE_IMPORT = /from\s+["'](\.\.?\/[^"']+\.ts)["']/g;
 
+/** The step's run text with every script it names, each read with its relative imports one level deep: a key may
+ *  leave through a shared module the script imports (the checks' one main writes `report=`). */
 function scriptsOf(actionName: string, step: Step): { run: string; scripts: string[] } {
   const actionDir = join(ACTIONS_DIR, actionName);
   const run = String(step.run).replaceAll(ACTION_PATH, actionDir);
@@ -97,33 +97,52 @@ function stepWrites(actionName: string, step: Step, key: string): boolean {
   return Object.hasOwn(loadAction(own[1]).outputs ?? {}, key);
 }
 
+/** Every `inputs.x` one expression reads that the action does not declare. */
+function undeclaredInputReads(where: string, expression: string, inputs: Set<string>): string[] {
+  return [...expression.matchAll(INPUT_REF)]
+    .filter((m) => !inputs.has(m[1]))
+    .map((m) => `${where}: inputs.${m[1]} is not declared`);
+}
+
+/** Every `steps.id.outputs.key` one expression reads from a step that is not among `visible` or writes no such key. */
+function badStepReads(
+  where: string,
+  expression: string,
+  visible: Set<string>,
+  byId: Map<string, Step>,
+  actionName: string,
+): string[] {
+  const problems: string[] = [];
+  for (const [, id, key] of expression.matchAll(STEP_REF)) {
+    const step = byId.get(id);
+    if (!visible.has(id) || step === undefined) {
+      problems.push(`${where}: steps.${id} is no earlier step`);
+    } else if (key !== undefined && !stepWrites(actionName, step, key)) {
+      problems.push(`${where}: steps.${id} writes no output '${key}'`);
+    }
+  }
+  return problems;
+}
+
 function manifestProblems(name: string, action: Action): string[] {
   const inputs = new Set(Object.keys(action.inputs ?? {}));
   const steps = action.runs.steps;
   const byId = new Map(steps.filter((s) => typeof s.id === "string").map((s) => [String(s.id), s]));
+  const judge = (where: string, expressions: string[], visible: Set<string>): string[] =>
+    expressions.flatMap((expression) => [
+      ...undeclaredInputReads(where, expression, inputs),
+      ...badStepReads(where, expression, visible, byId, name),
+    ]);
   const problems: string[] = [];
-  const judge = (where: string, expressions: string[], visible: Set<string>) => {
-    for (const expression of expressions) {
-      for (const m of expression.matchAll(INPUT_REF)) {
-        if (!inputs.has(m[1])) problems.push(`${where}: inputs.${m[1]} is not declared`);
-      }
-      for (const [, id, key] of expression.matchAll(STEP_REF)) {
-        const step = byId.get(id);
-        if (!visible.has(id) || step === undefined) {
-          problems.push(`${where}: steps.${id} is no earlier step`);
-        } else if (key !== undefined && !stepWrites(name, step, key)) {
-          problems.push(`${where}: steps.${id} writes no output '${key}'`);
-        }
-      }
-    }
-  };
   const earlier = new Set<string>();
   steps.forEach((step, index) => {
-    judge(`step ${index + 1} (${String(step.name ?? step.id)})`, expressionsOf(step), earlier);
+    problems.push(
+      ...judge(`step ${index + 1} (${String(step.name ?? step.id)})`, expressionsOf(step), earlier),
+    );
     if (typeof step.id === "string") earlier.add(step.id);
   });
   for (const [output, spec] of Object.entries(action.outputs ?? {})) {
-    judge(`outputs.${output}`, expressionsOf(spec), new Set(byId.keys()));
+    problems.push(...judge(`outputs.${output}`, expressionsOf(spec), new Set(byId.keys())));
   }
   return problems;
 }

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   blockSources,
   checkFilesConfig,
+  type FileEntry,
   type FilesConfig,
   FilesConfigError,
   type ModuleData,
@@ -75,8 +76,9 @@ export function placeholderDefaults(config: FilesConfig): PlaceholderDefaults {
       const where = `modules.${module}.tracking_label`;
       declare(`${key}_label`, value, module, where);
       if (color !== undefined) declare(`${key}_label_color`, color, module, where);
-      if (description !== undefined)
+      if (description !== undefined) {
         declare(`${key}_label_description`, description, module, where);
+      }
     }
   }
   for (const name of config.placeholders) {
@@ -112,68 +114,82 @@ export function trackingTuples(config: FilesConfig): TrackingTuples {
   return { tuples, problems };
 }
 
+/** How the entries read one source; the blocks anchor is allowed only when every entry reading it splices blocks (`withBlocks === entries`). */
 interface SourceUse {
   regions: Set<RegionKind>;
-  /** The anchor is allowed only when every entry reading the source splices blocks into it. */
   entries: number;
   withBlocks: number;
+}
+
+function useOf(sources: Map<string, SourceUse>, source: string): SourceUse {
+  return sources.getOrInsertComputed(source, () => ({
+    regions: new Set(),
+    entries: 0,
+    withBlocks: 0,
+  }));
+}
+
+/** One more entry reading the source; a split entry's region is one the source may not mention. */
+function countRead(use: SourceUse, entry: FileEntry): void {
+  use.entries += 1;
+  if (entry.class === "split") use.regions.add(entry.region);
+}
+
+/** Every tree source by path with how the entries read it; a fetched source is not in the tree and is left out. */
+function sourceUses(config: FilesConfig): Map<string, SourceUse> {
+  const sources = new Map<string, SourceUse>();
+  const allModules = Object.keys(config.modules);
+  for (const entry of config.files) {
+    if ("render" in entry) continue;
+    // A fetched source is not in the tree; renderRegion refuses a body mentioning the markers at render time.
+    if (typeof entry.source === "string") {
+      const own = useOf(sources, entry.source);
+      countRead(own, entry);
+      if (entry.blocks !== undefined) own.withBlocks += 1;
+    }
+    // A block file is spliced into the source, so it is read like one but may not carry the anchor itself.
+    for (const { source } of blockSources(config, entry, allModules)) {
+      if (typeof source !== "string") continue;
+      countRead(useOf(sources, source), entry);
+    }
+  }
+  return sources;
+}
+
+/** A split source must not mention its own markers: the writer adds them, and a second pair leaves the file without an honest slice.
+ *  A source shared with a managed entry keeps the constraint. */
+function sourceProblems(config: FilesConfig, text: string, use: SourceUse): string[] {
+  const problems: string[] = [];
+  const spliced = use.withBlocks === use.entries;
+  const allowed = spliced ? [...config.placeholders, "blocks"] : config.placeholders;
+  const unknown = unknownPlaceholders(text, allowed);
+  if (unknown.length > 0) {
+    problems.push(`uses unlisted placeholder(s) ${unknown.map((n) => `{{${n}}}`).join(", ")}`);
+  }
+  const anchor = spliced ? blocksAnchorProblem(text) : null;
+  if (anchor !== null) problems.push(anchor);
+  for (const region of use.regions) {
+    if (mentionsMarkers(text, region === "hash" ? HASH_REGION_MARKERS : HTML_REGION_MARKERS)) {
+      problems.push(`mentions the ${region} region markers the writer adds itself`);
+    }
+  }
+  return problems;
 }
 
 /** The tree may carry nothing the config never reads.
  *  Otherwise a block file of a module that left, or a layer file dropped from the declaration, would sit there unnoticed. */
 export function verifySources(config: FilesConfig, tree: string, label = "files.yml"): void {
   const problems: string[] = [];
-  // A split source must not mention its own markers: the writer adds them, and a second pair leaves the file without an honest slice.
-  // A source shared with a managed entry keeps the constraint.
-  const sources = new Map<string, SourceUse>();
-  const use = (source: string): SourceUse => {
-    const found = sources.get(source);
-    if (found !== undefined) return found;
-    const made: SourceUse = { regions: new Set(), entries: 0, withBlocks: 0 };
-    sources.set(source, made);
-    return made;
-  };
-  const allModules = Object.keys(config.modules);
-  for (const entry of config.files) {
-    if ("render" in entry) continue;
-    // A fetched source is not in the tree; renderRegion refuses a body mentioning the markers at render time.
-    if (typeof entry.source === "string") {
-      const own = use(entry.source);
-      own.entries += 1;
-      if (entry.blocks !== undefined) own.withBlocks += 1;
-      if (entry.class === "split") own.regions.add(entry.region);
-    }
-    // A block file is spliced into the source, so it is read like one but may not carry the anchor itself.
-    for (const { source } of blockSources(config, entry, allModules)) {
-      if (typeof source !== "string") continue;
-      const used = use(source);
-      used.entries += 1;
-      if (entry.class === "split") used.regions.add(entry.region);
-    }
-  }
-  for (const [source, { regions, entries, withBlocks }] of [...sources].sort()) {
+  const sources = sourceUses(config);
+  for (const [source, use] of [...sources].sort()) {
     const abs = join(tree, source);
     if (!existsSync(abs)) {
       problems.push(`source ${SOURCE_PREFIX}${source} is missing from the tree`);
       continue;
     }
     const text = readFileSync(abs, "utf-8");
-    const spliced = withBlocks === entries;
-    const allowed = spliced ? [...config.placeholders, "blocks"] : config.placeholders;
-    const unknown = unknownPlaceholders(text, allowed);
-    if (unknown.length > 0) {
-      problems.push(
-        `source ${SOURCE_PREFIX}${source} uses unlisted placeholder(s) ${unknown.map((n) => `{{${n}}}`).join(", ")}`,
-      );
-    }
-    const anchor = spliced ? blocksAnchorProblem(text) : null;
-    if (anchor !== null) problems.push(`source ${SOURCE_PREFIX}${source} ${anchor}`);
-    for (const region of regions) {
-      if (mentionsMarkers(text, region === "hash" ? HASH_REGION_MARKERS : HTML_REGION_MARKERS)) {
-        problems.push(
-          `source ${SOURCE_PREFIX}${source} mentions the ${region} region markers the writer adds itself`,
-        );
-      }
+    for (const problem of sourceProblems(config, text, use)) {
+      problems.push(`source ${SOURCE_PREFIX}${source} ${problem}`);
     }
   }
   const layers = new Set(declaredLayers(config));

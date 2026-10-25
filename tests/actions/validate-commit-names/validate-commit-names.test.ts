@@ -39,6 +39,7 @@ function eventFile(payload: unknown): string {
 }
 
 // config-conventional caps the header at 100; the fleet turns that rule off (its titles run long by house style).
+
 const HEADER_101 = `fix: ${"x".repeat(96)}`;
 
 const TITLES: [title: string, problems: string[]][] = [

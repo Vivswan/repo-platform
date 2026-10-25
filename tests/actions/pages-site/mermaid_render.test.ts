@@ -25,13 +25,11 @@ class FakeElement {
     this.parent?.children.splice(this.parent.children.indexOf(this), 1);
     this.parent = null;
   }
-  /** Only the `:scope > .class` form the pass uses. */
   querySelector(selector: string): FakeElement | null {
     const match = /^:scope > \.([\w-]+)$/.exec(selector);
     if (match === null) throw new Error(`unsupported selector ${selector}`);
     return this.children.find((child) => child.className.split(" ").includes(match[1])) ?? null;
   }
-  /** A button carries its label, the one attribute the pass sets. */
   get shape(): string {
     const content = this.tag === "div" && this.innerHTML !== "" ? this.innerHTML : this.textContent;
     const label = this.tag === "button" ? `[${this.attributes["aria-label"]}]` : "";
@@ -46,7 +44,6 @@ interface Held {
   reject: (error: Error) => void;
 }
 
-/** Each render's SVG carries its ordinal, so a stale result landing is visible. */
 const stub = {
   failLoad: false,
   hold: false,
@@ -115,6 +112,7 @@ Bun.plugin({
                 await new Promise<void>((resolve, reject) => stub.held.push({ resolve, reject }));
               }
               if (source.endsWith("-->")) throw new Error("Parse error on line 2:\nA -->\n-----^");
+              // Each render's SVG carries its ordinal, so a stale result landing is visible.
               return { svg: `<svg data-render="${ordinal}">${source}</svg>` };
             },
           },

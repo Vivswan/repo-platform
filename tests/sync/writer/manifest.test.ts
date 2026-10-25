@@ -13,11 +13,12 @@ import { type ManifestEntryShape, parseManifestFiles } from "../../../actions/sh
 import { sha256 } from "../../../actions/shared/values.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
+// PROTO and CTOR are spelled as variables: the linter and the type checker read a literal `.__proto__` or
+// `.constructor` member as the inherited property.
+
 const temp = tempDirs();
 const HASH = sha256("x");
 const BUILD = "0123456789abcdef0123456789abcdef01234567";
-// Spelled as variables: the linter and the type checker read a literal
-// `.__proto__` or `.constructor` member as the inherited property.
 const PROTO = "__proto__";
 const CTOR = "constructor";
 

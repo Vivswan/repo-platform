@@ -34,20 +34,16 @@ import {
   sectionEntries,
 } from "./settings_layers.ts";
 
-/** The first header line of a rendered document; the settings apply's
- *  selector (fleet/select_settings_repos.ts) reads it to tell a rendered
- *  file from a hand-written one. */
+/** The first header line of a rendered document; the settings apply's selector (fleet/select_settings_repos.ts) reads it to tell a rendered file from a hand-written one. */
 export const RENDERED_HEADER = `# ${GENERATED_NOTICE}`;
 
-/** The library's re-layering directive. A repository must not declare it:
- *  `_layering: replace` on `labels` drops the fleet roster and the apply
- *  deletes every managed label, green either way. */
+/** The library's re-layering directive. A repository must not declare it: `_layering: replace` on `labels` drops the fleet roster and the apply deletes every managed label, green either way. */
 const LAYERING_KEY = "_layering";
 
+/** What the settings render reads; `modules` are the repository's selected ones, in files.yml order. */
 export interface SettingsRenderInput {
   config: FilesConfig & Pick<WriterFilesConfig, "trackingTuples">;
   tree: string;
-  /** The repository's selected modules, files.yml order. */
   modules: string[];
   registration: Registration;
   overlay: string | null;

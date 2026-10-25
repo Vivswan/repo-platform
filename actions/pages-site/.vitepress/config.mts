@@ -47,7 +47,24 @@ function required(name: string): string {
   if (value === undefined || value === "") {
     throw new Error(`${name} is not set - this config only runs under the pages-site action`);
   }
+
   return value;
+}
+
+/** An icon link only for an icon the docs tree ships (VitePress serves public/ at the base): a link to a missing
+ *  file would be a 404 on every page, while no link lets the browser fall back to the site's favicon.ico. */
+function shippedIcon(dir: string): string | undefined {
+  return ["favicon.svg", "favicon.ico"].find((name) => existsSync(join(dir, "public", name)));
+}
+
+/** The language's own name for itself (`Deutsch`), or the tag when the runtime knows none. */
+function nativeName(tag: string): string {
+  try {
+    const name = new Intl.DisplayNames([tag], { type: "language" }).of(tag);
+    return name && name !== tag ? name : tag;
+  } catch {
+    return tag;
+  }
 }
 
 const srcDir = required("DOCS_SITE_SRC");
@@ -63,25 +80,7 @@ const title = required("DOCS_SITE_TITLE");
 const base = process.env.DOCS_SITE_BASE || "/";
 const origin = required("DOCS_SITE_ORIGIN");
 const editBase = process.env.DOCS_SITE_EDIT_BASE || "";
-// An icon link only for an icon the docs tree ships (VitePress serves
-// public/ at the base): a link to a missing file would be a 404 on every
-// page, while no link lets the browser fall back to the site's favicon.ico.
-const icon = ["favicon.svg", "favicon.ico"].find((name) =>
-  existsSync(join(srcDir, "public", name)),
-);
-
-// Locales by convention alone: docs/<lang>[-<region>]/ mirroring the root
-// structure IS a locale (derive.ts owns the detection rule); the root tree
-// is the default (English) locale. Detected per build, so a tagged
-// version's translations are that tag's own.
-const nativeName = (tag: string): string => {
-  try {
-    const name = new Intl.DisplayNames([tag], { type: "language" }).of(tag);
-    return name && name !== tag ? name : tag;
-  } catch {
-    return tag;
-  }
-};
+const icon = shippedIcon(srcDir);
 
 const markdown: MarkdownOptions = {
   // Heading ids are GitHub's (anchors.ts): the fleet writes its links for
@@ -124,6 +123,9 @@ const sidebar: NonNullable<ThemeConfig["sidebar"]> = {};
 const locales: Record<string, { label: string; lang: string }> = {
   root: { label: "English", lang: "en" },
 };
+// Locales by convention alone: docs/<lang>[-<region>]/ mirroring the root structure IS a locale (derive.ts owns the
+// detection rule); the root tree is the default (English) locale. Detected per build, so a tagged version's
+// translations are that tag's own.
 for (const tree of sidebarTrees(files)) {
   sidebar[`/${tree.prefix}`] = deriveSidebar(tree.files, source, {
     prefix: tree.prefix,
@@ -131,6 +133,7 @@ for (const tree of sidebarTrees(files)) {
     indexPages,
   });
   if (tree.prefix === "") continue;
+
   const dir = tree.prefix.slice(0, -1);
   locales[dir] = { label: nativeName(dir), lang: dir };
 }
@@ -188,6 +191,7 @@ export default defineConfigWithTheme<FleetThemeConfig>({
         : {}),
     };
     if (!isLandingFile(pageData.filePath, includePages)) return source;
+
     return {
       ...source,
       frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false },

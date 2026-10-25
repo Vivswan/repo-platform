@@ -13,7 +13,6 @@ import { tempDirs } from "../shared/temp_dir";
 const temp = tempDirs();
 
 const ZEROS = "0".repeat(40);
-// git's empty tree, the base a branch-creating push is read from.
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 describe("resolveBase", () => {

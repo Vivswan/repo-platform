@@ -17,6 +17,8 @@ import {
 
 /** The `.css` suffix routes the module through Vite's CSS pipeline like a file. */
 export const TOKENS_CSS_ID = "virtual:fleet-tokens.css";
+
+/** The selector list a shared token is written under. */
 const BOTH_MODES = ":root,\n.dark";
 
 function block(

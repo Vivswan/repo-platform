@@ -29,6 +29,7 @@ function directChild(mount: HTMLElement, className: string): HTMLElement | null 
 function ensureChild(mount: HTMLElement, tag: "div" | "p", className: string): HTMLElement {
   const found = directChild(mount, className);
   if (found !== null) return found;
+
   const made = document.createElement(tag);
   made.className = className;
   mount.append(made);
@@ -48,8 +49,7 @@ function fail(mount: HTMLElement, error: unknown): void {
   mount.dataset.state = "error";
 }
 
-/** A face still in flight at the deadline is drawn in the fallback, exactly as a failed one is; unbounded, a
- *  request that never settles would leave every diagram on the page unrendered. */
+/** A face still in flight at the deadline is drawn in the fallback, exactly as a failed one is; unbounded, a request that never settles would leave every diagram on the page unrendered. */
 const FACE_DEADLINE_MS = 3_000;
 
 // The browser fetches a face only once laid-out text uses it, so the theme's mono face can still be in flight
@@ -57,6 +57,7 @@ const FACE_DEADLINE_MS = 3_000;
 function faceOrDeadline(font: string, text: string): Promise<void> {
   const fonts: FontFaceSet | undefined = document.fonts;
   if (fonts === undefined) return Promise.resolve();
+
   return new Promise((resolve) => {
     const deadline = setTimeout(resolve, FACE_DEADLINE_MS);
     const settle = () => {
@@ -67,6 +68,37 @@ function faceOrDeadline(font: string, text: string): Promise<void> {
   });
 }
 
+/** mermaid loaded, the face settled, and the theme applied, or null when the run was overtaken or the import failed
+ *  (every mount then shows the failure). An import that failed offline is not cached: the next run tries again. */
+async function themedMermaid(
+  run: number,
+  themeVariables: ReturnType<typeof mermaidThemeVariables>,
+  face: Promise<void>,
+  mounts: HTMLElement[],
+): Promise<Mermaid | null> {
+  try {
+    const mermaid = await loadMermaid();
+    await face;
+    if (run !== generation) return null;
+
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+      theme: "base",
+      themeVariables,
+    });
+    return mermaid;
+  } catch (error) {
+    loading = undefined;
+    if (run !== generation) return null;
+
+    for (const mount of mounts) fail(mount, error);
+
+    return null;
+  }
+}
+
 /** A run that a later one overtakes (a toggle mid-render, a navigation) stops at its next await, so the newest theme
  *  always lands last. */
 export async function renderAll(dark: boolean): Promise<void> {
@@ -74,6 +106,7 @@ export async function renderAll(dark: boolean): Promise<void> {
   const mounts = [...document.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS}`)];
   closeZoomOutside(mounts);
   if (mounts.length === 0) return;
+
   const sources = mounts.map(
     (mount) => directChild(mount, MERMAID_SOURCE_CLASS)?.textContent ?? "",
   );
@@ -83,25 +116,9 @@ export async function renderAll(dark: boolean): Promise<void> {
     `${themeVariables.fontSize} ${themeVariables.fontFamily}`,
     sources.join(""),
   );
-  let mermaid: Mermaid;
-  try {
-    mermaid = await loadMermaid();
-    await face;
-    if (run !== generation) return;
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "strict",
-      suppressErrorRendering: true,
-      theme: "base",
-      themeVariables,
-    });
-  } catch (error) {
-    // Not cached: an import that failed offline gets another try next run.
-    loading = undefined;
-    if (run !== generation) return;
-    for (const mount of mounts) fail(mount, error);
-    return;
-  }
+  const mermaid = await themedMermaid(run, themeVariables, face, mounts);
+  if (mermaid === null) return;
+
   for (const [index, mount] of mounts.entries()) {
     try {
       const { svg, bindFunctions } = await mermaid.render(
@@ -109,6 +126,7 @@ export async function renderAll(dark: boolean): Promise<void> {
         sources[index],
       );
       if (run !== generation) return;
+
       const diagram = ensureChild(mount, "div", MERMAID_DIAGRAM_CLASS);
       diagram.innerHTML = svg;
       bindFunctions?.(diagram);

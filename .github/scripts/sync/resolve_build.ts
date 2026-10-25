@@ -13,16 +13,25 @@ import { gitAnswersYes } from "../shared/git_yes_no.ts";
 import { lastLine } from "../shared/lines.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
 
+/** The writer's declaration, at the root of the commit synced from. */
 export const FILES_CONFIG = "files.yml";
+
+/** The delivery ref as a full tag ref. */
 const TAG = `refs/tags/${DELIVERY_REF}`;
+
+/** The remote-tracking ref main is fetched to. */
 const MAIN = "refs/remotes/origin/main";
 
+/** The platform repository, whose tag and main are read. */
 const repository = requireEnv("GITHUB_REPOSITORY");
+
+/** The remedy every refusal ends with. */
 const heal =
   "Dispatch post-green.yml with sha=<green main commit> to move the stable tag there, then re-run the sync.";
 
 // Forced: git refuses to move a local tag the checkout's fetch already followed, and every sync after a move would fail.
 const fetched = capture(["git", "fetch", "--quiet", "origin", `+${TAG}:${TAG}`]);
+
 if (fetched.exitCode !== 0) {
   fail(
     `fetching the stable tag failed (${lastLine(fetched.stderr) || `exit ${fetched.exitCode}`}). ${heal}`,
@@ -30,9 +39,13 @@ if (fetched.exitCode !== 0) {
 }
 // Main after the tag: main only advances, so a tag moved between the two fetches still lands inside main's snapshot.
 must(["git", "fetch", "--quiet", "origin", `+refs/heads/main:${MAIN}`]);
+
 // ^{commit} peels an annotated tag to the commit it names.
 const tip = mustCapture(["git", "rev-parse", "--verify", `${TAG}^{commit}`]);
+
+/** The sha as the messages spell it. */
 const short = tip.slice(0, 12);
+
 if (!gitAnswersYes(["merge-base", "--is-ancestor", tip, MAIN])) {
   fail(`the stable tag names ${short}, which is not on main's history. ${heal}`);
 }

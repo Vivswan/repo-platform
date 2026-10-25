@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { error, notice, setOutput } from "@actions/core";
+import { env } from "../shared/action_runtime.ts";
 import { ownLinksPattern, pagesSite } from "../shared/pages_site.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { type IncludeRoot, isUnwalkedEntry, LANDING_FILES } from "./.vitepress/conventions.ts";
@@ -41,22 +42,19 @@ import {
   versionTags,
 } from "./lib.ts";
 
+/** The action's own directory: every build root gets its `.vitepress/` copied and its `node_modules` linked from here. */
 const ACTION_DIR = import.meta.dir;
 
-/** The docs tree every repository renders: fixed, so the fleet's layout
- *  and PR check read one path (docs/modules/site.md). */
+/** The docs tree every repository renders: fixed, so the fleet's layout and PR check read one path (docs/modules/site.md). */
 export const DOCS_DIR = "docs";
 
 /** Newest version tags a docs mount serves (docs/modules/site.md, "Versions"). */
 const MAX_VERSIONS = 5;
 
-function env(name: string, fallback = ""): string {
-  return process.env[name] ?? fallback;
-}
-
 function requireEnv(name: string): string {
   const value = env(name);
   if (value === "") throw new Error(`${name} is required and empty`);
+
   return value;
 }
 
@@ -67,6 +65,7 @@ function run(argv: string[], opts: { cwd?: string; env?: Record<string, string> 
     env: { ...process.env, ...(opts.env ?? {}) },
   });
   if (proc.error) throw proc.error;
+
   if (proc.status !== 0) {
     throw new Error(`command failed (exit ${proc.status}): ${argv.join(" ")}`);
   }
@@ -75,9 +74,11 @@ function run(argv: string[], opts: { cwd?: string; env?: Record<string, string> 
 function capture(argv: string[], cwd?: string): string {
   const proc = spawnSync(argv[0], argv.slice(1), { cwd, encoding: "utf-8" });
   if (proc.error) throw proc.error;
+
   if (proc.status !== 0) {
     throw new Error(`command failed (exit ${proc.status}): ${argv.join(" ")}\n${proc.stderr}`);
   }
+
   return proc.stdout;
 }
 
@@ -91,8 +92,10 @@ function treeHas(workspace: string, ref: string, path: string): boolean {
 function treeFile(workspace: string, ref: string, path: string): string | null {
   const entry = capture(["git", "-C", workspace, "ls-tree", ref, "--", path]).trim();
   if (entry === "") return null;
+
   const mode = entry.split(" ")[0];
   if (mode !== "100644" && mode !== "100755") return null;
+
   return capture(["git", "-C", workspace, "show", `${ref}:${path}`]);
 }
 
@@ -131,29 +134,37 @@ export function assertCentralTheme(docsTree: string): void {
 }
 
 interface Config extends SiteConfig {
+  /** GITHUB_WORKSPACE: the checkout every tier is extracted from. */
   workspace: string;
+
+  /** The run's scratch directory under RUNNER_TEMP, realpath'd, where every build root and the artifact sit. */
   scratch: string;
-  /** The directory the artifact sits in at its base path, the way Pages
-   *  serves it: lychee's --root-dir, so an absolute link resolves as the
-   *  browser resolves it. */
+
+  /** The directory the artifact sits in at its base path, the way Pages serves it: lychee's --root-dir, so an absolute link resolves as the browser resolves it. */
   served: string;
-  /** The artifact's own directory: `served` at the base path, so `served`
-   *  itself for a user site. */
+
+  /** The artifact's own directory: `served` at the base path, so `served` itself for a user site. */
   site: string;
-  /** The site-build hook's dist, relative to the repository root; "" for
-   *  no website. */
+
+  /** The site-build hook's dist, relative to the repository root; "" for no website. */
   siteDir: string;
+
+  /** owner/name, as GITHUB_REPOSITORY spells it. */
   repository: string;
-  /** GITHUB_SERVER_URL without a trailing slash: every link the build
-   *  emits (edit links, project facts) joins onto it. */
+
+  /** GITHUB_SERVER_URL without a trailing slash: every link the build emits (edit links, project facts) joins onto it. */
   serverUrl: string;
+
+  /** The Pages origin the site is served from. */
   origin: string;
+
   /** The URL path the site is served under (pagesSite's base path). */
   rootBase: string;
-  /** The repository's edit URL up to the repo root; a page's edit link
-   *  appends its own source path (an include root's page edits at that
-   *  root, not under the docs directory). */
+
+  /** The repository's edit URL up to the repo root; a page's edit link appends its own source path (an include root's page edits at that root, not under the docs directory). */
   editBase: string;
+
+  /** DEFAULT_BRANCH, else `main`: the edit links' branch, and the provenance label of a tier built from HEAD. */
   defaultBranch: string;
 }
 
@@ -212,6 +223,7 @@ function assertTierIndex(dist: string, what: string): string {
         `landing page (for the docs tree: ${DOCS_DIR}/README.md)`,
     );
   }
+
   return dist;
 }
 
@@ -234,6 +246,7 @@ export function resolvePrebuilt(workspace: string, dist: string): string {
         "checkout - point dist at a directory inside the repository",
     );
   }
+
   return assertTierIndex(dir, `the site-build hook's dist '${dist}'`);
 }
 
@@ -264,6 +277,7 @@ export function stageIncludes(
       );
       continue;
     }
+
     const target = join(srcDir, include.mount);
     if (existsSync(target)) {
       throw new Error(
@@ -272,6 +286,7 @@ export function stageIncludes(
           "sources would claim one URL; mount the root under another name",
       );
     }
+
     if (tier.ref === "HEAD") {
       const tree = join(workspace, include.path);
       if (!existsSync(tree)) {
@@ -289,6 +304,7 @@ export function stageIncludes(
       renameSync(join(staging, include.path), target);
       rmSync(staging, { recursive: true, force: true });
     }
+
     if (!statSync(target).isDirectory()) {
       throw new Error(
         `the include root '${include.path}' is a file, not a directory, at ${tier.ref}`,
@@ -297,12 +313,14 @@ export function stageIncludes(
     assertIncludePages(target, include);
     staged.add(include);
   }
+
   return includes.filter((include) => staged.has(include));
 }
 
 export function assertIncludePages(target: string, include: IncludeRoot): void {
   for (const child of readdirSync(target, { withFileTypes: true })) {
     if (!child.isDirectory() || isUnwalkedEntry(child.name)) continue;
+
     const dir = join(target, child.name);
     if (existsSync(join(dir, include.page)) && existsSync(join(dir, "index.md"))) {
       throw new Error(
@@ -354,6 +372,7 @@ function buildVitepressTier(
     rmSync(staging, { recursive: true, force: true });
     assertCentralTheme(srcDir);
   }
+
   const staged = stageIncludes(cfg.workspace, tier, root, srcDir, includes);
   // The action's own dependency set serves every build root: vitepress,
   // vue, and the llms plugin resolve through this link, so no build root
@@ -404,6 +423,7 @@ export function copyInto(src: string, dest: string, what: string, reserved?: Set
           "(latest/, stable/, the version directories, versions.json) - rename that output",
       );
     }
+
     const target = join(dest, entry);
     if (existsSync(target)) {
       throw new Error(
@@ -427,15 +447,18 @@ function eligibleDocsTags(cfg: Config, kept: string[]): string[] {
   };
   return kept.filter((tag) => {
     if (!treeHas(cfg.workspace, tag, DOCS_DIR)) return skip(tag, `${DOCS_DIR}/ does not exist`);
+
     if (treeHas(cfg.workspace, tag, `${DOCS_DIR}/.vitepress`)) {
       return skip(
         tag,
         `${DOCS_DIR}/.vitepress exists (the theme is central; a repo-local one would be ignored)`,
       );
     }
+
     if (![...LANDING_FILES].some((name) => treeHas(cfg.workspace, tag, `${DOCS_DIR}/${name}`))) {
       return skip(tag, `${DOCS_DIR}/ has no landing page (${[...LANDING_FILES].join(" or ")})`);
     }
+
     return true;
   });
 }
@@ -469,6 +492,7 @@ function assembleDocs(cfg: Config, mount: DocsMount, kept: string[]): TierScope[
       `no version tags to serve: ${mount.path} is built from the default branch head, like ${mount.path}latest/, and ${mount.path}stable/ is absent`,
     );
   }
+
   return tiers.map((tier) => ({ rel: tier.rel, strict: tierStrictLinks(tier) }));
 }
 
@@ -483,6 +507,7 @@ function walkHtml(dir: string, prefix = ""): string[] {
       pages.push(rel);
     }
   }
+
   return pages;
 }
 
@@ -495,6 +520,7 @@ export function ownEntries(site: string): string[] {
     const page = /\.html?$/i.test(name) && statSync(join(site, name)).isFile();
     if (page) names.add(name.replace(/\.html?$/i, ""));
   }
+
   return [...names].sort();
 }
 
@@ -571,11 +597,13 @@ async function main(): Promise<void> {
   if (check !== "true" && check !== "false" && check !== "") {
     throw new Error(`CHECK must be "true" or "false" (got '${check}')`);
   }
+
   if (check === "true") {
     if (cfg.docs === null) {
       notice("docs-check stood down: the registration turns the docs half off (site.path: null)");
       return;
     }
+
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
     const { dist } = buildVitepressTier(cfg, tier, [], cfg.docs.include, { base: "/" });
     // No remap: this build sits at "/", not at the deployed layout, so a
@@ -599,6 +627,7 @@ async function main(): Promise<void> {
     setSiteOutputs(cfg, null, "", "");
     return;
   }
+
   if (website === null) {
     notice(
       `no repository website (no site-build dist directory was handed over), so ${DOCS_DIR}/ publishes alone`,
@@ -619,6 +648,7 @@ async function main(): Promise<void> {
         "calling workflow must check out with fetch-depth: 0",
     );
   }
+
   const kept = versionTags(
     capture(["git", "-C", cfg.workspace, "tag", "--list", "v*"]).split("\n"),
   ).slice(0, MAX_VERSIONS);
@@ -629,6 +659,7 @@ async function main(): Promise<void> {
   // directory already in place, so a website emitting that directory
   // collides loudly instead of silently mixing two sources under one URL.
   if (docs !== null) scopes.push(...assembleDocs(cfg, docs, kept));
+
   if (website !== null && websiteDir !== null) {
     console.log(`copying the site-build hook's website from ${website.dist}`);
     copyInto(websiteDir, cfg.site, `the site-build hook's website ('${website.dist}')`);

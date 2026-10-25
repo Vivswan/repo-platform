@@ -89,7 +89,7 @@ export function judgeOverlay(text: string, repository: () => string | null): Jud
     return { verdict: "refused", reason: "its homepage key is not written as a plain line" };
   }
   const node = isNode(pair.value) ? pair.value : null;
-  const valueEnd = node?.range != null ? node.range[1] : keyRange[1];
+  const valueEnd = node?.range == null ? keyRange[1] : node.range[1];
   const lineStart = text.lastIndexOf("\n", keyRange[0] - 1) + 1;
   const newline = text.indexOf("\n", Math.max(valueEnd - 1, lineStart));
   const lineEnd = newline === -1 ? text.length : newline + 1;

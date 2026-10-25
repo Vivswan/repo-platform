@@ -7,13 +7,9 @@ import {
   type ProjectFacts,
 } from "../../../actions/pages-site/facts.ts";
 
-const treeOf =
-  (files: Record<string, string>): FactsReader =>
-  (path) =>
-    files[path] ?? null;
-
 // An enterprise server, so a link built from a github.com literal is red; an owner whose hash differs
 // from the bare name's, so a hue hashed from owner/name is red (the accent is the repository's alone).
+
 const HEAD_INPUT = {
   repository: "fixture-org/fixture-repo",
   docsDir: "docs",
@@ -76,6 +72,10 @@ const FULL_TREE: Record<string, string> = {
   "LICENSE.md":
     "<!-- BEGIN REPO-PLATFORM MANAGED -->\n# Individual and Small Organization License 1.1.0\n\nterms\n",
 };
+
+function treeOf(files: Record<string, string>): FactsReader {
+  return (path) => files[path] ?? null;
+}
 
 describe("collectFacts", () => {
   // The toolchain file roster is a fleet convention no file declares, and the `v` prefix is dropped in one place.

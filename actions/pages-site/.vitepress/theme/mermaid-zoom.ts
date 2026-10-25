@@ -11,8 +11,7 @@ export interface Shown {
   diagram: HTMLElement;
 }
 
-/** An object opens the view, null closes it, and a fresh object for the mount already on show redraws the copy: a
- *  render pass keeps the diagram element and swaps the SVG inside it, so only the object's identity carries the news. */
+/** An object opens the view, null closes it, and a fresh object for the mount already on show redraws the copy: a render pass keeps the diagram element and swaps the SVG inside it, so only the object's identity carries the news. */
 export const shown = shallowRef<Shown | null>(null);
 
 /** The mount's zoom button, made once; a mount whose diagram is on show gets the copy redrawn from the fresh SVG (a
@@ -29,6 +28,7 @@ export function attachZoom(mount: HTMLElement, diagram: HTMLElement): void {
     });
     mount.append(button);
   }
+
   if (shown.value?.mount === mount) shown.value = { mount, diagram };
 }
 

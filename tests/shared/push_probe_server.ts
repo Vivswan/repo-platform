@@ -15,8 +15,9 @@ function serve(token: string, table: ProbeTable): ReturnType<typeof Bun.serve> {
     port: 0,
     hostname: "127.0.0.1",
     fetch(request) {
-      if (request.headers.get("authorization") !== expected)
+      if (request.headers.get("authorization") !== expected) {
         return new Response("", { status: 401 });
+      }
       const match = /^\/([^/]+)\/([^/]+\/[^/]+)\.git\/info\/refs$/.exec(
         new URL(request.url).pathname,
       );

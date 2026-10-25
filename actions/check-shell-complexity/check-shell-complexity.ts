@@ -31,23 +31,27 @@ import {
   judgePowerShell,
 } from "./judge.ts";
 
+/** The repo-owned allowlist at the checkout root; `.local` is the never-synced suffix. */
 export const ALLOWLIST_FILE = ".shell-complexity-allow.local";
+
+/** What an allowlist entry's `# reason` must satisfy, quoted in the failure for an entry without one. */
 export const REASON_RULE =
   "an allowlist entry needs a reason a reader accepts (the block runs before bun exists, or the file is upstream-shaped)";
+
+/** The fix every finding line ends with. */
 export const REMEDY = `move this block to a TypeScript script run by bun, or list the file in ${ALLOWLIST_FILE} with a # reason`;
 
-/** Directories a repository may track whose files the check still leaves alone: vendored installs and build output.
- *  A repository's own such directory (a sync writer's templates) is the caller's `skip` input. */
+/** Tracked directories the check leaves alone (vendored installs, build output); a repository's own such directory (a sync writer's templates) is the caller's `skip` input. */
 const SKIP_DIRS = new Set(["node_modules", "vendor", "third_party", "dist", "build", ".venv"]);
 
+/** One refused construct. `line` is 1-based; `written` is set when `path` is a template and `line` is the written
+ *  tree's. */
 export interface Finding {
   path: string;
-  /** 1-based line in the file. */
   line: number;
   construct: string;
   source: SourceKind;
   dialect: Dialect;
-  /** Set when `path` is a template and `line` is the written tree's. */
   written?: WrittenLine;
 }
 
@@ -62,7 +66,9 @@ function fromWritten<T extends { path: string; line: number }>(
     ? written.templates[item.path]
     : undefined;
   if (template === undefined) return { ...item, written: { tree: written.tree } };
+
   if (template.lineMapped) return { ...item, path: template.path };
+
   return { ...item, path: template.path, written: { tree: written.tree } };
 }
 
@@ -74,13 +80,18 @@ export function where(item: { path: string; line: number; written?: WrittenLine 
 }
 
 export interface Verdict {
+  /** Refused constructs on files the allowlist does not name. */
   findings: Finding[];
+
   /** Allow-list defects: entries without a reason, and stale entries. */
   allowlistErrors: string[];
+
   /** Bodies judged, by source kind. */
   bodies: Record<SourceKind, number>;
+
   /** Files carrying the platform's managed header: a fleet repository cannot fix such a file. */
   managedSkipped: number;
+
   /** Files of a judged kind the reader could not read as yaml: warned and skipped, never a failure. */
   unreadable: (CollectProblem & { written?: WrittenLine })[];
 }
@@ -114,28 +125,48 @@ export function judgeBodies(bodies: CollectedBody[]): Finding[] {
   });
   const judged = judgePowerShell(powershell);
   for (const { id, body } of powershell) at(body, judged.get(id) ?? []);
+
   return findings;
 }
 
 /** `judgeManaged`: the platform's own run over the fleet trees its writer lands, where the managed files are its own
  *  to fix; a fleet repository never judges them. `written`: that tree's name and each written file's template, so a
- *  finding points at the template that produced it rather than at a same-named file of the checkout. */
+ *  finding points at the template that produced it rather than at a same-named file of the checkout. `skip`: directory
+ *  names of the caller's own the check must not read, beside the generic skip set. */
 export interface CheckOptions {
   judgeManaged: boolean;
   written?: WrittenTree;
-  /** Directory names of the caller's own the check must not read, beside the generic skip set. */
   skip?: readonly string[];
 }
 
+/** A written tree by name; `templates` maps each written path to its template, `lineMapped` when the template's
+ *  lines are the written file's (no block splice). */
 export interface WrittenTree {
   tree: string;
-  /** Written path to its template; `lineMapped` when the template's lines are the written file's (no block splice). */
   templates: Record<string, { path: string; lineMapped: boolean }>;
 }
 
 /** Set on a remapped item whose `line` is the written tree's, not the template's. */
 export interface WrittenLine {
   tree: string;
+}
+
+/** A shell source and its kind, or null for a file the check does not read: a kind by name (workflow, action, moon
+ *  task, Containerfile), else an extensionless file git tracks whose shebang names a shell. An extensionless file is
+ *  shell only by its shebang, and only a tracked one is read: a hook or tool script a tool generates into the checkout
+ *  is not the repository's. */
+function shellSource(
+  root: string,
+  relPath: string,
+  tracked: ReadonlySet<string>,
+): { kind: SourceKind; text: string } | null {
+  const named = sourceKindOf(relPath);
+  if (named === null && !(tracked.has(relPath) && isExtensionless(relPath))) return null;
+
+  const text = readFileSync(join(root, relPath), "utf-8");
+  if (named === null && shebangDialect(text) === null) return null;
+
+  return { kind: named ?? "script", text };
 }
 
 export function check(root: string, options: CheckOptions = { judgeManaged: false }): Verdict {
@@ -151,24 +182,24 @@ export function check(root: string, options: CheckOptions = { judgeManaged: fals
     script: 0,
   };
   let managedSkipped = 0;
-  // An extensionless file is shell only by its shebang, and only a tracked one is read: a hook or tool script a tool
-  // generates into the checkout is not the repository's.
   const tracked = new Set(repositoryFiles(root, { untracked: false }));
   for (const relPath of repositoryFiles(root, { untracked: true })) {
     if (!isJudged(relPath, skip)) continue;
-    const named = sourceKindOf(relPath);
-    if (named === null && !(tracked.has(relPath) && isExtensionless(relPath))) continue;
-    const text = readFileSync(join(root, relPath), "utf-8");
-    if (named === null && shebangDialect(text) === null) continue;
-    if (!options.judgeManaged && isManaged(text)) {
+
+    const source = shellSource(root, relPath, tracked);
+    if (source === null) continue;
+
+    if (!options.judgeManaged && isManaged(source.text)) {
       managedSkipped += 1;
       continue;
     }
-    const collected = collectFile(relPath, text);
-    counts[named ?? "script"] += collected.bodies.length;
+
+    const collected = collectFile(relPath, source.text);
+    counts[source.kind] += collected.bodies.length;
     bodies.push(...collected.bodies);
     unreadable.push(...collected.problems);
   }
+
   const findings = judgeBodies(bodies).sort(
     (a, b) =>
       a.path.localeCompare(b.path) || a.line - b.line || a.construct.localeCompare(b.construct),
@@ -211,11 +242,13 @@ function census(verdict: Verdict): string {
   if (verdict.managedSkipped > 0) {
     parts.push(`${verdict.managedSkipped} managed file(s) skipped; ${PLATFORM_NAME} owns them.`);
   }
+
   if (verdict.unreadable.length > 0) {
     parts.push(
       `${verdict.unreadable.length} file(s) not readable as yaml and skipped: ${verdict.unreadable.map((problem) => `\`${where(problem)}\``).join(", ")}.`,
     );
   }
+
   return parts.join(" ");
 }
 
@@ -230,6 +263,7 @@ export function report(outcome: Outcome): string {
     parts.push(`The check did not run to completion: ${outcome.message}`);
     return `${parts.join("\n")}\n`;
   }
+
   const { findings, allowlistErrors } = outcome.verdict;
   if (outcome.state === "clean") {
     parts.push("Every shell body stays within one level of a construct.");
@@ -246,6 +280,7 @@ export function report(outcome: Outcome): string {
         ),
       );
     }
+
     if (allowlistErrors.length > 0) {
       parts.push("", `### ${ALLOWLIST_FILE}`, "", ...allowlistErrors.map((error) => `- ${error}`));
     }

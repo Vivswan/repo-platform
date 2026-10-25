@@ -57,15 +57,21 @@ export interface PlanDefaults {
 export interface FilesData {
   /** Every module in files.yml order, which is the canonical module order. */
   modules: Module[];
+
+  /** The plan defaults, each read from the one module declaring its key (REQUIRED_DEFAULTS). */
   defaults: PlanDefaults;
+
   /** The file entries, for the paths a mirror may name. */
   files: FileEntry[];
+
+  /** The fleet's mirrors, as files.yml declares them. */
   mirrors: Mirrors;
+
+  /** What the settings render reads: the module data and the layers. */
   layers: LayerSources;
 }
 
-/** The module-data key each default is read from; exactly one module declares it, or the delivery commit is broken and
- *  no repository plans. The module declaring `path` is the docs module: planSite deploys it under any name. */
+/** The module-data key each default is read from; exactly one module declares it, or the delivery commit is broken and no repository plans. The module declaring `path` is the docs module: planSite deploys it under any name. */
 export const REQUIRED_DEFAULTS = { docsPath: "path" } as const;
 
 function declaring(modules: Module[], key: string): Module[] {
@@ -79,8 +85,10 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
     config = parseFilesConfig(text, label);
   } catch (error) {
     if (!(error instanceof FilesConfigError)) throw error;
+
     throw new PlanError(error.problems.map((problem) => `${label}: ${problem}`));
   }
+
   const modules = Object.entries(config.modules).map(([name, data]) => ({ ...data, name }));
   const problems: string[] = [];
   const required = (key: (typeof REQUIRED_DEFAULTS)[keyof PlanDefaults]): string => {
@@ -95,6 +103,7 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
   };
   const defaults: PlanDefaults = { docsPath: required(REQUIRED_DEFAULTS.docsPath) };
   if (problems.length > 0) throw new PlanError(problems);
+
   return {
     modules,
     defaults,
@@ -105,15 +114,28 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
 }
 
 export interface PlanInput {
+  /** The repository's registration, parsed. */
   registration: Registration;
+
+  /** Every module files.yml declares, in its order. */
   modules: Module[];
+
+  /** The plan defaults, read from the modules. */
   defaults: PlanDefaults;
+
+  /** The file entries, for the paths a mirror may name. */
   files: FileEntry[];
+
+  /** The fleet's mirrors, as files.yml declares them. */
   mirrors: Mirrors;
+
   /** Lowercased: the settings layers' label names. */
   reservedLabels: ReadonlySet<string>;
+
   /** The fleet security stream's tuple, the settings baseline's SECURITY_LABEL entry. */
   securityLabel: LabelTuple;
+
+  /** Whether the repository is private: no CodeQL, and the `private` when clauses select by it. */
   private: boolean;
 }
 
@@ -123,6 +145,7 @@ export function selectModules(input: PlanInput): Module[] {
     input.modules.map((module) => module.name),
   );
   if (problems.length > 0) throw new PlanError(problems);
+
   const selected = new Set(input.registration.modules);
   return input.modules.filter((module) => selected.has(module.name));
 }
@@ -149,6 +172,7 @@ export function trackingLabels(
       ),
     );
   }
+
   const labels = streams.map((stream) => declared[stream.key] ?? stream.default);
   for (const [index, value] of labels.entries()) {
     if (!LABEL_RE.test(value)) {
@@ -156,6 +180,7 @@ export function trackingLabels(
         `files.yml: the ${streams[index].key} tracking label default is not a plain label: ${value}`,
       ]);
     }
+
     if (input.reservedLabels.has(value.toLowerCase())) {
       throw new PlanError([
         `tracking label "${value}" (${streams[index].key}) is a label the platform already manages; ` +
@@ -163,6 +188,7 @@ export function trackingLabels(
       ]);
     }
   }
+
   const lowered = labels.map((value) => value.toLowerCase());
   const duplicate = lowered.find((value, index) => lowered.indexOf(value) !== index);
   if (duplicate !== undefined) {
@@ -170,6 +196,7 @@ export function trackingLabels(
       `tracking label "${duplicate}" is shared by two streams (GitHub label names are case-insensitive); each stream needs its own`,
     ]);
   }
+
   return labels;
 }
 
@@ -188,14 +215,13 @@ export function weekly(now: Date): boolean {
   return now.getUTCDay() === 1;
 }
 
-/** The fleet-wide nightly security stream (docs/modules/security-scans.md): fleet.yml's trivy-nightly job files every repository's Trivy findings under it,
- *  so it joins the tracking labels without a module; the settings baseline declares it on every repository, and its entry is the
- *  tuple the plan hands trivy-nightly's report step. */
+/** The nightly security stream (docs/modules/security-scans.md): trivy-nightly files a repository's Trivy findings under it, so it joins the tracking labels with no module; the settings baseline declares it; its entry is the tuple trivy-nightly gets. */
 export const SECURITY_LABEL = "security-nightly";
 
 /** Personal-account code scanning is public-only, so a private repository gets no CodeQL. */
 export function codeqlLanguages(selected: Module[], isPrivate: boolean): string[] {
   if (isPrivate) return [];
+
   return [...new Set(selected.flatMap((m) => m.codeql_languages ?? []))];
 }
 
@@ -211,6 +237,7 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
   if (problems.length > 0) {
     throw new PlanError(problems.map((problem) => describeMirrorProblem(problem, own)));
   }
+
   return {
     modules: selected.map((module) => module.name),
     private: input.private,
@@ -225,8 +252,12 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
  *  the website itself is the repo-owned hook's, so nothing about it is
  *  planned here. */
 export interface SitePlan {
+  /** The registration's project name. */
   siteTitle: string;
+
+  /** The docs half as the registration declares it; null turns the docs off. */
   docs: DocsConfig | null;
+
   /** The link-rot stream: the registration's label under the docs module's tuple. */
   linkRot: LabelTuple;
 }
@@ -239,6 +270,7 @@ export function planSite(input: PlanInput): SitePlan {
       `${REGISTRATION_PATH}: no selected module declares a docs path - there is no site to deploy`,
     ]);
   }
+
   const labels = trackingLabels(input, selected);
   const streams = selected.flatMap((m) => (m.tracking_label ? [m.name] : []));
   const tuple = docsModule.tracking_label;
@@ -247,6 +279,7 @@ export function planSite(input: PlanInput): SitePlan {
       `files.yml: modules.${docsModule.name}.tracking_label needs a color and a description - the link-rot issue is filed under them`,
     ]);
   }
+
   const site = input.registration.site;
   return {
     siteTitle: input.registration.project.name,
@@ -274,6 +307,7 @@ export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
     };
     return { config: JSON.stringify(config) };
   }
+
   return {
     "modules": JSON.stringify(plan.modules),
     "private": String(plan.private),
@@ -302,17 +336,23 @@ export function readRegistration(root: string): Registration {
       `${REGISTRATION_PATH}: missing - every managed repository registers here`,
     ]);
   }
+
   const read = parseRegistration(readFileSync(path, "utf-8"));
   if ("errors" in read) throw new PlanError(read.errors);
+
   return read.registration;
 }
 
 /** The API fallback keeps an empty input from reading as public. */
 export function resolvePrivate(input: string, repository: string): boolean {
   if (input === "true") return true;
+
   if (input === "false") return false;
-  if (input !== "")
+
+  if (input !== "") {
     throw new PlanError([`private input must be true, false, or empty; got '${input}'`]);
+  }
+
   const result = capture(["gh", "api", `repos/${repository}`, "--jq", ".private"], {
     timeoutMs: 60_000,
   });
@@ -322,6 +362,7 @@ export function resolvePrivate(input: string, repository: string): boolean {
       `cannot read the visibility of ${repository}: ${succeeded(result.exit) ? `unexpected answer '${value}'` : failureDetail(result)}`,
     ]);
   }
+
   return value === "true";
 }
 
@@ -330,6 +371,7 @@ function main(): number {
   if (!MODES.includes(mode as Mode)) {
     throw new PlanError([`MODE must be one of ${MODES.join(", ")}; got '${mode}'`]);
   }
+
   const filesConfig = requireEnv("FILES_CONFIG");
   const moduleData = loadModuleData(readFilesConfig(filesConfig), filesConfig);
   const root = process.cwd();
@@ -344,6 +386,7 @@ function main(): number {
   };
   const plan = mode === "site" ? planSite(input) : planCi(input);
   for (const [name, value] of Object.entries(outputsOf(plan))) setOutput(name, value);
+
   return 0;
 }
 

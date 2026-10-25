@@ -39,9 +39,13 @@ export function checkerChanged(root: string, from: string, to: string): boolean 
 export interface StampInput {
   /** The commit the manifest named before this run; null when the target had no manifest the writer accepted. */
   recorded: string | null;
+
+  /** The platform commit this run delivers. */
   build: string;
+
   /** checkerChanged between the recorded commit and the build. */
   checkerMoved: boolean;
+
   /** Whether this run left a tracked byte different: a file written, retired, or mirrored, or a manifest record moved. */
   wroteChange: boolean;
 }

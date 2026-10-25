@@ -15,6 +15,7 @@ export function versionNav(
   origin: string,
 ): NonNullable<ThemeConfig["nav"]> {
   if (versions.length < 2) return [];
+
   return [
     {
       text: current,

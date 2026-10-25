@@ -12,10 +12,13 @@ const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 export interface SyncOptions {
   /** The checkout the writer fills, a directory the caller's tempDirs minted. */
   target: string;
+
   /** The stub upstream's host (tests/shared/upstream_server.ts), so no run reaches the network. */
   upstream: string;
+
   /** The registration's module selection; none when omitted. */
   modules?: string[];
+
   /** The repository's visibility as the writer's own flag; public when omitted. */
   private?: boolean;
 }

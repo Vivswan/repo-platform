@@ -1,4 +1,5 @@
-// One overlay starter serves both visibilities: the writer fills `{{private}}` from its own flag.
+// One overlay starter serves both visibilities: the writer fills `{{private}}` from its own flag. The test reads the
+// overlay alone, so every upstream file is a stub and never the network.
 
 import { afterAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -13,7 +14,6 @@ const temp = tempDirs();
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const OVERLAY = ".github/settings.local.yml";
 
-// This test reads the overlay alone, so every upstream file is a stub and never the network.
 const upstream = await spawnStubUpstream(
   parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
   temp.dir("overlay-starter-upstream-"),

@@ -53,11 +53,11 @@ function writeTree(root: string, files: Record<string, string>): void {
 
 describe("placeholderDefaults", () => {
   // The registration may leave a label unset, so a source may use `{{x_label}}` only when a module declares its
-  // default; without this gate the sync would hold every row of a repository over a data-file mistake.
+  // default; without this gate the sync would hold every row of a repository over a data-file mistake. A refused
+  // document's row leaves defaults unasserted: they reach no consumer.
   test.each<{
     reason: string;
     text: string;
-    /** Absent on a refused document: its defaults reach no consumer. */
     defaults?: Record<string, string>;
     problems: string[];
   }>([

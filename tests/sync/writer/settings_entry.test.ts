@@ -140,8 +140,6 @@ const held = (overrides: Partial<SettingsRenderInput>) => {
   const result = renderSettings(input(overrides));
   return "held" in result ? result.held : `rendered:\n${result.content}`;
 };
-
-/** A name-keyed section's entries out of the fold's `{entries, _undeclared}` wrapper. */
 const entries = (section: unknown) =>
   (section as { entries: Record<string, unknown>[] } | undefined)?.entries;
 const names = (section: unknown) => (entries(section) ?? []).map((entry) => entry.name);

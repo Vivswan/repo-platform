@@ -22,11 +22,12 @@ import { parseJsonWithThrow } from "../shared/json.ts";
 import { loadLayer } from "../sync/writer/settings_layers.ts";
 import { captureNetwork } from "./discovery.ts";
 
-/** The writer's data, its import closure, and its dependency versions, relative to the platform root; a directory ends in
- *  a slash. docs/platform/post-green.md lists the same paths, and a test pins the two. bun.lock is on it because the settings library's
- *  version decides the rendered settings.yml's key order; package.json because its postinstall decides which action-local
- *  dependencies the writer resolves. Whether a sync then moves a repository's judge is the writer's own stamp rule
- *  (sync/writer/judged_commit.ts). */
+// The writer's data, its import closure, and its dependency versions. bun.lock is on it because the settings library's
+// version decides the rendered settings.yml's key order; package.json because its postinstall decides which action-local
+// dependencies the writer resolves. Whether a sync then moves a repository's judge is the writer's own stamp rule
+// (sync/writer/judged_commit.ts).
+
+/** Relative to the platform root, a directory ending in a slash; docs/platform/post-green.md lists the same paths, and a test pins the two. */
 export const DELIVERED_SURFACE = [
   "files.yml",
   "files/",
@@ -46,13 +47,20 @@ export function deliveredBySync(path: string): boolean {
 
 /** The actor GITHUB_TOKEN's writes carry; a label event by anyone else is a human's. */
 export const BOT_LOGIN = "github-actions[bot]";
+
+/** The first line of the leg's own comment, which it finds again by this. */
 export const MARKER = `<!-- ${PLATFORM_NAME}/fleet-sync-default -->`;
+
 /** Enough to see what a sweep touched; the rest is a count. */
 export const LISTED_PATHS = 25;
+
+/** The section every comment points the reader to. */
 const DOCS = `https://github.com/${PLATFORM_SLUG}/blob/main/docs/all-green.md#opting-a-pr-into-an-immediate-fleet-sync`;
 
 export function labelOf(known: FleetSyncLabels, scope: FleetSyncScope): string {
-  for (const [label, labelScope] of known) if (labelScope === scope) return label;
+  for (const [label, labelScope] of known) {
+    if (labelScope === scope) return label;
+  }
   throw new Error(`no fleet-sync label names the ${scope} scope`);
 }
 
@@ -61,23 +69,29 @@ export type Note =
   | { kind: "kept-off"; by: string }
   | { kind: "refused"; error: string };
 
-export function noteBody(paths: readonly string[], known: FleetSyncLabels, note: Note): string {
+/** The comment's opening line and its closing line, around the listed paths. */
+function noteFrame(known: FleetSyncLabels, note: Note): [lead: string, closing: string] {
   const publicLabel = `\`${labelOf(known, "public")}\``;
-  const [lead, closing] =
-    note.kind === "added"
-      ? [
-          `Added ${publicLabel}: this pull request changes what a fleet sync delivers, so the public repos sync from its merge.`,
-          `Remove the label if you do not want that; with no label the weekly schedule carries it. \`${labelOf(known, "all")}\` only when necessary and approved by the repository owner: it bills private minutes.`,
-        ]
-      : note.kind === "kept-off"
-        ? [
-            `${publicLabel} was removed by ${note.by}; not re-adding it. This pull request changes what a fleet sync delivers:`,
-            "With no label the weekly schedule carries it.",
-          ]
-        : [
-            "This pull request changes what a fleet sync delivers:",
-            `Its fleet-sync label would be refused at merge and nothing would sync: ${note.error}.`,
-          ];
+  if (note.kind === "added") {
+    return [
+      `Added ${publicLabel}: this pull request changes what a fleet sync delivers, so the public repos sync from its merge.`,
+      `Remove the label if you do not want that; with no label the weekly schedule carries it. \`${labelOf(known, "all")}\` only when necessary and approved by the repository owner: it bills private minutes.`,
+    ];
+  }
+  if (note.kind === "kept-off") {
+    return [
+      `${publicLabel} was removed by ${note.by}; not re-adding it. This pull request changes what a fleet sync delivers:`,
+      "With no label the weekly schedule carries it.",
+    ];
+  }
+  return [
+    "This pull request changes what a fleet sync delivers:",
+    `Its fleet-sync label would be refused at merge and nothing would sync: ${note.error}.`,
+  ];
+}
+
+export function noteBody(paths: readonly string[], known: FleetSyncLabels, note: Note): string {
+  const [lead, closing] = noteFrame(known, note);
   const listed = paths.slice(0, LISTED_PATHS).map((path) => `- \`${path}\``);
   if (paths.length > LISTED_PATHS) listed.push(`- and ${paths.length - LISTED_PATHS} more`);
   return [MARKER, lead, "", ...listed, "", `${closing} Details: [all-green.md](${DOCS}).`, ""].join(
@@ -89,13 +103,14 @@ export function noteBody(paths: readonly string[], known: FleetSyncLabels, note:
 export interface LabelHistory {
   /** Who added the label the last time it went on, or null when it never did. */
   lastAddedBy: string | null;
+
   /** The last human to take it off, or null: a bot removal (the default withdrawn) is not a decision. */
   removedBy: string | null;
 }
 
+/** The pull request as the leg reads it; `changed` is every path the diff touches, a rename by both names. */
 export interface PullRequest {
   open: boolean;
-  /** Every path the diff touches, a rename by both names. */
   changed: readonly string[];
   labels: readonly string[];
   base: string;
@@ -131,8 +146,9 @@ const say = (
 /** The default yields to a human, and a closed pull request is left as it is: a post-merge label or title edit must change nothing
  *  the merge's own run already read (fleet_sync_marker.ts). */
 export function plan(pr: PullRequest, known: FleetSyncLabels): Plan {
-  if (!pr.open)
+  if (!pr.open) {
     return { label: "keep", comment: { kind: "leave", reason: "the pull request is closed" } };
+  }
   const publicLabel = labelOf(known, "public");
   const own = pr.labels.map((label) => label.toLowerCase());
   const botOwnsPublic = own.includes(publicLabel) && pr.history.lastAddedBy === BOT_LOGIN;
@@ -144,8 +160,9 @@ export function plan(pr: PullRequest, known: FleetSyncLabels): Plan {
   }
   const chosen = botOwnsPublic ? own.filter((label) => label !== publicLabel) : own;
   const directive = readDirective(chosen, known);
-  if (directive.kind === "fleet-sync")
+  if (directive.kind === "fleet-sync") {
     return clear(`fleet-sync:${directive.scope} chosen`, withdraw);
+  }
   if (directive.kind === "error") {
     return say(withdraw, paths, known, { kind: "refused", error: directive.error });
   }
@@ -166,12 +183,12 @@ const filesPages = z.array(
   z.array(z.object({ filename: z.string(), previous_filename: z.string().optional() })),
 );
 const commentsPages = z.array(z.array(z.object({ id: z.number(), body: z.string().optional() })));
-// Only label events carry `label`; every other event kind in the listing is skipped by that absence.
 const eventsPages = z.array(
   z.array(
     z.object({
       event: z.string(),
       actor: z.object({ login: z.string() }).nullable(),
+      // Only label events carry `label`; every other event kind in the listing is skipped by that absence.
       label: z.object({ name: z.string() }).optional(),
     }),
   ),
@@ -184,8 +201,9 @@ export function labelHistory(events: readonly LabelEvent[], label: string): Labe
   for (const event of events) {
     if (event.label?.name.toLowerCase() !== label) continue;
     const actor = event.actor?.login ?? null;
-    if (event.event === "labeled") history.lastAddedBy = actor;
-    else if (event.event === "unlabeled" && actor !== null && actor !== BOT_LOGIN) {
+    if (event.event === "labeled") {
+      history.lastAddedBy = actor;
+    } else if (event.event === "unlabeled" && actor !== null && actor !== BOT_LOGIN) {
       history.removedBy = actor;
     }
   }

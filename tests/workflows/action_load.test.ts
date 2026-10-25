@@ -4,6 +4,8 @@
 //   dependency-review -> pull requests only: its upstream action refuses every other event
 //   release-assets    -> never: it reads a draft release by tag, and this repository cuts no releases
 
+// `shipped` is the platform's own manifest walk, nested actions included, so this test and the shipping read one list.
+
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,7 +27,6 @@ interface Job {
 }
 
 const PULL_REQUESTS_ONLY = "github.event_name == 'pull_request'";
-// The recursive manifest walk, so a nested action is shipped and judged by the same list.
 const shipped = actionManifestPaths(join(REPO_ROOT, "actions")).map(dirname);
 const ci = parseYaml(readFileSync(join(REPO_ROOT, ".github/workflows/ci.yml"), "utf8")) as {
   jobs: Record<string, Job>;

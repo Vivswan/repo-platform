@@ -12,14 +12,13 @@ import {
   type Finding,
   HARD,
   HARD_WIDTH,
-  isGenerated,
   judgeFile,
   type Kind,
   REASON_RULE,
   type Tier,
   WARN,
 } from "../../../actions/check-file-size/check-file-size.ts";
-import { COMMENT_LINE, isManaged } from "../../../actions/shared/managed_header.ts";
+import { COMMENT_LINE, isGenerated, isManaged } from "../../../actions/shared/managed_header.ts";
 import { loadAction, stepNamed } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { checkout } from "../../shared/fixture_checkout.ts";
@@ -87,8 +86,7 @@ describe("classify", () => {
   });
 });
 
-/** Abridged header excerpts of this repository's hand-written files that
- *  name a generator without declaring anything about themselves. */
+/** Abridged header excerpts of this repository's hand-written files that name a generator without declaring anything about themselves. */
 const GENERATOR_MENTIONS: [string, string][] = [
   [
     "a helper naming the generator that calls it (action_steps.ts)",
@@ -332,8 +330,9 @@ describe("judgeFile comment blocks", () => {
     const bullet = readFileSync(join(REPO_ROOT, "docs/fleet-guidelines.md"), "utf8")
       .split("\n")
       .find((line) => line.startsWith("- **A comment block**"));
-    if (bullet === undefined)
+    if (bullet === undefined) {
       throw new Error("docs/fleet-guidelines.md lost its comment block bullet");
+    }
     return [...bullet.matchAll(/`([^`]+)`/g)].map((match) => match[1]);
   })();
   test("the guide names exactly the comment prefixes the regex knows", () => {

@@ -74,8 +74,9 @@ interface WorkspaceCheckout {
 function checkoutPath(step: Step): string | null {
   if (!step.uses?.startsWith("actions/checkout@")) return null;
   const path = step.with?.path;
-  if (typeof path !== "string" || path === "." || path.startsWith("${{ runner.temp }}"))
+  if (typeof path !== "string" || path === "." || path.startsWith("${{ runner.temp }}")) {
     return null;
+  }
   return path.replace(/\/+$/, "");
 }
 
@@ -84,8 +85,9 @@ function checkoutPath(step: Step): string | null {
 function checkedOutStepLists(rel: string, text: string, fragment: boolean): Step[][] {
   const stubbed = text.replaceAll(/^\{\{blocks\}\}$/gm, "").replaceAll(/\{\{[\w-]+\}\}/g, "x");
   if (fragment) return [parseYaml(`steps:\n${stubbed}`).steps ?? []];
-  if (rel.endsWith("action.yml"))
+  if (rel.endsWith("action.yml")) {
     return [(parseYaml(stubbed) as { runs: { steps: Step[] } }).runs.steps];
+  }
   return Object.values((parseYaml(stubbed) as Workflow).jobs ?? {})
     .map((job) => job.steps ?? [])
     .filter((steps) =>
