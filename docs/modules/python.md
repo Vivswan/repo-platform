@@ -69,7 +69,7 @@ So an `ignore` or a looser threshold in `pyproject.toml` does not lower the floo
 - **A relaxation is a `per-file-ignores` entry** naming the files and the rule, with its reason in a comment beside it. Specimen: `PTH207` asks for `Path.glob` where `glob.glob` accepts absolute patterns and skips dotfiles, so the module that needs those keeps `glob.glob` under one entry.
 - **The thresholds are the floor's.** A function over one is split; a threshold in `pyproject.toml` has no effect.
 - **A nested `pyproject.toml` with its own `[tool.ruff]`** governs the files under it alone, since ruff reads the closest configuration, and those files leave the floor entirely. A reviewer treats one as a relaxation of the whole subtree.
-- **A uv repository needs a `pyproject.toml` at its root,** since the `extend` fails without one, and keeps no `.ruff.toml`, which ruff would read in place of the managed file, silently.
+- **A uv repository needs a `pyproject.toml` at its root,** since the `extend` fails without one, and keeps no `.ruff.toml`, which ruff would read in place of the managed file, silently; the fleet's ruff step refuses a root `.ruff.toml` before it lints.
 - **The editor sees the floor too:** a ruff run from the repository root reads the same two files CI reads.
 
 ## Handling a finding

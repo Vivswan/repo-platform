@@ -120,6 +120,12 @@ jobs:
           !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' &&
           contains(steps.plan.outputs.modules, '"uv"')
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      # ruff reads a root .ruff.toml in place of ruff.toml, so one would shadow the managed floor silently; refuse it.
+      - name: Refuse a root .ruff.toml
+        if: ${{ !cancelled() && steps.uv.outcome == 'success' && hashFiles('.ruff.toml') != '' }}
+        run: |
+          echo "::error file=.ruff.toml::ruff reads .ruff.toml over the managed ruff.toml, so the floor would not apply; move its settings into pyproject.toml under [tool.ruff] and delete it"
+          exit 1
       - id: ruff
         if: ${{ !cancelled() && steps.uv.outcome == 'success' && hashFiles('ruff.toml') != '' }}
         run: uvx ruff@0.17.2 check --no-fix --no-fix-only .
