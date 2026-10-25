@@ -168,7 +168,7 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 
 **Why:** a per-finding bypass records what was accepted and why, beside the code it excuses, and covers only that finding; a switch hides every future finding too.
 
-**How:** the table below, one row per check fleet.yml runs. zizmor runs the fleet policy alone; knip runs on its own defaults, which the repo-owned `knip.json` overrides where it sets a key; `_typos.toml` extends the fleet allowlist.
+**How:** the table below, one row per check fleet.yml runs, plus the clippy floor the rust starter's cargo steps gate. zizmor runs the fleet policy alone; knip runs on its own defaults, which the repo-owned `knip.json` overrides where it sets a key; `_typos.toml` extends the fleet allowlist.
 
 | Check | Where it runs | Blocks on | Bypass |
 |---|---|---|---|
@@ -181,6 +181,9 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | commit-names | standard-checks | a subject commitlint refuses under config-conventional plus one scope ([the grammar](#conventional-commits-squash-merged)) | none: reword the commit |
 | typos | standard-checks | any finding | an entry in the repo-owned `_typos.toml` (keys below), or a trailing `typos: ignore` comment for a one-off |
 | zizmor | standard-checks | a high finding, by zizmor's own exit code; code scanning shows high findings only | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it |
+| biome | standard-checks (bun repos with a `biome.json`; a repo the sync has not reached stands down with a notice) | any finding under the managed `biome.json` ([typescript.md](modules/typescript.md#the-floor)) | a per-path `overrides` entry in the repo-owned `biome.local.jsonc` with its reason beside it, never a `biome-ignore` line; a repository-wide relaxation has no home, since the managed file applies last over the local layer's top-level rules |
+| member-shape | standard-checks (bun repos) | a finding under the four [member-shape rules](modules/typescript.md#the-member-shape-rules) or an allowlist defect; a file oxc cannot parse is warned, never judged | the path in the repo-owned `.member-shape-allow.local` with a `# reason` |
+| clippy floor | the cargo steps of the repo-owned `checks.yml` (rust repos, [rust.md](modules/rust.md#the-gate)) | any lint of the floor, every one `deny` | `#[expect(clippy::<lint>, reason = "...")]` on the one item it names; never `#[allow]` (itself denied), never a raised threshold (the floor's lint tables are the fleet's) |
 | knip | standard-checks (bun repos with a package.json to install from; a repo without one stands down with a notice) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
 | semgrep | semgrep (public repos) | an ERROR finding, a fatal analysis error, or a scan that did not complete (its exit status is named) | a `// nosemgrep: <rule-id>` comment (`# nosemgrep: <rule-id>` in YAML) on the finding's line or the line above it, with the reason beside it ([security-scans.md](modules/security-scans.md#semgrep)) |
 | dependency-review | dependency-review | a vulnerable dependency at or above high | none: upgrade or drop the dependency |

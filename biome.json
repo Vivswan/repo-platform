@@ -22,5 +22,8 @@
       "performance": { "noBarrelFile": "error", "noReExportAll": "error" },
       "correctness": { "noInvalidUseBeforeDeclaration": "error" }
     }
-  }
+  },
+  "overrides": [
+    { "includes": ["biome.json"], "formatter": { "enabled": false }, "assist": { "enabled": false } }
+  ]
 }

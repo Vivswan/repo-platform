@@ -18,7 +18,7 @@ placeholders:
 
 modules:
   bun:
-    description: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
+    description: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS, the biome lint floor and the member-shape rules)
     pin:
       file: files/bun/.bun-version
       repository: oven-sh/bun
@@ -165,6 +165,10 @@ files:
   - {path: LICENSE.md, class: split, region: html, when: {without: [custom-license]}}
   # --- modules
   - {path: .bun-version, class: managed, when: {modules: [bun]}}
+  # The lint floor (docs/modules/typescript.md). biome.json is strict JSON, so like .bun-version it carries no header
+  # and validate-managed-files judges it by hash.
+  - {path: biome.json, class: managed, when: {modules: [bun]}}
+  - {path: biome.local.jsonc, class: starter, when: {modules: [bun]}}
   - {path: .release-please-manifest.json, class: starter, when: {modules: [release-please]}}
   - {path: release-please-config.json, class: starter, when: {modules: [release-please]}}
   - {path: .github/workflows/pr-title.yml, class: managed, when: {modules: [pr-title]}}

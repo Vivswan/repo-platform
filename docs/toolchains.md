@@ -18,6 +18,19 @@ bun is the one pinned toolchain. uv floats on its setup action's default, and th
 - **Dependabot's bun PRs** install with the lockfile Dependabot wrote; a PR whose frozen install fails is fixed by hand, or by re-running Dependabot on it.
 - **A known limitation, accepted:** Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2 ([dependabot-core#15848](https://github.com/dependabot/dependabot-core/issues/15848)), so a Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
 
+## The biome pin
+
+biome is a tool pin, not a toolchain pin: one version, spelled in four places, and `tests/files/biome_floor.test.ts` holds them equal. A bump edits all four in one PR.
+
+| Where | Line |
+|---|---|
+| [actions/biome/package.json](../actions/biome/package.json) | the `@biomejs/biome` dependency: the one biome the fleet lints with |
+| the root `package.json` | the same devDependency: the biome this repository lints itself with |
+| [files/bun/biome.json](../files/bun/biome.json) and this repository's root copy | the version inside the `$schema` URL |
+| [the auto-format starter](../files/bun/.github/workflows/auto-format.toolchain.yml) | `bun x @biomejs/biome@<version> check --write .`, so the formatter a repository runs is the linter's version |
+
+A starter is written once, so an existing `auto-format.yml` keeps the version it was written with until the repository edits it; the gate's biome is always the action's.
+
 The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.txt` pins the yamllint the action installs, and dependabot's pip entry for that directory bumps it. The action is the one yamllint gate; this repository runs no yamllint locally, since the hook runs bun's own checks alone (fleet-guidelines, "Pre-commit hooks only check").
 
 The fleet's ruff step is not a module pin either: the version is spelled inline, `uvx ruff@<version>`, in fleet.yml's `ruff` step and in the uv starters' format lines, and tests/files/ruff_floor.test.ts holds every site to one version. It is bumped by hand, never by the refresh: a ruff minor can add rules to a selected family, so a bump changes the [Python lint floor](modules/python.md) and is reviewed as one.

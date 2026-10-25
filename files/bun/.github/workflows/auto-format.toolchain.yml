@@ -8,4 +8,4 @@
           key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
       - name: Format (biome)
-        run: bun x @biomejs/biome@2 check --write .
+        run: bun x @biomejs/biome@2.5.11 check --write .
