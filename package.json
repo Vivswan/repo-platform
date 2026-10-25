@@ -13,6 +13,7 @@
     "typecheck": "bun scripts/typecheck.ts",
     "typography": "bun actions/check-typography/check-typography.ts .",
     "file-size": "bun actions/check-file-size/check-file-size.ts .",
+    "member-shape": "bun actions/check-member-shape/check-member-shape.ts .",
     "wrap:check": "bun scripts/check/check_markdown_wrap.ts",
     "test": "bun scripts/run_tests.ts",
     "postinstall": "for pkg in actions/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done"

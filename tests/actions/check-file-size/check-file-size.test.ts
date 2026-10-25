@@ -12,14 +12,13 @@ import {
   type Finding,
   HARD,
   HARD_WIDTH,
-  isGenerated,
   judgeFile,
   type Kind,
   REASON_RULE,
   type Tier,
   WARN,
 } from "../../../actions/check-file-size/check-file-size.ts";
-import { COMMENT_LINE, isManaged } from "../../../actions/shared/managed_header.ts";
+import { COMMENT_LINE, isGenerated, isManaged } from "../../../actions/shared/managed_header.ts";
 import { loadAction, stepNamed } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { checkout } from "../../shared/fixture_checkout.ts";

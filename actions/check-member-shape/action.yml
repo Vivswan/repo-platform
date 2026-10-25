@@ -1,0 +1,71 @@
+name: Check Member Shape
+description: |
+  Judges the shape of commented records and constants in the caller's TypeScript (.ts, .tsx, .mts, .cts), read with
+  oxc-parser. Readability first: a record or block where no item carries a comment is never asked for structure.
+
+  - blank-line-between-members: once any member of an interface, class, type literal, or enum carries a comment,
+    exactly one blank line separates every pair of adjacent members.
+  - one-line-comment: a member's or a module-level constant's comment is one line (a `//` line or a one-line
+    `/** ... */`) directly above the item, above its `export` or decorators. Stacked lines, a multi-line block, or a
+    blank line between the comment and the item are findings. A trailing comment belongs to the item on its line.
+  - all-or-none: within one record, or one block of adjacent module-level `const` declarations, every item carries a
+    comment or none does; each bare item of a half-commented block is a finding.
+  - constant-spacing: a commented module-level constant has a blank line (or the file start) before its comment and a
+    blank line (or the file end) after its declaration.
+
+  Findings are one table in the step summary and the log annotations on every event, plus a sticky PR comment on
+  pull_request events, deleted when there is nothing to say (the calling job needs pull-requests: write for it).
+
+  Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it), and a file whose
+  header declares it generated. Warned, never judged: a file oxc cannot parse. Never read: vendored installs and
+  recorded fixtures (node_modules, vendor, third_party, goldens, __snapshots__).
+  Repo-owned exemptions: `.member-shape-allow.local`, one path per line with a `# reason`.
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: $/actions/bun-setup
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    # The script records report=findings|clean|error itself; a crash before
+    # that leaves it empty, which posts no comment. The comment steps read it
+    # on !cancelled(), so the comment is posted before the job turns red.
+    - name: Check member shape
+      id: check
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        REPORT_PATH: ${{ runner.temp }}/check-member-shape-report.md
+      run: '"$ACTION_BUN" "${{ github.action_path }}/check-member-shape.ts"'
+
+    # The comment is a convenience sink: the summary and annotations carry
+    # the same table, so a token without pull-requests write (a fork or
+    # Dependabot PR) must not turn the verdict red.
+    - name: Post the findings as a sticky PR comment
+      if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.check.outputs.report == 'findings' }}
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      with:
+        header: repo-platform/check-member-shape
+        path: ${{ runner.temp }}/check-member-shape-report.md
+
+    - name: Remove a stale sticky comment
+      if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.check.outputs.report == 'clean' }}
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      with:
+        header: repo-platform/check-member-shape
+        delete: true

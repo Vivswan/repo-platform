@@ -4,8 +4,8 @@
   // Every script runs by path (package.json scripts, workflows, bun test), so the entry globs are
   // wide and entry exports are judged too, or a dead export in a shared library would never surface.
   "includeEntryExports": true,
-  // actions/knip ships a manifest alone, the knip the fleet runs; nothing there is code to analyze.
-  "ignoreWorkspaces": ["actions/knip"],
+  // actions/knip and actions/biome ship a manifest alone, the knip and biome the fleet runs; nothing there is code to analyze.
+  "ignoreWorkspaces": ["actions/knip", "actions/biome"],
   "workspaces": {
     ".": {
       "entry": [

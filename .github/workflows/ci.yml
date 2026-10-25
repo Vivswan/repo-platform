@@ -112,6 +112,8 @@ jobs:
         run: bun install --frozen-lockfile --silent
       - name: Biome (lint + format check)
         run: bun run lint
+      # The fleet's lint floor, as every repository receives it: the pinned biome of the action under this checkout's biome.json.
+      - uses: $/actions/biome
 
   typography:
     runs-on: ubuntu-latest
@@ -158,6 +160,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: $/actions/check-file-size
+
+  member-shape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Only for the sticky comment.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: $/actions/check-member-shape
 
   commit-names:
     runs-on: ubuntu-latest
@@ -455,6 +468,7 @@ jobs:
       - typography
       - shell-complexity
       - file-size
+      - member-shape
       - commit-names
       - typecheck
       - invariants
