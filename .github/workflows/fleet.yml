@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      # The sticky findings comments of validate-managed-files, file-size, and shell-complexity.
+      # The sticky findings comments of validate-managed-files, file-size, shell-complexity, and member-shape.
       pull-requests: write
       # zizmor's SARIF upload.
       security-events: write
@@ -149,6 +149,18 @@ jobs:
       - id: bun-install
         if: ${{ !cancelled() && steps.bun.outcome == 'success' && hashFiles('package.json') != '' }}
         run: bun install --frozen-lockfile
+      # The TypeScript lint floor (docs/modules/typescript.md): biome under the managed biome.json, which the sync
+      # writes, so a repository registered before its first sync stands down; once recorded, a deleted biome.json is
+      # validate-managed-files' red. member-shape reads the checkout alone, so it needs no biome.json and no install.
+      - id: biome
+        if: ${{ !cancelled() && steps.bun.outcome == 'success' && hashFiles('biome.json') != '' }}
+        uses: $/actions/biome
+      - name: Note why biome stood down
+        if: ${{ !cancelled() && steps.bun.outcome == 'success' && steps.biome.outcome == 'skipped' }}
+        run: echo "::notice::biome stood down, this repository has no biome.json yet; the next sync writes it"
+      - id: member-shape
+        if: ${{ !cancelled() && steps.bun.outcome == 'success' }}
+        uses: $/actions/check-member-shape
       - id: knip
         if: ${{ !cancelled() && steps.bun-install.outcome == 'success' }}
         uses: $/actions/knip

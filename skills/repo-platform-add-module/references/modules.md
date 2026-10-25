@@ -11,10 +11,12 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 
 ## Toolchains: bun / uv / rust
 
-- Managed: the version dotfile for bun (`.bun-version`, fleet-pinned); the Python lint floor for uv (`ruff.toml`, extending the repository's own `pyproject.toml`; the platform's docs/modules/python.md); the clippy thresholds for rust (`clippy.toml`, read by every crate under the root). Public repos with bun/uv: fleet CI runs CodeQL for their language. Every uv repo: fleet CI's `ruff` step lints it against the floor at a pinned ruff.
+- Managed: the version dotfile for bun (`.bun-version`, fleet-pinned) and bun's `biome.json`, the TypeScript lint floor (the platform's `docs/modules/typescript.md`; it extends `biome.local.jsonc`, so the floor cannot be lowered there); the Python lint floor for uv (`ruff.toml`, extending the repository's own `pyproject.toml`; the platform's docs/modules/python.md); the clippy thresholds for rust (`clippy.toml`, read by every crate under the root).
+- Fleet CI on the floors: `biome` on a bun repo holding `biome.json` and `member-shape` on every bun repo; the `ruff` step on every uv repo, at a pinned ruff. Public repos with bun/uv: fleet CI runs CodeQL for their language.
 - Blocks: a gitignore section and a Toolchain section in `AGENTS.md` (split files), and a Dependabot ecosystem entry (the managed `.github/dependabot.yml`).
-- Starter: `auto-format.yml` for every toolchain but rust, and the `Cargo.toml` workspace root with the lint floor for rust, written only when absent. An existing `auto-format.yml`, `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
-- Removal: the version dotfile and `ruff.toml` are retired; the blocks leave the split regions and the managed `.github/dependabot.yml`. `auto-format.yml` stays. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
+- Starter: bun's `biome.local.jsonc`, the repo's own biome layer (exclusions, formatter, extra rules, per-path overrides with reasons), an empty object until filled in; a repo with its own `biome.json` or `biome.jsonc` folds it in as the platform's `docs/modules/typescript.md` says. `auto-format.yml` for every toolchain but rust, and the `Cargo.toml` workspace root with the lint floor for rust, written only when absent.
+- A starter is written once: an existing `auto-format.yml`, `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
+- Removal: the version dotfile, `ruff.toml`, and `biome.json` are retired, and the `biome`, `member-shape`, and `ruff` steps stand down; `biome.local.jsonc` stays (a starter), so a repo that keeps linting renames it to `biome.json` or extends it from one. `auto-format.yml` stays. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
 
 ## site
 

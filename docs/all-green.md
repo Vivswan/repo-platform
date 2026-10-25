@@ -88,6 +88,8 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | `zizmor` | every push and pull request | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
 | `trivy` | every push and pull request | the blocking half of the [security scans](modules/security-scans.md) |
 | `ruff` | uv repositories once a sync has written `ruff.toml` | the [Python lint floor](modules/python.md) at a pinned ruff; a repository before its first sync stands down with a notice |
+| `biome` | bun repositories with a `biome.json` | the [TypeScript floor](modules/typescript.md) under the managed `biome.json`; a repository the sync has not reached yet stands down with a notice |
+| `member-shape` | bun repositories | the [member-shape rules](modules/typescript.md#the-member-shape-rules) over every tracked TypeScript file; needs no install |
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
 
 - **Beside it, one job each:** `semgrep` and `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix, on public repositories with an analyzable toolchain), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts.
