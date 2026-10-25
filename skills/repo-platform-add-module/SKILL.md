@@ -33,7 +33,7 @@ One line each, the `description` of each module in the platform's `files.yml`.
 |---|---|
 | `bun` | TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS) |
 | `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff floor) |
-| `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
+| `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore, the clippy readability floor; no CodeQL) |
 | `site` | one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme) |
 | `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels |
 | `pr-title` | Conventional Commit PR title check, its own required workflow |
@@ -49,7 +49,7 @@ From the platform's `files.yml`. Managed files are rewritten on every sync; star
 |---|---|---|
 | `bun` | `.bun-version` | managed |
 | `uv` | `ruff.toml`, the Python lint floor the repository's `pyproject.toml` builds on | managed |
-| `rust` | no file of its own | - |
+| `rust` | `Cargo.toml` (the workspace root with the lint floor); `clippy.toml` (the floor's thresholds) | starter; managed |
 | every toolchain | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml` | split; managed |
 | every toolchain but `rust` | `.github/workflows/auto-format.yml` | starter |
 | `site` | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | - |

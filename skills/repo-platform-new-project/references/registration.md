@@ -27,7 +27,7 @@ One line each, the `description` of each module in the platform's `files.yml`:
 
 - `bun`: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
 - `uv`: Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff floor)
-- `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
+- `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore, the clippy readability floor; no CodeQL)
 - `site`: one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme)
 - `release-please`: release-please releases through the fleet's release pipeline, plus autorelease labels
 - `pr-title`: Conventional Commit PR title check, its own required workflow

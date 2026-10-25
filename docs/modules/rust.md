@@ -4,7 +4,7 @@ order: 160
 
 # Rust
 
-Selecting the `rust` module gives a repository a `Cargo.toml` workspace-root starter carrying the fleet's lint floor ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/rust/Cargo.toml)), and the cargo steps that make the floor a gate. This page is the floor's contract; the toolchain version stays the repository's own, at Rust 1.84 or newer ([toolchains.md](../toolchains.md#overriding-per-toolchain)).
+Selecting the `rust` module gives a repository a `Cargo.toml` workspace-root starter carrying the fleet's lint floor ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/rust/Cargo.toml)), a managed `clippy.toml` holding the floor's thresholds ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/rust/clippy.toml)), and the cargo steps that make the floor a gate. This page is the floor's contract; the toolchain version stays the repository's own, at Rust 1.84 or newer ([toolchains.md](../toolchains.md#overriding-per-toolchain)).
 
 ## The floor
 
@@ -22,6 +22,22 @@ Every lint is `deny`. The starter carries each one with its reason beside it.
 | ASCII identifiers, the fleet's typography rule | `non_ascii_idents` |
 | No doc link to an item that is not there | `rustdoc::broken_intra_doc_links` |
 
+The readability floor, the same table in the starter, with its thresholds in the managed `clippy.toml`:
+
+| Lint | What it flags | Threshold |
+| --- | --- | --- |
+| `clippy::too_many_arguments` | a ninth parameter: three values of one type are a struct argument or a builder | 8 |
+| `clippy::too_many_lines` | a body past a hundred lines of code: two nameable concepts, split into named steps | 100 |
+| `clippy::cognitive_complexity` | branching a guard, a `continue`, or a split would flatten; off in clippy's default set, on by name here | 15 |
+| `clippy::manual_let_else` | `let x = if let Some(v) = o { v } else { return }` for `let Some(x) = o else { return };` | |
+| `clippy::collapsible_if`, `clippy::collapsible_else_if` | a nested `if` or an `else { if }` with nothing between it and its parent | |
+| `clippy::needless_return` | a trailing `return x;` where `x` is the value | |
+| `clippy::if_not_else` | `if !x { a } else { b }`: swap the branches | |
+| `missing_docs` | a `pub` item without a `///` line, the crate root's `//!` included | |
+| `clippy::missing_errors_doc`, `clippy::missing_panics_doc` | a `Result` without `# Errors`, a function that can panic without `# Panics` | |
+
+A threshold tighter than these forces splits that read worse, so the managed file is never edited: a local edit is replaced on the next sync.
+
 The floor in code, the one module that may hold unsafe:
 
 ```rust
@@ -36,6 +52,7 @@ pub unsafe fn raw(p: *const u8) -> u8 {
     unsafe { *p }
 }
 
+/// Reads one byte through a shared reference.
 pub fn read(p: &u8) -> u8 {
     // SAFETY: a shared reference is non-null, aligned, and live for its lifetime.
     unsafe { raw(p) }
@@ -43,15 +60,16 @@ pub fn read(p: &u8) -> u8 {
 ```
 
 - **Rust 1.84 or newer:** nothing older parses `resolver = "3"`, and `#[expect]` needs 1.81. An older `rust-toolchain.toml` fails at the manifest, before any lint runs.
-- **`expect`, never `allow`:** an `#[allow]` anywhere is an error, and so is an `#[expect]` whose lint no longer fires.
+- **`expect`, never `allow`:** an `#[allow]` anywhere is an error, and so is an `#[expect]` whose lint no longer fires. A readability finding is fixed, or carried with `#[expect(clippy::too_many_lines, reason = "...")]` at the one function it names.
 - **A foreign `#[non_exhaustive]` enum** forces a `_` arm. The lint accepts it once every known variant is listed above it.
 
 ## How a repository takes it
 
 A starter is written once ([platform/sync/writer.md](../platform/sync/writer.md#classes)), so the path depends on what the repository already has:
 
-1. **A new repository:** the sync writes `Cargo.toml` before any crate exists. `cargo new crates/<name>` inside the workspace adds the member and writes `[lints] workspace = true` into it, so every crate inherits the floor.
-2. **A repository that already owns `Cargo.toml`:** copy the three lint tables into it by hand, and give each member crate `[lints] workspace = true`. Its workflows are starters too, written once, so copy the cargo steps from the [three rust blocks](https://github.com/Vivswan/repo-platform/tree/main/files/rust/.github/workflows) into its `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` as well.
+1. **Every repository:** the managed `clippy.toml` arrives at the root by sync and is rewritten by every sync. clippy reads the nearest one up the tree, so every crate under the root reads its thresholds. A member crate's own `clippy.toml` shadows the root one whole, so remove it: a threshold it kept would silently leave the other two at clippy's defaults.
+2. **A new repository:** the sync writes `Cargo.toml` before any crate exists. `cargo new crates/<name>` inside the workspace adds the member and writes `[lints] workspace = true` into it, so every crate inherits the floor.
+3. **A repository that already owns `Cargo.toml`:** copy the three lint tables into it by hand, and give each member crate `[lints] workspace = true`. When the starter's tables gain a row, copy the row the same way: the sync never rewrites a starter. Its workflows are starters too, written once, so copy the cargo steps from the [three rust blocks](https://github.com/Vivswan/repo-platform/tree/main/files/rust/.github/workflows) into its `checks.yml`, `auto-format.yml`, and `copilot-setup-steps.yml` as well.
 
 ## The gate
 

@@ -16,6 +16,8 @@ unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 # The fleet's ASCII typography rule, applied to identifiers.
 non_ascii_idents = "deny"
+# A `///` line on every public item: what it returns and what its arguments mean, never a narrative of its body.
+missing_docs = "deny"
 
 [workspace.lints.clippy]
 # `// SAFETY:` above every unsafe block, stating the invariant it depends on.
@@ -37,6 +39,26 @@ wildcard_enum_match_arm = "deny"
 match_wildcard_for_single_variants = "deny"
 # A struct pattern that binds every field carries no `..`, so a `..` always marks a deliberate skip.
 rest_pat_in_fully_bound_structs = "deny"
+
+# The readability floor: a function reads as the list of its steps. The thresholds live in the managed root clippy.toml.
+# A ninth parameter is a struct argument or a builder.
+too_many_arguments = "deny"
+# A function past a hundred lines holds two nameable concepts: split it into named steps.
+too_many_lines = "deny"
+# Nested branching that a guard, a `continue`, or a split would flatten. Off in clippy's default set; naming it here turns it on, on stable.
+cognitive_complexity = "deny"
+# `let Some(x) = o else { return };` reads once, where `let x = if let ... else` reads twice.
+manual_let_else = "deny"
+# A nested `if` with nothing between it and its parent is one condition.
+collapsible_if = "deny"
+collapsible_else_if = "deny"
+# The last expression is the value; a trailing `return` is noise.
+needless_return = "deny"
+# `if !x { a } else { b }` reads inverted: swap the branches.
+if_not_else = "deny"
+# A `Result` says `# Errors` and a function that can panic says `# Panics`: what the signature cannot.
+missing_errors_doc = "deny"
+missing_panics_doc = "deny"
 
 [workspace.lints.rustdoc]
 # A doc link to an item that is not there fails, as the docs site's link check does for pages.
