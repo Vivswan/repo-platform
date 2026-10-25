@@ -21,6 +21,7 @@ One list per folder, each in the sidebar's order.
 - [Nightly](modules/nightly.md): a nightly CI stream for checks too slow for every PR.
 - [Fuzzer](modules/fuzzer.md): the nightly fuzz starter and its failure-report contract.
 - [Rust](modules/rust.md): the `Cargo.toml` lint floor every Rust repository carries, and the cargo gate that enforces it.
+- [Python](modules/python.md): the lint floor every Python repository's managed ruff.toml carries and fleet CI's ruff step enforces.
 - [Tracking issues](modules/tracking-issues.md): the issue stream the fuzzer, nightly, site, and security streams share: lifecycle and release gating.
 - [Security scans](modules/security-scans.md): Trivy fleet-wide (the blocking gate, the expiring bypass file, the nightly scan's tracking issues) and semgrep on public repositories.
 

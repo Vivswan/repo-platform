@@ -20,6 +20,8 @@ bun is the one pinned toolchain. uv floats on its setup action's default, and th
 
 The fleet's yamllint step is not a module pin: `actions/yamllint/requirements.txt` pins the yamllint the action installs, and dependabot's pip entry for that directory bumps it. The action is the one yamllint gate; this repository runs no yamllint locally, since the hook runs bun's own checks alone (fleet-guidelines, "Pre-commit hooks only check").
 
+The fleet's ruff step is not a module pin either: the version is spelled inline, `uvx ruff@<version>`, in fleet.yml's `ruff` step and in the uv starters' format lines, and tests/files/ruff_floor.test.ts holds every site to one version. It is bumped by hand, never by the refresh: a ruff minor can add rules to a selected family, so a bump changes the [Python lint floor](modules/python.md) and is reviewed as one.
+
 ## How the pin reaches repositories
 
 - **Managed files:** the dotfiles are MANAGED files (deliberately not starters). In a repo selecting the module, every sync updates them, and no registration key overrides them: the fleet shares one version per toolchain.

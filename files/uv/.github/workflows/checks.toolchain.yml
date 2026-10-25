@@ -1,5 +1,8 @@
 
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      # The lint gate is fleet.yml's ruff step over the managed ruff.toml (docs/modules/python.md); this is the
+      # formatter's half, on the same ruff.
+      - run: uvx ruff@0.17.2 format --check .
       # Example uv checks; replace the placeholder below with real ones.
-      # - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       # - run: uv sync
       # - run: uv run pytest
