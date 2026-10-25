@@ -10,7 +10,7 @@ Selecting the `bun` module gives a repository the fleet's TypeScript lint floor 
 
 | File | Class | Holds |
 | --- | --- | --- |
-| `biome.json` | managed, rewritten every sync | the floor below, `linter.enabled: true`, `extends: ["./biome.local.jsonc"]`, and one override turning the formatter and the assist actions off for `biome.json` itself; no `files`, `vcs`, or `formatter` block |
+| `biome.json` | managed, rewritten every sync | the floor below, `linter.enabled: true`, `extends: ["./biome.local.jsonc"]`, and one override turning the formatter and the assist actions off for `biome.json` itself and for the sync's generated `.github/repo-platform-manifest.json`; no `files`, `vcs`, or `formatter` block |
 | `biome.local.jsonc` | starter, written once, then yours | exclusions, `vcs`, the formatter, extra rules, plugins, and per-path `overrides` with their reasons |
 
 Biome merges `extends` left to right and applies the extending file last. The managed file extends the local one, so on a conflict the floor wins and the local layer's additions apply beneath it. A local `linter.enabled: false` or a rule turned off at the top level changes nothing.
@@ -89,5 +89,5 @@ Both steps run in fleet.yml's `standard-checks` job ([all-green.md](../all-green
 | `member-shape` | always | never: the action brings its own parser, so no `package.json` is needed |
 
 - **Lint only:** the `biome` step judges format nowhere; the repo-owned `auto-format.yml` starter runs `biome check --write` on the `fix-lint` label at the same pin ([toolchains.md](../toolchains.md#the-biome-pin)).
-- **The managed bytes survive `check --write`:** without its own override, biome 2.5.11 rewrites `biome.json` to tabs under an empty local layer (932 to 880 bytes), and a local `useSortedKeys` assist reorders its keys; the next sync or validate-managed-files run reports either. The override keeps the formatter and the assists, yours or the starter's, off that one file.
+- **The managed bytes survive `check --write`:** without its own override, biome 2.5.11 rewrites `biome.json` to tabs under an empty local layer, and a local `useSortedKeys` assist reorders its keys. The override keeps the formatter and the assists off that file and off the sync's generated manifest, which `check --write .` would otherwise reformat into a managed-files failure.
 - **One biome for the fleet:** the action's own, pinned in its manifest, never the repository's install.
