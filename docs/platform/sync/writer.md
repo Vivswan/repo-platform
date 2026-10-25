@@ -48,23 +48,9 @@ A nonzero exit is a data or environment error, one of:
 | `split` | the marker-bounded region, every sync | everything above BEGIN and below END is kept; a file that never mentions the markers gets the region above its content and the verdict `region added`, which holds the PR; marker text duplicated or buried mid-line fails the run | `hash` = sha256 of the region, marker lines included |
 | `starter` | once, when the path is absent (a link there counts as present) | never touched again | no hash |
 
-Change verdicts per written row:
+A written row's change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) and a held row's detail are the reader's vocabulary, owned by the sync-pr skill ([Read the report](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md#read-the-report)).
 
-| Verdict | Meaning |
-| --- | --- |
-| `created` | absent before |
-| `updated` | was exactly the recorded content |
-| `unchanged` | already the new content |
-| `replaced local edits` | was neither |
-| `region added` | a split region placed above repository-owned content |
-| `held` | not written; the Detail column says why |
-
-What holds an entry:
-
-- **A symlink at a managed or split entry's path:** the writer never reads through a link and has no record of writing one there.
-- **A directory** (or anything else that is neither a file nor a link) at the path of an entry of any class: held with `<what> sits at the path, and the writer will not replace it`.
-- **A rendered entry's overlay path holding anything but a regular file:** held too, with the detail naming what sits there.
-- **A rendered entry whose overlay is missing, does not parse, names one label twice,** or whose registration's tracking labels are refused ([settings.md](../../settings.md)).
+What holds an entry: a symlink at a managed or split path (the writer never reads through a link and has no record of writing one there), a directory or anything that is neither a file nor a link at any entry's path, and a rendered entry whose overlay is missing, not a regular file, unparsable, names one label twice, or carries tracking labels the registration refuses ([settings.md](../../settings.md)).
 
 ## Class flips
 
@@ -92,24 +78,13 @@ A recorded `managed` or `split` path that no selected entry writes now (a module
 
 Rows appear only for files present, save a `released` row, which reports a record. An unrecorded file produces no row, since no manifest record vouches for it and it is not the platform's to retire.
 
-| State of the stale file | Outcome |
-| --- | --- |
-| `managed`, content equals the recorded hash | `deleted` |
-| `split`, region equals the recorded hash, nothing outside the region | `deleted` |
-| `split`, region equals the recorded hash, repository-owned content outside it | `region removed` (below) |
-| `split`, region equals the recorded hash, only blank lines outside it | `deleted`, with the detail saying so |
-| `split`, region differs from the recorded hash, or markers missing or malformed | `held` |
-| a symlink where a `managed` or `split` file was recorded | `held` |
-| content differs | `held` |
-| a `managed`, `split`, or `starter` record at a path the registration's `except` names, whatever sits at the path | `released`: the record leaves, nothing at the path is probed or touched, and the PR does not hold; the row appears whether or not a file is present, since the manifest changed |
+Each outcome (`deleted`, `region removed`, `held`, `released`) is the reader's vocabulary, owned by the sync-pr skill ([the Retired outcomes](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md#read-the-report)). Two carry writer mechanics of their own:
 
-**`region removed`:** the marker lines and the region go, the content above and below stays byte for byte as a plain file, and the record leaves.
+- **`released`:** a `managed`, `split`, or `starter` record at a path the registration's `except` names, whatever sits at the path. The record leaves, nothing at the path is probed or touched, and the PR does not hold; the row appears whether or not a file is present, since the manifest changed.
+- **`region removed`:** the marker lines and the region go, the content above and below stays byte for byte as a plain file, and the record leaves. The PR holds this once, with a detail asking the reader to complete the file or delete it; next run the path is unrecorded and produces no row.
+- **The seam of a removed region:** the blank lines that framed it become one when content stands on both sides and none when it stands on one side only, so a tail under a top region starts at its first content line.
 
-- The blank lines that framed the region become one when content stands on both sides and none when it stands on one side only, so a tail under a top region starts at its first content line, and blank lines away from the seam stay.
-- The PR holds this once, with a detail asking the reader to complete the file (a heading and intro if it lost them) or delete it.
-- Next run the path is unrecorded and produces no row.
-
-Beyond the table:
+Beyond the outcomes:
 
 - **A stale record at a path no `files.yml` entry declares at all** (a hand edit, or an entry that left `files.yml`) is retired the same way. While a file sits at the path it is also noted (`manifest record for <path> had no writer: ...`), which holds the PR for the Retired row's outcome.
 - **A recorded path that is not a clean repository path** is ignored and noted.
@@ -139,24 +114,7 @@ Beyond the table:
 
 ## The report
 
-| Section | Content |
-| --- | --- |
-| header | Build, Modules, Visibility |
-| Written | path, class, change, detail for every selected entry (detail is a held row's reason, or the stale-class explanation on a class-flip row) |
-| Replaced local edits | one unified diff per replaced file, capped at 40 lines |
-| Retired | path, outcome, detail |
-| Registration notes | the notes below |
-| Mirrors | source, target, outcome, detail |
-| Review | `Hold for review: yes` with the reasons, or `no` |
-
-A Registration note is one of:
-
-- a manifest refused whole ([The manifest](manifest.md#when-the-judged-commit-moves))
-- a placeholder with no value, and the key that sets it
-- a manifest record at a path that is not a clean repository path
-- a stale record no `files.yml` entry declares now, while a file sits at its path
-- a mirror record no declaration reaches
-- an `except` path no `files.yml` entry or fleet mirror writes
+The report's sections (header, Written, Replaced local edits, Retired, Registration notes, Mirrors, Review), each row's vocabulary, and every Registration note's exact text are the sync-pr skill's ([Read the report](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md#read-the-report)). A Written row's detail is a held row's reason, or the stale-class explanation on a class-flip row; a replaced-file diff is capped at 40 lines.
 
 **`hold` is true on** any held or `region added` written row, any replaced local edit (a mirror's included), any held or `region removed` retirement, any `replaced` mirror, or any registration note.
 
@@ -167,3 +125,21 @@ A Registration note is one of:
 - A replaced diff sits in a fence one backtick longer than any backtick run its lines open with, so the target's own content cannot close it.
 
 **The PR body stays under GitHub's 65,536-character limit** (`BODY_CAP` in [sync/deliver.ts](../../../.github/scripts/sync/deliver.ts)). The header and the Review section take their room first, then the tables and notes, then the replaced-edit diffs. A section the room runs out on ends in a warning naming how many characters were cut, and one with no room left is dropped.
+
+## The code behind each rule
+
+| Question | Owner |
+| --- | --- |
+| What does `files.yml` look like, and what does the loader refuse? | [actions/plan/files_config.ts](../../../actions/plan/files_config.ts), the grammar every reader shares (the writer, the fleet plan, the checks); the writer's own checks against the `files/` tree and the placeholder defaults are in [sync/writer/files_config.ts](../../../.github/scripts/sync/writer/files_config.ts) |
+| Which placeholder tokens exist? | `PLACEHOLDER_NAMES` in [sync/writer/placeholders.ts](../../../.github/scripts/sync/writer/placeholders.ts) |
+| How are the values derived from `.repo-platform.yml`? | [sync/writer/registration.ts](../../../.github/scripts/sync/writer/registration.ts) |
+| Which entries apply to one repository? | `selects` in [actions/shared/selection.ts](../../../actions/shared/selection.ts), the one rule the writer, the fleet plan, and the validator select by; `selectEntries` in [actions/plan/files_config.ts](../../../actions/plan/files_config.ts) |
+| How is each class written? | [sync/writer/write_managed.ts](../../../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../../../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../../../.github/scripts/sync/writer/write_starter.ts); the mirrors, the fleet's and the repository's, by [mirrors.ts](../../../.github/scripts/sync/writer/mirrors.ts) |
+| Where do blocks land, and what may a value contain? | `spliceBlocks` and `substitute` in [sync/writer/placeholders.ts](../../../.github/scripts/sync/writer/placeholders.ts) |
+| What happens when an entry's class differs from its record? | `writeEntry` in [sync/writer/sync.ts](../../../.github/scripts/sync/writer/sync.ts) |
+| How is `.github/settings.yml` rendered? | [sync/writer/settings_entry.ts](../../../.github/scripts/sync/writer/settings_entry.ts) over [settings_layers.ts](../../../.github/scripts/sync/writer/settings_layers.ts), which folds with the github-settings-as-code library ([settings.md](../../settings.md)) |
+| When does a file the platform stopped writing leave? | [sync/writer/retire.ts](../../../.github/scripts/sync/writer/retire.ts) |
+| What does the manifest record? | [sync/writer/manifest.ts](../../../.github/scripts/sync/writer/manifest.ts) |
+| What holds a PR for review? | `holdReasons` in [sync/writer/report.ts](../../../.github/scripts/sync/writer/report.ts) |
+| How does a dispatch add a module to a registration? | `withModules` in [sync/add_modules.ts](../../../.github/scripts/sync/add_modules.ts) ([the operator's "Adding modules"](operator.md#adding-modules)) |
+| The whole run, as a CLI | [sync/writer/sync.ts](../../../.github/scripts/sync/writer/sync.ts) |
