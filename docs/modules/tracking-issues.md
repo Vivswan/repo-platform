@@ -40,7 +40,7 @@ The registration grammar and fleet.yml's `plan` step enforce:
 
 - **Distinct streams:** every pair of selected stream labels must differ (`labels.nightly` vs `labels.fuzzer` vs `labels.site`). All streams dedup AND auto-close by label, so a shared label would let one stream's green night close another's active failure issue.
 
-- **A later reservation:** a repo whose label later becomes reserved fails its plan until the value in `.repo-platform.yml` changes (see [Renaming the label](#renaming-the-label)).
+- **A later reservation:** a repo whose label later becomes reserved fails its plan until the value in `.repo-platform.yml` changes. Renaming a label, and deselecting a module, are [the add-module skill's](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-add-module/SKILL.md#module-keys).
 
 ## Issue lifecycle
 
@@ -72,23 +72,3 @@ To unblock:
 - **Fix the failure** and let the next green night close the issue, or hand-close it once fixed. Closing re-triggers nothing: re-run the release PR's failed `release-pr` job afterwards (the pre-flight reads issue state fresh at release time).
 
 - **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([release-health action](../../actions/release-health/action.yml)). It never waves through freshness: a release PR behind main refreshes itself in its own run, whatever its labels, and the owner approves the new head's run ([all-green.md](../all-green.md#what-gates-what)).
-
-## Renaming the label
-
-A fuzz or nightly rename is one default-branch PR that makes two edits:
-
-1. edit `labels.<key>` in `.repo-platform.yml`
-2. update the workflow's two `label:` inputs in the same change, or it keeps filing under the old name while the settings apply deletes it
-
-The reason: the starters are repo-owned, while the label reaches the rendered settings from the registration on every sync. Renaming the key changes the label the NEXT sync renders and the apply after it declares, but never the repo-owned workflow.
-
-The site stream is simpler: its leg is the managed ci.yml's and the plan action resolves the label from the registration at run time, so step 1 alone renames it.
-
-## Deselecting the module
-
-Deselecting removes the label declaration (remove the `labels.<key>` line with the module: a key for an unselected module fails the plan). Sync never deletes the fuzzer and nightly starters, so their workflow keeps running after the module is dropped.
-
-| Module | What else to do |
-|---|---|
-| fuzzer, nightly | delete its workflow file in `.github/workflows/` (`nightly-fuzz.yml` or `nightly.yml`), or keep the label declared in your own `.github/settings.local.yml` if you keep the workflow |
-| site | no such step: the leg skips on the next run, and the repo-owned site-build hook stays where it is |

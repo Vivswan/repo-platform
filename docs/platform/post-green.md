@@ -107,8 +107,6 @@ The opt-in waits for the weekly sync cron (or a hand dispatch) when:
 
 - **Not forced:** a human removing the label is final for that pull request (the comment then reads `removed by <login>; not re-adding it`), and a human's own fleet-sync label is never touched.
 
-- **`fleet-sync:all` only when necessary** and approved by the repository owner: it bills private Actions minutes.
-
 - **The bot withdraws its own label** when the paths leave the diff, the PR targets a branch other than the default, or a human picks another fleet-sync label; a label the merge would refuse is named in the comment.
 
 - **Triggers:** opened, synchronize, reopened, edited (a retarget arrives as edited), labeled, and unlabeled; a closed PR is left as it is. GitHub runs no pull_request workflow on a conflicting PR, so the label catches up at the next push.

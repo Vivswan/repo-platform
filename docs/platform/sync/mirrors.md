@@ -10,6 +10,20 @@ This page is the mirror contract: how a file this sync wrote is carried to more 
 
 Two `mirrors` lists in one grammar (`source`, `targets`, `kind`) carry a file this sync wrote to each target: the fleet's in `files.yml`, then the repository's in its registration.
 
+```yaml
+mirrors:
+  - source: LICENSE.md
+    targets:
+      - template/LICENSE.md
+      - skills/*/LICENSE.md
+  - source: AGENTS.md
+    kind: symlink
+    targets:
+      - docs/AGENTS.md
+```
+
+The skills repository declares the first: a standalone skill install copies one folder, so each needs its own `LICENSE.md`, rewritten from the fresh source in the same sync PR. A `source` is a file `files.yml` writes for the repository as `managed` or `split`; mirroring repo-owned content is the repository's own job.
+
 - **One pass judges and writes both as one list,** the fleet's declarations first, so a repository target meeting a fleet target is judged as any two claims on one path are (below). It is refused when it is another source's, another kind's, nested, or a literal spelled twice; a pattern of the same source and kind finds the fleet's literal current.
 - **A fleet target the registration's `except` names** is dropped from the list, as an entry at that path would be.
 - **A failure line names the document that declares the pair:** the registration when it does, `files.yml` otherwise.
@@ -62,6 +76,7 @@ A path a declaration is certain to claim is refused when it is:
 
 - **A previous mirror of either kind vouches for the bytes:** a copy where a link is declared now, or the reverse, is replaced without a diff. A record of another class does not vouch for the bytes.
 - **The `replaced local edits` diff** is of link targets where a link is declared, and of the old link target against the new bytes where a copy is. It sits in the report's Replaced local edits section and holds the PR.
+- **`written` and `current` never hold:** the declaration is repo-owned consent, so a clean LICENSE bump stays auto-merge-eligible. The fleet's `validate-managed-files` judges each target as the writer does: a file where a link is declared, a link where a copy is, or a link pointing elsewhere is a finding.
 
 Every claim of a pass is judged before the pass writes, and the run fails when:
 

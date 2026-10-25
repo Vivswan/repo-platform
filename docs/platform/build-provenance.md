@@ -18,7 +18,7 @@ How the `stable` tag gets moved, how a sync verifies the commit it names before 
 
 | What the fleet reads | Where it sits at the commit | Who reads it |
 | --- | --- | --- |
-| `files.yml` and `files/` | the repository root | the sync writer ([platform/sync/README.md](sync/README.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../../actions/plan/reserved_labels.ts)), validate-managed-files |
+| `files.yml` and `files/` | the repository root | the sync writer ([platform/sync/writer.md](sync/writer.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../../actions/plan/reserved_labels.ts)), validate-managed-files |
 | `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | every platform workflow and composite, by `$/` path at its own commit ([one commit per run](#one-commit-per-run)); every managed workflow's `uses:` at the tag |
 | `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` |
 
@@ -121,7 +121,7 @@ Old delivery commits stay reachable forever: they are main history.
 
 ## A new action input and its workflow land together
 
-A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([platform/sync/README.md](sync/README.md#this-repository-as-a-target)).
+A managed workflow (`files/<module>/.github/workflows/<name>.yml`) calls platform actions at the delivery ref. Every copy of it that runs, this repository's own included, is the sync's, written from the delivery commit ([platform/sync/operator.md](sync/operator.md#this-repository-as-a-target)).
 
 So a workflow never runs ahead of the actions it calls: the sync PR that carries a new workflow line lands only once the delivery ref names a commit carrying the action input it feeds. One PR may add the input and the line together; no check here runs the workflow before the move.
 

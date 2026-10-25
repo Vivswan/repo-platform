@@ -1,5 +1,5 @@
 // What holds repo-platform's own third-party pins together and pinact cannot: pinact reads a branch comment as no comment,
-// so nothing else ties the Vivswan/skills lines to one sha (docs/fleet-guidelines.md names this test); Dependabot bumps the
+// so nothing else ties the Vivswan/skills lines to one sha; Dependabot bumps the
 // `uses:` lines and never the docs-check checkout `ref:` that Vale reads its styles from; and the delivery-ref ignore rule in
 // .github/pinact.yaml is a cross-file fact (the ref and the repository name live in actions/shared/platform.ts).
 

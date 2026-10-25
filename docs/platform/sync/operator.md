@@ -25,17 +25,7 @@ This page is the operator's contract: the run that writes every managed reposito
 | row 7: deliver | [sync/deliver.ts](../../../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform` and a PR whose body is the report, or another outcome ([delivering a row](#delivering-a-row)) |
 | row 8: print | [sync/verdict.ts](../../../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 
-The vocabulary, complete (`tests/sync/verdict.test.ts` pins it):
-
-```text
-plan: <N> rows
-row <i>: unchanged
-row <i>: PR opened
-row <i>: PR refreshed
-row <i>: branch pushed
-row <i>: failed, report filed in the target repository
-row <i>: failed before the target was resolved; re-run the workflow
-```
+The row lines are the vocabulary the [new-project skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-new-project/SKILL.md#4-run-the-first-sync) and the [add-module skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-add-module/SKILL.md#2-review-the-report) read: `plan: <N> rows`, then one `row <i>: ...` line per row (`tests/sync/verdict.test.ts` pins the set).
 
 - **A row is red only when a step before or at the resolve failed** (the install, the build checkout, the listing, the resolve itself). The printer then prints the unresolved line, and the failed step's exit status is the whole public signal. The plan job listed the same repositories moments earlier, so re-running the workflow is the remedy.
 - **From the checkout on,** the steps continue on error and the failure is delivered to the target; the row stays green with its verdict line. The one exception is a target that cannot take the failure report (no Issues grant): that row prints nothing and is red.
@@ -61,6 +51,7 @@ The deliver step takes the writer's output: a commit and a PR in the target, one
 - **A refresh** re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's.
 - **A tree that already matches the build** closes any open sync PR as obsolete: disarmed, closed with a one-line comment, its branch deleted.
 - **A failed checkout, writer, or push** files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails.
+- **No recovery mode:** a broken target is re-synced by re-running the workflow, and the writer replaces platform files whole.
 - **Every line** goes to `$RUNNER_TEMP/deliver.log`.
 
 ## Adding modules
@@ -98,13 +89,31 @@ row <i>: branch pushed
 
 The same row runs against that branch: the clone checks it out, the writer reads the registration on it, and the delivery commits the writer's output onto it as one commit (`chore: sync repo-platform build <sha>`). The push carries a lease on the commit the row cloned, so a commit pushed to the branch meanwhile fails the push instead of being overwritten.
 
-A PR that changes a module selection carries its own files this way, declared and delivered together ([new-repo.md](../../new-repo.md#changing-the-module-selection)).
-
 - **No sync PR, no auto-merge, and no issue touched on a clean run:** the failure issue is the default-branch sync's. A failed checkout, writer, or push files it as any delivery failure does.
 - **The report** the PR body would carry goes to the run's job summary, for a public repository; a private repository's summary says the report is withheld, and the commit on the branch is the record.
 - **`repo` names exactly one repository** (no list, no `all`, no visibility token, no `modules:` filter), and `manual` and `add_modules` are refused beside `branch`: all three refuse in the plan job, before any repository is probed.
 - **A branch the repository does not have,** or its default branch (a direct push there would pass the repository's PR gate; the plain dispatch syncs it through a PR), refuses in the row's resolve step, so the row prints `failed before the target was resolved`.
 - **The branch name** rides the event payload as the repository name does, never step env, and never reaches the log; a public repository's job summary is the one place that names it.
+
+### A module change on a pull request
+
+A PR that changes a module selection carries its own files this way, declared and delivered together. The sync writes the module's DATA files (its workflows, starters, and toolchain pins) and the manifest stamp onto the PR's branch as one commit; CI itself needs nothing written, since ci.yml is the same file for every selection and fleet.yml's `plan` step reads the new list on the next run:
+
+```text
+PR edits modules: in .repo-platform.yml
+  -> plan reads the registration against the module data at the `stable` commit's root
+  -> validate-managed-files is red: it names each file the sync would write for the new selection, with the bytes
+  -> gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f branch=<pr-branch>
+     (or the repo-platform:sync label on the PR, when the sync's whole diff touches no workflow file and holds nothing)
+     one commit on the PR branch carries the files and the new manifest stamp
+  -> with the label: approve the pushed head's run from the merge box (GitHub holds a repository-token push's run), or push a commit; the check is green
+  -> review and merge the one PR
+```
+
+- **Why the PR is red first:** validate-managed-files runs the recorded commit's writer over a copy of the tree with the edited registration, so the module's missing files are findings naming each path with its bytes. The branch sync brings them, the manifest with them, and the check turns green.
+- **A module the recorded commit does not know yet** (added to the platform after the repository's last sync) is the writer's `unknown module(s)` refusal in the check instead, with the same way out: the sync runs at `stable`, knows the module, and moves the judge.
+- **The other red to expect:** a module whose fleet.yml jobs read a file the sync has not written yet (a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the branch sync writes that file onto the PR.
+- **The one edit no sync can carry** is a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say): the writer refuses the declaration that now conflicts, so no sync restamps the record until it is gone. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules.
 
 ## Syncing a branch by label
 
@@ -136,3 +145,11 @@ label added -> checks out the branch and the platform at `stable`
 - **The job holds** `contents: write` and `pull-requests: write` (the comment and the label), nothing else, with no secret.
 - **A run that goes red before the delivery step** (a checkout or the install) leaves the label on: remove it and add it again to retry.
 - **The label is declared** in the baseline settings layer ([settings.md](../../settings.md#what-the-baseline-contains)); the validator's red comment names it as the remedy for managed drift.
+
+## This repository as a target
+
+The sync targets this repository like any other: its [.repo-platform.yml](../../../.repo-platform.yml) registers it, and the writer keeps its root copies of the files it ships (`.editorconfig`, the `.gitignore` region, `LICENSE.md`, the `AGENTS.md` region, the rendered `.github/settings.yml`, the links) by sync PR, recorded in its own manifest.
+
+- **Its `except`:** the paths whose file is this repository's own and cannot be the fleet's (its `ci.yml`, `dependabot.yml`, `.yamllint`, and the starters it does not take). A new starter and this repository's `except` for it take two PRs: the check judges the registration at the recorded commit ([manifest.md](manifest.md#judged-at-the-synced-commit)), which knows the path only after the sync that records it here.
+- **Its CI** runs the [plan action](../../../actions/plan/action.yml) over the registration and then the [validate-managed-files action](../../../actions/validate-managed-files/action.yml) from the checkout, as fleet CI does: this checkout's action shell runs, the recorded commit's `check.ts` judges. A PR that changes `files/` stays green until this repository syncs itself.
+- **Its `.yamllint`** ignores `files`, so the writer's templates (placeholder tokens, not YAML) are outside yamllint.

@@ -8,21 +8,7 @@ This page is the central run that applies every managed repository's rendered `.
 
 ## The dispatch scope
 
-**The `-f repo=` scope** is `all`, or one of these or a comma list of them:
-
-| Scope value | Targets |
-|---|---|
-| owner/name slugs | those repositories |
-| the visibility tokens `public` and `private` | the repositories of that visibility |
-| `modules:<a>+<b>` | the targets whose `.repo-platform.yml` selects every listed module; a visibility token intersects with it |
-
-How a scope entry resolves:
-
-| Case | Outcome |
-|---|---|
-| an entry naming no discovered fleet repository or no module of `files.yml` | fails the run |
-| a discovered repository whose push probe is refused, that is not adopted, has no `.repo-platform.yml`, or has no `.github/settings.yml` yet | skipped with a notice |
-| a discovered repository carrying a hand-written `.github/settings.yml` | fails the run with a count |
+**The `-f repo=` scope** is the sync's grammar ([the README's `repo=` table](../../README.md#shipping-a-change)); an entry naming no discovered fleet repository or no module of `files.yml` fails the run before any row exists. What admits each discovered repository the scope names is [Selection](#selection).
 
 ## The green-commit gate
 
@@ -101,17 +87,7 @@ A target is selected when all three probes pass, in this order, over every disco
 
 ### Private targets
 
-- **The selector's log** names the public targets and counts the private ones (`settings targets: <public slugs> and <n> private repositories`). Every form of a private slug is registered with the runner's masker before anything prints.
-
-- **The matrix names no target:** a job output holding a masked value is dropped by the runner, and an unmasked slug there would name a private repository in the run's job list. So each row carries the plan's key instead.
-
-- **The key binds the row to its repository:** a repository adopted or revoked mid-run cannot move a row onto another one.
-
-- **In the logs:** a private target appears in its job's log, summary, and outputs as `private repository #1` (`private-repos: redact`). The job's name carries its index in the matrix, `apply (row 3)`, never the repository.
-
-- **A private target's full report** is a reused issue on the target itself, pinned by the `settings-as-code-report` label (`private-report: issue`). It is opened or refreshed when the target fails or drifts, closed when it is healthy, and delivered in check mode too ([private repositories](sync/private-repositories.md)).
-
-- **The first check on a private target** can flag that marker label itself as drift. The label does not exist until the same run's delivery creates it, so the next run is clean.
+A private target is identified by its row key and named nowhere in the run; how the selector, the matrix, and each apply row keep it out of the public log, and where its report goes, is [private repositories](sync/private-repositories.md#when-the-settings-apply-runs).
 
 ### Check mode
 

@@ -17,21 +17,24 @@ git checkout -b add-nightly
 #     nightly: slow-suite-failure
 git commit -am "chore: add the nightly module"
 gh pr create
-# fleet CI's plan step validates the file; merge when green, then:
-gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
+# fleet CI's plan step validates the file; validate-managed-files stays red until the files land, so:
+gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=add-nightly
+# (not the repo-platform:sync label: nightly.yml is a workflow file, which the repository token cannot push)
 ```
 
-**3. The sync PR.**
+**3. The branch sync.**
 
-The run's job log ends `row 0: PR opened`. In the report:
+The run's job log ends `row 0: branch pushed`, and one commit lands on `add-nightly`. In the report (the run's job summary, for a public repository):
 
 - Written: `.github/workflows/nightly.yml` as `starter`, `created`; `.github/settings.yml` as `managed`, `updated`: the render gains the `nightly-failure` label (or your `labels.nightly`) from the registration. Every other row `unchanged`.
-- Review: `Hold for review: no`; `manual=true` keeps it waiting for you.
+- Review: `Hold for review: no`.
 - No edit of your own in `.github/settings.local.yml` is needed for the label: the registration key is its home, and the settings apply after the merge declares it.
+
+The fleet PAT's push gives the PR an ordinary run (only a label push's run is held for approval); merge when green.
 
 **4. The starter, and moving real checks in.**
 
-Two jobs: `checks` (yours; the placeholder is a green no-op that never files issues) and `report` (the machinery: `needs: [checks]`, `if: always()`, a cancelled checks job counts as red). Pick the repo's own cron minute.
+Three jobs: `checks` (yours; the placeholder is a green no-op that never files issues), `release-gate` (calls the repo-owned `release-gate.yml`, the release acceptance tier), and `report` (the machinery: `needs: [checks, release-gate]`, `if: always()`, a cancelled job counts as red). Pick the repo's own cron minute.
 
 - Port the slow suites' steps into `checks`, or add them as sibling jobs, list every one in `report`'s `needs`, and fold each result into the red/green conditions. Keep siblings unconditional: a job skipped by its own `if:` matches neither condition and the report does nothing that night.
 - With a custom label, change the two `label:` inputs in the starter to match `labels.nightly`.

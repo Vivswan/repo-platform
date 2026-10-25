@@ -53,4 +53,5 @@ The fleet's `validate-managed-files` check judges a repository as [check.ts](../
 | `check.ts` exit 0 | clean, unless a hygiene check finds something |
 
 - **Freshness informs and never fails:** the action compares the recorded commit with the `stable` tag in the platform checkout (git ancestry alone) and writes one line to the job summary and an annotation. The line says up to date, `stable` moved N commits past it, or the commit is not on `stable`'s history. In both of the last two, a sync moves the judge under [the stamp rule](#when-the-judged-commit-moves).
-- **The hygiene checks** (conflict markers, `release-as`) read no platform data and run from the action at `stable` ([new-repo.md](../../new-repo.md#the-managed-files-check)). Their walk skips `.git` alone. YAML syntax and duplicate mapping keys are the yamllint step's, in the same job.
+- **The hygiene checks** read no platform data and run from the action at `stable`: a `release-as` key in `release-please-config.json` ([the release pipeline](../../new-repo.md#the-release-pipeline-release-please)), and a conflict marker (a line opening with `<<<<<<< ` or `>>>>>>> `, or reading `=======`) in a source, config, or markdown file, a fenced example of the markers included.
+- **Their walk skips `.git` alone.** YAML syntax and duplicate mapping keys are the yamllint step's, in the same job.

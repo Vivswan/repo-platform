@@ -6,20 +6,14 @@ order: 150
 
 Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter workflow ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/fuzzer/.github/workflows/nightly-fuzz.yml)): a nightly cron plus a `workflow_dispatch` with `seed` and `iterations` inputs, your fuzz step in the middle, and shared reporting machinery around it.
 
-- **A red night** uploads the failure artifacts, and the `report` job files or refreshes a [tracking issue](tracking-issues.md) built from your failure reports; that page owns the issue lifecycle, release gating, and label renaming.
+- **A red night** uploads the failure artifacts, and the `report` job files or refreshes a [tracking issue](tracking-issues.md) built from your failure reports; that page owns the issue lifecycle and release gating.
 - **A green night** closes the stream's open issues.
 - **Red means failed or cancelled:** the `report` job runs with `needs: [fuzz]` and judges `needs.fuzz.result`, so a fuzz job that hits its `timeout-minutes` (cancelled, not failed) still files the issue, and the upload step runs on `failure() || cancelled()` so the reports a hung run wrote ride along. A human cancelling the run files an issue too, which the next green night closes.
 - **The `.gitignore` region:** the module also adds `/.fuzz-failures/` to the managed region of the repository's `.gitignore`, so the failure directory a run leaves behind is never committed.
 
 **Repo-owned:** the starter is written once and then repo-owned. Fuzzers and their toolchains differ too much across repos for the platform to keep managing the file, so it carries the shared machinery and leaves the fuzz step itself to you. Repo-owned also means a fix to the starter never reaches repos that already received it.
 
-## Module parameter (registration key)
-
-| Key in `.repo-platform.yml` | Meaning | Default |
-|---|---|---|
-| `labels.fuzzer` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | the fuzzer module's `tracking_label` default in [files.yml](../../files.yml) |
-
-The label is a registration key rather than a starter edit alone because the settings layer must declare it too; [Tracking issues: the label is the stream](tracking-issues.md#the-label-is-the-stream) has the reasoning and the reserved-name rules.
+**The `labels.fuzzer` key** names the stream's label ([the registration reference](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-new-project/references/registration.md#keys) has the key and its default). Why it is a registration key rather than a starter edit alone, and the reserved-name rules, are [Tracking issues: the label is the stream](tracking-issues.md#the-label-is-the-stream).
 
 ## Customizing the starter
 

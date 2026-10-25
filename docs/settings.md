@@ -5,7 +5,7 @@ group: Start here
 
 # Repository settings
 
-This page is the settings model of a managed repository: the layers the sync renders, the dialect that folds them, when the result is applied, and what the apply does to it; the central run itself is [platform/settings-apply.md](platform/settings-apply.md), and the sync writer is [platform/sync/README.md](platform/sync/README.md)'s.
+This page is the settings model of a managed repository: the layers the sync renders, the dialect that folds them, when the result is applied, and what the apply does to it; the central run itself is [platform/settings-apply.md](platform/settings-apply.md), and the sync writer is [platform/sync/writer.md](platform/sync/writer.md)'s.
 
 - **The rendered document:** every managed repository carries `.github/settings.yml`, a managed file the sync writes from six plain YAML layers. It is the one document [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code) applies.
 - **The edit rule:** the repository edits `.github/settings.local.yml`, its own layer, never the rendered file ([editing your settings](#editing-your-settings)).
@@ -202,7 +202,7 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 
 ## repo-platform itself is a target
 
-- **Its registration:** it carries its own [.repo-platform.yml](../.repo-platform.yml) (modules and project facts) like any managed repository. The sync writes its rendered [.github/settings.yml](../.github/settings.yml) from the same layers, this registration, and its overlay ([platform/sync/README.md](platform/sync/README.md#this-repository-as-a-target)), and the selector picks it up like any other target.
+- **Its registration:** it carries its own [.repo-platform.yml](../.repo-platform.yml) (modules and project facts) like any managed repository. The sync writes its rendered [.github/settings.yml](../.github/settings.yml) from the same layers, this registration, and its overlay ([platform/sync/operator.md](platform/sync/operator.md#this-repository-as-a-target)), and the selector picks it up like any other target.
 
 - **Its overlay,** [.github/settings.local.yml](../.github/settings.local.yml), carries its identity keys plus its two repo-specific rulesets:
 

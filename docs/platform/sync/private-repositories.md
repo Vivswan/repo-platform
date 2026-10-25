@@ -38,7 +38,8 @@ The settings apply ([settings-repos.yml](../../../.github/workflows/settings-rep
 
 - **The plan** names public targets and counts private ones, and masks every form of a private slug before anything prints. Its matrix carries keyed rows: an HMAC of the slug under the fleet token and the run id.
 - **Each apply row** resolves its key against one listing of the owner's repositories and registers the name with the masker. Only then does the library's CLI run, on that one target.
-- **The CLI** shows a private target as `private repository #N` (`--private-repos redact`). Its full report goes to a reused issue on the target itself, pinned by the `settings-as-code-report` label.
+- **The CLI** shows a private target as `private repository #N` (`--private-repos redact`), and the job's name carries its matrix index, `apply (row 3)`, never the repository. Its full report goes to a reused issue on the target itself, pinned by the `settings-as-code-report` label: opened or refreshed when the target fails or drifts, closed when it is healthy, and delivered in check mode too.
+- **The first check on a private target** can flag that marker label itself as drift: the label does not exist until the same run's delivery creates it, so the next run is clean.
 
 ## Where the model stops
 
