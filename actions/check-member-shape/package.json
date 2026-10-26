@@ -1,9 +1,10 @@
 {
   "name": "check-member-shape",
   "private": true,
-  "description": "Dependency manifest for the check-member-shape action: oxc-parser reads the TypeScript, @actions/core writes its annotations and step summary.",
+  "description": "Dependency manifest for the check-member-shape action: oxc-parser reads the TypeScript, lines-and-columns turns its offsets into lines, @actions/core writes its annotations and step summary.",
   "dependencies": {
     "@actions/core": "3.0.1",
+    "lines-and-columns": "2.0.4",
     "oxc-parser": "0.155.0"
   },
   "devDependencies": {

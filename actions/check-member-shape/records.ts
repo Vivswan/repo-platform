@@ -1,7 +1,7 @@
 // The record model the member-shape rules judge: every record (an interface body, a class body, a type literal, an
 // enum body) and every block of adjacent module-level `const` statements, each member or declarator with the comments
 // that belong to it. The TypeScript is read by oxc-parser (TypeScript 7 is the native port and exposes no in-process
-// compiler API); line numbers come from offsets through one line-start table.
+// compiler API); line numbers come from offsets through lines-and-columns.
 
 import type {
   ClassBody,
@@ -12,6 +12,7 @@ import type {
   TSTypeLiteral,
   VariableDeclarator,
 } from "@oxc-project/types";
+import { LinesAndColumns } from "lines-and-columns";
 import { type Comment as OxcComment, parseSync, Visitor } from "oxc-parser";
 
 /** The record kinds the rules judge: a body whose members stand together. */
@@ -116,35 +117,18 @@ const METHOD_TYPES: ReadonlySet<string> = new Set([
   "StaticBlock",
 ]);
 
-/** The lines of a file in order, so an offset maps to a 1-based line by a binary search over the line starts. Span
- *  ends are exclusive, so endLineOf reads the character before the end. */
-class LineTable {
-  readonly lines: string[];
-  private readonly starts: number[];
+/** The 1-based line of an offset. lines-and-columns counts lines from 0 and answers null only for an offset past the
+ *  text's end, which oxc never produces. */
+function lineOf(table: LinesAndColumns, offset: number): number {
+  const location = table.locationForIndex(offset);
+  if (location === null) throw new Error(`offset ${offset} lies outside the text`);
 
-  constructor(text: string) {
-    this.lines = text.split("\n");
-    this.starts = [0];
-    for (const line of this.lines.slice(0, -1)) {
-      this.starts.push(this.starts[this.starts.length - 1] + line.length + 1);
-    }
-  }
+  return location.line + 1;
+}
 
-  lineOf(offset: number): number {
-    let low = 0;
-    let high = this.starts.length - 1;
-    while (low < high) {
-      const mid = Math.ceil((low + high) / 2);
-      if (this.starts[mid] <= offset) low = mid;
-      else high = mid - 1;
-    }
-
-    return low + 1;
-  }
-
-  endLineOf(end: number): number {
-    return this.lineOf(Math.max(end - 1, 0));
-  }
+/** The line an exclusive span end sits on: that of the character before it. */
+function endLineOf(table: LinesAndColumns, end: number): number {
+  return lineOf(table, Math.max(end - 1, 0));
 }
 
 function membersOf(body: RecordBody): Node[] {
@@ -291,13 +275,13 @@ function commentsWithin(
   comments: OxcComment[],
   from: number,
   to: number,
-  table: LineTable,
+  table: LinesAndColumns,
 ): Comment[] {
   return comments
     .filter((comment) => within(comment, from, to))
     .map((comment) => ({
-      line: table.lineOf(comment.start),
-      endLine: table.endLineOf(comment.end),
+      line: lineOf(table, comment.start),
+      endLine: endLineOf(table, comment.end),
     }));
 }
 
@@ -306,7 +290,7 @@ function commentsInside(
   comments: OxcComment[],
   owned: Owned[],
   span: Span,
-  table: LineTable,
+  table: LinesAndColumns,
 ): Comment[] {
   const inner = owned.filter((node) => within(node, span.start, span.end));
   const outside = comments.filter(
@@ -317,8 +301,13 @@ function commentsInside(
 
 /** The comments between two offsets. `from` is the end of the item above, or of what opens the block: a brace, the
  *  statement before, the file start at 0. */
-function gapComments(comments: OxcComment[], from: number, to: number, table: LineTable): Gap {
-  const openLine = from === 0 ? 0 : table.endLineOf(from);
+function gapComments(
+  comments: OxcComment[],
+  from: number,
+  to: number,
+  table: LinesAndColumns,
+): Gap {
+  const openLine = from === 0 ? 0 : endLineOf(table, from);
   const within = commentsWithin(comments, from, to, table);
   return {
     trailing: within.find((comment) => comment.line === openLine) ?? null,
@@ -344,13 +333,13 @@ function attribute(
   spans: Span[],
   comments: OxcComment[],
   owned: Owned[],
-  table: LineTable,
+  table: LinesAndColumns,
   { openAt, closeAt, opens }: Attribution,
 ): Item[] {
   const items: Item[] = spans.map((span) => ({
     kind: span.kind,
-    line: table.lineOf(span.start),
-    endLine: table.endLineOf(span.end),
+    line: lineOf(table, span.start),
+    endLine: endLineOf(table, span.end),
     above: [],
     inside: commentsInside(comments, owned, span, table),
     trailing: null,
@@ -381,7 +370,7 @@ export function parseSource(relPath: string, text: string): Source | null {
   const parsed = parseSync(relPath, text);
   if (parsed.errors.length > 0) return null;
 
-  const table = new LineTable(text);
+  const table = new LinesAndColumns(text);
   const comments = parsed.comments;
   const program = parsed.program;
   const { records: bodies, owned } = constructsOf(program, text, comments);
@@ -413,5 +402,6 @@ export function parseSource(relPath: string, text: string): Source | null {
     };
   });
 
-  return { lines: table.lines, blocks: [...records, ...constBlocks] };
+  // Split on the line breaks lines-and-columns counts (LF, CRLF, a lone CR), so its line numbers index `lines`.
+  return { lines: text.split(/\r\n|\r|\n/), blocks: [...records, ...constBlocks] };
 }
