@@ -198,22 +198,6 @@
         }
       }
     },
-    // hasDuplicateKey is a character-level token walk over known-valid JSON; a split threads five locals through a record for no reading gain.
-    {
-      "includes": ["actions/shared/manifest.ts"],
-      "linter": {
-        "rules": {
-          "complexity": {
-            "noExcessiveCognitiveComplexity": {
-              "level": "error",
-              "options": {
-                "maxAllowedComplexity": 35
-              }
-            }
-          }
-        }
-      }
-    },
     // A test table is data, not a function body.
     {
       "includes": ["tests/**"],
