@@ -87,6 +87,38 @@ export function strayFields(fields: readonly string[], entry: ManifestEntryShape
   return Object.keys(entry).filter((key) => !fields.includes(key));
 }
 
+/** The only tokens the check reads: a string literal whole (a quote or brace inside one is text), the braces, the colon. */
+const KEY_TOKENS = /"(?:[^"\\]|\\.)*"|[{}:]/g;
+
+/** Whether any ONE object of the text binds a key more than once. Called only on text JSON.parse has already accepted,
+ *  so the token before every colon is that member's key and every brace has its match. */
+function hasDuplicateKey(resolved: string): boolean {
+  const scopes: Set<string>[] = [];
+  let lastString = "";
+  for (const [token] of resolved.matchAll(KEY_TOKENS)) {
+    if (token === "{") {
+      scopes.push(new Set());
+      continue;
+    }
+    if (token === "}") {
+      scopes.pop();
+      continue;
+    }
+    if (token !== ":") {
+      lastString = token;
+      continue;
+    }
+
+    // Compared DECODED, so two spellings of one key ("a" and "\u0061") collide as they do for JSON.parse.
+    const scope = scopes[scopes.length - 1];
+    const key = JSON.parse(lastString) as string;
+    if (scope.has(key)) return true;
+    scope.add(key);
+  }
+
+  return false;
+}
+
 /** Every consumer reads through here, so no station can act on a manifest another one refused. Every problem string
  *  is VALUE-FREE: the text is target-repo content on updates and the strings reach public logs. */
 export function parseManifestFiles(
@@ -143,56 +175,4 @@ export function parseManifestFiles(
   }
 
   return { files: files as Record<string, ManifestEntryShape>, problem: null };
-}
-
-/** Whether any ONE object of the text binds a key more than once. Called
- *  only on text JSON.parse has already accepted, so this token walk runs
- *  over known-valid JSON and its string/escape/scope tracking cannot
- *  desync. */
-function hasDuplicateKey(resolved: string): boolean {
-  const scopes: Set<string>[] = [];
-  let inString = false;
-  let escaped = false;
-  let stringStart = -1;
-  let lastString: string | null = null;
-  for (let i = 0; i < resolved.length; i++) {
-    const ch = resolved[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === '"') {
-        inString = false;
-        lastString = resolved.slice(stringStart, i + 1);
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      inString = true;
-      stringStart = i;
-    } else if (ch === ":") {
-      // The string before a colon is an object key (valid JSON has no
-      // other colon position); compare DECODED so two spellings of one
-      // key ("a" and "a") still collide, like JSON.parse does.
-      if (lastString !== null && scopes.length > 0) {
-        const key = JSON.parse(lastString) as string;
-        const scope = scopes[scopes.length - 1];
-        if (scope.has(key)) return true;
-        scope.add(key);
-      }
-      lastString = null;
-    } else if (ch === "{") {
-      scopes.push(new Set());
-      lastString = null;
-    } else if (ch === "}") {
-      scopes.pop();
-      lastString = null;
-    } else if (ch !== "," && !/\s/.test(ch)) {
-      lastString = null;
-    }
-  }
-
-  return false;
 }

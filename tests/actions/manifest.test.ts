@@ -29,4 +29,24 @@ describe("parseManifestFiles", () => {
       quotes: parsed.problem?.includes("SECRET") ?? false,
     }).toEqual({ files, refused: files === null, quotes: false });
   });
+
+  // The duplicate check reads the text by a token regex, not through JSON.parse, which accepts every row here. A regex
+  // that misread an escaped quote, a brace inside a string, or a sibling scope would refuse a valid manifest or launder
+  // a duplicate, and nothing else would notice.
+  test.each<{ text: string; refused: boolean }>([
+    {
+      text: '{"files": {"a": {"class": "x", "b": 1}, "c": {"class": "y", "b": 2}}}',
+      refused: false,
+    },
+    { text: '{"files": {"a": {"class": "x", "b": 1, "b": 2}}}', refused: true },
+    { text: '{"files": {"a": {"class": "x", "arr": [{"k": 1, "k": 2}]}}}', refused: true },
+    { text: '{"files": {"a{\\"}": {"class": "x", "s": "}{\\":\\"{"}}}', refused: false },
+    { text: '{"files": {"files": {"class": "x"}}}', refused: false },
+    { text: '{"files": {"a": {"class": "x"}, "\\u0061": {"class": "y"}}}', refused: true },
+  ])(
+    "a key bound twice in ONE object is refused, the same key across objects is not: $text",
+    ({ text, refused }) => {
+      expect(parseManifestFiles(text).problem !== null).toBe(refused);
+    },
+  );
 });
