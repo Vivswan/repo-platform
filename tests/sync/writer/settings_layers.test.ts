@@ -740,4 +740,27 @@ describe("the github-pages environment", () => {
   test("a selection without site declares no environments, so the live ones stay as they are", () => {
     expect(fleetFold(selection({ modules: ["bun", "pr-title"] })).environments).toBeUndefined();
   });
+
+  // GitHub accepts the environment and its branch policy on a private repository and refuses the reviewer-rule keys
+  // there (422, "ensure the billing plan supports the required reviewers protection rule"): the apply failed a private
+  // site repository on them every run.
+  test("a private site repository declares the environment's branch policy and no reviewer rule; both keep the Pages build type", () => {
+    const site = (isPrivate: boolean) =>
+      fleetFold(selection({ modules: ["site"], private: isPrivate }));
+    const [onPublic, onPrivate] = [site(false), site(true)];
+    const environment = (fold: SettingsDoc) =>
+      (fold.environments as Record<string, unknown>[]).find((e) => e.name === "github-pages");
+    const policy = {
+      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+      deployment_branch_policies: { _undeclared: "delete", entries: [{ name: "main" }] },
+    };
+    const reviewerRule = { reviewers: [], wait_timer: 0, prevent_self_review: false };
+
+    expect([onPublic.pages, onPrivate.pages]).toEqual([
+      { build_type: "workflow" },
+      { build_type: "workflow" },
+    ]);
+    expect(environment(onPublic)).toEqual({ name: "github-pages", ...reviewerRule, ...policy });
+    expect(environment(onPrivate)).toEqual({ name: "github-pages", ...policy });
+  });
 });
