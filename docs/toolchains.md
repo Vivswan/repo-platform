@@ -99,3 +99,5 @@ A pinned module declares its pin in `files.yml` (`modules.<name>.pin`, its keys 
 4. **Close a PR main already carries:** when nothing moved and that PR is still open, main already carries its pins, so the PR is closed and its branch deleted.
 
 Merging the PR moves the `stable` tag once its gate is green; the next sync rolls the pin out to the fleet.
+
+Dependabot reaches the root workflows alone, so a bump that touches a managed root copy (`.github/workflows/sync-branch.yml`, written from `files/base/.github/workflows/sync-branch.yml`) goes into the shipped copy under `files/` instead. The root copy stays on the recorded pin, which the managed-files check holds it to, and the self-sync after the merge writes the bump into it. The pin census (`tests/workflows/delivery_pins.test.ts`) judges a managed root copy under `files/` alone.
