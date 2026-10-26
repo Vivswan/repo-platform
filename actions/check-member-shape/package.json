@@ -9,7 +9,7 @@
   },
   "devDependencies": {
     "@oxc-project/types": "0.155.0",
-    "@types/bun": "1.4.3",
+    "@types/bun": "1.4.4",
     "typescript": "^7.0.2"
   }
 }
