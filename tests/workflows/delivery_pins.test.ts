@@ -46,10 +46,11 @@ export function managedRootCopy(site: { path: string; text: string }): boolean {
   return site.path.startsWith(".github/workflows/") && isManaged(site.text);
 }
 
-// The sites judged: the sources the fleet executes (the writer's tree, this repository's workflows, the action
-// manifests), for self pins also the docs and skills, whose examples spell the shape a reader copies, and the callable
-// workflow names a stem may resolve to. A managed root copy is judged once, under files/: the managed-files check holds
-// the root copy to the recorded build's render, so only the shipped source can take a bump before the self-sync.
+// Two rules part the censuses on a managed root copy of a shipped workflow. The sha agreement judges it once, under
+// files/: the managed-files check holds the root copy to the recorded build's render, so only the shipped source can
+// take a bump before the self-sync. The self-pin census keeps it: a root copy that calls an action a PR deletes breaks
+// at the stable move, before the self-sync rewrites it. Docs and skills join the self pins, since their examples spell
+// the shape a reader copies.
 
 const MANIFESTS = actionManifestPaths(join(REPO_ROOT, "actions"));
 const ROOT_WORKFLOWS = walk(".github/workflows").map((path) => ({ path, text: read(path) }));
@@ -57,7 +58,13 @@ const OWN_ROOT_WORKFLOWS = ROOT_WORKFLOWS.filter((site) => !managedRootCopy(site
   (site) => site.path,
 );
 const PIN_SITES = [...walk("files"), ...OWN_ROOT_WORKFLOWS, ...MANIFESTS];
-const SELF_PIN_SITES = [...PIN_SITES, ...walk("docs"), ...walk("skills")];
+const SELF_PIN_SITES = [
+  ...walk("files"),
+  ...walk(".github/workflows"),
+  ...MANIFESTS,
+  ...walk("docs"),
+  ...walk("skills"),
+];
 const callable = callableWorkflowNames(ROOT_WORKFLOWS);
 
 /** True when pinact settles the line itself: a full version it verifies, or no version comment at all (its code 005). False is
