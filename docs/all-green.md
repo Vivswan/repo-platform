@@ -87,8 +87,8 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | `typography`, `file-size`, `shell-complexity`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps), [shell complexity](../actions/check-shell-complexity/action.yml)) |
 | `zizmor` | every push and pull request | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
 | `trivy` | every push and pull request | the blocking half of the [security scans](modules/security-scans.md) |
-| `ruff` | uv repositories once a sync has written `ruff.toml` | the [Python lint floor](modules/python.md) at a pinned ruff; a repository before its first sync stands down with a notice |
-| `biome` | bun repositories with a `biome.json` | the [TypeScript floor](modules/typescript.md) under the managed `biome.json`; a repository the sync has not reached yet stands down with a notice |
+| `ruff` | uv repositories once a sync has written `ruff.toml` | the [Python lint floor](modules/python.md) at a pinned ruff, with the readability thresholds (`C901`, the `PLR09` counts) ignored; the advisory step after it selects those alone and warns with their count, never red; a repository before its first sync stands down with a notice |
+| `biome` | bun repositories with a `biome.json` | the [TypeScript floor](modules/typescript.md) under the managed `biome.json`, whose three thresholds warn and never red the step; a repository the sync has not reached yet stands down with a notice |
 | `member-shape` | bun repositories | the [member-shape rules](modules/typescript.md#the-member-shape-rules) over every tracked TypeScript file; needs no install; advisory: a finding is a warning annotation and a sticky comment, never a red job |
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
 

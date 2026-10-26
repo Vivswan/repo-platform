@@ -65,20 +65,20 @@ function synced(label: string, modules: string[]): string {
   return target;
 }
 
-test("the rust module lands clippy.toml with its header rendered, and every threshold names a denied lint", () => {
+test("the rust module lands clippy.toml with its header rendered, and every threshold names a lint the floor turns on, at warn", () => {
   const target = synced("rust", ["rust"]);
   const clippyToml = readFileSync(join(target, "clippy.toml"), "utf-8");
   expect(clippyToml.split("\n")[0]).toBe("# This file is managed by owner/repo-platform.");
 
   const thresholds = Bun.TOML.parse(clippyToml) as Record<string, number>;
   const cargo = Bun.TOML.parse(readFileSync(join(target, "Cargo.toml"), "utf-8")) as LintTables;
-  const denied = cargo.workspace.lints.clippy;
+  const floor = cargo.workspace.lints.clippy;
   const thresholdLints = Object.keys(thresholds).map((key) =>
     key.replace(/-threshold$/, "").replaceAll("-", "_"),
   );
   expect(thresholdLints.length).toBeGreaterThan(0);
   for (const lint of thresholdLints) {
-    expect(denied[lint]).toBe("deny");
+    expect(floor[lint]).toBe("warn");
   }
 });
 

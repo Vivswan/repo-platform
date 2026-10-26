@@ -20,6 +20,7 @@ Biome merges `extends` left to right and applies the extending file last. Measur
 
 ## Building on the floor
 
+- **The three thresholds warn** (`noExcessiveCognitiveComplexity`, `noExcessiveLinesPerFunction`, `useMaxParams`): a threshold is a hint about readability, and a forced split can read worse, so `biome lint` exits 0 on them alone. The mechanical rules keep blocking. A known case stays visible as a warning, or goes quiet under a per-path `overrides` entry with its reason beside it.
 - **A finding is split, or folded:** two nameable concepts become named steps; a step called from one place that is no concept of its own folds back into its caller.
 - **A repository that already has a `biome.jsonc`:** move its content into `biome.local.jsonc` and delete it. Biome reads `biome.json` and silently ignores a `biome.jsonc` beside it, so the old file would be dead configuration.
 - **A repository that already has a `biome.json`:** the sync replaces it and reports the diff under Replaced local edits; its content moves into `biome.local.jsonc` the same way.

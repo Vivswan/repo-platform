@@ -18,6 +18,8 @@ unsafe_op_in_unsafe_fn = "deny"
 non_ascii_idents = "deny"
 # A `///` line on every public item: what it returns and what its arguments mean, never a narrative of its body.
 missing_docs = "deny"
+# A stale `#[expect]` fails on every run, the local one included, where its default would only warn.
+unfulfilled_lint_expectations = "deny"
 
 [workspace.lints.clippy]
 # `// SAFETY:` above every unsafe block, stating the invariant it depends on.
@@ -41,12 +43,13 @@ match_wildcard_for_single_variants = "deny"
 rest_pat_in_fully_bound_structs = "deny"
 
 # The readability floor: a function reads as the list of its steps. The thresholds live in the managed root clippy.toml.
+# Its three lints warn where the rest deny: a threshold is a hint, and a forced split can read worse. The checks starter keeps them at warn under `-D warnings` with `--force-warn`.
 # A ninth parameter is a struct argument or a builder.
-too_many_arguments = "deny"
+too_many_arguments = "warn"
 # A function past a hundred lines holds two nameable concepts: split it into named steps.
-too_many_lines = "deny"
+too_many_lines = "warn"
 # Nested branching that a guard, a `continue`, or a split would flatten. Off in clippy's default set; naming it here turns it on, on stable.
-cognitive_complexity = "deny"
+cognitive_complexity = "warn"
 # `let Some(x) = o else { return };` reads once, where `let x = if let ... else` reads twice.
 manual_let_else = "deny"
 # A nested `if` with nothing between it and its parent is one condition.
