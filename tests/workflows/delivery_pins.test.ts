@@ -7,12 +7,8 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import {
-  DELIVERY_REF,
-  MANAGED_HEADER_PATTERN,
-  PLATFORM_NAME,
-  PLATFORM_OWNER,
-} from "../../actions/shared/platform";
+import { isManaged } from "../../actions/shared/managed_header";
+import { DELIVERY_REF, PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform";
 import { actionManifestPaths } from "../../scripts/lib/action_steps";
 import { REPO_ROOT } from "../shared/action_step";
 import {
@@ -45,16 +41,31 @@ function exists(rel: string): boolean {
   return existsSync(join(REPO_ROOT, rel));
 }
 
-// The sites judged: the sources the fleet executes (the writer's tree, this repository's workflows, the action
-// manifests), for self pins also the docs and skills, whose examples spell the shape a reader copies, and the callable
-// workflow names a stem may resolve to.
+/** True for a root workflow the self-sync wrote from its files/ source, which the managed header marks. */
+export function managedRootCopy(site: { path: string; text: string }): boolean {
+  return site.path.startsWith(".github/workflows/") && isManaged(site.text);
+}
+
+// Two rules part the censuses on a managed root copy of a shipped workflow. The sha agreement judges it once, under
+// files/: the managed-files check holds the root copy to the recorded build's render, so only the shipped source can
+// take a bump before the self-sync. The self-pin census keeps it: a root copy that calls an action a PR deletes breaks
+// at the stable move, before the self-sync rewrites it. Docs and skills join the self pins, since their examples spell
+// the shape a reader copies.
 
 const MANIFESTS = actionManifestPaths(join(REPO_ROOT, "actions"));
-const PIN_SITES = [...walk("files"), ...walk(".github/workflows"), ...MANIFESTS];
-const SELF_PIN_SITES = [...PIN_SITES, ...walk("docs"), ...walk("skills")];
-const callable = callableWorkflowNames(
-  walk(".github/workflows").map((path) => ({ path, text: read(path) })),
+const ROOT_WORKFLOWS = walk(".github/workflows").map((path) => ({ path, text: read(path) }));
+const OWN_ROOT_WORKFLOWS = ROOT_WORKFLOWS.filter((site) => !managedRootCopy(site)).map(
+  (site) => site.path,
 );
+const PIN_SITES = [...walk("files"), ...OWN_ROOT_WORKFLOWS, ...MANIFESTS];
+const SELF_PIN_SITES = [
+  ...walk("files"),
+  ...walk(".github/workflows"),
+  ...MANIFESTS,
+  ...walk("docs"),
+  ...walk("skills"),
+];
+const callable = callableWorkflowNames(ROOT_WORKFLOWS);
 
 /** True when pinact settles the line itself: a full version it verifies, or no version comment at all (its code 005). False is
  *  the gap: a comment pinact reads as a version but leaves unverified, sha included. The branches follow pinact's classifier order. */
@@ -204,6 +215,28 @@ describe("one sha per action across the root and the shipped sources", () => {
     ]);
   });
 
+  // The control for the sites: a managed root copy behind its shipped source is no split, since the self-sync writes it
+  // from that source after the merge; the same root workflow without the header is one.
+  test("a managed root copy behind its shipped source is judged under files/; an own root workflow behind it is a split", () => {
+    const shipped = {
+      path: "files/base/.github/workflows/x.yml",
+      text: `- uses: actions/checkout@${"0".repeat(40)}`,
+    };
+    const root = (text: string) => ({ path: ".github/workflows/x.yml", text });
+    const header = `# This file is managed by octocat/${PLATFORM_NAME}.\n`;
+    const census = (sites: { path: string; text: string }[]) =>
+      splitPins(
+        sites
+          .filter((site) => !managedRootCopy(site))
+          .flatMap((site) => extractUsesPins(site.text, site.path)),
+      );
+    expect(census([root(`${header}- uses: actions/checkout@${SHA}`), shipped])).toEqual([]);
+    expect(census([root(`- uses: actions/checkout@${SHA}`), shipped])).toEqual([
+      `actions/checkout: ${SHA} (.github/workflows/x.yml)`,
+      `actions/checkout: ${"0".repeat(40)} (files/base/.github/workflows/x.yml)`,
+    ]);
+  });
+
   test("every pin site names one ref per action", () => {
     const pins = PIN_SITES.flatMap((rel) => extractUsesPins(read(rel), rel));
     expect(pins.length).toBeGreaterThan(0);
@@ -278,9 +311,7 @@ describe("self pins resolve at the delivery ref", () => {
 // repository (docs/platform/build-provenance.md). A managed root copy is judged under files/.
 describe("platform files reference each other by `$/`; the starters pin the delivery ref", () => {
   const WORKSPACE_PATH = /uses:\s*['"]?(\.\/(?:actions|\.github\/workflows)\/[^\s'"]+)/g;
-  const platformSites = [...walk(".github/workflows"), ...MANIFESTS].filter(
-    (rel) => !MANAGED_HEADER_PATTERN.test(read(rel)),
-  );
+  const platformSites = [...OWN_ROOT_WORKFLOWS, ...MANIFESTS];
   const judge = (rel: string, text: string) => ({
     byTag: sourceSelfPins(text, rel).map((pin) => `${pin.stem}@${pin.ref}`),
     byWorkspacePath: [...text.matchAll(WORKSPACE_PATH)].map((match) => match[1]),
