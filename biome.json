@@ -24,10 +24,6 @@
     }
   },
   "overrides": [
-    {
-      "includes": ["biome.json", ".github/repo-platform-manifest.json"],
-      "formatter": { "enabled": false },
-      "assist": { "enabled": false }
-    }
+    { "includes": ["biome.json"], "formatter": { "enabled": false }, "assist": { "enabled": false } }
   ]
 }
