@@ -5,18 +5,15 @@
 // so every upstream file is a stub and never the network.
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFilesConfig } from "../../actions/plan/files_config";
-import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { syncedCheckout } from "../shared/synced_checkout";
 import { tempDirs } from "../shared/temp_dir";
 import { spawnStubUpstream } from "../shared/upstream_server";
 
 const temp = tempDirs();
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
-const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
-const FILES_TREE = join(REPO_ROOT, "files");
-const BUILD = "0".repeat(40);
 const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
 const upstream = await spawnStubUpstream(config, temp.dir("clippy-floor-upstream-"));
 afterAll(() => upstream.stop());
@@ -25,60 +22,23 @@ interface LintTables {
   workspace: { lints: { clippy: Record<string, string> } };
 }
 
-function synced(label: string, modules: string[]): string {
-  const target = temp.dir(`clippy-floor-${label}-`);
-  writeFileSync(
-    join(target, ".repo-platform.yml"),
-    [
-      `modules: ${JSON.stringify(modules)}`,
-      "project:",
-      "  name: Demo",
-      "  slug: demo",
-      "  description: A demo",
-      "  copyright_holder: Owner",
-      "",
-    ].join("\n"),
-  );
-  const result = boundedSpawnSync(
-    [
-      "bun",
-      SYNC,
-      "--files",
-      join(REPO_ROOT, "files.yml"),
-      "--tree",
-      FILES_TREE,
-      "--target",
-      target,
-      "--build",
-      BUILD,
-      "--repository",
-      "owner/demo",
-      "--private",
-      "false",
-      "--upstream",
-      upstream.host,
-    ],
-    { cwd: REPO_ROOT, timeoutMs: 60_000 },
-  );
-  expect(result.stderr).toBe("");
-  expect(result.exitCode).toBe(0);
-  return target;
-}
+const synced = (label: string, modules: string[]) =>
+  syncedCheckout({ target: temp.dir(`clippy-floor-${label}-`), upstream: upstream.host, modules });
 
-test("the rust module lands clippy.toml with its header rendered, and every threshold names a denied lint", () => {
+test("the rust module lands clippy.toml with its header rendered, and every threshold names a lint the floor turns on, at warn", () => {
   const target = synced("rust", ["rust"]);
   const clippyToml = readFileSync(join(target, "clippy.toml"), "utf-8");
   expect(clippyToml.split("\n")[0]).toBe("# This file is managed by owner/repo-platform.");
 
   const thresholds = Bun.TOML.parse(clippyToml) as Record<string, number>;
   const cargo = Bun.TOML.parse(readFileSync(join(target, "Cargo.toml"), "utf-8")) as LintTables;
-  const denied = cargo.workspace.lints.clippy;
+  const floor = cargo.workspace.lints.clippy;
   const thresholdLints = Object.keys(thresholds).map((key) =>
     key.replace(/-threshold$/, "").replaceAll("-", "_"),
   );
   expect(thresholdLints.length).toBeGreaterThan(0);
   for (const lint of thresholdLints) {
-    expect(denied[lint]).toBe("deny");
+    expect(floor[lint]).toBe("warn");
   }
 });
 

@@ -45,12 +45,8 @@ describe("the ruff pin", () => {
       ),
     );
     const versions = new Set(spelled.map((line) => line.slice(line.indexOf("uvx ruff"))));
-    expect({
-      gate: spelled.filter((line) => line.startsWith(".github/")).length,
-      versions: [...versions],
-    }).toEqual({
-      gate: 1,
-      versions: [expect.stringMatching(/^uvx ruff@\d+\.\d+\.\d+$/)],
-    });
+    // The pattern must reach fleet.yml, else the starters alone would agree with themselves.
+    expect(spelled.filter((line) => line.startsWith(".github/")).length).toBeGreaterThan(0);
+    expect([...versions]).toEqual([expect.stringMatching(/^uvx ruff@\d+\.\d+\.\d+$/)]);
   });
 });

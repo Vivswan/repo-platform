@@ -31,6 +31,10 @@ jobs:
   standard-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # ruff's readability thresholds (docs/modules/python.md): out of the gate run, into the advisory run after it.
+      # PLR0904, PLR0914, and PLR0916 are preview counts at this pin, so they fire only under a repository's `preview = true`.
+      RUFF_THRESHOLDS: C901,PLR0904,PLR0911,PLR0912,PLR0913,PLR0914,PLR0915,PLR0916,PLR0917
     permissions:
       contents: read
       # The sticky findings comments of validate-managed-files, file-size, shell-complexity, and member-shape.
@@ -126,9 +130,17 @@ jobs:
         run: |
           echo "::error file=.ruff.toml::ruff reads .ruff.toml over the managed ruff.toml, so the floor would not apply; move its settings into pyproject.toml under [tool.ruff] and delete it"
           exit 1
+      # ruff has no per-rule severity: the readability thresholds leave the gate run by --ignore and run again below under
+      # --exit-zero (docs/modules/python.md). `-q` keeps that run's stdout to one line per finding, so `wc -l` is the count.
       - id: ruff
         if: ${{ !cancelled() && steps.uv.outcome == 'success' && hashFiles('ruff.toml') != '' }}
-        run: uvx ruff@0.17.2 check --no-fix --no-fix-only .
+        run: uvx ruff@0.17.2 check --no-fix --no-fix-only --ignore "$RUFF_THRESHOLDS" .
+      - name: Readability thresholds, advisory
+        if: ${{ !cancelled() && steps.uv.outcome == 'success' && hashFiles('ruff.toml') != '' }}
+        run: |
+          uvx ruff@0.17.2 check -q --no-fix --no-fix-only --exit-zero --output-format concise --select "$RUFF_THRESHOLDS" . | tee "$RUNNER_TEMP/thresholds.txt"
+          count=$(wc -l < "$RUNNER_TEMP/thresholds.txt" | tr -d ' ')
+          [ "$count" -eq 0 ] || echo "::warning::$count readability threshold finding(s), advisory: a threshold is a hint, and a forced split can read worse (docs/modules/python.md)"
       - name: Note why ruff stood down
         if: ${{ !cancelled() && steps.uv.outcome == 'success' && steps.ruff.outcome == 'skipped' }}
         run: echo "::notice::ruff stood down, this repository has no ruff.toml until its first sync writes it"

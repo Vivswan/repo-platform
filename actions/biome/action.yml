@@ -7,7 +7,8 @@ description: |
     applies last, so a rule it sets stays set, and the local layer adds beneath it.
   - The one bypass is a path override in the repository's own biome layer, with its reason beside it; a finding is
     split or raised there, never silenced inline with a biome-ignore comment.
-  - A finding fails the step; the caller installs nothing for it, since the action brings its own biome.
+  - An error-level finding fails the step; a warn-level one (the readability thresholds) is logged and the step passes.
+    The caller installs nothing for it, since the action brings its own biome.
 
 runs:
   using: composite
