@@ -68,7 +68,7 @@ To run one repo on a different version, override in a repo-owned workflow and le
 | Toolchain | Override |
 |---|---|
 | bun | pass the explicit version input (`bun-version:` on setup-bun), which the action prefers over its version-file input |
-| rust | commit a `rust-toolchain.toml` naming the channel (1.84 or newer, [rust.md](modules/rust.md#the-floor)) and components; the setup action in the three rust blocks installs it, with no dotfile to leave alone |
+| rust | commit a `rust-toolchain.toml` naming the channel (1.84 or newer, [rust.md](modules/rust.md)) and components; the setup action in the three rust blocks installs it, with no dotfile to leave alone |
 
 Rules that follow:
 
