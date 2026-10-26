@@ -2,7 +2,7 @@
       # The Rust gate is cargo's own commands, the same in every repository, so these steps are live, not examples.
       # The action installs the toolchain rust-toolchain.toml names (stable when there is none) and caches the target directory.
       # Warnings fail through clippy's own flag, which reaches every target; a RUSTFLAGS variable would silence the repository's build.rustflags.
-      # Under `-D warnings` every warn-level lint is an error whatever the flag order, so the three readability thresholds ride on `--force-warn`, the one level it leaves alone.
+      # `-D warnings` upgrades every warn-level lint whatever the flag order; `--force-warn` is the one level it leaves alone (docs/modules/rust.md).
       # `--locked` fails a stale or missing Cargo.lock. The lint floor itself is the root Cargo.toml's [workspace.lints].
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
