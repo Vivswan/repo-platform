@@ -73,6 +73,7 @@ settings:
     - {source: files/uv/settings.yml, when: {modules: [uv]}}
     - {source: files/rust/settings.yml, when: {modules: [rust]}}
     - {source: files/site/settings.yml, when: {modules: [site]}}
+    - {source: files/site/settings.public.yml, when: {modules: [site], private: false}}
     - {source: files/release-please/settings.yml, when: {modules: [release-please]}}
     - {source: files/pr-title/settings.yml, when: {modules: [pr-title]}}
     - {source: files/settings/codeql-public.yml, when: {private: false, any: {declaring: codeql_languages}}}

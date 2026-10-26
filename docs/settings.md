@@ -14,7 +14,7 @@ This page is the settings model of a managed repository: the layers the sync ren
 |---|---|---|---|
 | 1 | Fleet baseline | [files/settings/baseline.yml](../files/settings/baseline.yml) | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels |
 | 2 | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | public: `security_and_analysis`, and the `main` ruleset's `code_quality` and `copilot_code_review` rules; private: the `settings-as-code-report` marker label |
-| 3 | Module layer | `files/<module>/settings.yml` | what selecting that module adds (the list below) |
+| 3 | Module layer | `files/<module>/settings.yml` and, for site, [settings.public.yml](../files/site/settings.public.yml) | what selecting that module adds (the list below) |
 | 4 | CodeQL layer | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml) | the `code_scanning` rule, for public repos with a CodeQL toolchain |
 | 5 | Repo overlay | the repo's own `.github/settings.local.yml` | identity keys (`description`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides |
 | 6 | Fleet override | [files/settings/override.yml](../files/settings/override.yml) | the invariants no repo may weaken (the list below) |
@@ -22,7 +22,7 @@ This page is the settings model of a managed repository: the layers the sync ren
 What a module layer adds:
 
 - **A toolchain module:** its dependabot label.
-- **site:** the Pages build type (Actions-workflow builds) and the `github-pages` environment: no reviewers, no wait, and the branch policy GitHub creates it with, `main` alone.
+- **site:** the Pages build type (Actions-workflow builds) and the `github-pages` environment with the branch policy GitHub creates it with, `main` alone. On a public repository the environment also carries its reviewer rule (no reviewers, no wait): GitHub refuses those keys on a private repository with a 422 naming the billing plan.
 - **release-please:** four labels, the `release-tags` ruleset, and the Actions grant its release PR needs (`can_approve_pull_request_reviews`).
 - **pr-title:** [the pr-title ruleset](#the-pr-title-ruleset).
 

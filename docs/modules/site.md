@@ -52,7 +52,7 @@ A repository with nothing to publish ends green with a notice (`nothing to publi
 - **A deploy before that apply** fails red on configure-pages's own error (`Get Pages site failed`): the job token can read the site but never create one. The red run needs no action and no rerun.
 - **The nightly rebuild** deploys once the site exists; the next main push does the same.
 
-**The `github-pages` environment is the module's,** declared by its settings layer ([settings.md](../settings.md)). A required-reviewers rule there parks every deploy "waiting for review" with later runs queued behind it. Once the repository's rendered settings carry the declaration (the next sync), the daily apply removes such a rule or an extra branch pattern.
+**The `github-pages` environment is the module's,** declared by its settings layer ([settings.md](../settings.md)); its reviewer rule is the public-only part, since GitHub refuses those keys on a private repository. A required-reviewers rule there parks every deploy "waiting for review" with later runs queued behind it. Once the repository's rendered settings carry the declaration (the next sync), the daily apply removes such a rule or an extra branch pattern.
 
 ## The hook: `.github/actions/site-build/action.yml`
 

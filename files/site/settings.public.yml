@@ -1,0 +1,9 @@
+# The github-pages environment's reviewer rule, PUBLIC repositories only: GitHub refuses these keys on a private
+# repository (422, "ensure the billing plan supports the required reviewers protection rule") and accepts the branch
+# policy files/site/settings.yml declares. A required-reviewers rule added by hand parks every deploy "waiting for
+# review", so the declared empty roster heals it on the next apply.
+environments:
+  - name: github-pages
+    reviewers: []
+    wait_timer: 0
+    prevent_self_review: false

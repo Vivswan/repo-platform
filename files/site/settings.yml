@@ -2,15 +2,11 @@
 pages:
   build_type: workflow
 
-# reusable-site.yml deploys into this environment from main alone; a required-reviewers rule added by hand parks every
-# deploy "waiting for review", so the declared empty roster heals it on the next apply. The branch policy is the one
-# GitHub creates the environment with (the default branch alone); the apply refuses an environment update that would
-# drop a live policy the layer omits, so it is spelled out.
+# reusable-site.yml deploys into this environment from main alone. The branch policy is the one GitHub creates the
+# environment with (the default branch alone); the apply refuses an environment update that would drop a live policy
+# the layer omits, so it is spelled out. The reviewer rule is files/site/settings.public.yml's, merged in by name.
 environments:
   - name: github-pages
-    reviewers: []
-    wait_timer: 0
-    prevent_self_review: false
     deployment_branch_policy:
       protected_branches: false
       custom_branch_policies: true
