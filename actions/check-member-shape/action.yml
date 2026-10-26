@@ -16,8 +16,9 @@ description: |
   - constant-spacing: a commented module-level constant has a blank line (or the file start) before its comment and a
     blank line (or the file end) after its declaration.
 
-  Findings are one table in the step summary and the log annotations on every event, plus a sticky PR comment on
-  pull_request events, deleted when there is nothing to say (the calling job needs pull-requests: write for it).
+  Advisory: a finding is a warning annotation, never a red job. Findings are one table in the step summary and the
+  log annotations on every event, plus a sticky PR comment on pull_request events, deleted when there is nothing to
+  say (the calling job needs pull-requests: write for it).
 
   Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it), and a file whose
   header declares it generated. Warned, never judged: a file oxc cannot parse. Never read: vendored installs and
@@ -45,7 +46,7 @@ runs:
 
     # The script records report=findings|clean|error itself; a crash before
     # that leaves it empty, which posts no comment. The comment steps read it
-    # on !cancelled(), so the comment is posted before the job turns red.
+    # on !cancelled(); a crash records report=error and posts nothing.
     - name: Check member shape
       id: check
       shell: bash
@@ -56,7 +57,7 @@ runs:
 
     # The comment is a convenience sink: the summary and annotations carry
     # the same table, so a token without pull-requests write (a fork or
-    # Dependabot PR) must not turn the verdict red.
+    # Dependabot PR) must not turn the job red.
     - name: Post the findings as a sticky PR comment
       if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.check.outputs.report == 'findings' }}
       continue-on-error: true

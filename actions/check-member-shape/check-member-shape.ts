@@ -169,12 +169,12 @@ if (import.meta.main) {
       check,
       outcomeOf,
       report,
-      warnings: (verdict) =>
-        verdict.unparsed.map((path) => ({
+      // Advisory: every finding is a warning annotation and the job stays green; the owner reads shape, never a gate.
+      warnings: (verdict) => [
+        ...verdict.unparsed.map((path) => ({
           message: `${path}: oxc could not parse the file; it is not judged`,
           file: path,
         })),
-      errors: (verdict) => [
         ...verdict.findings.map((finding) => ({
           message: describe(finding),
           file: finding.path,
@@ -182,8 +182,11 @@ if (import.meta.main) {
         })),
         ...verdict.allowlistErrors.map((message) => ({ message })),
       ],
+      errors: () => [],
       passed: (verdict) =>
-        `Member shape check passed (${verdict.unparsed.length} file(s) not parsed, ${verdict.managedSkipped} managed and ${verdict.generatedSkipped} generated file(s) skipped).`,
+        outcomeOf(verdict).state === "findings"
+          ? `${verdict.findings.length} finding(s), ${verdict.unparsed.length} file(s) not parsed; advisory. ${REMEDY}`
+          : `Member shape check passed (${verdict.managedSkipped} managed and ${verdict.generatedSkipped} generated file(s) skipped).`,
       failed: (count) => `${count} finding(s). ${REMEDY}`,
     },
     core,
