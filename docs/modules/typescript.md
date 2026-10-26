@@ -4,7 +4,7 @@ order: 170
 
 # TypeScript
 
-Selecting the `bun` module gives a repository the fleet's TypeScript lint floor as a managed `biome.json` ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/bun/biome.json)), a repo-owned `biome.local.jsonc` to build on it ([the starter](https://github.com/Vivswan/repo-platform/blob/main/files/bun/biome.local.jsonc)), and two fleet steps that make the floor a gate: `biome` ([the action](../../actions/biome/action.yml)) and `member-shape` ([the action](../../actions/check-member-shape/action.yml)). The files say what they hold; this page says how the two layers combine and what a repository may do underneath.
+Selecting the `bun` module gives a repository the fleet's TypeScript lint floor as a managed `biome.json` ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/bun/biome.json)), a repo-owned `biome.local.jsonc` to build on it ([the starter](https://github.com/Vivswan/repo-platform/blob/main/files/bun/biome.local.jsonc)), and two fleet steps: `biome` ([the action](../../actions/biome/action.yml)), the gate, and `member-shape` ([the action](../../actions/check-member-shape/action.yml)), advisory. The files say what they hold; this page says how the two layers combine and what a repository may do underneath.
 
 ## The two layers
 
@@ -26,4 +26,4 @@ Biome merges `extends` left to right and applies the extending file last. Measur
 
 ## The member-shape rules
 
-The action's description states the four rules, the methods exemption, and the `.member-shape-allow.local` bypass. What it cannot say: `.astro` frontmatter is outside the check today.
+The action's description states the four rules, the methods exemption, the `.member-shape-allow.local` bypass, and that the check is advisory: a finding is a warning annotation, never a red job. What it cannot say: `.astro` frontmatter is outside the check today.
