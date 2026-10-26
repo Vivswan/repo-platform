@@ -1,8 +1,9 @@
 // The bun module ships the TypeScript lint floor as a managed biome.json over a repo-owned biome.local.jsonc starter.
-// What would drift silently: an entry gone or misclassed in files.yml (the fleet keeps an old floor, green), a root copy
-// differing from the shipped one (this repository's own sync PR reports `replaced local edits`), a biome version moving
-// in one of its homes (the gate's biome and the formatter's disagree, green). The writer runs over the real files.yml
-// with every upstream file a stub, never the network.
+// What would drift silently: an entry gone or misclassed in files.yml (the fleet keeps an old floor, green), a biome
+// version moving in one of its homes (the gate's biome and the formatter's disagree, green).
+//
+// The root copy is not pinned here: this repository syncs itself after a merge, so a PR that changes the shipped file
+// stays green until that sync writes the root. The writer runs over the real files.yml with every upstream file a stub.
 
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -107,11 +108,6 @@ describe("the shipped biome pair", () => {
       local: LOCAL_EDIT,
     });
   });
-
-  // This repository is a sync target of itself, so its root copy is what the writer would write over it.
-  test("the root biome.json is the shipped floor, byte for byte", () => {
-    expect(readFileSync(join(REPO_ROOT, "biome.json"), "utf-8")).toBe(SHIPPED_FLOOR);
-  });
 });
 
 describe("one biome version", () => {
@@ -131,14 +127,14 @@ describe("one biome version", () => {
       readFileSync(join(FILES_TREE, "bun/.github/workflows/auto-format.toolchain.yml"), "utf-8"),
     )?.[1];
 
-  test("the action's dependency, the root devDependency, both $schema URLs, and the auto-format starter name one version", () => {
+  // The root biome.json's $schema is not compared: a managed root copy follows the shipped file by self-sync.
+  test("the action's dependency, the root devDependency, the shipped $schema URL, and the auto-format starter name one version", () => {
     const pinned = dependency("actions/biome/package.json", "dependencies");
     expect(pinned).toMatch(/^\d+\.\d+\.\d+$/);
     expect({
       root: dependency("package.json", "devDependencies"),
       shippedSchema: schemaVersion(SHIPPED_FLOOR),
-      rootSchema: schemaVersion(readFileSync(join(REPO_ROOT, "biome.json"), "utf-8")),
       starter: starterVersion(),
-    }).toEqual({ root: pinned, shippedSchema: pinned, rootSchema: pinned, starter: pinned });
+    }).toEqual({ root: pinned, shippedSchema: pinned, starter: pinned });
   });
 });
