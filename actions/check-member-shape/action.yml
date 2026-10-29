@@ -16,6 +16,10 @@ description: |
   - constant-spacing: a commented module-level constant has a blank line (or the file start) before its comment and a
     blank line (or the file end) after its declaration.
 
+  A comment addressed to a tool (`// @ts-expect-error`, `// biome-ignore`, an eslint or prettier pragma) or a doc block
+  of tags alone (`/** @public */`) is nobody's comment: glued above an item it is the item's head, as a decorator is,
+  and the item's comment sits above it.
+
   Advisory: a finding is a warning annotation, never a red job. Findings are one table in the step summary and the
   log annotations on every event, plus a sticky PR comment on pull_request events, deleted when there is nothing to
   say (the calling job needs pull-requests: write for it).

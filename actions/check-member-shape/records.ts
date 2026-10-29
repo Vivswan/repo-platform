@@ -12,7 +12,7 @@ import type {
   TSTypeLiteral,
   VariableDeclarator,
 } from "@oxc-project/types";
-import { LinesAndColumns } from "lines-and-columns";
+import { LinesAndColumns, type SourceLocation } from "lines-and-columns";
 import { type Comment as OxcComment, parseSync, Visitor } from "oxc-parser";
 
 /** The record kinds the rules judge: a body whose members stand together. */
@@ -37,7 +37,7 @@ export interface Item {
   /** Field or method; a module constant is a field. */
   kind: MemberKind;
 
-  /** The item's own first line: its `export` keyword or first decorator, never its comment; a later declarator's own. */
+  /** The item's own first line: a tool comment glued above it, else its `export` or decorator, never its comment. */
   line: number;
 
   /** The line its last character sits on. */
@@ -117,13 +117,22 @@ const METHOD_TYPES: ReadonlySet<string> = new Set([
   "StaticBlock",
 ]);
 
-/** The 1-based line of an offset. lines-and-columns counts lines from 0 and answers null only for an offset past the
- *  text's end, which oxc never produces. */
-function lineOf(table: LinesAndColumns, offset: number): number {
+/** A comment for a tool, never the reader: a TypeScript directive, a biome or eslint suppression, a prettier pragma. */
+const DIRECTIVE =
+  /^(@ts-(expect-error|ignore|nocheck|check)\b|biome-ignore\b|eslint-(disable|enable)|prettier-ignore\b)/;
+
+/** The 0-based line and column of an offset. lines-and-columns answers null only for an offset past the text's end,
+ *  which oxc never produces. */
+function locationOf(table: LinesAndColumns, offset: number): SourceLocation {
   const location = table.locationForIndex(offset);
   if (location === null) throw new Error(`offset ${offset} lies outside the text`);
 
-  return location.line + 1;
+  return location;
+}
+
+/** The 1-based line of an offset. */
+function lineOf(table: LinesAndColumns, offset: number): number {
+  return locationOf(table, offset).line + 1;
 }
 
 /** The line an exclusive span end sits on: that of the character before it. */
@@ -146,6 +155,29 @@ function afterTrivia(text: string, comments: OxcComment[], at: number): number {
   } while (comment !== undefined);
 
   return next;
+}
+
+/** A comment's text with its margins stripped: a doc block's opening `*` and the ` * ` opening each of its lines. */
+function bodyOf(comment: OxcComment): string {
+  return comment.value
+    .replace(/^\*/, "")
+    .replace(/^\s*\*/gm, "")
+    .trim();
+}
+
+/** Whether a comment speaks to the reader: not a directive, and not tags alone (a doc block holding `@public` alone
+ *  is knip's, not the constant's). */
+function isProse(comment: OxcComment): boolean {
+  const body = bodyOf(comment);
+  if (DIRECTIVE.test(body)) return false;
+
+  return body.split(/\s+/).some((word) => !word.startsWith("@"));
+}
+
+/** Whether nothing but whitespace precedes the comment on its line. */
+function opensItsLine(text: string, comment: OxcComment, table: LinesAndColumns): boolean {
+  const { column } = locationOf(table, comment.start);
+  return text.slice(comment.start - column, comment.start).trim() === "";
 }
 
 /** The record bodies and the owned regions of the tree. A static block owns its braces only: a comment between
@@ -224,6 +256,26 @@ function memberKind(node: Node): MemberKind {
 function delimiterEnd(text: string, comments: OxcComment[], end: number): number {
   const at = afterTrivia(text, comments, end);
   return text.charAt(at) === "," || text.charAt(at) === ";" ? at + 1 : end;
+}
+
+/** The start of the tool comments glued directly above `start`, else `start` itself: each opens its line, ends on the
+ *  line above, and has nothing but whitespace between it and what follows. A `@ts-expect-error` line or a `@public`
+ *  doc block must sit on the line above its item, so it is the item's head, as a decorator is, and the item's own
+ *  comment sits above it. */
+function headStart(
+  text: string,
+  tools: OxcComment[],
+  start: number,
+  table: LinesAndColumns,
+): number {
+  const line = lineOf(table, start);
+  const glued = tools.find(
+    (comment) =>
+      endLineOf(table, comment.end) === line - 1 &&
+      opensItsLine(text, comment, table) &&
+      text.slice(comment.end, start).trim() === "",
+  );
+  return glued === undefined ? start : headStart(text, tools, glued.start, table);
 }
 
 /** A class member's span starts at its first decorator. */
@@ -330,9 +382,10 @@ interface Attribution {
   opens: "brace" | "statement";
 }
 
-/** The items of one block, with each comment given to the item it belongs to: a comment on the line an item ends on
- *  trails that item; every other comment between two items is the lower item's, and one on an item's own lines is
- *  that item's. A blank-separated comment above a const block's first item is the group's tell, not the item's. */
+/** The items of one block, with each reader's comment given to the item it belongs to: a comment on the line an item
+ *  ends on trails that item; every other comment between two items is the lower item's, and one on an item's own
+ *  lines is that item's. A blank-separated comment above a const block's first item is the group's tell, not the
+ *  item's. */
 function attribute(
   spans: Span[],
   comments: OxcComment[],
@@ -375,18 +428,24 @@ export function parseSource(relPath: string, text: string): Source | null {
   if (parsed.errors.length > 0) return null;
 
   const table = new LinesAndColumns(text);
-  const comments = parsed.comments;
   const program = parsed.program;
+
+  // Every comment is trivia to step over; only a reader's comment is an item's, and a tool's glued above an item is
+  // the item's head.
+  const comments = parsed.comments;
+  const prose = comments.filter(isProse);
+  const tools = comments.filter((comment) => !isProse(comment));
   const { records: bodies, owned } = constructsOf(program, text, comments);
-  const toDelimiter = (span: Span): Span => ({
+  const toSpan = (span: Span): Span => ({
     ...span,
+    start: headStart(text, tools, span.start, table),
     end: delimiterEnd(text, comments, span.end),
   });
   const records: Block[] = bodies
     .filter((body) => membersOf(body).length > 0)
     .map((body) => ({
       kind: RECORD_KINDS[body.type],
-      items: attribute(membersOf(body).map(memberSpan).map(toDelimiter), comments, owned, table, {
+      items: attribute(membersOf(body).map(memberSpan).map(toSpan), prose, owned, table, {
         openAt: body.start,
         closeAt: body.end,
         opens: "brace",
@@ -398,7 +457,7 @@ export function parseSource(relPath: string, text: string): Source | null {
     const after = program.body[program.body.indexOf(run[run.length - 1].node) + 1];
     return {
       kind: "const block",
-      items: attribute(run.flatMap(declaratorSpans).map(toDelimiter), comments, owned, table, {
+      items: attribute(run.flatMap(declaratorSpans).map(toSpan), prose, owned, table, {
         openAt: before?.end ?? 0,
         closeAt: after?.start ?? text.length,
         opens: "statement",
