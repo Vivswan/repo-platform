@@ -11,8 +11,8 @@ description: |
     belongs to the item; a nested record's, a function body's, or an object or array literal's comments are its own.
     A method's doc comment may run longer: methods are outside this rule and the next.
   - all-or-none: within one record, or one block of adjacent module-level `const` statements (each declarator a
-    constant of its own), every field or constant carries a comment or none does; each bare one of a half-commented
-    block is a finding.
+    constant of its own; a `declare const` is a type-level name, not a constant, and ends the block), every field or
+    constant carries a comment or none does; each bare one of a half-commented block is a finding.
   - constant-spacing: a commented module-level constant has a blank line (or the file start) before its comment and a
     blank line (or the file end) after its declaration.
 

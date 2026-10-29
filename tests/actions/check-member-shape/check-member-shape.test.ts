@@ -266,6 +266,11 @@ describe("the rules, per record kind and construct", () => {
       "f(); // done\nconst A = 1;\nconst B = 2;\n",
       [],
     ],
+    [
+      "a declare const is no constant of a run: oxc's declare flag ends the block, so the brand and the constant below it are not asked for the comment above",
+      "// A\nconst A = 1;\n\ndeclare const brand: unique symbol;\nconst B = 2;\n",
+      [],
+    ],
     // oxc reads the language off the file name: forced to plain TypeScript, a declaration file's `const A: number;`
     // is a parse error and the file would be warned past instead of judged.
     [
