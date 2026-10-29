@@ -271,6 +271,42 @@ describe("the rules, per record kind and construct", () => {
       "// A\nconst A = 1;\n\ndeclare const brand: unique symbol;\nconst B = 2;\n",
       [],
     ],
+    // A comment addressed to a tool is nobody's: it arms no block, and glued above an item it is the item's head.
+    [
+      "control: a doc block of tags alone, one line or many, is no comment: the block stays comment-free",
+      "/** @public */\nexport const A = 1;\n/**\n * @internal\n */\nconst B = 2;\nconst C = 3;\n",
+      [],
+    ],
+    [
+      "control: a directive glued above a constant, or above a field, arms nothing",
+      "// @ts-expect-error a\nconst A: number = 'a';\nconst B = 2;\ninterface I {\n  // biome-ignore lint/suspicious/noExplicitAny: a\n  a: any;\n  b: string;\n}\n",
+      [],
+    ],
+    [
+      "control: a directive trailing a constant is nobody's comment",
+      "const A = 1; // eslint-disable-line no-foo\nconst B = 2;\n",
+      [],
+    ],
+    [
+      "a directive glued above an item is its head: the comment above the directive is one line directly above the item",
+      "// A\n// @ts-expect-error a\nconst A: number = 'a';\n\n// B\nconst B = 2;\n",
+      [],
+    ],
+    [
+      "a tag after words is still the constant's comment: the words arm the block",
+      "/** A. @public */\nconst A = 1;\nconst B = 2;\n",
+      ["2: constant-spacing", "3: all-or-none"],
+    ],
+    [
+      "a tag opening the line above with code after it is no head: the next item's span never reaches back over the item before",
+      "/** @public */ const A = 1; // A\nconst B = 2;\n",
+      ["1: constant-spacing", "1: one-line-comment", "2: all-or-none"],
+    ],
+    [
+      "a lone-CR file: the head's line start comes from the line table, so the directive is still the item's head",
+      "// A\r// @ts-expect-error a\rconst A: number = String();\r\r// B\rconst B = 2;\r",
+      [],
+    ],
     // oxc reads the language off the file name: forced to plain TypeScript, a declaration file's `const A: number;`
     // is a parse error and the file would be warned past instead of judged.
     [
