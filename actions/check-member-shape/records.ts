@@ -178,10 +178,14 @@ function constructsOf(program: Program, text: string, comments: OxcComment[]): C
   return { records, owned };
 }
 
-/** The statement as a `const` statement, or null for any other. */
+/** The statement as a `const` statement, or null for any other. A `declare const` (a brand's `unique symbol`, an
+ *  ambient global) has no value a comment could speak to, so it is no constant of a run and ends one, as a type alias
+ *  does. */
 function constStatement(node: ModuleStatement): ConstStatement | null {
   const declaration = node.type === "ExportNamedDeclaration" ? node.declaration : node;
   if (declaration?.type !== "VariableDeclaration" || declaration.kind !== "const") return null;
+
+  if (declaration.declare) return null;
 
   return { node, declarators: declaration.declarations };
 }
