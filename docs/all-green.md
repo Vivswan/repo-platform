@@ -57,11 +57,11 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | Gating job | What it does |
 | --- | --- |
 | `checks` | calls the repo-owned checks.yml; skipped on the nightly schedule run |
-| `platform` | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. The `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels. Its `trivy-nightly` job is the schedule's |
+| `platform` | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. The `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels |
 | `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository)) |
 | `all-green` | needs all three |
 
-**The nightly schedule run** is the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, the other checks stand down, and `trivy-nightly` runs the Trivy scan and files its tracking issue. Public repositories only: a private repository pays for every job that runs, and a skipped job bills nothing.
+**The nightly schedule run** is the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, and every other check stands down.
 
 **One ceiling for every platform call:** `platform`, `release`, `publish-release`, and `site` carry the same fixed `permissions:` block, the union of what any job behind those calls asks, and each called job narrows itself to its own need.
 
@@ -72,7 +72,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 **The membership rule:** what gates a managed repository is being a job in fleet.yml or checks.yml, or in release-gate.yml on the release PR and a dispatch - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
 
-- **Inside fleet.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green. `trivy-nightly` fails on a scan or configuration error alone, never on a finding; such a night's gate is red, and the site rebuild waits for the next.
+- **Inside fleet.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green.
 
 - **Every platform action it calls** is a `$/` path, this repository at the workflow's own commit ([build-provenance](platform/build-provenance.md#one-commit-per-run)).
 
@@ -86,13 +86,13 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | `validate-managed-files` | every push and pull request | its report step fails in place on anything but a clean verdict; the sticky-comment steps after it run on `!cancelled()` |
 | `typography`, `file-size`, `shell-complexity`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps), [shell complexity](../actions/check-shell-complexity/action.yml)) |
 | `zizmor` | every push and pull request | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
-| `trivy` | every push and pull request | the blocking half of the [security scans](modules/security-scans.md) |
+| `trivy` | every push and pull request | the advisory Trivy [security scan](modules/security-scans.md#the-trivy-scan): a finding is a warning annotation on its target, never a red step |
 | `ruff` | uv repositories once a sync has written `ruff.toml` | the [Python lint floor](modules/python.md) at a pinned ruff, with the readability thresholds (`C901`, the `PLR09` counts) ignored; the advisory step after it selects those alone and warns with their count, never red; a repository before its first sync stands down with a notice |
 | `biome` | bun repositories with a `biome.json` | the [TypeScript floor](modules/typescript.md) under the managed `biome.json`, whose three thresholds warn and never red the step; a repository the sync has not reached yet stands down with a notice |
 | `member-shape` | bun repositories | the [member-shape rules](modules/typescript.md#the-member-shape-rules) over every tracked TypeScript file; needs no install; advisory: a finding is a warning annotation and a sticky comment, never a red job |
 | `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
 
-- **Beside it, one job each:** `semgrep` and `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix, on public repositories with an analyzable toolchain), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts.
+- **Beside it, one job each:** `semgrep` and the advisory `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix, on public repositories with an analyzable toolchain), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts.
 
 - **The `release-pr` job** runs [release-health](../actions/release-health/action.yml) in pull-request mode on the PR head, then the health gates. A head behind main would cut a release missing commits already on it, so the job refreshes the PR in place (release-please's propose, or GitHub's update-branch where propose pushed nothing because the PR body was unchanged) and ends green naming the new head. The owner approves the new head's run from the merge box.
 

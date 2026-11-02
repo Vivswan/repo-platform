@@ -13,7 +13,6 @@ Each stream keeps one open GitHub issue: a red night files or updates it, a gree
 | the [fuzzer](fuzzer.md) module | its `labels.fuzzer` registration key |
 | the [nightly](nightly.md) module | its `labels.nightly` registration key |
 | the [site](site.md) module's nightly link-rot check | its `labels.site` registration key |
-| the nightly [security scan](security-scans.md) of every public repository | the fixed `security-nightly` label the settings baseline declares on every repository (no module, no answer) |
 
 ## The action
 
@@ -71,4 +70,4 @@ To unblock:
 
 - **Fix the failure** and let the next green night close the issue, or hand-close it once fixed. Closing re-triggers nothing: re-run the release PR's failed `release-pr` job afterwards (the pre-flight reads issue state fresh at release time).
 
-- **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, open Dependabot alerts and blocker issues included, turning all failures into loud warnings ([release-health action](../../actions/release-health/action.yml)). It never waves through freshness: a release PR behind main refreshes itself in its own run, whatever its labels, and the owner approves the new head's run ([all-green.md](../all-green.md#what-gates-what)).
+- **Ship despite the open issue:** apply the `release-override` label to the release PR. It waves through EVERY release-health gate at once, tracking and blocker issues alike, turning all failures into loud warnings ([release-health action](../../actions/release-health/action.yml)). It never waves through freshness: a release PR behind main refreshes itself in its own run, whatever its labels, and the owner approves the new head's run ([all-green.md](../all-green.md#what-gates-what)).

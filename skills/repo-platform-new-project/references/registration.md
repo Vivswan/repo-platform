@@ -46,6 +46,6 @@ The files each module brings are listed in the `repo-platform-add-module` skill 
 
 ## Visibility
 
-Visibility is read from GitHub, not from this file. Public repositories get dependency-review, Semgrep, and the nightly Trivy scan, and zizmor uploads its SARIF; private ones get none of these. CodeQL runs on a public repository whose selected toolchain declares a CodeQL language (`bun`, `uv`; not `rust`).
+Visibility is read from GitHub, not from this file. Public repositories get dependency-review and Semgrep, and zizmor uploads its SARIF; private ones get none of these. CodeQL runs on a public repository whose selected toolchain declares a CodeQL language (`bun`, `uv`; not `rust`).
 
 The settings overlay starter seeds `repository.private` from that reading, and from then on the rendered `.github/settings.yml` follows the value your `.github/settings.local.yml` declares.

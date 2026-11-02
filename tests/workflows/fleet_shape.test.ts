@@ -221,14 +221,12 @@ describe("fleet.yml", () => {
     });
   });
 
-  // Which steps and jobs a scheduled run may reach: the checkout, the plan, CodeQL on its weekly day, and trivy-nightly,
-  // which runs on the schedule ALONE (without its clause every push would file the security issue). Every other step
-  // and job excludes the schedule or gates on one that does, so a new step or job must take a side.
+  // Which steps and jobs a scheduled run may reach: the checkout, the plan, and CodeQL on its weekly day. Every other
+  // step and job excludes the schedule or gates on one that does, so a new step or job must take a side.
   const SKIP_ON_SCHEDULE = "github.event_name != 'schedule'";
-  const ONLY_ON_SCHEDULE = "github.event_name == 'schedule'";
   const GATED_ON = /^steps\.([\w-]+)\.outcome == 'success'$/;
 
-  test("on the nightly schedule only the checkout, the plan, (weekly) codeql, and trivy-nightly can run; trivy-nightly runs then alone", () => {
+  test("on the nightly schedule only the checkout, the plan, and (weekly) codeql can run", () => {
     const stoodDown = new Set<string>();
     for (let grew = true; grew; ) {
       grew = false;
@@ -247,11 +245,8 @@ describe("fleet.yml", () => {
     expect(reachable).toEqual(BARE_STEPS);
 
     const SCHEDULE_RUNS = new Set([CHECKS_JOB, "codeql"]);
-    const SCHEDULE_ALONE = new Set(["trivy-nightly"]);
     const sideOf = (job: Job): string => {
       const clauses = clausesOf(job.if);
-      if (clauses.includes(ONLY_ON_SCHEDULE)) return "schedule only";
-
       if (
         clauses.includes(SKIP_ON_SCHEDULE) ||
         clauses.includes("github.event_name == 'pull_request'")
@@ -261,15 +256,13 @@ describe("fleet.yml", () => {
 
       return "every event";
     };
-    const expectedSide = (name: string): string => {
-      if (SCHEDULE_RUNS.has(name)) return "every event";
-
-      if (SCHEDULE_ALONE.has(name)) return "schedule only";
-
-      return "never on the schedule";
-    };
     const sides = Object.entries(fleet.jobs).map(([name, job]) => [name, sideOf(job)]);
-    expect(sides).toEqual(Object.keys(fleet.jobs).map((name) => [name, expectedSide(name)]));
+    expect(sides).toEqual(
+      Object.keys(fleet.jobs).map((name) => [
+        name,
+        SCHEDULE_RUNS.has(name) ? "every event" : "never on the schedule",
+      ]),
+    );
     expect(fleet.jobs.codeql?.if).toContain(
       `(github.event_name != 'schedule' || needs.${CHECKS_JOB}.outputs.weekly == 'true')`,
     );
