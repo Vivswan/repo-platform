@@ -1,6 +1,7 @@
 ---
 applyTo: "**"
 ---
+
 <!-- This file is managed by {{github_username}}/repo-platform.
      Local edits are replaced on the next sync. -->
 # How to write review comments

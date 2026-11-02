@@ -70,17 +70,17 @@
         text-wrap: balance;
         transition: color var(--fleet-transition);
       }
-      /* A group head, collapsible (a directory) or plain (pages sharing a
-       * frontmatter group), is the one row without a link. */
-      &:not(.is-link) > .item > .text,
-      &.collapsible > .item > .link > .text {
-        font-weight: 500;
-      }
       .item:hover {
         background-color: var(--color-action-list-item-default-hover-bg);
       }
       .item:hover .text {
         color: var(--vp-c-text-1);
+      }
+      /* A group head, collapsible (a directory) or plain (pages sharing a
+       * frontmatter group), is the one row without a link. */
+      &:not(.is-link) > .item > .text,
+      &.collapsible > .item > .link > .text {
+        font-weight: 500;
       }
       &.is-link > .item > .link:hover .text {
         text-decoration: none;

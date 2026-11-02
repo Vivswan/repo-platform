@@ -101,28 +101,28 @@ gh run watch -R Vivswan/repo-platform <id> --exit-status
 
 `manual=true` keeps the PR waiting for a human even when the report holds nothing. The run's job log (`gh run view <id> --log`) carries the operator's only lines: the selector's `syncing:` line (public slugs by name, private repositories as a count), `plan:` once, then one `row <i>:` line per repository, numbered from 0. No row line names a repository: the details are in the repo's own sync PR or failure issue.
 
-| Line | Meaning |
-| --- | --- |
-| `plan: N rows` | how many repositories the run resolved |
-| `row i: unchanged` | the repo already holds every file; no PR |
-| `row i: PR opened` / `PR refreshed` | the sync PR is there, with its report |
-| `row i: branch pushed` | a branch dispatch's clean row: one commit on that branch, no PR |
-| `row i: failed, report filed in the target repository` | read the `[repo-platform] sync failed` issue in the repo |
-| `row i: failed before the target was resolved; re-run the workflow` | the run broke before reaching the repo |
+| Line                                                                | Meaning                                                         |
+| ------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `plan: N rows`                                                      | how many repositories the run resolved                          |
+| `row i: unchanged`                                                  | the repo already holds every file; no PR                        |
+| `row i: PR opened` / `PR refreshed`                                 | the sync PR is there, with its report                           |
+| `row i: branch pushed`                                              | a branch dispatch's clean row: one commit on that branch, no PR |
+| `row i: failed, report filed in the target repository`              | read the `[repo-platform] sync failed` issue in the repo        |
+| `row i: failed before the target was resolved; re-run the workflow` | the run broke before reaching the repo                          |
 
 ### 5. Review the sync PR's report
 
 The PR body is the report, one section per outcome ([the sync-pr skill](https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-sync-pr) covers every case in depth):
 
-| Section | On a first sync, expect |
-| --- | --- |
-| header | Build sha, the modules the registration selected, the visibility |
-| Written | `created` for every path that was absent; an adopted repo also sees `unchanged` for a starter it already had, `region added` for a split file that had no markers (the region goes above its content and the PR holds), and `replaced local edits` for a managed file or split region it had written itself |
-| Replaced local edits | a diff per replaced file; move anything you want to keep (step 6) |
-| Retired | a row per file the platform no longer writes; `held` means it needs your decision |
-| Registration notes | a placeholder with no value, naming the registration key to set (an empty `project.description` counts as no value; step 2 lists what it holds); an `except` path no `files.yml` entry writes |
-| Mirrors | one row per declared target: `written`, `current`, `replaced local edits`, or `replaced` (the last two hold the PR); a declaration the writer cannot honour fails the sync instead |
-| Review | `Hold for review: yes` with the reasons, or `no` |
+| Section              | On a first sync, expect                                                                                                                                                                                                                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| header               | Build sha, the modules the registration selected, the visibility                                                                                                                                                                                                                                            |
+| Written              | `created` for every path that was absent; an adopted repo also sees `unchanged` for a starter it already had, `region added` for a split file that had no markers (the region goes above its content and the PR holds), and `replaced local edits` for a managed file or split region it had written itself |
+| Replaced local edits | a diff per replaced file; move anything you want to keep (step 6)                                                                                                                                                                                                                                           |
+| Retired              | a row per file the platform no longer writes; `held` means it needs your decision                                                                                                                                                                                                                           |
+| Registration notes   | a placeholder with no value, naming the registration key to set (an empty `project.description` counts as no value; step 2 lists what it holds); an `except` path no `files.yml` entry writes                                                                                                               |
+| Mirrors              | one row per declared target: `written`, `current`, `replaced local edits`, or `replaced` (the last two hold the PR); a declaration the writer cannot honour fails the sync instead                                                                                                                          |
+| Review               | `Hold for review: yes` with the reasons, or `no`                                                                                                                                                                                                                                                            |
 
 Merge when every row is explained.
 
@@ -130,17 +130,17 @@ Merge when every row is explained.
 
 Starters arrive once and are yours afterwards. Put real content in the ones your modules brought:
 
-| File | Role |
-| --- | --- |
-| `.github/workflows/checks.yml` | the repo's own test and lint jobs; `ci.yml` calls it inside the gate |
-| `.github/workflows/post-green.yml` | green-gated work on a push to main, before the release |
-| `.github/workflows/release-gate.yml` | release acceptance tests, critical for a release but not run on every merge; the release PR, a dispatch, and the nightly starter run it |
-| `.github/workflows/update-release.yml` | release-please: mutate the draft release (assets, notes) |
-| `.github/workflows/update-release-pr.yml` | release-please: regenerate files that ride in the release commit |
-| `.github/actions/site-build/action.yml` | site: build the repo's own website into a directory named in `dist`; a no-op until filled in |
-| `.github/workflows/nightly-fuzz.yml` | fuzzer: replace the placeholder step |
-| `.github/workflows/nightly.yml` | nightly: replace the placeholder step |
-| `.github/settings.local.yml` | the repo's own settings overlay: identity keys, your labels and rulesets (step 8) |
+| File                                      | Role                                                                                                                                    |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `.github/workflows/checks.yml`            | the repo's own test and lint jobs; `ci.yml` calls it inside the gate                                                                    |
+| `.github/workflows/post-green.yml`        | green-gated work on a push to main, before the release                                                                                  |
+| `.github/workflows/release-gate.yml`      | release acceptance tests, critical for a release but not run on every merge; the release PR, a dispatch, and the nightly starter run it |
+| `.github/workflows/update-release.yml`    | release-please: mutate the draft release (assets, notes)                                                                                |
+| `.github/workflows/update-release-pr.yml` | release-please: regenerate files that ride in the release commit                                                                        |
+| `.github/actions/site-build/action.yml`   | site: build the repo's own website into a directory named in `dist`; a no-op until filled in                                            |
+| `.github/workflows/nightly-fuzz.yml`      | fuzzer: replace the placeholder step                                                                                                    |
+| `.github/workflows/nightly.yml`           | nightly: replace the placeholder step                                                                                                   |
+| `.github/settings.local.yml`              | the repo's own settings overlay: identity keys, your labels and rulesets (step 8)                                                       |
 
 The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
 
@@ -150,14 +150,14 @@ A `site` repository that publishes its own website fills in the site-build hook 
 
 Push any commit to main after the merge and read the run. The jobs are the same in every repository:
 
-| Job | On a PR | On a push to main |
-| --- | --- | --- |
-| `checks` | runs (your checks.yml) | runs |
-| `platform` | runs (fleet.yml: plan, base checks, CodeQL where public and a selected toolchain declares a language, module checks) | runs |
-| `all-green` | the required check | judged |
-| `post-green` | skipped | runs your hook |
-| `release`, `update-release`, `publish-release`, `update-release-pr` | skipped | run only with `release-please` selected |
-| `site` | skipped | runs only with `site` selected (on the nightly schedule and a dispatch too) |
+| Job                                                                 | On a PR                                                                                                              | On a push to main                                                           |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `checks`                                                            | runs (your checks.yml)                                                                                               | runs                                                                        |
+| `platform`                                                          | runs (fleet.yml: plan, base checks, CodeQL where public and a selected toolchain declares a language, module checks) | runs                                                                        |
+| `all-green`                                                         | the required check                                                                                                   | judged                                                                      |
+| `post-green`                                                        | skipped                                                                                                              | runs your hook                                                              |
+| `release`, `update-release`, `publish-release`, `update-release-pr` | skipped                                                                                                              | run only with `release-please` selected                                     |
+| `site`                                                              | skipped                                                                                                              | runs only with `site` selected (on the nightly schedule and a dispatch too) |
 
 A grey leg on main has three ordinary causes: its module is not in `modules`, the gate before it (`all-green`, `post-green`) did not succeed, or the push created no release (`update-release`, `publish-release`) or no release PR (`update-release-pr`). Check the module list before reading grey as a failure.
 

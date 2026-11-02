@@ -44,7 +44,13 @@ modules:
   site:
     description: one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme)
     path: docs
-    tracking_label: {key: site, default: docs-link-rot, color: D4A72C, description: Automated docs-site link-rot report}
+    tracking_label:
+      {
+        key: site,
+        default: docs-link-rot,
+        color: D4A72C,
+        description: Automated docs-site link-rot report,
+      }
   release-please:
     description: release-please releases through the fleet's release pipeline, plus autorelease labels
   pr-title:
@@ -52,10 +58,22 @@ modules:
   fuzzer:
     description: nightly fuzz starter with issue filing, replay inputs, auto-close
     gitignore_sources: [fuzzer]
-    tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}
+    tracking_label:
+      {
+        key: fuzzer,
+        default: fuzz-nightly,
+        color: B60205,
+        description: Automated nightly fuzz failure,
+      }
   nightly:
     description: nightly CI starter with failure issue filing and auto-close
-    tracking_label: {key: nightly, default: nightly-failure, color: D93F0B, description: Automated nightly CI failure}
+    tracking_label:
+      {
+        key: nightly,
+        default: nightly-failure,
+        color: D93F0B,
+        description: Automated nightly CI failure,
+      }
   custom-license:
     description: repo carries its own license in LICENSE.md; the fleet license is not written
 
@@ -67,22 +85,23 @@ modules:
 settings:
   baseline: files/settings/baseline.yml
   layers:
-    - {source: files/settings/public.yml, when: {private: false}}
-    - {source: files/settings/private.yml, when: {private: true}}
-    - {source: files/bun/settings.yml, when: {modules: [bun]}}
-    - {source: files/uv/settings.yml, when: {modules: [uv]}}
-    - {source: files/rust/settings.yml, when: {modules: [rust]}}
-    - {source: files/site/settings.yml, when: {modules: [site]}}
-    - {source: files/site/settings.public.yml, when: {modules: [site], private: false}}
-    - {source: files/release-please/settings.yml, when: {modules: [release-please]}}
-    - {source: files/pr-title/settings.yml, when: {modules: [pr-title]}}
-    - {source: files/settings/codeql-public.yml, when: {private: false, any: {declaring: codeql_languages}}}
+    - { source: files/settings/public.yml, when: { private: false } }
+    - { source: files/settings/private.yml, when: { private: true } }
+    - { source: files/bun/settings.yml, when: { modules: [bun] } }
+    - { source: files/uv/settings.yml, when: { modules: [uv] } }
+    - { source: files/rust/settings.yml, when: { modules: [rust] } }
+    - { source: files/site/settings.yml, when: { modules: [site] } }
+    - { source: files/site/settings.public.yml, when: { modules: [site], private: false } }
+    - { source: files/release-please/settings.yml, when: { modules: [release-please] } }
+    - { source: files/pr-title/settings.yml, when: { modules: [pr-title] } }
+    - source: files/settings/codeql-public.yml
+      when: { private: false, any: { declaring: codeql_languages } }
   override: files/settings/override.yml
 
 files:
   # --- base: every repository
-  - {path: .editorconfig, class: split, region: hash}
-  - {path: .gitattributes, class: split, region: hash}
+  - { path: .editorconfig, class: split, region: hash }
+  - { path: .gitattributes, class: split, region: hash }
   # The github/gitignore templates are fetched at the pin by every sync; refresh-upstream.yml moves the pin weekly, as
   # it moves each module's `pin` above.
   # macOS names its Finder icon file "Icon\r", which the template spells as a class holding a bare CR byte; text gates
@@ -91,20 +110,65 @@ files:
     class: split
     region: hash
     blocks: gitignore_sources
-    replace: {"[\r]": "?"}
+    replace: { "[\r]": "?" }
     always: [Windows, macOS, Linux, VSCode, JetBrains]
     sources:
-      Windows: {repository: github/gitignore, sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac, path: Global/Windows.gitignore}
-      macOS: {repository: github/gitignore, sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac, path: Global/macOS.gitignore}
-      Linux: {repository: github/gitignore, sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac, path: Global/Linux.gitignore}
-      VSCode: {repository: github/gitignore, sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac, path: Global/VisualStudioCode.gitignore}
-      JetBrains: {repository: github/gitignore, sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac, path: Global/JetBrains.gitignore}
-      Node: {repository: github/gitignore, sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac, path: Node.gitignore}
-      bun: {repository: github/gitignore, sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac, path: bun.gitignore}
-      Python: {repository: github/gitignore, sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac, path: Python.gitignore}
-      Rust: {repository: github/gitignore, sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac, path: Rust.gitignore}
+      Windows:
+        {
+          repository: github/gitignore,
+          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          path: Global/Windows.gitignore,
+        }
+      macOS:
+        {
+          repository: github/gitignore,
+          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          path: Global/macOS.gitignore,
+        }
+      Linux:
+        {
+          repository: github/gitignore,
+          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          path: Global/Linux.gitignore,
+        }
+      VSCode:
+        {
+          repository: github/gitignore,
+          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          path: Global/VisualStudioCode.gitignore,
+        }
+      JetBrains:
+        {
+          repository: github/gitignore,
+          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          path: Global/JetBrains.gitignore,
+        }
+      Node:
+        {
+          repository: github/gitignore,
+          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          path: Node.gitignore,
+        }
+      bun:
+        {
+          repository: github/gitignore,
+          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          path: bun.gitignore,
+        }
+      Python:
+        {
+          repository: github/gitignore,
+          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          path: Python.gitignore,
+        }
+      Rust:
+        {
+          repository: github/gitignore,
+          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          path: Rust.gitignore,
+        }
       fuzzer: files/fuzzer/fuzzer.gitignore
-  - {path: .github/CODEOWNERS, class: split, region: hash}
+  - { path: .github/CODEOWNERS, class: split, region: hash }
   - path: .github/dependabot.yml
     class: managed
     blocks: dependabot_ecosystems
@@ -112,13 +176,16 @@ files:
       bun: files/bun/.github/dependabot.bun.yml
       uv: files/uv/.github/dependabot.uv.yml
       cargo: files/rust/.github/dependabot.cargo.yml
-  - {path: .github/actionlint.yaml, class: starter}
-  - {path: .github/instructions/review.instructions.md, class: managed}
+  - { path: .github/actionlint.yaml, class: starter }
+  - { path: .github/instructions/review.instructions.md, class: managed }
   # The overlay starter precedes the rendered document, which reads the
   # overlay it seeds in the same run.
-  - {path: .github/settings.local.yml, class: starter}
-  - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}
-  - {path: .github/workflows/ci.yml, class: managed}
+  - { path: .github/settings.local.yml, class: starter }
+  - path: .github/settings.yml
+    class: managed
+    render: settings
+    overlay: .github/settings.local.yml
+  - { path: .github/workflows/ci.yml, class: managed }
   - path: .github/workflows/checks.yml
     class: starter
     blocks: toolchain_steps
@@ -126,11 +193,11 @@ files:
       bun: files/bun/.github/workflows/checks.toolchain.yml
       uv: files/uv/.github/workflows/checks.toolchain.yml
       rust: files/rust/.github/workflows/checks.toolchain.yml
-  - {path: .github/workflows/post-green.yml, class: starter}
-  - {path: .github/workflows/release-gate.yml, class: starter}
-  - {path: .github/workflows/update-release.yml, class: starter}
-  - {path: .github/workflows/update-release-pr.yml, class: starter}
-  - {path: .github/actions/site-build/action.yml, class: starter}
+  - { path: .github/workflows/post-green.yml, class: starter }
+  - { path: .github/workflows/release-gate.yml, class: starter }
+  - { path: .github/workflows/update-release.yml, class: starter }
+  - { path: .github/workflows/update-release-pr.yml, class: starter }
+  - { path: .github/actions/site-build/action.yml, class: starter }
   - path: .github/workflows/copilot-setup-steps.yml
     class: starter
     blocks: toolchain_steps
@@ -138,46 +205,49 @@ files:
       bun: files/bun/.github/workflows/copilot-setup-steps.toolchain.yml
       uv: files/uv/.github/workflows/copilot-setup-steps.toolchain.yml
       rust: files/rust/.github/workflows/copilot-setup-steps.toolchain.yml
-  - {path: .gitleaks.toml, class: starter}
-  - {path: .yamllint, class: managed}
-  - {path: .github/workflows/auto-assign.yml, class: managed}
-  - {path: .github/workflows/sync-branch.yml, class: managed}
+  - { path: .gitleaks.toml, class: starter }
+  - { path: .yamllint, class: managed }
+  - { path: .github/workflows/auto-assign.yml, class: managed }
+  - { path: .github/workflows/sync-branch.yml, class: managed }
   - path: .github/workflows/auto-format.yml
     class: starter
-    when: {any: {declaring: toolchain_steps}}
+    when: { any: { declaring: toolchain_steps } }
     blocks: toolchain_steps
     sources:
       bun: files/bun/.github/workflows/auto-format.toolchain.yml
       uv: files/uv/.github/workflows/auto-format.toolchain.yml
       rust: files/rust/.github/workflows/auto-format.toolchain.yml
-  - {path: .typography-allow, class: managed, when: {without: [release-please]}}
-  - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
-  - {path: AGENTS.md, class: split, region: html, when: {without: {declaring: agents_toolchain}}}
+  - { path: .typography-allow, class: managed, when: { without: [release-please] } }
+  - { path: .typography-allow, class: managed, when: { modules: [release-please] } }
   - path: AGENTS.md
     class: split
     region: html
-    when: {any: {declaring: agents_toolchain}}
+    when: { without: { declaring: agents_toolchain } }
+  - path: AGENTS.md
+    class: split
+    region: html
+    when: { any: { declaring: agents_toolchain } }
     source: files/base/AGENTS.toolchain.md
     blocks: agents_toolchain
     sources:
       bun: files/bun/AGENTS.toolchain.md
       uv: files/uv/AGENTS.toolchain.md
       rust: files/rust/AGENTS.toolchain.md
-  - {path: LICENSE.md, class: split, region: html, when: {without: [custom-license]}}
+  - { path: LICENSE.md, class: split, region: html, when: { without: [custom-license] } }
   # --- modules
-  - {path: .bun-version, class: managed, when: {modules: [bun]}}
+  - { path: .bun-version, class: managed, when: { modules: [bun] } }
   # The lint floor (docs/modules/typescript.md). biome.json is strict JSON, so like .bun-version it carries no header
   # and validate-managed-files judges it by hash.
-  - {path: biome.json, class: managed, when: {modules: [bun]}}
-  - {path: biome.local.jsonc, class: starter, when: {modules: [bun]}}
-  - {path: .release-please-manifest.json, class: starter, when: {modules: [release-please]}}
-  - {path: release-please-config.json, class: starter, when: {modules: [release-please]}}
-  - {path: .github/workflows/pr-title.yml, class: managed, when: {modules: [pr-title]}}
-  - {path: Cargo.toml, class: starter, when: {modules: [rust]}}
-  - {path: ruff.toml, class: managed, when: {modules: [uv]}}
-  - {path: clippy.toml, class: managed, when: {modules: [rust]}}
-  - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
-  - {path: .github/workflows/nightly.yml, class: starter, when: {modules: [nightly]}}
+  - { path: biome.json, class: managed, when: { modules: [bun] } }
+  - { path: biome.local.jsonc, class: starter, when: { modules: [bun] } }
+  - { path: .release-please-manifest.json, class: starter, when: { modules: [release-please] } }
+  - { path: release-please-config.json, class: starter, when: { modules: [release-please] } }
+  - { path: .github/workflows/pr-title.yml, class: managed, when: { modules: [pr-title] } }
+  - { path: Cargo.toml, class: starter, when: { modules: [rust] } }
+  - { path: ruff.toml, class: managed, when: { modules: [uv] } }
+  - { path: clippy.toml, class: managed, when: { modules: [rust] } }
+  - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
+  - { path: .github/workflows/nightly.yml, class: starter, when: { modules: [nightly] } }
 
 # The fleet's mirrors, in the registration's grammar, written by the mirror pass before the repository's own; a
 # target the registration excepts is left to the repository.

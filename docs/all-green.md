@@ -12,10 +12,10 @@ Every repository in the fleet - repo-platform included - gates merges on a requi
 
 **The judgment, whole:** every needed result must be `success`, or `skipped` for a job named in `allowed-skips`. Anything else (`failure`, `cancelled`, a skip the list does not name) fails the gate, and the step summary lists every job with its result.
 
-| ci.yml | `allowed-skips` | Why |
-| --- | --- | --- |
+| ci.yml               | `allowed-skips`             | Why                                                                                                                           |
+| -------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | the managed skeleton | `checks` and `release-gate` | so a schedule night passes on `platform`, an ordinary run passes without the release gate, and an all-skipped run cannot pass |
-| repo-platform's own | `dependency-review` alone | since only a pull request has a dependency diff to review |
+| repo-platform's own  | `dependency-review` alone   | since only a pull request has a dependency diff to review                                                                     |
 
 **The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, which [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) holds to the root's sha, landed in the fleet by the next sync round.
 
@@ -54,12 +54,12 @@ Each entry is what you see, what it means, and what to do.
 
 A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-checksyml)) carries four gating jobs:
 
-| Gating job | What it does |
-| --- | --- |
-| `checks` | calls the repo-owned checks.yml; skipped on the nightly schedule run |
-| `platform` | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. The `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels |
-| `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository)) |
-| `all-green` | needs all three |
+| Gating job     | What it does                                                                                                                                                                                                                                                            |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checks`       | calls the repo-owned checks.yml; skipped on the nightly schedule run                                                                                                                                                                                                    |
+| `platform`     | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. The `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels |
+| `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository))                                                                                   |
+| `all-green`    | needs all three                                                                                                                                                                                                                                                         |
 
 **The nightly schedule run** is the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, and every other check stands down.
 
@@ -80,17 +80,17 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 - **Each check step** runs under `!cancelled()` once the plan resolved: one failure never hides another, a cancelled run stops them, and a failed plan runs none. Each step fails in place, and the job's page names the failed step; a step that stood down is never a failure.
 
-| Step | Runs on | Notes |
-| --- | --- | --- |
-| `plan` | every event, the schedule included | a failed plan fails the job and skips every check step; its outputs gate ruff, knip, and every job beside |
-| `validate-managed-files` | every push and pull request | its report step fails in place on anything but a clean verdict; the sticky-comment steps after it run on `!cancelled()` |
-| `typography`, `file-size`, `shell-complexity`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps), [shell complexity](../actions/check-shell-complexity/action.yml)) |
-| `zizmor` | every push and pull request | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check) |
-| `trivy` | every push and pull request | the advisory Trivy [security scan](modules/security-scans.md#the-trivy-scan): a finding is a warning annotation on its target, never a red step |
-| `ruff` | uv repositories once a sync has written `ruff.toml` | the [Python lint floor](modules/python.md) at a pinned ruff, with the readability thresholds (`C901`, the `PLR09` counts) ignored; the advisory step after it selects those alone and warns with their count, never red; a repository before its first sync stands down with a notice |
-| `biome` | bun repositories with a `biome.json` | the [TypeScript floor](modules/typescript.md) under the managed `biome.json`, whose three thresholds warn and never red the step; a repository the sync has not reached yet stands down with a notice |
-| `member-shape` | bun repositories | the [member-shape rules](modules/typescript.md#the-member-shape-rules) over every tracked TypeScript file; needs no install; advisory: a finding is a warning annotation and a sticky comment, never a red job |
-| `knip` | bun repositories with a package.json to install from | a repository without one yet stands down with a notice |
+| Step                                                                                                         | Runs on                                              | Notes                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`                                                                                                       | every event, the schedule included                   | a failed plan fails the job and skips every check step; its outputs gate ruff, knip, and every job beside                                                                                                                                                                             |
+| `validate-managed-files`                                                                                     | every push and pull request                          | its report step fails in place on anything but a clean verdict; the sticky-comment steps after it run on `!cancelled()`                                                                                                                                                               |
+| `typography`, `file-size`, `shell-complexity`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request                          | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps), [shell complexity](../actions/check-shell-complexity/action.yml))                                                                                                                                              |
+| `zizmor`                                                                                                     | every push and pull request                          | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check)                                                                                                                                       |
+| `trivy`                                                                                                      | every push and pull request                          | the advisory Trivy [security scan](modules/security-scans.md#the-trivy-scan): a finding is a warning annotation on its target, never a red step                                                                                                                                       |
+| `ruff`                                                                                                       | uv repositories once a sync has written `ruff.toml`  | the [Python lint floor](modules/python.md) at a pinned ruff, with the readability thresholds (`C901`, the `PLR09` counts) ignored; the advisory step after it selects those alone and warns with their count, never red; a repository before its first sync stands down with a notice |
+| `biome`                                                                                                      | bun repositories with a `biome.json`                 | the [TypeScript floor](modules/typescript.md) under the managed `biome.json`, whose three thresholds warn and never red the step; a repository the sync has not reached yet stands down with a notice                                                                                 |
+| `member-shape`                                                                                               | bun repositories                                     | the [member-shape rules](modules/typescript.md#the-member-shape-rules) over every tracked TypeScript file; needs no install; advisory: a finding is a warning annotation and a sticky comment, never a red job                                                                        |
+| `knip`                                                                                                       | bun repositories with a package.json to install from | a repository without one yet stands down with a notice                                                                                                                                                                                                                                |
 
 - **Beside it, one job each:** `semgrep` and the advisory `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix, on public repositories with an analyzable toolchain), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts.
 
@@ -98,11 +98,11 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 - **What stays red there,** each with its remedy:
 
-| Red | What happens next |
-| --- | --- |
-| a health gate fails | the refresh still runs, and the gate's red stands |
-| main moved past this run's checkout | that commit's own run refreshes the PR |
-| a merged release PR still wears `autorelease: pending` | release-please proposes nothing until the cut relabels it |
+| Red                                                                                                       | What happens next                                                   |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| a health gate fails                                                                                       | the refresh still runs, and the gate's red stands                   |
+| main moved past this run's checkout                                                                       | that commit's own run refreshes the PR                              |
+| a merged release PR still wears `autorelease: pending`                                                    | release-please proposes nothing until the cut relabels it           |
 | GitHub cannot merge main cleanly (update-branch answers 422: a conflict, or the head moved under the run) | the job fails with GitHub's message, never retrying or resolving it |
 
 - **Bypassing a check:** each check's per-finding bypass is the table in [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check).
@@ -148,9 +148,9 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 
 **The caller grants `GITHUB_TOKEN` two scopes,** the ceiling for every hook job (a called job cannot raise above its caller), and no knob narrows them per repository:
 
-| Scope | Why |
-| --- | --- |
-| `contents: write` | a hook may publish a fast-forward branch such as a packaged `latest` |
+| Scope             | Why                                                                                                                                                                     |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contents: write` | a hook may publish a fast-forward branch such as a packaged `latest`                                                                                                    |
 | `id-token: write` | a hook may mint the run's OIDC token for trusted publishing (npm, PyPI). GitHub artifact attestations need `attestations: write` too, which this ceiling does not grant |
 
 **The starter ships one no-op job** (a workflow_call cannot ship empty), and that job costs a runner allocation on every green push to main until the repository REPLACES it. Replace the no-op, do not append beside it.
@@ -165,12 +165,12 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 
 **Every managed ci.yml carries a `release-gate` job** calling the repo-owned starter `release-gate.yml` (workflow_call only, no required inputs, seeded once, never resynced): the release acceptance tier, tests critical for a release that need not run on every merge because they are slow, environment-heavy, or network-bound.
 
-| Event | What happens |
-| --- | --- |
-| the release PR: a head branch with release-please's `release-please--` prefix, the spelling fleet.yml's `release-pr` job reads | the hook runs and all-green blocks on it |
-| a `workflow_dispatch` of ci.yml | the hook runs, and a red gate blocks that run's legs, the site deploy included |
-| every other event | the job skips, and `allowed-skips` names it so the gate stays green |
-| the nightly schedule | not ci.yml's: a nightly.yml the [nightly](modules/nightly.md) module seeds from now on calls the same file every night, an existing one [adds the sibling job itself](modules/nightly.md#customizing-the-starter), and a red tier files the nightly tracking issue |
+| Event                                                                                                                          | What happens                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| the release PR: a head branch with release-please's `release-please--` prefix, the spelling fleet.yml's `release-pr` job reads | the hook runs and all-green blocks on it                                                                                                                                                                                                                           |
+| a `workflow_dispatch` of ci.yml                                                                                                | the hook runs, and a red gate blocks that run's legs, the site deploy included                                                                                                                                                                                     |
+| every other event                                                                                                              | the job skips, and `allowed-skips` names it so the gate stays green                                                                                                                                                                                                |
+| the nightly schedule                                                                                                           | not ci.yml's: a nightly.yml the [nightly](modules/nightly.md) module seeds from now on calls the same file every night, an existing one [adds the sibling job itself](modules/nightly.md#customizing-the-starter), and a red tier files the nightly tracking issue |
 
 - **The caller's contract is checks.yml's:** no secrets, permissions cap at `contents: read`. A tier needing more gets its own workflow.
 
@@ -197,10 +197,10 @@ checks + platform + release-gate -> all-green -> post-green (repo-owned hook) ->
 
 **The `release` leg** needs the hook, which itself ran only past a green gate, so the repo's post-green work lands before the tag is minted. It then calls [fleet-release.yml](../.github/workflows/fleet-release.yml)`@stable` with the judged sha and the `platform` call's `tracking-labels` output. The called job takes two paths off release-health's `release-cut` output:
 
-| Push | Path |
-| --- | --- |
-| a release-PR merge | it cuts: release-please tags that merge commit (never the branch head) and drafts the release, whatever main does afterwards |
-| every other push | it proposes or refreshes the release PR, and only while main's head is still the judged commit (release-health's `head-current` output): a run whose commit is no longer the head skips instead of racing the newer run's refresh |
+| Push               | Path                                                                                                                                                                                                                              |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a release-PR merge | it cuts: release-please tags that merge commit (never the branch head) and drafts the release, whatever main does afterwards                                                                                                      |
+| every other push   | it proposes or refreshes the release PR, and only while main's head is still the judged commit (release-health's `head-current` output): a run whose commit is no longer the head skips instead of racing the newer run's refresh |
 
 - **A release merge whose own run went red** stays pending until that run is re-run, and the stale-label guard (release-health in `after-propose` mode, run once release-please proposed) names it on the next push.
 
@@ -220,10 +220,10 @@ checks + platform + release-gate -> all-green -> post-green (repo-owned hook) ->
 
 One label on the PR, before it merges.
 
-| Label | Syncs now | Notes |
-| --- | --- | --- |
-| `fleet-sync:public` | every public managed repo | the default choice |
-| `fleet-sync:all` | the whole fleet, the same run the weekly cron performs | private repos burn paid Actions minutes, so the weekly sync normally carries them; only when necessary, with the repository owner's approval |
+| Label               | Syncs now                                              | Notes                                                                                                                                        |
+| ------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fleet-sync:public` | every public managed repo                              | the default choice                                                                                                                           |
+| `fleet-sync:all`    | the whole fleet, the same run the weekly cron performs | private repos burn paid Actions minutes, so the weekly sync normally carries them; only when necessary, with the repository owner's approval |
 
 - **A direct push:** a commit no pull request produced carries no label and never syncs from its own merge.
 

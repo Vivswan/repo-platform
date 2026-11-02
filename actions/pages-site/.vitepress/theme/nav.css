@@ -225,13 +225,6 @@
       color: var(--vp-c-text-2);
     }
   }
-  /* A page without headings (a landing) beside a sidebar has nothing to
-   * list, and carbon's fallback there is a no-op "Return to top" at the top
-   * of the page. Without a sidebar the bar appears only once scrolled, where
-   * that button does something. */
-  &.empty.has-sidebar .VPLocalNavOutlineDropdown {
-    display: none;
-  }
   /* The sheet: one opaque panel with a hairline under its header. Carbon
    * draws that divider as a 1px grid gap over the gutter color, and the
    * fleet's translucent gutter lets the page text bleed through it. */
@@ -265,6 +258,13 @@
       line-height: 24px;
       white-space: normal;
     }
+  }
+  /* A page without headings (a landing) beside a sidebar has nothing to
+   * list, and carbon's fallback there is a no-op "Return to top" at the top
+   * of the page. Without a sidebar the bar appears only once scrolled, where
+   * that button does something. */
+  &.empty.has-sidebar .VPLocalNavOutlineDropdown {
+    display: none;
   }
 }
 

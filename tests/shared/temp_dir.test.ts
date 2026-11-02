@@ -204,10 +204,11 @@ describe("the biome ban on bare mkdtemp under tests/", () => {
   ].join("\n");
 
   test("a bare import reds under tests/ with the helper's path, the helper alone is exempt by path", () => {
-    // The shipped biome pair, byte for byte; vcs is off on the command line since the fixture root has no .git.
+    // The shipped floor and this repository's local layer, byte for byte: the root biome.json is the floor's managed
+    // copy and lags it by one self-sync. vcs is off on the command line since the fixture root has no .git.
     const lintRoot = join(root, "biome-ban");
     const files: Record<string, string> = {
-      "biome.json": readFileSync(join(repoRoot, "biome.json"), "utf-8"),
+      "biome.json": readFileSync(join(repoRoot, "files/bun/biome.json"), "utf-8"),
       "biome.local.jsonc": readFileSync(join(repoRoot, "biome.local.jsonc"), "utf-8"),
       "tests/x/bare.test.ts": bare,
       "tests/shared/temp_dir.ts": helperSource,

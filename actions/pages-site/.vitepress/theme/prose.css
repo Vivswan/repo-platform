@@ -143,6 +143,13 @@
     line-height: 1.5;
     transition: none;
   }
+  :not(pre, h1, h2, h3, h4, h5, h6) > code {
+    font-size: 0.88em;
+  }
+  a > code {
+    color: var(--fleet-hue);
+    text-decoration: inherit;
+  }
   /* A percentage cap resolves to nothing while a table column is sized, so
    * a bare cell's token has no cap and counts whole. In the scroll wrapper
    * the cap is a share of the wrapper (tables.css makes it the size
@@ -157,13 +164,6 @@
     width: max-content;
     max-width: 50cqi;
     overflow-wrap: anywhere;
-  }
-  :not(pre, h1, h2, h3, h4, h5, h6) > code {
-    font-size: 0.88em;
-  }
-  a > code {
-    color: var(--fleet-hue);
-    text-decoration: inherit;
   }
   /* Highlights carry the hue's band, never the agent's yellow. */
   mark {

@@ -12,14 +12,14 @@ Ruff reads one configuration file per directory, `.ruff.toml` first, then `ruff.
 
 Ruff resolves the selection level by level, parent first, so the child's `extend-select` is applied last and a scalar (a threshold, the convention) takes the child's value. Measured at ruff 0.17.2:
 
-| `pyproject.toml` carries | Result |
-| --- | --- |
-| a `[tool.ruff]` table with no `lint` keys | the floor's findings, with ruff's own default selection still beneath them |
-| `[tool.ruff.lint] extend-select = ["D1"]` | `D103` reds beside the floor: the repository added a family |
-| `[tool.ruff.lint] select = ["D1"]` | `D103` reds, and ruff's default selection is gone: `select` replaces it, `extend-select` keeps it |
-| `[tool.ruff.lint] ignore = ["PLR0913"]` | `PLR0913` still fires: the child's `extend-select` re-selects the family after the parent's ignore |
-| `[tool.ruff.lint.pylint] max-args = 20` | still `9 > 8`: the child's threshold wins |
-| `[tool.ruff.lint.per-file-ignores] "sample.py" = ["PLR0913"]` | `PLR0913` off in that file alone |
+| `pyproject.toml` carries                                      | Result                                                                                             |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| a `[tool.ruff]` table with no `lint` keys                     | the floor's findings, with ruff's own default selection still beneath them                         |
+| `[tool.ruff.lint] extend-select = ["D1"]`                     | `D103` reds beside the floor: the repository added a family                                        |
+| `[tool.ruff.lint] select = ["D1"]`                            | `D103` reds, and ruff's default selection is gone: `select` replaces it, `extend-select` keeps it  |
+| `[tool.ruff.lint] ignore = ["PLR0913"]`                       | `PLR0913` still fires: the child's `extend-select` re-selects the family after the parent's ignore |
+| `[tool.ruff.lint.pylint] max-args = 20`                       | still `9 > 8`: the child's threshold wins                                                          |
+| `[tool.ruff.lint.per-file-ignores] "sample.py" = ["PLR0913"]` | `PLR0913` off in that file alone                                                                   |
 
 So an `ignore` or a looser threshold in `pyproject.toml` does not lower the floor. The one way under it is `per-file-ignores`, scoped to named files and visible in a diff.
 
@@ -32,12 +32,12 @@ So an `ignore` or a looser threshold in `pyproject.toml` does not lower the floo
 
 ## Handling a finding
 
-| The finding | The response |
-| --- | --- |
-| a rule violation | fix it |
-| a function over a threshold (`C901`, the `PLR09` counts) | advisory: the gate run ignores them and a second step warns with their count; split when the split reads better, else leave it, or carry a known case in `per-file-ignores` |
-| a rule whose fix would change behaviour, or a false positive, in named files | one `per-file-ignores` entry in `pyproject.toml`, its reason beside it |
-| anything else | not a `# noqa` wall, not a root `.ruff.toml`, not an `ignore` (which the floor re-selects anyway) |
+| The finding                                                                  | The response                                                                                                                                                                |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a rule violation                                                             | fix it                                                                                                                                                                      |
+| a function over a threshold (`C901`, the `PLR09` counts)                     | advisory: the gate run ignores them and a second step warns with their count; split when the split reads better, else leave it, or carry a known case in `per-file-ignores` |
+| a rule whose fix would change behaviour, or a false positive, in named files | one `per-file-ignores` entry in `pyproject.toml`, its reason beside it                                                                                                      |
+| anything else                                                                | not a `# noqa` wall, not a root `.ruff.toml`, not an `ignore` (which the floor re-selects anyway)                                                                           |
 
 ## What is not in the files
 

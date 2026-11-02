@@ -8,11 +8,11 @@ This page is the machinery the tracking-issue streams share; the module pages co
 
 Each stream keeps one open GitHub issue: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating).
 
-| Stream | Rides the machinery under |
-|---|---|
-| the [fuzzer](fuzzer.md) module | its `labels.fuzzer` registration key |
-| the [nightly](nightly.md) module | its `labels.nightly` registration key |
-| the [site](site.md) module's nightly link-rot check | its `labels.site` registration key |
+| Stream                                              | Rides the machinery under             |
+| --------------------------------------------------- | ------------------------------------- |
+| the [fuzzer](fuzzer.md) module                      | its `labels.fuzzer` registration key  |
+| the [nightly](nightly.md) module                    | its `labels.nightly` registration key |
+| the [site](site.md) module's nightly link-rot check | its `labels.site` registration key    |
 
 ## The action
 
@@ -59,9 +59,9 @@ The registration grammar and fleet.yml's `plan` step enforce:
 
 With the release-please module also selected, an open tracking issue blocks releases twice over:
 
-| Gate | What it does |
-|---|---|
-| the release PR's `release-pr` CI job | fails early and visibly; it blocks that PR on every refresh |
+| Gate                                            | What it does                                                                                         |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| the release PR's `release-pr` CI job            | fails early and visibly; it blocks that PR on every refresh                                          |
 | the release pipeline's authoritative pre-flight | blocks the cut itself; it self-scopes to release-cut pushes, so ordinary main runs are never blocked |
 
 **How the labels reach the gate:** fleet.yml's `plan` step outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open.
