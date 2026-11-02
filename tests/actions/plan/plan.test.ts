@@ -18,7 +18,7 @@ import {
   weekly,
 } from "../../../actions/plan/plan.ts";
 import { parseRegistration, type Registration } from "../../../actions/plan/registration.ts";
-import { declaredLabelTuple, reservedLabelNames } from "../../../actions/plan/reserved_labels.ts";
+import { reservedLabelNames } from "../../../actions/plan/reserved_labels.ts";
 import { loadAction } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { parseGithubOutput } from "../../shared/github_output.ts";
@@ -41,7 +41,6 @@ const MINIMAL_FILES = [
 ].join("\n");
 
 const RESERVED = reservedLabelNames(FILES_DATA.layers, FILES_TREE);
-const SECURITY = declaredLabelTuple(FILES_DATA.layers, FILES_TREE, "security-nightly");
 
 const PROJECT = "project: { name: Demo Project, slug: demo, description: A demo }\n";
 
@@ -59,7 +58,6 @@ function input(text: string, isPrivate = false, modules: Module[] = MODULES): Pl
     files: FILES_DATA.files,
     mirrors: FILES_DATA.mirrors,
     reservedLabels: RESERVED,
-    securityLabel: SECURITY,
     private: isPrivate,
   };
 }
@@ -113,15 +111,9 @@ describe("loadModuleData", () => {
 describe("planCi", () => {
   const MONDAY = new Date("2026-09-07T04:03:00Z");
   const THURSDAY = new Date("2026-09-10T04:03:00Z");
-  const SECURITY_ROWS = {
-    "security-label": "security-nightly",
-    "security-label-color": "1d76db",
-    "security-label-description": "Automated nightly security scan findings",
-  };
 
   // The output names are fleet.yml's `needs.plan.outputs` contract; the module order is files.yml's whatever the
-  // registration's, the tracking labels follow it with the registration's spellings winning per key, and the fleet
-  // security label rides last on every repository, an empty one included.
+  // registration's, and the tracking labels follow it with the registration's spellings winning per key.
   test.each<{ reason: string; text: string; now: Date; outputs: Record<string, string> }>([
     {
       reason: "a shuffled selection with two registration labels",
@@ -131,8 +123,7 @@ describe("planCi", () => {
         "modules": '["bun","uv","site","release-please","fuzzer","nightly"]',
         "private": "false",
         "codeql-languages": '["javascript-typescript","python"]',
-        "tracking-labels": "docs-link-rot,fuzz: nightly,nightly-red,security-nightly",
-        ...SECURITY_ROWS,
+        "tracking-labels": "docs-link-rot,fuzz: nightly,nightly-red",
         "weekly": "true",
       },
     },
@@ -144,8 +135,7 @@ describe("planCi", () => {
         "modules": '["fuzzer","nightly"]',
         "private": "false",
         "codeql-languages": "[]",
-        "tracking-labels": "fuzz: nightly,nightly-failure,security-nightly",
-        ...SECURITY_ROWS,
+        "tracking-labels": "fuzz: nightly,nightly-failure",
         "weekly": "false",
       },
     },
@@ -157,25 +147,19 @@ describe("planCi", () => {
         "modules": "[]",
         "private": "false",
         "codeql-languages": "[]",
-        "tracking-labels": "security-nightly",
-        ...SECURITY_ROWS,
+        "tracking-labels": "",
         "weekly": "false",
       },
     },
   ])(
-    "canonical order, CodeQL per toolchain, tracking labels per stream plus the fleet security label: $reason",
+    "canonical order, CodeQL per toolchain, tracking labels per stream: $reason",
     ({ text, now, outputs }) => {
       const plan = planCi(input(text), now);
       expect(plan).toEqual({
         modules: JSON.parse(outputs.modules),
         private: false,
         codeqlLanguages: JSON.parse(outputs["codeql-languages"]),
-        trackingLabels: outputs["tracking-labels"].split(","),
-        securityLabel: {
-          name: "security-nightly",
-          color: "1d76db",
-          description: "Automated nightly security scan findings",
-        },
+        trackingLabels: outputs["tracking-labels"].split(",").filter((label) => label !== ""),
         weekly: outputs.weekly === "true",
       });
       expect(outputsOf(plan)).toEqual(outputs);
@@ -447,10 +431,7 @@ describe("plan.ts as a child", () => {
         "modules": '["bun","release-please","fuzzer"]',
         "private": "false",
         "codeql-languages": '["javascript-typescript"]',
-        "tracking-labels": "fuzz-nightly,security-nightly",
-        "security-label": "security-nightly",
-        "security-label-color": "1d76db",
-        "security-label-description": "Automated nightly security scan findings",
+        "tracking-labels": "fuzz-nightly",
         "weekly": WEEKLY,
       },
     },
@@ -462,10 +443,7 @@ describe("plan.ts as a child", () => {
         "modules": '["uv"]',
         "private": "true",
         "codeql-languages": "[]",
-        "tracking-labels": "security-nightly",
-        "security-label": "security-nightly",
-        "security-label-color": "1d76db",
-        "security-label-description": "Automated nightly security scan findings",
+        "tracking-labels": "",
         "weekly": WEEKLY,
       },
     },
@@ -603,10 +581,7 @@ describe("plan.ts as a child", () => {
         "modules": '["site"]',
         "private": "false",
         "codeql-languages": "[]",
-        "tracking-labels": "docs-link-rot,security-nightly",
-        "security-label": "security-nightly",
-        "security-label-color": "1d76db",
-        "security-label-description": "Automated nightly security scan findings",
+        "tracking-labels": "docs-link-rot",
         "weekly": WEEKLY,
       },
     ]);

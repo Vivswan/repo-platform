@@ -129,7 +129,7 @@ The run itself is [platform/settings-apply.md](platform/settings-apply.md): its 
 
 | When | Labels |
 |---|---|
-| always | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's PR-flow labels `merge-when-green` and `parked`; the fleet-wide `security-nightly` stream label; `repo-platform:sync`, which a human adds to a PR for the branch sync ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)) |
+| always | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's PR-flow labels `merge-when-green` and `parked`; `repo-platform:sync`, which a human adds to a PR for the branch sync ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)) |
 | per selected toolchain | the dependabot ecosystem labels: `javascript` for bun, `python:uv` for uv, `rust` for cargo |
 | with release-please | the `autorelease: *` pair and release-health's gate labels, `release-blocker` and `release-override`: stripping one un-blocks or un-overrides a release mid-flight |
 | with the fuzzer, nightly, or site module | the tracking labels, named and styled as the layer list above says |

@@ -76,17 +76,3 @@ export function reservedLabelNames(config: LayerSources, tree: string): Set<stri
 
   return names;
 }
-
-/** The tuple a declared layer writes `name` with; a missing label or an incomplete tuple is a broken delivery commit. */
-export function declaredLabelTuple(config: LayerSources, tree: string, name: string): LabelTuple {
-  const label = layerLabelEntries(config, tree).find((entry) => entry.name === name);
-  if (label === undefined) {
-    throw new Error(`no declared settings layer carries the label '${name}'`);
-  }
-
-  if (typeof label.color !== "string" || typeof label.description !== "string") {
-    throw new Error(`the declared label '${name}' needs a string color and description`);
-  }
-
-  return { name, color: label.color, description: label.description };
-}

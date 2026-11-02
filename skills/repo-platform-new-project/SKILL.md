@@ -179,7 +179,7 @@ gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-p
 
 ## Private repositories
 
-- No CodeQL, dependency-review, Semgrep, or nightly Trivy jobs; zizmor still runs but uploads no SARIF to code scanning.
+- No CodeQL, dependency-review, or Semgrep jobs; zizmor still runs but uploads no SARIF to code scanning.
 - Fleet run logs are public, so the `plan:` and `row <i>:` lines never name a repository (the plan job's selection line names public repositories and counts private ones); the details land in the repo's own sync PR and failure issue.
 
 ## Verify

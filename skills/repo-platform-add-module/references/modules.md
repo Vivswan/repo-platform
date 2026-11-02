@@ -38,9 +38,9 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
   | Gate | Fails when |
   | --- | --- |
   | Freshness | the base moved after the run's checkout, a merged release PR is still pending, GitHub refuses the merge (a conflict, a refused push), or the head stays unchanged after the update-branch wait; a PR behind its base first gets release-please's propose, then GitHub's update-branch only when the regenerated body is unchanged |
-  | Health | a tracking issue of a selected stream (`fuzzer`, `nightly`, `site`) or the fleet `security-nightly` stream is open |
+  | Health | a tracking issue of a selected stream (`fuzzer`, `nightly`, `site`) is open |
   | Health | a `release-blocker` issue is open |
-  | Health | a Dependabot alert at or above the threshold (default `high`) is open; alerts the token cannot read skip that gate |
+  | Health, advisory | never: an open Dependabot alert at high or critical is a warning on the run; an alerts endpoint the token cannot read fails the check |
 
 - Labels (`autorelease: pending`, `autorelease: tagged`, `release-blocker`, `release-override`) and the tag-immutability ruleset come from the module's settings layer: the sync renders them into `.github/settings.yml`, the settings apply declares them.
 - Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in the config.

@@ -328,13 +328,13 @@ describe("securityGate", () => {
       },
     },
     {
-      reason: "fails naming the open alerts",
+      reason: "warns naming the open alerts, never fails",
       threshold: "medium",
       alerts: [1, 2, 3],
       url: "medium,high,critical",
       expected: {
         gate: "security",
-        status: "fail",
+        status: "warn",
         problem: "3 open Dependabot alert(s) at or above medium: #1, #2, #3",
         advice: "fix them",
       },
@@ -524,7 +524,7 @@ describe("runHealthCheck", () => {
     "or apply the 'release-override' label to the release PR and re-run this check";
   const TRACKING_ADVICE = `fix the failures behind it (the stream's next green nightly run closes the tracking issue automatically), ${OVERRIDE_HINT}`;
   const BLOCKER_ADVICE = `close the blocker issue(s), ${OVERRIDE_HINT}`;
-  const SECURITY_ADVICE = `fix or dismiss the alert(s) under the repository's Security tab, ${OVERRIDE_HINT}`;
+  const SECURITY_ADVICE = "fix or dismiss the alert(s) under the repository's Security tab";
   const PR_CALLS = (labels: string[]) => [
     PR_VIEW_CALL,
     ...labels.map(issueListCall),
@@ -595,7 +595,8 @@ describe("runHealthCheck", () => {
       },
     },
     {
-      reason: "each failing gate is an error annotation with its advice, exit 1",
+      reason:
+        "each failing gate is an error annotation with its advice, exit 1; the advisory security gate warns first and fails nothing",
       config: prConfig(),
       fixture: {
         issues: { "fuzz-nightly": [2], "release-blocker": [7] },
@@ -606,16 +607,16 @@ describe("runHealthCheck", () => {
         exit: 1,
         lines: [
           [
+            "warning",
+            `security gate (advisory): 1 open Dependabot alert(s) at or above high: #11. ${SECURITY_ADVICE}`,
+          ],
+          [
             "error",
             `tracking:fuzz-nightly gate failed: 1 open 'fuzz-nightly' issue(s): #2. To release: ${TRACKING_ADVICE}`,
           ],
           [
             "error",
             `blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
-          ],
-          [
-            "error",
-            `security gate failed: 1 open Dependabot alert(s) at or above high: #11. To release: ${SECURITY_ADVICE}`,
           ],
         ],
         outputs: [],
@@ -624,7 +625,7 @@ describe("runHealthCheck", () => {
     },
     {
       reason:
-        "the override turns failures into warnings plus a loud notice, exit 0, every gate still run",
+        "the override turns failures into warnings plus a loud notice, exit 0, every gate still run; an advisory alert is no failure to bypass",
       config: prConfig(),
       fixture: {
         issues: { "fuzz-nightly": [], "release-blocker": [7] },
@@ -634,11 +635,14 @@ describe("runHealthCheck", () => {
       expected: {
         exit: 0,
         lines: [
+          [
+            "warning",
+            `security gate (advisory): 1 open Dependabot alert(s) at or above high: #5. ${SECURITY_ADVICE}`,
+          ],
           ["warning", "blocker gate failed: 1 open 'release-blocker' issue(s): #7"],
-          ["warning", "security gate failed: 1 open Dependabot alert(s) at or above high: #5"],
           [
             "notice",
-            "OVERRIDE: the 'release-override' label on release PR #12 bypassed 2 failing gate(s) (blocker, security); this release ships despite them",
+            "OVERRIDE: the 'release-override' label on release PR #12 bypassed 1 failing gate(s) (blocker); this release ships despite them",
           ],
         ],
         outputs: [],

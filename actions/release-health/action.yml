@@ -1,8 +1,8 @@
 name: Release Health
 description: |
-  Gates releases in managed repositories on what says the repository is not release-worthy; any of these, open, fails
-  the gate: a tracking issue of a nightly stream (fuzz or CI), a release-blocker issue, or a Dependabot alert at high
-  or critical severity.
+  Gates releases in managed repositories on what says the repository is not release-worthy; either of these, open,
+  fails the gate: a tracking issue of a nightly stream (fuzz or CI), or a release-blocker issue. An open Dependabot
+  alert at high or critical severity is advisory: a warning on the run, never a failure.
 
   Modes, each named by the caller:
 

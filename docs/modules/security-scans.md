@@ -6,65 +6,23 @@ order: 225
 
 This page covers the fleet's Trivy and semgrep scans; every other check fleet.yml runs has its row in [fleet-guidelines.md](../fleet-guidelines.md#how-to-bypass-a-check).
 
-Every managed repository is scanned by [Trivy](https://trivy.dev) through the skeleton ci.yml's `platform` call, with zero Trivy files in the repository (public repositories also run [semgrep](#semgrep)). The configuration lives in the [trivy action](../../actions/trivy/action.yml), and the scan runs in two halves:
+Every managed repository is scanned by [Trivy](https://trivy.dev) on every push and pull request, through the skeleton ci.yml's `platform` call, with zero Trivy files in the repository (public repositories also run [semgrep](#semgrep)). The configuration lives in the [trivy action](../../actions/trivy/action.yml), and the scan is the `trivy` step of [fleet.yml](../../.github/workflows/fleet.yml)'s `standard-checks` job.
 
-| Half | Where | Runs on | Scans | Blocking? | Findings go to |
-|---|---|---|---|---|---|
-| Blocking | the `trivy` step of [fleet.yml](../../.github/workflows/fleet.yml)'s `standard-checks` job | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity; fixable vulnerabilities only, every misconfiguration | yes: the step fails its job, so `all-green` fails | the step log |
-| Nightly | the `trivy-nightly` job in [fleet.yml](../../.github/workflows/fleet.yml) | the `schedule` trigger, public repositories only | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
+## The Trivy scan
 
-## The blocking half
+- **Advisory:** a finding is one `warning` annotation on its target, naming the id, the package and its fix, and the advisory link. The step stays green; a scan error is its one red.
 
-- **The gate** is `trivy fs .` with `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1`. A vulnerability blocks only when the advisory is HIGH or CRITICAL and a fixed version exists, so its fix is a dependency bump.
+- **The scan** is `trivy fs .` with `--scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0` over lockfiles, Dockerfiles, and infrastructure files. A vulnerability surfaces only when the advisory is HIGH or CRITICAL and a fixed version exists, so its fix is a dependency bump.
 
-- **Misconfigurations block too:** `--ignore-unfixed` filters vulnerabilities only, so a HIGH or CRITICAL misconfiguration (a Dockerfile, an infrastructure file) blocks too, and its fix is the file or a bypass entry.
+- **Misconfigurations surface too:** `--ignore-unfixed` filters vulnerabilities only, so a HIGH or CRITICAL misconfiguration (a Dockerfile, an infrastructure file) is annotated too, and its fix is the file.
 
-- **Unfixed HIGH and CRITICAL vulnerabilities** never block; they surface in the nightly issue (public repositories).
+- **What appears nowhere:** a MEDIUM or LOW finding, and an unfixed HIGH or CRITICAL vulnerability.
 
-- **The same scan runs in repo-platform's own CI** (`trivy` in [ci.yml](../../.github/workflows/ci.yml), a gating job), so a lockfile here is held to the same bar.
+- **No bypass:** the exit code and the ignore file are explicit, which Trivy otherwise reads from the repository: a `trivy.yaml` cannot turn a finding red, and a `.trivyignore` or `.trivyignore.yaml` is not read, since the ignore file is `/dev/null`.
 
-## Bypassing a finding: `.trivyignore.yaml`
+- **Where the findings go:** the step's annotations and log, nowhere else; Trivy uploads nothing to code scanning and files no issue.
 
-A repository silences a finding only through Trivy's own YAML ignore file at its root.
-
-- Every entry MUST carry a `statement` (why the risk is accepted) and an `expired_at` date.
-- Trivy drops an entry once the date passes, so a bypass undoes itself and the finding blocks again.
-- The action fails the job when the file exists with an entry lacking either field, and refuses the plain `.trivyignore` format outright (it has no expiry).
-
-```yaml
-vulnerabilities:
-  - id: CVE-2026-65898
-    paths:
-      - actions/pages-site/bun.lock
-    statement: dompurify only ever sanitizes markdown this repository authored
-    expired_at: 2026-12-01
-misconfigurations:
-  - id: DS-0002
-    statement: the image is a build tool, never served
-    expired_at: 2027-01-15
-```
-
-- **Sections:** `vulnerabilities`, `misconfigurations`, `secrets`, `licenses`. Entry keys: `id`, `paths`, `purls`, `statement`, `expired_at` (the [Trivy filtering reference](https://trivy.dev/latest/docs/configuration/filtering/) has the semantics).
-
-- **An expired entry** is a warning, not a failure: Trivy already ignores it, so fix the finding or delete the entry. The zero date `0001-01-01` is a failure: Trivy's expiry prune skips it, so that entry would never expire.
-
-- **The nightly scan reads the file too:** a bypassed finding stays out of the tracking issue until its date passes. Each report's replay command passes the file too, so the replay sees what the scan saw (Trivy skips a missing ignore file).
-
-## The nightly half
-
-The nightly scan is the `trivy-nightly` job of fleet.yml, beside the check jobs. It files its issue under `issues: write`, a scope of the one fixed ceiling the skeleton grants every platform call ([all-green.md](../all-green.md#what-gates-what)).
-
-- **Never red on a finding:** the `platform` call stays green whatever the scan finds. A scan or configuration error (an ignore entry without its `expired_at`) fails the job, and with it that night's gate and site rebuild.
-
-- **Trigger:** the managed ci.yml's `schedule` event, on which `trivy-nightly` runs and fleet.yml's `trivy` step stands down. Public repositories only: the job skips in a private repository, which pays for every job that runs and nothing for a skipped one.
-
-- **The cron's cadence,** and which other jobs stand down on it, belong to the skeleton ci.yml and the per-job conditions, not to the scan.
-
-- **Findings:** the action writes one report per scanned target in the [fuzz-issue action's](../../actions/fuzz-issue/action.yml) report-directory contract ([fuzzer.md](fuzzer.md#the-failure-report-contract-v1)), and the job runs the `security-nightly` stream through the [issue lifecycle](tracking-issues.md#issue-lifecycle) the tracking-issues page owns. The full JSON rides the run's artifact.
-
-- **Code scanning:** the SARIF is uploaded under the `trivy` category when the repository is public (personal-account code scanning is public-only).
-
-- **Release gating:** `security-nightly` is fleet data, not a module answer. The [settings baseline](../../files/settings/baseline.yml) declares the label on every repository, [actions/plan](../../actions/plan/plan.ts) appends it to every repository's `tracking-labels`, and `release-health` refuses to release while the issue is open ([tracking-issues.md](tracking-issues.md#release-gating)).
+- **The same scan runs in repo-platform's own CI** (`trivy` in [ci.yml](../../.github/workflows/ci.yml)), so a lockfile here gets the same annotations.
 
 ## Semgrep
 
