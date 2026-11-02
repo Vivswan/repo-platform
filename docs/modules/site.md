@@ -92,7 +92,7 @@ An MkDocs website (uv):
 runs:
   using: composite
   steps:
-    - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+    - uses: astral-sh/setup-uv@<sha> # <tag>, the pin the uv starters carry
     - { run: uv sync --frozen, shell: bash }
     - id: build
       shell: bash
