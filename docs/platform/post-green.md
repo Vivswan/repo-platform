@@ -18,10 +18,7 @@ all-green -> post-green -> site
 - post-green.yml's only other way in is a `workflow_dispatch` with a green main commit's `sha`, which runs the mover alone: the self-heal for a tag move that failed or was evicted after its gate passed (the next push heals it too; a sync meanwhile renders the commit the tag still names).
 - The file's header has the coalescing contract every leg there must satisfy.
 
-**The mover** ([post-green/move_stable.ts](../../.github/scripts/post-green/move_stable.ts)) re-verifies main history and the check at the sha, reads where the tag sits, and moves it with a lease push, the compare-and-swap that makes a racing mover lose loudly.
-
-- It moves nothing when the tag already names the sha or a newer green commit's run already moved it past the sha (newest-green wins).
-- Why the tag's ruleset ([.github/settings.local.yml](../../.github/settings.local.yml)) can block deletion only is [build-provenance.md's](build-provenance.md#who-can-write-refstagsstable).
+**The mover** ([post-green/move_stable.ts](../../.github/scripts/post-green/move_stable.ts)) is [build-provenance.md](build-provenance.md)'s: what it re-verifies, why newest-green wins, and why the tag's ruleset can block deletion alone.
 
 **Repo-platform's own docs site** is the skeleton's `site` leg, carried by hand in its ci.yml, since this repository's ci.yml is its own, not the managed skeleton. The deploy runs after this run's mover, so a green move's theme is what `@stable` serves it. A red or skipped post-green does not hold it back: it deploys from the tag as it stands.
 
@@ -50,7 +47,7 @@ It calls reusable-site.yml by local path; the reusable plans the site configurat
 
 - Each caller on the chain says `secrets: inherit`: a job reached through two calls reads the environment secret only when every caller on the chain inherits ([actions/runner#4453](https://github.com/actions/runner/issues/4453)).
 
-- GitHub hands a job that cannot see the secret the empty string, so every declaring job's first read of it is the `Require the fleet token` step ([fleet/require_fleet_token.ts](../../.github/scripts/fleet/require_fleet_token.ts)). An empty read fails the job with the setup recipe, and no fleet write ever runs on `github.token`.
+- A job that cannot see the secret reads the empty string, so every declaring job requires the token before any fleet write, and no fleet write ever runs on `github.token`.
 
 ## How the leg reads the label
 
@@ -64,12 +61,7 @@ It calls reusable-site.yml by local path; the reusable plans the site configurat
 
 ## Which commits a run reads
 
-The leg reads a range: from the commit the `stable` tag named before this run moved it (the mover's `previous` output), up to the judged commit ([post-green/judged_range.ts](../../.github/scripts/post-green/judged_range.ts)); not the judged commit alone. Three PRs merged within one minute, `fleet-sync:public` on the first only, and only the third's mover lands:
-
-```text
-::notice::fleet-sync label on <first merge>: public
-::notice::<the tag's previous commit>..<third merge> opted in: syncing public now
-```
+The leg reads a range: from the commit the `stable` tag named before this run moved it (the mover's `previous` output), up to the judged commit ([post-green/judged_range.ts](../../.github/scripts/post-green/judged_range.ts)); not the judged commit alone.
 
 Why a range: the mover legs of neighbouring commits queue on the `stable-tag-move` lane under [the lane rule](../all-green.md#after-the-gate). A commit whose mover was replaced there never syncs from its own run, and its successor's own `before..sha` would miss it.
 
@@ -83,7 +75,7 @@ The tag's previous commit is a durable base: the range from it covers every comm
 
 - **Several opt-ins in the range union:** any `all` wins, otherwise `public`.
 
-- **Refused labels by commit:** the judged commit's refused labels turn the leg red. An older commit's (its own run was red, or its mover was replaced at the lane) are a warning naming the commit and contribute nothing, and the next merge's correct label still syncs.
+- **Refused labels by commit:** the judged commit's turn the leg red; an older commit's are a warning and contribute nothing, so the next merge's correct label still syncs.
 
 - **A merge never loses its own run** ([after the gate](../all-green.md#after-the-gate)), but its mover leg is replaced when a third mover queues on the `stable-tag-move` lane while one runs and one waits. A running mover is never cancelled, and the surviving run's range still reads its label.
 
@@ -101,27 +93,15 @@ The opt-in waits for the weekly sync cron (or a hand dispatch) when:
 
 **The public sync by default, never a gate:** [fleet-sync-default.yml](../../.github/workflows/fleet-sync-default.yml) adds `fleet-sync:public` to a pull request of this repository that changes what a sync delivers and wears no fleet-sync label. It keeps one sticky comment saying so ([its script](../../.github/scripts/fleet/fleet_sync_default.ts)).
 
-- **Watches the delivered surface:** `files.yml`, `files/`, `actions/`, `.github/scripts/sync/`, `.github/scripts/shared/`, `migrations/`, `bun.lock`, and `package.json` (`DELIVERED_SURFACE` in [its script](../../.github/scripts/fleet/fleet_sync_default.ts)), so a lockfile bump gets the label too.
+- **Watches the delivered surface** (`DELIVERED_SURFACE` in [its script](../../.github/scripts/fleet/fleet_sync_default.ts)), so a lockfile bump gets the label too; any other change is live at `stable` on merge and gets no label. Whether that sync then moves a repository's judge is the stamp rule ([platform/sync/manifest.md](sync/manifest.md#when-the-judged-commit-moves)).
 
-- **Any other change** is live at `stable` on merge and gets no label. Whether that sync then moves a repository's judge is the stamp rule ([platform/sync/manifest.md](sync/manifest.md#when-the-judged-commit-moves)): a theme change syncs nothing and restamps nothing.
+- **Not forced:** a human removing the label is final for that pull request, a human's own fleet-sync label is never touched, and the bot withdraws its own when the paths leave the diff or the pull request retargets. It sits outside `all-green`'s needs.
 
-- **Not forced:** a human removing the label is final for that pull request (the comment then reads `removed by <login>; not re-adding it`), and a human's own fleet-sync label is never touched.
-
-- **The bot withdraws its own label** when the paths leave the diff, the PR targets a branch other than the default, or a human picks another fleet-sync label; a label the merge would refuse is named in the comment.
-
-- **Triggers:** opened, synchronize, reopened, edited (a retarget arrives as edited), labeled, and unlabeled; a closed PR is left as it is. GitHub runs no pull_request workflow on a conflicting PR, so the label catches up at the next push.
-
-- **Outside the gate:** it sits outside `all-green`'s needs, and exits 0 on every path with a warning annotation: a fork's read-only token, a file listing GitHub capped at 3,000.
+- **A conflicting pull request gets no label** until its next push: GitHub runs no pull_request workflow while a pull request conflicts.
 
 ## How the static legs gate
 
-The legs, what each does for a repository, and the release leg's known limits are [all-green.md's](../all-green.md#the-static-legs). What the managed ci.yml spells to get them:
-
-- **`release` and `site` gate on the `platform` call's `modules` output,** each naming its own module: `contains(needs.platform.outputs.modules, '"release-please"')` and `contains(needs.platform.outputs.modules, '"site"')`, a substring test on the compact JSON array, hence the quoted name.
-
-- **The release hooks** gate on the `release` job's outputs.
-
-- A job reads outputs only from its direct dependencies, so `platform` sits in the needs list of `release` and `site`.
+The legs, what each does for a repository, and the release leg's known limits are [all-green.md's](../all-green.md#the-static-legs); the conditions are the managed ci.yml's own. Two lane decisions:
 
 - **The cut's lane is keyed by the judged sha,** so no other run shares it and nothing can cancel a pending cut; a re-run of the same commit waits, then finds the release already cut.
 

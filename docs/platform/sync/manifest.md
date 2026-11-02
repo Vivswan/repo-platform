@@ -32,26 +32,11 @@ The entry moves to the build when the sync wrote a change or the checker changed
 - **Why the checker counts:** a change there can turn C's verdict away from N's with no byte written. N's registration parser accepts a `site.path` C's rejects, so C's check would stay red with no sync PR to move the stamp.
 - **Never on the surface:** the operator scripts, the action's stable-run `src/` and `validator/` files (they reach every repository the moment the tag moves), and the docs-site theme.
 - **Why not every platform change:** a docs-theme change under `actions/pages-site/` once restamped nine repositories with one-line manifest PRs (copilot-env #279, after repo-platform #356); under this rule that sync writes nothing, moves nothing, and opens no PR.
-- **The diff runs in the build checkout** under `build/`, checked out with its full history, before anything is written; a C that history lacks fails the run.
 
 ## Judged at the synced commit
 
 The fleet's `validate-managed-files` check judges a repository as [check.ts](../../../actions/validate-managed-files/check.ts) judges it at the commit the manifest records, byte to byte against what that platform tree writes, so a platform change reddens a repository only once it syncs.
 
-- **The action reads the recorded commit first** ([shared/recorded_commit.ts](../../../actions/shared/recorded_commit.ts)), clones repo-platform at it under the runner's temp directory, installs that clone's dependencies, and runs its `check.ts` over the repository.
-- **`check.ts` copies the repository to scratch** (what git lists when the target is a checkout's own root; every path but `.git` in any other tree), runs the tree's own writer over the copy with `--build` as the commit, and removes the copy.
-- **Every reason the writer would hold** the sync PR for is printed first (a link or a directory where a file is declared, a placeholder with no value). Then come every path whose bytes differ, the manifest's own line included, with a unified diff under each changed file.
 - **A pending registration change** is red until the sync that carries it lands.
-- **Exit 0** when identical, 1 with findings, 2 when the writer refused (its message is the output).
-
-| The action finds                                                                                                                 | The verdict                                                                                    |
-| -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| no full 40-hex `commit` on the manifest's own entry (a hand edit, since every sync writes it), or a manifest that does not parse | not judged, the reason naming the manifest and the remedy: revert the edit, or dispatch a sync |
-| a commit repo-platform's history lacks (the clone fails)                                                                         | not judged, the clone step's outcome in the reason                                             |
-| `check.ts` exit 1 or 2 with output                                                                                               | findings: its output fenced under `#### repo-platform at <commit>`, with the remedy            |
-| `check.ts` exit 1 or 2 with no output, any other exit, a signal, or the deadline                                                 | not judged: `ended without a verdict`, with the detail                                         |
-| `check.ts` exit 0                                                                                                                | clean, unless a hygiene check finds something                                                  |
-
-- **Freshness informs and never fails:** the action compares the recorded commit with the `stable` tag in the platform checkout (git ancestry alone) and writes one line to the job summary and an annotation. The line says up to date, `stable` moved N commits past it, or the commit is not on `stable`'s history. In both of the last two, a sync moves the judge under [the stamp rule](#when-the-judged-commit-moves).
-- **The hygiene checks** read no platform data and run from the action at `stable`: a `release-as` key in `release-please-config.json` ([the release pipeline](../../new-repo.md#the-release-pipeline-release-please)), and a conflict marker (a line opening with `<<<<<<< ` or `>>>>>>> `, or reading `=======`) in a source, config, or markdown file, a fenced example of the markers included.
-- **Their walk skips `.git` alone.** YAML syntax and duplicate mapping keys are the yamllint step's, in the same job.
+- **Freshness never fails:** the action reports how far `stable` has moved past the recorded commit, and a sync moves the judge under [the stamp rule](#when-the-judged-commit-moves).
+- **The hygiene checks** (a `release-as` key in `release-please-config.json`, a conflict marker in a source, config, or markdown file) read no platform data and run from the action at `stable`; YAML syntax and duplicate keys are the yamllint step's, in the same job.

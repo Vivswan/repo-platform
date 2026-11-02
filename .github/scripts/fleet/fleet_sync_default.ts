@@ -27,7 +27,7 @@ import { captureNetwork } from "./discovery.ts";
 // dependencies the writer resolves. Whether a sync then moves a repository's judge is the writer's own stamp rule
 // (sync/writer/judged_commit.ts).
 
-/** Relative to the platform root, a directory ending in a slash; docs/platform/post-green.md lists the same paths, and a test pins the two. */
+/** Relative to the platform root, a directory ending in a slash; a test holds each path to the kind its spelling says. */
 export const DELIVERED_SURFACE = [
   "files.yml",
   "files/",

@@ -41,7 +41,7 @@ git commit -m "chore: initialize"
 
 The files themselves arrive as the first sync PR ([step 4](#4-publish-and-grant-the-fleet-pat)): the writer copies them from the main commit the `stable` tag names, re-verified as green main history before any row consumes it ([build provenance](platform/build-provenance.md#provenance-is-the-commit-itself)).
 
-**The list of platform files** is [files.yml](../files.yml) at the commit the `stable` tag names; [platform/sync/files.md](platform/sync/files.md#filesyml-reference) explains each entry's `class` and `when`. Four files matter later:
+**The list of platform files** is [files.yml](../files.yml) at the commit the `stable` tag names; [platform/sync/files.md](platform/sync/files.md#filesyml) explains each entry's `class` and `when`. Four files matter later:
 
 - **`.repo-platform.yml`** is the module selection's home, and its presence is what marks the repo as managed. Edit its `modules:` list in a PR, and the branch sync writes the module's files onto that PR ([changing the module selection](#changing-the-module-selection)). Repo-owned: the sync reads it and never rewrites it.
 - **`.github/settings.local.yml`** is your settings overlay: identity keys, your own labels and rulesets. A starter, written once: every sync renders the managed `.github/settings.yml` from it and the fleet layers, and repo-platform's central run applies the rendered file ([settings](#5-settings-management)). Edit the overlay, never the rendered file.
