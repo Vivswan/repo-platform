@@ -14,17 +14,12 @@ This page is the settings model of a managed repository: the layers the sync ren
 | --- | ------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | Fleet baseline           | [files/settings/baseline.yml](../files/settings/baseline.yml)                                             | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels                                                          |
 | 2   | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | public: `security_and_analysis`, and the `main` ruleset's `code_quality` and `copilot_code_review` rules; private: the `settings-as-code-report` marker label |
-| 3   | Module layer             | `files/<module>/settings.yml` and, for site, [settings.public.yml](../files/site/settings.public.yml)     | what selecting that module adds (the list below)                                                                                                              |
+| 3   | Module layer             | `files/<module>/settings.yml` and, for site, [settings.public.yml](../files/site/settings.public.yml)     | what selecting that module adds, as its layer file says                                                                                                       |
 | 4   | CodeQL layer             | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml)                                   | the `code_scanning` rule, for public repos with a CodeQL toolchain                                                                                            |
 | 5   | Repo overlay             | the repo's own `.github/settings.local.yml`                                                               | identity keys (`description`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides                                                        |
 | 6   | Fleet override           | [files/settings/override.yml](../files/settings/override.yml)                                             | the invariants no repo may weaken (the list below)                                                                                                            |
 
-What a module layer adds:
-
-- **A toolchain module:** its dependabot label.
-- **site:** the Pages build type (Actions-workflow builds) and the `github-pages` environment with the branch policy GitHub creates it with, `main` alone. On a public repository the environment also carries its reviewer rule (no reviewers, no wait): GitHub refuses those keys on a private repository with a 422 naming the billing plan.
-- **release-please:** four labels, the `release-tags` ruleset, and the Actions grant its release PR needs (`can_approve_pull_request_reviews`).
-- **pr-title:** [the pr-title ruleset](#the-pr-title-ruleset).
+What a module layer adds is the layer file itself (`files/<module>/settings.yml`).
 
 Two layers of the table need a note:
 
@@ -35,49 +30,28 @@ Every layer is a plain settings-as-code YAML document a human can read on its ow
 
 - **The render** is the writer's settings entry ([sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts)). `files.yml`'s `settings` block names the baseline, the override, and every layer between them with the `when` that selects it (the `source` and `when` of a `files` entry).
 
-- **The entry** `{path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}` folds the layers with the overlay ([platform/sync/files.md](platform/sync/files.md#filesyml)).
+- **Layers 1 to 4 are selected by the repository's facts:** the module selection from its `.repo-platform.yml`, and the visibility the overlay's `repository.private` declares.
 
-- **Layers 1 to 4 are selected by the repository's facts:** the module selection from its `.repo-platform.yml`, and the visibility the overlay's `repository.private` declares. A module name `files.yml` does not offer fails the sync, and an overlay declaring no visibility holds the row.
-
-- **Which layer files exist is DECLARED, never discovered from the tree:** [sync/writer/settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts) refuses a declared layer missing from `files/`, and the writer's tree walk refuses a layer file no declaration names. So neither shrinks the stack and lets the apply delete its labels fleet-wide.
+- **Which layer files exist is DECLARED, never discovered from the tree,** and a declaration and the tree that disagree fail the run: so nothing shrinks the stack and lets the apply delete its labels fleet-wide.
 
 - **Layer 6 is the only layer a repository cannot beat.** Fleet defaults a repo may tune belong in layer 1.
 
 - **Tracking labels are the one non-file input.** The label NAME is the registration's `labels.fuzzer` / `labels.nightly` / `labels.site` key (the module's default when unset). Its color and description are the module's `tracking_label` data in `files.yml`, and the render folds them in as the top layer ([apply semantics](#apply-semantics)).
 
-- **A refused tracking label:** a key set for a module the repository does not select, or a name a fleet layer already manages, holds the row with the plan's message ([tracking-issues.md](modules/tracking-issues.md#the-label-is-the-stream)).
-
-- **The rendered document opens with three comment lines:** `# Generated by repo-platform - do not edit.`, the source line naming the layers and the overlay, and `# Applied by <owner>/repo-platform's settings run.` The first is what the apply's selector reads to tell a rendered file from a hand-written one.
 
 ## The merge dialect
 
-The fold is [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code)'s own `mode: render`, run as its npm library (`@vivswan/github-settings-as-code`, on its `next` channel in `package.json` until it cuts releases; `bun.lock` is the one place that names its version) from [sync/writer/settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts).
+The fold is [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code)'s own `mode: render`, run as its npm library from [sync/writer/settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts); the render and the apply read one dialect, the library's [layering guide](https://github.com/Vivswan/github-settings-as-code/blob/main/docs/operate/layering.md). What the fleet relies on:
 
-The render and the apply read one dialect, spelled out in the library's [layering guide](https://github.com/Vivswan/github-settings-as-code/blob/main/docs/operate/layering.md). What the fleet relies on:
+- **The higher layer wins;** mappings merge key by key, and a repo cannot null away an override, since layer 6 puts its value straight back.
 
-- **The higher layer wins;** mappings merge key by key, lower keys keeping their order.
+- **`null` is the empty state on GitHub, never an opt-out:** `pages: null` turns Pages off, `protection: null` strips a branch's protection.
 
-- **`null` is the empty state on GitHub, never an opt-out:** `pages: null` turns Pages off, `protection: null` strips a branch's protection. A key with no empty state (`has_wiki`, a label's description) refuses it. A repo cannot null away an override: layer 6 puts its value straight back.
+- **`labels` and `rulesets` are NAME-KEYED UNIONS,** same-name entries merging field by field with the higher layer's fields winning, so a repo declaring one extra label can never freeze the fleet roster, and the CodeQL layer can add its `code_scanning` rule to the `main` ruleset the override declares.
 
-- **`_remove: true` on a keyed entry drops the fleet's entry** under the same key (a label by name, a ruleset's rule by type); the marker never reaches the rendered file. It belongs in the repository overlay: a fleet or module layer is judged alone, where nothing lies below, and the removal is refused.
+- **An overlay may set** `_undeclared` (`labels: {_undeclared: keep, entries: [...]}` keeps that repository's undeclared labels) and `_remove: true` on a keyed entry, which drops the fleet's entry under the same key; the library's `_layering` directive is refused, since it would replace the fleet roster wholesale.
 
-- **`labels` and `rulesets` are NAME-KEYED UNIONS:** both sides' entries are kept, so a plain array-replace can never freeze the fleet roster the moment a repo declares one extra label. Label names match case-insensitively (GitHub deduplicates them that way); ruleset names match exactly.
-
-- **Same-name entries merge field by field, the higher layer's fields winning.** A same-name LABEL keeps the lower fields the higher one leaves unsaid. A same-name RULESET merges key by key: its `rules` pair by `type` and merge their parameters, and new types append.
-
-- **What that rule merge buys:** the CodeQL layer (layer 4) can add `code_scanning` to the `main` ruleset the override (layer 6) declares.
-
-- **Every list section unions by its key:** `environments` and `branches` by `name`, since the library's keyed wrapper for them. Every scalar list (`topics`) and every scalar replaces wholesale.
-
-- **Every layer is validated on its own** before it may contribute, and the folded document once more as the apply will read it, so the render can never complete a broken layer into a valid document.
-
-- **A refused layer:** one that names one label or ruleset twice, a keyless entry, a section the apply does not know, or a shape it cannot merge is refused with the layer named. A fleet or module layer fails the run (operator data); the overlay holds its row.
-
-- **The `{entries, _undeclared}` wrapper:** the rendered `labels` and `rulesets` carry the library's wrapper with the policy resolved. That is `delete` for both: the apply's default for labels, the override's declaration for rulesets. It writes the roster semantics under [apply semantics](#apply-semantics) into the document rather than assuming them.
-
-- **What an overlay may set:** `_undeclared` itself (`labels: {_undeclared: keep, entries: [...]}` keeps that repository's undeclared labels) and `_remove: true` on an entry.
-
-- **What an overlay may not set:** the library's `_layering` directive, which would replace the fleet roster wholesale and have the apply delete every managed label. The render holds the row on it.
+- **Every layer is validated on its own** before it may contribute, and the folded document once more as the apply will read it.
 
 ## Editing your settings
 
@@ -86,8 +60,6 @@ The render and the apply read one dialect, spelled out in the library's [layerin
 - **An overlay edit is one PR with the branch sync.** The managed files check reds the overlay PR while the rendered file is stale. The `repo-platform:sync` label or the branch dispatch ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch)) re-renders `.github/settings.yml` onto the PR's branch as one commit, so the PR merges green.
 
 - **The apply follows the merge:** the nightly cron plus every green main run ([below](#when-it-runs)) applies the new render once it is on main.
-
-- **A faulty overlay** (one that names one label twice, declares a label without a `name`, or does not parse) holds the rendered row with the reason ([the merge dialect](#the-merge-dialect)); the overlay itself is never rewritten.
 
 What re-renders on main without a PR of the repository's own:
 
@@ -123,19 +95,13 @@ The run itself is [platform/settings-apply.md](platform/settings-apply.md): its 
 
 - **Why only the public overlay carries `security_and_analysis`** (secret scanning + push protection): private repos without Advanced Security reject it with a 422.
 
-- **The `code_scanning` rule blocks at the fleet's high-or-critical bar,** the same bar as the other [security scans](modules/security-scans.md): `alerts_threshold: errors` and `security_alerts_threshold: high_or_higher`. So a non-security warning or a medium security alert never blocks a merge.
+- **The `code_scanning` rule blocks at the fleet's high-or-critical bar,** the same bar as the other [security scans](modules/security-scans.md), so a non-security warning or a medium security alert never blocks a merge.
 
 **The label roster** is the union of every selected layer's `labels`, less any fleet-layer entry the overlay drops with `_remove: true`. The tracking labels fold in above the overlay, so a removal naming one holds the row instead.
 
-| When                                     | Labels                                                                                                                                                                                                                                                                                                     |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| always                                   | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's PR-flow labels `merge-when-green` and `parked`; `repo-platform:sync`, which a human adds to a PR for the branch sync ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)) |
-| per selected toolchain                   | the dependabot ecosystem labels: `javascript` for bun, `python:uv` for uv, `rust` for cargo                                                                                                                                                                                                                |
-| with release-please                      | the `autorelease: *` pair and release-health's gate labels, `release-blocker` and `release-override`: stripping one un-blocks or un-overrides a release mid-flight                                                                                                                                         |
-| with the fuzzer, nightly, or site module | the tracking labels, named and styled as the layer list above says                                                                                                                                                                                                                                         |
-| private repos only                       | the `settings-as-code-report` marker label for private report issues: declared in the private overlay, and injected by the apply for redacted targets                                                                                                                                                      |
+Which labels each layer declares is the layer file's; the owner's two PR-flow labels and the dependabot labels carry rules of their own:
 
-- **Why the dependabot labels are declared:** dependabot recreates its labels when missing, so an undeclared one would loop delete/recreate nightly. [tests/files/label_names.test.ts](../tests/files/label_names.test.ts) holds the layers to dependabot's names.
+- **Why the dependabot labels are declared:** dependabot recreates its labels when missing, so an undeclared one would loop delete/recreate nightly.
 
 - **`merge-when-green`** is applied by the owner alone. Whoever runs the landing verifies the labeling actor is the repository owner and that no push followed the labeling, then merges once every check is green; a later push voids it.
 
@@ -157,7 +123,7 @@ The apply is stateless, touches only declared keys, and upserts by name, all on 
 
 - **`_remove: true` on a rule** in the overlay's `main` entry drops the rule a LOWER layer contributed (`rules: [{type: copilot_code_review, _remove: true}]`). It cannot touch the override layer's rules, so the fleet's mandatory protection survives it either way.
 
-- **Repository fields, topics, and security toggles** are applied only when declared; omitting a key leaves the live value alone. The overlay starter therefore seeds `topics: []` unconditionally, like `private:`: the empty list declares-and-clears instead of leaving the field unmanaged. An empty string is refused, since no GitHub topic is empty.
+- **Repository fields, topics, and security toggles** are applied only when declared; omitting a key leaves the live value alone. The overlay starter therefore seeds `topics: []` unconditionally, like `private:`: the empty list declares-and-clears instead of leaving the field unmanaged.
 
 - **Topics set only in the GitHub UI** are cleared by the first apply after the render lands. Put values you want to keep in the overlay.
 
@@ -169,12 +135,7 @@ The apply is stateless, touches only declared keys, and upserts by name, all on 
 
 ## The default-branch rulesets
 
-The two protection rulesets live in [files/settings/override.yml](../files/settings/override.yml), the layer no repo can beat. `loadOverrideLayer` refuses an override that drops the required check or its Actions pin, and unit tests pin the empty bypass list and the rest of the protection policy.
-
-| Ruleset          | Rules                                                                                                                                                                                                                                                                                          | Bypass                                                                |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `main`           | ONE required status check, `all-green`, the ci.yml gate job's own check run, pinned to the GitHub Actions app by `integration_id` ([all-green.md](all-green.md)); PR gates: a CODEOWNER review, every review thread resolved, squash-only; deletion, force-push, and linear-history protection | admins, so direct pushes keep working                                 |
-| `non-bypassable` | deletion, linear history                                                                                                                                                                                                                                                                       | `bypass_actors: []`: GitHub binds everyone, repository owner included |
+The two protection rulesets live in [files/settings/override.yml](../files/settings/override.yml), the layer no repo can beat: `main` requires the one `all-green` check and the PR gates, with admins bypassing so direct pushes keep working; `non-bypassable` protects deletion and linear history with an explicit empty bypass list, so GitHub binds everyone, repository owner included.
 
 - **The explicit empty bypass list** (unlike an omitted key) lets the nightly heal detect and clear an out-of-band bypass actor. The owner can still edit or disable the ruleset itself, but the nightly apply re-asserts it.
 
@@ -217,7 +178,7 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 
 - **A stricter mover-only ruleset over the executable ref is not expressible:** GitHub rejects an Integration bypass actor on a user-owned repository's ruleset (422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization").
 
-- **What follows:** `stable` consumption keeps its sync-side [re-verification](platform/build-provenance.md#provenance-is-the-commit-itself). The executable `uses: ...@stable` channel has no mover-identity enforcement beyond push access plus the deletion-only rule. [tests/fleet/repo_settings.test.ts](../tests/fleet/repo_settings.test.ts) pins that no settings layer declares an Integration bypass actor.
+- **What follows:** `stable` consumption keeps its sync-side [re-verification](platform/build-provenance.md#provenance-is-the-commit-itself). The executable `uses: ...@stable` channel has no mover-identity enforcement beyond push access plus the deletion-only rule.
 
 - **It does NOT redeclare `main` or `non-bypassable` in its overlay:** an entry named like a fleet ruleset merges into it, the override's rules winning on conflict, so a copy there adds nothing. That is why the up-to-date requirement is a ruleset of its own.
 
@@ -225,18 +186,10 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 
 **The starter:** every repository receives `.github/settings.local.yml` once ([files/base/.github/settings.local.yml](../files/base/.github/settings.local.yml)). It carries the three identity keys (`description` from the registration, `topics` declared empty, `private` from the writer's `--private` flag), plus commented examples for local labels and rulesets. It is repo-owned from then on (a starter: written only when absent).
 
-**The rendered file** `.github/settings.yml` is written right after it, on every sync. It takes the managed rules ([platform/sync/writer.md](platform/sync/writer.md#classes)):
-
-| The file on the target          | Row                                                                                                    |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| the recorded render             | `updated`                                                                                              |
-| already matches the new one     | `unchanged`                                                                                            |
-| neither: hand-written or edited | replaced with its diff holding the PR (`replaced local edits`); move what it declared into the overlay |
+**The rendered file** `.github/settings.yml` is written right after it, on every sync, under the managed rules ([platform/sync/writer.md](platform/sync/writer.md#classes)): a hand-written or edited one is replaced with its diff holding the PR; move what it declared into the overlay by hand, since the writer copies nothing across.
 
 **Nothing in the repository applies its settings:** [settings-repos.yml](../.github/workflows/settings-repos.yml) applies them centrally, on [its own entries](#when-it-runs). A managed repository carries no apply workflow and no token ([the token](platform/settings-apply.md#token)).
 
 ## Opting out
 
-Leaving management is the only opt-out: revoke the fleet token's write access to the repo, or delete its `.repo-platform.yml`. [eject.md](eject.md#pause-instead-of-eject) owns both pauses and what the plan log shows for each.
-
-The rendered `.github/settings.yml` and the overlay stay either way (sync never deletes them), as inert documentation or for hand use.
+Leaving management is the only opt-out ([eject.md](eject.md#pause-instead-of-eject)); the rendered `.github/settings.yml` and the overlay stay either way, since the sync never deletes them.

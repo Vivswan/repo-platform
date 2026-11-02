@@ -18,9 +18,6 @@ Each stream keeps one open GitHub issue: a red night files or updates it, a gree
 
 Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action.
 
-- **How it files:** it assembles the body in TypeScript and hands it to `peter-evans/create-issue-from-file` (sha-pinned), so a red night refreshes the stream's open issue in place instead of commenting on it.
-- **Runner requirement:** it needs `gh` on the runner. GitHub-hosted runners preinstall it, self-hosted runners must provide it.
-
 **The pin inside a starter:** because the starters are repo-owned, the sync never rewrites them, so the `fuzz-issue` pin inside a starter stays whatever was last written. New repositories get `@stable`. A pin move or a breaking change to the action's inputs still needs a manual edit in each repo, announced loudly in the change's PR.
 
 ## The label is the stream
@@ -33,13 +30,11 @@ Each stream is identified by a label, set as a registration key (`labels.fuzzer`
 
   The rendered `.github/settings.yml` declares the label automatically: the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](../settings.md)).
 
-The registration grammar and fleet.yml's `plan` step enforce:
+The registration grammar and fleet.yml's `plan` step refuse two shapes, by name:
 
-- **No reserved name:** no label name the fleet layers already manage (the settings baseline, the release labels, the dependabot labels; GitHub label names are case-insensitive). Reusing one would let a green night close unrelated issues carrying it and make every settings apply fight over the label's color and description.
+- **A reserved name,** one a fleet layer already manages: reusing it would let a green night close unrelated issues carrying it and make every settings apply fight over the label's color and description.
 
-- **Distinct streams:** every pair of selected stream labels must differ (`labels.nightly` vs `labels.fuzzer` vs `labels.site`). All streams dedup AND auto-close by label, so a shared label would let one stream's green night close another's active failure issue.
-
-- **A later reservation:** a repo whose label later becomes reserved fails its plan until the value in `.repo-platform.yml` changes. Renaming a label, and deselecting a module, are [the add-module skill's](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-add-module/SKILL.md#module-keys).
+- **Two streams on one label:** all streams dedup AND auto-close by label, so a shared label would let one stream's green night close another's active failure issue. Renaming a label, and deselecting a module, are [the add-module skill's](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-add-module/SKILL.md#module-keys).
 
 ## Issue lifecycle
 
@@ -47,7 +42,7 @@ The registration grammar and fleet.yml's `plan` step enforce:
 
 - **The label itself** is created, or an existing one repainted, with the color and description the module data declares (`tracking_label` under `modules.<module>` in `files.yml`, the same source the settings layer reads).
 
-- **A green night** comments on and closes every open issue carrying the label (up to 100 a night), so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([release-health action](../../actions/release-health/action.yml)).
+- **A green night** comments on and closes the open issues carrying the label, so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([release-health action](../../actions/release-health/action.yml)).
 
 - **A manual green dispatch** also closes a fuzz or nightly issue (the site stream's link check runs on the nightly schedule alone, so its issue waits for the next clean night); the close comment links the run, so the provenance is visible.
 

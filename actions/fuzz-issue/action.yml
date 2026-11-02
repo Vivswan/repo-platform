@@ -6,7 +6,8 @@ description: |
   - report: files the stream's issue, or refreshes the open one, the body replaced and never appended to.
   - resolve: after a green run, comments on and closes the open labeled issues.
 
-  Which issue a refresh takes, how many a resolve closes, and who is assigned and why are docs/modules/tracking-issues.md's.
+  Which issue a refresh takes, and who is assigned and why, are docs/modules/tracking-issues.md's; a resolve closes the
+  open labeled issues one listing returns.
 
   No stream's wording is a default: every caller names its mode and stream, and in report mode its title and label
   tuple.

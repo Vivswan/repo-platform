@@ -35,31 +35,24 @@ git add --all
 git commit -m "chore: initialize"
 ```
 
-- **`modules`** is any combination of `bun`, `uv`, `rust`, `site`, `release-please`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster).
+- **`modules`** is any combination of the roster, the `modules` section of [files.yml](../files.yml).
 - **Module parameters** (`site.*`, `labels.*`) are read from the same file; [the registration reference](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-new-project/references/registration.md#keys) has each key and its default.
 - **Nothing else is asked:** the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
 
 The files themselves arrive as the first sync PR ([step 4](#4-publish-and-grant-the-fleet-pat)): the writer copies them from the main commit the `stable` tag names, re-verified as green main history before any row consumes it ([build provenance](platform/build-provenance.md#provenance-is-the-commit-itself)).
 
-**The list of platform files** is [files.yml](../files.yml) at the commit the `stable` tag names; [platform/sync/files.md](platform/sync/files.md#filesyml-reference) explains each entry's `class` and `when`. Four files matter later:
+**The list of platform files** is [files.yml](../files.yml) at the commit the `stable` tag names; [platform/sync/files.md](platform/sync/files.md#filesyml) explains each entry's `class` and `when`. Four files matter later:
 
 - **`.repo-platform.yml`** is the module selection's home, and its presence is what marks the repo as managed. Edit its `modules:` list in a PR, and the branch sync writes the module's files onto that PR ([changing the module selection](#changing-the-module-selection)). Repo-owned: the sync reads it and never rewrites it.
 - **`.github/settings.local.yml`** is your settings overlay: identity keys, your own labels and rulesets. A starter, written once: every sync renders the managed `.github/settings.yml` from it and the fleet layers, and repo-platform's central run applies the rendered file ([settings](#5-settings-management)). Edit the overlay, never the rendered file.
 - **`.gitignore`** is split: the platform owns the managed region (below), and repository-owned patterns go above the BEGIN marker or below the END marker ([split files](platform/sync/writer.md#classes)).
-- **`.github/repo-platform-manifest.json`** is the ownership manifest, written by every sync: each platform-written path's class (`managed`, `split`, `starter`, or `mirror`) plus sha256 hashes of the managed content (a symlink mirror's hash covers its link target string). The `validate-managed-files` check blocks on any byte that differs from what the recorded commit's sync writes ([the managed files check](#the-managed-files-check)).
+- **`.github/repo-platform-manifest.json`** is the ownership manifest, written by every sync ([platform/sync/manifest.md](platform/sync/manifest.md)); the `validate-managed-files` check blocks on any byte that differs from what the recorded commit's sync writes ([the managed files check](#the-managed-files-check)).
 
-The managed region of `.gitignore` carries:
-
-- **OS and editors:** Windows, macOS, Linux, VS Code, JetBrains.
-- **The selected modules' sections:** the toolchains' github/gitignore templates, the fuzzer's `/.fuzz-failures/`.
-- **Agent local state.**
-- **Secrets files:** dotenv files anywhere in the tree (`.env.example` excepted), and private key material.
-- **Scratch:** `*.tmp` files.
-- **CI workspace paths:** every path a fleet action or workflow writes inside the checked-out workspace.
+The managed region of `.gitignore` carries the OS and editor templates, the selected modules' templates, and the platform's own patterns, as `files.yml`'s `.gitignore` entry lists them.
 
 ### Mirror copies of platform files
 
-A repository that must carry byte-identical copies of a platform-written file at paths the platform does not own (the skills repository's per-folder `LICENSE.md`) declares them under `mirrors` in `.repo-platform.yml`, and every sync rewrites them in the same PR. The grammar, what the `plan` step refuses on the PR, and each outcome at sync time are [platform/sync/mirrors.md](platform/sync/mirrors.md).
+A repository that must carry byte-identical copies of a platform-written file at paths the platform does not own declares them under `mirrors` in `.repo-platform.yml`, and every sync rewrites them in the same PR ([platform/sync/mirrors.md](platform/sync/mirrors.md)).
 
 ## 3. Add checks to checks.yml
 
@@ -99,8 +92,6 @@ The `auto-format.yml` starter pushes its formatting commit to the PR branch with
 
 - **The held run:** GitHub creates the new head's `pull_request` run for such a push but holds it in an approval-required state ([its GITHUB_TOKEN docs](https://docs.github.com/en/actions/concepts/security/github_token)). The required `all-green` check sits unreported until someone approves the run from the PR's merge box or the Actions tab, or pushes a commit to the branch.
 
-- **The notice:** the job posts one sticky PR comment (edited in place on later runs) and a run warning saying so.
-
 A PAT with Contents:RW would start the run outright, but any same-repo PR's formatter tooling runs next to that token, so the starter deliberately does not wire one in.
 
 ### The release pipeline (release-please)
@@ -131,7 +122,7 @@ Around the cut itself:
 
 - **Forcing a version:** merge an empty commit with a footer: `git commit --allow-empty -m "chore: release 5.0.0" -m "Release-As: 5.0.0"`. release-please honours it once and leaves nothing behind.
 
-- **Never set `release-as` in release-please-config.json:** the key survives the release it pinned, so the next release PR proposes the same version again, and with `force-tag-creation` it would move the published tag. The fleet's validate-managed-files check rejects the key.
+- **Never set `release-as` in release-please-config.json:** the key survives the release it pinned, so the next release PR proposes the same version again, and with `force-tag-creation` it would move the published tag.
 
 ## 4. Publish and grant the fleet PAT
 
