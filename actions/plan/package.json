@@ -4,7 +4,7 @@
   "description": "Dependency manifest for the plan action: yaml reads the registration and files.yml; zod holds the registration schema the sync shares.",
   "dependencies": {
     "@actions/core": "3.0.1",
-    "yaml": "^2.9.0",
+    "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
