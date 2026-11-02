@@ -31,12 +31,7 @@ import {
   ownedPaths,
 } from "./mirrors.ts";
 import { parseRegistration, type Registration, unknownModuleProblems } from "./registration.ts";
-import {
-  declaredLabelTuple,
-  type LabelTuple,
-  type LayerSources,
-  reservedLabelNames,
-} from "./reserved_labels.ts";
+import { type LabelTuple, type LayerSources, reservedLabelNames } from "./reserved_labels.ts";
 
 export const MODES = ["default", "site"] as const;
 export type Mode = (typeof MODES)[number];
@@ -132,9 +127,6 @@ export interface PlanInput {
   /** Lowercased: the settings layers' label names. */
   reservedLabels: ReadonlySet<string>;
 
-  /** The fleet security stream's tuple, the settings baseline's SECURITY_LABEL entry. */
-  securityLabel: LabelTuple;
-
   /** Whether the repository is private: no CodeQL, and the `private` when clauses select by it. */
   private: boolean;
 }
@@ -205,7 +197,6 @@ export interface CiPlan {
   private: boolean;
   codeqlLanguages: string[];
   trackingLabels: string[];
-  securityLabel: LabelTuple;
   weekly: boolean;
 }
 
@@ -214,9 +205,6 @@ export interface CiPlan {
 export function weekly(now: Date): boolean {
   return now.getUTCDay() === 1;
 }
-
-/** The nightly security stream (docs/modules/security-scans.md): trivy-nightly files a repository's Trivy findings under it, so it joins the tracking labels with no module; the settings baseline declares it; its entry is the tuple trivy-nightly gets. */
-export const SECURITY_LABEL = "security-nightly";
 
 /** Personal-account code scanning is public-only, so a private repository gets no CodeQL. */
 export function codeqlLanguages(selected: Module[], isPrivate: boolean): string[] {
@@ -242,8 +230,7 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
     modules: selected.map((module) => module.name),
     private: input.private,
     codeqlLanguages: codeqlLanguages(selected, input.private),
-    trackingLabels: [...trackingLabels(input, selected), input.securityLabel.name],
-    securityLabel: input.securityLabel,
+    trackingLabels: trackingLabels(input, selected),
     weekly: weekly(now),
   };
 }
@@ -313,9 +300,6 @@ export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
     "private": String(plan.private),
     "codeql-languages": JSON.stringify(plan.codeqlLanguages),
     "tracking-labels": plan.trackingLabels.join(","),
-    "security-label": plan.securityLabel.name,
-    "security-label-color": plan.securityLabel.color,
-    "security-label-description": plan.securityLabel.description,
     "weekly": String(plan.weekly),
   };
 }
@@ -380,7 +364,6 @@ function main(): number {
     registration: readRegistration(root),
     ...moduleData,
     reservedLabels: reservedLabelNames(moduleData.layers, tree),
-    securityLabel: declaredLabelTuple(moduleData.layers, tree, SECURITY_LABEL),
     private:
       mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
   };

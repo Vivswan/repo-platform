@@ -1,7 +1,7 @@
 {
   "name": "trivy",
   "private": true,
-  "description": "Dependency manifest for the trivy action: @actions/core annotates the bypass file findings.",
+  "description": "Dependency manifest for the trivy action: @actions/core carries the warning annotations.",
   "devDependencies": {
     "@types/bun": "1.4.4",
     "typescript": "^7.0.2"
