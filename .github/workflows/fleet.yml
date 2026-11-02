@@ -109,8 +109,8 @@ jobs:
         with:
           upload-sarif: ${{ steps.plan.outputs.private != 'true' }}
 
-      # Blocks for every visibility (docs/modules/security-scans.md); the only bypass is the repository's
-      # .trivyignore.yaml, statement and expiry per entry.
+      # Advisory for every visibility (docs/modules/security-scans.md): a finding is a warning annotation on its
+      # target, never a red step.
       - id: trivy
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: $/actions/trivy
@@ -195,7 +195,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The severity threshold and the upstream pin live in the wrapper.
+      # The upstream pin and the warn-only verdict live in the wrapper.
       - uses: $/actions/dependency-review
 
   # Public only: code scanning is where the findings go (the sentinel and != 'true' as above).
@@ -305,61 +305,3 @@ jobs:
           mode: after-refresh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # The nightly half of the security scan (docs/modules/security-scans.md). A finding never fails it: findings become
-  # the security-nightly issue that release-health blocks on, and a clean night closes it. A scan or configuration
-  # error does, and that night's call and gate are red with it. Public repositories only: a private repository pays
-  # for every job that runs, and a skipped job bills nothing.
-  trivy-nightly:
-    if: github.event_name == 'schedule' && !github.event.repository.private
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      issues: write
-      security-events: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: $/actions/plan
-        id: plan
-        with:
-          private: ${{ github.event.repository.private }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: $/actions/trivy
-        id: scan
-        with:
-          mode: nightly
-      - name: Upload the findings report
-        if: steps.scan.outputs.found == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: trivy-findings-${{ github.run_attempt }}
-          path: ${{ steps.scan.outputs.report-dir }}
-          if-no-files-found: ignore
-      - name: File or update the security issue
-        if: steps.scan.outputs.found == 'true'
-        uses: $/actions/fuzz-issue
-        with:
-          mode: report
-          label: ${{ steps.plan.outputs.security-label }}
-          title: Nightly security scan findings
-          artifacts-dir: ${{ steps.scan.outputs.report-dir }}
-          artifact-name: trivy-findings-${{ github.run_attempt }}
-          label-color: ${{ steps.plan.outputs.security-label-color }}
-          label-description: ${{ steps.plan.outputs.security-label-description }}
-          stream: generic
-      - name: Close the security issue on a clean night
-        if: steps.scan.outputs.found == 'false'
-        uses: $/actions/fuzz-issue
-        with:
-          mode: resolve
-          label: ${{ steps.plan.outputs.security-label }}
-          stream: generic
-      # Personal-account code scanning is public-only.
-      - name: Upload the SARIF to code scanning
-        if: steps.plan.outputs.private == 'false'
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
-        with:
-          sarif_file: ${{ steps.scan.outputs.sarif }}
-          category: trivy

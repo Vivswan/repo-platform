@@ -40,7 +40,6 @@ Leaving the fleet means revoking the fleet token's write access to the repo: rem
    | the `release` leg | it needs `platform` and reads `needs.platform.outputs.*` in its condition and inputs (`modules`, `tracking-labels`): delete it, or replace each such read with your repo's literals |
    | the `site` job | it needs `platform`, reads `needs.platform.outputs.modules` in its condition, and calls `reusable-site.yml`, which configures the deploy from `.repo-platform.yml` and takes no input but the commit `sha`. Delete it, or replace it with your own deploy that runs `.github/actions/site-build` (the hook is already yours), passes the pages-site action its `config` by hand, and uploads the output |
    | every job you remove | rewire each surviving job's `needs` to jobs that still exist (actionlint reports a dangling one) |
-   | fleet.yml's `trivy-nightly` job | it runs on the schedule in a public repository, and its plan step reads the registration too: leave it out of your copy, or inline the scan with literal configuration |
    | ci.yml's `all-green` job | it keeps judging whatever its needs list names; drop it too if you drop the `all-green` required check from your branch protection |
 
 3. (Optional) Inline the reusable workflows. Skip this if repo-platform continues to exist: the pinned references keep working unchanged. Otherwise:

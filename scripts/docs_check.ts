@@ -9,14 +9,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { passthrough } from "../.github/scripts/shared/proc.ts";
-import {
-  loadModuleData,
-  outputsOf,
-  planSite,
-  readRegistration,
-  SECURITY_LABEL,
-} from "../actions/plan/plan.ts";
-import { declaredLabelTuple, reservedLabelNames } from "../actions/plan/reserved_labels.ts";
+import { loadModuleData, outputsOf, planSite, readRegistration } from "../actions/plan/plan.ts";
+import { reservedLabelNames } from "../actions/plan/reserved_labels.ts";
 import { PLATFORM_NAME, PLATFORM_SLUG } from "../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -28,7 +22,6 @@ function siteConfig(): string {
     registration: readRegistration(REPO_ROOT),
     ...files,
     reservedLabels: reservedLabelNames(files.layers, tree),
-    securityLabel: declaredLabelTuple(files.layers, tree, SECURITY_LABEL),
     private: false,
   });
   return outputsOf(plan).config;

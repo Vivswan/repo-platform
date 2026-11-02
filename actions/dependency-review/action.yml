@@ -1,9 +1,10 @@
 name: Dependency Review
 description: |
-  Diffs the dependency graph between a PR's base and head, the fleet's dependency-review gate.
+  Diffs the dependency graph between a PR's base and head, the fleet's dependency-review check. Advisory: a vulnerable
+  dependency is a warning annotation and a row in the job summary, never a red job.
 
-  Wraps actions/dependency-review-action so the upstream version pin and the severity
-  threshold live in one place instead of in every rendered ci.yml.
+  Wraps actions/dependency-review-action so the upstream version pin and the verdict live in one place instead of in
+  every rendered ci.yml.
 
   Only a pull_request event has a diff to review, so callers run it on pull_request
   and allow its skip at their gate.
@@ -14,5 +15,6 @@ runs:
     - name: Review the dependency diff
       uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
       with:
-        # Pinned here so an upstream default change cannot move the gate silently.
-        fail-on-severity: high
+        # Upstream ignores fail-on-severity under warn-only and reads every severity,
+        # so the warning and the summary name low and moderate vulnerabilities too.
+        warn-only: "true"

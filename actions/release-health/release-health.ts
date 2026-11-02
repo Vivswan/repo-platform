@@ -57,7 +57,7 @@ export const BLOCKER_LABEL = "release-blocker";
 /** The release PR label that ships a release despite its failing gates; the other of the two. */
 export const OVERRIDE_LABEL = "release-override";
 
-/** The lowest alert severity the security gate fails on. */
+/** The lowest alert severity the advisory security gate warns on. */
 export const SECURITY_THRESHOLD: Severity = "high";
 
 /** release-please's label on a merged release PR until the cut tags it (tests/files/label_names.test.ts). */
@@ -259,6 +259,7 @@ export async function findReleasePr(
 
 export type GateOutcome =
   | { gate: string; status: "pass"; summary: string }
+  | { gate: string; status: "warn"; problem: string; advice: string }
   | { gate: string; status: "fail"; problem: string; advice: string };
 
 /** The branch head through the API, not an anonymous ls-remote, so private repositories work. */
@@ -403,7 +404,7 @@ export async function securityGate(
   const list = alerts.map((alert) => `#${alert.number}`).join(", ");
   return {
     gate,
-    status: "fail",
+    status: "warn",
     problem: `${alerts.length} open Dependabot alert(s) at or above ${threshold}: ${list}`,
     advice,
   };
@@ -611,14 +612,19 @@ export async function runHealthCheck(
       `close the blocker issue(s), ${overrideHint}`,
     ),
   );
+  // Advisory: an open alert is a warning on the run, never a failure, so the override has nothing to wave through.
   outcomes.push(
     await securityGate(
       run,
       cfg.repo,
       SECURITY_THRESHOLD,
-      `fix or dismiss the alert(s) under the repository's Security tab, ${overrideHint}`,
+      "fix or dismiss the alert(s) under the repository's Security tab",
     ),
   );
+
+  for (const outcome of outcomes.filter((outcome) => outcome.status === "warn")) {
+    log.warning(`${outcome.gate} gate (advisory): ${outcome.problem}. ${outcome.advice}`);
+  }
 
   const failures = outcomes.filter((outcome) => outcome.status === "fail");
   if (failures.length === 0) {

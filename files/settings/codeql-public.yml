@@ -10,6 +10,6 @@ rulesets:
         parameters:
           code_scanning_tools:
             - tool: CodeQL
-              # The fleet's severity bar, shared with semgrep (ERROR) and trivy (HIGH, CRITICAL): a warning-level alert or a medium security alert never blocks a merge.
+              # The fleet's severity bar, shared with semgrep (ERROR) and trivy's advisory scan (HIGH, CRITICAL): a warning-level alert or a medium security alert never blocks a merge.
               security_alerts_threshold: high_or_higher
               alerts_threshold: errors

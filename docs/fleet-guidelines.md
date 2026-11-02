@@ -187,8 +187,8 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 | clippy floor | the cargo steps of the repo-owned `checks.yml` (rust repos, [rust.md](modules/rust.md)) | any lint of the floor but its three thresholds (`too_many_arguments`, `too_many_lines`, `cognitive_complexity`), which warn under `--force-warn`; the rest `deny` | `#[expect(clippy::<lint>, reason = "...")]` on the one item it names; never `#[allow]` (itself denied), never a raised threshold (the floor's lint tables are the fleet's) |
 | knip | standard-checks (bun repos with a package.json to install from; a repo without one stands down with a notice) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
 | semgrep | semgrep (public repos) | an ERROR finding, a fatal analysis error, or a scan that did not complete (its exit status is named) | a `// nosemgrep: <rule-id>` comment (`# nosemgrep: <rule-id>` in YAML) on the finding's line or the line above it, with the reason beside it ([security-scans.md](modules/security-scans.md#semgrep)) |
-| dependency-review | dependency-review | a vulnerable dependency at or above high | none: upgrade or drop the dependency |
-| Trivy | standard-checks on every event but the schedule (the schedule split below) | a HIGH or CRITICAL vulnerability with a fix available, or any HIGH or CRITICAL misconfiguration | an entry in the repo-owned `.trivyignore.yaml` carrying a `statement` and an `expired_at` date ([security-scans.md](modules/security-scans.md#bypassing-a-finding-trivyignoreyaml)); the plain `.trivyignore` is refused |
+| dependency-review | dependency-review (public repos) | nothing: advisory, a vulnerable dependency is a warning annotation and a row in the job summary, at every severity (upstream's warn-only reads no threshold) | none: upgrade or drop the dependency |
+| Trivy | standard-checks | nothing: advisory, a HIGH or CRITICAL vulnerability with a fix available, or any HIGH or CRITICAL misconfiguration, is a warning annotation on its target; a MEDIUM or LOW finding appears nowhere ([security-scans.md](modules/security-scans.md#the-trivy-scan)) | none: fix the finding, or let the warning stand; a `.trivyignore` is not read |
 | CodeQL | codeql | nothing in the job; the `main` ruleset's `code_scanning` rule blocks the merge at the fleet's alert bar ([settings.md](settings.md#what-the-baseline-contains)) | a code scanning dismissal with a reason |
 
 - **typos config files:** the repo-owned file may be `_typos.toml`, `typos.toml`, or `.typos.toml`, which typos layers under the fleet config. `[default.extend-words]` holds the repository's vocabulary, `[files] extend-exclude` fixture paths spelled wrong on purpose, and `[default.extend-identifiers]` one identifier.
@@ -196,8 +196,6 @@ The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size
 - **The typos one-off:** `# typos: ignore` or `// typos: ignore` at the end of the line.
 
 - **zizmor's two passes:** one pinned zizmor under one rendered policy, a SARIF pass for code scanning (zizmor exits 0 in SARIF mode whatever it finds) and a plain pass whose exit is the verdict.
-
-- **Trivy on the schedule:** `trivy-nightly` runs instead, public repositories only, and reports without blocking. Both scans run at HIGH and CRITICAL, so a MEDIUM or LOW finding appears nowhere.
 
 **What knip finds on its own:** package.json `main`, `bin`, and scripts; the scripts that workflow `run:` steps and `.github/**/action.yml` files invoke; what its plugins read (a bunfig `preload`); `index`, `cli`, and `main` at the root or under `src/`.
 

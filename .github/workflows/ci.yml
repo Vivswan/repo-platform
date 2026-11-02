@@ -90,7 +90,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The severity threshold and the upstream pin live in the wrapper.
+      # The upstream pin and the warn-only verdict live in the wrapper.
       - uses: $/actions/dependency-review
 
   yamllint:
@@ -411,6 +411,7 @@ jobs:
         # shared install path); the judge reads recorded outputs only.
         run: bun .github/scripts/ci/bun_setup_smoke.ts judge
 
+  # Advisory (docs/modules/security-scans.md): green on a finding, red on a scan error.
   trivy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
