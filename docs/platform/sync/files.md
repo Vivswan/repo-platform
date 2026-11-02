@@ -9,63 +9,136 @@ This page is the grammar of `files.yml`, the one data file the writer reads: wha
 ## files.yml
 
 ```yaml
-placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, private, fuzzer_label, fuzzer_label_color, fuzzer_label_description]
+placeholders:
+  [
+    project_name,
+    project_slug,
+    description,
+    github_username,
+    github_username_lower,
+    copyright_holder,
+    year,
+    private,
+    fuzzer_label,
+    fuzzer_label_color,
+    fuzzer_label_description,
+  ]
 modules:
-  bun: {codeql_languages: [javascript-typescript], gitignore_sources: [Node, bun], dependabot_ecosystems: [bun]}
-  fuzzer: {gitignore_sources: [fuzzer], tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
+  bun:
+    {
+      codeql_languages: [javascript-typescript],
+      gitignore_sources: [Node, bun],
+      dependabot_ecosystems: [bun],
+    }
+  fuzzer:
+    {
+      gitignore_sources: [fuzzer],
+      tracking_label:
+        {
+          key: fuzzer,
+          default: fuzz-nightly,
+          color: B60205,
+          description: Automated nightly fuzz failure,
+        },
+    }
   release-please: {}
 settings:
   baseline: files/settings/baseline.yml
   layers:
-    - {source: files/settings/public.yml, when: {private: false}}
-    - {source: files/bun/settings.yml, when: {modules: [bun]}}
+    - { source: files/settings/public.yml, when: { private: false } }
+    - { source: files/bun/settings.yml, when: { modules: [bun] } }
   override: files/settings/override.yml
 files:
-  - {path: .github/workflows/ci.yml, class: managed}
+  - { path: .github/workflows/ci.yml, class: managed }
   - path: .gitignore
     class: split
     region: hash
     blocks: gitignore_sources
-    replace: {"[\r]": "?"}
+    replace: { "[\r]": "?" }
     always: [Windows, macOS, Linux, VSCode, JetBrains]
     sources:
-      Windows: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Windows.gitignore}
-      macOS: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/macOS.gitignore}
-      Linux: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/Linux.gitignore}
-      VSCode: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/VisualStudioCode.gitignore}
-      JetBrains: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Global/JetBrains.gitignore}
-      Node: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: Node.gitignore}
-      bun: {repository: github/gitignore, sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4, path: bun.gitignore}
+      Windows:
+        {
+          repository: github/gitignore,
+          sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4,
+          path: Global/Windows.gitignore,
+        }
+      macOS:
+        {
+          repository: github/gitignore,
+          sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4,
+          path: Global/macOS.gitignore,
+        }
+      Linux:
+        {
+          repository: github/gitignore,
+          sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4,
+          path: Global/Linux.gitignore,
+        }
+      VSCode:
+        {
+          repository: github/gitignore,
+          sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4,
+          path: Global/VisualStudioCode.gitignore,
+        }
+      JetBrains:
+        {
+          repository: github/gitignore,
+          sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4,
+          path: Global/JetBrains.gitignore,
+        }
+      Node:
+        {
+          repository: github/gitignore,
+          sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4,
+          path: Node.gitignore,
+        }
+      bun:
+        {
+          repository: github/gitignore,
+          sha: 356fd7baab4c05e092194a41f64dbd5afc8817e4,
+          path: bun.gitignore,
+        }
       fuzzer: files/fuzzer/fuzzer.gitignore
-  - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems, sources: {bun: files/bun/.github/dependabot.bun.yml}}
-  - {path: .github/settings.local.yml, class: starter}
-  - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}
-  - {path: AGENTS.md, class: split, region: html}
-  - {path: .typography-allow, class: managed, when: {without: [release-please]}}
-  - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
-  - {path: .github/actions/site-build/action.yml, class: starter}
-  - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
+  - {
+      path: .github/dependabot.yml,
+      class: managed,
+      blocks: dependabot_ecosystems,
+      sources: { bun: files/bun/.github/dependabot.bun.yml },
+    }
+  - { path: .github/settings.local.yml, class: starter }
+  - {
+      path: .github/settings.yml,
+      class: managed,
+      render: settings,
+      overlay: .github/settings.local.yml,
+    }
+  - { path: AGENTS.md, class: split, region: html }
+  - { path: .typography-allow, class: managed, when: { without: [release-please] } }
+  - { path: .typography-allow, class: managed, when: { modules: [release-please] } }
+  - { path: .github/actions/site-build/action.yml, class: starter }
+  - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
 mirrors:
-  - {source: AGENTS.md, kind: symlink, targets: [CLAUDE.md, .github/agents.md]}
+  - { source: AGENTS.md, kind: symlink, targets: [CLAUDE.md, .github/agents.md] }
 ```
 
-| Key | Meaning |
-| --- | --- |
-| `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
-| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. What the data may carry: [Module data](#module-data). |
-| `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
-| `files[].class` | `managed`, `split`, or `starter` ([Classes](writer.md#classes)). |
-| `files[].source` | The source file, under `files/`, or an upstream ref `{repository, sha, path}` fetched at sync time ([Upstream refs](#upstream-refs)). Default: `files/<first when.modules entry, or base>/<path>`. |
-| `files[].when` | The selection condition ([Selection](#selection)). Absent or empty means always. |
-| `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
-| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names one block (below); a value listed twice lands once. |
-| `files[].always` | Managed, split, and starter entries: block values every repository takes, before the modules' blocks; each needs a source in `sources`. |
-| `files[].sources` | Managed, split, and starter entries: block value to its source, in the grammar of `files[].source`: a tree file under `files/`, spliced as it reads, or an upstream ref ([Upstream refs](#upstream-refs)). Every value `always` or a module lists has one, and every source is listed by one of them. |
-| `files[].replace` | Entries fetching an upstream source or blocks: literal rewrites `{<from>: <to>}` applied to every fetched body of the entry, in order (`{"[\r]": "?"}` turns the macOS template's class holding a bare CR byte, which check-typography refuses, into a one-character glob). A tree file is edited instead. |
-| `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers and the repository's overlay at `overlay` ([settings.md](../../settings.md)). |
-| `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
-| `settings.baseline`, `settings.layers`, `settings.override` | The settings layers ([settings.md](../../settings.md)), clean paths under `files/`, present exactly when a `render: settings` entry exists: the baseline, then each `{source, when}` layer whose `when` holds (absent means always) in declared order, then the override above the repository's overlay. |
-| `mirrors` | The fleet's mirrors, in the registration's grammar; [Mirrors](mirrors.md) says how the fleet's list and the repository's are judged as one. A fleet mirror carries no `when`: every repository gets each target, save one its `except` names. Absent means none. |
+| Key                                                         | Meaning                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `placeholders`                                              | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`).                                                                                                                                                           |
+| `modules.<name>`                                            | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. What the data may carry: [Module data](#module-data).                                                                                                                                     |
+| `files[].path`                                              | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`.                                                                                                                                                                                                              |
+| `files[].class`                                             | `managed`, `split`, or `starter` ([Classes](writer.md#classes)).                                                                                                                                                                                                                                           |
+| `files[].source`                                            | The source file, under `files/`, or an upstream ref `{repository, sha, path}` fetched at sync time ([Upstream refs](#upstream-refs)). Default: `files/<first when.modules entry, or base>/<path>`.                                                                                                         |
+| `files[].when`                                              | The selection condition ([Selection](#selection)). Absent or empty means always.                                                                                                                                                                                                                           |
+| `files[].region`                                            | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers.                                                                                                                                                                                                                         |
+| `files[].blocks`                                            | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names one block (below); a value listed twice lands once.                                                                                                              |
+| `files[].always`                                            | Managed, split, and starter entries: block values every repository takes, before the modules' blocks; each needs a source in `sources`.                                                                                                                                                                    |
+| `files[].sources`                                           | Managed, split, and starter entries: block value to its source, in the grammar of `files[].source`: a tree file under `files/`, spliced as it reads, or an upstream ref ([Upstream refs](#upstream-refs)). Every value `always` or a module lists has one, and every source is listed by one of them.      |
+| `files[].replace`                                           | Entries fetching an upstream source or blocks: literal rewrites `{<from>: <to>}` applied to every fetched body of the entry, in order (`{"[\r]": "?"}` turns the macOS template's class holding a bare CR byte, which check-typography refuses, into a one-character glob). A tree file is edited instead. |
+| `files[].render`                                            | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers and the repository's overlay at `overlay` ([settings.md](../../settings.md)).                                                                                    |
+| `files[].overlay`                                           | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is.                                                                        |
+| `settings.baseline`, `settings.layers`, `settings.override` | The settings layers ([settings.md](../../settings.md)), clean paths under `files/`, present exactly when a `render: settings` entry exists: the baseline, then each `{source, when}` layer whose `when` holds (absent means always) in declared order, then the override above the repository's overlay.   |
+| `mirrors`                                                   | The fleet's mirrors, in the registration's grammar; [Mirrors](mirrors.md) says how the fleet's list and the repository's are judged as one. A fleet mirror carries no `when`: every repository gets each target, save one its `except` names. Absent means none.                                           |
 
 **Where blocks land:** at the anchor line, the word `blocks` inside double braces, alone on its line, spelled like a placeholder.
 
@@ -76,17 +149,17 @@ mirrors:
 
 ### Module data
 
-| Module data key | Meaning | Reader |
-| --- | --- | --- |
-| `description` | the module's one-line description | docs and the PR body |
-| `codeql_languages` | the CodeQL languages the toolchain contributes; the plan folds the selected modules' lists into one deduplicated matrix | the fleet plan |
-| `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
-| `gitignore_sources` | the github/gitignore templates and platform-authored blocks the module adds (its `blocks` list) | the writer |
-| `agents_toolchain` | the AGENTS.md block list, the module's own name | the writer |
-| `toolchain_steps` | the block list, the module's own name, of the three starter workflows that carry per-toolchain steps | the writer |
-| `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
-| `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
-| `pin` | `{file, repository, tag}`: the module's version dotfile under `files/`, the github.com repository whose latest release it follows, and that repository's release tag with `{version}` where the version stands ([toolchains.md](../../toolchains.md#keeping-the-pins-fresh)) | the refresh workflow |
+| Module data key         | Meaning                                                                                                                                                                                                                                                                      | Reader                                                                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `description`           | the module's one-line description                                                                                                                                                                                                                                            | docs and the PR body                                                       |
+| `codeql_languages`      | the CodeQL languages the toolchain contributes; the plan folds the selected modules' lists into one deduplicated matrix                                                                                                                                                      | the fleet plan                                                             |
+| `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list)                                                                                                                                                                                                           | the writer                                                                 |
+| `gitignore_sources`     | the github/gitignore templates and platform-authored blocks the module adds (its `blocks` list)                                                                                                                                                                              | the writer                                                                 |
+| `agents_toolchain`      | the AGENTS.md block list, the module's own name                                                                                                                                                                                                                              | the writer                                                                 |
+| `toolchain_steps`       | the block list, the module's own name, of the three starter workflows that carry per-toolchain steps                                                                                                                                                                         | the writer                                                                 |
+| `path`                  | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path`                                                                                                           | the fleet plan                                                             |
+| `tracking_label`        | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with                              | the fleet plan, the writer's settings render, and the placeholder defaults |
+| `pin`                   | `{file, repository, tag}`: the module's version dotfile under `files/`, the github.com repository whose latest release it follows, and that repository's release tag with `{version}` where the version stands ([toolchains.md](../../toolchains.md#keeping-the-pins-fresh)) | the refresh workflow                                                       |
 
 - **The typed keys** are `description`, `path`, `tracking_label`, `codeql_languages`, and `pin`. Any other key is a list some entry's `blocks` or a `declaring` clause reads.
 - **Every many-of key is a list,** `codeql_languages` and the block lists alike: a key outside `description`, `path`, `tracking_label`, and `pin` must hold a non-empty list of names, and one spelled as a single word is a loader error naming the module and key.
@@ -128,20 +201,20 @@ The file list is [files.yml](../../../files.yml) itself: its `files` entries nam
 
 The tables below cover the `when` forms and `blocks` keys in use.
 
-| `when` form | Used by |
-| --- | --- |
-| `modules: [x]` | every module-owned file |
-| `any: {declaring: <key>}` | the CodeQL settings layer (`codeql_languages`), `auto-format.yml` (`toolchain_steps`), the Toolchain variant of `AGENTS.md` (`agents_toolchain`) |
-| `without: [...]` | `LICENSE.md` (not `custom-license`), the plain variant of `.typography-allow` |
-| `without: {declaring: <key>}` | the plain variant of `AGENTS.md` (`agents_toolchain`) |
-| `private: true` / `false` | the public, private, and CodeQL settings layers |
+| `when` form                   | Used by                                                                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `modules: [x]`                | every module-owned file                                                                                                                          |
+| `any: {declaring: <key>}`     | the CodeQL settings layer (`codeql_languages`), `auto-format.yml` (`toolchain_steps`), the Toolchain variant of `AGENTS.md` (`agents_toolchain`) |
+| `without: [...]`              | `LICENSE.md` (not `custom-license`), the plain variant of `.typography-allow`                                                                    |
+| `without: {declaring: <key>}` | the plain variant of `AGENTS.md` (`agents_toolchain`)                                                                                            |
+| `private: true` / `false`     | the public, private, and CodeQL settings layers                                                                                                  |
 
-| `blocks` key | Entry | Block sources |
-| --- | --- | --- |
-| `gitignore_sources` | `.gitignore` (split) | github/gitignore templates at one pinned sha, fetched by every sync; the fuzzer's failure directory from `files/fuzzer/fuzzer.gitignore` |
-| `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.<ecosystem>.yml`, appended at the anchor line that ends the source |
-| `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.toolchain.md`, the module's Toolchain bullets, appended after the region body |
-| `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.toolchain.yml`: the example checks (rust's are live steps: cargo's own commands, the same in every repository), the setup and install steps, the setup and format steps |
+| `blocks` key            | Entry                                                                 | Block sources                                                                                                                                                                                                    |
+| ----------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gitignore_sources`     | `.gitignore` (split)                                                  | github/gitignore templates at one pinned sha, fetched by every sync; the fuzzer's failure directory from `files/fuzzer/fuzzer.gitignore`                                                                         |
+| `dependabot_ecosystems` | `.github/dependabot.yml` (managed)                                    | `files/<module>/.github/dependabot.<ecosystem>.yml`, appended at the anchor line that ends the source                                                                                                            |
+| `agents_toolchain`      | `AGENTS.md` (Toolchain variant, split)                                | `files/<module>/AGENTS.toolchain.md`, the module's Toolchain bullets, appended after the region body                                                                                                             |
+| `toolchain_steps`       | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.toolchain.yml`: the example checks (rust's are live steps: cargo's own commands, the same in every repository), the setup and install steps, the setup and format steps |
 
 - **The `.gitignore` templates on every repository,** through `always`: the OS templates `Global/Windows.gitignore`, `Global/macOS.gitignore`, `Global/Linux.gitignore` and the editor templates `Global/VisualStudioCode.gitignore`, `Global/JetBrains.gitignore`. The Node template both JavaScript toolchains list lands once.
 - **The `toolchain_steps` seams:** each block opens with the blank line that separates it from the step above. The anchor sits after the checkout step: `copilot-setup-steps.yml` ends there, and `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps.
@@ -160,17 +233,17 @@ An upstream ref is `{repository, sha, path}`: a file of a github.com repository 
 
 ## Placeholders
 
-| Name | Value |
-| --- | --- |
-| `project_name` | `project.name` from the registration |
-| `project_slug` | `project.slug` |
-| `description` | `project.description` |
-| `github_username` | the repository owner |
-| `github_username_lower` | the owner, lower-cased |
-| `copyright_holder` | `project.copyright_holder`, else the owner |
-| `year` | the current UTC year |
-| `private` | the writer's `--private` flag, `true` or `false`; the `.github/settings.local.yml` starter declares the visibility with it |
-| `fuzzer_label`, `nightly_label`, `site_label` | `labels.<key>` from the registration, else the `default` of the `modules.<m>.tracking_label` whose `key` is `fuzzer`, `nightly`, or `site` |
+| Name                                           | Value                                                                                                                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project_name`                                 | `project.name` from the registration                                                                                                                    |
+| `project_slug`                                 | `project.slug`                                                                                                                                          |
+| `description`                                  | `project.description`                                                                                                                                   |
+| `github_username`                              | the repository owner                                                                                                                                    |
+| `github_username_lower`                        | the owner, lower-cased                                                                                                                                  |
+| `copyright_holder`                             | `project.copyright_holder`, else the owner                                                                                                              |
+| `year`                                         | the current UTC year                                                                                                                                    |
+| `private`                                      | the writer's `--private` flag, `true` or `false`; the `.github/settings.local.yml` starter declares the visibility with it                              |
+| `fuzzer_label`, `nightly_label`, `site_label`  | `labels.<key>` from the registration, else the `default` of the `modules.<m>.tracking_label` whose `key` is `fuzzer`, `nightly`, or `site`              |
 | `<key>_label_color`, `<key>_label_description` | the `color` and `description` of the same `tracking_label`: the tuple the starter's report step creates the label with, and the render declares it with |
 
 - **A token** is the name inside double braces with no spaces; spaces inside the braces make it plain text.
@@ -181,12 +254,12 @@ An upstream ref is `{repository, sha, path}`: a file of a github.com repository 
 
 ## Selection
 
-| Clause | Holds when |
-| --- | --- |
-| `modules: [a, b]` | every listed module is selected |
-| `any: [a, b]` | at least one listed module is selected |
-| `without: [a]` | none of the listed modules is selected |
-| `private: true` | the repository's visibility matches |
+| Clause            | Holds when                             |
+| ----------------- | -------------------------------------- |
+| `modules: [a, b]` | every listed module is selected        |
+| `any: [a, b]`     | at least one listed module is selected |
+| `without: [a]`    | none of the listed modules is selected |
+| `private: true`   | the repository's visibility matches    |
 
 **A list position may name a module-data key instead of the modules:** `any: {declaring: codeql_languages}` is the list of every module whose data carries `codeql_languages`, in `modules` order. The loader expands it, so a list spelled this way follows the modules block and a new module joins it by declaring the key; a key no module declares is a loader error.
 

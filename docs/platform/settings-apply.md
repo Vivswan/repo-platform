@@ -14,10 +14,10 @@ This page is the central run that applies every managed repository's rendered `.
 
 Every run, on all three entries ([when it runs](../settings.md#when-it-runs)), applies only from a GREEN commit ([fleet/require_green_commit.ts](../../.github/scripts/fleet/require_green_commit.ts), the same [all-green predicate](../all-green.md#consuming-the-gate) the tag mover and the sync enforce). Each job has one checkout with no `ref:`, so the selector's and the resolver's code is the judged commit's.
 
-| Entry | The gate |
-| --- | --- |
-| Post-green call | the sha input must be the run's own judged commit, read through the tag mover's bounded all-green poll (shared/all_green.ts) |
-| Dispatch and nightly heal | waits (bounded, 20 minutes) for the tip's all-green check and fails closed on red or none |
+| Entry                     | The gate                                                                                                                     |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Post-green call           | the sha input must be the run's own judged commit, read through the tag mover's bounded all-green poll (shared/all_green.ts) |
+| Dispatch and nightly heal | waits (bounded, 20 minutes) for the tip's all-green check and fails closed on red or none                                    |
 
 - **Post-green call:** the caller is needs-ordered behind the gate in the same run, so a verdict still pending at the bound means the call came from somewhere else.
 
@@ -49,11 +49,11 @@ A red nightly is the signal that drift is going unhealed, so the halt is a FAILE
 
 A `plan` job, then one `apply (row <i>)` job per target, the shape the sync's operator uses ([platform/sync/operator.md](sync/operator.md)). The selector lists the targets and keys each row of the apply matrix. Every apply job resolves its own target and runs the library's CLI (`gsac`) on it, in `--repos` mode, from its rendered `.github/settings.yml` on its default branch.
 
-| Step | Script | What it does |
-| --- | --- | --- |
-| plan: select | [fleet/select_settings_repos.ts](../../.github/scripts/fleet/select_settings_repos.ts) | selects the targets ([the three probes](#selection)) |
-| apply: resolve | [fleet/resolve_settings_target.ts](../../.github/scripts/fleet/resolve_settings_target.ts) | resolves the row's target |
-| apply: apply | `bun run gsac`, the installed library's own bin, `--repos` that one target | applies, or checks, that one target |
+| Step           | Script                                                                                     | What it does                                         |
+| -------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| plan: select   | [fleet/select_settings_repos.ts](../../.github/scripts/fleet/select_settings_repos.ts)     | selects the targets ([the three probes](#selection)) |
+| apply: resolve | [fleet/resolve_settings_target.ts](../../.github/scripts/fleet/resolve_settings_target.ts) | resolves the row's target                            |
+| apply: apply   | `bun run gsac`, the installed library's own bin, `--repos` that one target                 | applies, or checks, that one target                  |
 
 - **The selector's outputs** are `count` and `matrix`: one row per target, in the selection's order, each an index and the row's key.
 
@@ -77,10 +77,10 @@ A `plan` job, then one `apply (row <i>)` job per target, the shape the sync's op
 
 A target is selected when all three probes pass, in this order, over every discovered repository the scope admits, sorted:
 
-| Probe | Reads | On failure |
-| --- | --- | --- |
-| Enrolled | the fleet token can push to the repository | skipped with a notice |
-| Adopted | `.repo-platform.yml` on the default branch | skipped with the not-adopted notice; a probe that keeps failing after retries is skipped for the run with a warning and picked up again the next night |
+| Probe    | Reads                                                                                     | On failure                                                                                                                                                                                                        |
+| -------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enrolled | the fleet token can push to the repository                                                | skipped with a notice                                                                                                                                                                                             |
+| Adopted  | `.repo-platform.yml` on the default branch                                                | skipped with the not-adopted notice; a probe that keeps failing after retries is skipped for the run with a warning and picked up again the next night                                                            |
 | Rendered | `.github/settings.yml` on the default branch opens with the generator header's first line | a missing file is skipped with the notice `it has no .github/settings.yml yet; the sync PR that renders it has not merged`; a file without the header fails the plan with a count (the log is public, so no name) |
 
 - **The hand-written refusal keeps a first sync safe:** a `.github/settings.yml` the sync did not render is never applied on its own. Applying it in `repos` mode would delete every fleet label it does not declare. The plan stays red until the sync PR that renders it merges.

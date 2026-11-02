@@ -44,34 +44,34 @@ Exactly one open sync PR should exist per repo; when none exists, or more than o
 
 ## Read the report
 
-| Section | Content | What to verify |
-|---|---|---|
-| header | Build sha, the modules the registration selected, the visibility | The module list matches `.repo-platform.yml`; visibility matches the repo |
-| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) | Each change per the Written table below. A starter is only ever `created`, `unchanged`, or `held` |
-| Replaced local edits | one unified diff per replaced file or region (40 lines shown, the rest counted) | Decide per diff: the content moves into a repo-owned hook or upstream, or it was a stray edit and goes |
-| Retired | one row per file the platform no longer writes here: `deleted`, `region removed`, `held`, `released` | Each outcome per the Retired table below |
-| Registration notes | one line per note: an unreadable manifest, a placeholder with no value, a manifest record at an unclean path, a stale record no entry declares, a mirror record no declaration reaches, or an `except` path no entry writes (the exact forms below) | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A dropped mirror record means that copy is the repository's own now |
-| Mirrors | one row per declared target: `written`, `current`, `replaced local edits` (its diff below), `replaced` with a detail naming what was removed | `replaced local edits`: decide per diff like a managed file; `replaced`: a directory stood at the target or a file where a directory had to be, and the diff shows what went. A declaration the writer cannot honour never reaches the report: the sync fails instead (the failure path below) |
-| Review | `Hold for review: yes` with one line per reason, or `no` | Every listed reason resolved before merging |
+| Section              | Content                                                                                                                                                                                                                                             | What to verify                                                                                                                                                                                                                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| header               | Build sha, the modules the registration selected, the visibility                                                                                                                                                                                    | The module list matches `.repo-platform.yml`; visibility matches the repo                                                                                                                                                                                                                      |
+| Written              | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`)                                                                                                                     | Each change per the Written table below. A starter is only ever `created`, `unchanged`, or `held`                                                                                                                                                                                              |
+| Replaced local edits | one unified diff per replaced file or region (40 lines shown, the rest counted)                                                                                                                                                                     | Decide per diff: the content moves into a repo-owned hook or upstream, or it was a stray edit and goes                                                                                                                                                                                         |
+| Retired              | one row per file the platform no longer writes here: `deleted`, `region removed`, `held`, `released`                                                                                                                                                | Each outcome per the Retired table below                                                                                                                                                                                                                                                       |
+| Registration notes   | one line per note: an unreadable manifest, a placeholder with no value, a manifest record at an unclean path, a stale record no entry declares, a mirror record no declaration reaches, or an `except` path no entry writes (the exact forms below) | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A dropped mirror record means that copy is the repository's own now                                              |
+| Mirrors              | one row per declared target: `written`, `current`, `replaced local edits` (its diff below), `replaced` with a detail naming what was removed                                                                                                        | `replaced local edits`: decide per diff like a managed file; `replaced`: a directory stood at the target or a file where a directory had to be, and the diff shows what went. A declaration the writer cannot honour never reaches the report: the sync fails instead (the failure path below) |
+| Review               | `Hold for review: yes` with one line per reason, or `no`                                                                                                                                                                                            | Every listed reason resolved before merging                                                                                                                                                                                                                                                    |
 
 The Written changes:
 
-| Change | What to verify |
-|---|---|
-| `created` | the path was absent before: a first sync, a new module, or a path the platform newly declares for a selected module |
-| `updated`, `unchanged` | need no look |
-| `replaced local edits` | a managed file, or a split file's region; its diff is below |
-| `region added` | a split file that had no markers, its whole prior content now below the new region |
-| `held` | wrote nothing; its Detail says why (the list below) |
+| Change                 | What to verify                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `created`              | the path was absent before: a first sync, a new module, or a path the platform newly declares for a selected module |
+| `updated`, `unchanged` | need no look                                                                                                        |
+| `replaced local edits` | a managed file, or a split file's region; its diff is below                                                         |
+| `region added`         | a split file that had no markers, its whole prior content now below the new region                                  |
+| `held`                 | wrote nothing; its Detail says why (the list below)                                                                 |
 
 The Retired outcomes:
 
-| Outcome | What it did |
-|---|---|
-| `deleted` | removed the platform's own content |
+| Outcome          | What it did                                                                                                                                                           |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deleted`        | removed the platform's own content                                                                                                                                    |
 | `region removed` | took the managed region and its markers out of a split file and left the repository-owned content as a plain file; the record leaves with it, so the row appears once |
-| `held` | left a file whose content differs from the recorded write, for your decision |
-| `released` | dropped the record of a path the registration's `except` names and touched nothing (yours) |
+| `held`           | left a file whose content differs from the recorded write, for your decision                                                                                          |
+| `released`       | dropped the record of a path the registration's `except` names and touched nothing (yours)                                                                            |
 
 The Registration notes, exactly:
 
@@ -137,13 +137,13 @@ git diff origin/main...origin/automation/repo-platform -- <path>
 
 ## The manual review cases
 
-| Case | What happened | What to do |
-|---|---|---|
-| Replaced local edits | Someone edited a managed file (`ci.yml`, a module workflow, a pin dotfile) or the managed region of a split file | Read the diff; move the need (below). The platform version stays |
-| Held retirement | A file the platform stopped writing here differs from its recorded write: a managed file edited, a split file's region edited or its markers gone | Keep what matters, delete the rest yourself; the row returns every sync until the file is gone |
-| Removed region | A split file the platform stopped writing here carried repository-owned content around its recorded region: the region and its markers went, the rest stayed as a plain file | Read the file that remains; it is yours now, and no row returns for it |
-| Replaced mirror | A declared target held other content (`replaced local edits`, diff below), or a directory or a blocking file stood in the target's way (`replaced`, the detail names it) | Read the diff; the platform's copy or link, by the declared `kind`, stays. Content worth keeping moves to a path no declaration names |
-| Settings | `.github/settings.yml` reads `replaced local edits` (someone edited the rendered file, or the repository carried a hand-written one the sync had not recorded) or `held` (one of the three overlay details under Read the report) | `replaced local edits`: move what the diff removed into `.github/settings.local.yml` (the rendered file is never edited by hand); the holds name the registration key or the overlay line to fix |
+| Case                 | What happened                                                                                                                                                                                                                     | What to do                                                                                                                                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Replaced local edits | Someone edited a managed file (`ci.yml`, a module workflow, a pin dotfile) or the managed region of a split file                                                                                                                  | Read the diff; move the need (below). The platform version stays                                                                                                                                 |
+| Held retirement      | A file the platform stopped writing here differs from its recorded write: a managed file edited, a split file's region edited or its markers gone                                                                                 | Keep what matters, delete the rest yourself; the row returns every sync until the file is gone                                                                                                   |
+| Removed region       | A split file the platform stopped writing here carried repository-owned content around its recorded region: the region and its markers went, the rest stayed as a plain file                                                      | Read the file that remains; it is yours now, and no row returns for it                                                                                                                           |
+| Replaced mirror      | A declared target held other content (`replaced local edits`, diff below), or a directory or a blocking file stood in the target's way (`replaced`, the detail names it)                                                          | Read the diff; the platform's copy or link, by the declared `kind`, stays. Content worth keeping moves to a path no declaration names                                                            |
+| Settings             | `.github/settings.yml` reads `replaced local edits` (someone edited the rendered file, or the repository carried a hand-written one the sync had not recorded) or `held` (one of the three overlay details under Read the report) | `replaced local edits`: move what the diff removed into `.github/settings.local.yml` (the rendered file is never edited by hand); the holds name the registration key or the overlay line to fix |
 
 Something that matches none of the above: do not merge; waiting loses nothing. Escalate with an issue on Vivswan/repo-platform.
 
@@ -164,14 +164,14 @@ A split file (`AGENTS.md`, `LICENSE.md`, `.gitignore`, `.editorconfig`, `.gitatt
 
 ## Keeping a local change
 
-| The change was in | Move it to |
-|---|---|
-| `ci.yml` (a job, a step) | `checks.yml` for gate jobs; `release-gate.yml` for release acceptance tests; `post-green.yml` for green-gated work on main; `update-release.yml` / `update-release-pr.yml` for release-time logic |
-| the managed region of a split file | above BEGIN or below END of the same file |
-| a module workflow or a pin dotfile | the platform's `files/` (a PR there reaches the whole fleet; one that feeds a platform action a new input may add the input in the same PR: [build provenance](https://github.com/Vivswan/repo-platform/blob/main/docs/platform/build-provenance.md#a-new-action-input-and-its-workflow-land-together)), or a repo-owned workflow beside it |
-| a module setting | the module's key in `.repo-platform.yml` (`labels.*`, `site.*`) |
-| the rendered `.github/settings.yml` (a label, a ruleset, an identity key) | `.github/settings.local.yml`, the overlay the render reads; the next sync re-renders the managed file from it |
-| a site build command | the repo-owned `.github/actions/site-build/action.yml` hook (its `dist` output names the built directory) |
+| The change was in                                                         | Move it to                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci.yml` (a job, a step)                                                  | `checks.yml` for gate jobs; `release-gate.yml` for release acceptance tests; `post-green.yml` for green-gated work on main; `update-release.yml` / `update-release-pr.yml` for release-time logic                                                                                                                                           |
+| the managed region of a split file                                        | above BEGIN or below END of the same file                                                                                                                                                                                                                                                                                                   |
+| a module workflow or a pin dotfile                                        | the platform's `files/` (a PR there reaches the whole fleet; one that feeds a platform action a new input may add the input in the same PR: [build provenance](https://github.com/Vivswan/repo-platform/blob/main/docs/platform/build-provenance.md#a-new-action-input-and-its-workflow-land-together)), or a repo-owned workflow beside it |
+| a module setting                                                          | the module's key in `.repo-platform.yml` (`labels.*`, `site.*`)                                                                                                                                                                                                                                                                             |
+| the rendered `.github/settings.yml` (a label, a ruleset, an identity key) | `.github/settings.local.yml`, the overlay the render reads; the next sync re-renders the managed file from it                                                                                                                                                                                                                               |
+| a site build command                                                      | the repo-owned `.github/actions/site-build/action.yml` hook (its `dist` output names the built directory)                                                                                                                                                                                                                                   |
 
 ## Fix the PR
 
@@ -207,12 +207,12 @@ A sync leg that fails files (or refreshes) one issue in the target repository ti
 
 Fix what the issue names, usually the registration:
 
-| Cause | How it is named |
-|---|---|
-| a module `files.yml` does not offer (the registration) | `.repo-platform.yml: module "<name>" is not a module files.yml offers (known: ...)` |
-| a mirror declaration the writer cannot honour (the registration) | `.repo-platform.yml: mirrors: source '<s>', target '<t>': <reason>` |
-| a manifest record the writer cannot read | counted in the log, and named by the repository's own `validate-managed-files` check |
-| a split file's markers | - |
+| Cause                                                            | How it is named                                                                      |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| a module `files.yml` does not offer (the registration)           | `.repo-platform.yml: module "<name>" is not a module files.yml offers (known: ...)`  |
+| a mirror declaration the writer cannot honour (the registration) | `.repo-platform.yml: mirrors: source '<s>', target '<t>': <reason>`                  |
+| a manifest record the writer cannot read                         | counted in the log, and named by the repository's own `validate-managed-files` check |
+| a split file's markers                                           | -                                                                                    |
 
 Then dispatch again:
 

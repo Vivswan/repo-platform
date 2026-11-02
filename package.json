@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@actions/expressions": "^0.3.61",
-    "@biomejs/biome": "2.6.3",
+    "@biomejs/biome": "2.6.4",
     "@types/bun": "1.4.4",
     "colorjs.io": "0.7.1",
     "markdown-it": "15.0.3",

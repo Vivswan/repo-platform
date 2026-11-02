@@ -8,15 +8,15 @@ Selecting the `bun` module gives a repository the fleet's TypeScript lint floor 
 
 ## The two layers
 
-Biome merges `extends` left to right and applies the extending file last. Measured at biome 2.5.11 under the shipped pair:
+Biome merges `extends` left to right and applies the extending file last. Measured under the shipped pair:
 
-| `biome.local.jsonc` carries | Result |
-| --- | --- |
-| `linter.enabled: false` | nothing changes: the managed `enabled: true` applies last |
+| `biome.local.jsonc` carries                    | Result                                                                        |
+| ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| `linter.enabled: false`                        | nothing changes: the managed `enabled: true` applies last                     |
 | a floor rule's threshold (`useMaxParams` at 3) | overwritten by the managed file's: the floor's thresholds are fixed both ways |
-| an additional rule, a preset, a plugin | applies beneath the floor |
-| the formatter, `vcs`, exclusions | stand: the managed file carries none of those blocks |
-| a per-path `overrides` entry | honored for its paths, the one relaxation |
+| an additional rule, a preset, a plugin         | applies beneath the floor                                                     |
+| the formatter, `vcs`, exclusions               | stand: the managed file carries none of those blocks                          |
+| a per-path `overrides` entry                   | honored for its paths, the one relaxation                                     |
 
 ## Building on the floor
 

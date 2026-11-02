@@ -29,36 +29,36 @@ For enrolling a repo that is not managed yet, use the `repo-platform-new-project
 
 One line each, the `description` of each module in the platform's `files.yml`.
 
-| Module | What it gives the repo |
-|---|---|
-| `bun` | TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS, the biome lint floor and the member-shape rules) |
-| `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff floor) |
-| `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore, the clippy readability floor; no CodeQL) |
-| `site` | one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme) |
-| `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels |
-| `pr-title` | Conventional Commit PR title check, its own required workflow |
-| `fuzzer` | nightly fuzz starter with issue filing, replay inputs, auto-close |
-| `nightly` | nightly CI starter with failure issue filing and auto-close |
-| `custom-license` | repo carries its own license in LICENSE.md; the fleet license is not written |
+| Module           | What it gives the repo                                                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun`            | TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS, the biome lint floor and the member-shape rules)                              |
+| `uv`             | Python/uv toolchain (gitignore, dependabot, CodeQL Python, the ruff floor)                                                                |
+| `rust`           | Rust/cargo toolchain (cargo dependabot, Rust gitignore, the clippy readability floor; no CodeQL)                                          |
+| `site`           | one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme) |
+| `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels                                                     |
+| `pr-title`       | Conventional Commit PR title check, its own required workflow                                                                             |
+| `fuzzer`         | nightly fuzz starter with issue filing, replay inputs, auto-close                                                                         |
+| `nightly`        | nightly CI starter with failure issue filing and auto-close                                                                               |
+| `custom-license` | repo carries its own license in LICENSE.md; the fleet license is not written                                                              |
 
 ## What each module writes
 
 From the platform's `files.yml`. Managed files are rewritten on every sync; starters are written once and then repo-owned; split files get the module's block inside their managed region.
 
-| Module | Files | Class |
-|---|---|---|
-| `bun` | `.bun-version`, `biome.json` (the TypeScript lint floor; it extends the local layer) | managed |
-| `bun` | `biome.local.jsonc` (the repo's own biome layer under the floor) | starter |
-| `uv` | `ruff.toml`, the Python lint floor the repository's `pyproject.toml` builds on | managed |
-| `rust` | `Cargo.toml` (the workspace root with the lint floor); `clippy.toml` (the floor's thresholds) | starter; managed |
-| every toolchain | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml` | split; managed |
-| every toolchain but `rust` | `.github/workflows/auto-format.yml` | starter |
-| `site` | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | - |
-| `release-please` | `release-please-config.json`, `.release-please-manifest.json`; the release variant of `.typography-allow` | starter; managed |
-| `pr-title` | `.github/workflows/pr-title.yml` | managed |
-| `fuzzer` | `.github/workflows/nightly-fuzz.yml` | starter |
-| `nightly` | `.github/workflows/nightly.yml` | starter |
-| `custom-license` | `LICENSE.md` is no longer written; the fleet copy is retired on that sync | - |
+| Module                     | Files                                                                                                           | Class            |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `bun`                      | `.bun-version`, `biome.json` (the TypeScript lint floor; it extends the local layer)                            | managed          |
+| `bun`                      | `biome.local.jsonc` (the repo's own biome layer under the floor)                                                | starter          |
+| `uv`                       | `ruff.toml`, the Python lint floor the repository's `pyproject.toml` builds on                                  | managed          |
+| `rust`                     | `Cargo.toml` (the workspace root with the lint floor); `clippy.toml` (the floor's thresholds)                   | starter; managed |
+| every toolchain            | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml`                                     | split; managed   |
+| every toolchain but `rust` | `.github/workflows/auto-format.yml`                                                                             | starter          |
+| `site`                     | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | -                |
+| `release-please`           | `release-please-config.json`, `.release-please-manifest.json`; the release variant of `.typography-allow`       | starter; managed |
+| `pr-title`                 | `.github/workflows/pr-title.yml`                                                                                | managed          |
+| `fuzzer`                   | `.github/workflows/nightly-fuzz.yml`                                                                            | starter          |
+| `nightly`                  | `.github/workflows/nightly.yml`                                                                                 | starter          |
+| `custom-license`           | `LICENSE.md` is no longer written; the fleet copy is retired on that sync                                       | -                |
 
 The release and site legs of `ci.yml` exist in every repository and run only when their module is selected. Per-module keys, companion steps, and removal notes are in [references/modules.md](references/modules.md).
 
@@ -81,11 +81,11 @@ The `plan` step of fleet CI parses `.repo-platform.yml` on the PR: an unknown ke
 
 The PR then stays red on `validate-managed-files` until a sync writes the module's files onto its branch: the check runs the writer over the tree with the edited registration and names each missing file with its bytes. Three ways bring them:
 
-| Way | How | What it does |
-| --- | --- | --- |
-| the `add_modules` dispatch | `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f add_modules=<a>,<b>` | no PR of your own: the sync PR carries the registration edit and the files, and waits for review |
-| the branch dispatch | `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=<pr-branch>` | one commit onto your PR branch; the row prints `branch pushed` |
-| the `repo-platform:sync` label | add the label to the PR | the repository's own token syncs the branch and comments the report, for a hold-free report only: it refuses, pushing nothing, when the sync touches `.github/workflows/` (so a module that brings a workflow, `fuzzer`, `nightly`, `pr-title`, takes the branch dispatch) or when the writer holds (a replaced local edit, a registration note) |
+| Way                            | How                                                                                                     | What it does                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| the `add_modules` dispatch     | `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f add_modules=<a>,<b>` | no PR of your own: the sync PR carries the registration edit and the files, and waits for review                                                                                                                                                                                                                                                 |
+| the branch dispatch            | `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=<pr-branch>`  | one commit onto your PR branch; the row prints `branch pushed`                                                                                                                                                                                                                                                                                   |
+| the `repo-platform:sync` label | add the label to the PR                                                                                 | the repository's own token syncs the branch and comments the report, for a hold-free report only: it refuses, pushing nothing, when the sync touches `.github/workflows/` (so a module that brings a workflow, `fuzzer`, `nightly`, `pr-title`, takes the branch dispatch) or when the writer holds (a replaced local edit, a registration note) |
 
 After a label sync, approve the pushed head's held run from the merge box (or push a commit): GitHub holds the run a repository-token push creates. The branch dispatch pushes with the fleet PAT, so its run starts on its own. Merge when green.
 
@@ -97,12 +97,12 @@ A repo whose own website renders `docs/` sets `site.path: null` instead: the web
 
 For a dispatch, the run's job log (`gh run view <id> --log`; `gh run list -R Vivswan/repo-platform --workflow sync-repos.yml --limit 1` finds the id) reads `plan: 1 rows` and then one row line, rows numbered from 0:
 
-| Line | Meaning |
-| --- | --- |
-| `row 0: PR opened` | the sync PR is there (`PR refreshed` when one was already open); an `add_modules` run never arms it |
-| `row 0: branch pushed` | the branch dispatch's clean row: one commit on your PR branch |
-| `row 0: unchanged`, no PR | the repo already holds every file of the new selection |
-| `failed, report filed in the target repository` | the `[repo-platform] sync failed` issue in the repo has the error |
+| Line                                            | Meaning                                                                                             |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `row 0: PR opened`                              | the sync PR is there (`PR refreshed` when one was already open); an `add_modules` run never arms it |
+| `row 0: branch pushed`                          | the branch dispatch's clean row: one commit on your PR branch                                       |
+| `row 0: unchanged`, no PR                       | the repo already holds every file of the new selection                                              |
+| `failed, report filed in the target repository` | the `[repo-platform] sync failed` issue in the repo has the error                                   |
 
 The report (the sync PR's body, the branch sync's label comment, or a public repository's job summary on a branch dispatch) should be explained by the module diff:
 
@@ -125,11 +125,11 @@ The full checklist per module is in [references/modules.md](references/modules.m
 
 A module's settings live next to the selection, in `.repo-platform.yml`, and are changed by an ordinary PR:
 
-| Module | Keys | Default |
-|---|---|---|
-| `site` | `site.path`, `site.include`, `labels.site` | `docs`, none, `docs-link-rot` |
-| `fuzzer` | `labels.fuzzer` | `fuzz-nightly` |
-| `nightly` | `labels.nightly` | `nightly-failure` |
+| Module    | Keys                                       | Default                       |
+| --------- | ------------------------------------------ | ----------------------------- |
+| `site`    | `site.path`, `site.include`, `labels.site` | `docs`, none, `docs-link-rot` |
+| `fuzzer`  | `labels.fuzzer`                            | `fuzz-nightly`                |
+| `nightly` | `labels.nightly`                           | `nightly-failure`             |
 
 Two keys belong to no module. `project` is required, with `name`, `slug`, and `description` together; `copyright_holder` is optional and defaults to the owner. `mirrors` defaults to none.
 

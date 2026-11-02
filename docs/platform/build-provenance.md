@@ -6,21 +6,21 @@ order: 250
 
 How the `stable` tag gets moved, how a sync verifies the commit it names before consuming it, and which trusts remain. This document states the contract; each invariant is owned by exactly one script, named per section, whose header carries only what the code alone cannot show.
 
-| Question | Owner |
-| --- | --- |
-| When does a move happen, and what gates it? | [post-green/move_stable.ts](../../.github/scripts/post-green/move_stable.ts) |
-| How does a sync verify the commit before consuming it? | [sync/resolve_build.ts](../../.github/scripts/sync/resolve_build.ts) |
-| Which workflows drive the flow? | [ci.yml](../../.github/workflows/ci.yml) (the [all-green gate](../all-green.md) + the post-green caller), [post-green.yml](../../.github/workflows/post-green.yml) (the move, on the call and on a dispatch) |
+| Question                                               | Owner                                                                                                                                                                                                        |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| When does a move happen, and what gates it?            | [post-green/move_stable.ts](../../.github/scripts/post-green/move_stable.ts)                                                                                                                                 |
+| How does a sync verify the commit before consuming it? | [sync/resolve_build.ts](../../.github/scripts/sync/resolve_build.ts)                                                                                                                                         |
+| Which workflows drive the flow?                        | [ci.yml](../../.github/workflows/ci.yml) (the [all-green gate](../all-green.md) + the post-green caller), [post-green.yml](../../.github/workflows/post-green.yml) (the move, on the call and on a dispatch) |
 
 ## The delivery ref is a tag on main
 
 `refs/tags/stable` names a commit on `main` whose own CI run passed. Every fleet `uses:` pins it (`Vivswan/repo-platform/actions/<name>@stable`, `.../.github/workflows/<name>.yml@stable`) and the sync operator checks it out, so the fleet reads main's own committed tree at that commit:
 
-| What the fleet reads | Where it sits at the commit | Who reads it |
-| --- | --- | --- |
-| `files.yml` and `files/` | the repository root | the sync writer ([platform/sync/writer.md](sync/writer.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../../actions/plan/reserved_labels.ts)), validate-managed-files |
-| `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | every platform workflow and composite, by `$/` path at its own commit ([one commit per run](#one-commit-per-run)); every managed workflow's `uses:` at the tag |
-| `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` |
+| What the fleet reads                                          | Where it sits at the commit                                                       | Who reads it                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `files.yml` and `files/`                                      | the repository root                                                               | the sync writer ([platform/sync/writer.md](sync/writer.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../../actions/plan/reserved_labels.ts)), validate-managed-files |
+| `actions/<name>/`                                             | the repository root; each action installs its own pinned dependencies at run time | every platform workflow and composite, by `$/` path at its own commit ([one commit per run](#one-commit-per-run)); every managed workflow's `uses:` at the tag                                                                                                                                   |
+| `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root                                                               | every managed workflow's reusable-workflow `uses:`                                                                                                                                                                                                                                               |
 
 Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. Two constraints follow for every path on `main`:
 
@@ -49,20 +49,20 @@ So no platform file names another by tag. Between platform files the reference i
 uses: $/.github/workflows/reusable-codeql.yml   # the same commit
 ```
 
-| Who names a platform file | Form | Why |
-| --- | --- | --- |
-| a platform workflow or composite (`.github/workflows/`, `actions/`) | `$/<path>` | the file's own commit, whoever fetched it |
-| a starter (`files/`) | `<owner>/repo-platform/<path>@stable` | the starter is copied into a fleet repository, where `$/` would name that repository |
+| Who names a platform file                                           | Form                                  | Why                                                                                  |
+| ------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------ |
+| a platform workflow or composite (`.github/workflows/`, `actions/`) | `$/<path>`                            | the file's own commit, whoever fetched it                                            |
+| a starter (`files/`)                                                | `<owner>/repo-platform/<path>@stable` | the starter is copied into a fleet repository, where `$/` would name that repository |
 
 [tests/workflows/delivery_pins.test.ts](../../tests/workflows/delivery_pins.test.ts) holds every reference to its row, and refuses a `./actions/<name>` or `./.github/workflows/<name>` path in a platform file: that form resolves against the caller's workspace, which holds nothing of this repository.
 
 ## Who can write `refs/tags/stable`?
 
-| Writer | When | What gates the write |
-| --- | --- | --- |
-| post-green.yml's move-stable job, called | After the `all-green` gate passes on a push to main | ci.yml's post-green job (needs-ordered behind the gate, same run) releases it, and move_stable.ts re-verifies main history and the check at the commit before the push. |
-| post-green.yml's move-stable job, dispatched | A manual `workflow_dispatch` naming a green main commit's sha (the self-heal) | move_stable.ts's verification - main history, completed successful `all-green` - is the SOLE gate there. |
-| Anyone with push access, out of band | Any time | Nothing at write time: the `stable-tag` ruleset ([.github/settings.local.yml](../../.github/settings.local.yml)) blocks deletion only. Sync consumption re-verifies below; `uses:` execution trusts the ref (the residuals table). |
+| Writer                                       | When                                                                          | What gates the write                                                                                                                                                                                                               |
+| -------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| post-green.yml's move-stable job, called     | After the `all-green` gate passes on a push to main                           | ci.yml's post-green job (needs-ordered behind the gate, same run) releases it, and move_stable.ts re-verifies main history and the check at the commit before the push.                                                            |
+| post-green.yml's move-stable job, dispatched | A manual `workflow_dispatch` naming a green main commit's sha (the self-heal) | move_stable.ts's verification - main history, completed successful `all-green` - is the SOLE gate there.                                                                                                                           |
+| Anyone with push access, out of band         | Any time                                                                      | Nothing at write time: the `stable-tag` ruleset ([.github/settings.local.yml](../../.github/settings.local.yml)) blocks deletion only. Sync consumption re-verifies below; `uses:` execution trusts the ref (the residuals table). |
 
 The ruleset blocks deletion only because git classifies every update of an existing tag as a forced update, so a `non_fast_forward` or `update` rule would block the mover itself; rollback protection is the mover's ancestry skip plus the lease.
 
@@ -70,11 +70,11 @@ The ruleset blocks deletion only because git classifies every update of an exist
 
 A change merges to main as commit S. What happens, in order:
 
-| Step | Actor | What happens |
-| --- | --- | --- |
-| 1. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](../all-green.md)). |
-| 2. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
-| 3. Move | post-green.yml's move-stable job | [move_stable.ts](../../.github/scripts/post-green/move_stable.ts) verifies S is main history with a green check, reads where the tag sits, and moves it to S with a lease push. |
+| Step                             | Actor                                          | What happens                                                                                                                                                                                                                                            |
+| -------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. The gating jobs finish        | ci.yml's `all-green` job                       | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](../all-green.md)).                                                                                                                                               |
+| 2. Gate green on a main push     | ci.yml's post-green job                        | Calls [post-green.yml](../../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction).                                                                                                                        |
+| 3. Move                          | post-green.yml's move-stable job               | [move_stable.ts](../../.github/scripts/post-green/move_stable.ts) verifies S is main history with a green check, reads where the tag sits, and moves it to S with a lease push.                                                                         |
 | 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml, calls reusable-site.yml with `github.sha` after the mover, gated on the all-green result alone ([post-green.md](post-green.md#the-run-leg-by-leg)); its failure is its own red job. |
 
 **The commit moved to is always SOURCE_SHA:** the judged run's own commit on the call, the operator's sha input on a dispatch. Never a read of origin/main, which can already be a newer, even red, commit (move_stable.ts's header owns this discipline).
@@ -104,10 +104,10 @@ Until the heal, a sync copies from the commit the tag names as it stands ([Resid
 
 The tag names a main commit whose own CI run passed, so there is no generated tree to prove and no stamp to parse. Two facts anchor everything, verified at the move and re-verified at every sync ([sync/resolve_build.ts](../../.github/scripts/sync/resolve_build.ts)), both hard failures:
 
-| # | Check | What it catches |
-| --- | --- | --- |
-| 1 | The commit is `main` history (`git merge-base --is-ancestor`, through [shared/git_yes_no.ts](../../.github/scripts/shared/git_yes_no.ts), so an errored look is fatal, never a "no"). | A tag pointed at a PR head, a side branch, or a foreign commit. |
-| 2 | The commit carries a completed successful `all-green` check run ([shared/all_green.ts](../../.github/scripts/shared/all_green.ts)). | A red or unjudged commit. |
+| #   | Check                                                                                                                                                                                 | What it catches                                                 |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 1   | The commit is `main` history (`git merge-base --is-ancestor`, through [shared/git_yes_no.ts](../../.github/scripts/shared/git_yes_no.ts), so an errored look is fatal, never a "no"). | A tag pointed at a PR head, a side branch, or a foreign commit. |
+| 2   | The commit carries a completed successful `all-green` check run ([shared/all_green.ts](../../.github/scripts/shared/all_green.ts)).                                                   | A red or unjudged commit.                                       |
 
 The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
@@ -127,11 +127,11 @@ So a workflow never runs ahead of the actions it calls: the sync PR that carries
 
 ## Residuals
 
-| Residual | Why it stands | What bounds it |
-| --- | --- | --- |
-| `uses: ...@stable` execution trusts the ref. | A user-repo ruleset cannot restrict other writers to one workflow; it blocks deletion only. | Sync consumption re-verifies main history and the green check at the commit; nothing re-verifies for `uses:` (below). |
-| Actor provenance is advisory. | Nothing records which run moved the tag; a lightweight tag carries no message. | The check at the commit is the anchor, not the mover's identity. |
-| A sync copies from the commit the tag names as it stands. | No freshness wait exists (the lag, below). | resolve_build.ts runs the green gate and the ancestry check on that commit, and a sync PR, when one opens, records the commit it copied. |
+| Residual                                                  | Why it stands                                                                               | What bounds it                                                                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `uses: ...@stable` execution trusts the ref.              | A user-repo ruleset cannot restrict other writers to one workflow; it blocks deletion only. | Sync consumption re-verifies main history and the green check at the commit; nothing re-verifies for `uses:` (below).                    |
+| Actor provenance is advisory.                             | Nothing records which run moved the tag; a lightweight tag carries no message.              | The check at the commit is the anchor, not the mover's identity.                                                                         |
+| A sync copies from the commit the tag names as it stands. | No freshness wait exists (the lag, below).                                                  | resolve_build.ts runs the green gate and the ancestry check on that commit, and a sync PR, when one opens, records the commit it copied. |
 
 **The ref-trust residual in full:** the tag can only ever name a commit that exists on the server, and repo-platform's own CI gates every commit on `main`. Neither bound covers `uses:`: an out-of-band move to a red or off-main commit still reaches the fleet's `uses:` execution.
 

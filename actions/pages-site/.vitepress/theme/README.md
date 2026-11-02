@@ -14,56 +14,56 @@ Each file's header comment and code own its details. The tables say which file t
 
 This directory, `theme/`:
 
-| File | Role |
-| --- | --- |
-| `tokens.ts` | the fleet token layer as typed data: per-mode and shared tokens, code palette, six hues |
-| `tokens-css.ts` | renders `tokens.ts` into the `virtual:fleet-tokens.css` module at build time |
-| `base.css` | page-wide rules that have no component of their own |
-| `nav.css` | the nav bar and the local nav |
-| `sidebar.css` | the sidebar drawer, its groups, and its rows |
-| `doc.css` | the doc column's frame: the row above the article, the aside's top, the footer |
-| `prose.css` | the article's type |
-| `tables.css` | tables and their scroll wrapper |
-| `code.css` | code blocks and code-group tabs |
-| `mermaid.css` | the mermaid mount and its full-size view |
-| `custom-blocks.css` | custom blocks and GitHub alerts |
-| `pager.css` | the footer's pager |
-| `provenance.css` | the provenance line's look |
-| `landing.css` | the landing page's layout: the facts card's aside, the intro's measure |
-| `facts.css` | the project facts card's layout |
-| `not-found.css` | carbon's not-found page in the fleet's type |
-| `print.css` | the print sheet |
-| `motion.css` | the reduced-motion stop |
-| `image-zoom.css` | the image lightbox's stacking |
-| `index.ts` | the theme entry: carbon as base, fonts, mounts (rules below) |
-| `tier-routes.ts` | the router guard that makes a cross-tier route a full page load |
-| `facts-panel.ts` | the project facts card on landing pages |
-| `provenance.ts` | the provenance line: each page's ref, commit, and source file |
-| `mermaid.ts` | the diagram component (`MermaidDiagrams`) |
-| `mermaid-render.ts` | the render pass over a page's mermaid mounts |
-| `mermaid-theme.ts` | mermaid's `themeVariables` from the fleet's tokens |
-| `mermaid-zoom.ts` | the Zoom button and the `shown` state the view follows |
-| `mermaid-zoom-view.ts` | the full-size diagram view, on Panzoom 4.6.2 (pinned exact) |
-| `image-zoom.ts` | the image lightbox (`ImageZoom`), on medium-zoom 1.1.0 (pinned exact) |
-| `css.d.ts` | the type stand-in for CSS imports |
+| File                   | Role                                                                                    |
+| ---------------------- | --------------------------------------------------------------------------------------- |
+| `tokens.ts`            | the fleet token layer as typed data: per-mode and shared tokens, code palette, six hues |
+| `tokens-css.ts`        | renders `tokens.ts` into the `virtual:fleet-tokens.css` module at build time            |
+| `base.css`             | page-wide rules that have no component of their own                                     |
+| `nav.css`              | the nav bar and the local nav                                                           |
+| `sidebar.css`          | the sidebar drawer, its groups, and its rows                                            |
+| `doc.css`              | the doc column's frame: the row above the article, the aside's top, the footer          |
+| `prose.css`            | the article's type                                                                      |
+| `tables.css`           | tables and their scroll wrapper                                                         |
+| `code.css`             | code blocks and code-group tabs                                                         |
+| `mermaid.css`          | the mermaid mount and its full-size view                                                |
+| `custom-blocks.css`    | custom blocks and GitHub alerts                                                         |
+| `pager.css`            | the footer's pager                                                                      |
+| `provenance.css`       | the provenance line's look                                                              |
+| `landing.css`          | the landing page's layout: the facts card's aside, the intro's measure                  |
+| `facts.css`            | the project facts card's layout                                                         |
+| `not-found.css`        | carbon's not-found page in the fleet's type                                             |
+| `print.css`            | the print sheet                                                                         |
+| `motion.css`           | the reduced-motion stop                                                                 |
+| `image-zoom.css`       | the image lightbox's stacking                                                           |
+| `index.ts`             | the theme entry: carbon as base, fonts, mounts (rules below)                            |
+| `tier-routes.ts`       | the router guard that makes a cross-tier route a full page load                         |
+| `facts-panel.ts`       | the project facts card on landing pages                                                 |
+| `provenance.ts`        | the provenance line: each page's ref, commit, and source file                           |
+| `mermaid.ts`           | the diagram component (`MermaidDiagrams`)                                               |
+| `mermaid-render.ts`    | the render pass over a page's mermaid mounts                                            |
+| `mermaid-theme.ts`     | mermaid's `themeVariables` from the fleet's tokens                                      |
+| `mermaid-zoom.ts`      | the Zoom button and the `shown` state the view follows                                  |
+| `mermaid-zoom-view.ts` | the full-size diagram view, on Panzoom 4.6.2 (pinned exact)                             |
+| `image-zoom.ts`        | the image lightbox (`ImageZoom`), on medium-zoom 1.1.0 (pinned exact)                   |
+| `css.d.ts`             | the type stand-in for CSS imports                                                       |
 
 The parent directory, `.vitepress/`:
 
-| File | Role |
-| --- | --- |
-| `../config.mts` | site structure, the `DOCS_SITE_*` env contract, the facts contract, the markdown rules |
-| `../rewrite-links.ts` | resolves relative links in repository space, as they read on GitHub |
-| `../table-wrap.ts` | wraps each top-level table in its scroll wrapper |
-| `../mermaid.ts` | the mermaid fence rule: a fence becomes a mount |
-| `../custom-blocks.ts` | custom-block titles in sentence case, and `alertTitlesRule` |
-| `../anchors.ts` | heading ids as GitHub assigns them |
-| `../version-nav.ts` | the version menu |
-| `../source-path.ts` | a staged page's repository path, and the landing-file test |
-| `../derive.ts` | routes, locales, and the per-page read from the docs tree |
-| `../sidebar.ts` | the sidebar and its order |
-| `../dir-title.ts` | a directory's display title |
-| `../conventions.ts` | docs conventions shared by the site build and the plan action |
-| `../url-path.ts` | URL path and file path conversion, segment by segment |
+| File                  | Role                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `../config.mts`       | site structure, the `DOCS_SITE_*` env contract, the facts contract, the markdown rules |
+| `../rewrite-links.ts` | resolves relative links in repository space, as they read on GitHub                    |
+| `../table-wrap.ts`    | wraps each top-level table in its scroll wrapper                                       |
+| `../mermaid.ts`       | the mermaid fence rule: a fence becomes a mount                                        |
+| `../custom-blocks.ts` | custom-block titles in sentence case, and `alertTitlesRule`                            |
+| `../anchors.ts`       | heading ids as GitHub assigns them                                                     |
+| `../version-nav.ts`   | the version menu                                                                       |
+| `../source-path.ts`   | a staged page's repository path, and the landing-file test                             |
+| `../derive.ts`        | routes, locales, and the per-page read from the docs tree                              |
+| `../sidebar.ts`       | the sidebar and its order                                                              |
+| `../dir-title.ts`     | a directory's display title                                                            |
+| `../conventions.ts`   | docs conventions shared by the site build and the plan action                          |
+| `../url-path.ts`      | URL path and file path conversion, segment by segment                                  |
 
 Rules a change keeps:
 
@@ -84,15 +84,15 @@ Rules a change keeps:
 
 Tests that guard the theme (each file owns its scenarios):
 
-| Test | Guards |
-| --- | --- |
-| `theme_contrast.test.ts` | every text and code token, and every mermaid text variable, at 4.5:1 on its ground |
-| `theme_tokens.test.ts` | a live var() reader per declared token, and a value per mode for every color a highlighted span can carry |
-| `theme_layout.test.ts` | the diagram view and the image lightbox in headless Chrome |
-| `mermaid_labels.test.ts` | every mermaid label inside its box, in headless Chrome |
-| `mermaid_render.test.ts` | no mermaid download without a mount |
-| `tier_routes.test.ts` | the tier guard, which stays pure and browser-free |
-| `tests/ci/pages_site_build` | no page references the mermaid chunk |
+| Test                        | Guards                                                                                                    |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `theme_contrast.test.ts`    | every text and code token, and every mermaid text variable, at 4.5:1 on its ground                        |
+| `theme_tokens.test.ts`      | a live var() reader per declared token, and a value per mode for every color a highlighted span can carry |
+| `theme_layout.test.ts`      | the diagram view and the image lightbox in headless Chrome                                                |
+| `mermaid_labels.test.ts`    | every mermaid label inside its box, in headless Chrome                                                    |
+| `mermaid_render.test.ts`    | no mermaid download without a mount                                                                       |
+| `tier_routes.test.ts`       | the tier guard, which stays pure and browser-free                                                         |
+| `tests/ci/pages_site_build` | no page references the mermaid chunk                                                                      |
 
 The first six live in `tests/actions/pages-site/`.
 

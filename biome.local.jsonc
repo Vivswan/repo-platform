@@ -7,8 +7,24 @@
   },
   // files/bun/biome.json is the floor the sync ships; force-ignored (`!!`), or biome reads it as a nested root configuration.
   "files": {
-    "includes": ["**", "!.github/repo-platform-manifest.json", "!!files/bun/biome.json"]
+    // The sync writer's YAML sources, and the end-to-end fixtures standing in for them, carry `{{placeholder}}` tokens
+    // and indentation-relative fragments, which are not YAML before the writer renders them (the root .yamllint skips
+    // them for the same reason); the rendered copies are judged in the fleet lint tree.
+    // The two managed Markdown copies are the sync's: each follows its source under files/base, which is judged here,
+    // and lags it by one self-sync.
+    "includes": [
+      "**",
+      "!.github/repo-platform-manifest.json",
+      "!!files/bun/biome.json",
+      "!files/**/*.yml",
+      "!files/**/*.yaml",
+      "!tests/ci/sync_end_to_end/fixtures/**/*.yml",
+      "!LICENSE.md",
+      "!.github/instructions/review.instructions.md"
+    ]
   },
+  // The docs' `---` frontmatter is data, not a heading.
+  "markdown": { "parser": { "frontmatter": true } },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -43,6 +59,12 @@
     }
   },
   "overrides": [
+    {
+      // The generated pair is the sync's output, never formatted (the managed biome.json says the same).
+      "includes": [".github/repo-platform-manifest.json", ".github/settings.yml"],
+      "formatter": { "enabled": false },
+      "assist": { "enabled": false }
+    },
     {
       "includes": [
         "actions/**",

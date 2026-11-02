@@ -40,24 +40,24 @@ The skills repository declares the first: a standalone skill install copies one 
 
 The `plan` step of fleet CI rejects, on the PR that introduces it, what `files.yml` alone proves unwritable (the rules in [actions/plan/mirrors.ts](../../../actions/plan/mirrors.ts)):
 
-| Refused on the PR | Detail |
-| --- | --- |
-| a source that is not a `managed` or `split` file `files.yml` writes for the repository | |
-| a `**` | |
-| a target or pattern that is unsafe | a control character, a segment over 255 bytes, or a path over 1024 bytes included |
-| a target or pattern that is or sits under the registration itself, or sits under `.github/workflows/` | |
-| a target or pattern that is, sits under, or is a path prefix of a path `files.yml` writes or the registration excepts | |
-| a pattern that matches (segment for segment, as the writer expands it) the registration or a path `files.yml` writes or the registration excepts | the claim reserves the path, whether or not the file stands in the checkout that run |
-| every path a declaration is certain to claim, judged as the writer judges a claim (the rows below) | over the literal targets and the directories they create: the only part of the tree the plan knows, since the literal pass writes them before any pattern expands |
+| Refused on the PR                                                                                                                                | Detail                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a source that is not a `managed` or `split` file `files.yml` writes for the repository                                                           |                                                                                                                                                                   |
+| a `**`                                                                                                                                           |                                                                                                                                                                   |
+| a target or pattern that is unsafe                                                                                                               | a control character, a segment over 255 bytes, or a path over 1024 bytes included                                                                                 |
+| a target or pattern that is or sits under the registration itself, or sits under `.github/workflows/`                                            |                                                                                                                                                                   |
+| a target or pattern that is, sits under, or is a path prefix of a path `files.yml` writes or the registration excepts                            |                                                                                                                                                                   |
+| a pattern that matches (segment for segment, as the writer expands it) the registration or a path `files.yml` writes or the registration excepts | the claim reserves the path, whether or not the file stands in the checkout that run                                                                              |
+| every path a declaration is certain to claim, judged as the writer judges a claim (the rows below)                                               | over the literal targets and the directories they create: the only part of the tree the plan knows, since the literal pass writes them before any pattern expands |
 
 A path a declaration is certain to claim is refused when it is:
 
-| Certain claim refused | Detail |
-| --- | --- |
-| a literal target declared twice | |
-| a path nested with another claimed path | both sides, whatever their sources (below) |
-| a pattern's path that sits under or above a path `files.yml` writes or the registration excepts, or that the grammar refuses | |
-| a path claimed by two sources or as a copy and as a symbolic link | one pattern text declared twice included, since both expand alike |
+| Certain claim refused                                                                                                        | Detail                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| a literal target declared twice                                                                                              |                                                                   |
+| a path nested with another claimed path                                                                                      | both sides, whatever their sources (below)                        |
+| a pattern's path that sits under or above a path `files.yml` writes or the registration excepts, or that the grammar refuses |                                                                   |
+| a path claimed by two sources or as a copy and as a symbolic link                                                            | one pattern text declared twice included, since both expand alike |
 
 **Nesting is judged on the text:** a pattern's own text counts as written, so `skills/*` nests under a literal `skills`. Two different pattern texts are nested as written, never by what they can match: `tests/*/foo` with `tests/a*/foo/bar` passes the plan and fails at sync time on any checkout with a `tests/a*` directory.
 
@@ -67,12 +67,12 @@ A path a declaration is certain to claim is refused when it is:
 
 **A failure exits nonzero** before the pass writes anything, one `::error::` line per verdict for each declaration and path: `<.repo-platform.yml or files.yml>: mirrors: source '<s>', target '<t>': <reason>`, a pattern's reason naming the path it expanded to. No PR is opened; the failure issue the operator files ([the operator](operator.md)) carries the lines in its writer log.
 
-| Outcome | When |
-| --- | --- |
-| `written` | the target was absent, or held exactly the previous mirror (the hash of its `mirror` record, of either kind) |
-| `current` | the target already holds the new content: the bytes for a `copy`, a link to the source for a `symlink` |
-| `replaced local edits` | the target held other content: a file with other bytes, a file where a link is declared, a link where a copy is declared, or a link elsewhere where a link is declared |
-| `replaced` | a directory stood at the target (removed whole, the links inside unlinked and never followed) or a file stood where an ancestor directory must be (removed); the detail names which, and holds the PR |
+| Outcome                | When                                                                                                                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `written`              | the target was absent, or held exactly the previous mirror (the hash of its `mirror` record, of either kind)                                                                                          |
+| `current`              | the target already holds the new content: the bytes for a `copy`, a link to the source for a `symlink`                                                                                                |
+| `replaced local edits` | the target held other content: a file with other bytes, a file where a link is declared, a link where a copy is declared, or a link elsewhere where a link is declared                                |
+| `replaced`             | a directory stood at the target (removed whole, the links inside unlinked and never followed) or a file stood where an ancestor directory must be (removed); the detail names which, and holds the PR |
 
 - **A previous mirror of either kind vouches for the bytes:** a copy where a link is declared now, or the reverse, is replaced without a diff. A record of another class does not vouch for the bytes.
 - **The `replaced local edits` diff** is of link targets where a link is declared, and of the old link target against the new bytes where a copy is. It sits in the report's Replaced local edits section and holds the PR.

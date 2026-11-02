@@ -8,12 +8,12 @@ Selecting the `nightly` module gives a repository a `nightly.yml` starter workfl
 
 Like the fuzzer starter it is written once and then repo-owned: the checks are repo-specific, so the starter carries the shared machinery and leaves the check steps to you.
 
-| Part of the starter | What it is |
-|---|---|
-| `checks` job | yours |
-| `release-gate` job | calls the repo-owned release-gate.yml, the release acceptance tier ci.yml runs on the release PR ([its contract](../all-green.md#the-release-gate-hook-in-every-managed-repository)) |
-| `report` job | the machinery: `needs: [checks, release-gate]` with `if: always()` |
-| Triggers | a nightly cron (06:59 UTC, offset from the fuzzer starter's 09:11 UTC) plus a bare `workflow_dispatch` |
+| Part of the starter | What it is                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `checks` job        | yours                                                                                                                                                                                |
+| `release-gate` job  | calls the repo-owned release-gate.yml, the release acceptance tier ci.yml runs on the release PR ([its contract](../all-green.md#the-release-gate-hook-in-every-managed-repository)) |
+| `report` job        | the machinery: `needs: [checks, release-gate]` with `if: always()`                                                                                                                   |
+| Triggers            | a nightly cron (06:59 UTC, offset from the fuzzer starter's 09:11 UTC) plus a bare `workflow_dispatch`                                                                               |
 
 **What a night does:**
 

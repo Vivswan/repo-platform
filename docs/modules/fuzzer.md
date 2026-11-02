@@ -49,12 +49,12 @@ The [fuzz-issue action](../../actions/fuzz-issue/fuzz-issue.ts) knows nothing ab
 
 Size limits:
 
-| Budget | Value |
-|---|---|
-| per failure, lines included | the heading plus the first `REPORT_LINES` lines after it |
-| per failure, size | at most `MAX_BLOCK_CHARS` characters |
-| without an `artifact-name` | no per-failure cap: the body is the only record, so every report rides whole, each cut at its share of the body budget with a count of the lines missing |
-| whole issue body | `MAX_BODY` characters, under GitHub's cap; failures included oldest-first by directory mtime (meaningful only where the reports were written: re-extracting artifacts, as the [shard aggregation](#sharding) does, stamps fresh mtimes), then a note says how many were omitted |
+| Budget                      | Value                                                                                                                                                                                                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| per failure, lines included | the heading plus the first `REPORT_LINES` lines after it                                                                                                                                                                                                                        |
+| per failure, size           | at most `MAX_BLOCK_CHARS` characters                                                                                                                                                                                                                                            |
+| without an `artifact-name`  | no per-failure cap: the body is the only record, so every report rides whole, each cut at its share of the body budget with a count of the lines missing                                                                                                                        |
+| whole issue body            | `MAX_BODY` characters, under GitHub's cap; failures included oldest-first by directory mtime (meaningful only where the reports were written: re-extracting artifacts, as the [shard aggregation](#sharding) does, stamps fresh mtimes), then a note says how many were omitted |
 
 The three constants live in [actions/fuzz-issue/fuzz-issue.ts](../../actions/fuzz-issue/fuzz-issue.ts). Keep the replay block near the top of `report.md`: lines past `REPORT_LINES` survive only in the artifact.
 

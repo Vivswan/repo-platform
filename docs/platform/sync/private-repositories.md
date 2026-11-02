@@ -8,12 +8,12 @@ This page is the redaction model of the sync's public log: the four rules that k
 
 repo-platform is public, and GitHub Actions has no log-level access control: run logs, job names, step headers, and annotations are as readable as the repository they run in. The operator therefore never lets a private repository's name or content reach that log. Four rules carry the whole model, and the job shape enforces them, not a per-step discipline.
 
-| Rule | Where it lives |
-| --- | --- |
-| **Index-only names:** the matrix carries row indexes and opaque keys, and the job names row indexes (`sync (row 3)`), never repository names. | [sync-repos.yml](../../../.github/workflows/sync-repos.yml) |
-| **Mask at the boundary:** one step per row finds its repository by key and registers every form of the name with the runner's masker before anything else prints. | [sync/resolve_row.ts](../../../.github/scripts/sync/resolve_row.ts), [sync/checkout_target.ts](../../../.github/scripts/sync/checkout_target.ts) |
-| **Logs to files:** every later `run:` step writes its whole output to a `$RUNNER_TEMP` file. | the row job's step shape |
-| **Details in the target repository:** the report becomes the sync PR's body, and a failure's log tails become one reused `[repo-platform] sync failed` issue there, both exactly as private as the repository. | [sync/deliver.ts](../../../.github/scripts/sync/deliver.ts) |
+| Rule                                                                                                                                                                                                           | Where it lives                                                                                                                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Index-only names:** the matrix carries row indexes and opaque keys, and the job names row indexes (`sync (row 3)`), never repository names.                                                                  | [sync-repos.yml](../../../.github/workflows/sync-repos.yml)                                                                                      |
+| **Mask at the boundary:** one step per row finds its repository by key and registers every form of the name with the runner's masker before anything else prints.                                              | [sync/resolve_row.ts](../../../.github/scripts/sync/resolve_row.ts), [sync/checkout_target.ts](../../../.github/scripts/sync/checkout_target.ts) |
+| **Logs to files:** every later `run:` step writes its whole output to a `$RUNNER_TEMP` file.                                                                                                                   | the row job's step shape                                                                                                                         |
+| **Details in the target repository:** the report becomes the sync PR's body, and a failure's log tails become one reused `[repo-platform] sync failed` issue there, both exactly as private as the repository. | [sync/deliver.ts](../../../.github/scripts/sync/deliver.ts)                                                                                      |
 
 ## How each rule is kept
 

@@ -8,9 +8,9 @@ This page is the `site` module's guide: what the site carries, how its leg build
 
 Selecting the module arms the managed ci.yml's `site` leg: ONE GitHub Pages site per repository, deployed by repo-platform's [reusable-site.yml](../../.github/workflows/reusable-site.yml) and the shared [pages-site action](../../actions/pages-site/action.yml). Two things can be on it, alone or together:
 
-| Part | Built by | Served at |
-|---|---|---|
-| The repository's own website | the repo-owned hook `.github/actions/site-build/action.yml` | `/` (one unversioned build of the judged commit) |
+| Part                                                     | Built by                                                                                            | Served at                                                                                                                                     |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| The repository's own website                             | the repo-owned hook `.github/actions/site-build/action.yml`                                         | `/` (one unversioned build of the judged commit)                                                                                              |
 | The docs: `docs/` markdown under the central fleet theme | the fleet (VitePress, config and theme live in repo-platform; the repository carries only markdown) | `/<site.path>/` beside a website, else `/` (versioned by tag); off with `site.path: null` ([below](#turning-the-docs-half-off-sitepath-null)) |
 
 repo-platform dogfoods the docs half: this guide and the rest of `docs/` are the site at <https://vivswan.github.io/repo-platform/>.
@@ -19,11 +19,11 @@ repo-platform dogfoods the docs half: this guide and the rest of `docs/` are the
 
 The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release`, and runs on every run of ci.yml on main whose gate passed:
 
-| Trigger | The deploy it is |
-|---|---|
-| a push | the ordinary deploy |
-| the nightly schedule | the rebuild |
-| a manual dispatch | the manual deploy |
+| Trigger              | The deploy it is    |
+| -------------------- | ------------------- |
+| a push               | the ordinary deploy |
+| the nightly schedule | the rebuild         |
+| a manual dispatch    | the manual deploy   |
 
 - **No workflow of its own and no tag trigger:** a tag created without a push lands on the nightly rebuild, or right away via dispatch.
 - **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
@@ -34,14 +34,14 @@ The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release
 
 The called workflow is one job, in this order:
 
-| Step | Runs when | What |
-|---|---|---|
-| checkout | always | the judged commit, full history (the tag list is the version set) |
-| urls | always | the shared [site-urls action](../../actions/site-urls/action.yml): the base path `/<repo>/` (`/` for the owner's `<owner>.github.io` repository, the user site), the origin `https://<owner>.github.io`, and the link-rot step's edit and tree patterns |
-| hook | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace |
-| pages-site | always | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes the link-rot step's `.lycheeignore` (the links the site owns on its origin, then the repository's own list), and writes `versions.json` under the docs mount |
-| configure, upload, deploy | something was built (`publish`) | the one Pages artifact, deployed to the `github-pages` environment; red on configure-pages's error while the Pages site does not exist yet ([below](#pages-enablement)) |
-| link rot | the schedule alone, after a deploy | checks the site's external links with lychee, reads lychee's exit code as the verdict through the shared [lychee-verdict action](../../actions/lychee-verdict/action.yml), and files the tracking issue ([below](#link-rot)) |
+| Step                      | Runs when                                                      | What                                                                                                                                                                                                                                                           |
+| ------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| checkout                  | always                                                         | the judged commit, full history (the tag list is the version set)                                                                                                                                                                                              |
+| urls                      | always                                                         | the shared [site-urls action](../../actions/site-urls/action.yml): the base path `/<repo>/` (`/` for the owner's `<owner>.github.io` repository, the user site), the origin `https://<owner>.github.io`, and the link-rot step's edit and tree patterns        |
+| hook                      | `.github/actions/site-build/action.yml` exists in the checkout | the repository's own build, in the same job and workspace                                                                                                                                                                                                      |
+| pages-site                | always                                                         | assembles the layout below from the hook's `dist` and `docs/`, checks every internal link, writes the link-rot step's `.lycheeignore` (the links the site owns on its origin, then the repository's own list), and writes `versions.json` under the docs mount |
+| configure, upload, deploy | something was built (`publish`)                                | the one Pages artifact, deployed to the `github-pages` environment; red on configure-pages's error while the Pages site does not exist yet ([below](#pages-enablement))                                                                                        |
+| link rot                  | the schedule alone, after a deploy                             | checks the site's external links with lychee, reads lychee's exit code as the verdict through the shared [lychee-verdict action](../../actions/lychee-verdict/action.yml), and files the tracking issue ([below](#link-rot))                                   |
 
 A repository with nothing to publish ends green with a notice (`nothing to publish`) and no deploy ([layout](#layout)).
 
@@ -63,14 +63,14 @@ The hook is a universal starter: the sync seeds it once in every repository, mod
 
 It is a composite action, so the fleet can run it from the caller's checkout inside the deploy job and hand its output directory to the same job with no artifact hop. A repository that has not filled it in publishes `docs/` alone.
 
-| Contract | Value |
-|---|---|
-| input `base-path` | the URL path the site is served under: `/<repo>/`, or `/` for the owner's `<owner>.github.io` repository, which GitHub serves at the origin's root |
-| input `origin` | `https://<owner>.github.io` |
-| output `dist` | the built site's directory, relative to the repository root, with an `index.html`; empty (the seeded default) means no repository website |
-| runs as | a step of the deploy job, on the checked-out judged commit, under that job's token (contents read, pages and id-token write, issues write), the same exposure the release hooks have, so it runs only code from the judged commit |
-| refused | an absolute `dist`, one that leaves the repository (`..`, or a symlink resolving outside it), a missing directory, or one without `index.html`: the leg goes red naming the path |
-| declares no `dist` output | only the docs directory publishes, when there is one, with the assembly's notice that no dist directory was named |
+| Contract                  | Value                                                                                                                                                                                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| input `base-path`         | the URL path the site is served under: `/<repo>/`, or `/` for the owner's `<owner>.github.io` repository, which GitHub serves at the origin's root                                                                                |
+| input `origin`            | `https://<owner>.github.io`                                                                                                                                                                                                       |
+| output `dist`             | the built site's directory, relative to the repository root, with an `index.html`; empty (the seeded default) means no repository website                                                                                         |
+| runs as                   | a step of the deploy job, on the checked-out judged commit, under that job's token (contents read, pages and id-token write, issues write), the same exposure the release hooks have, so it runs only code from the judged commit |
+| refused                   | an absolute `dist`, one that leaves the repository (`..`, or a symlink resolving outside it), a missing directory, or one without `index.html`: the leg goes red naming the path                                                  |
+| declares no `dist` output | only the docs directory publishes, when there is one, with the assembly's notice that no dist directory was named                                                                                                                 |
 
 A website built by the repository's own toolchain (its setup steps go before the build step):
 
@@ -80,7 +80,7 @@ runs:
   steps:
     - id: build
       shell: bash
-      env: {PAGES_BASE_PATH: "${{ inputs.base-path }}", PAGES_ORIGIN: "${{ inputs.origin }}"}
+      env: { PAGES_BASE_PATH: "${{ inputs.base-path }}", PAGES_ORIGIN: "${{ inputs.origin }}" }
       run: |
         <your build command>
         echo "dist=<the built site directory>" >> "$GITHUB_OUTPUT"
@@ -93,10 +93,10 @@ runs:
   using: composite
   steps:
     - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-    - {run: uv sync --frozen, shell: bash}
+    - { run: uv sync --frozen, shell: bash }
     - id: build
       shell: bash
-      env: {SITE_URL: "${{ inputs.origin }}${{ inputs.base-path }}"}
+      env: { SITE_URL: "${{ inputs.origin }}${{ inputs.base-path }}" }
       run: |
         uv run mkdocs build --site-dir dist
         echo "dist=dist" >> "$GITHUB_OUTPUT"
@@ -108,25 +108,25 @@ Map the two inputs onto whatever the tool expects (`ASTRO_BASE`/`ASTRO_SITE`, `v
 
 ## Layout
 
-| hook `dist` | `docs/` exists | `site.path` | The site |
-|---|---|---|---|
-| set | yes | a segment (default `docs`) | the website at `/`, the docs versioned at `/<site.path>/`, one link check over both |
-| set | no | any | the website at `/` alone |
-| empty | yes | a segment | the docs versioned at `/` |
-| set | yes | `null` | the website at `/` alone; `docs/` is the website's own business |
-| empty | any | `null`, or any when there is no `docs/` | nothing published; the leg is green with a notice |
+| hook `dist` | `docs/` exists | `site.path`                             | The site                                                                            |
+| ----------- | -------------- | --------------------------------------- | ----------------------------------------------------------------------------------- |
+| set         | yes            | a segment (default `docs`)              | the website at `/`, the docs versioned at `/<site.path>/`, one link check over both |
+| set         | no             | any                                     | the website at `/` alone                                                            |
+| empty       | yes            | a segment                               | the docs versioned at `/`                                                           |
+| set         | yes            | `null`                                  | the website at `/` alone; `docs/` is the website's own business                     |
+| empty       | any            | `null`, or any when there is no `docs/` | nothing published; the leg is green with a notice                                   |
 
 **Version navigation belongs to the docs:** the `vX.Y.Z/` tiers exist only under the docs mount. A repository that wants versioned website builds puts them in its own hook output.
 
 The docs mount carries the tag rules:
 
-| URL under the docs mount | Built from |
-|---|---|
-| `/` | the newest served version tag's docs (none served: the default branch's docs, the same content as `latest/`) |
-| `latest/` | the default branch's docs |
-| `stable/` | the newest served version tag's docs, under a name that survives releases; absent while no tag is served |
-| `vX.Y.Z/` | that tag's docs, one directory per served tag |
-| `versions.json` | the index of served tiers (label and path each), written by the build for anything outside the site that needs the list; the theme's menu is built from the same data at build time |
+| URL under the docs mount | Built from                                                                                                                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                      | the newest served version tag's docs (none served: the default branch's docs, the same content as `latest/`)                                                                        |
+| `latest/`                | the default branch's docs                                                                                                                                                           |
+| `stable/`                | the newest served version tag's docs, under a name that survives releases; absent while no tag is served                                                                            |
+| `vX.Y.Z/`                | that tag's docs, one directory per served tag                                                                                                                                       |
+| `versions.json`          | the index of served tiers (label and path each), written by the build for anything outside the site that needs the list; the theme's menu is built from the same data at build time |
 
 - **Versions** are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest five of them (`MAX_VERSIONS` in [build.ts](../../actions/pages-site/build.ts)). Prerelease-shaped tags (`v1.0.0-rc.1`) are not versions.
 
@@ -168,7 +168,7 @@ The theme is one for the whole fleet, owned by [actions/pages-site/.vitepress/th
 
 - **Fonts:** the docs build strips the theme's remote font imports, so the docs never load a font from a third party (the hook's website is copied as built).
 
-- **Diagrams:** a ```` ```mermaid ```` fence renders as a diagram in the site's colors in both appearance modes; the source stays as the fallback without JavaScript and beside a parse error.
+- **Diagrams:** a ` ```mermaid ` fence renders as a diagram in the site's colors in both appearance modes; the source stays as the fallback without JavaScript and beside a parse error.
 
 - **Diagram zoom:** its Zoom button (on hover, focus, or touch) opens the diagram at full size in a view that zooms by wheel, pinch, keys, or buttons, pans by drag or arrow keys, and closes on Escape.
 
@@ -198,11 +198,11 @@ site:
     - { path: skills, mount: skills, page: SKILL.md }
 ```
 
-| Key | What it names | With the example |
-|---|---|---|
-| `path` | the repository directory to stage | `skills/` |
-| `mount` | the URL directory under the docs mount | `.../skills/` (or `.../<site.path>/skills/` beside a website) |
-| `page` | the file that is each child directory's page | `skills/repo-platform-sync-pr/SKILL.md` renders at `/skills/repo-platform-sync-pr/` |
+| Key     | What it names                                | With the example                                                                    |
+| ------- | -------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `path`  | the repository directory to stage            | `skills/`                                                                           |
+| `mount` | the URL directory under the docs mount       | `.../skills/` (or `.../<site.path>/skills/` beside a website)                       |
+| `page`  | the file that is each child directory's page | `skills/repo-platform-sync-pr/SKILL.md` renders at `/skills/repo-platform-sync-pr/` |
 
 - **The section's landing page** is a `README.md` at the include's root; the other markdown files in a child directory render at their own paths.
 
@@ -227,12 +227,12 @@ site:
   path: null
 ```
 
-| With `site.path: null` | Behavior |
-|---|---|
-| the deploy | publishes the hook's `dist` alone, whatever `docs/` carries; no `dist` means nothing published |
-| `docs-check` | stands down with a notice on every PR (the job still runs, and passes) |
-| `site.include` | refused by the plan: there is no docs mount to render the roots into |
-| the plan's `config` output | `docs_path` is `null` |
+| With `site.path: null`     | Behavior                                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| the deploy                 | publishes the hook's `dist` alone, whatever `docs/` carries; no `dist` means nothing published |
+| `docs-check`               | stands down with a notice on every PR (the job still runs, and passes)                         |
+| `site.include`             | refused by the plan: there is no docs mount to render the roots into                           |
+| the plan's `config` output | `docs_path` is `null`                                                                          |
 
 The registration is read on every run, so the flip needs no sync.
 
@@ -265,14 +265,14 @@ A broken one fails the step with lychee's report, in the log and the job summary
 
 Where lychee reads a link differently from Pages:
 
-| Link | lychee | Pages |
-|---|---|---|
-| inside `<pre>`, `<code>`, or a `<script src>` | not read (verbatim elements) | served |
-| a `<meta http-equiv="refresh">` target | not read | followed |
-| a `<meta content>` URL (`og:image`) | not read | fetched by the consumer |
-| under a page's `<base href>` | resolved from the page's own path | resolved from the base |
-| protocol-relative (`//host/path`) | read as a file path, so it fails; spell the scheme | fetched over the page's scheme |
-| a page's URL with a trailing slash (`/setup/` for `setup.html`) | passes, through the extensionless fallback | 404 |
+| Link                                                            | lychee                                             | Pages                          |
+| --------------------------------------------------------------- | -------------------------------------------------- | ------------------------------ |
+| inside `<pre>`, `<code>`, or a `<script src>`                   | not read (verbatim elements)                       | served                         |
+| a `<meta http-equiv="refresh">` target                          | not read                                           | followed                       |
+| a `<meta content>` URL (`og:image`)                             | not read                                           | fetched by the consumer        |
+| under a page's `<base href>`                                    | resolved from the page's own path                  | resolved from the base         |
+| protocol-relative (`//host/path`)                               | read as a file path, so it fails; spell the scheme | fetched over the page's scheme |
+| a page's URL with a trailing slash (`/setup/` for `setup.html`) | passes, through the extensionless fallback         | 404                            |
 
 ## Link rot
 
@@ -286,13 +286,13 @@ The nightly run checks the deployed site's EXTERNAL links after publishing with 
 
 **Links into the repository's own tree** (`github.com/<owner>/<repo>/blob/<default branch>/...`, `tree/` too) are never fetched: lychee remaps each to the checkout's path and judges it by the file, so a moved or deleted file still rots and a query or line fragment changes nothing. github.com answers an anonymous crawl of blob pages with 503, and the tree is their truth anyway.
 
-| Skipped | Why |
-|---|---|
-| the theme's "Edit this page" links | theme output an anonymous crawl cannot judge (auth redirect, 404 on a private repository) |
-| mail links | not http(s) |
-| private-network and loopback URLs | not on the public network (`--exclude-all-private`) |
-| same-site links and assets, relative or spelled with the site's own URL (the artifact's entries on the origin; a sibling project site's link is crawled) | judged against the artifact at build time, not over the network |
-| URLs matching the repository's root `.lycheeignore` | the repository's own list of what an anonymous crawl cannot judge: hosts behind a bot wall (403) or a login redirect |
+| Skipped                                                                                                                                                  | Why                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| the theme's "Edit this page" links                                                                                                                       | theme output an anonymous crawl cannot judge (auth redirect, 404 on a private repository)                            |
+| mail links                                                                                                                                               | not http(s)                                                                                                          |
+| private-network and loopback URLs                                                                                                                        | not on the public network (`--exclude-all-private`)                                                                  |
+| same-site links and assets, relative or spelled with the site's own URL (the artifact's entries on the origin; a sibling project site's link is crawled) | judged against the artifact at build time, not over the network                                                      |
+| URLs matching the repository's root `.lycheeignore`                                                                                                      | the repository's own list of what an anonymous crawl cannot judge: hosts behind a bot wall (403) or a login redirect |
 
 **`.lycheeignore`** is [lychee's own format](https://lychee.cli.rs/recipes/excluding-links/): one regular expression per line, `#` starting a comment. lychee reads it from its working directory alone, so the deploy stages the crawl's list into the assembled site after the Pages upload: the assembly's own-links regex first, then the repository's copy; the served site never carries it.
 
@@ -300,11 +300,11 @@ Keep it to hosts that are alive in a browser and reject automated clients, each 
 
 ## Module parameters (registration keys)
 
-| Key in `.repo-platform.yml` | Meaning | Default |
-|---|---|---|
-| `site.path` | the URL segment the docs mount under when the hook also builds a website; `null` turns the docs half off ([above](#turning-the-docs-half-off-sitepath-null)) | `docs` (`modules.site.path` in `files.yml`) |
-| `site.include` | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude)) | none |
-| `labels.site` | the link-rot tracking issue's label | the site module's `tracking_label` default in [files.yml](../../files.yml) |
+| Key in `.repo-platform.yml` | Meaning                                                                                                                                                      | Default                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `site.path`                 | the URL segment the docs mount under when the hook also builds a website; `null` turns the docs half off ([above](#turning-the-docs-half-off-sitepath-null)) | `docs` (`modules.site.path` in `files.yml`)                                |
+| `site.include`              | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude))                                                                      | none                                                                       |
+| `labels.site`               | the link-rot tracking issue's label                                                                                                                          | the site module's `tracking_label` default in [files.yml](../../files.yml) |
 
 **The `config` output:** the plan action ([actions/plan](../../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into one `config` output. That is the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label` with its `link_rot_color` and `link_rot_description`).
 

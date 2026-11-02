@@ -20,13 +20,13 @@ This page is the manifest's contract: what `.github/repo-platform-manifest.json`
 
 The entry moves to the build when the sync wrote a change or the checker changed, and stays otherwise (`judgedCommit` in [sync/writer/judged_commit.ts](../../../.github/scripts/sync/writer/judged_commit.ts)). The manifest is written last, so the decision reads the run's own outcome.
 
-| The manifest names | The build is | The sync | The entry after the sync |
-| --- | --- | --- | --- |
-| no manifest the writer accepts: none (a first sync), one that does not parse, or one whose own entry names no full commit (a hand edit, since every sync writes the field) | any | any | the build |
-| commit C | C | any | C |
-| commit C | N | wrote at least one byte differently: a managed, split, starter, or mirror write, a retirement, a replaced local edit, or a manifest record moved | N |
-| commit C | N, with the checker different between C and N | wrote nothing | N |
-| commit C | N, with the checker byte-identical between C and N | wrote nothing | C; no sync PR opens |
+| The manifest names                                                                                                                                                         | The build is                                       | The sync                                                                                                                                         | The entry after the sync |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| no manifest the writer accepts: none (a first sync), one that does not parse, or one whose own entry names no full commit (a hand edit, since every sync writes the field) | any                                                | any                                                                                                                                              | the build                |
+| commit C                                                                                                                                                                   | C                                                  | any                                                                                                                                              | C                        |
+| commit C                                                                                                                                                                   | N                                                  | wrote at least one byte differently: a managed, split, starter, or mirror write, a retirement, a replaced local edit, or a manifest record moved | N                        |
+| commit C                                                                                                                                                                   | N, with the checker different between C and N      | wrote nothing                                                                                                                                    | N                        |
+| commit C                                                                                                                                                                   | N, with the checker byte-identical between C and N | wrote nothing                                                                                                                                    | C; no sync PR opens      |
 
 - **The checker surface** is the set of files check.ts imports, derived from the import graph at sync time (`checkerSurface` in [sync/writer/judged_commit.ts](../../../.github/scripts/sync/writer/judged_commit.ts)): exactly the code that runs at the recorded commit, the writer included.
 - **Why the checker counts:** a change there can turn C's verdict away from N's with no byte written. N's registration parser accepts a `site.path` C's rejects, so C's check would stay red with no sync PR to move the stamp.
@@ -44,13 +44,13 @@ The fleet's `validate-managed-files` check judges a repository as [check.ts](../
 - **A pending registration change** is red until the sync that carries it lands.
 - **Exit 0** when identical, 1 with findings, 2 when the writer refused (its message is the output).
 
-| The action finds | The verdict |
-| --- | --- |
+| The action finds                                                                                                                 | The verdict                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | no full 40-hex `commit` on the manifest's own entry (a hand edit, since every sync writes it), or a manifest that does not parse | not judged, the reason naming the manifest and the remedy: revert the edit, or dispatch a sync |
-| a commit repo-platform's history lacks (the clone fails) | not judged, the clone step's outcome in the reason |
-| `check.ts` exit 1 or 2 with output | findings: its output fenced under `#### repo-platform at <commit>`, with the remedy |
-| `check.ts` exit 1 or 2 with no output, any other exit, a signal, or the deadline | not judged: `ended without a verdict`, with the detail |
-| `check.ts` exit 0 | clean, unless a hygiene check finds something |
+| a commit repo-platform's history lacks (the clone fails)                                                                         | not judged, the clone step's outcome in the reason                                             |
+| `check.ts` exit 1 or 2 with output                                                                                               | findings: its output fenced under `#### repo-platform at <commit>`, with the remedy            |
+| `check.ts` exit 1 or 2 with no output, any other exit, a signal, or the deadline                                                 | not judged: `ended without a verdict`, with the detail                                         |
+| `check.ts` exit 0                                                                                                                | clean, unless a hygiene check finds something                                                  |
 
 - **Freshness informs and never fails:** the action compares the recorded commit with the `stable` tag in the platform checkout (git ancestry alone) and writes one line to the job summary and an annotation. The line says up to date, `stable` moved N commits past it, or the commit is not on `stable`'s history. In both of the last two, a sync moves the judge under [the stamp rule](#when-the-judged-commit-moves).
 - **The hygiene checks** read no platform data and run from the action at `stable`: a `release-as` key in `release-please-config.json` ([the release pipeline](../../new-repo.md#the-release-pipeline-release-please)), and a conflict marker (a line opening with `<<<<<<< ` or `>>>>>>> `, or reading `=======`) in a source, config, or markdown file, a fenced example of the markers included.

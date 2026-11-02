@@ -9,9 +9,9 @@ One version per toolchain, fleet-wide, spelled once: a version dotfile under `fi
 
 ## The pins
 
-| Toolchain | Pin | Readers |
-|---|---|---|
-| bun | [files/bun/.bun-version](../files/bun/.bun-version) | the fleet's synced `.bun-version`; this repository's workflows (`bun-version-file: files/bun/.bun-version`); every composite action's bun-setup step, through this repository's own synced root copy; `@types/bun` in every package declaring it, pinned exactly to it |
+| Toolchain | Pin                                                 | Readers                                                                                                                                                                                                                                                                |
+| --------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| bun       | [files/bun/.bun-version](../files/bun/.bun-version) | the fleet's synced `.bun-version`; this repository's workflows (`bun-version-file: files/bun/.bun-version`); every composite action's bun-setup step, through this repository's own synced root copy; `@types/bun` in every package declaring it, pinned exactly to it |
 
 bun is the one pinned toolchain. uv floats on its setup action's default, and the rust blocks' setup action installs the toolchain the repository's `rust-toolchain.toml` names (stable when there is none), so rust version selection stays repository-owned.
 
@@ -22,11 +22,11 @@ bun is the one pinned toolchain. uv floats on its setup action's default, and th
 
 biome is a tool pin, not a toolchain pin: one version, spelled in four places, and `tests/files/biome_floor.test.ts` holds them equal. A bump edits all four in one PR.
 
-| Where | Line |
-|---|---|
-| [actions/biome/package.json](../actions/biome/package.json) | the `@biomejs/biome` dependency: the one biome the fleet lints with |
-| the root `package.json` | the same devDependency: the biome this repository lints itself with |
-| [files/bun/biome.json](../files/bun/biome.json) and this repository's root copy | the version inside the `$schema` URL |
+| Where                                                                               | Line                                                                                                         |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [actions/biome/package.json](../actions/biome/package.json)                         | the `@biomejs/biome` dependency: the one biome the fleet lints with                                          |
+| the root `package.json`                                                             | the same devDependency: the biome this repository lints itself with                                          |
+| [files/bun/biome.json](../files/bun/biome.json) and this repository's root copy     | the version inside the `$schema` URL                                                                         |
 | [the auto-format starter](../files/bun/.github/workflows/auto-format.toolchain.yml) | `bun x @biomejs/biome@<version> check --write .`, so the formatter a repository runs is the linter's version |
 
 A starter is written once, so an existing `auto-format.yml` keeps the version it was written with until the repository edits it; the gate's biome is always the action's.
@@ -65,10 +65,10 @@ repo-platform's own composite actions (under `actions/`) pin their bun from the 
 
 To run one repo on a different version, override in a repo-owned workflow and leave the dotfile alone:
 
-| Toolchain | Override |
-|---|---|
-| bun | pass the explicit version input (`bun-version:` on setup-bun), which the action prefers over its version-file input |
-| rust | commit a `rust-toolchain.toml` naming the channel (1.84 or newer, [rust.md](modules/rust.md)) and components; the setup action in the three rust blocks installs it, with no dotfile to leave alone |
+| Toolchain | Override                                                                                                                                                                                            |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| bun       | pass the explicit version input (`bun-version:` on setup-bun), which the action prefers over its version-file input                                                                                 |
+| rust      | commit a `rust-toolchain.toml` naming the channel (1.84 or newer, [rust.md](modules/rust.md)) and components; the setup action in the three rust blocks installs it, with no dotfile to leave alone |
 
 Rules that follow:
 
@@ -82,11 +82,11 @@ Rules that follow:
 
 A pinned module declares its pin in `files.yml` (`modules.<name>.pin`, its keys defined in [platform/sync/files.md](platform/sync/files.md#module-data)), data the refresh reads and never content the sync writes. bun's, the only one today:
 
-| Key | bun |
-|---|---|
-| `file` | `files/bun/.bun-version` |
-| `repository` | `oven-sh/bun` |
-| `tag` | `bun-v{version}` |
+| Key          | bun                      |
+| ------------ | ------------------------ |
+| `file`       | `files/bun/.bun-version` |
+| `repository` | `oven-sh/bun`            |
+| `tag`        | `bun-v{version}`         |
 
 [refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) (weekly cron plus manual dispatch) runs `release` pins as one matrix leg beside the `commit` pins of [platform/sync/files.md](platform/sync/files.md#upstream-refs), each on its own PR branch, so a toolchain bump is never held behind a gitignore diff:
 

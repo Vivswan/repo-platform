@@ -10,14 +10,14 @@ This page is the settings model of a managed repository: the layers the sync ren
 - **The rendered document:** every managed repository carries `.github/settings.yml`, a managed file the sync writes from six plain YAML layers. It is the one document [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code) applies.
 - **The edit rule:** the repository edits `.github/settings.local.yml`, its own layer, never the rendered file ([editing your settings](#editing-your-settings)).
 
-| # | Layer | Home | Contents |
-|---|---|---|---|
-| 1 | Fleet baseline | [files/settings/baseline.yml](../files/settings/baseline.yml) | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels |
-| 2 | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | public: `security_and_analysis`, and the `main` ruleset's `code_quality` and `copilot_code_review` rules; private: the `settings-as-code-report` marker label |
-| 3 | Module layer | `files/<module>/settings.yml` and, for site, [settings.public.yml](../files/site/settings.public.yml) | what selecting that module adds (the list below) |
-| 4 | CodeQL layer | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml) | the `code_scanning` rule, for public repos with a CodeQL toolchain |
-| 5 | Repo overlay | the repo's own `.github/settings.local.yml` | identity keys (`description`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides |
-| 6 | Fleet override | [files/settings/override.yml](../files/settings/override.yml) | the invariants no repo may weaken (the list below) |
+| #   | Layer                    | Home                                                                                                      | Contents                                                                                                                                                      |
+| --- | ------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Fleet baseline           | [files/settings/baseline.yml](../files/settings/baseline.yml)                                             | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels                                                          |
+| 2   | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | public: `security_and_analysis`, and the `main` ruleset's `code_quality` and `copilot_code_review` rules; private: the `settings-as-code-report` marker label |
+| 3   | Module layer             | `files/<module>/settings.yml` and, for site, [settings.public.yml](../files/site/settings.public.yml)     | what selecting that module adds (the list below)                                                                                                              |
+| 4   | CodeQL layer             | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml)                                   | the `code_scanning` rule, for public repos with a CodeQL toolchain                                                                                            |
+| 5   | Repo overlay             | the repo's own `.github/settings.local.yml`                                                               | identity keys (`description`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides                                                        |
+| 6   | Fleet override           | [files/settings/override.yml](../files/settings/override.yml)                                             | the invariants no repo may weaken (the list below)                                                                                                            |
 
 What a module layer adds:
 
@@ -103,11 +103,11 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -
 
 [settings-repos.yml](../.github/workflows/settings-repos.yml) has three ways in ([post-green.md](platform/post-green.md#the-run-leg-by-leg) owns why no push is one):
 
-| Entry | Effect |
-|---|---|
-| The post-green call, in a green main push's own CI run | the scope [the `settings-fleet` leg](platform/post-green.md#the-run-leg-by-leg) owns |
-| Nightly cron | heals out-of-band drift |
-| Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift and changes no settings ([check mode](platform/settings-apply.md#check-mode)); `-f repo=` scopes it ([the dispatch scope](platform/settings-apply.md#the-dispatch-scope)) |
+| Entry                                                  | Effect                                                                                                                                                                                                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The post-green call, in a green main push's own CI run | the scope [the `settings-fleet` leg](platform/post-green.md#the-run-leg-by-leg) owns                                                                                                                                                 |
+| Nightly cron                                           | heals out-of-band drift                                                                                                                                                                                                              |
+| Manual dispatch                                        | plain dispatch applies; `-f check_only=true` reports drift and changes no settings ([check mode](platform/settings-apply.md#check-mode)); `-f repo=` scopes it ([the dispatch scope](platform/settings-apply.md#the-dispatch-scope)) |
 
 The run itself is [platform/settings-apply.md](platform/settings-apply.md): its dispatch scope, the green-commit gate, newest wins, selection, private targets, and check mode.
 
@@ -127,13 +127,13 @@ The run itself is [platform/settings-apply.md](platform/settings-apply.md): its 
 
 **The label roster** is the union of every selected layer's `labels`, less any fleet-layer entry the overlay drops with `_remove: true`. The tracking labels fold in above the overlay, so a removal naming one holds the row instead.
 
-| When | Labels |
-|---|---|
-| always | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's PR-flow labels `merge-when-green` and `parked`; `repo-platform:sync`, which a human adds to a PR for the branch sync ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)) |
-| per selected toolchain | the dependabot ecosystem labels: `javascript` for bun, `python:uv` for uv, `rust` for cargo |
-| with release-please | the `autorelease: *` pair and release-health's gate labels, `release-blocker` and `release-override`: stripping one un-blocks or un-overrides a release mid-flight |
-| with the fuzzer, nightly, or site module | the tracking labels, named and styled as the layer list above says |
-| private repos only | the `settings-as-code-report` marker label for private report issues: declared in the private overlay, and injected by the apply for redacted targets |
+| When                                     | Labels                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| always                                   | `dependencies` and `github_actions`; the triage trio `bug`, `enhancement`, `fix-lint`; the owner's PR-flow labels `merge-when-green` and `parked`; `repo-platform:sync`, which a human adds to a PR for the branch sync ([platform/sync/operator.md](platform/sync/operator.md#syncing-a-branch-by-label)) |
+| per selected toolchain                   | the dependabot ecosystem labels: `javascript` for bun, `python:uv` for uv, `rust` for cargo                                                                                                                                                                                                                |
+| with release-please                      | the `autorelease: *` pair and release-health's gate labels, `release-blocker` and `release-override`: stripping one un-blocks or un-overrides a release mid-flight                                                                                                                                         |
+| with the fuzzer, nightly, or site module | the tracking labels, named and styled as the layer list above says                                                                                                                                                                                                                                         |
+| private repos only                       | the `settings-as-code-report` marker label for private report issues: declared in the private overlay, and injected by the apply for redacted targets                                                                                                                                                      |
 
 - **Why the dependabot labels are declared:** dependabot recreates its labels when missing, so an undeclared one would loop delete/recreate nightly. [tests/files/label_names.test.ts](../tests/files/label_names.test.ts) holds the layers to dependabot's names.
 
@@ -171,10 +171,10 @@ The apply is stateless, touches only declared keys, and upserts by name, all on 
 
 The two protection rulesets live in [files/settings/override.yml](../files/settings/override.yml), the layer no repo can beat. `loadOverrideLayer` refuses an override that drops the required check or its Actions pin, and unit tests pin the empty bypass list and the rest of the protection policy.
 
-| Ruleset | Rules | Bypass |
-|---|---|---|
-| `main` | ONE required status check, `all-green`, the ci.yml gate job's own check run, pinned to the GitHub Actions app by `integration_id` ([all-green.md](all-green.md)); PR gates: a CODEOWNER review, every review thread resolved, squash-only; deletion, force-push, and linear-history protection | admins, so direct pushes keep working |
-| `non-bypassable` | deletion, linear history | `bypass_actors: []`: GitHub binds everyone, repository owner included |
+| Ruleset          | Rules                                                                                                                                                                                                                                                                                          | Bypass                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `main`           | ONE required status check, `all-green`, the ci.yml gate job's own check run, pinned to the GitHub Actions app by `integration_id` ([all-green.md](all-green.md)); PR gates: a CODEOWNER review, every review thread resolved, squash-only; deletion, force-push, and linear-history protection | admins, so direct pushes keep working                                 |
+| `non-bypassable` | deletion, linear history                                                                                                                                                                                                                                                                       | `bypass_actors: []`: GitHub binds everyone, repository owner included |
 
 - **The explicit empty bypass list** (unlike an omitted key) lets the nightly heal detect and clear an out-of-band bypass actor. The owner can still edit or disable the ruleset itself, but the nightly apply re-asserts it.
 
@@ -206,10 +206,10 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 
 - **Its overlay,** [.github/settings.local.yml](../.github/settings.local.yml), carries its identity keys plus its two repo-specific rulesets:
 
-| Ruleset | What it does |
-|---|---|
-| `stable-tag` | only blocks deleting the `stable` tag ([build-provenance.md](platform/build-provenance.md#who-can-write-refstagsstable)) |
-| `main-up-to-date` | requires a pull request branch to be up to date before merging; admins may bypass, as on `main` |
+| Ruleset           | What it does                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `stable-tag`      | only blocks deleting the `stable` tag ([build-provenance.md](platform/build-provenance.md#who-can-write-refstagsstable)) |
+| `main-up-to-date` | requires a pull request branch to be up to date before merging; admins may bypass, as on `main`                          |
 
 - **Why `stable-tag` blocks only deletion** is [build-provenance.md's](platform/build-provenance.md#who-can-write-refstagsstable).
 
@@ -227,10 +227,10 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 
 **The rendered file** `.github/settings.yml` is written right after it, on every sync. It takes the managed rules ([platform/sync/writer.md](platform/sync/writer.md#classes)):
 
-| The file on the target | Row |
-|---|---|
-| the recorded render | `updated` |
-| already matches the new one | `unchanged` |
+| The file on the target          | Row                                                                                                    |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| the recorded render             | `updated`                                                                                              |
+| already matches the new one     | `unchanged`                                                                                            |
 | neither: hand-written or edited | replaced with its diff holding the PR (`replaced local edits`); move what it declared into the overlay |
 
 **Nothing in the repository applies its settings:** [settings-repos.yml](../.github/workflows/settings-repos.yml) applies them centrally, on [its own entries](#when-it-runs). A managed repository carries no apply workflow and no token ([the token](platform/settings-apply.md#token)).

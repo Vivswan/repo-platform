@@ -22,15 +22,15 @@ Which files the platform owns, and how strongly, is declared as data in `files.y
 
 The measure of the design is the cost of a simple change, not the number of checks.
 
-| Principle | What it means here |
-|---|---|
-| Behavior never lives in a written file | ci.yml is byte-identical in every repo; fleet.yml's `plan` step reads the registration at run time and every leg keys on its outputs. Adding a leg is one static job in the skeleton plus its platform workflow. |
-| Fewer derived artifacts beats a better generator | What the fleet receives is written once under `files/` and copied whole; the one rendered file is each repo's `.github/settings.yml`, folded by the sync from the settings layers and the repo's overlay. The generators that remain (gitignore blocks, toolchain pin dotfiles, the theme CSS, this repo's own settings document) each have one offline drift check. |
-| One run, one order | Everything after the gate is a job in the same run, ordered by `needs`: move the `stable` tag, sync the fleet, deploy the docs. No dispatch tokens between workflows. |
-| Sync is copy, not merge | Managed files are replaced whole, split files have their managed region replaced around the repository's own sides, starters are written once, and a file no entry writes any more is deleted when it still holds the platform's own content. |
-| Private is private by where it runs and by what the run can emit | Job names carry row indexes, names are masked where they enter a step, per-row logs go to files, and the details land in the target repository ([docs/platform/sync/private-repositories.md](docs/platform/sync/private-repositories.md)). |
-| Own as few files as possible | Community health files come from the account's `.github` defaults repository; tool configs ride inside the actions that run them; the rest is the file list. |
-| TypeScript only | A workflow step is one `bun` call; [AGENTS.md](AGENTS.md#principles) owns the rule for the shell that stays. |
+| Principle                                                        | What it means here                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Behavior never lives in a written file                           | ci.yml is byte-identical in every repo; fleet.yml's `plan` step reads the registration at run time and every leg keys on its outputs. Adding a leg is one static job in the skeleton plus its platform workflow.                                                                                                                                                     |
+| Fewer derived artifacts beats a better generator                 | What the fleet receives is written once under `files/` and copied whole; the one rendered file is each repo's `.github/settings.yml`, folded by the sync from the settings layers and the repo's overlay. The generators that remain (gitignore blocks, toolchain pin dotfiles, the theme CSS, this repo's own settings document) each have one offline drift check. |
+| One run, one order                                               | Everything after the gate is a job in the same run, ordered by `needs`: move the `stable` tag, sync the fleet, deploy the docs. No dispatch tokens between workflows.                                                                                                                                                                                                |
+| Sync is copy, not merge                                          | Managed files are replaced whole, split files have their managed region replaced around the repository's own sides, starters are written once, and a file no entry writes any more is deleted when it still holds the platform's own content.                                                                                                                        |
+| Private is private by where it runs and by what the run can emit | Job names carry row indexes, names are masked where they enter a step, per-row logs go to files, and the details land in the target repository ([docs/platform/sync/private-repositories.md](docs/platform/sync/private-repositories.md)).                                                                                                                           |
+| Own as few files as possible                                     | Community health files come from the account's `.github` defaults repository; tool configs ride inside the actions that run them; the rest is the file list.                                                                                                                                                                                                         |
+| TypeScript only                                                  | A workflow step is one `bun` call; [AGENTS.md](AGENTS.md#principles) owns the rule for the shell that stays.                                                                                                                                                                                                                                                         |
 
 ## Modules
 
@@ -48,14 +48,14 @@ Merge to `main`; once CI's `all-green` gate passes, the `stable` tag moves to th
 
 The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_scope.ts) owns the grammar; settings-repos.yml's `repo=` reads the same):
 
-| `repo=` | Syncs |
-| --- | --- |
-| `Vivswan/a,Vivswan/b` | those repos |
-| `public` or `private` | every managed repo of that visibility |
-| `modules:site+release-please` | every managed repo whose `.repo-platform.yml` selects BOTH modules (`+` ANDs the names) |
-| `modules:site,modules:release-please` | every managed repo selecting EITHER module (filters union): the repos a change to the site or release-please files lands in |
-| `public,modules:site` | the public repos selecting site: a visibility token intersects with the filter, and a slug (`Vivswan/a,modules:site`) adds as typed |
-| `all` or empty | the whole fleet |
+| `repo=`                               | Syncs                                                                                                                               |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `Vivswan/a,Vivswan/b`                 | those repos                                                                                                                         |
+| `public` or `private`                 | every managed repo of that visibility                                                                                               |
+| `modules:site+release-please`         | every managed repo whose `.repo-platform.yml` selects BOTH modules (`+` ANDs the names)                                             |
+| `modules:site,modules:release-please` | every managed repo selecting EITHER module (filters union): the repos a change to the site or release-please files lands in         |
+| `public,modules:site`                 | the public repos selecting site: a visibility token intersects with the filter, and a slug (`Vivswan/a,modules:site`) adds as typed |
+| `all` or empty                        | the whole fleet                                                                                                                     |
 
 - A module name outside `files.yml` fails the plan before any repository is probed, naming the roster; a repo whose `.repo-platform.yml` has no readable `modules` list is reported as a warning and left out, and the plan prints how many repos the filter left out.
 - The filter, `private`, and slugs are dispatch-only, so a merge label carries `public` or `all` alone; [docs/all-green.md](docs/all-green.md#opting-a-pr-into-an-immediate-fleet-sync) says why.
