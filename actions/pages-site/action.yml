@@ -7,6 +7,8 @@ description: |
   - The configuration is the config input, or the registration read through the plan action when the input is empty.
   - With neither part the step ends green with publish false and no directory.
   - A deploy needs a full checkout (fetch-depth 0): version tags and per-ref trees come from git history.
+  - Under `check`, the site is built and its internal links verified, and nothing is deployed; a dead link fails the
+    step, and the fix is the link.
 
 inputs:
   site-dir:

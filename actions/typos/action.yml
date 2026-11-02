@@ -3,8 +3,10 @@ description: |
   Spell-checks the caller's checkout with the pinned typos action and the fleet allowlist shipped beside this action;
   typos layers that allowlist as --config over the repository's own file, which extends it without replacing it.
 
-  A finding fails the step. The repository's own extensions, the only bypass, are docs/fleet-guidelines.md's, "How to
-  bypass a check".
+  A finding fails the step. The bypasses are the repository's own: an entry in its `_typos.toml` (`typos.toml` and
+  `.typos.toml` are read too), where `[default.extend-words]` holds its vocabulary, `[files] extend-exclude` the
+  fixtures spelled wrong on purpose, and `[default.extend-identifiers]` one identifier; or a trailing `typos: ignore`
+  comment for a one-off.
 
 runs:
   using: composite

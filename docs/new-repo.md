@@ -76,7 +76,7 @@ CI is split so the platform can keep improving its half while each repo keeps it
 
 **A starter is written once** and never touched by a sync after that, so when the platform INTRODUCES a starter at a path a repository already owns a file at, the writer leaves the repository's file alone and reports the row `unchanged`. Check the kept file against the interface its callers expect (the [sync-PR skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md) has the triage row).
 
-**The `platform` job's checks** are listed in [what gates what](all-green.md#what-gates-what), each with where it runs, and [the all-green convention](all-green.md) says how the required `all-green` check judges the gating jobs.
+**The `platform` job's checks** are fleet.yml's `standard-checks` steps and the jobs beside it ([what gates what](all-green.md#what-gates-what)); each check's action description says what it judges, and [the all-green convention](all-green.md) says how the required `all-green` check judges the gating jobs.
 
 ### The managed files check
 

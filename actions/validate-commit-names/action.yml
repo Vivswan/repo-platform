@@ -7,6 +7,8 @@ description: |
     out with fetch-depth: 0 so base..head resolves on pull_request events.
   - With `title`: that one string instead, with no checkout needed.
 
+  No bypass: reword the commit.
+
 inputs:
   title:
     description: >-

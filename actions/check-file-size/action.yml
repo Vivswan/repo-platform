@@ -11,8 +11,13 @@ description: |
   Findings are one table in the step summary and the log annotations on every event, plus a sticky PR comment on
   pull_request events, deleted when there is nothing to say (the calling job needs pull-requests: write for it).
 
-  Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it).
-  Repo-owned exemptions: `.file-size-allow.local`, one path per line with a `# reason`.
+  Skipped and counted: a file carrying repo-platform's managed header (the caller cannot fix it). Not judged: a file of
+  no kind (lockfiles, json, yaml outside workflows and action manifests), vendored and recorded directories (node_modules, vendor,
+  third_party, goldens, __snapshots__), a file or region declaring itself generated, and a line that is one unbreakable
+  token.
+
+  Repo-owned exemptions: `.file-size-allow.local`, one `path # reason` per line, the reason mandatory; an entry with no
+  finding left fails as stale.
 
 runs:
   using: composite
