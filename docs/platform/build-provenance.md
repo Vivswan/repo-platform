@@ -28,17 +28,13 @@ Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. 
 
 - **Self-contained actions:** a composite action must resolve from that tarball alone: its own directory plus the root files it reads from there (`files.yml`, and the `.bun-version` its bun-setup step finds, [toolchains.md](../toolchains.md#how-the-composite-actions-pin-bun)), since nothing installs the repository's root dependencies on the caller's runner.
 
-**Every self pin resolves:** [tests/workflows/delivery_pins.test.ts](../../tests/workflows/delivery_pins.test.ts) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout. A renamed or deleted action, or a pin off the delivery ref, fails CI here instead of the next fleet run.
-
-**Every manifest loads:** GitHub loads an action's manifest when the job starts, so a manifest error fails every caller before its first step. Only a job naming an action loads it, so this repository's gate runs every shipped action but one, the `action-load` job carrying those no other check names ([all-green.md](../all-green.md#what-gates-what)), and a manifest GitHub cannot load fails here before `stable` moves.
-
-release-assets is the one unjudged: it reads a draft release by tag, and this repository cuts none ([tests/workflows/action_load.test.ts](../../tests/workflows/action_load.test.ts) holds the gate to the actions directory and names it).
+**Every self pin resolves and every manifest loads before `stable` moves:** a renamed or deleted action, a pin off the delivery ref, or a manifest GitHub cannot load fails CI here instead of the next fleet run (release-assets, which reads a draft release by tag, is the one action no job here runs).
 
 ## One commit per run
 
 GitHub resolves a reusable workflow's `@stable` when the run starts and a composite action's `@stable` when its job runs. The tag moves between the two whenever main lands while runs sit queued, so a workflow at one commit once ran actions at another: an output the old guard read as empty failed `standard-checks` right after "Validation passed".
 
-So no platform file names another by tag. Between platform files the reference is GitHub's `$/` path ([the self-repository reference](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax), runner 2.336 or newer), which resolves against the repository holding the file at the commit the run fetched it from, with nothing checked out for it:
+So no platform file names another by tag. Between platform files the reference is GitHub's `$/` path ([the self-repository reference](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)), which resolves against the repository holding the file at the commit the run fetched it from, with nothing checked out for it:
 
 ```yaml
 # .github/workflows/fleet.yml, fetched at the tag by a fleet repository's ci.yml
@@ -54,7 +50,7 @@ uses: $/.github/workflows/reusable-codeql.yml   # the same commit
 | a platform workflow or composite (`.github/workflows/`, `actions/`) | `$/<path>`                            | the file's own commit, whoever fetched it                                            |
 | a starter (`files/`)                                                | `<owner>/repo-platform/<path>@stable` | the starter is copied into a fleet repository, where `$/` would name that repository |
 
-[tests/workflows/delivery_pins.test.ts](../../tests/workflows/delivery_pins.test.ts) holds every reference to its row, and refuses a `./actions/<name>` or `./.github/workflows/<name>` path in a platform file: that form resolves against the caller's workspace, which holds nothing of this repository.
+A `./actions/<name>` or `./.github/workflows/<name>` path is refused in a platform file: that form resolves against the caller's workspace, which holds nothing of this repository.
 
 ## Who can write `refs/tags/stable`?
 

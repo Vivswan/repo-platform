@@ -17,13 +17,11 @@ Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter wo
 
 ## Customizing the starter
 
-- **Replace the placeholder** in the `Fuzz` step with your fuzzer, seeded from `$SEED` and bounded by `$ITERATIONS`. Until you do, the step is a green no-op that prints a warning; an uncustomized starter never files issues.
+- **Replace the placeholder** in the `Fuzz` step with your fuzzer, seeded from `$SEED` and bounded by `$ITERATIONS`. Until you do, the step is a green no-op, and an uncustomized starter never files issues.
 
 - **Set up the toolchain** the fuzzer needs in the steps above it (rust nightly and cargo-fuzz, a docker stack, a corpus cache), and point the upload step's `path` at your failure-report directory. The artifact carries the failure directories themselves, so the `report` job's download path and `artifacts-dir` stay as they are.
 
 - **The `report` job is the machinery:** it downloads every `fuzz-failures-*` artifact of the run into `.fuzz-failures` (a pattern download of nothing succeeds, so a night that wrote no artifact files the bare notice; a download that fails still files it, since the filing step leads with `always()`) and runs the action once. Leave it as it is; only [sharding](#sharding) touches its `artifact-name`.
-
-- **Hidden files in the upload:** the upload step sets `include-hidden-files: true`. Since v4.4, `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default. Without the flag the step finds no files and uploads nothing, and `if-no-files-found: ignore` keeps that silent.
 
 ## The failure-report contract (v1)
 
@@ -45,18 +43,14 @@ The [fuzz-issue action](../../actions/fuzz-issue/fuzz-issue.ts) knows nothing ab
 
 - **The body** must contain a fenced code block with the exact replay command(s), runnable from the repository root or starting with an explicit `cd`. The producer owns the replay command; the action never constructs one.
 
-- **Recommended content after the replay block:** the seed used, the crashing input's filename, and the [regression-pinning](#regression-pinning-and-why-auto-close-is-honest) instruction for your repo. Add a base64 copy of the crashing input when it is 3,000 bytes or smaller: it outlives the artifact retention window. Keep it on a single line, so head-truncation cannot cut it.
+- **Recommended content after the replay block:** the seed used, the crashing input's filename, and the [regression-pinning](#regression-pinning-and-why-auto-close-is-honest) instruction for your repo. Add a base64 copy of the crashing input when it fits the per-failure budget: it outlives the artifact retention window. Keep it on a single line, so head-truncation cannot cut it.
 
-Size limits:
+Size limits, the constants [actions/fuzz-issue/fuzz-issue.ts](../../actions/fuzz-issue/fuzz-issue.ts) names:
 
-| Budget                      | Value                                                                                                                                                                                                                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| per failure, lines included | the heading plus the first `REPORT_LINES` lines after it                                                                                                                                                                                                                        |
-| per failure, size           | at most `MAX_BLOCK_CHARS` characters                                                                                                                                                                                                                                            |
-| without an `artifact-name`  | no per-failure cap: the body is the only record, so every report rides whole, each cut at its share of the body budget with a count of the lines missing                                                                                                                        |
-| whole issue body            | `MAX_BODY` characters, under GitHub's cap; failures included oldest-first by directory mtime (meaningful only where the reports were written: re-extracting artifacts, as the [shard aggregation](#sharding) does, stamps fresh mtimes), then a note says how many were omitted |
+- **Per failure,** the heading plus the first `REPORT_LINES` lines after it, at most `MAX_BLOCK_CHARS` characters; without an `artifact-name` the body is the only record, so every report rides whole, each cut at its share of the body budget.
+- **The whole issue body,** `MAX_BODY` characters, failures included oldest-first by directory mtime (meaningful only where the reports were written: re-extracting artifacts, as the [shard aggregation](#sharding) does, stamps fresh mtimes), then a note says how many were omitted.
 
-The three constants live in [actions/fuzz-issue/fuzz-issue.ts](../../actions/fuzz-issue/fuzz-issue.ts). Keep the replay block near the top of `report.md`: lines past `REPORT_LINES` survive only in the artifact.
+Keep the replay block near the top of `report.md`: lines past `REPORT_LINES` survive only in the artifact.
 
 ## Regression pinning, and why auto-close is honest
 

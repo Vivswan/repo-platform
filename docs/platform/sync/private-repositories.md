@@ -4,7 +4,7 @@ order: 6
 
 # Private repositories
 
-This page is the redaction model of the sync's public log: the four rules that keep a private repository's name and content out of it, what a run still shows, the settings apply that runs the same shape, and where the model stops.
+This page is the redaction model of the sync's public log: the four rules that keep a private repository's name and content out of it, the settings apply that runs the same shape, and where the model stops; what a run still prints is [the operator's vocabulary](operator.md).
 
 repo-platform is public, and GitHub Actions has no log-level access control: run logs, job names, step headers, and annotations are as readable as the repository they run in. The operator therefore never lets a private repository's name or content reach that log. Four rules carry the whole model, and the job shape enforces them, not a per-step discipline.
 
@@ -24,13 +24,6 @@ repo-platform is public, and GitHub Actions has no log-level access control: run
 - **Only the vocabulary prints:** the writer's report and the delivery log never touch stdout, so the only lines printed are the operator's vocabulary ([the operator](operator.md)).
 
 The same job runs for public and private targets: nothing is conditional on visibility except the report's `Visibility` cell and a branch dispatch's job summary, which withholds a private repository's report ([syncing a branch](operator.md#syncing-a-branch)).
-
-## What a run still shows
-
-- `plan: <N> rows` and one `row <i>: ...` line per row.
-- The delivery commit the run ships: it names THIS repository's main history, not a target.
-- A step's exit status, and the red step's own error when a row failed before its target was resolved (nothing target-derived exists yet at that point).
-- The plan job's selection line, which names public repositories in the clear and counts the private ones.
 
 ## When the settings apply runs
 

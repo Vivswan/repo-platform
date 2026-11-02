@@ -13,7 +13,7 @@ Like the fuzzer starter it is written once and then repo-owned: the checks are r
 | `checks` job        | yours                                                                                                                                                                                |
 | `release-gate` job  | calls the repo-owned release-gate.yml, the release acceptance tier ci.yml runs on the release PR ([its contract](../all-green.md#the-release-gate-hook-in-every-managed-repository)) |
 | `report` job        | the machinery: `needs: [checks, release-gate]` with `if: always()`                                                                                                                   |
-| Triggers            | a nightly cron (06:59 UTC, offset from the fuzzer starter's 09:11 UTC) plus a bare `workflow_dispatch`                                                                               |
+| Triggers            | a nightly cron, offset from the fuzzer starter's, plus a bare `workflow_dispatch`                                                                                                    |
 
 **What a night does:**
 
@@ -30,7 +30,7 @@ A human cancelling an in-flight run files an issue too, because the report job c
 
 ## Customizing the starter
 
-- **Replace the placeholder** in the `checks` job with the repository's own nightly checks. Until you do, the step is a green no-op that prints a warning; an uncustomized starter never files issues.
+- **Replace the placeholder** in the `checks` job with the repository's own nightly checks. Until you do, the step is a green no-op, and an uncustomized starter never files issues.
 
 - **Moving real checks in,** as steps of `checks` or as sibling jobs the `report` job folds in, is [the add-module skill's worked example](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-add-module/references/worked-examples.md#adding-nightly-to-a-repo-that-already-has-fuzzer). A sibling that must be conditional folds its `skipped` state into one side of the report job's conditions explicitly, or the report job does nothing that night.
 
