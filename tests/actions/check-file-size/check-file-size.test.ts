@@ -986,7 +986,7 @@ test("the caps table in docs/fleet-guidelines.md is the caps the code judges by"
   const rows = readFileSync(join(REPO_ROOT, "docs/fleet-guidelines.md"), "utf8")
     .split("\n")
     .filter((line) =>
-      /^\| (source|test|workflow|shell|markdown|line width|comment block) \|/.test(line),
+      /^\| (source|test|workflow|shell|markdown|line width|comment block) +\|/.test(line),
     )
     .map((line) => line.split("|").map((cell) => cell.trim()))
     .map((cells) => [cells[1], cells[3], cells[4]?.replace(/ \(.*\)$/, "")]);
