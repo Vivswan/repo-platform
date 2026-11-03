@@ -15,7 +15,7 @@ Management is push-based, so ejecting starts in repo-platform, not in the repo: 
 
 Leaving the fleet means revoking the fleet token's write access to the repo: remove the repo from the REPO_PLATFORM_TOKEN's repository access list.
 
-- **The plan log:** a private repository disappears from discovery, and a public one stays listed with a notice ([what each case prints](#pause-instead-of-eject)).
+- **The plan:** a private repository disappears from discovery, and a public one stays listed, its rows skipped.
 - **Nothing is deleted** either way.
 - **Nothing else to edit:** nothing in repo-platform lists the fleet.
 - **Settings stop being applied too:** the central run only manages enrolled repos carrying a `.repo-platform.yml` and a rendered `.github/settings.yml` ([settings.md](settings.md)).
@@ -66,10 +66,10 @@ Every remaining file is plain configuration that works standalone: the rendered 
 
 To stop receiving sync PRs without detaching, do one of these, and undo it to resume updates. Both pauses also drop the repository from the central settings apply ([selection](platform/settings-apply.md#selection)).
 
-| Pause                  | How                                                                                                                   | In the plan log                                                                                                       |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| a revoked public repo  | revoke the fleet token's write access to the repo (fleet side: the same step as deregistering; re-grant it to resume) | stays listed, and every plan whose scope selects that repository prints one notice that the token cannot push to it   |
-| a revoked private repo | the same revoke                                                                                                       | nothing (it is no longer discovered)                                                                                  |
-| the deleted-file pause | delete `.repo-platform.yml` from the repo (the sync skips repos without it)                                           | a notice that the repo is "skipped - no .repo-platform.yml on its default branch, so it has not adopted the platform" |
+| Pause                  | How                                                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| a revoked public repo  | revoke the fleet token's write access to the repo (fleet side: the same step as deregistering; re-grant it to resume) |
+| a revoked private repo | the same revoke                                                                                                       |
+| the deleted-file pause | delete `.repo-platform.yml` from the repo (the sync skips repos without it)                                           |
 
 The token's repository access list is the authoritative view of which repos are paused.
