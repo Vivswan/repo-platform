@@ -17,11 +17,11 @@ Every run, on all three entries ([when it runs](../settings.md#when-it-runs)), a
 | Entry                     | The gate                                                                                                                     |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | Post-green call           | the sha input must be the run's own judged commit, read through the tag mover's bounded all-green poll (shared/all_green.ts) |
-| Dispatch and nightly heal | waits (bounded, 20 minutes) for the tip's all-green check and fails closed on red or none                                    |
+| Dispatch and nightly heal | waits, bounded, for the tip's all-green check and fails closed on red or none                                                |
 
 - **Post-green call:** the caller is needs-ordered behind the gate in the same run, so a verdict still pending at the bound means the call came from somewhere else.
 
-- **The dispatch and nightly halt:** the run halts with an `::error::` naming the red commit, its verdict, and the fix. Get main green; then the next nightly or a manual dispatch applies.
+- **The dispatch and nightly halt** on a red or missing verdict. Get main green; then the next nightly or a manual dispatch applies.
 
 - **`check_only` while main is red:** check reports are dispatch runs too, so the drift diagnostic is unavailable exactly while main is red.
 
@@ -31,13 +31,11 @@ A red nightly is the signal that drift is going unhealed, so the halt is a FAILE
 
 ## Newest wins
 
-**A superseded run's rows stand down GREEN.** Each row asks whether main's tip is still its run's commit ([fleet/newest_main.ts](../../.github/scripts/fleet/newest_main.ts), one `git ls-remote`). When main moved on, the row stands down with the notice `superseded by <sha>`; the tip's own run or the nightly applies.
+**A superseded run's rows stand down GREEN.** Each row asks whether main's tip is still its run's commit ([fleet/newest_main.ts](../../.github/scripts/fleet/newest_main.ts)); when main moved on, the row stands down, and the tip's own run or the nightly applies.
 
 **The plan's refusals are red whatever main's tip is:** a scope naming no repository, or a selected target carrying a hand-written `.github/settings.yml`, fails the run before any row exists.
 
 **Why it asks:** the `settings-repos` lane runs one apply at a time in ARRIVAL order, and CI durations vary, so an older commit's run can reach the lane after a newer one's. post-green.yml's `settings-fleet` job holds the lane on a call; the cron and dispatch runs hold it themselves. Neither cancels a run in progress.
-
-**Where it asks:** each row's resolver, before its listing, at the write. No `TARGET` skips the apply step, so a superseded row stands down green. A superseded run's rows each spin up and stand down; a re-run of failed rows asks afresh at each write.
 
 - **Guarantee:** no apply row writes after a row of a newer main commit's run did. An older run's rows wait their turn on the lane and stand down.
 
@@ -49,21 +47,7 @@ A red nightly is the signal that drift is going unhealed, so the halt is a FAILE
 
 A `plan` job, then one `apply (row <i>)` job per target, the shape the sync's operator uses ([platform/sync/operator.md](sync/operator.md)). The selector lists the targets and keys each row of the apply matrix. Every apply job resolves its own target and runs the library's CLI (`gsac`) on it, in `--repos` mode, from its rendered `.github/settings.yml` on its default branch.
 
-| Step           | Script                                                                                     | What it does                                         |
-| -------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| plan: select   | [fleet/select_settings_repos.ts](../../.github/scripts/fleet/select_settings_repos.ts)     | selects the targets ([the three probes](#selection)) |
-| apply: resolve | [fleet/resolve_settings_target.ts](../../.github/scripts/fleet/resolve_settings_target.ts) | resolves the row's target                            |
-| apply: apply   | `bun run gsac`, the installed library's own bin, `--repos` that one target                 | applies, or checks, that one target                  |
-
-- **The selector's outputs** are `count` and `matrix`: one row per target, in the selection's order, each an index and the row's key.
-
 - **The row key** is the sync operator's own `rowKeyOf` ([sync/resolve_row.ts](../../.github/scripts/sync/resolve_row.ts)): an HMAC of the slug under the fleet token and the run id, so a private target is identified without being named.
-
-- **The resolver** asks [newest wins](#newest-wins), then lists the owner's writable repositories once and finds the one the row's key names. It registers every form of the name with the runner's masker before anything else prints, and hands the slug to the CLI through `GITHUB_ENV` (`TARGET`).
-
-- **A key no listed repository carries** (the grant moved mid-run) refuses, naming nothing.
-
-- **The CLI's run:** the log and the step summary (`--summary`) are the job's. A non-zero exit (a failure, or drift under check) is the row's red.
 
 - **One library version:** the bin is the same package the writer folds with ([the merge dialect](../settings.md#the-merge-dialect)), installed by the job's `bun install --frozen-lockfile`. So a `bun update` moves the render and the apply together.
 
@@ -71,17 +55,19 @@ A `plan` job, then one `apply (row <i>)` job per target, the shape the sync's op
 
 - **The apply job never re-runs the plan's probes:** its resolver lists the owner's repositories once and matches the key, so a fleet of N targets costs N listings, not N selections.
 
-- **Bounds:** each apply job is bounded by one target's work (`timeout-minutes: 15`), so the fleet's size widens the matrix and never a timeout. The plan job's bound covers the green gate's wait plus the probes, which run one target after another.
+- **Bounds:** each apply job is bounded by one target's work, so the fleet's size widens the matrix and never a timeout.
 
 ### Selection
 
 A target is selected when all three probes pass, in this order, over every discovered repository the scope admits, sorted:
 
-| Probe    | Reads                                                                                     | On failure                                                                                                                                                                                                        |
-| -------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Enrolled | the fleet token can push to the repository                                                | skipped with a notice                                                                                                                                                                                             |
-| Adopted  | `.repo-platform.yml` on the default branch                                                | skipped with the not-adopted notice; a probe that keeps failing after retries is skipped for the run with a warning and picked up again the next night                                                            |
-| Rendered | `.github/settings.yml` on the default branch opens with the generator header's first line | a missing file is skipped with the notice `it has no .github/settings.yml yet; the sync PR that renders it has not merged`; a file without the header fails the plan with a count (the log is public, so no name) |
+| Probe    | Reads                                                                                     |
+| -------- | ----------------------------------------------------------------------------------------- |
+| Enrolled | the fleet token can push to the repository                                                |
+| Adopted  | `.repo-platform.yml` on the default branch                                                |
+| Rendered | `.github/settings.yml` on the default branch opens with the generator header's first line |
+
+A probe that fails skips the target, save a rendered file without the header, which fails the plan:
 
 - **The hand-written refusal keeps a first sync safe:** a `.github/settings.yml` the sync did not render is never applied on its own. Applying it in `repos` mode would delete every fleet label it does not declare. The plan stays red until the sync PR that renders it merges.
 
@@ -93,9 +79,6 @@ A private target is identified by its row key and named nowhere in the run; how 
 
 **`check_only`** runs every row's CLI in `check`: no setting changes. The one write left is a private target's report issue and its marker label.
 
-- **Its output:** one `drift:` line per difference names the section, the field, and the declared versus live values (hidden for a private target, whose detail goes to its report issue).
-- **Each row ends** `clean`, `drift`, or `failed`.
-
 A fleet check reads clean only when three things hold together. The second and third readings are what show a stale rendered file behind a held sync PR.
 
 1. every row is green (the CLI exits 1 on drift),
@@ -104,7 +87,4 @@ A fleet check reads clean only when three things hold together. The second and t
 
 ## Token
 
-The fleet-level token model lives in the [README's Credentials section](https://github.com/Vivswan/repo-platform#credentials): one PAT stored only in repo-platform drives sync and central settings. It is required there: the central runs fail without it.
-
-- **Strict about permissions:** a token that cannot reach a declared section fails that target's apply (`on-missing-permission: fail`), so drift never hides behind a green run.
-- **Required scopes:** Administration and Issues write are required wherever settings are applied.
+One PAT stored only in repo-platform drives the sync and the central settings ([the README's Credentials section](https://github.com/Vivswan/repo-platform#credentials)). It is strict about permissions: a token that cannot reach a declared section fails that target's apply, so drift never hides behind a green run.
