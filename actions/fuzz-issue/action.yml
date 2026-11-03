@@ -1,6 +1,6 @@
 name: Nightly Issue
 description: |
-  Files, refreshes, or closes the tracking issue of a nightly stream (fuzz, plain CI, security, link rot): the fleet's
+  Files, refreshes, or closes the tracking issue of a nightly stream (fuzz, plain CI, link rot): the fleet's
   issue mechanism, as the sticky PR comment is its comment mechanism (docs/modules/tracking-issues.md).
 
   - report: files the stream's issue, or refreshes the open one, the body replaced and never appended to.
