@@ -28,7 +28,6 @@ import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 const SCRIPT = resolve(import.meta.dir, "../../../actions/check-file-size/check-file-size.ts");
-const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
 const lines = (count: number): string => `${Array.from({ length: count }, () => "x").join("\n")}\n`;
 const MANAGED = "# This file is managed by Vivswan/repo-platform.\n";
@@ -323,36 +322,20 @@ describe("judgeFile comment blocks", () => {
     );
   };
 
-  // docs/fleet-guidelines.md names the prefixes by hand and COMMENT_LINE (actions/shared/managed_header.ts) is the
-  // source, so the two can drift apart. Each prefix the guide names is driven through a block, indented, in two
-  // languages (the prefix decides, never the extension), and the guide's set is the regex's alternatives, exactly.
-  const documented = (() => {
-    const bullet = readFileSync(join(REPO_ROOT, "docs/fleet-guidelines.md"), "utf8")
-      .split("\n")
-      .find((line) => line.startsWith("- **A comment block**"));
-    if (bullet === undefined) {
-      throw new Error("docs/fleet-guidelines.md lost its comment block bullet");
-    }
-    return [...bullet.matchAll(/`([^`]+)`/g)].map((match) => match[1]);
-  })();
-  test("the guide names exactly the comment prefixes the regex knows", () => {
-    const alternatives = COMMENT_LINE.source
-      .replace(/^\^\\s\*\(/, "")
-      .replace(/\)$/, "")
-      .split("|")
-      .map((alternative) => alternative.replace(/\\(.)/g, "$1"));
-    expect([...documented].sort()).toEqual([...alternatives].sort());
+  // Every prefix COMMENT_LINE (actions/shared/managed_header.ts) knows is driven through a block, indented, in two
+  // languages: the prefix decides, never the extension.
+  const prefixes = COMMENT_LINE.source
+    .replace(/^\^\\s\*\(/, "")
+    .replace(/\)$/, "")
+    .split("|")
+    .map((alternative) => alternative.replace(/\\(.)/g, "$1"));
+  test.each(prefixes)("a run of lines opening with %s is a block, in any judged kind", (prefix) => {
+    const run = (count: number): string =>
+      `${Array.from({ length: count }, (_, i) => `  ${prefix} c${i}`).join("\n")}\n`;
+    judgeComments("f.ts", `x\n${run(BLOCK + 1)}x\n`, [[2, BLOCK + 1, "block"]]);
+    judgeComments("f.sh", `x\n${run(BLOCK + 1)}x\n`, [[2, BLOCK + 1, "block"]]);
+    judgeComments("f.ts", `x\n${run(BLOCK)}x\n`, []);
   });
-  test.each(documented)(
-    "a run of lines opening with %s is a block, in any judged kind",
-    (prefix) => {
-      const run = (count: number): string =>
-        `${Array.from({ length: count }, (_, i) => `  ${prefix} c${i}`).join("\n")}\n`;
-      judgeComments("f.ts", `x\n${run(BLOCK + 1)}x\n`, [[2, BLOCK + 1, "block"]]);
-      judgeComments("f.sh", `x\n${run(BLOCK + 1)}x\n`, [[2, BLOCK + 1, "block"]]);
-      judgeComments("f.ts", `x\n${run(BLOCK)}x\n`, []);
-    },
-  );
 
   // Every case names its file: the kind read off it decides whether blocks are judged at all (markdown is prose).
   test.each<[string, string, string, Row[]]>([
@@ -517,16 +500,16 @@ describe("judgeFile comment blocks", () => {
       `x\r\n\r\n${slashes(BLOCK + 1).replace(/\n/g, "\r\n")}x\r\n`,
       [[3, BLOCK + 1, "block"]],
     ],
-    // The misreads docs/fleet-guidelines.md names under "The accepted cost", one row each, so the guide cannot keep
-    // naming a cost the code no longer pays.
+    // The misreads the action's description accepts (a string, here-doc, or block-scalar line opening with a prefix reads
+    // as a comment; a /* */ body line opening with anything else reads as code), one row each.
     [
-      "the guide's cost: a string's lines opening with a prefix read as a block",
+      "an accepted misread: a string's lines opening with a prefix read as a block",
       "f.ts",
       `x\nconst t = \`\n${"# c\n// c\n".repeat(BLOCK)}\`;\nx\n`,
       [[3, 2 * BLOCK, "block"]],
     ],
     [
-      "the guide's cost: a here-doc's # lines read as a block like the same lines after it",
+      "an accepted misread: a here-doc's # lines read as a block like the same lines after it",
       "f.sh",
       `cat <<'EOF'\n${hashes(BLOCK + 1)}EOF\n${hashes(BLOCK + 1)}echo y\n`,
       [
@@ -535,13 +518,13 @@ describe("judgeFile comment blocks", () => {
       ],
     ],
     [
-      "the guide's cost: a yaml block scalar's # lines read as a block",
+      "an accepted misread: a yaml block scalar's # lines read as a block",
       ".github/workflows/f.yml",
       `run: |\n${hashes(BLOCK + 1).replace(/^/gm, "  ")}x: y\n`,
       [[2, BLOCK + 1, "block"]],
     ],
     [
-      "the guide's cost: a /* */ body whose lines open with no * reads as code, so no block forms",
+      "an accepted misread: a /* */ body whose lines open with no * reads as code, so no block forms",
       "f.js",
       `x\n/*\n${"a\n\nb\n".repeat(3)}*/\nx\n`,
       [],
@@ -978,26 +961,4 @@ describe("the CLI", () => {
     const root = makeRoot();
     expect(run(root)).toEqual(expected(root));
   });
-});
-
-// docs/fleet-guidelines.md spells the caps by hand for the fleet; the tests above read them from the source, so a changed
-// ratio or cap would leave the guide lying with nothing red.
-test("the caps table in docs/fleet-guidelines.md is the caps the code judges by", () => {
-  const rows = readFileSync(join(REPO_ROOT, "docs/fleet-guidelines.md"), "utf8")
-    .split("\n")
-    .filter((line) =>
-      /^\| (source|test|workflow|shell|markdown|line width|comment block) +\|/.test(line),
-    )
-    .map((line) => line.split("|").map((cell) => cell.trim()))
-    .map((cells) => [cells[1], cells[3], cells[4]?.replace(/ \(.*\)$/, "")]);
-  const kinds: Kind[] = ["source", "test", "workflow", "shell", "markdown"];
-  expect(rows).toEqual([
-    ...kinds.map((kind) => [kind, `${HARD.lines[kind]} lines`, `${WARN.lines[kind]} lines`]),
-    ["line width", `${HARD_WIDTH} code points`, "none"],
-    [
-      "comment block",
-      "never fails",
-      `${COMMENT_CAPS.block} lines; ${COMMENT_CAPS.header} for the file header`,
-    ],
-  ]);
 });

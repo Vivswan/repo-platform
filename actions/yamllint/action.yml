@@ -6,6 +6,9 @@ description: |
   One implementation for every managed repository, so the install, the version, and the invocation cannot drift per
   repository.
 
+  The one bypass is yamllint's own: a `# yamllint disable-line rule:<name>` comment on the line. The `.yamllint` config
+  itself is managed.
+
 runs:
   using: composite
   steps:

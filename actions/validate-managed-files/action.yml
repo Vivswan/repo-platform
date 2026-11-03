@@ -9,6 +9,9 @@ description: |
     comment and nothing beyond contents: read.
   - The report step always runs, writes the summary and the comment body, and fails on anything but a clean verdict; the
     comment steps run on !cancelled(), so a red check still posts its comment.
+  - A drift finding's remedy is the next sync, which writes the managed file again, or the registration's `except` list
+    for a path the repository must keep as its own; a hygiene finding (a `release-as` key, a conflict marker) is fixed in
+    the file. Nothing else bypasses the check.
 
 inputs:
   private:

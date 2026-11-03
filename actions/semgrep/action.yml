@@ -8,8 +8,12 @@ description: |
   - Public repositories only: the registry needs no token, but code scanning needs a public repository or Advanced Security.
   - One registry rule is excluded for good: mutable-action-tag duplicates zizmor's unpinned-uses, and one tool owns each finding
     class.
-  - The bypass marker, how marked findings leave the SARIF upload, and what happens to alerts an earlier upload opened are
-    docs/modules/security-scans.md's, "Semgrep".
+  - The bypass is semgrep's own marker, `// nosemgrep: <rule-id>` (`# nosemgrep: <rule-id>` in YAML), on the finding's
+    line or the line above it, with the reason beside it; a Dockerfile instruction takes no trailing comment, so there
+    the marker is the line directly above it.
+  - A marked finding stays in semgrep's SARIF as a suppressed result that code scanning would show as an open alert, so
+    the suppressed results are dropped before the upload; a lower-severity alert an earlier upload opened closes once a
+    later upload for the same category and branch lacks it.
 
   The calling job needs security-events: write for the SARIF upload.
 

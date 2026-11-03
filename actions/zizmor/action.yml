@@ -1,13 +1,14 @@
 name: Zizmor
 description: |
   Audits every workflow and action.yml in the caller's checkout with zizmor, the fleet's GitHub Actions security
-  audit,
-  under the fleet policy shipped beside this action (a repository's own zizmor config is not read). A medium or low
-  finding neither blocks nor surfaces.
+  audit, under the fleet policy shipped beside this action (a repository's own zizmor config is not read). A medium or
+  low finding neither blocks nor surfaces.
 
-  Two passes of the one pinned zizmor under the same policy: a SARIF pass for code scanning (public repositories only, as
-  private personal repositories have none) and a plain pass whose exit is the verdict. Why two, what each fails on, and
-  the bypass are docs/fleet-guidelines.md's, "How to bypass a check".
+  Two passes of the one pinned zizmor under the same policy: a SARIF pass for code scanning (public repositories only,
+  as private personal repositories have none; zizmor exits 0 in SARIF mode whatever it finds) and a plain pass whose
+  exit is the verdict, so a high finding fails the step.
+
+  The one bypass is zizmor's own: a `# zizmor: ignore[rule]` comment on the finding's line, with the reason beside it.
 
   The calling job needs security-events: write for the SARIF upload, when upload-sarif is true.
 

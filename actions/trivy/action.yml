@@ -7,6 +7,9 @@ description: |
   (ignore-unfixed filters vulnerabilities only, since a misconfiguration has no fixed version), is a warning
   annotation on its target, never a red step. A scan error is the one red. A MEDIUM or LOW finding appears nowhere.
 
+  A repository's `.trivyignore` is not read, and its `trivy.yaml` cannot turn a finding red; the remedy for a finding is
+  the fix.
+
 runs:
   using: composite
   steps:

@@ -17,8 +17,6 @@ Every repository in the fleet - repo-platform included - gates merges on a requi
 | the managed skeleton | `checks` and `release-gate` | so a schedule night passes on `platform`, an ordinary run passes without the release gate, and an all-skipped run cannot pass |
 | repo-platform's own  | `dependency-review` alone   | since only a pull request has a dependency diff to review                                                                     |
 
-**The judgment's own scenario tests are alls-green's.** The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, which [tests/workflows/delivery_pins.test.ts](../tests/workflows/delivery_pins.test.ts) holds to the root's sha, landed in the fleet by the next sync round.
-
 **repo-platform's own main carries one more merge rule,** the `main-up-to-date` ruleset in its [overlay](../.github/settings.local.yml): [settings.md](settings.md#repo-platform-itself-is-a-target) owns what it refuses and why the fleet does not carry it.
 
 ## Quick triage: why is my PR red or waiting?
@@ -48,7 +46,7 @@ Each entry is what you see, what it means, and what to do.
 **`pr-title` waiting (repos with the pr-title module).**
 
 - **Means:** its own required check, outside this gate; the workflow re-runs on open/edit/reopen/push ([the pr-title ruleset](settings.md#the-pr-title-ruleset)).
-- **Do:** fix the title to what commitlint accepts under config-conventional plus one scope (no scope list, no Sentence-case description, no trailing period).
+- **Do:** fix the title; the check's log names what commitlint refused.
 
 ## What gates what
 
@@ -65,32 +63,15 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 **One ceiling for every platform call:** `platform`, `release`, `publish-release`, and `site` carry the same fixed `permissions:` block, the union of what any job behind those calls asks, and each called job narrows itself to its own need.
 
-- GitHub validates a called job's grant against its caller's before the job's `if` runs, so one job over the block fails every fleet run at once.
-- [tests/workflows/caller_ceilings.test.ts](../tests/workflows/caller_ceilings.test.ts) holds every called job under the block and the block to exactly that union, so no scope is granted that nothing asks.
-
 **The jobs beside them gate nothing:** the `post-green` caller and the static legs are gate-downstream ([after the gate](#after-the-gate)).
 
 **The membership rule:** what gates a managed repository is being a job in fleet.yml or checks.yml, or in release-gate.yml on the release PR and a dispatch - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
 
 - **Inside fleet.yml,** a module- or visibility-conditioned step or job skips via its `if:` when it does not apply; a skipped step or job leaves the called run green.
 
-- **Every platform action it calls** is a `$/` path, this repository at the workflow's own commit ([build-provenance](platform/build-provenance.md#one-commit-per-run)).
-
 - **The checks every repository runs** are the steps of one `standard-checks` job, because GitHub bills a job a rounded-up minute.
 
-- **Each check step** runs under `!cancelled()` once the plan resolved: one failure never hides another, a cancelled run stops them, and a failed plan runs none. Each step fails in place, and the job's page names the failed step; a step that stood down is never a failure.
-
-| Step                                                                                                         | Runs on                                              | Notes                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan`                                                                                                       | every event, the schedule included                   | a failed plan fails the job and skips every check step; its outputs gate ruff, knip, and every job beside                                                                                                                                                                             |
-| `validate-managed-files`                                                                                     | every push and pull request                          | its report step fails in place on anything but a clean verdict; the sticky-comment steps after it run on `!cancelled()`                                                                                                                                                               |
-| `typography`, `file-size`, `shell-complexity`, `commit-names`, `actionlint`, `yamllint`, `typos`, `gitleaks` | every push and pull request                          | the base checks ([file-size caps](fleet-guidelines.md#file-size-caps), [shell complexity](../actions/check-shell-complexity/action.yml))                                                                                                                                              |
-| `zizmor`                                                                                                     | every push and pull request                          | SARIF upload on public repositories only; its two passes and the verdict are [fleet-guidelines.md's](fleet-guidelines.md#how-to-bypass-a-check)                                                                                                                                       |
-| `trivy`                                                                                                      | every push and pull request                          | the advisory Trivy [security scan](modules/security-scans.md#the-trivy-scan): a finding is a warning annotation on its target, never a red step                                                                                                                                       |
-| `ruff`                                                                                                       | uv repositories once a sync has written `ruff.toml`  | the [Python lint floor](modules/python.md) at a pinned ruff, with the readability thresholds (`C901`, the `PLR09` counts) ignored; the advisory step after it selects those alone and warns with their count, never red; a repository before its first sync stands down with a notice |
-| `biome`                                                                                                      | bun repositories with a `biome.json`                 | the [TypeScript floor](modules/typescript.md) under the managed `biome.json`, whose three thresholds warn and never red the step; a repository the sync has not reached yet stands down with a notice                                                                                 |
-| `member-shape`                                                                                               | bun repositories                                     | the [member-shape rules](modules/typescript.md#the-member-shape-rules) over every tracked TypeScript file; needs no install; advisory: a finding is a warning annotation and a sticky comment, never a red job                                                                        |
-| `knip`                                                                                                       | bun repositories with a package.json to install from | a repository without one yet stands down with a notice                                                                                                                                                                                                                                |
+- **Each check step** fails in place and never hides another: the job's page names every red step, and a step that stood down (a floor the sync has not written yet) says so with a notice and is never a failure. What each step judges, and its bypass, is its action's description; the actions are fleet.yml's `$/actions/*` steps.
 
 - **Beside it, one job each:** `semgrep` and the advisory `dependency-review` (public repositories only, where minutes are free), `codeql` (a per-language matrix, on public repositories with an analyzable toolchain), and the module jobs `docs-check` and `release-pr`. Each runs under `!cancelled()`, so a red standard check hides none of their verdicts.
 
@@ -105,17 +86,9 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | a merged release PR still wears `autorelease: pending`                                                    | release-please proposes nothing until the cut relabels it           |
 | GitHub cannot merge main cleanly (update-branch answers 422: a conflict, or the head moved under the run) | the job fails with GitHub's message, never retrying or resolving it |
 
-- **Bypassing a check:** each check's per-finding bypass is the table in [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check).
+- **Bypassing a check:** each check's per-finding bypass is its action description's; the rule, and the checks run without a description, are [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check)'s.
 
 - **Repo-platform's own ci.yml** has no callers to hide behind: its gating jobs are the needs list itself.
-
-- **Its action-load check:** the `action-load` job runs the shipped actions no other gating job runs, with inputs that change nothing, so GitHub's own loader judges their manifests here before `stable` moves; the guarantee and its one exception are [build-provenance.md](platform/build-provenance.md#the-delivery-ref-is-a-tag-on-main)'s.
-
-- **Its skills checks:** `validate-skills` (structure, offline) and `skills-discovery` (the real `npx skills` listing, so its own job) run [Vivswan/skills' validate-skills action](https://github.com/Vivswan/skills/tree/main/.github/actions/validate-skills) on this repository's own skills catalog. The action is pinned by sha like every other third-party action ([build-provenance.md](platform/build-provenance.md)).
-
-- **Its docs shape and wording check:** the `docs-check` job runs [Vale](https://vale.sh) over README.md and every page under docs/ with the skills repository's styles, read from a checkout at the validate-skills sha: a paragraph or list item over 70 words, or a word or phrase from the unslop and natural-writing skills' lists, fails the job, naming the line. The binary is a pinned release verified by sha256, as pinact is.
-
-- **Its docs path check, CI-only like Vale:** the same job runs the working-text probe from that checkout over the same pages; `bun run check` does not. A relative link whose target is missing fails it. A backticked path fails it when its first directory exists beside the page, at the root, or in `files/base` and the rest does not; bare file names and other layouts are left alone.
 
 - **A repo-owned advisory check** opts out with `continue-on-error: true` on its job in checks.yml.
 
@@ -227,7 +200,7 @@ One label on the PR, before it merges.
 
 - **A direct push:** a commit no pull request produced carries no label and never syncs from its own merge.
 
-- **A refused label:** two fleet-sync labels on one PR, or a `fleet-sync:` label the platform does not declare, turn `read-directives` red on the judged commit and nothing syncs. A mistyped opt-in fails loudly instead of waiting for Tuesday.
+- **A refused label** (two fleet-sync labels on one PR, or one the platform does not declare) turns `read-directives` red on the judged commit, and nothing syncs.
 
 - **The fix for a refused label:** fix the merged PR's labels for the next run that covers the commit (every run reads [the whole range](platform/post-green.md#which-commits-a-run-reads)), dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`), or let the next merge carry a correct label.
 

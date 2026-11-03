@@ -1,7 +1,8 @@
 name: Dependency Review
 description: |
   Diffs the dependency graph between a PR's base and head, the fleet's dependency-review check. Advisory: a vulnerable
-  dependency is a warning annotation and a row in the job summary, never a red job.
+  dependency is a warning annotation and a row in the job summary, never a red job; upgrading or dropping the dependency
+  clears it, and nothing else does.
 
   Wraps actions/dependency-review-action so the upstream version pin and the verdict live in one place instead of in
   every rendered ci.yml.
