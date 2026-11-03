@@ -18,27 +18,11 @@ bun .github/scripts/sync/writer/sync.ts \
 
 - **`--tree`** is the `files/` directory itself. Every tree `source` starts with `files/` and resolves under it, and a ref source is fetched ([Upstream refs](files.md#upstream-refs)).
 - **`--build`** is the delivery commit's full sha, 40 lowercase hex characters. A short or uppercase one is refused before anything is written.
-- **Resolving `--build`:** `git fetch origin +refs/tags/stable:refs/tags/stable`, then `git rev-parse stable^{commit}`. The forced refspec refreshes a local tag an earlier fetch left.
 - **The delivery commit is named** in full in the PR body, by its first 12 characters in the sync commit's subject, and in the manifest's own entry under the stamp rule ([The manifest](manifest.md#when-the-judged-commit-moves)).
 - **`--repository`** names the GitHub repository, whose owner the placeholders derive from ([Placeholders](files.md#placeholders)).
 - **`--upstream`** swaps the host every upstream ref is fetched from ([Upstream refs](files.md#upstream-refs)); the tests serve their fixture over loopback.
 - **Output:** the Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
-- **Exit 0** whether or not the report holds the PR.
-
-A nonzero exit is a data or environment error, one of:
-
-- a `--build` that is not a full sha
-- a bad `files.yml`
-- an unreadable registration
-- a registration naming a module `files.yml` does not offer
-- a manifest record the writer cannot read ([Retirement](#retirement))
-- a recorded commit the build checkout's history lacks ([The manifest](manifest.md#when-the-judged-commit-moves))
-- a symlinked ancestor at a path the writer touches
-- a directory or a symlink at the manifest or registration path
-- a directory at a stale record's path
-- a split file whose marker text is duplicated or buried mid-line
-- a placeholder value carrying a double quote, backslash, or control character
-- a mirror declaration the writer cannot honour ([Mirrors](mirrors.md))
+- **Exit 0** is a report, whether or not it holds the PR; a nonzero exit is a data or environment error, named in the output.
 
 ## Classes
 
@@ -50,27 +34,16 @@ A nonzero exit is a data or environment error, one of:
 
 A written row's change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) and a held row's detail are the reader's vocabulary, owned by the sync-pr skill ([Read the report](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md#read-the-report)).
 
-What holds an entry: a symlink at a managed or split path (the writer never reads through a link and has no record of writing one there), a directory or anything that is neither a file nor a link at any entry's path, and a rendered entry whose overlay is missing, not a regular file, unparsable, names one label twice, or carries tracking labels the registration refuses ([settings.md](../../settings.md)).
-
 ## Class flips
 
 A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`) that `files.yml` now declares under another is a class flip. Without the rule below, a managed file that becomes split would have the region prepended above its old content and report `updated`. `files.yml` is the truth for a path's class, and the recorded content is the platform's own previous write, so:
 
-| State                                                                                                                                  | Outcome                                                                                                                                                                                                              |
-| -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the path already holds exactly what the entry writes                                                                                   | `unchanged`; the record takes the new class                                                                                                                                                                          |
-| what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated`                                                                                                                                                             |
-| anything else, a `starter` record included                                                                                             | the record is stale, and the file is written as an unrecorded one under the new class, with the detail `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded` (the rows below) |
-| the new class is `starter`                                                                                                             | a handover: the file is the repository's own, nothing is held                                                                                                                                                        |
-
-A stale record's file, judged unrecorded under the new class:
-
-| The file                                                                           | Written as                                                                                                                                                |
-| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a `managed` entry                                                                  | `replaced local edits` with the diff; the write's own record replaces the stale one and the PR holds once                                                 |
-| a `split` entry                                                                    | `region added` (or `replaced local edits` when the file already carries the markers); the write's own record replaces the stale one and the PR holds once |
-| already the incoming content (a `split` region above a repository-owned tail, say) | `unchanged` with the same detail, the record restamped, no hold                                                                                           |
-| held (a symlink where a file is declared)                                          | the detail is the writer's refusal reason, the previous record is kept, and the path is held again next run                                               |
+| State                                                                                                                                  | Outcome                                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the path already holds exactly what the entry writes                                                                                   | `unchanged`; the record takes the new class                                                                                                                                                                                                                                                                         |
+| what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated`                                                                                                                                                                                                                                                            |
+| anything else, a `starter` record included                                                                                             | the record is stale, and the file is written as an unrecorded one under the new class, with the detail `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`; its Written row is then the unrecorded file's (`replaced local edits`, `region added`, `unchanged`, or `held`) |
+| the new class is `starter`                                                                                                             | a handover: the file is the repository's own, nothing is held                                                                                                                                                                                                                                                       |
 
 ## Retirement
 
@@ -86,13 +59,7 @@ Each outcome (`deleted`, `region removed`, `held`, `released`) is the reader's v
 
 Beyond the outcomes:
 
-- **A stale record at a path no `files.yml` entry declares at all** (a hand edit, or an entry that left `files.yml`) is retired the same way. While a file sits at the path it is also noted (`manifest record for <path> had no writer: ...`), which holds the PR for the Retired row's outcome.
-- **A recorded path that is not a clean repository path** is ignored and noted.
-- **A held file and a held entry keep their records** (from a manifest the writer accepted) in the new manifest every run, so the file is held again next time and never becomes an unrecorded orphan.
-- **A `starter` record whose entry nothing selects** leaves the manifest; the file is the repository's own either way.
-- **A `mirror` record no declaration reaches any more** (a fleet target the registration excepts included) is dropped with a note. The copy stays as the repository's own, and a mirror declared again adopts it while it still holds the source's content.
-- **A record that is not exactly a shape the writer writes** (an unknown class, a field the class does not carry, a hash that is not a sha256 digest, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers) fails the run with a count before anything is written.
-- **The fix for such a record:** the target's own `validate-managed-files` check shows the refusal, so the fix is a manifest edit (git history has the stamped original) and a new dispatch.
+- **A record the writer refuses** (a shape it never writes) fails the run before anything is written; the target's own `validate-managed-files` check shows the refusal, so the fix is a manifest edit (git history has the stamped original) and a new dispatch.
 - **A file the platform stops writing needs no grammar of its own:** its entry leaves `files.yml`, and every target retires the recorded file as above on its next sync. A transition the sync cannot carry by itself is one rung in `migrations/` ([Migrations](#migrations)).
 
 ## Migrations
@@ -106,25 +73,14 @@ Beyond the outcomes:
 - **A rung ships with the PR that changes the shape** and rides the next sync round that reaches the repository (the PR's fleet-sync label for public repositories; private ones on the owner's next sync), with one test seen red on the old shape and a no-op control.
 - **A rung's edit is committed because the rung reported it:** the delivery stages the runner's list beside the writer's paths and the manifest ([what a delivery commits](operator.md#delivering-a-row)), so an edit at a path neither the rung printed nor the writer's report or the manifest names stays out of the commit.
 
-| Rung                            | Transition                                                                                                                                                                                                                                                              |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0001-link-records-are-mirrors` | a `link` manifest record becomes `{"class": "mirror", "kind": "symlink"}` with its hash kept, the fleet's `AGENTS.md` symlinks having become mirrors the fleet declares                                                                                                 |
-| `0002-homepage-unmanaged`       | the overlay's `homepage` key is deleted when its value is empty or the repository's own GitHub address (read from the checkout's `origin`), the platform having stopped managing the homepage ([settings.md](../../settings.md#apply-semantics)); any other value stays |
-| `0003-topics-empty-list`        | the overlay's `topics: ""` (or a valueless `topics:`) becomes `topics: []`, the spelling the settings library accepts for no topics; any other value stays                                                                                                              |
+The rungs are [migrations/](../../../migrations/), each one's header its transition.
 
 ## The report
 
-The report's sections (header, Written, Replaced local edits, Retired, Registration notes, Mirrors, Review), each row's vocabulary, and every Registration note's exact text are the sync-pr skill's ([Read the report](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md#read-the-report)). A Written row's detail is a held row's reason, or the stale-class explanation on a class-flip row; a replaced-file diff is capped at 40 lines.
+The report's sections, each row's vocabulary, and every Registration note's text are the sync-pr skill's ([Read the report](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md#read-the-report)).
 
-**`hold` is true on** any held or `region added` written row, any replaced local edit (a mirror's included), any held or `region removed` retirement, any `replaced` mirror, or any registration note.
-
-**The report's shape defends itself:**
-
-- Table cells escape `|`, so a path or detail carrying one keeps the columns.
-- Every cell, note, and code-formatted value (the replaced-file headings included) is printed on one line: a newline inside a registration value or a manifest path (the writer copies both into the report verbatim) cannot end the row and start a heading of its own.
-- A replaced diff sits in a fence one backtick longer than any backtick run its lines open with, so the target's own content cannot close it.
-
-**The PR body stays under GitHub's 65,536-character limit** (`BODY_CAP` in [sync/deliver.ts](../../../.github/scripts/sync/deliver.ts)). The header and the Review section take their room first, then the tables and notes, then the replaced-edit diffs. A section the room runs out on ends in a warning naming how many characters were cut, and one with no room left is dropped.
+- **`hold` is true on** any row a human must look at: a held or `region added` write, a replaced local edit (a mirror's included), a held or `region removed` retirement, a `replaced` mirror, or a registration note.
+- **The PR body is capped** (`BODY_CAP` in [sync/deliver.ts](../../../.github/scripts/sync/deliver.ts)): the header and the Review section take their room first, then the tables and notes, then the replaced-edit diffs; a section the room runs out on ends in a warning, and one with no room left is dropped.
 
 ## The code behind each rule
 

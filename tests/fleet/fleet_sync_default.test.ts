@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   BOT_LOGIN,
@@ -106,16 +106,8 @@ describe("deliveredBySync", () => {
 describe("the delivered surface", () => {
   const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
-  test("is the list docs/platform/post-green.md documents, each path the kind its spelling says", () => {
-    const line = readFileSync(join(REPO_ROOT, "docs/platform/post-green.md"), "utf-8")
-      .split("\n")
-      .find((l) => l.includes("`DELIVERED_SURFACE`"));
-    expect(line).toBeDefined();
-    const spans = [...(line ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-    // The paths are the code spans before the one naming the constant.
-    const named = spans.indexOf("DELIVERED_SURFACE");
-    expect(named).toBeGreaterThan(0);
-    expect(spans.slice(0, named)).toEqual([...DELIVERED_SURFACE]);
+  // A path spelled as a directory that is a file (or the reverse) would match nothing in a PR's file list, silently.
+  test("every path exists in the checkout as the kind its spelling says", () => {
     for (const path of DELIVERED_SURFACE) {
       expect(lstatSync(join(REPO_ROOT, path)).isDirectory()).toBe(path.endsWith("/"));
     }

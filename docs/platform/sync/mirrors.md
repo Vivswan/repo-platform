@@ -31,41 +31,21 @@ The skills repository declares the first: a standalone skill install copies one 
 - **A Windows checkout** materializes a link only with `core.symlinks` on; no fleet runner is Windows today.
 - **Single-segment `*` globs:** a `*` directory segment matches directories, a final `*` matches existing files, a literal final segment lands in every matched directory. A glob never creates a directory.
 - **Literal targets are written before any glob expands,** so a directory a literal creates is matched in the same run; a target a literal claims stays the literal's.
-- **A symbolic link above a target,** in a literal or a `*` directory segment, is never followed or listed through. A linked directory, or a link that cannot be looked through (resolving to nothing, to a name too long, or through a directory the runner may not read), fails the run by name, the rest of the pattern riding along (`skills/link/sub/*.md`).
+- **A symbolic link above a target,** in a literal or a `*` directory segment, is never followed or listed through.
 - **A link that provably resolves to a file** is no directory, so it is passed over like a file.
 - **A link a final segment matches** is the target itself, judged by the declared kind (the outcome table below).
-- **A matched path the grammar refuses** (one grown past 1024 bytes through long directory names) is never probed and fails by name the same way.
 
 ## Refused on the PR
 
-The `plan` step of fleet CI rejects, on the PR that introduces it, what `files.yml` alone proves unwritable (the rules in [actions/plan/mirrors.ts](../../../actions/plan/mirrors.ts)):
+The `plan` step of fleet CI rejects, on the PR that introduces it, what `files.yml` alone proves unwritable, each refusal naming the declaration and the reason ([actions/plan/mirrors.ts](../../../actions/plan/mirrors.ts)): a source that is not a managed or split file, an unsafe or reserved path, a `**`, and a path two declarations claim or nest.
 
-| Refused on the PR                                                                                                                                | Detail                                                                                                                                                            |
-| ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a source that is not a `managed` or `split` file `files.yml` writes for the repository                                                           |                                                                                                                                                                   |
-| a `**`                                                                                                                                           |                                                                                                                                                                   |
-| a target or pattern that is unsafe                                                                                                               | a control character, a segment over 255 bytes, or a path over 1024 bytes included                                                                                 |
-| a target or pattern that is or sits under the registration itself, or sits under `.github/workflows/`                                            |                                                                                                                                                                   |
-| a target or pattern that is, sits under, or is a path prefix of a path `files.yml` writes or the registration excepts                            |                                                                                                                                                                   |
-| a pattern that matches (segment for segment, as the writer expands it) the registration or a path `files.yml` writes or the registration excepts | the claim reserves the path, whether or not the file stands in the checkout that run                                                                              |
-| every path a declaration is certain to claim, judged as the writer judges a claim (the rows below)                                               | over the literal targets and the directories they create: the only part of the tree the plan knows, since the literal pass writes them before any pattern expands |
-
-A path a declaration is certain to claim is refused when it is:
-
-| Certain claim refused                                                                                                        | Detail                                                            |
-| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| a literal target declared twice                                                                                              |                                                                   |
-| a path nested with another claimed path                                                                                      | both sides, whatever their sources (below)                        |
-| a pattern's path that sits under or above a path `files.yml` writes or the registration excepts, or that the grammar refuses |                                                                   |
-| a path claimed by two sources or as a copy and as a symbolic link                                                            | one pattern text declared twice included, since both expand alike |
+The writer judges the same claims again at sync time with what only the checkout shows, the stale records it retires reserved alongside.
 
 **Nesting is judged on the text:** a pattern's own text counts as written, so `skills/*` nests under a literal `skills`. Two different pattern texts are nested as written, never by what they can match: `tests/*/foo` with `tests/a*/foo/bar` passes the plan and fails at sync time on any checkout with a `tests/a*` directory.
 
 ## Checked by the writer
 
-**The writer runs the same check,** with the stale manifest records it retires reserved alongside (`a path a stale manifest record retires`), then judges each pass's claims the same way with what only the checkout shows.
-
-**A failure exits nonzero** before the pass writes anything, one `::error::` line per verdict for each declaration and path: `<.repo-platform.yml or files.yml>: mirrors: source '<s>', target '<t>': <reason>`, a pattern's reason naming the path it expanded to. No PR is opened; the failure issue the operator files ([the operator](operator.md)) carries the lines in its writer log.
+A failure exits nonzero before the pass writes anything, each verdict naming the declaring document, the source, the target, and the reason; no PR is opened, and the failure issue the operator files ([the operator](operator.md)) carries the lines in its writer log.
 
 | Outcome                | When                                                                                                                                                                                                  |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -77,15 +57,5 @@ A path a declaration is certain to claim is refused when it is:
 - **A previous mirror of either kind vouches for the bytes:** a copy where a link is declared now, or the reverse, is replaced without a diff. A record of another class does not vouch for the bytes.
 - **The `replaced local edits` diff** is of link targets where a link is declared, and of the old link target against the new bytes where a copy is. It sits in the report's Replaced local edits section and holds the PR.
 - **`written` and `current` never hold:** the declaration is repo-owned consent, so a clean LICENSE bump stays auto-merge-eligible. The fleet's `validate-managed-files` judges each target as the writer does: a file where a link is declared, a link where a copy is, or a link pointing elsewhere is a finding.
-
-Every claim of a pass is judged before the pass writes, and the run fails when:
-
-- the source was held this run
-- the pattern matches nothing, or reads through a symbolic link or a file in its literal prefix
-- a claimed path is unsafe
-- a claimed path nests with a path `files.yml` writes, a stale record retires, or the registration excepts
-- a claimed path sits under a symbolic link, or (a pattern's) sits under a file or in a directory that does not exist
-- a path is a prefix of or sits under another target (both sides; a target an earlier pass settled included)
-- a path is claimed by more than one source, or as a copy and as a link
 
 Every row's target is recorded as a `mirror` record ([The manifest](manifest.md)).
