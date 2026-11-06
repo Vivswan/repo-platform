@@ -29,7 +29,7 @@ jobs:
   # On an event without a repository object the visibility input is empty, and the plan action's `private` input
   # owns what happens then.
   standard-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     env:
       # ruff's readability thresholds (docs/modules/python.md): out of the gate run, into the advisory run after it.
@@ -191,7 +191,7 @@ jobs:
     if: >-
       !cancelled() && needs.standard-checks.outputs.modules != '' &&
       needs.standard-checks.outputs.private != 'true' && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -204,7 +204,7 @@ jobs:
     if: >-
       !cancelled() && needs.standard-checks.outputs.modules != '' &&
       needs.standard-checks.outputs.private != 'true' && github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: read
@@ -238,7 +238,7 @@ jobs:
   docs-check:
     needs: [standard-checks]
     if: ${{ !cancelled() && contains(needs.standard-checks.outputs.modules, '"site"') && github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -264,7 +264,7 @@ jobs:
     if: >-
       !cancelled() && contains(needs.standard-checks.outputs.modules, '"release-please"') &&
       github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     # contents write: release-please and update-branch push the release branch. pull-requests write: release-please
     # edits the release PR. The skeleton's `platform` caller grants both, and the pull_request event keeps them on the

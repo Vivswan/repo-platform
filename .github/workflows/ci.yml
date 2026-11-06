@@ -24,7 +24,7 @@ jobs:
   # two scratch repositories (every module, none). Each is linted from its own root, where the
   # starter actionlint.yaml's path-scoped ignores apply; pinact judges the same roots and this checkout.
   actionlint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,10 +42,10 @@ jobs:
       - name: Install the pinned pinact release
         env:
           PINACT_VERSION: 4.1.1
-          PINACT_SHA256: d1cffebe5704b74e2e5f8a864efb9f7e54768972dc686188c008033fb1797841
+          PINACT_SHA256: dd1f29908319ed3e59f9fe6b39196efbb76936357f3bd741cd759a96306ae8d8
         run: |
           curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/pinact.tar.gz" \
-            "https://github.com/suzuki-shunsuke/pinact/releases/download/v${PINACT_VERSION}/pinact_linux_amd64.tar.gz"
+            "https://github.com/suzuki-shunsuke/pinact/releases/download/v${PINACT_VERSION}/pinact_linux_arm64.tar.gz"
           echo "${PINACT_SHA256}  $RUNNER_TEMP/pinact.tar.gz" | sha256sum --check --strict
           mkdir -p "$RUNNER_TEMP/pinact-bin"
           tar -xzf "$RUNNER_TEMP/pinact.tar.gz" -C "$RUNNER_TEMP/pinact-bin" pinact
@@ -65,7 +65,7 @@ jobs:
   # the PR's commits to build that range. Comments off keeps that scope at read; findings still land
   # in the job summary and SARIF artifact.
   gitleaks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -86,7 +86,7 @@ jobs:
   # Only a pull request has a dependency diff to review; the gate's allowed-skips names this job.
   dependency-review:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,14 +94,14 @@ jobs:
       - uses: $/actions/dependency-review
 
   yamllint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: $/actions/yamllint
 
   biome:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -116,7 +116,7 @@ jobs:
       - uses: $/actions/biome
 
   typography:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -125,7 +125,7 @@ jobs:
   # This checkout first, then the fleet trees the writer lands (the templates under files/ are not yaml until written),
   # where the managed files are this repository's own to fix, so they are judged rather than skipped.
   shell-complexity:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -151,7 +151,7 @@ jobs:
           --judge-managed --sources .shell-complexity-sources.json
 
   file-size:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -162,7 +162,7 @@ jobs:
       - uses: $/actions/check-file-size
 
   member-shape:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -173,7 +173,7 @@ jobs:
       - uses: $/actions/check-member-shape
 
   commit-names:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,7 +182,7 @@ jobs:
       - uses: $/actions/validate-commit-names
 
   typecheck:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -196,7 +196,7 @@ jobs:
 
   # The invariants are package.json's `invariants` script, so CI and `bun run check` run one list.
   invariants:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -212,7 +212,7 @@ jobs:
   # the registration, then the action from this checkout, which reads the manifest's recorded commit and runs that
   # commit's check.ts over the tree. A PR that changes files/ stays green until this repository syncs itself.
   managed-files:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: read
@@ -230,6 +230,8 @@ jobs:
         with:
           private: ${{ steps.plan.outputs.private }}
 
+  # x64 on purpose: the theme tests drive headless Chrome, which the ARM image omits (docs/fleet-guidelines.md, "ARM
+  # runners by default").
   script-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -260,7 +262,7 @@ jobs:
   # This repository's own skills catalog, judged by the action Vivswan/skills carries (it pins its
   # own bun). Skills publishes no release tags, so the pin's comment names its branch.
   validate-skills:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -269,7 +271,7 @@ jobs:
   # Discovery runs the real `npx skills add --list` against the checkout, so it reaches the npm
   # registry: its own job, so a registry hiccup names itself instead of the structure check.
   skills-discovery:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -280,7 +282,7 @@ jobs:
   # The configuration is the plan's reading of this repository's registration, as in the deploy; this checkout's plan, not
   # @stable's, so a PR changing files.yml judges its own docs. A dead internal link fails here instead of the deploy.
   docs-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -303,10 +305,10 @@ jobs:
       - name: Install the pinned Vale release
         env:
           VALE_VERSION: 3.24.0
-          VALE_SHA256: 867534ddb678abca7f214bc4706ead0922bd5252ffe8035fc227013f66c8b214
+          VALE_SHA256: 104cbd349279e50c4cb40adb70adf345d93cc4a3a0191f9e68bdccb97086b582
         run: |
           curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/vale.tar.gz" \
-            "https://github.com/vale-cli/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz"
+            "https://github.com/vale-cli/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_arm64.tar.gz"
           echo "${VALE_SHA256}  $RUNNER_TEMP/vale.tar.gz" | sha256sum --check --strict
           mkdir -p "$RUNNER_TEMP/vale-bin"
           tar -xzf "$RUNNER_TEMP/vale.tar.gz" -C "$RUNNER_TEMP/vale-bin" vale
@@ -334,7 +336,7 @@ jobs:
 
   # This repository is public, so the SARIF uploads (zizmor, semgrep) run unconditionally.
   zizmor:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -344,7 +346,7 @@ jobs:
       - uses: $/actions/zizmor
 
   typos:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -352,7 +354,7 @@ jobs:
 
   # knip.jsonc at the root is this repository's own configuration.
   knip:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -364,7 +366,7 @@ jobs:
       - uses: $/actions/knip
 
   semgrep:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: read
@@ -374,7 +376,7 @@ jobs:
       - uses: $/actions/semgrep
 
   bun-setup-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -413,7 +415,7 @@ jobs:
 
   # Advisory (docs/modules/security-scans.md): green on a finding, red on a scan error.
   trivy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -424,7 +426,7 @@ jobs:
   # change nothing;
   # tests/workflows/action_load.test.ts holds the job to the actions directory.
   action-load:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -487,7 +489,7 @@ jobs:
       - trivy
       - action-load
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     steps:
       - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
