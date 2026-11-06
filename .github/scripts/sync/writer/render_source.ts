@@ -9,6 +9,7 @@ import {
   type StarterEntry,
   type UpstreamRef,
 } from "../../../../actions/plan/files_config.ts";
+import type { Selection } from "../../../../actions/shared/selection.ts";
 import { regionMarkers } from "./manifest.ts";
 import {
   missingPlaceholders,
@@ -47,14 +48,14 @@ export function renderSourced(
   config: FilesConfig,
   tree: string,
   entry: SourcedEntry,
-  modules: string[],
+  selection: Selection,
   values: PlaceholderValues,
   upstream: UpstreamBodies,
 ): string | { missing: string[] } {
   const raw = (rel: string) => readFileSync(join(tree, rel), "utf-8");
   const fetched = (ref: UpstreamRef) => rewritten(upstream.body(ref), entry.replace);
   const region = entry.class === "split" ? entry.region : null;
-  const blocks = blockSources(config, entry, modules).map(({ value, source }) =>
+  const blocks = blockSources(config, entry, selection).map(({ value, source }) =>
     typeof source === "string"
       ? raw(source)
       : upstreamBlock(region, value, source, fetched(source)),

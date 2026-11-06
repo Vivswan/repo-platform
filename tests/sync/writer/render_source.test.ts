@@ -29,7 +29,7 @@ const fromDisk = (url: string) =>
 const bodies = await fetchUpstream(upstreamRefs(config.files), "http://upstream", fromDisk);
 const withoutAlways = { ...gitignore, always: [] } as Sourced;
 const render = (entry: Sourced, modules: string[]) =>
-  renderSourced(config, TREE, entry, modules, {}, bodies) as string;
+  renderSourced(config, TREE, entry, { modules, private: false }, {}, bodies) as string;
 
 describe("the always blocks", () => {
   test.each([[[]], [["bun"]], [["uv"]], [["bun", "uv", "fuzzer"]]])(
@@ -81,7 +81,9 @@ describe("an entry whose source is an upstream ref", () => {
     const entry = parsed.files[0] as Sourced;
     const fetched = await fetchUpstream(upstreamRefs(parsed.files), "http://upstream", fromDisk);
     for (const modules of [[], ["bun"]]) {
-      expect(renderSourced(parsed, TREE, entry, modules, {}, fetched)).toBe("Thumbs.db\nSTAR~\n\n");
+      expect(renderSourced(parsed, TREE, entry, { modules, private: false }, {}, fetched)).toBe(
+        "Thumbs.db\nSTAR~\n\n",
+      );
     }
   });
 
@@ -120,6 +122,8 @@ describe("an entry whose source is an upstream ref", () => {
     const parsed = doc(source, region);
     const entry = parsed.files[0] as Sourced;
     const fetched = await fetchUpstream(upstreamRefs(parsed.files), "http://upstream", fromDisk);
-    expect(renderSourced(parsed, TREE, entry, ["bun"], {}, fetched)).toBe(expected);
+    expect(
+      renderSourced(parsed, TREE, entry, { modules: ["bun"], private: false }, {}, fetched),
+    ).toBe(expected);
   });
 });

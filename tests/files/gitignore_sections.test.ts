@@ -7,6 +7,11 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
+import {
+  PLACEHOLDER_NAMES,
+  spliceBlocks,
+  substitute,
+} from "../../.github/scripts/sync/writer/placeholders.ts";
 import { parseFilesConfig } from "../../actions/plan/files_config.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
@@ -19,6 +24,7 @@ const BASE = readFileSync(join(FILES, "base/.gitignore"), "utf-8");
 const FUZZER = readFileSync(join(FILES, "fuzzer/fuzzer.gitignore"), "utf-8");
 const ROOT_GITIGNORE = readFileSync(join(REPO_ROOT, ".gitignore"), "utf-8");
 const CI_WORKSPACE_SECTION = "## CI workspace paths (repo-platform)";
+const STUB_VALUES = Object.fromEntries(PLACEHOLDER_NAMES.map((name) => [name, "x"]));
 
 function ignoredByGit(section: string, rel: string, kind: "dir" | "file"): boolean {
   const repo = temp.dir("gitignore-sections-");
@@ -83,8 +89,13 @@ function checkoutPath(step: Step): string | null {
 /** A composite action runs inside the caller's checkout and a spliced block's anchor follows the starter's checkout
  *  step, so both always count; a job checking out into subdirectories alone has no tree a sibling could land in. */
 function checkedOutStepLists(rel: string, text: string, fragment: boolean): Step[][] {
-  const stubbed = text.replaceAll(/^\{\{blocks\}\}$/gm, "").replaceAll(/\{\{[\w-]+\}\}/g, "x");
-  if (fragment) return [parseYaml(`steps:\n${stubbed}`).steps ?? []];
+  // Every placeholder a word: the census reads step shapes, never the values.
+  const stubbed = substitute(spliceBlocks(text, []), STUB_VALUES);
+  // A fragment spliced somewhere other than a step list (the skeleton's nightly trigger) has no steps.
+  if (fragment) {
+    const steps: unknown = parseYaml(`steps:\n${stubbed}`).steps;
+    return [Array.isArray(steps) ? (steps as Step[]) : []];
+  }
   if (rel.endsWith("action.yml")) {
     return [(parseYaml(stubbed) as { runs: { steps: Step[] } }).runs.steps];
   }

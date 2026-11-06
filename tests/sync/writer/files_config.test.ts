@@ -122,6 +122,7 @@ describe("verifySources", () => {
     "  - { path: shared-a.yml, class: managed, blocks: eco, source: files/base/shared-anchor.yml, sources: {bun: files/bun/shared-a.yml, uv: files/uv/shared-a.yml} }",
     "  - { path: shared-b.yml, class: managed, source: files/base/shared-anchor.yml }",
     "  - { path: twice.yml, class: managed, blocks: eco, source: files/base/twice.yml, sources: {bun: files/bun/twice.yml, uv: files/uv/twice.yml} }",
+    "  - { path: fixed.yml, class: managed, always: [{value: nightly, when: {private: false}}], source: files/base/fixed.yml, sources: {nightly: files/base/fixed.nightly.yml} }",
   ].join("\n");
 
   // The tree walk fails CLOSED: a block file of a module that left, or a layer file dropped from the declaration,
@@ -177,6 +178,9 @@ describe("verifySources", () => {
         "base/plain.yml": "{{blocks}}\n",
         "base/shared-anchor.yml": "{{blocks}}\n",
         "base/twice.yml": "{{blocks}}\n{{blocks}}\n",
+        // An entry whose only blocks are conditioned splices them too, so its source may carry the anchor.
+        "base/fixed.yml": "on:\n{{blocks}}\n",
+        "base/fixed.nightly.yml": "  schedule: []\n",
         "bun/d.yml": "one\n",
         "uv/d.yml": "two\n",
         "bun/s.yml": "{{blocks}}\n",

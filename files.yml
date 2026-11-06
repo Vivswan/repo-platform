@@ -185,7 +185,13 @@ files:
     class: managed
     render: settings
     overlay: .github/settings.local.yml
-  - { path: .github/workflows/ci.yml, class: managed }
+  # The nightly schedule is public repositories' alone: it serves the site leg's rebuild and link-rot check and
+  # CodeQL's weekly rescan, and a private repository has no code scanning, so its nightly run would buy nothing.
+  - path: .github/workflows/ci.yml
+    class: managed
+    always: [{ value: nightly, when: { private: false } }]
+    sources:
+      nightly: files/base/.github/workflows/ci.nightly.yml
   - path: .github/workflows/checks.yml
     class: starter
     blocks: toolchain_steps

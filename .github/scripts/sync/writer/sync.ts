@@ -122,7 +122,15 @@ function render(
       write: (recorded) => writeManaged(target, entry.path, rendered.content, recorded),
     };
   }
-  const text = () => renderSourced(config, options.tree, entry, modules, values, facts.upstream);
+  const text = () =>
+    renderSourced(
+      config,
+      options.tree,
+      entry,
+      { modules, private: options.private },
+      values,
+      facts.upstream,
+    );
   if (entry.class === "starter") {
     return {
       content: "",
@@ -368,7 +376,8 @@ function recordWrite(run: Run, entry: FileEntry, result: Written, writes: Writes
   ) {
     writes.templates.set(entry.path, {
       source: entry.source,
-      lineMapped: entry.class !== "split" && entry.blocks === undefined,
+      lineMapped:
+        entry.class !== "split" && entry.blocks === undefined && entry.always.length === 0,
     });
   }
   if (outcome.change === "replaced local edits") {

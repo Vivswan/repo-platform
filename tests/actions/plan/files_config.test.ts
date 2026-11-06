@@ -688,9 +688,67 @@ describe("block sources", () => {
   ])(
     "blockSources for entry $entry under $selected: the always values first, then the selected modules in files.yml order, a value listed twice once",
     ({ config, entry, selected, expected }) => {
-      expect(blockSources(config, config.files[entry], selected)).toEqual(expected);
+      expect(
+        blockSources(config, config.files[entry], { modules: selected, private: false }),
+      ).toEqual(expected);
     },
   );
+});
+
+describe("a conditioned always block", () => {
+  const doc = (always: string) =>
+    [
+      "placeholders: []",
+      "modules:",
+      "  bun: {}",
+      "files:",
+      `  - { path: ci.yml, class: managed, always: ${always}, sources: {Linux: ${REF("Global/Linux.gitignore")}, nightly: files/base/ci.nightly.yml} }`,
+      "",
+    ].join("\n");
+  const both = parseFilesConfig(doc("[Linux, {value: nightly, when: {private: false}}]"));
+  const entry = both.files[0];
+
+  // The clause is resolved like an entry's own, so the bare and the conditioned spelling read as one list and a
+  // visibility a `when` names is what parts the two renders of one path.
+  test("a bare value is every repository's; a clause's value is the repositories the clause selects", () => {
+    expect(entry).toMatchObject({
+      always: [
+        { value: "Linux", when: null },
+        { value: "nightly", when: { private: false } },
+      ],
+    });
+    expect(blockSources(both, entry, { modules: [], private: false })).toEqual([
+      { value: "Linux", source: ref("Global/Linux.gitignore") },
+      { value: "nightly", source: "base/ci.nightly.yml" },
+    ]);
+    expect(blockSources(both, entry, { modules: ["bun"], private: true })).toEqual([
+      { value: "Linux", source: ref("Global/Linux.gitignore") },
+    ]);
+  });
+
+  // The key census read entry and layer clauses alone, so a key only a block's clause derived from was refused as unread.
+  test("a module-data key a block's clause derives from counts as read", () => {
+    const derived = checkFilesConfig(
+      doc("[Linux, {value: nightly, when: {any: {declaring: nightly_for}}}]").replace(
+        "  bun: {}",
+        "  bun: { nightly_for: [bun] }",
+      ),
+    );
+    expect(derived.problems).toEqual([]);
+    expect(
+      blockSources(derived.config, derived.config.files[0], {
+        modules: ["bun"],
+        private: true,
+      }).map((block) => block.value),
+    ).toEqual(["Linux", "nightly"]);
+  });
+
+  test("a clause naming an unknown module is a load error, and so is a source no listed value names", () => {
+    expect(checkFilesConfig(doc("[{value: nightly, when: {modules: [nope]}}]")).problems).toEqual([
+      "files: ci.yml: sources.Linux: neither always nor a module lists the value",
+      "files: ci.yml: always.nightly: when names unknown module 'nope'",
+    ]);
+  });
 });
 
 describe("the block sources grammar", () => {
@@ -735,7 +793,7 @@ describe("the block sources grammar", () => {
     });
     expect(sourced.files[1]).toMatchObject({
       source: "base/.gitignore",
-      always: ["Linux"],
+      always: [{ value: "Linux", when: null }],
       sources: { Linux: ref("Global/Linux.gitignore") },
     });
     expect(upstreamRefs(sourced.files)).toEqual([

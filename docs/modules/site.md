@@ -26,6 +26,7 @@ The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release
 | a manual dispatch    | the manual deploy   |
 
 - **No workflow of its own and no tag trigger:** a tag created without a push lands on the nightly rebuild, or right away via dispatch.
+- **No nightly on a private repository:** its managed ci.yml renders without the schedule ([all-green.md](../all-green.md#what-gates-what)), so the rebuild is a push or a dispatch and the link-rot check never runs there.
 - **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
 
 **The release leg sits before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the tag and then runs whatever the release's result, and a release commit's own deploy serves its new tag ([all-green.md](../all-green.md#after-the-gate)).

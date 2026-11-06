@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { CHECK_NAME } from "../../.github/scripts/shared/all_green.ts";
 import { sectionEntries } from "../../.github/scripts/sync/writer/settings_layers.ts";
-import { PLATFORM_OWNER } from "../../actions/shared/platform.ts";
+import { shippedText } from "../shared/shipped_workflow.ts";
 
 interface Job {
   needs?: string | string[];
@@ -24,9 +24,7 @@ interface Job {
 type Rule = { type: string; parameters?: { required_status_checks?: { context: string }[] } };
 
 const ROOT = join(import.meta.dir, "../..");
-const read = (rel: string) =>
-  readFileSync(join(ROOT, rel), "utf8").replaceAll("{{github_username}}", PLATFORM_OWNER);
-const jobsOf = (rel: string) => (parseYaml(read(rel)) as { jobs: Record<string, Job> }).jobs;
+const jobsOf = (rel: string) => (parseYaml(shippedText(rel)) as { jobs: Record<string, Job> }).jobs;
 const needsOf = (job: Job | undefined): string[] =>
   typeof job?.needs === "string" ? [job.needs] : (job?.needs ?? []);
 
@@ -54,9 +52,10 @@ test.each([
 });
 
 test("both gate jobs post the check as CHECK_NAME, fail closed, and the override ruleset requires that context", () => {
-  const main = sectionEntries(parseYaml(read("files/settings/override.yml")), "rulesets").find(
-    (ruleset) => ruleset.name === "main",
-  );
+  const main = sectionEntries(
+    parseYaml(readFileSync(join(ROOT, "files/settings/override.yml"), "utf8")),
+    "rulesets",
+  ).find((ruleset) => ruleset.name === "main");
   const contexts = (main?.rules as Rule[] | undefined)
     ?.find((rule) => rule.type === "required_status_checks")
     ?.parameters?.required_status_checks?.map((check) => check.context);

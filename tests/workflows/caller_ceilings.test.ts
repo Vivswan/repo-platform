@@ -5,10 +5,11 @@
 //                   workflow is the CALLER's name, so a group built from it splits one lane between called and dispatched runs
 
 import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { PLATFORM_OWNER, PLATFORM_SLUG } from "../../actions/shared/platform.ts";
+import { PLATFORM_SLUG } from "../../actions/shared/platform.ts";
+import { shippedText } from "../shared/shipped_workflow.ts";
 
 type Permissions = Record<string, string> | string | undefined;
 interface Concurrency {
@@ -45,12 +46,8 @@ const PLATFORM_CALL = new RegExp(`^${PLATFORM_SLUG}/(\\.github/workflows/.+)@`);
 const FALLBACK_LANE =
   /^\$\{\{ inputs\.([\w-]+) != '' && format\('[\w-]+-called-\{0\}', github\.run_id\) \|\| '([\w-]+)' \}\}$/;
 
-/** The writer's two placeholders become YAML before parsing: the owner slug, and the `{{blocks}}` line a starter opens with. */
 function load(rel: string): Workflow {
-  const text = readFileSync(join(ROOT, rel), "utf8")
-    .replaceAll("{{github_username}}", PLATFORM_OWNER)
-    .replace(/^\{\{blocks\}\}$/gm, "");
-  return parseYaml(text) as Workflow;
+  return parseYaml(shippedText(rel)) as Workflow;
 }
 
 /** A reusable workflow of this repository, whichever spelling the caller uses; a third-party call is GitHub's alone to
@@ -65,7 +62,9 @@ function calledPath(uses: string, callerRoot: string): string | null {
 const workflowFiles = (root: string) =>
   readdirSync(join(ROOT, root))
     .filter((name) => name.endsWith(".yml"))
-    .map((name) => `${root}/${name}`);
+    .map((name) => `${root}/${name}`)
+    // A block fragment beside the workflows (the skeleton's nightly trigger) has no jobs and is no workflow.
+    .filter((rel) => load(rel).jobs !== undefined);
 
 const lanesOf = (workflow: Workflow): [string, string][] => {
   const lanes: [string, string][] = [];
