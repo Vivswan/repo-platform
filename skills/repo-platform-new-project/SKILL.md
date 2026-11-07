@@ -69,7 +69,7 @@ project:
   name: My Project
   slug: my-project
   description: One line for the repository description
-  copyright_holder: Example Org
+  copyright_holder: Example Org (https://example.com)
 site:
   path: docs
   include:

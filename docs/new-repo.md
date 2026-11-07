@@ -37,7 +37,7 @@ git commit -m "chore: initialize"
 
 - **`modules`** is any combination of the roster, the `modules` section of [files.yml](../files.yml).
 - **Module parameters** (`site.*`, `labels.*`) are read from the same file; [the registration reference](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-new-project/references/registration.md#keys) has each key and its default.
-- **Nothing else is asked:** the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
+- **Nothing else is asked:** the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner's handle and GitHub page, the address the license points readers at.
 
 The files themselves arrive as the first sync PR ([step 4](#4-publish-and-grant-the-fleet-pat)): the writer copies them from the main commit the `stable` tag names, re-verified as green main history before any row consumes it ([build provenance](platform/build-provenance.md#provenance-is-the-commit-itself)).
 

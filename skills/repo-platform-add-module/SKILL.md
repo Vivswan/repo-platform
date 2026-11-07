@@ -131,7 +131,7 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | `fuzzer`  | `labels.fuzzer`                            | `fuzz-nightly`                |
 | `nightly` | `labels.nightly`                           | `nightly-failure`             |
 
-Two keys belong to no module. `project` is required, with `name`, `slug`, and `description` together; `copyright_holder` is optional and defaults to the owner. `mirrors` defaults to none.
+Two keys belong to no module. `project` is required, with `name`, `slug`, and `description` together; `copyright_holder` is optional and defaults to the owner's handle and GitHub page. `mirrors` defaults to none.
 
 - **No sync needed:** a `site.path` or `site.include` change; the site leg reads the registration at run time.
 - **Needs a branch sync on the PR:** `mirrors`, `labels.*`, and `project.*`. The `repo-platform:sync` label pushes a hold-free report; a held one (a replaced local edit, or a mirror change that leaves a registration note, such as a dropped declaration whose recorded copy stays) takes the branch dispatch (`-f branch=`). `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`); a `labels.*` value re-renders `.github/settings.yml` (step 3, Labels).
