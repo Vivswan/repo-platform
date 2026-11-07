@@ -1,6 +1,6 @@
 # Labels a pull request that changes what the fleet receives fleet-sync:public by default (docs/platform/post-green.md).
 #
-# A change under files.yml, files/, migrations/, the sync writer, or the managed-files validator reaches the fleet
+# A change under files.yml, files/, the sync writer, or the managed-files validator reaches the fleet
 # only when a sync runs, so such a pull request gets the label, with one sticky comment saying so. A human removing
 # the label is final for that pull request.
 #

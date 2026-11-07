@@ -66,14 +66,16 @@ Beyond the outcomes:
 
 `migrations/` is the only home for transitional code ([fleet-guidelines.md](../../fleet-guidelines.md#no-backwards-compatibility-code)): the writer and the validator know the current shape alone, so a fleet transition the writer cannot carry by itself (a manifest record class that left, say) is one rung there.
 
-- **A rung** is one self-contained bun script, `migrations/<NNNN>-<what>.ts <checkout>`, numbered in the order it was written, idempotent (a checkout it has already crossed is a no-op), and never retired: a target that missed a round crosses every rung on its next sync.
+- **A rung** is one self-contained bun script, `migrations/<NNNN>-<what>.ts <checkout>`, numbered in the order it was written and idempotent (a checkout it has already crossed is a no-op). A target that missed a round crosses every rung on its next sync.
+- **A rung is retired** once every registered repository's manifest records a platform commit at or after the rung's landing, read from each repository's `.github/repo-platform-manifest.json`; a repository registered later starts at the current shape and has nothing to cross. With every rung retired there is no `migrations/` at all, and the runner reads that as no rungs.
 - **A rung's output:** its stdout is the checkout-relative paths it wrote, one per line, and nothing else; anything it has to say goes to stderr.
 - **The operator runs every rung** in the build's `migrations/` over the target checkout, in name order, before the writer reads it ([sync/migrate.ts](../../../.github/scripts/sync/migrate.ts)); nothing outside `migrations/` knows any rung. The runner writes the union of the reported paths to `$RUNNER_TEMP/migrated.txt`, NUL-separated, once every rung has finished.
 - **A rung that exits nonzero fails the row:** the rungs after it and the writer do not run, nothing is delivered, and the failure is filed as the writer's with the rung's line in the log tail.
 - **A rung ships with the PR that changes the shape** and rides the next sync round that reaches the repository (the PR's fleet-sync label for public repositories; private ones on the owner's next sync), with one test seen red on the old shape and a no-op control.
+- **The first rung after a retirement** also puts `migrations/` back on the delivered surface the fleet-sync default reads (`DELIVERED_SURFACE` in [fleet_sync_default.ts](../../../.github/scripts/fleet/fleet_sync_default.ts)); the last rung's retirement takes it off again.
 - **A rung's edit is committed because the rung reported it:** the delivery stages the runner's list beside the writer's paths and the manifest ([what a delivery commits](operator.md#delivering-a-row)), so an edit at a path neither the rung printed nor the writer's report or the manifest names stays out of the commit.
 
-The rungs are [migrations/](../../../migrations/), each one's header its transition.
+A live rung sits in `migrations/`, its header its transition; the retired ones are in git history.
 
 ## The report
 
