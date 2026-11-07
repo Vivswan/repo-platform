@@ -2,7 +2,7 @@
   "name": "repo-platform-add-module",
   "description": "Add or remove a repo-platform module in a managed repository: edit the registration, merge it, run the sync for the module files, and finish the companion steps.",
   "author": {
-    "name": "Vivswan Shah",
+    "name": "Vivswan",
     "email": "58091053+Vivswan@users.noreply.github.com",
     "url": "https://vivswan.github.io/"
   },
