@@ -1169,7 +1169,7 @@ describe("sync.ts over manifest records it cannot read", () => {
     ".github/old-tool.yml": `{"class": "mirror", "kind": "hardlink", "hash": "${sha256(OLD_TOOL)}"}`,
     "CONTRIBUTING.md": `{"class": "split", "grammar": "managed-region", "hash": "${sha256(OLD_CONTRIBUTING_REGION)}"}`,
     "BESPOKE.md": `{"class": "bespoke", "hash": "${sha256("b\n")}"}`,
-    // The class the fleet's symlinks left behind; migrations/0001 restamps it before the writer runs.
+    // The class the fleet's symlinks once carried, refused like any class the writer does not record.
     "CLAUDE.md": `{"class": "link", "hash": "${sha256("AGENTS.md")}"}`,
     "UNHASHED.md": '{"class": "managed", "hash": null}',
     "docs/old.md": '{"class": "starter", "hash": null}',

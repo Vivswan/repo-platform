@@ -6,14 +6,17 @@
 //
 // Usage: bun .github/scripts/sync/migrate.ts <migrations dir> <checkout>
 
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fail, requireEnv } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
 
 export const MIGRATED_FILE = "migrated.txt";
 
+/** A build with no rung has no migrations/ at all (git keeps no empty directory), so an absent one is the empty list. */
 export function rungsOf(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+
   return readdirSync(dir)
     .filter((name) => name.endsWith(".ts"))
     .sort()

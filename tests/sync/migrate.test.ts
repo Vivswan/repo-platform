@@ -59,6 +59,15 @@ describe("migrate.ts", () => {
     expect(existsSync(join(runnerTemp, "migrated.txt"))).toBe(false);
   });
 
+  // Every rung retired leaves no migrations/ in the build (git keeps no empty directory); the writer must still run.
+  test("a build with no migrations directory writes an empty list and succeeds", () => {
+    const runnerTemp = temp.dir("migrate-temp-");
+    expect(
+      run(join(temp.dir("migrate-rungs-"), "none"), temp.dir("migrate-checkout-"), runnerTemp),
+    ).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(readFileSync(join(runnerTemp, "migrated.txt"), "utf-8")).toBe("");
+  });
+
   test("a run every rung finished writes the union of the reported paths, each once", () => {
     const dir = rungs({ "0001-first.ts": rung(0), "0002-second.ts": rung(0) });
     const checkout = temp.dir("migrate-checkout-");

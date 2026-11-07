@@ -8,12 +8,7 @@
   "ignoreWorkspaces": ["actions/knip", "actions/biome"],
   "workspaces": {
     ".": {
-      "entry": [
-        "scripts/**/*.ts",
-        ".github/scripts/**/*.ts",
-        "migrations/**/*.ts",
-        "tests/**/*.ts"
-      ],
+      "entry": ["scripts/**/*.ts", ".github/scripts/**/*.ts", "tests/**/*.ts"],
       "project": ["**/*.{ts,mts}"],
       // The lint scripts run `bun node_modules/.bin/biome` so its node-shebang launcher runs under bun; knip reads only
       // `bun x biome` or a bare `biome` as a use.

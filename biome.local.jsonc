@@ -72,8 +72,7 @@
         ".github/scripts/**",
         "scripts/**",
         "!**/*.test.ts",
-        "!actions/shared/platform.ts",
-        "!migrations/**"
+        "!actions/shared/platform.ts"
       ],
       "plugins": ["./biome/platform_name.grit"]
     },
@@ -209,17 +208,6 @@
         "!actions/validate-commit-names/commitlint.ts"
       ],
       "plugins": ["./biome/stream_write.grit"]
-    },
-    // A migration rung is frozen once shipped and never edited, so its complexity is never paid again.
-    {
-      "includes": ["migrations/**"],
-      "linter": {
-        "rules": {
-          "complexity": {
-            "noExcessiveCognitiveComplexity": "off"
-          }
-        }
-      }
     },
     // A test table is data, not a function body.
     {
