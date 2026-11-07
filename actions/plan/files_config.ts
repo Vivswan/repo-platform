@@ -4,6 +4,7 @@ import { z } from "zod";
 import { MANIFEST_NAME } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
 import {
+  applies,
   type ModuleList,
   moduleList,
   type Selection,
@@ -36,6 +37,12 @@ export interface UpstreamRef {
 /** Relative to the files/ tree, or fetched; an entry's own body and each of its blocks read through this one shape. */
 export type Source = string | UpstreamRef;
 
+/** A block taken outside module selection: by every repository when `when` is null, else by those the clause selects. */
+export interface ExplicitBlock {
+  value: string;
+  when: When | null;
+}
+
 interface SourcedEntry extends EntryBase {
   /** The entry's own body. */
   source: Source;
@@ -43,8 +50,8 @@ interface SourcedEntry extends EntryBase {
   /** The module-data key whose values name the blocks. */
   blocks?: string;
 
-  /** Values every repository takes, before the selected modules' blocks. */
-  always: string[];
+  /** The blocks taken outside module selection, before the selected modules' blocks. */
+  always: ExplicitBlock[];
 
   /** Block value to where it comes from; checkFilesConfig refused a listed value without one. */
   sources: Record<string, Source>;
@@ -161,7 +168,11 @@ const fileSchema = z.strictObject({
   when: whenSchema.optional(),
   region: z.enum(["hash", "html"]).optional(),
   blocks: z.string().min(1).optional(),
-  always: z.array(z.string().min(1)).optional(),
+  always: z
+    .array(
+      z.union([z.string().min(1), z.strictObject({ value: z.string().min(1), when: whenSchema })]),
+    )
+    .optional(),
   sources: z.record(z.string().regex(BLOCK_VALUE_RE, "not a block name"), sourceSchema).optional(),
   replace: z.record(z.string().min(1), z.string()).optional(),
   render: z.enum(["settings"]).optional(),
@@ -303,14 +314,16 @@ export function blockLists(modules: Record<string, ModuleData>, key: string): [s
 export function blockSources(
   config: Pick<FilesConfig, "modules">,
   entry: FileEntry,
-  modules: string[],
+  selection: Selection,
 ): Block[] {
   if ("render" in entry) return [];
 
-  const values = new Set(entry.always);
+  const values = new Set(
+    entry.always.filter((block) => applies(block.when, selection)).map((block) => block.value),
+  );
   const lists = entry.blocks === undefined ? [] : blockLists(config.modules, entry.blocks);
   for (const [module, listed] of lists) {
-    if (!modules.includes(module)) continue;
+    if (!selection.modules.includes(module)) continue;
 
     for (const value of listed) values.add(value);
   }
@@ -536,7 +549,7 @@ function sourceListProblems(
   const problems: string[] = [];
   const sources = entry.sources ?? {};
   const listed = new Set([
-    ...(entry.always ?? []),
+    ...(entry.always ?? []).map((block) => (typeof block === "string" ? block : block.value)),
     ...(entry.blocks === undefined
       ? []
       : blockLists(modules, entry.blocks).flatMap(([, values]) => values)),
@@ -598,17 +611,24 @@ function treeSource(what: string, source: Source, where: string, problems: strin
 function sourcedEntry(
   entry: WrittenEntry,
   when: When | null,
+  modules: Record<string, ModuleData>,
   where: string,
   problems: string[],
 ): ManagedEntry | StarterEntry | SplitEntry {
   const sources = entry.sources ?? {};
   const written = entry.source ?? `${SOURCE_PREFIX}${when?.modules?.[0] ?? "base"}/${entry.path}`;
+  const always = (entry.always ?? []).map((block): ExplicitBlock => {
+    if (typeof block === "string") return { value: block, when: null };
+
+    const clause = resolveWhen(`${where}: always.${block.value}`, block.when, modules, problems);
+    return { value: block.value, when: clause };
+  });
   const base = {
     path: entry.path,
     source: treeSource("source", written, where, problems),
     when,
     ...(entry.blocks === undefined ? {} : { blocks: entry.blocks }),
-    always: entry.always ?? [],
+    always,
     sources: Object.fromEntries(
       Object.entries(sources).map(([value, source]) => [
         value,
@@ -652,7 +672,7 @@ function fileEntryOf(
     };
   }
 
-  return sourcedEntry(entry, when, where, problems);
+  return sourcedEntry(entry, when, modules, where, problems);
 }
 
 /** The many-of keys some entry's blocks or some when reads. */
@@ -661,6 +681,9 @@ function readKeys(data: ConfigData): Set<string> {
     data.files.flatMap((entry) => [
       ...(entry.blocks === undefined ? [] : [entry.blocks]),
       ...declaredKeys(entry.when ?? null),
+      ...(entry.always ?? []).flatMap((block) =>
+        typeof block === "string" ? [] : declaredKeys(block.when),
+      ),
     ]),
   );
   for (const layer of data.settings?.layers ?? []) {

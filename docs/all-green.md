@@ -59,7 +59,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository))                                                                                   |
 | `all-green`    | needs all three                                                                                                                                                                                                                                                         |
 
-**The nightly schedule run** is the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, and every other check stands down.
+**The nightly schedule run** is public repositories' alone, and the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, and every other check stands down. A private repository's ci.yml renders without the schedule ([the file list](platform/sync/files.md#filesyml)): it has no code scanning, so the night would buy nothing on paid minutes, and its site rebuilds on a push or a dispatch.
 
 **One ceiling for every platform call:** `platform`, `release`, `publish-release`, and `site` carry the same fixed `permissions:` block, the union of what any job behind those calls asks, and each called job narrows itself to its own need.
 

@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadAction, REPO_ROOT } from "../shared/action_step";
+import { shippedText } from "../shared/shipped_workflow.ts";
 
 interface Step {
   id?: string;
@@ -29,9 +30,9 @@ const job = (
 const releasePrJob = (
   parseYaml(read(".github/workflows/fleet.yml")) as { jobs: Record<string, Job> }
 ).jobs["release-pr"];
-const skeleton = parseYaml(
-  read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
-) as { jobs: Record<string, Job> };
+const skeleton = parseYaml(shippedText("files/base/.github/workflows/ci.yml")) as {
+  jobs: Record<string, Job>;
+};
 
 // A mistyped output name in action.yml (release_cut) reads as empty to every consumer: cut, head, propose, and the guard all
 // skip, and the run is green; so does `behind` to fleet.yml's heal. Each output is wired to a step of the action under

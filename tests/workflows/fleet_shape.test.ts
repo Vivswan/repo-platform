@@ -18,6 +18,7 @@ import { TokenType } from "@actions/expressions/lexer";
 import { parse as parseYaml } from "yaml";
 import { RELEASE_BRANCH_PREFIX } from "../../actions/shared/platform.ts";
 import { parseExpression, subexpressions } from "../shared/github_expression.ts";
+import { shippedText } from "../shared/shipped_workflow.ts";
 
 interface Step {
   id?: string;
@@ -326,12 +327,7 @@ describe("fleet.yml", () => {
   // release-please's branch convention is an external fact the platform cannot enforce; two jobs read it in YAML and
   // release-health in TypeScript, and a prefix misspelled in one place leaves that job skipped forever, green.
   test("the release PR is one prefix on github.head_ref: fleet.yml's release-pr job, the skeleton's release-gate job, and release-health agree", () => {
-    const skeleton = parseYaml(
-      readFileSync(join(ROOT, "files/base/.github/workflows/ci.yml"), "utf8").replaceAll(
-        "{{github_username}}",
-        "owner",
-      ),
-    ) as Workflow;
+    const skeleton = parseYaml(shippedText("files/base/.github/workflows/ci.yml")) as Workflow;
     expect({
       releasePr: prefixesOf(fleet.jobs["release-pr"]?.if),
       releaseGate: prefixesOf(skeleton.jobs["release-gate"]?.if),

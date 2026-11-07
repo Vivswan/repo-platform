@@ -1,0 +1,4 @@
+  # Nightly, public repositories only (files.yml): the scheduled run is the site leg's rebuild and link-rot check,
+  # and CodeQL keeps its weekly rescan through fleet.yml's plan output.
+  schedule:
+    - cron: "3 4 * * *"

@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { evaluateCondition } from "../shared/github_expression.ts";
+import { shippedText } from "../shared/shipped_workflow.ts";
 
 const root = join(import.meta.dir, "../..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
@@ -138,9 +139,9 @@ describe("post-green wiring", () => {
   // commits' verdicts; every run that did run was green. Keyed by the commit, every push run completes; PR pushes keep
   // cancelling their stale runs. The skeleton every fleet repository runs carries the same block.
   test("ci.yml and the skeleton key a push run by its commit and never cancel it; only pull-request lanes cancel", () => {
-    const skeleton = parseYaml(
-      read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
-    ) as { concurrency: Concurrency };
+    const skeleton = parseYaml(shippedText("files/base/.github/workflows/ci.yml")) as {
+      concurrency: Concurrency;
+    };
     for (const doc of [ci, skeleton]) {
       expect(doc.concurrency).toEqual({
         group:
@@ -162,9 +163,9 @@ describe("post-green wiring", () => {
   // The release gate's condition reads github.head_ref, which GitHub sets on pull_request alone; a spelling that read the
   // ref or the event only would run the gate on every PR or on none.
   test("the skeleton: every leg runs on a release commit's push; the schedule rebuilds the site alone; a red hook skips the release and the deploy still runs; the release gate runs on the release PR and a dispatch alone", () => {
-    const skeleton = parseYaml(
-      read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
-    ) as { jobs: Record<string, Job> };
+    const skeleton = parseYaml(shippedText("files/base/.github/workflows/ci.yml")) as {
+      jobs: Record<string, Job>;
+    };
     const every = Object.keys(skeleton.jobs).sort();
     const released = {
       modules: '["release-please","site"]',

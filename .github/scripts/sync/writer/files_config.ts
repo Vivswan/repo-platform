@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  blockSources,
   checkFilesConfig,
   type FileEntry,
   type FilesConfig,
@@ -138,17 +137,17 @@ function countRead(use: SourceUse, entry: FileEntry): void {
 /** Every tree source by path with how the entries read it; a fetched source is not in the tree and is left out. */
 function sourceUses(config: FilesConfig): Map<string, SourceUse> {
   const sources = new Map<string, SourceUse>();
-  const allModules = Object.keys(config.modules);
   for (const entry of config.files) {
     if ("render" in entry) continue;
     // A fetched source is not in the tree; renderRegion refuses a body mentioning the markers at render time.
     if (typeof entry.source === "string") {
       const own = useOf(sources, entry.source);
       countRead(own, entry);
-      if (entry.blocks !== undefined) own.withBlocks += 1;
+      if (entry.blocks !== undefined || entry.always.length > 0) own.withBlocks += 1;
     }
-    // A block file is spliced into the source, so it is read like one but may not carry the anchor itself.
-    for (const { source } of blockSources(config, entry, allModules)) {
+    // A block file is spliced into the source, so it is read like one but may not carry the anchor itself; every
+    // source is listed by a block some selection takes (the loader refused an unlisted one), so all are read.
+    for (const source of Object.values(entry.sources)) {
       if (typeof source !== "string") continue;
       countRead(useOf(sources, source), entry);
     }

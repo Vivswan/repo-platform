@@ -72,8 +72,13 @@ describe("write_fleet_lint_tree.ts", () => {
       path: "files/base/.github/workflows/checks.yml",
       lineMapped: false,
     });
+    // The skeleton's nightly block is a public repository's alone, so its anchor shifts the lines after it too.
     expect(sources("all").templates[".github/workflows/ci.yml"]).toEqual({
       path: "files/base/.github/workflows/ci.yml",
+      lineMapped: false,
+    });
+    expect(sources("all").templates[".github/workflows/auto-assign.yml"]).toEqual({
+      path: "files/base/.github/workflows/auto-assign.yml",
       lineMapped: true,
     });
     // The all tree lands the module workflows over the base ones; two equal trees lint one selection twice.
