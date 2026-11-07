@@ -3,7 +3,7 @@
   "displayName": "Repo Platform Skills",
   "description": "Fleet-operations agent skills for repo-platform: new project registration, sync-PR handling, and module changes",
   "author": {
-    "name": "Vivswan Shah",
+    "name": "Vivswan",
     "email": "58091053+Vivswan@users.noreply.github.com"
   },
   "repository": "https://github.com/Vivswan/repo-platform",
