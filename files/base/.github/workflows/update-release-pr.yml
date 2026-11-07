@@ -20,7 +20,7 @@ on:
 
 jobs:
   update-release-pr:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     permissions:
       contents: write # enough to push regenerated files back to the PR branch

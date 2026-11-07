@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   fuzz:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     # Sharding multiplies coverage: uncomment the matrix and suffix the
     # artifact name below with the shard (docs/modules/fuzzer.md).
@@ -72,7 +72,7 @@ jobs:
   report:
     needs: [fuzz]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     # A hung reporter is the residual silence window; keep this tight.
     timeout-minutes: 5
     # issues: write is for the fuzz-issue action; an issue it creates fires no issues:opened event, so it assigns the owner itself.

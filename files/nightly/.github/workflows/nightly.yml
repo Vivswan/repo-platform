@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,7 +44,7 @@ jobs:
   report:
     needs: [checks, release-gate]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     # A hung reporter is the residual silence window; keep this tight.
     timeout-minutes: 5
     # issues: write is for the fuzz-issue action; an issue it creates fires no issues:opened event, so it assigns the owner itself.
