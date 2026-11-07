@@ -15,7 +15,7 @@ const PROJECT_YAML = "project: {name: My Repo, slug: myrepo, description: Does t
 
 describe("placeholderValues", () => {
   // The facts every LICENSE and README render from: the owner and its lower-case form come from the operator's
-  // slug, the holder defaults to the owner, and the year is UTC's. bun test pins the process to UTC, where a
+  // slug, the holder defaults to the owner with their GitHub page (the address the license points readers at), and the year is UTC's. bun test pins the process to UTC, where a
   // local-time read agrees with UTC at every instant, so each row sets a zone in which its instant belongs to the
   // neighbouring year.
   test.each([
@@ -29,12 +29,12 @@ describe("placeholderValues", () => {
     },
     {
       reason:
-        "an unset copyright holder is the owner, a private repository, the year's first half hour west of UTC",
+        "an unset copyright holder is the owner with their GitHub page, a private repository, the year's first half hour west of UTC",
       copyright_holder: undefined,
       isPrivate: true,
       now: "2031-01-01T00:30:00Z",
       zone: "Pacific/Honolulu",
-      expected: "OwnerOrg",
+      expected: "OwnerOrg (https://github.com/OwnerOrg)",
     },
   ])("$reason", ({ copyright_holder, isPrivate, now, zone, expected }) => {
     const registration = { modules: [], project: { ...PROJECT, copyright_holder } };
@@ -68,7 +68,7 @@ describe("placeholderValues", () => {
       description: "Does things",
       github_username: "OwnerOrg",
       github_username_lower: "ownerorg",
-      copyright_holder: "OwnerOrg",
+      copyright_holder: "OwnerOrg (https://github.com/OwnerOrg)",
       year: "2031",
       private: "false",
     };

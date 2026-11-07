@@ -43,7 +43,9 @@ export function parseRepositorySlug(slug: string): RepositorySlug {
   return { owner: match[1], name: match[2] };
 }
 
-/** The registration never names its own owner, so the slug comes from the operator.
+/** The registration never names its own owner, so the slug comes from the operator. The holder default carries the
+ *  owner's GitHub page because the license tells readers to contact the licensor at the address in the Required Notice,
+ *  so a registration naming another licensor spells that licensor's address in the same string.
  *  A tracking label absent from both the registration and files.yml's module default stays absent.
  *  sync.ts then refuses any listed source that uses it (placeholders.ts, missingPlaceholders).
  *  The label's color and description are files.yml's alone. */
@@ -62,7 +64,8 @@ export function placeholderValues(
     description: project.description,
     github_username: repository.owner,
     github_username_lower: repository.owner.toLowerCase(),
-    copyright_holder: project.copyright_holder ?? repository.owner,
+    copyright_holder:
+      project.copyright_holder ?? `${repository.owner} (https://github.com/${repository.owner})`,
     year: String(now.getUTCFullYear()),
     private: String(isPrivate),
   };
