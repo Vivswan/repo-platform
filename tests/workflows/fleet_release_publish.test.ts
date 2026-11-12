@@ -47,10 +47,15 @@ type Context = Record<string, string | boolean>;
 /** A step's outputs, or null when it failed. */
 type Outputs = Record<string, string> | null;
 
-const temp = tempDirs();
-
 // The skeleton's `uses:` lines carry the owner placeholder, which YAML reads as a flow mapping, so it is filled before
 // parsing.
+//
+// The fake repository holds one release: a draft, id 4242, wearing `v1.2.3`, with one asset and a bundle a prior
+// attempt left. Every other tag names no release, as the cut's tag does once a hook renamed the draft.
+//
+// CUT is what release-please-action writes for the draft it created; each case adds the tag it gave the draft.
+
+const temp = tempDirs();
 
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
 const cutWorkflow = parseYaml(read(".github/workflows/fleet-release.yml")) as CalledWorkflow;
@@ -62,9 +67,6 @@ const publishJob = publishWorkflow.jobs["publish-release"];
 const skeleton = parseYaml(
   read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
 ) as { jobs: Record<string, Job> };
-
-// The fake repository holds one release: a draft, id 4242, wearing `v1.2.3`, with one asset and a bundle a prior
-// attempt left. Every other tag names no release, as the cut's tag does once a hook renamed the draft.
 
 const REPO = "o/r";
 const DRAFT = JSON.stringify({
@@ -90,7 +92,6 @@ const PUBLISHED = [
   gh("release", "edit", "v1.2.3", "--draft=false"),
 ];
 
-/** What release-please-action writes for the draft it created; each case adds the tag it gave the draft. */
 const CUT = { release_created: "true", id: "4242" };
 const SKELETON_SENDS = skeleton.jobs["publish-release"].with ?? {};
 
