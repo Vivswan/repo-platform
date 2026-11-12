@@ -27,7 +27,7 @@ jobs:
     # GITHUB_TOKEN cannot push to a fork's branch, and PR-controlled tool
     # configuration must not run next to write credentials.
     if: github.event.label.name == 'fix-lint' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: write

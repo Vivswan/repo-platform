@@ -43,7 +43,7 @@ jobs:
   # move_stable.ts owns the tag's invariants and re-verifies the all-green check at the sha before the push:
   # defense in depth on the call, the sole gate on a dispatch.
   move-stable:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     # One mover lane, LITERAL on purpose: github.workflow inside a called workflow is the CALLER's name, which would
     # split the lane between called and dispatched runs. ci.yml's calling job holds no lane: a caller never holds what
@@ -83,7 +83,7 @@ jobs:
   read-directives:
     needs: [move-stable]
     if: github.event_name != 'workflow_dispatch' && !cancelled()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read

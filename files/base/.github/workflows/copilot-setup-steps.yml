@@ -4,6 +4,9 @@
 #
 # Copilot runs this job, which must be named copilot-setup-steps. The push and PR triggers exist so edits to this
 # file are validated in CI.
+#
+# The one x64 job the platform ships: the Copilot coding agent runs its setup on Ubuntu x64 alone, so the fleet's ARM
+# default (docs/fleet-guidelines.md, "ARM runners by default") does not apply here.
 
 name: Copilot Setup Steps
 

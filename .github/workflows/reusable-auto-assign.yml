@@ -27,7 +27,7 @@ jobs:
       github.actor != 'dependabot[bot]') ||
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       issues: write # issue events, and the sweep assigns issues and PRs alike

@@ -60,7 +60,7 @@ concurrency:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     environment: fleet-operator
     # The probe bounds at ten adopted repos: discovery 2 x 120 s,
     # selection's two 300 s stages, 10 x 2 x 120 s.
@@ -138,7 +138,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: sync (row ${{ matrix.row }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     environment: fleet-operator
     # Every bound a step can hit before deliver.ts files a failure counts
     # (the listing, the target clone, the writer's git and upstream calls, the

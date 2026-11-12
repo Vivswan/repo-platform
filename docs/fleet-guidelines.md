@@ -21,6 +21,24 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Pre-commit hooks only check](#pre-commit-hooks-only-check)                      | review                                                                                                                                             |
 | [File size caps](#file-size-caps)                                                | the `file-size` step (a hard cap fails the step, and the step fails the `standard-checks` job)                                                     |
 | [How to bypass a check](#how-to-bypass-a-check)                                  | each tool's own per-finding, in-repo bypass; no job-level switch exists                                                                            |
+| [ARM runners by default](#arm-runners-by-default)                                | `tests/workflows/runner_labels.test.ts` in repo-platform for the platform's workflows and the shipped starters; review for a repo-owned workflow   |
+
+## ARM runners by default
+
+**Rule:** every job the platform ships runs on `ubuntu-24.04-arm`, the one runner label: the fleet workflows, the reusable workflows, the managed workflows, and the starters a repository takes over. A repository's own jobs follow unless a job is bound to x86.
+
+**Why:** GitHub bills a Linux ARM minute below an x64 one, and the ARM runners are usually the faster ones. One label makes a job back on `ubuntu-latest` a visible drift instead of a silent cost.
+
+**How:** before a job moves, every action and binary it runs must ship an arm64 Linux build. The platform's own tools do today: trivy, gitleaks, actionlint, zizmor, semgrep, typos, knip, biome, lychee, ruff, CodeQL (2.27 and later), and the bun, uv, node, and Rust setups. A `run:` step that fetches an archive by URL names the arm64 archive and its checksum. A Docker image must be multi-arch.
+
+**The x64 exceptions,** each with its reason, are the test's `X64_JOBS` table and the job's own header comment:
+
+| Workflow                                    | Job                   | Why it stays on x64                                              |
+| ------------------------------------------- | --------------------- | ---------------------------------------------------------------- |
+| repo-platform's `.github/workflows/ci.yml`  | `script-tests`        | the theme tests drive headless Chrome, which the ARM image omits |
+| `.github/workflows/copilot-setup-steps.yml` | `copilot-setup-steps` | the Copilot coding agent runs its setup on Ubuntu x64 alone      |
+
+**Enforced by:** `tests/workflows/runner_labels.test.ts` in repo-platform holds every job of the platform's workflows and the shipped starters to the label, or to a listed exception. An x64 archive fetched onto an ARM job fails that job on its own. A repository's own workflow after seeding is review's.
 
 ## Sticky PR comments
 

@@ -16,7 +16,7 @@ on:
 
 jobs:
   update-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     permissions:
       contents: write # also what makes the draft visible to gh
