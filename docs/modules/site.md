@@ -26,6 +26,7 @@ The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release
 | a manual dispatch    | the manual deploy   |
 
 - **No workflow of its own and no tag trigger:** a tag created without a push lands on the nightly rebuild, or right away via dispatch.
+- **No nightly on a private repository:** its scheduled run skips every job ([all-green.md](../all-green.md#the-nightly-schedule-run)), so the rebuild is a push or a dispatch and the link-rot check never runs there.
 - **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
 
 **The release leg sits before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the tag and then runs whatever the release's result, and a release commit's own deploy serves its new tag ([all-green.md](../all-green.md#after-the-gate)).
@@ -41,7 +42,7 @@ A repository with nothing to publish ends green with a notice (`nothing to publi
 **Nothing to do:** the module's settings layer creates the Pages site on the next fleet settings apply ([settings.md](../settings.md)), which runs daily.
 
 - **A deploy before that apply** fails red on configure-pages's own error (`Get Pages site failed`): the job token can read the site but never create one. The red run needs no action and no rerun.
-- **The nightly rebuild** deploys once the site exists; the next main push does the same.
+- **The nightly rebuild** deploys once the site exists; the next main push does the same. A private repository has no nightly, so there it is the next main push or a dispatch.
 
 **The `github-pages` environment is the module's,** declared by its settings layer ([settings.md](../settings.md)). A required-reviewers rule added by hand parks every deploy "waiting for review" with later runs queued behind it. Once the repository's rendered settings carry the declaration (the next sync), the daily apply heals it:
 

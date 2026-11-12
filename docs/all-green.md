@@ -7,7 +7,7 @@ group: Start here
 
 Every repository in the fleet - repo-platform included - gates merges on a required status check named `all-green`: the check run of an ordinary CI job. This page covers the gate, the work that runs after it on main, and repo-platform's fleet-sync label from the PR's side; repo-platform's own post-green run and the gate's residuals are [platform/post-green.md](platform/post-green.md), and setting a repository up is [new-repo.md](new-repo.md).
 
-- **The job** needs every gating job, runs on `if: always()`, and judges the results through [re-actors/alls-green](https://github.com/re-actors/alls-green), a third-party action pinned by sha like every other ([build-provenance.md](platform/build-provenance.md)).
+- **The job** needs every gating job, runs on `if: always()` (the managed skeleton's adds [the private-nightly clause](#the-nightly-schedule-run)), and judges the results through [re-actors/alls-green](https://github.com/re-actors/alls-green), a third-party action pinned by sha like every other ([build-provenance.md](platform/build-provenance.md)).
 - **Where it lives:** the managed skeleton's job is in [files/base/.github/workflows/ci.yml](../files/base/.github/workflows/ci.yml); repo-platform's own is in its [ci.yml](../.github/workflows/ci.yml).
 
 **The judgment, whole:** every needed result must be `success`, or `skipped` for a job named in `allowed-skips`. Anything else (`failure`, `cancelled`, a skip the list does not name) fails the gate, and the step summary lists every job with its result.
@@ -59,7 +59,10 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository))                                                                                   |
 | `all-green`    | needs all three                                                                                                                                                                                                                                                         |
 
-**The nightly schedule run** is the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, and every other check stands down.
+<a id="the-nightly-schedule-run"></a>**The nightly schedule run** is public repositories' alone, and the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, and every other check stands down.
+
+- **A private repository's night runs no job.** `platform` and `all-green` carry one clause, `github.event_name != 'schedule' || !github.event.repository.private`, and every other job is behind them, so the run is all skips and bills nothing. It has no code scanning, so the night would buy nothing; its site rebuilds on a push or a dispatch.
+- **Every other event** runs in a private repository as in a public one, the gate included.
 
 **One ceiling for every platform call:** `platform`, `release`, `publish-release`, and `site` carry the same fixed `permissions:` block, the union of what any job behind those calls asks, and each called job narrows itself to its own need.
 

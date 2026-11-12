@@ -1,7 +1,7 @@
 // fleet.yml is the fleet's gate-job home, every job of the skeleton's one `platform` call. Pinned here is what a green
-// run cannot show: GitHub's step rule (a bare step implies success()), the schedule census (the `platform` caller is
-// unconditional, so a step without a schedule clause runs nightly fleet-wide), the output chain GitHub resolves to ''
-// without an error, and two gates whose wrong spelling stays green.
+// run cannot show: GitHub's step rule (a bare step implies success()), the schedule census (the `platform` caller
+// runs every night in a public repository, so a step without a schedule clause runs nightly across them), the output
+// chain GitHub resolves to '' without an error, and two gates whose wrong spelling stays green.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
