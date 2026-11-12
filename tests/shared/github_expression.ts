@@ -48,7 +48,10 @@ const STATUS_FUNCTIONS = new Map(
  *  Actions. The status functions are the workflow runner's, not the expression language's: a step or job whose
  *  condition passed counts as run only when its chain ran or a status function let it continue, so always() reads
  *  true and cancelled() false here. */
-export function evaluateCondition(expression: string, context: Record<string, string>): boolean {
+export function evaluateCondition(
+  expression: string,
+  context: Record<string, string | boolean>,
+): boolean {
   const contexts = new data.Dictionary();
   for (const [path, value] of Object.entries(context)) {
     const keys = path.split(".");
@@ -59,7 +62,7 @@ export function evaluateCondition(expression: string, context: Record<string, st
       if (node.get(key) === undefined) node.add(key, child);
       node = child;
     }
-    node.add(keys[keys.length - 1], new data.StringData(value));
+    node.add(keys[keys.length - 1], data.reviver("", value));
   }
   const tokens = new Lexer(expression).lex().tokens;
   const tree = new Parser(
@@ -104,8 +107,13 @@ function calls(expr: Expr): string[] {
   return [...own, ...subexpressions(expr).flatMap(calls)];
 }
 
+/** Every function the condition calls, by lower-cased name, as GitHub's parser reads it. */
+export function calledFunctions(condition: string): string[] {
+  return calls(parseExpression(condition).tree);
+}
+
 /** Whether the condition calls a status function anywhere, as GitHub's parser reads it: a quoted "always()" is a
  *  string, and a call with blanks inside the parentheses or in another case is still the call. */
 export function hasStatusFunction(condition: string): boolean {
-  return calls(parseExpression(condition).tree).some((name) => STATUS_FUNCTION_NAMES.has(name));
+  return calledFunctions(condition).some((name) => STATUS_FUNCTION_NAMES.has(name));
 }

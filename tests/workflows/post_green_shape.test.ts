@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { evaluateCondition } from "../shared/github_expression.ts";
+import { evaluateCondition, hasStatusFunction } from "../shared/github_expression.ts";
 
 const root = join(import.meta.dir, "../..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
@@ -59,20 +59,27 @@ function needsContext(
   return context;
 }
 
+/** What a simulated run may vary beyond its event and outputs. */
+interface Scenario {
+  failed?: string[];
+  ref?: string;
+  headRef?: string;
+  isPrivate?: boolean;
+}
+
 /** Simulates GitHub's own rules, which the body mirrors; `outputs` stands in for the step outputs
  * of every job that ran. "A failure or skip applies to all jobs in the dependency chain from the
  * point of failure or skip onwards", even through a job a status function let continue.
  *   an unrun need                       -> result `skipped`, empty outputs
  *   a condition with no status function -> implicit success() over the WHOLE ancestry
  *   the run's ref                       -> main's head unless given (ci.yml's push trigger is filtered to main)
- *   the PR head branch                  -> unset unless given, as on every event but pull_request */
+ *   the PR head branch                  -> unset unless given, as on every event but pull_request
+ *   the repository's visibility         -> public unless given */
 function jobsRunning(
   jobs: Record<string, Job>,
   event: string,
   outputs: Record<string, string>,
-  failed: string[] = [],
-  ref = "refs/heads/main",
-  headRef?: string,
+  { failed = [], ref = "refs/heads/main", headRef, isPrivate = false }: Scenario = {},
 ): string[] {
   const ran = new Set<string>();
   const pending = Object.keys(jobs);
@@ -85,14 +92,15 @@ function jobsRunning(
       continue;
     }
     if (failed.includes(id)) continue;
-    const context: Record<string, string> = {
+    const context: Record<string, string | boolean> = {
       "github.event_name": event,
       "github.ref": ref,
+      "github.event.repository.private": isPrivate,
       ...needsContext(needs, ran, failed, outputs),
     };
     if (headRef !== undefined) context["github.head_ref"] = headRef;
     const condition = job.if ?? "";
-    const statusFunction = /\b(always|cancelled|success|failure)\(\)/.test(condition);
+    const statusFunction = condition !== "" && hasStatusFunction(condition);
     const chainRan = [...ancestorsOf(jobs, id)].every((need) => ran.has(need));
     const passes = condition === "" || evaluateCondition(condition, context);
     if (passes && (statusFunction || chainRan)) ran.add(id);
@@ -128,10 +136,9 @@ describe("post-green wiring", () => {
     );
     // A red mover (a lost lease, a refused push) leaves the read on the push's own before and skips the
     // sync (the tag names a stale commit), nothing else.
-    expect(jobsRunning(jobs, "push", { armed: "true" }, ["move-stable"]).sort()).toEqual([
-      "read-directives",
-      "settings-fleet",
-    ]);
+    expect(
+      jobsRunning(jobs, "push", { armed: "true" }, { failed: ["move-stable"] }).sort(),
+    ).toEqual(["read-directives", "settings-fleet"]);
   });
 
   // #207: a ref-keyed group keeps one pending run and replaces it with the newest, so a burst of merges dropped the middle
@@ -161,7 +168,9 @@ describe("post-green wiring", () => {
   // deploy, or the deploy after a red hook.
   // The release gate's condition reads github.head_ref, which GitHub sets on pull_request alone; a spelling that read the
   // ref or the event only would run the gate on every PR or on none.
-  test("the skeleton: every leg runs on a release commit's push; the schedule rebuilds the site alone; a red hook skips the release and the deploy still runs; the release gate runs on the release PR and a dispatch alone", () => {
+  // A private repository's nightly runs no job at all (a skipped job bills nothing), and its other events run as a
+  // public repository's do; a clause on `platform` alone would leave the gate running and red every night.
+  test("the skeleton: every leg runs on a release commit's push; the schedule rebuilds the site alone, and nothing when private; a red hook skips the release and the deploy still runs; the release gate runs on the release PR and a dispatch alone", () => {
     const skeleton = parseYaml(
       read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
     ) as { jobs: Record<string, Job> };
@@ -172,32 +181,28 @@ describe("post-green wiring", () => {
       prs_created: "true",
       tag_name: "v1.2.3",
     };
-    const runs = (
-      event: string,
-      outputs: Record<string, string>,
-      failed?: string[],
-      ref?: string,
-      headRef?: string,
-    ) => jobsRunning(skeleton.jobs, event, outputs, failed, ref, headRef).sort();
+    const runs = (event: string, outputs: Record<string, string>, scenario?: Scenario) =>
+      jobsRunning(skeleton.jobs, event, outputs, scenario).sort();
     const MERGE_REF = "refs/pull/7/merge";
     expect({
       releasePush: runs("push", released),
       plainPush: runs("push", { modules: "[]" }),
       schedule: runs("schedule", released),
+      privateSchedule: runs("schedule", released, { isPrivate: true }),
+      privatePush: runs("push", { modules: "[]" }, { isPrivate: true }),
       dispatch: runs("workflow_dispatch", released),
-      pullRequest: runs("pull_request", released, [], MERGE_REF, "feat/anything"),
-      releasePullRequest: runs(
-        "pull_request",
-        released,
-        [],
-        MERGE_REF,
-        "release-please--branches--main",
-      ),
-      redHook: runs("push", released, ["post-green"]),
+      pullRequest: runs("pull_request", released, { ref: MERGE_REF, headRef: "feat/anything" }),
+      releasePullRequest: runs("pull_request", released, {
+        ref: MERGE_REF,
+        headRef: "release-please--branches--main",
+      }),
+      redHook: runs("push", released, { failed: ["post-green"] }),
     }).toEqual({
       releasePush: every.filter((job) => job !== "release-gate"),
       plainPush: ["all-green", "checks", "platform", "post-green"],
       schedule: ["all-green", "platform", "site"],
+      privateSchedule: [],
+      privatePush: ["all-green", "checks", "platform", "post-green"],
       dispatch: ["all-green", "checks", "platform", "release-gate", "site"],
       pullRequest: ["all-green", "checks", "platform"],
       releasePullRequest: ["all-green", "checks", "platform", "release-gate"],

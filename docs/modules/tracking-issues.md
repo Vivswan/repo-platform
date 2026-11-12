@@ -44,7 +44,7 @@ The registration grammar and fleet.yml's `plan` step refuse two shapes, by name:
 
 - **A green night** comments on and closes the open issues carrying the label, so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([release-health action](../../actions/release-health/action.yml)).
 
-- **A manual green dispatch** also closes a fuzz or nightly issue (the site stream's link check runs on the nightly schedule alone, so its issue waits for the next clean night); the close comment links the run, so the provenance is visible.
+- **A manual green dispatch** also closes a fuzz or nightly issue (the site stream's link check runs on the nightly schedule alone, so its issue waits for the next clean night, and in a private repository, which has no nightly, it is closed by hand once the links are fixed); the close comment links the run, so the provenance is visible.
 
 - **Assignment.** Every filing adds the repository owner as an assignee (issues created with `GITHUB_TOKEN` fire no `issues: opened` event, so the managed auto-assign workflow cannot catch them) and removes nobody.
 
