@@ -1,11 +1,15 @@
 // The shell this replaces read the asset list one name per line, so an empty release read as one empty name and a
 // bundle-only release as "no assets": which names count, that the stale bundle is deleted from the RELEASE before
 // anything else, and the output the publish leg keys on are gh's facts and the caller's, not the code's.
+//
+// The draft's tag is gh's fact too: a release hook may have renamed it since the cut, so the inspection is handed the
+// cut's id alone and reads the tag the draft wears from gh.
 
 import { expect, test } from "bun:test";
 import { type GhRunner, inspectAssets } from "../../../actions/release-assets/release-assets.ts";
 
 const REPO = "o/r";
+const RELEASE_ID = "4242";
 const TAG = "v1.2.0";
 const BUNDLE = "attestation.json";
 
@@ -13,10 +17,10 @@ function fakeGh(assets: string[]): { run: GhRunner; calls: string[][] } {
   const calls: string[][] = [];
   const run: GhRunner = (args) => {
     calls.push(args);
-    if (args[0] === "release" && args[1] === "view") {
-      return JSON.stringify({ assets: assets.map((name) => ({ name })) });
+    if (args.join(" ") === `api repos/${REPO}/releases/${RELEASE_ID}`) {
+      return JSON.stringify({ tag_name: TAG, assets: assets.map((name) => ({ name })) });
     }
-    if (args[0] === "release" && args[1] === "delete-asset") return "";
+    if (args[0] === "release" && args[1] === "delete-asset" && args[2] === TAG) return "";
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
   return { run, calls };
@@ -24,7 +28,7 @@ function fakeGh(assets: string[]): { run: GhRunner; calls: string[][] } {
 
 // fleet-release-publish.yml runs with no checkout, so every call names the repository.
 
-const VIEW = ["release", "view", TAG, "--repo", REPO, "--json", "assets"];
+const VIEW = ["api", `repos/${REPO}/releases/${RELEASE_ID}`];
 const DELETE = ["release", "delete-asset", TAG, BUNDLE, "--yes", "--repo", REPO];
 /** A log line as the recorder saw it: core's method, then the message. */
 type Line = ["info" | "notice", string];
@@ -69,9 +73,13 @@ test.each<{
 ])("$reason", ({ assets, present, lines, calls }) => {
   const gh = fakeGh(assets);
   const out: Line[] = [];
-  const judged = inspectAssets(gh.run, REPO, TAG, BUNDLE, {
+  const found = inspectAssets(gh.run, REPO, RELEASE_ID, BUNDLE, {
     info: (message) => out.push(["info", message]),
     notice: (message) => out.push(["notice", String(message)]),
   });
-  expect({ present: judged, lines: out, calls: gh.calls }).toEqual({ present, lines, calls });
+  expect({ found, lines: out, calls: gh.calls }).toEqual({
+    found: { tag: TAG, present },
+    lines,
+    calls,
+  });
 });

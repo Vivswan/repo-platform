@@ -36,6 +36,9 @@ on:
       tag_name:
         description: The cut release's tag.
         value: ${{ jobs.release-please.outputs.tag_name }}
+      release_id:
+        description: The cut draft release's id, which still names the draft once a release hook renamed its tag.
+        value: ${{ jobs.release-please.outputs.release_id }}
       prs_created:
         description: Whether release-please created or refreshed a release PR ("true" or empty).
         value: ${{ jobs.release-please.outputs.prs_created }}
@@ -64,6 +67,8 @@ jobs:
     outputs:
       release_created: ${{ steps.cut.outputs.release_created }}
       tag_name: ${{ steps.cut.outputs.tag_name }}
+      # release-please-action writes every field of the release it created as an output; its README names only some, and `id` is not among them.
+      release_id: ${{ steps.cut.outputs.id }}
       # pr is unset when no PR was proposed; the && short-circuit keeps
       # fromJSON off the empty string.
       prs_created: ${{ steps.propose.outputs.prs_created }}
