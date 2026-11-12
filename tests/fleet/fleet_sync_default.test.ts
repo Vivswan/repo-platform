@@ -83,7 +83,6 @@ describe("deliveredBySync", () => {
     ["files.yml", true],
     ["files/base/AGENTS.md", true],
     ["files/bun/.bun-version", true],
-    ["migrations/one-rung.ts", true],
     [".github/scripts/sync/writer/sync.ts", true],
     [".github/scripts/sync/deliver.ts", true],
     [".github/scripts/shared/proc.ts", true],

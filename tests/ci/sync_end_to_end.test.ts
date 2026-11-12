@@ -82,7 +82,7 @@ const FLEET_LINKS = {
 const noWriterNote = (path: string) =>
   `manifest record for \`${path}\` had no writer: no files.yml entry declares the path now; ` +
   "it is retired as a stale record (the Retired row has the outcome)";
-const NEW_LICENSE = `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`;
+const NEW_LICENSE = `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg (https://github.com/OwnerOrg)\n`;
 const OWN_OVERLAY = [
   // Identity keys, a ruleset of its own, comment lines, a CRLF line, and no trailing newline, so the starter's
   // hands-off rule is checked byte for byte.
@@ -945,9 +945,7 @@ describe("sync.ts over a registration with an empty description", () => {
     expect(readFileSync(join(target, ".github/workflows/nightly-fuzz.yml"), "utf-8")).toBe(STARTER);
     expect(existsSync(join(target, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(target, ".github/workflows/checks.yml"))).toBe(false);
-    expect(readFileSync(join(target, "LICENSE.md"), "utf-8")).toBe(
-      `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`,
-    );
+    expect(readFileSync(join(target, "LICENSE.md"), "utf-8")).toBe(NEW_LICENSE);
     expect(summary.notes).toEqual([
       "placeholder `{{description}}` has no value: set project.description in .repo-platform.yml",
     ]);
@@ -1169,7 +1167,7 @@ describe("sync.ts over manifest records it cannot read", () => {
     ".github/old-tool.yml": `{"class": "mirror", "kind": "hardlink", "hash": "${sha256(OLD_TOOL)}"}`,
     "CONTRIBUTING.md": `{"class": "split", "grammar": "managed-region", "hash": "${sha256(OLD_CONTRIBUTING_REGION)}"}`,
     "BESPOKE.md": `{"class": "bespoke", "hash": "${sha256("b\n")}"}`,
-    // The class the fleet's symlinks left behind; migrations/0001 restamps it before the writer runs.
+    // The class the fleet's symlinks once carried, refused like any class the writer does not record.
     "CLAUDE.md": `{"class": "link", "hash": "${sha256("AGENTS.md")}"}`,
     "UNHASHED.md": '{"class": "managed", "hash": null}',
     "docs/old.md": '{"class": "starter", "hash": null}',

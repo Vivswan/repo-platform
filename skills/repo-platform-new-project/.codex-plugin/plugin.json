@@ -2,7 +2,7 @@
   "name": "repo-platform-new-project",
   "description": "Create or adopt a repository managed by Vivswan/repo-platform: write the registration, grant the fleet token, run the first sync, review its report, and watch the first CI run.",
   "author": {
-    "name": "Vivswan Shah",
+    "name": "Vivswan",
     "email": "58091053+Vivswan@users.noreply.github.com",
     "url": "https://vivswan.github.io/"
   },

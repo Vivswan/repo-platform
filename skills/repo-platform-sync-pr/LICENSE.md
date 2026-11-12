@@ -2,7 +2,7 @@
 
 <https://github.com/Vivswan/licenses/blob/main/individual-small-organization-license/1.1.0/LICENSE.md>
 
-Required Notice: Copyright Vivswan Shah (https://github.com/Vivswan)
+Required Notice: Copyright Vivswan (https://github.com/Vivswan)
 
 ## Summary (non-binding)
 

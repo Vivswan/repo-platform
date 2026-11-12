@@ -129,7 +129,7 @@ The apply is stateless, touches only declared keys, and upserts by name, all on 
 
 - **The homepage is unmanaged:** the starter seeds no `homepage` key, so the apply never touches the field and a homepage set on GitHub stays. To have the apply manage a real website, add `homepage:` to the overlay by hand.
 
-- **The overlay cannot declare-and-clear the homepage:** the `0002-homepage-unmanaged` rung ([platform/sync/writer.md](platform/sync/writer.md#migrations)) deletes an empty or own-address `homepage` key on every sync.
+- **An empty `homepage` clears it:** the apply reads a declared empty value as "clear it" and wipes a homepage set on GitHub on every apply, so to leave the field alone the key is absent, never empty.
 
 - **Visibility** is managed like any other declared field: the starter seeds `private:` (false included), so the nightly heal reverts an out-of-band flip in either direction. To change visibility on purpose, edit `private:` in the overlay; the visibility-gated layers follow the declared value in the same render.
 
