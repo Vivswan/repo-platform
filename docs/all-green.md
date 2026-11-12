@@ -54,7 +54,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 | Gating job     | What it does                                                                                                                                                                                                                                                            |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checks`       | calls the repo-owned checks.yml; skipped on the nightly schedule run                                                                                                                                                                                                    |
+| `checks`       | calls the repo-owned checks.yml with the repository's secrets; skipped on the nightly schedule run                                                                                                                                                                      |
 | `platform`     | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. The `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels |
 | `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository))                                                                                   |
 | `all-green`    | needs all three                                                                                                                                                                                                                                                         |
@@ -148,7 +148,7 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 | every other event                                                                                                              | the job skips, and `allowed-skips` names it so the gate stays green                                                                                                                                                                                                |
 | the nightly schedule                                                                                                           | not ci.yml's: a nightly.yml the [nightly](modules/nightly.md) module seeds from now on calls the same file every night, an existing one [adds the sibling job itself](modules/nightly.md#customizing-the-starter), and a red tier files the nightly tracking issue |
 
-- **The caller's contract is checks.yml's:** no secrets, permissions cap at `contents: read`. A tier needing more gets its own workflow.
+- **The caller's contract:** no secrets, permissions cap at `contents: read`. A tier needing more gets its own workflow.
 
 - **Outputs are the repository's own,** and the managed call ignores them. Every job inside gates: the caller's result aggregates every job of the workflow it calls.
 
