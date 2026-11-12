@@ -18,7 +18,7 @@ on:
         type: string
         default: ""
       # Read only while a repository's ci.yml still sends the cut's tag and no id, as one the sync has not replaced yet
-      # does: the job's first step reads the id from it.
+      # does: the job's first step reads the id from it, and fails the job when it has neither.
       tag:
         description: The draft release's tag, as fleet-release.yml reported it.
         required: false
@@ -38,13 +38,17 @@ jobs:
       # The attest action's own bundle file name.
       BUNDLE_NAME: attestation.json
     steps:
+      # gh reads an empty tag as no tag and answers the latest published release, so an empty one is refused before gh
+      # runs.
       - name: Read the draft's id from the tag
         id: by-tag
         if: inputs.release-id == ''
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
-        run: gh release view "$TAG" --json databaseId --jq '"id=\(.databaseId)"' >> "$GITHUB_OUTPUT"
+        run: >-
+          gh release view "${TAG:?the cut reported neither a release id nor a tag}"
+          --json databaseId --jq '"id=\(.databaseId)"' >> "$GITHUB_OUTPUT"
       # A stale bundle from a prior attempt is deleted from the RELEASE, so
       # no later skip path can publish it.
       - uses: $/actions/release-assets

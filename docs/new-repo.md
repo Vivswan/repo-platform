@@ -110,6 +110,8 @@ GitHub releases are immutable once published, so every release moves through thr
 
 - **Only once the repository's ci.yml sends the id:** a ci.yml that still sends the cut's tag, one whose sync PR has not merged, has its draft looked up by that tag. A draft renamed there is not found, and `publish-release` is red with the release still a draft.
 
+- **Neither an id nor a tag:** `publish-release` fails at its first step, saying the cut reported neither, and the release stays a draft.
+
 **The attestation** is a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json`. It is skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations.
 
 Around the cut itself:

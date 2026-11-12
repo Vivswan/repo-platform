@@ -50,8 +50,9 @@ type Outputs = Record<string, string> | null;
 // The skeleton's `uses:` lines carry the owner placeholder, which YAML reads as a flow mapping, so it is filled before
 // parsing.
 //
-// The fake repository holds one release: a draft, id 4242, wearing `v1.2.3`, with one asset and a bundle a prior
-// attempt left. Every other tag names no release, as the cut's tag does once a hook renamed the draft.
+// The fake repository holds two releases. One is the draft, id 4242, wearing `v1.2.3`, with one asset and a bundle a
+// prior attempt left. The other is the latest published release, id 4100, wearing `v1.2.2`: what gh answers when the
+// tag it is given is empty. Every other tag names no release, as the cut's tag does once a hook renamed the draft.
 //
 // CUT is what release-please-action writes for the draft it created; each case adds the tag it gave the draft.
 
@@ -74,11 +75,18 @@ const DRAFT = JSON.stringify({
   draft: true,
   assets: [{ name: "app.tar.gz" }, { name: "attestation.json" }],
 });
+const LATEST_PUBLISHED = JSON.stringify({
+  tag_name: "v1.2.2",
+  draft: false,
+  assets: [{ name: "app.tar.gz" }],
+});
 const FAKE_GH = [
   'case "$*" in',
   `  "api repos/${REPO}/releases/4242") echo '${DRAFT}' ;;`,
+  `  "api repos/${REPO}/releases/4100") echo '${LATEST_PUBLISHED}' ;;`,
   '  "release view v1.2.3 --json databaseId --jq "*) echo "id=4242" ;;',
-  '  "release "*" v1.2.3 "*) ;;',
+  '  "release view  --json databaseId --jq "*) echo "id=4100" ;;',
+  '  "release "*" v1.2.3 "* | "release "*" v1.2.2 "*) ;;',
   '  *) echo "release not found" >&2; exit 1 ;;',
   "esac",
 ];
@@ -290,3 +298,11 @@ test.each<{
     expect(publish(cut, sent)).toEqual({ red: null, calls });
   },
 );
+
+// The cut reports a release and no id, and the skeleton sends no tag. Asked for an empty tag, gh answers the latest
+// published release, so the job would attest and publish that one, green, with the cut's draft still a draft.
+test("a publish job sent neither an id nor a tag is red at its first step, before any gh call", () => {
+  const cut = { release_created: "true", tag_name: "v1.2.3" };
+
+  expect(publish(cut, SKELETON_SENDS)).toEqual({ red: "by-tag", calls: [] });
+});
