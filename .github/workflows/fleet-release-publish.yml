@@ -1,5 +1,8 @@
 # Publishes the draft release fleet-release.yml cut, attested when the repository is public and the draft has assets.
 #
+# The draft is found by its id, so the update-release hook may rename its tag; every later step names the tag the draft
+# wears by then.
+#
 # Attestation needs a public repository, so a non-public release publishes unattested.
 #
 # The gates are step-level on purpose: whether the draft has assets is only knowable at run time.
@@ -9,10 +12,18 @@ name: Fleet Release Publish
 on:
   workflow_call:
     inputs:
+      release-id:
+        description: The draft release's id, as fleet-release.yml reported it.
+        required: false
+        type: string
+        default: ""
+      # Read only while a repository's ci.yml still sends the cut's tag and no id, as one the sync has not replaced yet
+      # does: the job's first step reads the id from it, and fails the job when it has neither.
       tag:
         description: The draft release's tag, as fleet-release.yml reported it.
-        required: true
+        required: false
         type: string
+        default: ""
 
 jobs:
   publish-release:
@@ -24,16 +35,26 @@ jobs:
       attestations: write
     env:
       GH_REPO: ${{ github.repository }}
-      TAG: ${{ inputs.tag }}
       # The attest action's own bundle file name.
       BUNDLE_NAME: attestation.json
     steps:
+      # gh reads an empty tag as no tag and answers the latest published release, so an empty one is refused before gh
+      # runs.
+      - name: Read the draft's id from the tag
+        id: by-tag
+        if: inputs.release-id == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: >-
+          gh release view "${TAG:?the cut reported neither a release id nor a tag}"
+          --json databaseId --jq '"id=\(.databaseId)"' >> "$GITHUB_OUTPUT"
       # A stale bundle from a prior attempt is deleted from the RELEASE, so
       # no later skip path can publish it.
       - uses: $/actions/release-assets
         id: assets
         with:
-          tag: ${{ inputs.tag }}
+          release-id: ${{ inputs.release-id || steps.by-tag.outputs.id }}
           bundle-name: ${{ env.BUNDLE_NAME }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,6 +65,7 @@ jobs:
           && github.event.repository.visibility == 'public'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.assets.outputs.tag }}
         run: |
           mkdir assets
           gh release download "$TAG" --dir assets
@@ -58,6 +80,7 @@ jobs:
         if: steps.attest.outputs.bundle-path != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.assets.outputs.tag }}
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
           cp "$BUNDLE" "$BUNDLE_NAME"
@@ -65,4 +88,5 @@ jobs:
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.assets.outputs.tag }}
         run: gh release edit "$TAG" --draft=false

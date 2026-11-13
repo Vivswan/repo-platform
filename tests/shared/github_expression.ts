@@ -44,14 +44,14 @@ const STATUS_FUNCTIONS = new Map(
   ]),
 );
 
-/** Whether the condition holds over the context. A key nobody set reads as null, as an unrun job's output does in
- *  Actions. The status functions are the workflow runner's, not the expression language's: a step or job whose
- *  condition passed counts as run only when its chain ran or a status function let it continue, so always() reads
- *  true and cancelled() false here. */
-export function evaluateCondition(
+/** The expression's value over the context, each key a dotted path. A key nobody set reads as null, as an unrun job's
+ *  output does in Actions. The status functions are the workflow runner's, not the expression language's: a step or
+ *  job whose condition passed counts as run only when its chain ran or a status function let it continue, so always()
+ *  reads true and cancelled() false here. */
+function evaluate(
   expression: string,
   context: Record<string, string | boolean>,
-): boolean {
+): data.ExpressionData {
   const contexts = new data.Dictionary();
   for (const [path, value] of Object.entries(context)) {
     const keys = path.split(".");
@@ -70,7 +70,22 @@ export function evaluateCondition(
     contexts.pairs().map((pair) => pair.key),
     [...STATUS_FUNCTIONS.values()],
   ).parse();
-  return truthy(new Evaluator(tree, contexts, STATUS_FUNCTIONS).evaluate());
+  return new Evaluator(tree, contexts, STATUS_FUNCTIONS).evaluate();
+}
+
+/** Whether the condition holds over the context. */
+export function evaluateCondition(
+  expression: string,
+  context: Record<string, string | boolean>,
+): boolean {
+  return truthy(evaluate(expression, context));
+}
+
+/** The text as the runner fills a `with:` or `env:` value: every `${{ }}` span replaced by its value over the context. */
+export function interpolate(text: string, context: Record<string, string | boolean>): string {
+  return text.replaceAll(/\$\{\{([\s\S]*?)\}\}/g, (_span, expression: string) =>
+    evaluate(expression.trim(), context).coerceString(),
+  );
 }
 
 const STATUS_FUNCTION_NAMES = new Set(["success", "failure", "cancelled", "always"]);

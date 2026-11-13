@@ -3,13 +3,16 @@ description: |
   Inspects a draft release before its assets are attested. A `bundle-name` asset a prior attempt left is deleted, so no
   later skip path can publish a stale bundle; whether any other asset remains is the `present` output.
 
+  The draft is found by its id, so a release hook may rename its tag after the cut; the tag it wears now is the `tag`
+  output.
+
   A draft with none publishes unattested, with a notice. Runs without a checkout, and needs GH_TOKEN in the
   environment
   with contents write.
 
 inputs:
-  tag:
-    description: The draft release's tag.
+  release-id:
+    description: The draft release's id.
     required: true
   bundle-name:
     description: >-
@@ -20,6 +23,9 @@ outputs:
   present:
     description: '"true" when the release carries an asset other than the bundle, "false" otherwise.'
     value: ${{ steps.inspect.outputs.present }}
+  tag:
+    description: The tag the draft wears now.
+    value: ${{ steps.inspect.outputs.tag }}
 
 runs:
   using: composite
@@ -45,6 +51,6 @@ runs:
       shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
-        TAG: ${{ inputs.tag }}
+        RELEASE_ID: ${{ inputs.release-id }}
         BUNDLE_NAME: ${{ inputs.bundle-name }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/release-assets.ts"'

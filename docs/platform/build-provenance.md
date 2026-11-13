@@ -28,7 +28,7 @@ Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. 
 
 - **Self-contained actions:** a composite action must resolve from that tarball alone: its own directory plus the root files it reads from there (`files.yml`, and the `.bun-version` its bun-setup step finds, [toolchains.md](../toolchains.md#how-the-composite-actions-pin-bun)), since nothing installs the repository's root dependencies on the caller's runner.
 
-**Every self pin resolves and every manifest loads before `stable` moves:** a renamed or deleted action, a pin off the delivery ref, or a manifest GitHub cannot load fails CI here instead of the next fleet run (release-assets, which reads a draft release by tag, is the one action no job here runs).
+**Every self pin resolves and every manifest loads before `stable` moves:** a renamed or deleted action, a pin off the delivery ref, or a manifest GitHub cannot load fails CI here instead of the next fleet run (release-assets, which reads a draft release by its id, is the one action no job here runs).
 
 ## One commit per run
 

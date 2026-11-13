@@ -2,7 +2,7 @@
 // that loader. So every shipped action is named by a step of a gating job in ci.yml on every push and pull request, or
 // the fleet is the first to load it, via `stable`.
 //   dependency-review -> pull requests only: its upstream action refuses every other event
-//   release-assets    -> never: it reads a draft release by tag, and this repository cuts no releases
+//   release-assets    -> never: it reads a draft release by its id, and this repository cuts no releases
 
 // `shipped` is the platform's own manifest walk, nested actions included, so this test and the shipping read one list.
 
