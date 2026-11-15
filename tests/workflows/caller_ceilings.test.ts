@@ -9,6 +9,7 @@ import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { PLATFORM_SLUG } from "../../actions/shared/platform.ts";
+import { parseExpression, printed, soleExpression } from "../shared/github_expression.ts";
 import { shippedSource } from "../shared/shipped_source.ts";
 
 type Permissions = Record<string, string> | string | undefined;
@@ -44,7 +45,7 @@ const CALLER_ROOTS = [".github/workflows", "files/base/.github/workflows"];
 const LOCAL_CALL = /^[.$]\/\.github\/workflows\/(.+)$/;
 const PLATFORM_CALL = new RegExp(`^${PLATFORM_SLUG}/(\\.github/workflows/.+)@`);
 const FALLBACK_LANE =
-  /^\$\{\{ inputs\.([\w-]+) != '' && format\('[\w-]+-called-\{0\}', github\.run_id\) \|\| '([\w-]+)' \}\}$/;
+  /^inputs\.([\w-]+) != '' && format\('[\w-]+-called-\{0\}', github\.run_id\) \|\| '([\w-]+)'$/;
 
 function load(rel: string): Workflow {
   return parseYaml(shippedSource(rel)) as Workflow;
@@ -63,6 +64,12 @@ const workflowFiles = (root: string) =>
   readdirSync(join(ROOT, root))
     .filter((name) => name.endsWith(".yml"))
     .map((name) => `${root}/${name}`);
+
+/** The fallback a lane spells, matched in the parser's one spelling so spacing decides nothing; null for any other lane. */
+function fallbackOf(group: string): RegExpExecArray | null {
+  const source = soleExpression(group);
+  return source === null ? null : FALLBACK_LANE.exec(printed(parseExpression(source).tree));
+}
 
 const lanesOf = (workflow: Workflow): [string, string][] => {
   const lanes: [string, string][] = [];
@@ -185,7 +192,7 @@ function unionOfGrants(platformCalls: Call[]): Record<string, string> {
 function laneFindings({ site, job, called, heldByChain }: Call): string[] {
   const findings: string[] = [];
   for (const [where, group] of lanesOf(called)) {
-    const fallback = FALLBACK_LANE.exec(group);
+    const fallback = fallbackOf(group);
     if (fallback === null) {
       if (heldByChain.has(group.toLowerCase())) {
         findings.push(`${site} ${where}: group '${group}' is held by the caller chain`);
@@ -260,7 +267,7 @@ test("no called lane is one its caller chain holds or reads github.workflow; a f
   const findings = [...CALLS.flatMap(laneFindings), ...lanesReadingGithubWorkflow()];
   const fallbackSites = CALLS.flatMap((call) =>
     lanesOf(call.called)
-      .filter(([, group]) => FALLBACK_LANE.test(group))
+      .filter(([, group]) => fallbackOf(group) !== null)
       .map(() => call.site),
   );
   // The armed controls: the two fallback-shaped callees were seen, and the sync callee's chain holds ci.yml's run lane as

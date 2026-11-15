@@ -10,13 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { PLATFORM_SLUG } from "../../actions/shared/platform.ts";
 import { type Action, REPO_ROOT, type Step } from "../shared/action_step";
-import {
-  type ContextRead,
-  conditionSource,
-  contextReads,
-  expressionsIn,
-  parseExpression,
-} from "../shared/github_expression";
+import { type ContextRead, readsIn } from "../shared/github_expression";
 import { shippedSource } from "../shared/shipped_source";
 
 const ACTIONS_DIR = join(REPO_ROOT, "actions");
@@ -43,25 +37,6 @@ function loadYaml(rel: string): unknown {
 }
 
 const loadAction = (name: string): Action => loadYaml(`actions/${name}/action.yml`) as Action;
-
-/** Every string a YAML node holds, at any depth. */
-function strings(node: unknown): string[] {
-  if (typeof node === "string") return [node];
-
-  if (node === null || typeof node !== "object") return [];
-
-  return Object.values(node).flatMap(strings);
-}
-
-/** Every context read of a step or an output spec, as GitHub's parser reads it: an `if:` is an expression whole,
- *  everywhere else only the `${{ }}` spans are. */
-function readsOf(node: unknown): ContextRead[] {
-  const { if: condition, ...rest } = node as Record<string, unknown>;
-  const sources = strings(rest).flatMap(expressionsIn);
-  if (typeof condition === "string") sources.push(conditionSource(condition));
-
-  return sources.flatMap((source) => contextReads(parseExpression(source).tree));
-}
 
 /** The step a read names and the output key it reads, for `steps.<id>.outputs.<key>`, `.outcome`, and `.conclusion`;
  *  null for any other read, a computed step id included. */
@@ -165,12 +140,12 @@ function manifestProblems(name: string, action: Action): string[] {
   const earlier = new Set<string>();
   steps.forEach((step, index) => {
     problems.push(
-      ...judge(`step ${index + 1} (${String(step.name ?? step.id)})`, readsOf(step), earlier),
+      ...judge(`step ${index + 1} (${String(step.name ?? step.id)})`, readsIn(step), earlier),
     );
     if (typeof step.id === "string") earlier.add(step.id);
   });
   for (const [output, spec] of Object.entries(action.outputs ?? {})) {
-    problems.push(...judge(`outputs.${output}`, readsOf(spec), new Set(byId.keys())));
+    problems.push(...judge(`outputs.${output}`, readsIn(spec), new Set(byId.keys())));
   }
   return problems;
 }
@@ -354,7 +329,7 @@ export function undeclaredOutputReads(steps: Step[], actions: Map<string, Action
     if (own !== null && typeof step.id === "string") ownAction.set(step.id, own[1]);
   }
   const problems: string[] = [];
-  for (const read of steps.flatMap(readsOf)) {
+  for (const read of readsIn(steps)) {
     const { id = "", key } = stepRead(read) ?? {};
     const name = ownAction.get(id);
     if (key === undefined || name === undefined) continue;

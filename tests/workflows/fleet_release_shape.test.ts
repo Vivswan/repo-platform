@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadAction, REPO_ROOT } from "../shared/action_step";
+import { readsIn, soleRead } from "../shared/github_expression";
 import { shippedSource } from "../shared/shipped_source";
 
 interface Step {
@@ -51,11 +52,12 @@ test("every release-health output is written by the script of the step it is wir
     return script === undefined ? null : read(`actions/release-health/${script}`);
   };
   const sources = outputs.map(({ name, value }) => {
-    const wired = /^\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
-    const script = wired === null || wired[2] !== name ? null : scriptOf(wired[1]);
+    const [context, id, field, key, ...deeper] = soleRead(value) ?? [];
+    const wired = context === "steps" && field === "outputs" && key === name && deeper.length === 0;
+    const script = wired && typeof id === "string" ? scriptOf(id) : null;
     const written =
       script !== null && (script.includes(`"${name}"`) || script.includes(`${name}=`));
-    return { name, source: written ? `steps.${wired?.[1]}` : value };
+    return { name, source: written ? `steps.${id}` : value };
   });
   expect(sources).toEqual(
     sources.map(({ name }) => ({
@@ -63,11 +65,9 @@ test("every release-health output is written by the script of the step it is wir
       source: expect.stringMatching(/^steps\.[\w-]+$/) as string,
     })),
   );
-  const reads = [
-    ...JSON.stringify([job.steps, releasePrJob.steps]).matchAll(
-      /steps\.health\.outputs\.([\w-]+)/g,
-    ),
-  ].map((match) => match[1]);
+  const reads = readsIn([job.steps, releasePrJob.steps])
+    .filter(([context, id, field]) => context === "steps" && id === "health" && field === "outputs")
+    .map(([, , , key]) => key);
   expect(reads.length).toBeGreaterThan(0);
   expect(new Set(reads)).toEqual(new Set(outputs.map(({ name }) => name)));
 });
