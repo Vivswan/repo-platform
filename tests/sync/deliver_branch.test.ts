@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SYNC_IDENTITY } from "../../.github/scripts/shared/git_identity.ts";
+import { BOT_LOGIN } from "../../.github/scripts/shared/sticky_comment.ts";
 import { prTitle } from "../../.github/scripts/sync/deliver.ts";
 import type { SyncReport } from "../../.github/scripts/sync/writer/report.ts";
 import { SYNC_LABEL } from "../../actions/shared/platform.ts";
@@ -34,6 +35,11 @@ const REPORT = "## Sync report\n\n### Review\n\nHold for review: no\n";
 const PUSH_REFUSAL =
   "! [remote rejected] HEAD -> feat/take-the-module (protected branch hook declined)";
 const REAL_GIT = Bun.which("git") ?? "git";
+const EARLIER_COMMENT = {
+  id: 777,
+  body: "<!-- repo-platform sync-branch -->\nBuild `0000000` pushed.",
+  user: { login: BOT_LOGIN },
+};
 
 const GIT_LINES = [
   // With STUB_REAL_GIT set, every target call but the push runs the real git over the fixture checkout.
@@ -54,7 +60,7 @@ const GH_LINES = [
   'for a in "$@"; do case "$a" in body=@*) cp "${a#body=@}" "$STUB_COMMENT_OUT" ;; esac; done',
   'case "$*" in',
   `  *" DELETE "*"/labels/"*) case "\${STUB_LABEL:-ok}" in 404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; fail) echo "gh: Forbidden (HTTP 403)" >&2; exit 1 ;; esac ;;`,
-  '  *"/comments --paginate --jq "*) printf "%s" "${STUB_COMMENT_ID:-}" ;;',
+  '  *"/comments --paginate --slurp") printf "%s" "${STUB_COMMENTS:-[[]]}" ;;',
   "esac",
 ];
 
@@ -349,13 +355,22 @@ describe("the branch delivery's outcomes", () => {
     });
   });
 
-  test("an earlier comment of this bot is replaced in place, not joined", () => {
+  // What would drift silently: a second finder beside fleet-sync-default's, or one that takes a human's comment for its own.
+  test.each([
+    {
+      name: "an earlier comment of this bot is replaced in place, not joined",
+      comments: [[{ id: 3, body: "unrelated", user: { login: BOT_LOGIN } }], [EARLIER_COMMENT]],
+      expected: { method: "PATCH", endpoint: `repos/${REPOSITORY}/issues/comments/777` },
+    },
+    {
+      name: "a comment opening with the marker under another login is left alone and the bot posts its own",
+      comments: [[{ ...EARLIER_COMMENT, user: { login: "vivswan" } }]],
+      expected: { method: "POST", endpoint: `repos/${REPOSITORY}/issues/42/comments` },
+    },
+  ])("$name", ({ comments, expected }) => {
     const result = run({
-      stub: { STUB_CHANGED: "", STUB_AUTHOR: "Vivswan", STUB_COMMENT_ID: "777" },
+      stub: { STUB_CHANGED: "", STUB_AUTHOR: "Vivswan", STUB_COMMENTS: JSON.stringify(comments) },
     });
-    expect({ method: result.commentMethod, endpoint: result.commentEndpoint }).toEqual({
-      method: "PATCH",
-      endpoint: `repos/${REPOSITORY}/issues/comments/777`,
-    });
+    expect({ method: result.commentMethod, endpoint: result.commentEndpoint }).toEqual(expected);
   });
 });

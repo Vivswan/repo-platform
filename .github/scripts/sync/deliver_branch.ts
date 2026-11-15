@@ -12,7 +12,9 @@ import { join } from "node:path";
 import { PLATFORM_NAME, PLATFORM_SLUG, SYNC_LABEL } from "../../../actions/shared/platform.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
+import { parseJsonWith } from "../shared/json.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
+import { issueCommentsPages, stickyComment } from "../shared/sticky_comment.ts";
 import {
   boundedReport,
   DELIVERY_CALL_BOUND_MS,
@@ -28,9 +30,6 @@ import type { SyncReport } from "./writer/report.ts";
 
 /** The first line of the sticky comment; the finder matches it, so it never changes shape. */
 const COMMENT_MARKER = `<!-- ${PLATFORM_NAME} sync-branch -->`;
-
-/** The login the repository token comments under. */
-const COMMENT_LOGIN = "github-actions[bot]";
 
 /** A repository-token push cannot carry a change under it; such a sync is reported in the comment instead. */
 const WORKFLOWS_DIR = ".github/workflows/";
@@ -163,40 +162,26 @@ class BranchDelivery {
     }
   }
 
-  /** One comment per pull request: the marker under this bot's login finds the earlier one, which is replaced (a human can start a comment with the marker; the login is the token's own). */
+  /** One comment per pull request: the earlier one is replaced in place. */
   comment(outcome: Outcome): void {
     const bodyFile = join(this.runnerTemp, "sync-branch-comment.md");
     writeFileSync(
       bodyFile,
       commentBody(outcome, { build: this.build, branch: this.branch, runUrl: this.runUrl }),
     );
-    // The jq filter reads the marker and the login from env: a literal in the filter would need jq quoting of its own.
-    const found = this.run(
-      this.api(
-        `repos/${this.repository}/issues/${this.prNumber}/comments`,
-        "--paginate",
-        "--jq",
-        ".[] | select(.user.login == env.LOGIN and (.body | startswith(env.MARKER))) | .id",
-      ),
-      { MARKER: COMMENT_MARKER, LOGIN: COMMENT_LOGIN },
-    );
-    if (!found.ok) fail("listing the pull request's comments failed");
-    const id = found.stdout.trim().split("\n")[0] ?? "";
+    const comments = `repos/${this.repository}/issues/${this.prNumber}/comments`;
+    const listed = this.run(this.api(comments, "--paginate", "--slurp"));
+    if (!listed.ok) fail("listing the pull request's comments failed");
+    const pages = parseJsonWith(issueCommentsPages, listed.stdout, comments);
+    const earlier = stickyComment(pages.flat(), COMMENT_MARKER);
     this.must(
-      id === ""
-        ? this.api(
-            "--method",
-            "POST",
-            "--silent",
-            `repos/${this.repository}/issues/${this.prNumber}/comments`,
-            "-F",
-            `body=@${bodyFile}`,
-          )
+      earlier === null
+        ? this.api("--method", "POST", "--silent", comments, "-F", `body=@${bodyFile}`)
         : this.api(
             "--method",
             "PATCH",
             "--silent",
-            `repos/${this.repository}/issues/comments/${id}`,
+            `repos/${this.repository}/issues/comments/${earlier.id}`,
             "-F",
             `body=@${bodyFile}`,
           ),
