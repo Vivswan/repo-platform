@@ -5,9 +5,7 @@ import { z } from "zod";
 import {
   type DocsConfig,
   type IncludeRoot,
-  includeListProblem,
-  includeMountProblem,
-  includePageProblem,
+  includeRootsSchema,
   includeWithoutDocsProblem,
   relPathProblem,
   type SiteConfigJson,
@@ -91,18 +89,7 @@ const siteConfigSchema: z.ZodType<SiteConfigJson> = z
     // The plan's schema already requires project.name; a hand-written document meets the same bar here.
     site_title: oneLine.min(1),
     docs_path: judged(urlSegmentProblem).nullable(),
-    include: z
-      .array(
-        z.strictObject({
-          path: judged(relPathProblem),
-          mount: judged(includeMountProblem),
-          page: judged(includePageProblem),
-        }),
-      )
-      .superRefine((roots, ctx) => {
-        const message = includeListProblem(roots);
-        if (message !== null) ctx.addIssue({ code: "custom", message });
-      }),
+    include: includeRootsSchema(z),
     link_rot_label: oneLine,
     link_rot_color: oneLine,
     link_rot_description: oneLine,

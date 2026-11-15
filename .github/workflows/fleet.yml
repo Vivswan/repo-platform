@@ -57,8 +57,6 @@ jobs:
         uses: $/actions/plan
         with:
           private: ${{ github.event.repository.private }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - id: validate
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}

@@ -468,7 +468,6 @@ describe("plan.ts as a child", () => {
         FILES_TREE,
         GITHUB_OUTPUT: output,
         GITHUB_ENV: exported,
-        GITHUB_REPOSITORY: "o/r",
         ...env,
       },
     });
@@ -660,6 +659,13 @@ describe("plan.ts as a child", () => {
       env: { MODE: "site", VARS: "{" },
       error: () => "::error::the vars input is not JSON (",
       detail: true,
+    },
+    {
+      reason: "an empty private input, which is refused, never read as public",
+      files: { ".repo-platform.yml": `modules: [bun]\n${PROJECT}` },
+      env: {},
+      error: () =>
+        "::error::the private input must be true or false (pass github.event.repository.private); got ''\n",
     },
     {
       reason: "an unknown mode",

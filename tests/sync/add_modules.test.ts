@@ -69,13 +69,13 @@ describe("withModules", () => {
       text: "project: {name: x}\n",
       expected: {
         error:
-          ".repo-platform.yml: no module selection found - add a top-level `modules: [...]` list (the sync never assumes an empty selection, which would strip every module from the repo)",
+          ".repo-platform.yml: modules: no module selection found - add a top-level `modules: [...]` list (the sync never assumes an empty selection, which would strip every module from the repo)",
       },
     },
     {
       reason: "a scalar in the list's place is the grammar's refusal",
       text: "modules: bun\n",
-      expected: { error: ".repo-platform.yml: modules must be a list of module names" },
+      expected: { error: ".repo-platform.yml: modules: must be a list of module names" },
     },
     {
       reason: "a file that does not parse is refused with the parser's first line",
@@ -180,7 +180,7 @@ describe("add_modules.ts", () => {
       registration: "modules: bun\n",
       expected: {
         exitCode: 1,
-        stdout: "::error::.repo-platform.yml: modules must be a list of module names\n",
+        stdout: "::error::.repo-platform.yml: modules: must be a list of module names\n",
         registration: "modules: bun\n",
       },
     },
