@@ -57,7 +57,20 @@ The managed `.github/workflows/auto-fix.yml` arrives with the sync. The `fix-lin
 - **An entry is a glob:** `*` stops at a slash, `**` crosses them and reaches dotfiles, `{a,b}` lists names. An entry ending in a slash is that directory and everything under it. A leading `!` is refused.
 - **`paths: ["**"]` is allowed.** The set below is still refused.
 - **Read from the default branch,** by the push job itself, at the time it pushes. A pull request that edits its own lists changes nothing until it merges.
-- **Never carried, whatever the lists say:** anything under `.github/`, `.repo-platform.yml`, `.gitmodules`, a symbolic link, a submodule, and a path with a control character, a backslash, or bytes that are not UTF-8.
+- **Never carried, whatever the lists say:** anything under `.github/` outside `.github/scripts/`, `.repo-platform.yml`, `.gitmodules`, a symbolic link, a submodule, and a path with a control character, a backslash, or bytes that are not UTF-8.
+- **`.github/scripts/` is carried when a list reaches it,** as any other path is. `**` reaches it, and so does `.github/scripts/**`:
+
+  ```text
+  path the fixer changed                paths: ["src/**"]    paths: ["**"]
+  src/app.ts                            carried              carried
+  .github/scripts/check.ts              left out             carried
+  .GitHub/Scripts/check.ts              left out             left out: only the exact spelling opens
+  .github/workflows/ci.yml              left out             left out
+  .github/actions/autofix/action.yml    left out             left out
+  .github/dependabot.yml                left out             left out
+  ```
+
+  A script there may later run in a workflow that holds a write token, as any code in the repository may: the fix lands on the pull request's branch and is reviewed before it merges.
 - **A rename** is judged as a deletion and an addition.
 - **A pull request changing more than 3000 files** runs the hook on every push without asking which files: GitHub lists no more than that.
 
