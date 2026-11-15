@@ -1,57 +1,36 @@
-import { readFileSync } from "node:fs";
-import { extname, join } from "node:path";
-import type { Context } from "../context.ts";
+import { capture, failureDetail } from "../../../shared/action_runtime.ts";
 import { error, type Finding } from "../findings.ts";
-import { hasConflictMarker } from "../readers.ts";
 
-const TEXT_SUFFIXES = new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".py",
-  ".pyi",
-  ".yml",
-  ".yaml",
-  ".json",
-  ".md",
-  ".html",
-  ".css",
-  ".toml",
-  ".cfg",
-  ".ini",
-  ".txt",
-  ".sh",
-  ".astro",
-  ".template",
-]);
+/** Under the deadline src/run.ts gives the whole validator, so a hung git is reported by name. */
+const SEARCH_TIMEOUT_MS = 120_000;
 
-const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
+/** Counted, never literal: this file must pass its own scan. The carriage return is a checkout under core.autocrlf. */
+const MARKER_LINE = "^(<{7} |>{7} |={7}\r?$)";
 
-export function checkConflictMarkers(ctx: Context): Finding[] {
-  const findings: Finding[] = [];
-  for (const rel of ctx.files) {
-    const suffix = extname(rel);
-    if (!TEXT_SUFFIXES.has(suffix) && suffix !== "") continue;
-
-    let content: string;
-    try {
-      content = STRICT_UTF8.decode(readFileSync(join(ctx.root, rel)));
-    } catch {
-      continue;
-    }
-
-    if (hasConflictMarker(content)) {
-      findings.push(
-        error(
-          `${rel}: carries conflict-marker lines (a line opening with '<<<<<<< ' or '>>>>>>> ', or reading ` +
-            "'=======' whole) - resolve each conflict block, or move an example so no line reads as a marker",
-        ),
-      );
-    }
+/** The files under `root` that carry a conflict-marker line, as paths relative to it, in git's order: the files git
+ *  tracks and reads as text (`git grep -I`), whatever their names. An untracked file, a submodule's content, and a
+ *  file git reads as binary are not judged.
+ *
+ *  @throws {Error} git could not search `root` (it is no git checkout, say), or ran past its deadline */
+export function conflictMarkedFiles(root: string): string[] {
+  const options = ["-I", "-l", "-z", "--no-color", "--no-recurse-submodules"];
+  const searched = capture(["git", "-C", root, "grep", ...options, "-E", "-e", MARKER_LINE], {
+    timeoutMs: SEARCH_TIMEOUT_MS,
+  });
+  // git grep exits 1 for "no line matched", which is the clean tree.
+  const { exit } = searched;
+  if (exit.kind !== "exited" || exit.code > 1) {
+    throw new Error(`git grep failed in ${root}: ${failureDetail(searched)}`);
   }
 
-  return findings;
+  return searched.stdout.split("\0").filter((path) => path !== "");
+}
+
+export function checkConflictMarkers(marked: readonly string[]): Finding[] {
+  return marked.map((path) =>
+    error(
+      `${path}: carries conflict-marker lines (a line opening with '<<<<<<< ' or '>>>>>>> ', or reading ` +
+        "'=======' whole) - resolve each conflict block, or move an example so no line reads as a marker",
+    ),
+  );
 }

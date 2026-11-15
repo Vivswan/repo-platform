@@ -1,11 +1,8 @@
 #!/usr/bin/env bun
 import { resolve } from "node:path";
-import { checkConflictMarkers } from "./checks/conflict_markers.ts";
+import { checkConflictMarkers, conflictMarkedFiles } from "./checks/conflict_markers.ts";
 import { checkReleasePlease } from "./checks/release_please.ts";
-import { type Context, loadContext } from "./context.ts";
-import { type Finding, print, writeReport } from "./findings.ts";
-
-const CHECKS: ((ctx: Context) => Finding[])[] = [checkReleasePlease, checkConflictMarkers];
+import { print, writeReport } from "./findings.ts";
 
 function usageError(message: string): never {
   console.error(`error: ${message}`);
@@ -13,13 +10,14 @@ function usageError(message: string): never {
 }
 
 function main(): number {
-  const [root, ...rest] = process.argv.slice(2);
+  const [target, ...rest] = process.argv.slice(2);
   if (rest.length > 0) usageError(`unrecognized argument: ${rest[0]}`);
 
-  if (root?.startsWith("-")) usageError(`unrecognized argument: ${root}`);
+  if (target?.startsWith("-")) usageError(`unrecognized argument: ${target}`);
 
-  const ctx = loadContext(resolve(root ?? "."));
-  const findings = CHECKS.flatMap((check) => check(ctx));
+  const root = resolve(target ?? ".");
+  const marked = conflictMarkedFiles(root);
+  const findings = [...checkReleasePlease(root, marked), ...checkConflictMarkers(marked)];
   writeReport(findings, process.env);
   return print(findings);
 }
