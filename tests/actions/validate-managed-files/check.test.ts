@@ -145,7 +145,7 @@ describe("check.ts reports what the writer would hold", () => {
     const before = snapshotTree(target);
     const run = check(target);
     expect(run.exitCode).toBe(1);
-    expect(run.stdout).toMatch(new RegExp(`^${MANAGED.replace(".", "\\.")} held: `, "m"));
+    expect(run.stdout).toMatch(new RegExp(`^\`${MANAGED.replace(".", "\\.")}\` held: `, "m"));
     expect(snapshotTree(target)).toEqual(before);
     expect(run.leftovers).toEqual([]);
   });

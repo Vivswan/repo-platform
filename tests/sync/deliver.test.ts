@@ -907,7 +907,7 @@ describe("closedFences", () => {
 
 describe("boundedReport", () => {
   const review =
-    "\n### Review\n\nHold for review: **yes**\n\n- local edits replaced in README.md\n";
+    "\n### Review\n\nHold for review: **yes**\n\n- local edits replaced in `README.md`\n";
   const MARKER = "\n\n> [!WARNING]\n> ";
   const CUT = / characters of this section were cut to fit GitHub's body limit\.\n/;
   const omitted = (text: string) =>

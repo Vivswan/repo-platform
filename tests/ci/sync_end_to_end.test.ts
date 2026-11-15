@@ -516,7 +516,7 @@ describe("sync.ts end to end", () => {
         "LICENSE.md",
         "skills/alpha/README.md/LICENSE.md",
         "replaced",
-        "a file stood at ancestor 'skills/alpha/README.md'",
+        "a file stood at ancestor `skills/alpha/README.md`",
       ),
       mirror("LICENSE.md", "template/LICENSE.md", "replaced local edits"),
       mirror("LICENSE.md", "docs/LICENSE.md", "written"),
@@ -689,20 +689,20 @@ describe("sync.ts end to end", () => {
     );
     expect(summary.hold).toBe(true);
     expect(summary.holdReasons).toEqual([
-      ".gitattributes: the managed region was added above repository-owned content",
-      ".yamllint: the managed region was added above repository-owned content",
-      ".dockerignore: the managed region was added above repository-owned content",
-      "local edits replaced in .github/workflows/ci.yml",
-      "local edits replaced in .github/dependabot.yml",
-      "local edits replaced in constructor",
-      "local edits replaced in .github/copilot-instructions.md",
-      "local edits replaced in template/LICENSE.md",
-      "local edits replaced in skills/beta/LICENSE.md",
-      "local edits replaced in skills/gamma/LICENSE.md",
-      "retirement of .github/workflows/release.yml held: the content differs from the last write",
-      "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
-      "mirror plain replaced: a directory stood at the target",
-      "mirror skills/alpha/README.md/LICENSE.md replaced: a file stood at ancestor 'skills/alpha/README.md'",
+      "`.gitattributes`: the managed region was added above repository-owned content",
+      "`.yamllint`: the managed region was added above repository-owned content",
+      "`.dockerignore`: the managed region was added above repository-owned content",
+      "local edits replaced in `.github/workflows/ci.yml`",
+      "local edits replaced in `.github/dependabot.yml`",
+      "local edits replaced in `constructor`",
+      "local edits replaced in `.github/copilot-instructions.md`",
+      "local edits replaced in `template/LICENSE.md`",
+      "local edits replaced in `skills/beta/LICENSE.md`",
+      "local edits replaced in `skills/gamma/LICENSE.md`",
+      "retirement of `.github/workflows/release.yml` held: the content differs from the last write",
+      "retirement of `CONTRIBUTING.md`: the managed region was removed and the repository-owned content kept",
+      "mirror `plain` replaced: a directory stood at the target",
+      "mirror `skills/alpha/README.md/LICENSE.md` replaced: a file stood at ancestor `skills/alpha/README.md`",
       `registration: ${noWriterNote(".github/old-tool.yml")}`,
       `registration: ${noWriterNote(".github/workflows/release.yml")}`,
       `registration: ${noWriterNote("SECURITY.md")}`,
@@ -752,7 +752,7 @@ describe("sync.ts end to end", () => {
           !r.startsWith("mirror ") &&
           (!r.includes("manifest record") || r.includes("`.github/workflows/release.yml`")) &&
           !r.endsWith("the managed region was added above repository-owned content") &&
-          !r.startsWith("retirement of CONTRIBUTING.md"),
+          !r.startsWith("retirement of `CONTRIBUTING.md`"),
       ),
     );
     expect(snapshotTree(target)).toEqual(before);
@@ -798,8 +798,8 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
         ),
       ],
       holds: [
-        `${OVERLAY} held: ${DIRECTORY_HELD}`,
-        `${SETTINGS} held: ${OVERLAY} is a directory, which the render does not read through`,
+        `\`${OVERLAY}\` held: ${DIRECTORY_HELD}`,
+        `\`${SETTINGS}\` held: ${OVERLAY} is a directory, which the render does not read through`,
       ],
       still: (target: string) => {
         expect(existsSync(join(target, SETTINGS))).toBe(false);
@@ -810,7 +810,7 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
       reason: "a directory at the settings.yml path, no overlay",
       seed: (target: string) => dirWithInner(target, SETTINGS),
       rows: [row(OVERLAY, "starter", "created"), row(SETTINGS, "managed", "held", DIRECTORY_HELD)],
-      holds: [`${SETTINGS} held: ${DIRECTORY_HELD}`],
+      holds: [`\`${SETTINGS}\` held: ${DIRECTORY_HELD}`],
       still: (target: string) => {
         expect(readFileSync(join(target, SETTINGS, "inner.yml"), "utf-8")).toBe(THEIRS);
         expect(existsSync(join(target, OVERLAY))).toBe(true);
@@ -828,7 +828,7 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
       ],
       // No record vouches for its bytes, so the re-render is shown as a
       // replaced edit once, then recorded.
-      holds: [`local edits replaced in ${SETTINGS}`],
+      holds: [`local edits replaced in \`${SETTINGS}\``],
       still: (target: string) => {
         const text = readFileSync(join(target, SETTINGS), "utf-8");
         expect(text.startsWith("# Generated by repo-platform - do not edit.\n")).toBe(true);
@@ -860,7 +860,7 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
           "class changed from starter to managed; the record was stale, so the file was judged unrecorded",
         ),
       ],
-      holds: [`local edits replaced in ${SETTINGS}`],
+      holds: [`local edits replaced in \`${SETTINGS}\``],
       still: (target: string) => {
         const text = readFileSync(join(target, SETTINGS), "utf-8");
         expect(text.startsWith("# Generated by repo-platform - do not edit.\n")).toBe(true);

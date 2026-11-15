@@ -9,6 +9,7 @@ import { notice, setOutput, warning } from "@actions/core";
 import { z } from "zod";
 import { fail, requireEnv } from "../shared/gha.ts";
 import { GitHubClient, unansweredReason } from "../shared/github.ts";
+import { codeSpan } from "../shared/markdown_code.ts";
 import { loadLayer, sectionEntries } from "../sync/writer/settings_layers.ts";
 import {
   type DiffBase,
@@ -73,13 +74,13 @@ export function readDirective(labels: readonly string[], known: FleetSyncLabels)
   if (unknown.length > 0) {
     return {
       kind: "error",
-      error: `unknown fleet-sync label${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")}; the platform declares ${[...known.keys()].sort().join(" and ")}`,
+      error: `unknown fleet-sync label${unknown.length === 1 ? "" : "s"} ${unknown.map(codeSpan).join(", ")}; the platform declares ${[...known.keys()].sort().map(codeSpan).join(" and ")}`,
     };
   }
   if (scopes.length > 1) {
     return {
       kind: "error",
-      error: `${scopes.length} fleet-sync labels (${own.join(", ")}): one scope per merge`,
+      error: `${scopes.length} fleet-sync labels (${own.map(codeSpan).join(", ")}): one scope per merge`,
     };
   }
   return { kind: "fleet-sync", scope: scopes[0] };

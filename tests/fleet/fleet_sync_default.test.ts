@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { lstatSync } from "node:fs";
 import { join } from "node:path";
+import MarkdownIt from "markdown-it";
 import {
   DELIVERED_SURFACE,
   deliveredBySync,
@@ -17,6 +18,7 @@ import {
 import {
   FLEET_SYNC_OVERLAY,
   fleetSyncLabels,
+  readDirective,
 } from "../../.github/scripts/post-green/fleet_sync_marker.ts";
 import { BOT_LOGIN } from "../../.github/scripts/shared/sticky_comment.ts";
 import { loadLayer } from "../../.github/scripts/sync/writer/settings_layers.ts";
@@ -57,7 +59,8 @@ const KEPT_OFF_ONE = [
   `With no label the weekly schedule carries it. Details: [all-green.md](${DOCS}).`,
   "",
 ].join("\n");
-const TWO_SCOPES = "2 fleet-sync labels (fleet-sync:all, fleet-sync:public): one scope per merge";
+const TWO_SCOPES =
+  "2 fleet-sync labels (`fleet-sync:all`, `fleet-sync:public`): one scope per merge";
 
 const NEVER: LabelHistory = { lastAddedBy: null, removedBy: null };
 const BOT_ADDED: LabelHistory = { lastAddedBy: BOT_LOGIN, removedBy: null };
@@ -248,6 +251,20 @@ describe("plan", () => {
     );
     expect(lines[3 + LISTED_PATHS]).toBe("- and 2 more");
     expect(lines[4 + LISTED_PATHS]).toBe("");
+  });
+
+  // A label's name is whatever someone with triage rights typed. Named bare in the refusal, one spelled as a link is
+  // a live link in the bot's comment.
+  test("a label spelled as a link is code in the refusal the note quotes", () => {
+    const directive = readDirective(["fleet-sync:[click](https:evil.example)"], KNOWN);
+    if (directive.kind !== "error") throw new Error("the label was not refused");
+    const html = new MarkdownIt().render(
+      noteBody(["files.yml"], KNOWN, { kind: "refused", error: directive.error }),
+    );
+    expect({
+      links: (html.match(/<a /g) ?? []).length,
+      label: html.includes("<code>fleet-sync:[click](https:evil.example)</code>"),
+    }).toEqual({ links: 1, label: true });
   });
 
   // The listed paths are the pull request's own file names, and git lets a name hold a line break: kept, it would end

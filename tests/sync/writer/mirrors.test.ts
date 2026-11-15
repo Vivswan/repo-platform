@@ -218,7 +218,7 @@ describe("applyMirrors", () => {
     );
     expect(rows).toEqual([
       row("L.md", "adir", "replaced", "a directory stood at the target"),
-      row("L.md", "afile.txt/COPY.md", "replaced", "a file stood at ancestor 'afile.txt'"),
+      row("L.md", "afile.txt/COPY.md", "replaced", "a file stood at ancestor `afile.txt`"),
       row("L.md", "ldir", "replaced", "a directory stood at the target"),
       row("N.md", "skills/a/LICENSE.md", "replaced", "a directory stood at the target"),
     ]);

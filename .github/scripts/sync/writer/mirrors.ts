@@ -19,6 +19,7 @@ import {
 } from "../../../../actions/shared/mirror_pattern.ts";
 import { sha256 } from "../../../../actions/shared/values.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
+import { codeSpan } from "../../shared/markdown_code.ts";
 import {
   type MirrorRecord,
   mirrorKind,
@@ -223,7 +224,7 @@ function clearPath(target: string, path: string): string {
   const blocked = blockedAncestor(target, path);
   if (blocked !== null) {
     removeFile(target, blocked.dir);
-    detail = `a file stood at ancestor '${blocked.dir}'`;
+    detail = `a file stood at ancestor ${codeSpan(blocked.dir)}`;
   }
   if (lstatOrNull(join(target, path))?.isDirectory()) {
     removeTree(target, path);

@@ -78,25 +78,32 @@ export type SyncOutcome = z.infer<typeof syncOutcome>;
 
 export type SyncReport = z.infer<typeof syncReport>;
 
+/** One Markdown sentence per reason: a path is a repository's own file name, so each is named in a code span. */
 export function holdReasons(outcome: SyncOutcome): string[] {
   const reasons: string[] = [];
   for (const row of outcome.written) {
-    if (row.change === "held") reasons.push(`${row.path} held: ${row.detail}`);
+    const path = codeSpan(row.path);
+    if (row.change === "held") reasons.push(`${path} held: ${row.detail}`);
     if (row.change === "region added") {
-      reasons.push(`${row.path}: the managed region was added above repository-owned content`);
+      reasons.push(`${path}: the managed region was added above repository-owned content`);
     }
   }
-  for (const row of outcome.replaced) reasons.push(`local edits replaced in ${row.path}`);
+  for (const row of outcome.replaced) {
+    reasons.push(`local edits replaced in ${codeSpan(row.path)}`);
+  }
   for (const row of outcome.retired) {
-    if (row.outcome === "held") reasons.push(`retirement of ${row.path} held: ${row.detail}`);
+    const path = codeSpan(row.path);
+    if (row.outcome === "held") reasons.push(`retirement of ${path} held: ${row.detail}`);
     if (row.outcome === "region removed") {
       reasons.push(
-        `retirement of ${row.path}: the managed region was removed and the repository-owned content kept`,
+        `retirement of ${path}: the managed region was removed and the repository-owned content kept`,
       );
     }
   }
   for (const row of outcome.mirrors) {
-    if (row.outcome === "replaced") reasons.push(`mirror ${row.target} replaced: ${row.detail}`);
+    if (row.outcome === "replaced") {
+      reasons.push(`mirror ${codeSpan(row.target)} replaced: ${row.detail}`);
+    }
   }
   for (const note of outcome.notes) reasons.push(`registration: ${note}`);
   return reasons;

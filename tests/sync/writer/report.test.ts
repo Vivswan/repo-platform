@@ -67,12 +67,12 @@ describe("holdReasons", () => {
       ],
     };
     expect(holdReasons(loud)).toEqual([
-      "AGENTS.md held: a symbolic link sits where a file is declared",
-      ".gitignore: the managed region was added above repository-owned content",
-      "local edits replaced in ci.yml",
-      "retirement of r.yml held: the content differs from the last write",
-      "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
-      "mirror s/L replaced: a directory stood at the target",
+      "`AGENTS.md` held: a symbolic link sits where a file is declared",
+      "`.gitignore`: the managed region was added above repository-owned content",
+      "local edits replaced in `ci.yml`",
+      "retirement of `r.yml` held: the content differs from the last write",
+      "retirement of `CONTRIBUTING.md`: the managed region was removed and the repository-owned content kept",
+      "mirror `s/L` replaced: a directory stood at the target",
       "registration: placeholder `{{description}}` has no value: set project.description in .repo-platform.yml",
     ]);
     expect(buildReport(loud).hold).toBe(true);
@@ -226,10 +226,40 @@ describe("renderReport", () => {
       "- placeholder `{{bad ### Forged}}` has no value: set project.description in .repo-platform.yml",
     );
     expect(lines).toContain("| `LICENSE.md` | `x/bad ### Forged` | replaced | d |");
-    expect(lines).toContain("- local edits replaced in bad ### Forged");
+    expect(lines).toContain("- local edits replaced in `bad ### Forged`");
     expect(lines).toContain(
       "- registration: placeholder `{{bad ### Forged}}` has no value: set project.description in .repo-platform.yml",
     );
+  });
+
+  // A path is a repository's own file name and a manifest's own key. Named bare in a Review sentence, one spelled as
+  // a link is a live link in the pull request body and the branch comment.
+  test("a path spelled as a link is code in every Review sentence that names it", () => {
+    const link = "[click](https:evil.example)";
+    const text = renderReport(
+      buildReport({
+        ...QUIET,
+        written: [{ path: link, class: "managed", change: "held", detail: "d" }],
+        replaced: [{ path: link, diff: "" }],
+        retired: [
+          { path: link, outcome: "held", detail: "the content differs from the last write" },
+        ],
+        mirrors: [{ source: "L", target: `${link}/copy`, outcome: "replaced", detail: "d" }],
+      }),
+    );
+    const rendered = new MarkdownIt().render(text);
+    expect({
+      links: rendered.includes("<a "),
+      review: rendered.split("\n").filter((line) => line.startsWith("<li>")),
+    }).toEqual({
+      links: false,
+      review: [
+        `<li><code>${link}</code> held: d</li>`,
+        `<li>local edits replaced in <code>${link}</code></li>`,
+        `<li>retirement of <code>${link}</code> held: the content differs from the last write</li>`,
+        `<li>mirror <code>${link}/copy</code> replaced: d</li>`,
+      ],
+    });
   });
 
   // CommonMark: a bare CR ends a line, so a quoted backtick run behind one can close a fence sized by LF lines

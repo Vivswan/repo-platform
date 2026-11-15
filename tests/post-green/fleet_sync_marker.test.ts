@@ -18,9 +18,10 @@ const temp = tempDirs();
 
 const PUBLIC: Directive = { kind: "fleet-sync", scope: "public" };
 const NONE: Directive = { kind: "none" };
-const TWO_SCOPES = "2 fleet-sync labels (fleet-sync:all, fleet-sync:public): one scope per merge";
+const TWO_SCOPES =
+  "2 fleet-sync labels (`fleet-sync:all`, `fleet-sync:public`): one scope per merge";
 const UNKNOWN = (...names: string[]) =>
-  `unknown fleet-sync label${names.length === 1 ? "" : "s"} ${names.join(", ")}; the platform declares fleet-sync:all and fleet-sync:public`;
+  `unknown fleet-sync label${names.length === 1 ? "" : "s"} ${names.map((name) => `\`${name}\``).join(", ")}; the platform declares \`fleet-sync:all\` and \`fleet-sync:public\``;
 
 test("a label is lowercased and scoped by its suffix; a label of another kind is not one", () => {
   const declared = (...names: string[]) => ({
