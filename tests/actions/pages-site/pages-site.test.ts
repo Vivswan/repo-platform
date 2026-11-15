@@ -21,6 +21,7 @@ import {
   routeOf,
   walkMarkdown,
 } from "../../../actions/pages-site/.vitepress/derive.ts";
+import { deriveSidebar, fileSource } from "../../../actions/pages-site/.vitepress/sidebar.ts";
 import { tokenNames } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 import {
   assertCentralTheme,
@@ -555,56 +556,56 @@ describe("derive", () => {
       "the first heading is the title",
       "setup.md",
       "# Getting started\n",
-      { title: "Getting started", order: null, group: null },
+      { title: "Getting started", declaredTitle: null, order: null, group: null },
     ],
     [
       "no heading: the humanized file name",
       "guide/deep-dive.md",
       "no heading here\n",
-      { title: "deep dive", order: null, group: null },
+      { title: "deep dive", declaredTitle: null, order: null, group: null },
     ],
     [
       "order and group read as written, the title from the heading below them",
       "pages.md",
       "---\norder: 20\ngroup: Modules\n---\n\n# Pages\n",
-      { title: "Pages", order: 20, group: "Modules" },
+      { title: "Pages", declaredTitle: null, order: 20, group: "Modules" },
     ],
     [
       "a title key wins over the heading, as it does for VitePress's own page title",
       "pages.md",
       "---\ntitle: Pages module\n---\n\n# Pages\n",
-      { title: "Pages module", order: null, group: null },
+      { title: "Pages module", declaredTitle: "Pages module", order: null, group: null },
     ],
     [
       "a heading inside the frontmatter is not the page's heading",
       "pages.md",
       "---\ndescription: '# not a heading'\n---\n\nno heading\n",
-      { title: "pages", order: null, group: null },
+      { title: "pages", declaredTitle: null, order: null, group: null },
     ],
     // The four below: a title read by a line pattern, not by the renderer, puts a row in the sidebar that the page's own title contradicts.
     [
       "a # line inside a code fence is not a heading",
       "guide/set-up.md",
       "Intro.\n\n```sh\n# install deps\nbun install\n```\n",
-      { title: "set up", order: null, group: null },
+      { title: "set up", declaredTitle: null, order: null, group: null },
     ],
     [
       "a code span reads as its text",
       "plan.md",
       "# The `plan` action\n",
-      { title: "The plan action", order: null, group: null },
+      { title: "The plan action", declaredTitle: null, order: null, group: null },
     ],
     [
       "a setext heading is the title",
       "page.md",
       "My Title\n========\n",
-      { title: "My Title", order: null, group: null },
+      { title: "My Title", declaredTitle: null, order: null, group: null },
     ],
     [
       "a link, emphasis and a closing # read as their text",
       "fleet.md",
       "# [Fleet](https://x.y) **guide** #\n",
-      { title: "Fleet guide", order: null, group: null },
+      { title: "Fleet guide", declaredTitle: null, order: null, group: null },
     ],
   ])("%s", (_, file, source, expected) => {
     expect(pageMeta(md, "/repo/docs", file, source)).toEqual(expected);
@@ -615,7 +616,12 @@ describe("derive", () => {
     const dir = temp.dir("derive-");
     writeFileSync(join(dir, "install.sh"), "# install deps\nbun install\n");
     writeFileSync(join(dir, "guide.md"), "# Guide\n\n<<< ./install.sh\n");
-    expect(readPage(md, dir, "guide.md")).toEqual({ title: "Guide", order: null, group: null });
+    expect(readPage(md, dir, "guide.md")).toEqual({
+      title: "Guide",
+      declaredTitle: null,
+      order: null,
+      group: null,
+    });
   });
 
   // The error names the page for the fleet's docs-check. `.nan` is YAML's not-a-number spelling and gray-matter reads
@@ -630,6 +636,32 @@ describe("derive", () => {
     expect(() =>
       pageMeta(md, "/repo/docs", "modules/pages.md", `---\n${line}\n---\n\n# Pages\n`),
     ).toThrow(`modules/pages.md: frontmatter ${message}`);
+  });
+
+  // The directory's place is read from real files by the reader every page uses, so a README's h1 never relabels its
+  // folder and a malformed `order` there stops the build with the page's own message, not a sidebar sorted by it.
+  test("a directory README's keys reach the sidebar through the page reader: the `title` key labels, the h1 does not, a malformed `order` names the README", () => {
+    const dir = temp.dir("derive-");
+    writeFileSync(join(dir, "README.md"), "# Home\n");
+    for (const [name, readme] of [
+      ["start", "---\ntitle: Start here\norder: 1\n---\n\n# Start\n"],
+      ["about", "# About this project\n"],
+    ]) {
+      mkdirSync(join(dir, name));
+      writeFileSync(join(dir, name, "README.md"), readme);
+    }
+
+    const files = walkMarkdown(dir);
+    expect(deriveSidebar(files, fileSource(md, dir))).toEqual([
+      { text: "Home", link: "/" },
+      { text: "Start here", collapsed: false, items: [{ text: "Start here", link: "/start/" }] },
+      { text: "About", collapsed: false, items: [{ text: "About this project", link: "/about/" }] },
+    ]);
+
+    writeFileSync(join(dir, "about", "README.md"), "---\norder: first\n---\n\n# About\n");
+    expect(() => deriveSidebar(files, fileSource(md, dir))).toThrow(
+      `about/README.md: frontmatter 'order' must be a number, got "first"`,
+    );
   });
 
   // `search-index.md` as a directory index, or a README beside an index.md, would be two files on one route,

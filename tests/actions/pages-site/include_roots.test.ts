@@ -152,7 +152,12 @@ describe("include root routes", () => {
       "getting started now",
     ],
   ])("titles a page with %s", (_, file, source, title) => {
-    expect(pageMeta(md, "/repo/docs", file, source)).toEqual({ title, order: null, group: null });
+    expect(pageMeta(md, "/repo/docs", file, source)).toEqual({
+      title,
+      declaredTitle: null,
+      order: null,
+      group: null,
+    });
   });
 });
 

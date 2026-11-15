@@ -198,7 +198,19 @@ The docs mount carries the tag rules:
 
 - **The landing page:** `docs/README.md` is the landing page and must exist; each directory's `README.md` is its index.
 
-- **Sidebar and nav** derive from the file tree and each page's frontmatter: `title` (else the h1, else the file name), `order` (a number, ascending; pages without one follow, by title), `group` (a heading placed where the group's first member falls). A directory reads as its folder name with each word capitalized, after the level's pages.
+- **Sidebar and nav** derive from the file tree and each page's frontmatter: `title` (else the h1, else the file name), `order` (a number, ascending; pages without one follow, by title), `group` (a heading placed where the group's first member falls).
+
+- **A directory** takes its place and its title from its own `README.md`, by the same two keys. One level reads: its landing page, then pages and directories with `order` in one list (ascending, ties by title), then the other pages by title, then the other directories by folder name.
+
+  | The directory's `README.md` says | Its place in the level          | Its title                              |
+  | -------------------------------- | ------------------------------- | -------------------------------------- |
+  | `order: 1`                       | ranked with the level's pages   | the `title` key, else the folder name  |
+  | `title: Start here`              | after the pages, by folder name | `Start here`                           |
+  | neither, or there is no README   | after the pages, by folder name | the folder name, each word capitalized |
+
+  The README's h1 titles its own row, never the directory. Its `group` stays inside the directory too: it heads the README's row there.
+
+  An included root's page ([below](#other-roots-on-the-site-siteinclude)) is an article, not a landing page: its keys place it inside its directory.
 
 - **An h1 titles its row as it titles the page,** by its text: ``# The `plan` action`` is the row "The plan action".
 
