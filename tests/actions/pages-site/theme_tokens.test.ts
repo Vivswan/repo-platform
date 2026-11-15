@@ -4,13 +4,29 @@
 //   carbon `.result.selected { ... }` reads                                -> live, a scoped rule still beats :root
 
 import { expect, test } from "bun:test";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import postcss from "postcss";
+import valueParser from "postcss-value-parser";
 import {
   MODES,
   modeValues,
   tokenNames,
 } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
+
+interface SfcBlock {
+  content: string;
+}
+
+interface SfcParse {
+  descriptor: {
+    template: SfcBlock | null;
+    script: SfcBlock | null;
+    scriptSetup: SfcBlock | null;
+    styles: SfcBlock[];
+  };
+  errors: Error[];
+}
 
 const ACTION = resolve(import.meta.dir, "../../../actions/pages-site");
 const THEME = join(ACTION, ".vitepress/theme");
@@ -19,41 +35,72 @@ const CARBON = join(ACTION, "node_modules/vitepress-carbon/dist");
 const { createCssVariablesTheme } = (await import(Bun.resolveSync("shiki", ACTION))) as {
   createCssVariablesTheme: (options: { variablePrefix: string }) => unknown;
 };
+const { parse: parseSfc } = (await import(Bun.resolveSync("vue/compiler-sfc", ACTION))) as {
+  parse: (source: string) => SfcParse;
+};
 
-const DECLARATION = /^\s*(--[a-z0-9-]+)\s*:([^;]*)/gm;
-const VAR_READ = /var\(\s*(--[a-z0-9-]+)/g;
+const TEXT_VAR_READ = /var\(\s*(--[\w-]+)/g;
 const ROOT_SELECTORS = new Set([":root", ".dark"]);
 
 function filesUnder(dir: string, exts: string[]): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry);
-    if (statSync(path).isDirectory()) out.push(...filesUnder(path, exts));
-    else if (exts.some((ext) => entry.endsWith(ext))) out.push(path);
-  }
-  return out;
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && exts.some((ext) => entry.name.endsWith(ext)))
+    .map((entry) => join(entry.parentPath, entry.name));
 }
 
-function tokens(text: string, pattern: RegExp): string[] {
-  return [...text.matchAll(pattern)].map((match) => match[1]);
+/** The var() reads of text that is not CSS (script, template, JSON), where no CSS parser applies. */
+function textReads(text: string): string[] {
+  return [...text.matchAll(TEXT_VAR_READ)].map((match) => match[1]);
 }
 
-function liveCarbonReads(text: string, overridden: Set<string>): string[] {
+function valueReads(value: string): string[] {
+  const reads: string[] = [];
+  valueParser(value).walk((node) => {
+    if (node.type !== "function" || node.value.toLowerCase() !== "var") return;
+
+    const name = node.nodes.at(0);
+    if (name?.type === "word") reads.push(name.value);
+  });
+  return reads;
+}
+
+function customProperties(css: string): string[] {
+  const names: string[] = [];
+  postcss.parse(css).walkDecls(/^--/, (declaration) => {
+    names.push(declaration.prop);
+  });
+  return names;
+}
+
+/** Every var() a stylesheet reads, less the ones in a :root or .dark declaration of a property in `overridden`. */
+function liveCssReads(css: string, overridden: ReadonlySet<string>): string[] {
   const live: string[] = [];
-  for (const block of text.split("}")) {
-    const brace = block.lastIndexOf("{");
-    const selector = block.slice(0, brace).trim().split("\n").at(-1)?.trim() ?? "";
-    const body = block.slice(brace + 1);
-    live.push(...tokens(block.slice(0, brace + 1), VAR_READ));
-    if (!ROOT_SELECTORS.has(selector)) {
-      live.push(...tokens(body, VAR_READ));
-      continue;
-    }
-    for (const match of body.matchAll(DECLARATION)) {
-      if (!overridden.has(match[1])) live.push(...tokens(match[2], VAR_READ));
-    }
-  }
+  postcss.parse(css).walkDecls((declaration) => {
+    const rule = declaration.parent;
+    const atRoot =
+      rule?.type === "rule" && rule.selectors.every((selector) => ROOT_SELECTORS.has(selector));
+    if (atRoot && overridden.has(declaration.prop)) return;
+
+    live.push(...valueReads(declaration.value));
+  });
   return live;
+}
+
+/** A carbon source by kind: a stylesheet and a component's style blocks are parsed as CSS; a component's
+ *  template and script, and a .js module, are scanned as text, where every read is live. */
+function liveCarbonReads(path: string, overridden: ReadonlySet<string>): string[] {
+  const text = readFileSync(path, "utf-8");
+  if (path.endsWith(".css")) return liveCssReads(text, overridden);
+  if (!path.endsWith(".vue")) return textReads(text);
+
+  const { descriptor, errors } = parseSfc(text);
+  if (errors.length > 0) throw new Error(`${path}: ${errors[0].message}`);
+
+  const code = [descriptor.template, descriptor.script, descriptor.scriptSetup];
+  return [
+    ...code.flatMap((block) => textReads(block?.content ?? "")),
+    ...descriptor.styles.flatMap((style) => liveCssReads(style.content, overridden)),
+  ];
 }
 
 /** Built the way config.mts builds it, so a renamed prefix or a token shiki stopped reading shows up as an unread declaration.
@@ -68,18 +115,15 @@ function shikiReads(): { all: string[]; colored: string[] } {
     tokenColors: unknown[];
   };
   return {
-    all: tokens(JSON.stringify(theme), VAR_READ),
-    colored: tokens(
-      JSON.stringify([theme.tokenColors, theme.colors["editor.foreground"]]),
-      VAR_READ,
-    ),
+    all: textReads(JSON.stringify(theme)),
+    colored: textReads(JSON.stringify([theme.tokenColors, theme.colors["editor.foreground"]])),
   };
 }
 
 function themeDeclarations(): Set<string> {
   const declared = new Set<string>(tokenNames());
   for (const file of filesUnder(THEME, [".css"])) {
-    for (const token of tokens(readFileSync(file, "utf-8"), DECLARATION)) declared.add(token);
+    for (const token of customProperties(readFileSync(file, "utf-8"))) declared.add(token);
   }
   return declared;
 }
@@ -87,11 +131,14 @@ function themeDeclarations(): Set<string> {
 test("every custom property the theme declares has a live var() reader", () => {
   const declared = themeDeclarations();
   const read = new Set<string>();
-  for (const file of filesUnder(THEME, [".css", ".ts"])) {
-    for (const token of tokens(readFileSync(file, "utf-8"), VAR_READ)) read.add(token);
+  for (const file of filesUnder(THEME, [".css"])) {
+    for (const token of liveCssReads(readFileSync(file, "utf-8"), new Set())) read.add(token);
+  }
+  for (const file of filesUnder(THEME, [".ts"])) {
+    for (const token of textReads(readFileSync(file, "utf-8"))) read.add(token);
   }
   for (const file of filesUnder(CARBON, [".css", ".vue", ".js"])) {
-    for (const token of liveCarbonReads(readFileSync(file, "utf-8"), declared)) read.add(token);
+    for (const token of liveCarbonReads(file, declared)) read.add(token);
   }
   const shiki = shikiReads();
   expect(shiki.colored).toContain("--fleet-code-token-comment");
@@ -114,12 +161,12 @@ test("every custom property the theme declares has a live var() reader", () => {
     "  color: var(--v);",
     "}",
   ].join("\n");
-  expect(liveCarbonReads(synthetic, new Set(["--a"])).sort()).toEqual(["--v", "--w", "--y"]);
-  const vars = readFileSync(join(CARBON, "theme/styles/vars.css"), "utf-8");
-  expect(tokens(vars, VAR_READ)).toContain("--vp-c-default-3");
+  expect(liveCssReads(synthetic, new Set(["--a"])).sort()).toEqual(["--v", "--w", "--y"]);
+  const vars = join(CARBON, "theme/styles/vars.css");
+  expect(liveCarbonReads(vars, new Set())).toContain("--vp-c-default-3");
   expect(declared.has("--vp-button-alt-bg")).toBe(true);
   expect(liveCarbonReads(vars, declared)).not.toContain("--vp-c-default-3");
-  const search = readFileSync(join(CARBON, "theme/components/VPLocalSearchBox.vue"), "utf-8");
+  const search = join(CARBON, "theme/components/VPLocalSearchBox.vue");
   expect(declared.has("--vp-local-search-result-bg")).toBe(true);
   expect(liveCarbonReads(search, declared)).toContain("--vp-local-search-result-selected-bg");
 });
@@ -132,4 +179,13 @@ test.each([...MODES])("every token color the shiki theme emits has a %s value", 
   const declared = new Set<string>(modeValues(mode).keys());
   const undeclared = [...new Set(shikiReads().colored)].filter((token) => !declared.has(token));
   expect(undeclared).toEqual([]);
+});
+
+// The classification reads CSS as CSS: a reader that guesses rules from lines and braces loses a read or counts a dead one.
+test.each([
+  ["a one-line rule", ":root { --a: var(--x); --b: var(--y); }", ["--y"]],
+  ["a brace inside a comment", ":root {\n  /* } */\n  --a: var(--x);\n}", []],
+  ["an upper-case name", ".scoped { color: var(--Brand); }", ["--Brand"]],
+])("the live reads of %s are the ones a browser resolves", (_shape, css, live) => {
+  expect(liveCssReads(css, new Set(["--a"]))).toEqual(live);
 });
