@@ -13,6 +13,7 @@ import { RELEASE_BRANCH_PREFIX } from "../../actions/shared/platform.ts";
 import {
   conditionSource,
   contextRead,
+  evaluateCondition,
   hasStatusFunction,
   parseExpression,
   printed,
@@ -349,4 +350,21 @@ describe("fleet.yml", () => {
       skeletonReadsWalked: true,
     });
   });
+});
+
+// GitHub fails a job whose condition errors, and fromJSON errors on the empty text a failed plan's output reads as.
+// Every other clause holds here, so the job's own sentinel is what keeps a failed plan a skip and not a second red.
+test("fleet.yml: a job selected by module stands down, without an error, after a plan that published no modules", () => {
+  const verdicts = Object.entries(fleet.jobs)
+    .filter(([, job]) => job.if?.includes(`fromJSON(needs.${CHECKS_JOB}.outputs.modules)`))
+    .map(([id, job]) => [
+      id,
+      evaluateCondition(job.if ?? "", {
+        "github.event_name": "pull_request",
+        "github.head_ref": `${RELEASE_BRANCH_PREFIX}branches--main`,
+        [`needs.${CHECKS_JOB}.result`]: "failure",
+      }),
+    ]);
+
+  expect(Object.fromEntries(verdicts)).toEqual({ "docs-check": false, "release-pr": false });
 });
