@@ -4,9 +4,12 @@ description: |
   audit, under the fleet policy shipped beside this action (a repository's own zizmor config is not read). A medium or
   low finding neither blocks nor surfaces.
 
-  Two passes of the one pinned zizmor under the same policy: a SARIF pass for code scanning (public repositories only,
-  as private personal repositories have none; zizmor exits 0 in SARIF mode whatever it finds) and a plain pass whose
-  exit is the verdict, so a high finding fails the step.
+  Two passes of zizmor's own action at one pin, under the same policy: one writes SARIF and uploads it to code scanning
+  (public repositories only, as private personal repositories have none; it passes whatever it finds), and a plain one
+  whose exit is the verdict, so a high finding fails the step.
+
+  The action pin is the zizmor pin: each release of the action carries one exact zizmor with its wheel hashes, so the
+  `version` input stays unset and Dependabot's bump of the pin is the zizmor bump.
 
   The one bypass is zizmor's own: a `# zizmor: ignore[rule]` comment on the finding's line, with the reason beside it.
 
@@ -23,10 +26,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install zizmor
-      shell: bash
-      run: python3 -m pip install --quiet --requirement "$GITHUB_ACTION_PATH/requirements.txt"
-
     - name: Render the fleet policy
       shell: bash
       env:
@@ -34,22 +33,17 @@ runs:
         OWNER: ${{ github.repository_owner }}
       run: sed "s|{{github_username}}|$OWNER|g" "$FLEET_POLICY" > "$RUNNER_TEMP/zizmor.yml"
 
-    - name: Write the high findings as SARIF
-      if: inputs.upload-sarif == 'true'
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: zizmor --config "$RUNNER_TEMP/zizmor.yml" --min-severity high --format sarif . > "$RUNNER_TEMP/zizmor.sarif"
-
     - name: Upload the high findings to code scanning
       if: inputs.upload-sarif == 'true'
-      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
       with:
-        sarif_file: ${{ runner.temp }}/zizmor.sarif
-        category: zizmor
+        config: ${{ runner.temp }}/zizmor.yml
+        min-severity: high
+        advanced-security: "true"
 
     - name: Fail on a high finding
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: zizmor --config "$RUNNER_TEMP/zizmor.yml" --min-severity high .
+      uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+      with:
+        config: ${{ runner.temp }}/zizmor.yml
+        min-severity: high
+        advanced-security: "false"
