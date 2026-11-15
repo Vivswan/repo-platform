@@ -10,6 +10,9 @@ const NEEDS_PADDING = /^[` ]|[` ]$/;
 /** A code span holding spaces alone is kept as written, so padding would add to it. */
 const ONLY_SPACES = /^ +$/;
 
+/** CommonMark ends a line on LF, CR, or CRLF, and no other character. */
+const LINE_BREAKS = /[\r\n]+/g;
+
 /** What stands for no text. Markdown has no empty code span: two backticks open a span that the next delimiter on the line closes. */
 const EMPTY = "(empty)";
 
@@ -23,12 +26,22 @@ export function fenced(text: string, info: string): string[] {
   return [`${fence}${info}`, text, fence];
 }
 
-/** `text` as an inline code span, or fixed words outside any span for no text; the caller keeps it on one line. */
+/**
+ * `text` with each run of line breaks as one space.
+ *
+ * A line break ends a list item, a table row, or a heading, and what follows it opens a Markdown block of its own.
+ */
+export function oneLine(text: string): string {
+  return text.replace(LINE_BREAKS, " ");
+}
+
+/** `text` as an inline code span, or fixed words outside any span for no text. The span is always one line: `oneLine` flattens `text` first. */
 export function codeSpan(text: string): string {
   if (text === "") return EMPTY;
 
-  const ticks = "`".repeat(longestRun(text) + 1);
-  const pad = NEEDS_PADDING.test(text) && !ONLY_SPACES.test(text) ? " " : "";
+  const line = oneLine(text);
+  const ticks = "`".repeat(longestRun(line) + 1);
+  const pad = NEEDS_PADDING.test(line) && !ONLY_SPACES.test(line) ? " " : "";
 
-  return `${ticks}${pad}${text}${pad}${ticks}`;
+  return `${ticks}${pad}${line}${pad}${ticks}`;
 }

@@ -56,7 +56,7 @@ function commentBody(
   input: { build: string; branch: string; runUrl: string },
 ): string {
   const build = `Build \`${input.build}\``;
-  const branch = `\`${input.branch}\``;
+  const branch = codeSpan(input.branch);
   const run = `([run](${input.runUrl}))`;
   const report = (text: string) => ["", boundedReport(text).replace(/\n$/, "")];
   const quoted = (text: string) => ["", ...fenced(text.replace(/\n$/, ""), "text")];
@@ -72,7 +72,7 @@ function commentBody(
       case "workflow files":
         return [
           `${build} NOT pushed: the sync changes ${outcome.paths.map(codeSpan).join(", ")}, and the repository token cannot create or update a workflow file ${run}.`,
-          `The owner's dispatch of sync-repos.yml in ${PLATFORM_SLUG} with \`repo=<owner>/<name>\` and \`branch=${input.branch}\` pushes the same commit with the fleet token.`,
+          `The owner's dispatch of sync-repos.yml in ${PLATFORM_SLUG} with \`repo=<owner>/<name>\` and ${codeSpan(`branch=${input.branch}`)} pushes the same commit with the fleet token.`,
           ...report(outcome.report),
         ];
       case "unchanged":

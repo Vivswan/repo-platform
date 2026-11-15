@@ -29,6 +29,7 @@ const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/deliver_branch.ts");
 const REPOSITORY = "Vivswan/some-repo";
 const BRANCH = "feat/take-the-module";
+const TICKED_BRANCH = "topic`__forged__`tail";
 const BUILD = "abcdef0123456789abcdef0123456789abcdef01";
 const TIP = "1111111111111111111111111111111111111111";
 const PUSHED = "2222222222222222222222222222222222222222";
@@ -70,6 +71,7 @@ interface Options {
   migrate?: "success" | "failure";
   writer?: "success" | "failure" | "skipped";
   hold?: boolean;
+  branch?: string;
   stub?: Record<string, string>;
   written?: (root: string) => SyncReport;
   label?: FakeReply;
@@ -129,7 +131,7 @@ function run(options: Options = {}): Run {
       RUNNER_TEMP: runnerTemp,
       GITHUB_REPOSITORY: REPOSITORY,
       PR_NUMBER: "42",
-      BRANCH,
+      BRANCH: options.branch ?? BRANCH,
       RUN_URL,
       GH_TOKEN: "ghs_SENTINEL",
       GITHUB_API_URL: `${api.host}/${name}`,
@@ -221,6 +223,33 @@ describe("the branch delivery's outcomes", () => {
         "NOT pushed: the sync changes `.github/workflows/ci.yml`, `.github/workflows/nightly.yml`",
         "sync-repos.yml in Vivswan/repo-platform with `repo=<owner>/<name>` and `branch=feat/take-the-module`",
       ],
+      saysNot: [APPROVAL],
+    },
+    {
+      // A path with a line break would end the comment's sentence and open a heading of its own; git lets a branch
+      // name hold backticks, and one backtick each side would close on the name's own.
+      reason:
+        "a workflow file whose name holds line breaks, on a branch whose name holds backticks: red, each inside its span",
+      options: {
+        branch: TICKED_BRANCH,
+        stub: { STUB_CHANGED: ".github/workflows/a\\n\\n# forged.yml\\0" },
+      },
+      exitCode: 1,
+      committed: false,
+      pushAttempted: false,
+      says: [
+        "NOT pushed: the sync changes `.github/workflows/a # forged.yml`, and the repository token cannot",
+        `and \`\`branch=${TICKED_BRANCH}\`\` pushes the same commit`,
+      ],
+      saysNot: [APPROVAL],
+    },
+    {
+      reason: "unchanged on a branch whose name holds backticks: green, the name inside its span",
+      options: { branch: TICKED_BRANCH, stub: { STUB_CHANGED: "", STUB_AUTHOR: "octocat" } },
+      exitCode: 0,
+      committed: false,
+      pushAttempted: false,
+      says: [`: \`\`${TICKED_BRANCH}\`\` already matches it, nothing pushed`],
       saysNot: [APPROVAL],
     },
     {

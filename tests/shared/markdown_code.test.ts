@@ -31,11 +31,51 @@ describe("the Markdown code delimiters", () => {
     expect(html).toBe(`(empty): <code>${link}</code>`);
   });
 
+  // A file name may hold a line break, and a pull request picks its file names. A span that kept the break would end
+  // at it: the rest of the name would render as blocks of its own in a comment the bot posts.
+  test("a name written to leave its span renders as one code span, with no heading and no link", () => {
+    const forged = "actions/\n\n# forged\n\n[click](https:evil.example)";
+    expect(markdown.render(`- ${codeSpan(forged)}`)).toBe(
+      "<ul>\n<li><code>actions/ # forged [click](https:evil.example)</code></li>\n</ul>\n",
+    );
+  });
+
+  // CommonMark's line endings are LF, CR, and CRLF. The other separators and the tab are text inside a span, as
+  // GitHub's renderer agrees, so they stay as written.
+  test.each([
+    ["a line feed", "a\n# b", "a # b"],
+    ["a carriage return", "a\r# b", "a # b"],
+    ["a CRLF", "a\r\n# b", "a # b"],
+    ["a blank line", "a\n\n# b", "a # b"],
+    ["mixed breaks in one run", "a\r\n\r\n\n\r# b", "a # b"],
+    ["a break at each end", "\na\n", " a "],
+    ["a break alone", "\n", " "],
+    ["a break beside a backtick", "`\n``", "` ``"],
+    ["a line separator", "a\u2028# b", "a\u2028# b"],
+    ["a paragraph separator", "a\u2029# b", "a\u2029# b"],
+    ["a form feed", "a\f# b", "a\f# b"],
+    ["a vertical tab", "a\v# b", "a\v# b"],
+    ["a tab", "a\t# b", "a\t# b"],
+  ])("a code span holding %s is one line of code", (_kind, text, shown) => {
+    expect(markdown.render(`- ${codeSpan(text)}`)).toBe(
+      `<ul>\n<li><code>${shown}</code></li>\n</ul>\n`,
+    );
+  });
+
+  // A comment already posted is replaced by its text: a name with no line break keeps the spelling it had.
+  test("a name with no line break is spelled as it was before the span flattened its text", () => {
+    expect(codeSpan(".github/workflows/ci.yml")).toBe("`.github/workflows/ci.yml`");
+  });
+
   test.each([
     "no backticks",
     "```\n### a fence line of its own\n```",
     "a ````` run mid-line",
     "-old\r````\r### behind a bare CR",
+    "~~~~\n### a tilde fence line\n~~~~",
+    "    ```\n### a fence line indented as code",
+    "ends on a fence line of its own\n```",
+    "",
   ])("a fenced block holds %p whole", (text) => {
     const tokens = markdown.parse(fenced(text, "text").join("\n"), {});
     // markdown-it reads a bare CR as the line ending CommonMark says it is.

@@ -249,6 +249,15 @@ describe("plan", () => {
     expect(lines[3 + LISTED_PATHS]).toBe("- and 2 more");
     expect(lines[4 + LISTED_PATHS]).toBe("");
   });
+
+  // The listed paths are the pull request's own file names, and git lets a name hold a line break: kept, it would end
+  // the list item and the rest of the name would be a heading and a link in the bot's comment.
+  test("a file name holding line breaks is one list item of the note", () => {
+    const forged = "actions/\n\n# forged\n\n[click](https:evil.example)";
+    expect(
+      noteBody([forged, "files.yml"], KNOWN, { kind: "added" }).split("\n").slice(2, 6),
+    ).toEqual(["", "- `actions/ # forged [click](https:evil.example)`", "- `files.yml`", ""]);
+  });
 });
 
 describe("main", () => {

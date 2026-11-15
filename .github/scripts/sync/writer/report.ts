@@ -3,7 +3,7 @@
 import { createTwoFilesPatch, FILE_HEADERS_ONLY } from "diff";
 import { z } from "zod";
 import type { FileClass } from "../../../../actions/plan/files_config.ts";
-import { codeSpan, fenced } from "../../shared/markdown_code.ts";
+import { codeSpan, fenced, oneLine } from "../../shared/markdown_code.ts";
 import type { MirrorRow } from "./mirrors.ts";
 import type { RetireRow } from "./retire.ts";
 import type { Change } from "./write_managed.ts";
@@ -136,13 +136,7 @@ export function unifiedDiff(
   return `${lines.slice(0, cap).join("\n")}\n... (${lines.length - cap} more diff lines)`;
 }
 
-/** Registration values and manifest paths reach the report verbatim; a newline inside one would end its cell, list item, or heading and let the rest of the value open a Markdown block of its own (a heading, a fence). */
-const oneLine = (text: string) => text.replace(/[\r\n]+/g, " ");
-
-/** An inline code span, flattened first: a newline would end it. */
-const code = (text: string) => codeSpan(oneLine(text));
-
-/** A pipe inside a cell would split it; the escape keeps the column count. */
+/** A cell, flattened first: a newline would end its row. A pipe inside it would split it; the escape keeps the column count. */
 const cell = (text: string) => oneLine(text).replaceAll("|", "\\|");
 
 /** A list item, flattened first: a newline would end it. */
@@ -161,8 +155,8 @@ export function renderReport(report: SyncReport): string {
       ["Build", "Modules", "Visibility"],
       [
         [
-          code(report.build),
-          report.modules.length === 0 ? "(none)" : report.modules.map(code).join(", "),
+          codeSpan(report.build),
+          report.modules.length === 0 ? "(none)" : report.modules.map(codeSpan).join(", "),
           report.private ? "private" : "public",
         ],
       ],
@@ -174,7 +168,7 @@ export function renderReport(report: SyncReport): string {
       ? "Nothing selected."
       : table(
           ["Path", "Class", "Change", "Detail"],
-          report.written.map((row) => [code(row.path), row.class, row.change, row.detail]),
+          report.written.map((row) => [codeSpan(row.path), row.class, row.change, row.detail]),
         ),
   ];
   if (report.replaced.length > 0) {
@@ -184,7 +178,7 @@ export function renderReport(report: SyncReport): string {
       "> These files held content no manifest record vouched for. The platform version replaced it; the text it replaced is below.",
     );
     for (const row of report.replaced) {
-      parts.push("", `#### ${code(row.path)}`, "", ...fenced(row.diff, "diff"));
+      parts.push("", `#### ${codeSpan(row.path)}`, "", ...fenced(row.diff, "diff"));
     }
   }
   if (report.retired.length > 0) {
@@ -194,7 +188,7 @@ export function renderReport(report: SyncReport): string {
       "",
       table(
         ["Path", "Outcome", "Detail"],
-        report.retired.map((row) => [code(row.path), row.outcome, row.detail]),
+        report.retired.map((row) => [codeSpan(row.path), row.outcome, row.detail]),
       ),
     );
   }
@@ -208,7 +202,12 @@ export function renderReport(report: SyncReport): string {
       "",
       table(
         ["Source", "Target", "Outcome", "Detail"],
-        report.mirrors.map((row) => [code(row.source), code(row.target), row.outcome, row.detail]),
+        report.mirrors.map((row) => [
+          codeSpan(row.source),
+          codeSpan(row.target),
+          row.outcome,
+          row.detail,
+        ]),
       ),
     );
   }

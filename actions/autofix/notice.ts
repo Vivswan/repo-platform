@@ -74,7 +74,7 @@ export function quotedFailure(text: string): string {
 
 /** One line of the pull request's own text (a path, a commit subject) as a code span, safe in Markdown and in an annotation. */
 export function quoted(text: string): string {
-  return codeSpan(visible(text, SHOWN_PATH_LENGTH).replaceAll(/[\n\t]/g, " "));
+  return codeSpan(visible(text, SHOWN_PATH_LENGTH).replaceAll("\t", " "));
 }
 
 /** Why an allowed change left the commit with the refused deletion of `path`: git holds a name as a file or as a directory. */
