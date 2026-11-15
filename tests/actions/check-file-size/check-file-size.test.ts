@@ -70,6 +70,7 @@ describe("classify", () => {
     ["scripts/run.sh", "shell"],
     ["bin/setup.bash", "shell"],
     [".zshrc.zsh", "shell"],
+    [".zsh", null],
     ["README.md", "markdown"],
     ["docs/guide.md", "markdown"],
     ["package.json", null],
