@@ -1,6 +1,8 @@
 // Shared by derive.ts, lib.ts, and actions/plan/registration.ts, so an include root the plan accepts is one the site builds.
-// Imports nothing: build.ts copies .vitepress/ into every build root, where an import reaching outside resolves to nothing.
+// Imports nothing at run time: build.ts copies .vitepress/ into every build root, where an import reaching outside resolves to nothing.
 // The plan action also imports it with none of pages-site's dependencies installed.
+
+import type { z } from "zod";
 
 /** ISO 639-1 primary language subtags: the locale-directory convention accepts exactly `<lang>` or `<lang>-<region>` with a two-letter primary from this set, so an ordinary docs directory (api/, cli/) can never be mistaken for a translation tree. */
 const ISO_639_1 = new Set(
@@ -99,7 +101,7 @@ export function urlSegmentProblem(value: string): string | null {
 }
 
 /** Each refusal is a placement the staging would get wrong, not a shape it cannot spell. */
-export function includeMountProblem(mount: string): string | null {
+function includeMountProblem(mount: string): string | null {
   const segments = mount.split("/");
   if (segments.some((segment) => !URL_SEGMENT_RE.test(segment))) {
     return "must be lowercase URL segments (letters, digits, dashes, underscores) joined by single slashes";
@@ -129,7 +131,7 @@ export function includeMountProblem(mount: string): string | null {
   return null;
 }
 
-export function includePageProblem(page: string): string | null {
+function includePageProblem(page: string): string | null {
   if (!PATH_SEGMENT_RE.test(page) || !page.endsWith(".md")) {
     return "must be a plain markdown file name (SKILL.md)";
   }
@@ -156,9 +158,7 @@ export function includeWithoutDocsProblem(
 }
 
 /** Two roots on one mount would claim one URL; one root on two mounts would render twice. */
-export function includeListProblem(
-  roots: readonly Pick<IncludeRoot, "path" | "mount">[],
-): string | null {
+function includeListProblem(roots: readonly Pick<IncludeRoot, "path" | "mount">[]): string | null {
   for (const key of ["path", "mount"] as const) {
     if (new Set(roots.map((root) => root[key])).size !== roots.length) {
       return `lists one ${key} twice - every root needs its own ${key}`;
@@ -166,4 +166,27 @@ export function includeListProblem(
   }
 
   return null;
+}
+
+/** The include roots as the registration's `site.include` and the site configuration's `include` both read them.
+ *  `zod` is the caller's own installed copy, since this file imports nothing at run time. */
+export function includeRootsSchema(zod: typeof z) {
+  const judged = (problem: (value: string) => string | null) =>
+    zod.string().superRefine((value, ctx) => {
+      const message = problem(value);
+      if (message !== null) ctx.addIssue({ code: "custom", message });
+    });
+
+  return zod
+    .array(
+      zod.strictObject({
+        path: judged(relPathProblem),
+        mount: judged(includeMountProblem),
+        page: judged(includePageProblem),
+      }),
+    )
+    .superRefine((roots, ctx) => {
+      const message = includeListProblem(roots);
+      if (message !== null) ctx.addIssue({ code: "custom", message });
+    });
 }
