@@ -3,8 +3,10 @@
 //
 // In process: `fakeGithub(routes).fetch` is the client's `fetch` option. For a script run as a subprocess the same table
 // serves from its own process (tests/shared/loopback_server.ts): the script's GITHUB_API_URL is `<host>/<run>`, so no
-// run sees another's place in a reply list. `bun tests/shared/fake_github.ts <routes json>`.
+// run sees another's place in a reply list. `bun tests/shared/fake_github.ts <routes json> <request log>`.
 
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { GitHubClient, type GitHubClientOptions } from "../../.github/scripts/shared/github.ts";
 import { type LoopbackServer, spawnLoopback } from "./loopback_server";
 
 export interface FakeReply {
@@ -48,9 +50,6 @@ export interface FakeGithub {
 
 /** GitHub's answer for a path the table lacks. */
 const NOT_FOUND: FakeReply = { status: 404 };
-
-/** The run name the server keeps for itself: `/__calls/<run>` lists that run's requests. */
-const CALLS = "__calls";
 
 /** An exact path wins; otherwise the first pattern whose `*` segments each stand for one path segment. */
 function repliesFor(routes: FakeRoutes, path: string): FakeReply[] {
@@ -126,9 +125,24 @@ export function fakeGithub(routes: FakeRoutes): FakeGithub {
   return { fetch: fake as typeof fetch, calls: () => calls };
 }
 
-function serve(routes: FakeRoutes): ReturnType<typeof Bun.serve> {
+/** A client over an in-process fake, its retries without their sleeps. */
+export function clientOver(
+  routes: FakeRoutes,
+  options: GitHubClientOptions = {},
+): { client: GitHubClient; github: FakeGithub } {
+  const github = fakeGithub(routes);
+  const client = new GitHubClient({
+    token: "stub-token",
+    baseUrl: "https://api.github.test",
+    fetch: github.fetch,
+    retryBaseMs: 0,
+    ...options,
+  });
+  return { client, github };
+}
+
+function serve(routes: FakeRoutes, log: string): ReturnType<typeof Bun.serve> {
   const served = new Map<string, number>();
-  const calls = new Map<string, string[]>();
   return Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -137,8 +151,7 @@ function serve(routes: FakeRoutes): ReturnType<typeof Bun.serve> {
       const url = new URL(request.url);
       const [, run, ...rest] = url.pathname.split("/");
       const path = rest.join("/");
-      if (run === CALLS) return Response.json(calls.get(path) ?? []);
-      calls.set(run, [...(calls.get(run) ?? []), path + url.search]);
+      appendFileSync(log, `${run}\t${path}${url.search}\n`);
       const reply = nextReply(routes, served, run, path);
       if (reply.hang === true) return stalled(request.signal);
       return response(reply, url);
@@ -148,20 +161,31 @@ function serve(routes: FakeRoutes): ReturnType<typeof Bun.serve> {
 
 export interface FakeGithubServer extends LoopbackServer {
   /** Every path one run requested so far, in order, each with its query string. */
-  calls(run: string): Promise<string[]>;
+  calls(run: string): string[];
 }
 
-/** The `host` is the server's root: a run reads `${host}/<its own name>` as its GITHUB_API_URL. */
-export async function spawnFakeGithub(routes: FakeRoutes): Promise<FakeGithubServer> {
-  const server = await spawnLoopback([import.meta.path, JSON.stringify(routes)], "fake GitHub API");
+/** The `host` is the server's root: a run reads `${host}/<its own name>` as its GITHUB_API_URL.
+ *
+ * @param log - a file in the caller's temp dir; the server appends each request to it before answering
+ */
+export async function spawnFakeGithub(routes: FakeRoutes, log: string): Promise<FakeGithubServer> {
+  writeFileSync(log, "");
+  const server = await spawnLoopback(
+    [import.meta.path, JSON.stringify(routes), log],
+    "fake GitHub API",
+  );
   return {
     ...server,
-    calls: async (run) =>
-      (await (await fetch(`${server.host}/${CALLS}/${run}`)).json()) as string[],
+    calls: (run) =>
+      readFileSync(log, "utf-8")
+        .split("\n")
+        .map((line) => line.split("\t"))
+        .filter(([name]) => name === run)
+        .map(([, path]) => path),
   };
 }
 
 if (import.meta.main) {
-  const server = serve(JSON.parse(process.argv[2]) as FakeRoutes);
+  const server = serve(JSON.parse(process.argv[2]) as FakeRoutes, process.argv[3]);
   console.log(server.port);
 }

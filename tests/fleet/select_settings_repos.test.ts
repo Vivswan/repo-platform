@@ -40,14 +40,12 @@ const ALL_MASKS = PRIVATE_SLUGS.flatMap(maskForms).length;
 const RUN_ID = "4242";
 const keyOf = rowKeyOf("stub-token", RUN_ID);
 
-// End-to-end harness against a loopback GitHub API (tests/shared/fake_github.ts), a stub `gh` for the listing, and a loopback push
-// advertisement; PROBE_RETRY_DELAY_MS and GITHUB_RETRY_BASE_MS are zeroed so no retry costs wall time.
+// End-to-end harness against a loopback GitHub API (tests/shared/fake_github.ts) and a loopback push advertisement; PROBE_RETRY_DELAY_MS and GITHUB_RETRY_BASE_MS are zeroed so no retry costs wall time.
 // PRIVATE personas' every public line says "a private repository" while the masks cover the slug,
 // and the matrix output names no target at all: each row rides as its index and the plan's key.
 describe("select_settings_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_settings_repos.ts");
   const root = temp.dir("select-settings-");
-  const bin = join(root, "bin");
   let probes: LoopbackServer;
   let api: LoopbackServer;
   let handWrittenApi: LoopbackServer;
@@ -59,6 +57,18 @@ describe("select_settings_repos.ts", () => {
   // The rendered document: the header line, then target-owned content the selector must never print.
   const RENDERED = `${RENDERED_HEADER}\n# Rendered by the sync\nrepository:\n  description: target-owned\n`;
   const ROUTES: FakeRoutes = {
+    "user/repos": [
+      {
+        status: 200,
+        body: PERSONAS.map((persona) => ({
+          full_name: `Vivswan/${persona.name}`,
+          private: persona.private,
+          archived: false,
+          owner: { login: "Vivswan" },
+          permissions: { push: true },
+        })),
+      },
+    ],
     [registration("flaky")]: [BAD_GATEWAY, ...file("modules: [settings-sync]\n")],
     [settings("flaky")]: [BAD_GATEWAY, ...file(RENDERED)],
     // Named incident: "not adopted" was read off the error text, so an outage whose text quoted a 404 dropped the
@@ -86,22 +96,11 @@ describe("select_settings_repos.ts", () => {
   };
 
   beforeAll(async () => {
-    mkdirSync(bin);
-    const listing = PERSONAS.map(
-      (p) =>
-        `{"full_name":"Vivswan/${p.name}","private":${p.private},"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}`,
-    ).join(",");
-    // The listing still rides gh (fleet/discovery.ts); every file read goes to the loopback API.
-    writeFileSync(
-      join(bin, "gh"),
-      ["#!/usr/bin/env bash", `printf '[[%s]]\\n' '${listing}'`, ""].join("\n"),
-      { mode: 0o755 },
+    api = await spawnFakeGithub(ROUTES, join(root, "api.log"));
+    handWrittenApi = await spawnFakeGithub(
+      { ...ROUTES, [settings("steady")]: file("repository:\n  description: mine\n") },
+      join(root, "hand-written-api.log"),
     );
-    api = await spawnFakeGithub(ROUTES);
-    handWrittenApi = await spawnFakeGithub({
-      ...ROUTES,
-      [settings("steady")]: file("repository:\n  description: mine\n"),
-    });
     // The push advertisement answers 403 for a repository the token sees without push, 404 for one it cannot see at
     // all (the grant revoked, or the repository gone): both are "not in the fleet", never a transport failure to retry.
     probes = await spawnPushProbeServer("stub-token", {
@@ -147,7 +146,6 @@ describe("select_settings_repos.ts", () => {
       cwd: work,
       env: {
         ...process.env,
-        PATH: `${bin}:${process.env.PATH}`,
         PAT: "stub-token",
         PROBE_RETRY_DELAY_MS: "0",
         GH_TOKEN: "stub-token",

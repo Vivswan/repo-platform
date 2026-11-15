@@ -54,29 +54,32 @@ describe("select_sync_repos.ts", () => {
   const file = (body: string): FakeReply[] => [{ status: 200, body }];
 
   beforeAll(async () => {
-    api = await spawnFakeGithub({
-      [registration("unadopted")]: [{ status: 404 }],
-      // A private repo whose adoption check fails hard, GitHub's error body spelling the slug, the bare name, and a
-      // case variant, and naming another private repo: none of it may print.
-      [registration("hidden-blocked")]: [
-        {
-          status: 500,
-          body: {
-            message:
-              "https://api.github.com/repos/Vivswan/hidden-blocked failed; HIDDEN-BLOCKED shares with Vivswan/hidden-billing",
+    api = await spawnFakeGithub(
+      {
+        [registration("unadopted")]: [{ status: 404 }],
+        // A private repo whose adoption check fails hard, GitHub's error body spelling the slug, the bare name, and a
+        // case variant, and naming another private repo: none of it may print.
+        [registration("hidden-blocked")]: [
+          {
+            status: 500,
+            body: {
+              message:
+                "https://api.github.com/repos/Vivswan/hidden-blocked failed; HIDDEN-BLOCKED shares with Vivswan/hidden-billing",
+            },
           },
-        },
-      ],
-      [registration("flaky")]: [{ status: 502 }, ...file("modules: [uv]\n")],
-      [registration("hidden-quoting")]: [
-        { status: 502, body: { message: "upstream said HTTP 404" } },
-      ],
-      [registration("steady")]: file("modules: [uv, site]\n"),
-      [registration("hidden-server")]: file("modules: [site, release-please]\n"),
-      [registration("hidden-nomods")]: file("notmodules: true\n"),
-      [registration("badlist")]: file("modules: notalist\n"),
-      [registration("*")]: file("modules: [uv]\n"),
-    });
+        ],
+        [registration("flaky")]: [{ status: 502 }, ...file("modules: [uv]\n")],
+        [registration("hidden-quoting")]: [
+          { status: 502, body: { message: "upstream said HTTP 404" } },
+        ],
+        [registration("steady")]: file("modules: [uv, site]\n"),
+        [registration("hidden-server")]: file("modules: [site, release-please]\n"),
+        [registration("hidden-nomods")]: file("notmodules: true\n"),
+        [registration("badlist")]: file("modules: notalist\n"),
+        [registration("*")]: file("modules: [uv]\n"),
+      },
+      join(root, "api.log"),
+    );
     probes = await spawnPushProbeServer("stub-token", {
       "Vivswan/hidden-locked": [403],
       "Vivswan/locked": [403],

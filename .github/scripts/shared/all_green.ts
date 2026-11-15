@@ -1,9 +1,7 @@
 // The one green-commit predicate every consumer shares (docs/all-green.md, "Consuming the gate").
 
 import { z } from "zod";
-import { parseJsonWith } from "./json.ts";
-import { lastLine } from "./lines.ts";
-import { capture, type RunResult } from "./proc.ts";
+import { GitHubClient, unansweredReason } from "./github.ts";
 
 /** The gate check's name: the context branch protection requires (files/settings/override.yml) and the ci.yml all-green job's own check run carries (a job's check run is named by its job id). */
 export const CHECK_NAME = "all-green";
@@ -25,21 +23,15 @@ const checkRunsSchema = z.object({
 
 type CheckRun = z.infer<typeof checkRunsSchema>["check_runs"][number];
 
-/** Injectable gh runner so tests never touch the network. */
-export type GhRunner = (command: string[]) => RunResult;
-
-/** capture()'s default hang bound is five minutes; a probe of the remote (this gate read, the tag mover's ls-remote) that slow is a stalled connection, and every caller waits on it. */
+/** The check-runs read's deadline, and the bound of the tag mover's ls-remote: a probe of the remote that slow is a stalled connection, and every caller waits on it. */
 export const PROBE_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? "15000");
-
-/** The production runner: gh under the probe bound. */
-const boundedCapture: GhRunner = (command) => capture(command, { timeoutMs: PROBE_TIMEOUT_MS });
 
 /** Injectable so tests never sleep. The default deadline covers a re-run's gate job finishing
  * moments behind a self-woken caller's first read. */
 export interface VerdictWait {
   deadlineMs?: number;
   sleepMs?: number;
-  sleep?: (ms: number) => void;
+  sleep?: (ms: number) => unknown;
 }
 
 /** A malformed override (NaN, Infinity, a negative) must never remove the poll's termination. */
@@ -80,36 +72,41 @@ function expiredReason(checks: readonly CheckRun[], deadlineMs: number): string 
 
 /** Any completed success vouches: every verdict at one sha judged the same tree, so a later failure
  * there is environment drift. A completed failure never returns early: a re-judged sha's fresh
- * verdict can land moments after its stale one was read. */
-export function allGreenFailure(
+ * verdict can land moments after its stale one was read.
+ *
+ * @param github - injectable so tests never touch the network
+ * @returns null for a green commit, else the reason it is not
+ */
+export async function allGreenFailure(
   repository: string,
   sha: string,
-  gh: GhRunner = boundedCapture,
+  github: GitHubClient = new GitHubClient({ deadlineMs: PROBE_TIMEOUT_MS }),
   wait: VerdictWait = {},
-): string | null {
+): Promise<string | null> {
   const deadlineMs = wait.deadlineMs ?? DEFAULT_WAIT_MS;
   const sleepMs = wait.sleepMs ?? DEFAULT_SLEEP_MS;
-  const sleep = wait.sleep ?? ((ms: number) => Bun.sleepSync(ms));
+  const sleep = wait.sleep ?? Bun.sleep;
   const started = Date.now();
   for (;;) {
-    const probe = gh([
-      "gh",
-      "api",
-      `repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}&filter=latest&per_page=100`,
-    ]);
-    if (probe.exitCode !== 0) {
-      const detail = lastLine(probe.stderr + probe.stdout);
-      const reason = detail === "" ? `exit ${probe.exitCode}` : detail;
+    // filter=latest is GitHub's default today; `all` would list a re-run's stale check run beside the fresh one.
+    const probe = await github.get(
+      `repos/${repository}/commits/${sha}/check-runs`,
+      checkRunsSchema,
+      {
+        check_name: CHECK_NAME,
+        filter: "latest",
+        per_page: 100,
+      },
+    );
+    if (probe.kind !== "ok") {
       return (
-        `reading its ${CHECK_NAME} check runs failed (${reason}) - ` +
+        `reading its ${CHECK_NAME} check runs failed (${unansweredReason(probe)}) - ` +
         "an API failure, not proof the commit is red, but the gate fails closed"
       );
     }
-    const checks = parseJsonWith(
-      checkRunsSchema,
-      probe.stdout,
-      "all_green: check runs response",
-    ).check_runs.filter((check) => check.name === CHECK_NAME && check.app?.slug === CHECK_APP);
+    const checks = probe.value.check_runs.filter(
+      (check) => check.name === CHECK_NAME && check.app?.slug === CHECK_APP,
+    );
     if (checks.some((check) => check.status === "completed" && check.conclusion === "success")) {
       return null;
     }
@@ -117,6 +114,6 @@ export function allGreenFailure(
     if (remaining <= 0) {
       return expiredReason(checks, deadlineMs);
     }
-    sleep(Math.min(sleepMs, remaining));
+    await sleep(Math.min(sleepMs, remaining));
   }
 }

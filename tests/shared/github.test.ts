@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
 import { GitHubClient, type Read } from "../../.github/scripts/shared/github.ts";
-import { type FakeReply, type FakeRoutes, fakeGithub } from "./fake_github";
+import { clientOver, type FakeReply, type FakeRoutes, fakeGithub } from "./fake_github";
 
 const REGISTRATION = "repos/example-owner/hidden-server/contents/.repo-platform.yml";
 const BASE = "https://api.github.test";
@@ -9,16 +9,9 @@ const BAD_GATEWAY: FakeReply = { status: 502 };
 const FILE: FakeReply = { status: 200, body: "modules: [base]\n" };
 const HOUR_AWAY = String(Math.floor(Date.now() / 1000) + 3600);
 
-function clientOver(routes: FakeRoutes, deadlineMs = 5000) {
-  const github = fakeGithub(routes);
-  const client = new GitHubClient({
-    token: "stub-token",
-    baseUrl: BASE,
-    fetch: github.fetch,
-    deadlineMs,
-    retryBaseMs: 0,
-  });
-  return { client, github };
+/** The client over a table, under a short deadline for the rows that stall. */
+function over(routes: FakeRoutes, deadlineMs = 5000) {
+  return clientOver(routes, { deadlineMs });
 }
 
 describe("GitHubClient", () => {
@@ -75,7 +68,7 @@ describe("GitHubClient", () => {
   ];
 
   test.each(outcomes)("%s", async (_name, replies, expected, attempts) => {
-    const { client, github } = clientOver({ [REGISTRATION]: replies });
+    const { client, github } = over({ [REGISTRATION]: replies });
 
     expect(await client.text(REGISTRATION)).toEqual(expected);
     expect(github.calls().length).toBe(attempts);
@@ -94,7 +87,7 @@ describe("GitHubClient", () => {
   });
 
   test("a stalled network ends at the deadline, in one attempt: a billed runner never waits on a retry of a timeout", async () => {
-    const { client, github } = clientOver({ [REGISTRATION]: [{ status: 200, hang: true }] }, 50);
+    const { client, github } = over({ [REGISTRATION]: [{ status: 200, hang: true }] }, 50);
 
     expect(await client.text(REGISTRATION)).toEqual({
       kind: "failed",
@@ -128,7 +121,7 @@ describe("GitHubClient", () => {
     test.each(leaky)(
       "%s leaves no part of the name in the outcome or on the console",
       async (_name, reply) => {
-        const { client } = clientOver({ [REGISTRATION]: [reply] }, 50);
+        const { client } = over({ [REGISTRATION]: [reply] }, 50);
 
         const outcome = await client.get(REGISTRATION, z.object({ sha: z.string() }));
 
@@ -176,7 +169,7 @@ describe("GitHubClient", () => {
   );
 
   test("a file that is itself JSON comes back as its text, not parsed: the selectors read a first line and a YAML document from it", async () => {
-    const { client } = clientOver({
+    const { client } = over({
       [REGISTRATION]: [{ status: 200, body: { modules: ["base"] } }],
     });
 
@@ -184,7 +177,7 @@ describe("GitHubClient", () => {
   });
 
   test("a listing is every page, in order, asked for 100 at a time under the token", async () => {
-    const { client, github } = clientOver({
+    const { client, github } = over({
       "user/repos": [
         { status: 200, body: [{ name: "one" }, { name: "two" }], next: true },
         { status: 200, body: [{ name: "three" }] },
@@ -204,7 +197,7 @@ describe("GitHubClient", () => {
   });
 
   test("a listing whose second page stalls ends at the deadline: the plugin's page requests carry the read's signal", async () => {
-    const { client } = clientOver(
+    const { client } = over(
       {
         "user/repos": [
           { status: 200, body: [{ name: "one" }], next: true },

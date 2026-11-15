@@ -138,7 +138,11 @@ async function probe<T>(
   return null;
 }
 
-const discovered = discoverOwnerRepos(owner, "select_settings_repos: user/repos response");
+const discovered = await discoverOwnerRepos(
+  github,
+  owner,
+  "select_settings_repos: user/repos response",
+);
 // Before anything else prints: the masker covers what a scrub might miss.
 for (const row of discovered) {
   if (row.private) {

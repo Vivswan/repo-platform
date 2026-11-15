@@ -88,8 +88,11 @@ describe("main", () => {
   let api: FakeGithubServer;
   let downApi: FakeGithubServer;
   beforeAll(async () => {
-    api = await spawnFakeGithub(routes);
-    downApi = await spawnFakeGithub({ "repos/o/r/commits/*/pulls": [{ status: 503 }] });
+    api = await spawnFakeGithub(routes, join(root, "api.log"));
+    downApi = await spawnFakeGithub(
+      { "repos/o/r/commits/*/pulls": [{ status: 503 }] },
+      join(root, "down-api.log"),
+    );
   });
   afterAll(() => {
     api.stop();
@@ -279,14 +282,14 @@ describe("main", () => {
       stdout: (_base: string, sha: string) =>
         lines(`::error::${short(sha)}: ${UNKNOWN("fleet-sync:private")}`),
     },
-  ])("a one-commit push, $reason", async ({ sha, exitCode, output, stdout }) => {
+  ])("a one-commit push, $reason", ({ sha, exitCode, output, stdout }) => {
     const before = git(clone, ["rev-parse", `${sha}~1`]);
     const result = run(clone, sha, before);
     expect(result).toEqual({ exitCode, output, stdout: stdout(before, sha), stderr: "" });
-    expect(await api.calls(latestRun)).toEqual([lookup(sha)]);
+    expect(api.calls(latestRun)).toEqual([lookup(sha)]);
   });
 
-  test("a failed pull request lookup is red for the whole range, never a quiet armed=false", async () => {
+  test("a failed pull request lookup is red for the whole range, never a quiet armed=false", () => {
     // The range is publicA then unlabeled; the first lookup fails on every attempt and names its commit.
     const result = run(clone, unlabeled, seed, downApi);
     expect(result).toEqual({
@@ -295,6 +298,6 @@ describe("main", () => {
       stdout: `::error::${short(publicA)}: repos/o/r/commits/${publicA}/pulls could not be read (HTTP 503)\n`,
       stderr: "",
     });
-    expect(await downApi.calls(latestRun)).toEqual(Array(4).fill(lookup(publicA)));
+    expect(downApi.calls(latestRun)).toEqual(Array(4).fill(lookup(publicA)));
   });
 });

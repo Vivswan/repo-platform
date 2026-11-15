@@ -13,8 +13,11 @@ import { discoverOwnerRepos } from "./discovery.ts";
 /** Where the discovered list is written for the selectors. */
 const runnerTemp = requireEnv("RUNNER_TEMP");
 
+/** The fleet token's client: GH_TOKEN is the PAT in this step. */
+const github = new GitHubClient();
+
 // The owner scope is the PAT's own user: cross-owner repos the user can write to must not ride into the sync plan.
-const who = await new GitHubClient().get("user", z.object({ login: z.string() }));
+const who = await github.get("user", z.object({ login: z.string() }));
 
 if (who.kind !== "ok") {
   error(`discover_repos: the token's user could not be read (${unansweredReason(who)})`);
@@ -22,6 +25,6 @@ if (who.kind !== "ok") {
 }
 const login = who.value.login;
 
-const discovered = discoverOwnerRepos(login, "discover_repos: user/repos response");
+const discovered = await discoverOwnerRepos(github, login, "discover_repos: user/repos response");
 writeFileSync(join(runnerTemp, "discovered.json"), JSON.stringify(discovered));
 console.log(`discovered ${discovered.length} writable repos for ${login}`);

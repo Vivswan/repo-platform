@@ -16,24 +16,13 @@ import {
 } from "../../.github/scripts/refresh-upstream/refresh_upstream.ts";
 import { GitHubClient } from "../../.github/scripts/shared/github.ts";
 import { parseFilesConfig, upstreamRefs } from "../../actions/plan/files_config.ts";
-import { type FakeReply, type FakeRoutes, fakeGithub } from "../shared/fake_github";
+import { clientOver, type FakeReply, type FakeRoutes, fakeGithub } from "../shared/fake_github";
 import { tempDirs } from "../shared/temp_dir";
 
 const REPO_ROOT = join(import.meta.dir, "../..");
 const FILES_YML = readFileSync(join(REPO_ROOT, "files.yml"), "utf-8");
 const OLD = "0123456789abcdef0123456789abcdef01234567";
 const NEW = "89abcdef0123456789abcdef0123456789abcdef";
-
-function apiOver(routes: FakeRoutes) {
-  const api = fakeGithub(routes);
-  const github = new GitHubClient({
-    token: "stub-token",
-    baseUrl: "https://api.github.test",
-    fetch: api.fetch,
-    retryBaseMs: 0,
-  });
-  return { api, github };
-}
 
 const ref = (repository: string, sha: string, path: string) => ({ repository, sha, path });
 const temp = tempDirs();
@@ -107,7 +96,7 @@ describe("the commit pins", () => {
       "o/a: commits/HEAD could not be read (the reply: unexpected shape - (root): invalid_type)",
     ],
   ])("headSha reads the default branch head: %s", async (_name, reply, expected) => {
-    const { github } = apiOver({ "repos/o/a/commits/HEAD": [reply] });
+    const { client: github } = clientOver({ "repos/o/a/commits/HEAD": [reply] });
 
     const outcome = await headSha("o/a", github).catch((error: Error) => error.message);
 

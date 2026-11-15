@@ -33,17 +33,18 @@ The residual is a slug another writable repository takes within the run: the row
 
 ## Reading the GitHub API
 
-The scripts' file reads (a repository's registration, its rendered settings), the token's user, and a commit's pull requests go through one client ([shared/github.ts](../../../.github/scripts/shared/github.ts)), so one answer means one thing in every script. The repository listing still runs through `gh`.
+The scripts' reads of the GitHub API (the repository listing, a repository's registration and rendered settings, a commit's check runs and pull requests) go through one client ([shared/github.ts](../../../.github/scripts/shared/github.ts)), so one answer means one thing in every script.
 
-| GitHub answers                                                | The read                                                    |
-| ------------------------------------------------------------- | ----------------------------------------------------------- |
-| a 5xx, no response, or a reply cut off mid-body               | is tried again after 1, 4, and 9 seconds, then fails        |
-| a rate limit lifting within a minute                          | waits it out, once per request                              |
-| a longer rate limit, or any other 4xx but 404                 | fails at once                                               |
-| 404                                                           | is "not there": the status alone, never the error's wording |
-| nothing for two minutes on the wire, across retries and pages | fails, so a stalled network never holds a billed runner     |
+| GitHub answers                                                                                                  | The read                                                    |
+| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| a 5xx, no response, or a reply cut off mid-body                                                                 | is tried again after 1, 4, and 9 seconds, then fails        |
+| a rate limit lifting within a minute                                                                            | waits it out, once per request                              |
+| a longer rate limit, or any other 4xx but 404                                                                   | fails at once                                               |
+| 404                                                                                                             | is "not there": the status alone, never the error's wording |
+| nothing for two minutes on the wire, across retries and pages (15 seconds for the green gate's check-runs read) | fails, so a stalled network never holds a billed runner     |
 
-- **In the sync plan** a registration read that still fails ends the plan red and no row runs: an outage never reads as "not adopted", and a transient 502 is tried again before it counts as one.
+- **In the sync plan** a listing or a registration read that still fails ends the plan red and no row runs: an outage never reads as "no repositories" or "not adopted", and a transient 502 is tried again before it counts as one.
+- **The green gate** fails closed on a check-runs read that still fails; the settings apply's gate keeps asking until its own deadline ([all-green.md](../../all-green.md#consuming-the-gate)).
 - **A failure prints its status alone** (`HTTP 502`), never the URL or GitHub's error text, which name the repository ([private repositories](private-repositories.md#how-each-rule-is-kept)).
 - **The token** is `GH_TOKEN`, else `GITHUB_TOKEN`, an empty value skipped, as `gh` reads them.
 
