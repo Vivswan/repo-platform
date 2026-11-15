@@ -320,19 +320,16 @@ export function planNpm(input: PlanInput): NpmPlan {
 
 /** What the autofix action reads from the registration (docs/modules/autofix.md). */
 export interface AutofixPlan {
-  /** The registration's `autofix` block, a push block it does not declare spelled null. */
+  /** The registration's `autofix` block, a push block it does not declare spelled null; null when the module is not selected. */
   autofix: {
     label: { paths: string[]; delete: string[] };
     push: { on: string[]; paths: string[]; delete: string[] } | null;
-  };
+  } | null;
 }
 
 export function planAutofix(input: PlanInput): AutofixPlan {
-  if (!selectModules(input).some((module) => module.name === "autofix")) {
-    throw new PlanError([
-      `${REGISTRATION_PATH}: the autofix module is not selected - nothing is fixed here`,
-    ]);
-  }
+  // The managed workflow outlives and precedes the selection on the default branch: nothing to fix, never an error.
+  if (!selectModules(input).some((module) => module.name === "autofix")) return { autofix: null };
 
   const declared = input.registration.autofix;
   if (declared === undefined) {

@@ -400,12 +400,19 @@ describe("the event", () => {
   test.each<{
     reason: string;
     kind: FixEvent;
-    config: Config;
+    config: Config | null;
     files: string[];
     count?: number;
     run: boolean;
   }>([
     { reason: "the label, whatever changed", kind: "label", config: CONFIG, files: [], run: true },
+    {
+      reason: "the label where the default branch does not select the module",
+      kind: "label",
+      config: null,
+      files: ["src/a.ts"],
+      run: false,
+    },
     {
       reason: "a push with no push block",
       kind: "push",

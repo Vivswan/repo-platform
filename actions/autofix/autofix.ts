@@ -64,6 +64,8 @@ const GIT_BOUND_MS = 120_000;
 const PUSH_BOUND_MS = 300_000;
 const API_BOUND_MS = 120_000;
 const WARNED_PATHS = 10;
+const NOT_SELECTED =
+  "autofix is not selected on the default branch, which is where its lists are read: nothing is fixed on this pull request";
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const LOCKED_GIT: readonly [string, string][] = [
   ["core.hooksPath", "/dev/null"],
@@ -205,12 +207,12 @@ export interface PushResult {
 }
 
 /**
- * The `autofix-config` the plan action printed.
+ * The `autofix-config` the plan action printed, null when the default branch does not select the module.
  *
  * @throws {Error} the text is not that document
  */
-export function parseConfig(text: string): Config {
-  return configSchema.parse(JSON.parse(text));
+export function parseConfig(text: string): Config | null {
+  return configSchema.nullable().parse(JSON.parse(text));
 }
 
 /** Whether `name` is the fix label. A workflow expression compares without case, so every phase must too. */
@@ -242,16 +244,19 @@ export function parseEvent(text: string): PullRequestEvent {
 }
 
 /**
- * Whether the event starts a fix. The label always does. A push does when the registration declares a `push` block
- * and one of the pull request's changed files matches its `on` list.
+ * Whether the event starts a fix. Nothing does without a config: the default branch does not select the module.
+ * Else the label always does, and a push does when the registration declares a `push` block and one of the pull
+ * request's changed files matches its `on` list.
  *
  * @param changedFiles - lists the pull request's changed files, read only for a push with a `push` block
  */
 export function startsFix(
   event: PullRequestEvent,
-  config: Config,
+  config: Config | null,
   changedFiles: () => string[],
 ): boolean {
+  if (config === null) return false;
+
   if (event.kind === "label") return true;
 
   const on = config.push?.on;
@@ -686,7 +691,9 @@ function changedFiles(repository: string, event: PullRequestEvent, tools: Tools)
     .map((line) => z.string().parse(JSON.parse(line)));
 }
 
-function requiredLists(kind: FixEvent, config: Config): Lists {
+function requiredLists(kind: FixEvent, config: Config | null): Lists {
+  if (config === null) throw new Error(NOT_SELECTED);
+
   const lists = kind === "label" ? config.label : config.push;
   if (lists === null) {
     throw new Error("the registration on the default branch declares no autofix.push block");
@@ -715,6 +722,7 @@ async function main(): Promise<void> {
   const config = parseConfig(requireEnv("CONFIG"));
   if (phase === "plan") {
     const run = startsFix(event, config, () => changedFiles(repository, event, tools));
+    if (config === null) core.notice(NOT_SELECTED);
     core.setOutput("run", String(run));
     return;
   }
