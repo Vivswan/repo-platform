@@ -4,8 +4,8 @@
 //   Dependabot reaches the root and actions/** alone, so one sha per action repo-wide holds only if the files/** pins are held to theirs.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { isManaged } from "../../actions/shared/managed_header";
 import { DELIVERY_REF, PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform";
@@ -21,17 +21,12 @@ import {
   sourceSelfPins,
 } from "../shared/uses_pins";
 
+/** Every regular file under `rel`, by its path from the repository root; a symbolic link is no file. */
 function walk(rel: string): string[] {
-  const found: string[] = [];
-  for (const name of readdirSync(join(REPO_ROOT, rel)).sort()) {
-    if (name === "node_modules") continue;
-    const child = `${rel}/${name}`;
-    const stat = lstatSync(join(REPO_ROOT, child));
-    if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) found.push(...walk(child));
-    else found.push(child);
-  }
-  return found;
+  return readdirSync(join(REPO_ROOT, rel), { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(REPO_ROOT, join(entry.parentPath, entry.name)))
+    .sort();
 }
 
 function read(rel: string): string {
