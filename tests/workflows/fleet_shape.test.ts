@@ -6,18 +6,21 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  ContextAccess,
-  type Expr,
-  FunctionCall,
-  IndexAccess,
-  Literal,
-  Logical,
-} from "@actions/expressions/ast";
+import { type Expr, FunctionCall, Literal, Logical } from "@actions/expressions/ast";
 import { TokenType } from "@actions/expressions/lexer";
 import { parse as parseYaml } from "yaml";
 import { RELEASE_BRANCH_PREFIX } from "../../actions/shared/platform.ts";
-import { parseExpression, subexpressions } from "../shared/github_expression.ts";
+import {
+  conditionSource,
+  contextRead,
+  hasStatusFunction,
+  parseExpression,
+  printed,
+  readsIn,
+  soleRead,
+  subexpressions,
+} from "../shared/github_expression.ts";
+import { shippedSource } from "../shared/shipped_source.ts";
 
 interface Step {
   id?: string;
@@ -58,50 +61,15 @@ function platformAction(uses: string | undefined): string | undefined {
     : undefined;
 }
 
-/** GitHub accepts `${{ }}` around an `if:`, so it is stripped before the condition is parsed. */
-function unwrapped(condition: string | undefined): string {
-  return (condition ?? "").trim().replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1");
-}
-
-/** The top-level conjuncts of a condition as GitHub's own parser reads them (so an `&&` inside a string literal or a
- *  parenthesis splits nothing), each as its source text; a condition that is not an `&&` chain is one clause. */
+/** The top-level conjuncts of a condition as GitHub's own parser reads them, each in the parser's one spelling: an
+ *  `&&` inside a string literal or a parenthesis splits nothing, and spacing decides nothing. A condition that is not
+ *  an `&&` chain is one clause. */
 function clausesOf(condition: string | undefined): string[] {
-  const source = unwrapped(condition);
-  if (source === "") return [""];
-  const { tokens: lexed, tree } = parseExpression(source);
-  const conjuncts =
-    tree instanceof Logical && tree.operator.type === TokenType.AND ? tree.args.length : 1;
-  const tokens = lexed.filter((token) => token.type !== TokenType.EOF);
-  const lineStarts = [0, ...[...source.matchAll(/\n/g)].map((match) => match.index + 1)];
-  const offset = ({ line, column }: { line: number; column: number }) => lineStarts[line] + column;
-  const clauses: string[] = [];
-  let depth = 0;
-  let from = tokens[0];
-  for (const [at, token] of tokens.entries()) {
-    if (token.type === TokenType.LEFT_PAREN) depth += 1;
-    if (token.type === TokenType.RIGHT_PAREN) depth -= 1;
-    const splits = depth === 0 && token.type === TokenType.AND && conjuncts > 1;
-    if (!splits && at < tokens.length - 1) continue;
-    const to = splits ? tokens[at - 1] : token;
-    clauses.push(source.slice(offset(from.range.start), offset(to.range.end)));
-    from = tokens[at + 1];
-  }
-  if (clauses.length !== conjuncts) {
-    throw new Error(`${source}: ${clauses.length} clauses sliced, the parser read ${conjuncts}`);
-  }
-  return clauses;
-}
+  if (condition === undefined) return [""];
 
-/** A context access's dotted path (bracket access with a literal index included), or undefined for any other
- *  expression. */
-function pathOf(expr: Expr): string | undefined {
-  if (expr instanceof ContextAccess) return expr.name.lexeme;
-
-  if (expr instanceof IndexAccess && expr.index instanceof Literal) {
-    return `${pathOf(expr.expr)}.${expr.index.literal.coerceString()}`;
-  }
-
-  return undefined;
+  const { tree } = parseExpression(conditionSource(condition));
+  const chain = tree instanceof Logical && tree.operator.type === TokenType.AND;
+  return (chain ? tree.args : [tree]).map(printed);
 }
 
 /** Every literal prefix a `startsWith(github.head_ref, ...)` call anywhere in the expression tests. */
@@ -110,7 +78,7 @@ function headRefPrefixes(expr: Expr): string[] {
     const [subject, prefix] = expr.args;
     const testsHeadRef =
       expr.functionName.lexeme.toLowerCase() === "startswith" &&
-      pathOf(subject) === "github.head_ref";
+      contextRead(subject)?.join(".") === "github.head_ref";
     if (testsHeadRef && prefix instanceof Literal) return [prefix.literal.coerceString()];
   }
 
@@ -120,7 +88,23 @@ function headRefPrefixes(expr: Expr): string[] {
 /** The head-ref prefixes a condition tests, read by GitHub's own parser so spacing, quoting, and bracket access read
  *  as GitHub reads them. */
 function prefixesOf(condition: string | undefined): string[] {
-  return headRefPrefixes(parseExpression(unwrapped(condition)).tree);
+  return headRefPrefixes(parseExpression(conditionSource(condition ?? "")).tree);
+}
+
+/** The `<id>` and `<name>` of a value that is one `<context>.<id>.outputs.<name>` read whole, or neither. */
+function wiredTo(value: string, context: string): [string, string] | [] {
+  const [from, id, field, name, ...deeper] = soleRead(value) ?? [];
+  const wired = from === context && field === "outputs" && deeper.length === 0;
+  return wired && typeof id === "string" && typeof name === "string" ? [id, name] : [];
+}
+
+/** Every `needs.<job>.outputs.<name>` and `steps.<id>.outputs.<name>` a node reads, as `[context, from, name]`. */
+function outputReads(node: unknown): [string, string, string][] {
+  return readsIn(node).flatMap(([context, from, field, name]) =>
+    (context === "needs" || context === "steps") && field === "outputs" && from && name
+      ? [[context, from, name] as [string, string, string]]
+      : [],
+  );
 }
 
 describe("fleet.yml", () => {
@@ -128,11 +112,9 @@ describe("fleet.yml", () => {
   // success(), and so does a `&& success()` appended anywhere), so one red check would hide every later check and every job
   // that needs it; continue-on-error fails open instead. The checkout and the plan are the bare steps:
   // nothing after a failed plan may run, and the plan's own red names it.
-  // GitHub reads function names case-insensitively and allows blanks inside the parentheses.
-  const STATUS_FUNCTION = /\b(success|failure|cancelled|always)\s*\(\s*\)/i;
   const independence = (condition: string | undefined) => {
     const [first, ...rest] = clausesOf(condition);
-    return { first, laterStatusFunctions: rest.filter((clause) => STATUS_FUNCTION.test(clause)) };
+    return { first, laterStatusFunctions: rest.filter(hasStatusFunction) };
   };
   const INDEPENDENT = { first: "!cancelled()", laterStatusFunctions: [] };
   const BARE_STEPS = ["checkout", "plan"];
@@ -263,7 +245,7 @@ describe("fleet.yml", () => {
         SCHEDULE_RUNS.has(name) ? "every event" : "never on the schedule",
       ]),
     );
-    expect(fleet.jobs.codeql?.if).toContain(
+    expect(clausesOf(fleet.jobs.codeql?.if)).toContain(
       `(github.event_name != 'schedule' || needs.${CHECKS_JOB}.outputs.weekly == 'true')`,
     );
   });
@@ -302,36 +284,32 @@ describe("fleet.yml", () => {
     }
     const value = job.outputs?.[output];
     if (value === undefined) return `job '${jobName}' declares no output '${output}'`;
-    const wired = /^\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
-    if (wired === null) {
+    const [id, name] = wiredTo(value, "steps");
+    if (id === undefined) {
       return `job '${jobName}' output '${output}' is ${value}, not one step output`;
     }
-    if (wired[2] !== output) {
-      return `job '${jobName}' output '${output}' is wired to steps.${wired[1]}.outputs.${wired[2]}, another name`;
+    if (name !== output) {
+      return `job '${jobName}' output '${output}' is wired to steps.${id}.outputs.${name}, another name`;
     }
-    return stepOutputGap(job, wired[1], wired[2]);
+    return stepOutputGap(job, id, name);
   };
   /** Why a caller's `needs.<call>.outputs.<name>` resolves to nothing, or null when the called workflow wires it through. */
   const callOutputGap = (called: Workflow, output: string): string | null => {
     const value = called.on.workflow_call.outputs?.[output]?.value;
     if (value === undefined) return `workflow_call declares no output '${output}'`;
-    const wired = /^\$\{\{ jobs\.([\w-]+)\.outputs\.([\w-]+) \}\}$/.exec(value);
-    if (wired === null) return `workflow_call output '${output}' is ${value}, not one job output`;
-    if (wired[2] !== output) {
-      return `workflow_call output '${output}' is wired to jobs.${wired[1]}.outputs.${wired[2]}, another name`;
+    const [job, name] = wiredTo(value, "jobs");
+    if (job === undefined)
+      return `workflow_call output '${output}' is ${value}, not one job output`;
+    if (name !== output) {
+      return `workflow_call output '${output}' is wired to jobs.${job}.outputs.${name}, another name`;
     }
-    return jobOutputGap(called, wired[1], wired[2]);
+    return jobOutputGap(called, job, name);
   };
 
   // release-please's branch convention is an external fact the platform cannot enforce; two jobs read it in YAML and
   // release-health in TypeScript, and a prefix misspelled in one place leaves that job skipped forever, green.
   test("the release PR is one prefix on github.head_ref: fleet.yml's release-pr job, the skeleton's release-gate job, and release-health agree", () => {
-    const skeleton = parseYaml(
-      readFileSync(join(ROOT, "files/base/.github/workflows/ci.yml"), "utf8").replaceAll(
-        "{{github_username}}",
-        "owner",
-      ),
-    ) as Workflow;
+    const skeleton = parseYaml(shippedSource("files/base/.github/workflows/ci.yml")) as Workflow;
     expect({
       releasePr: prefixesOf(fleet.jobs["release-pr"]?.if),
       releaseGate: prefixesOf(skeleton.jobs["release-gate"]?.if),
@@ -341,17 +319,11 @@ describe("fleet.yml", () => {
   /** The gaps behind one job's reads of needs.*.outputs.* and steps.*.outputs.*, wherever in the job they sit. */
   const jobReadGaps = (jobName: string, job: Job): string[] => {
     const gaps: string[] = [];
-    const text = JSON.stringify(job);
-    for (const [, needed, output] of text.matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-      const gap = jobOutputGap(fleet, needed, output);
+    for (const [context, from, output] of outputReads(job)) {
+      const gap =
+        context === "needs" ? jobOutputGap(fleet, from, output) : stepOutputGap(job, from, output);
       if (gap !== null) {
-        gaps.push(`fleet.yml job '${jobName}' reads needs.${needed}.outputs.${output}: ${gap}`);
-      }
-    }
-    for (const [, id, output] of text.matchAll(/steps\.([\w-]+)\.outputs\.([\w-]+)/g)) {
-      const gap = stepOutputGap(job, id, output);
-      if (gap !== null) {
-        gaps.push(`fleet.yml job '${jobName}' reads steps.${id}.outputs.${output}: ${gap}`);
+        gaps.push(`fleet.yml job '${jobName}' reads ${context}.${from}.outputs.${output}: ${gap}`);
       }
     }
     return gaps;
@@ -359,9 +331,11 @@ describe("fleet.yml", () => {
 
   test("every output read resolves to a step that sets it: the skeleton's through fleet.yml's workflow_call, the jobs', and the steps'", () => {
     const gaps: string[] = [];
-    const skeleton = readFileSync(join(ROOT, "files/base/.github/workflows/ci.yml"), "utf8");
+    const skeleton = parseYaml(shippedSource("files/base/.github/workflows/ci.yml"));
     const skeletonReads = new Set(
-      [...skeleton.matchAll(/needs\.platform\.outputs\.([\w-]+)/g)].map((match) => match[1]),
+      outputReads(skeleton)
+        .filter(([context, job]) => context === "needs" && job === "platform")
+        .map(([, , output]) => output),
     );
     for (const output of skeletonReads) {
       const gap = callOutputGap(fleet, output);

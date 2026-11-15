@@ -3,28 +3,21 @@
 // probe and the resolve are executed here per PATH state, so the two apply one test.
 
 import { describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-import { boundedSpawnSync } from "../../shared/bounded_spawn";
-import { interpolate } from "../../shared/github_expression";
+import {
+  loadAction,
+  REPO_ROOT,
+  runBashStep,
+  type Step,
+  type StepRun,
+} from "../../shared/action_step";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
-const REPO_ROOT = join(import.meta.dir, "../../..");
-const RUNNER_BASH = ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c"];
 const BUN_DIR = realpathSync(join(process.execPath, ".."));
 
-type Step = Record<string, unknown>;
-const action = parseYaml(readFileSync(join(REPO_ROOT, "actions/bun-setup/action.yml"), "utf8"));
-const steps: Step[] = action.runs.steps;
+const { steps } = loadAction("actions/bun-setup/action.yml").runs;
 const stepById = (id: string): Step => {
   const step = steps.find((s) => s.id === id);
   if (step === undefined) throw new Error(`no step '${id}'`);
@@ -63,33 +56,14 @@ function toolsDir(root: string): string {
   return dir;
 }
 
-function runStep(
-  step: Step,
-  context: Record<string, string>,
-  path: string,
-  root: string,
-): { exitCode: number; stdout: string; outputs: Record<string, string> } {
-  const outputs = join(root, `${String(step.id)}-outputs.txt`);
-  writeFileSync(outputs, "");
-  const env = Object.fromEntries(
-    Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [
-      k,
-      interpolate(v, context),
-    ]),
-  );
-  const proc = boundedSpawnSync([...RUNNER_BASH, interpolate(String(step.run), context)], {
-    env: { ...env, PATH: `${path}:${toolsDir(root)}`, GITHUB_OUTPUT: outputs },
+/** The step run from this checkout, whose root .bun-version plays the caller's pin a walk must never start at. */
+function runStep(step: Step, context: Record<string, string>, path: string, root: string): StepRun {
+  return runBashStep(step, {
+    context,
+    env: { PATH: `${path}:${toolsDir(root)}` },
+    cwd: REPO_ROOT,
+    root,
   });
-  return {
-    exitCode: proc.exitCode,
-    stdout: proc.stdout,
-    outputs: Object.fromEntries(
-      readFileSync(outputs, "utf8")
-        .split("\n")
-        .filter((line) => line !== "")
-        .map((line) => line.split("=", 2) as [string, string]),
-    ),
-  };
 }
 
 describe("actions/bun-setup", () => {

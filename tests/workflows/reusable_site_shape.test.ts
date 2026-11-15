@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { buildBody, failureDirs } from "../../actions/fuzz-issue/fuzz-issue.ts";
 import { loadAction, REPO_ROOT, runBashStep, type StepRun, stepNamed } from "../shared/action_step";
-import { evaluateCondition, interpolate } from "../shared/github_expression";
+import { evaluateCondition, interpolate, readsIn, stringsIn } from "../shared/github_expression";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -44,11 +44,11 @@ describe("reusable-site.yml", () => {
    *  `siteUrl` is the address GitHub reports, "" for a caller with no Pages API to ask. */
   function resolveUrls(repository: string, workspace: string, siteUrl = ""): StepRun {
     return runBashStep(stepNamed(SITE_URLS, "Resolve the site URLs"), {
-      fills: {
-        "${{ github.action_path }}": join(REPO_ROOT, "actions/site-urls"),
-        "${{ github.event.repository.default_branch }}": "main",
-        "${{ inputs.site-url }}": siteUrl,
-        "${{ steps.action-bun.outputs.path }}": process.execPath,
+      context: {
+        "github.action_path": join(REPO_ROOT, "actions/site-urls"),
+        "github.event.repository.default_branch": "main",
+        "inputs.site-url": siteUrl,
+        "steps.action-bun.outputs.path": process.execPath,
       },
       env: {
         GITHUB_SERVER_URL: "https://github.com",
@@ -64,7 +64,9 @@ describe("reusable-site.yml", () => {
   // name the action never declares reads as empty, and lychee then excludes nothing (edit-links) or remaps nothing.
   test("the urls step is the site-urls action, and every output the workflow reads from it is declared", () => {
     expect(step("urls")?.uses).toBe("$/actions/site-urls");
-    const read = [...source.matchAll(/steps\.urls\.outputs\.([\w-]+)/g)].map((match) => match[1]);
+    const read = readsIn(workflow)
+      .filter(([context, id, field]) => context === "steps" && id === "urls" && field === "outputs")
+      .map(([, , , key]) => key);
     expect(new Set(read)).toEqual(new Set(Object.keys(SITE_URLS.outputs ?? {})));
   });
 
@@ -349,7 +351,9 @@ describe("reusable-site.yml", () => {
       if (outcome === "failure" && deploy["continue-on-error"] !== true) job = "red";
     }
 
-    const readers = source.match(/\$\{\{[^}]*page_url[^}]*\}\}/g) ?? [];
+    const readers = stringsIn(workflow).filter((text) =>
+      readsIn(text).some((read) => read.includes("page_url")),
+    );
     expect(readers).toContain(String(workflow.jobs.site?.environment?.url));
     expect({
       job,
