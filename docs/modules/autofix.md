@@ -59,7 +59,7 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -
 
 - **The `repo-platform:sync` label never delivers this module.** Its sync pushes with the repository token, which cannot create or update a workflow file, and `auto-fix.yml` is one. The run commits nothing, and its comment says `NOT pushed` and names the dispatch above ([syncing a branch](../platform/sync/operator.md#syncing-a-branch)).
 - **A check that refuses the registration instead,** with `Unrecognized key: "autofix"`, means the build this repository's manifest records is older than the module. The same dispatch syncs at `stable` and restamps the manifest on the branch. So does merging the repository's open sync PR first, then updating the branch.
-- **The pull request cannot run the module on itself.** The lists are read from the default branch, which holds no `autofix` block until the merge. Its own `Auto Fix` runs are red in `plan`, saying the module is not selected; they are no part of `all-green`.
+- **The pull request cannot run the module on itself.** The lists are read from the default branch, which holds no `autofix` block until the merge. Its own `Auto Fix` runs are green and fix nothing, a `fix-lint` label is removed, and `plan` leaves a notice that the default branch does not select the module.
 
 ## The lists
 
@@ -173,4 +173,4 @@ A repository that declares `autofix.push` takes this cost on every fix the push 
 - **The label's name** is matched without case, as GitHub matches it.
 - **A rerun** is safe at every step: the label already gone, the commit already on the branch, and the notice already posted each read as done.
 - **Adding the label again** cancels the older label run; a newer push cancels the older push run.
-- **Removing the module** retires `auto-fix.yml`; the hook stays (a starter).
+- **Removing the module** retires `auto-fix.yml`; the hook stays (a starter). Until the sync that retires it, its runs are green and fix nothing, with the same notice as on [the pull request that adds the module](#the-pull-request-that-adds-the-module).
