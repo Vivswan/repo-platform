@@ -11,6 +11,7 @@ import {
   PlanError,
   type PlanInput,
   planCi,
+  planNpm,
   planSite,
   REQUIRED_DEFAULTS,
   type SitePlan,
@@ -390,6 +391,15 @@ describe("planSite", () => {
   });
 });
 
+// Any workflow can call fleet-npm-publish.yml: without this refusal, a repository that does not select the module
+// would have the package.json at its root planned for publishing.
+test("planNpm plans the selected module's package and refuses a registration that does not select it", () => {
+  expect(planNpm(input("modules: [bun, npm]"))).toEqual({ packagePath: "." });
+  expect(() => planNpm(input("modules: [bun]"))).toThrow(
+    ".repo-platform.yml: the npm module is not selected - there is no package to publish",
+  );
+});
+
 describe("plan.ts as a child", () => {
   function run(
     files: Record<string, string>,
@@ -615,7 +625,7 @@ describe("plan.ts as a child", () => {
       reason: "an unknown mode",
       files: { ".repo-platform.yml": `modules: []\n${PROJECT}` },
       env: { MODE: "pages" },
-      error: () => "::error::MODE must be one of default, site; got 'pages'\n",
+      error: () => "::error::MODE must be one of default, site, npm; got 'pages'\n",
     },
     ...([{ PRIVATE: "false" }, { MODE: "site" }] as Record<string, string>[]).map((env) => ({
       reason: `an unknown registration key under ${JSON.stringify(env)}`,

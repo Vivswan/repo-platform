@@ -157,9 +157,10 @@ Push any commit to main after the merge and read the run. The jobs are the same 
 | `all-green`                                                         | the required check                                                                                                   | judged                                                                      |
 | `post-green`                                                        | skipped                                                                                                              | runs your hook                                                              |
 | `release`, `update-release`, `publish-release`, `update-release-pr` | skipped                                                                                                              | run only with `release-please` selected                                     |
+| `npm-latest`, `npm-next`                                            | skipped                                                                                                              | run only with `npm` selected                                                |
 | `site`                                                              | skipped                                                                                                              | runs only with `site` selected (on the nightly schedule and a dispatch too) |
 
-A grey leg on main has three ordinary causes: its module is not in `modules`, the gate before it (`all-green`, `post-green`) did not succeed, or the push created no release (`update-release`, `publish-release`) or no release PR (`update-release-pr`). Check the module list before reading grey as a failure.
+A grey leg on main has three ordinary causes: its module is not in `modules`, the gate before it (`all-green`, `post-green`) did not succeed, or the push created no release (`update-release`, `npm-latest`, `publish-release`) or no release PR (`update-release-pr`, `npm-next`). Check the module list before reading grey as a failure.
 
 ### 8. Settings
 

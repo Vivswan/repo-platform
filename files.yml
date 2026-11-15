@@ -53,6 +53,8 @@ modules:
       }
   release-please:
     description: release-please releases through the fleet's release pipeline, plus autorelease labels
+  npm:
+    description: "publishes one npm package through trusted publishing: latest at a release, next when the release PR refreshes"
   pr-title:
     description: Conventional Commit PR title check, its own required workflow
   fuzzer:
@@ -242,6 +244,7 @@ files:
   - { path: biome.local.jsonc, class: starter, when: { modules: [bun] } }
   - { path: .release-please-manifest.json, class: starter, when: { modules: [release-please] } }
   - { path: release-please-config.json, class: starter, when: { modules: [release-please] } }
+  - { path: .github/actions/npm-build/action.yml, class: starter, when: { modules: [npm] } }
   - { path: .github/workflows/pr-title.yml, class: managed, when: { modules: [pr-title] } }
   - { path: Cargo.toml, class: starter, when: { modules: [rust] } }
   - { path: ruff.toml, class: managed, when: { modules: [uv] } }

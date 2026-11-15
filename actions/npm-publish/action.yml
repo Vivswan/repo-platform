@@ -1,0 +1,77 @@
+name: npm Publish
+description: |
+  Publishes the npm package in the caller's checkout through trusted publishing, in two phases around the caller's
+  build.
+
+  - plan: judges the registry's record before anything is built. On the next channel it mints a pre-release version
+    from the commit's position on main and stamps it into package.json.
+  - publish: judges the record again, publishes, waits for the record to show the version, and checks the channel's
+    dist-tag. A release publishes with a plain `npm publish`, so npm itself refuses a version below the newest
+    release, and then moves `next` to itself.
+
+  A version already there is skipped, and `next` never moves back. docs/modules/npm.md has the verdicts.
+
+  Needs a full checkout of the commit being published, `node` on PATH (22.14 or newer), and a job with id-token:
+  write. It carries its own pinned npm and reads no token.
+
+inputs:
+  phase:
+    description: The half to run, `plan` before the build or `publish` after it.
+    required: true
+  channel:
+    description: The dist-tag to publish under, `next` or `latest`.
+    required: true
+  path:
+    description: The package's directory, relative to the repository root.
+    required: true
+  tag:
+    description: The release's tag, which must end with `v<version>` (phase plan, channel latest).
+    required: false
+    default: ""
+  version:
+    description: The version the plan phase reported (phase publish).
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: The version the run judged, the minted pre-release on next and the release on latest.
+    value: ${{ steps.run.outputs.version }}
+  publish:
+    description: '"true" when the record leaves the version to publish, so the build is needed (phase plan).'
+    value: ${{ steps.run.outputs.publish }}
+  published:
+    description: '"true" when this run put the version on the registry, "false" when the record made it skip (phase publish).'
+    value: ${{ steps.run.outputs.published }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: $/actions/bun-setup
+      with:
+        from: ${{ github.action_path }}
+
+    # npm itself is one of the dependencies, pinned in package.json where Dependabot bumps it.
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    - name: Run the phase
+      id: run
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        PHASE: ${{ inputs.phase }}
+        CHANNEL: ${{ inputs.channel }}
+        PACKAGE_PATH: ${{ inputs.path }}
+        TAG: ${{ inputs.tag }}
+        VERSION: ${{ inputs.version }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/npm-publish.ts"'

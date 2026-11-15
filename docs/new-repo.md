@@ -102,7 +102,7 @@ GitHub releases are immutable once published, so every release moves through thr
 
 1. release-please cuts the release as a draft with its tag already forced.
 
-2. ci.yml's `update-release` job calls the repo-owned `update-release.yml` hook with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
+2. ci.yml's `update-release` job calls the repo-owned `update-release.yml` hook with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it. With the [npm](modules/npm.md) module, the `npm-latest` job then publishes the package, and publishing the release waits for that too.
 
 3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@stable` with the draft's id. That workflow finds the draft by the id, attests build provenance for every asset on it, and flips it live. [actions/release-assets](../actions/release-assets/action.yml) inspects the draft first, deleting a bundle a prior attempt left.
 
