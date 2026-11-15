@@ -471,20 +471,27 @@ describe("main", () => {
     });
   });
 
-  // GitHub answers 404 for a label that is already off, which is what a retried removal gets once its first reply was
-  // lost: stopping there would leave the note telling the reader a label is on.
-  test("a label removal answered 404 is the label off and the note is cleared; any other refusal is still a warning", () => {
+  // GitHub answers 404 for a label that is already off or a comment that is already gone, which is what a retried
+  // removal gets once its first reply was lost: a warning there would report a removal that landed as one skipped.
+  test("a removal answered 404 is the thing gone, the label and the note alike; any other refusal is still a warning", () => {
     const existing = [own(5, note(...TWO))];
     const left = { files: workflow, labels: [PUBLIC], events: botAdded, comments: existing };
-    const lostReply = { [labelRemoved.path]: [{ status: 502 }, { status: 404 }] };
-    expect(run("gone", { ...left, replies: lostReply })).toEqual({
+    const lostReply = [{ status: 502 }, { status: 404 }];
+    const removed = {
       exitCode: 0,
       stdout: notice(
         "removed fleet-sync:public",
         "removed the comment: no path here reaches the fleet through a sync",
       ),
       stderr: "",
+    };
+    expect(run("gone", { ...left, replies: { [labelRemoved.path]: lostReply } })).toEqual({
+      ...removed,
       calls: [...READS, labelRemoved, labelRemoved, COMMENTS_READ, deleted(5)],
+    });
+    expect(run("note", { ...left, replies: { [deleted(5).path]: lostReply } })).toEqual({
+      ...removed,
+      calls: [...READS, labelRemoved, COMMENTS_READ, deleted(5), deleted(5)],
     });
     expect(run("held", { ...left, replies: { [labelRemoved.path]: [{ status: 403 }] } })).toEqual({
       exitCode: 0,

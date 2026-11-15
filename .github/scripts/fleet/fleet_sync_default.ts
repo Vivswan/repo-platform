@@ -18,13 +18,7 @@ import {
   readDirective,
 } from "../post-green/fleet_sync_marker.ts";
 import { requireEnv } from "../shared/gha.ts";
-import {
-  type Fields,
-  GitHubClient,
-  type Read,
-  unansweredReason,
-  type WriteMethod,
-} from "../shared/github.ts";
+import { GitHubClient, type Read, type Sent, unansweredReason } from "../shared/github.ts";
 import { codeSpan } from "../shared/markdown_code.ts";
 import { BOT_LOGIN, issueComment, stickyComment } from "../shared/sticky_comment.ts";
 import { loadLayer } from "../sync/writer/settings_layers.ts";
@@ -222,26 +216,9 @@ async function answer<T>(endpoint: string, read: Promise<Read<T>>): Promise<T> {
  *
  * @throws {Error} GitHub refused or did not answer it
  */
-async function write(
-  github: GitHubClient,
-  method: WriteMethod,
-  endpoint: string,
-  fields?: Fields,
-): Promise<void> {
-  const sent = await github.send(method, endpoint, fields);
-  if (sent.kind !== "ok") throw new Error(`${endpoint}: ${unansweredReason(sent)}`);
-}
-
-/** The label off the pull request. A 404 is the label already off, as a removal retried after a lost reply finds it.
- *
- * @throws {Error} GitHub refused the removal otherwise, or did not answer it
- */
-async function removeLabel(github: GitHubClient, endpoint: string): Promise<void> {
-  const removed = await github.send("DELETE", endpoint);
-  if (removed.kind === "ok") return;
-  if (removed.kind === "refused" && removed.status === 404) return;
-
-  throw new Error(`${endpoint}: ${unansweredReason(removed)}`);
+async function write(endpoint: string, sent: Promise<Sent<undefined>>): Promise<void> {
+  const outcome = await sent;
+  if (outcome.kind !== "ok") throw new Error(`${endpoint}: ${unansweredReason(outcome)}`);
 }
 
 async function applyLabel(
@@ -251,11 +228,13 @@ async function applyLabel(
   action: LabelAction,
 ): Promise<string> {
   if (action === "add") {
-    await write(github, "POST", `${issue}/labels`, { labels: [publicLabel] });
+    const labels = `${issue}/labels`;
+    await write(labels, github.send("POST", labels, { labels: [publicLabel] }));
     return `added ${publicLabel}`;
   }
   if (action === "remove") {
-    await removeLabel(github, `${issue}/labels/${encodeURIComponent(publicLabel)}`);
+    const label = `${issue}/labels/${encodeURIComponent(publicLabel)}`;
+    await write(label, github.remove(label));
     return `removed ${publicLabel}`;
   }
   return "label kept";
@@ -276,16 +255,16 @@ async function applyComment(
   if (wanted.kind === "clear") {
     if (existing === null) return `nothing to say (${wanted.reason})`;
 
-    await write(github, "DELETE", own(existing.id));
+    await write(own(existing.id), github.remove(own(existing.id)));
     return `removed the comment: ${wanted.reason}`;
   }
   if (existing === null) {
-    await write(github, "POST", comments, { body: wanted.body });
+    await write(comments, github.send("POST", comments, { body: wanted.body }));
     return "posted the comment";
   }
   if (existing.body === wanted.body) return "the comment is current";
 
-  await write(github, "PATCH", own(existing.id), { body: wanted.body });
+  await write(own(existing.id), github.send("PATCH", own(existing.id), { body: wanted.body }));
   return "updated the comment";
 }
 

@@ -50,15 +50,15 @@ export type Read<T> =
   | { kind: "not-found" }
   | { kind: "failed"; reason: string };
 
-/** One write's outcome. `refused` is GitHub's own 4xx, an answer whose status the caller reads (a 404 the thing is gone,
- *  a 422 it already exists); `failed` is every non-answer, its reason safe for a public log. */
+/** One write's outcome. `refused` is GitHub's own 4xx, an answer whose status the caller reads (a 422 the thing already
+ *  exists); `failed` is every non-answer, its reason safe for a public log. */
 export type Sent<T> =
   | { kind: "ok"; value: T }
   | { kind: "refused"; status: number }
   | { kind: "failed"; reason: string };
 
-/** The methods that change something. PATCH and DELETE are retried like a read: the same request twice leaves the same state. */
-export type WriteMethod = "POST" | "PATCH" | "DELETE";
+/** The methods `send` takes. A DELETE is no member: it goes through `remove`, which reads its 404. */
+export type WriteMethod = "POST" | "PATCH";
 
 /** Query parameters of one read. */
 export type Query = Record<string, string | number>;
@@ -261,10 +261,32 @@ export class GitHubClient {
 
   send<T>(method: WriteMethod, path: string, fields: Fields, reply: z.ZodType<T>): Promise<Sent<T>>;
 
-  async send<T>(
+  send<T>(
     method: WriteMethod,
     path: string,
     fields: Fields = {},
+    reply?: z.ZodType<T>,
+  ): Promise<Sent<T | undefined>> {
+    return this.#write(method, path, fields, reply);
+  }
+
+  /** One DELETE. A 404 is `ok`: the thing is gone, as a removal retried after a lost reply finds it.
+   *
+   * @param path - the API path, as `get` takes it
+   */
+  async remove(path: string): Promise<Sent<undefined>> {
+    const removed = await this.#write<undefined>("DELETE", path, {});
+
+    return removed.kind === "refused" && removed.status === 404
+      ? { kind: "ok", value: undefined }
+      : removed;
+  }
+
+  /** A PATCH or a DELETE is retried like a read: the same request twice leaves the same state. */
+  async #write<T>(
+    method: WriteMethod | "DELETE",
+    path: string,
+    fields: Fields,
     reply?: z.ZodType<T>,
   ): Promise<Sent<T | undefined>> {
     const retries = method === "POST" ? SENT_ONCE : {};

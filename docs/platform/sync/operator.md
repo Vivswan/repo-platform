@@ -51,10 +51,11 @@ The scripts' reads and writes of the GitHub API go through one client ([shared/g
 
 A write (an issue, a comment, a label, a pull request) is read by its status too, and is sent twice only when twice is safe:
 
-| The write                                   | On a 5xx, no response, or a cut reply                                                  | On a 4xx                                                             |
-| ------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `PATCH`, `DELETE`                           | is tried again like a read: the same request twice leaves the same state               | is GitHub's answer, read by its status: a 404 on a removal is "gone" |
-| `POST` (a new issue, comment, pull request) | fails at once: the first attempt may have created the thing, and the next run finds it | is GitHub's answer, read by its status                               |
+| The write                                   | On a 5xx, no response, or a cut reply                                                  | On a 4xx                                                                          |
+| ------------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `PATCH`                                     | is tried again like a read: the same request twice leaves the same state               | is GitHub's answer, read by its status                                            |
+| `DELETE`                                    | is tried again like a read                                                             | a 404 is "gone", in the client and for every caller; any other is GitHub's answer |
+| `POST` (a new issue, comment, pull request) | fails at once: the first attempt may have created the thing, and the next run finds it | is GitHub's answer, read by its status                                            |
 
 - **A rate limit** is waited out for a write as for a read: GitHub did not act on the refused request.
 - **Auto-merge alone is still asked of `gh`** (`gh pr merge`): gh merges a pull request that is already mergeable and arms the rest, a choice no single API call makes.

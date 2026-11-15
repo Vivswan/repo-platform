@@ -505,7 +505,11 @@ class Delivery {
 
   /** The automation branch gone from the target: deleted now, or confirmed absent after a refused deletion. */
   async deleteAutomationBranch(reason: string): Promise<void> {
-    const deleted = await this.send("DELETE", `git/refs/heads/${AUTOMATION_BRANCH}`);
+    const refs = `git/refs/heads/${AUTOMATION_BRANCH}`;
+    const deleted = await this.answered(
+      `DELETE ${refs}`,
+      this.github.remove(`repos/${this.target}/${refs}`),
+    );
     if (deleted.kind === "ok") return;
 
     if (deleted.kind !== "refused" || deleted.status !== 422) failDelivery(reason);

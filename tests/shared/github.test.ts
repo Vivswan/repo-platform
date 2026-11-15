@@ -197,7 +197,7 @@ describe("GitHubClient", () => {
       ],
       [
         "a 404 is an answer with its status, never retried",
-        "DELETE",
+        "PATCH",
         [{ status: 404 }],
         { kind: "refused", status: 404 },
         1,
@@ -232,21 +232,37 @@ describe("GitHubClient", () => {
       expect(github.calls().length).toBe(attempts);
     });
 
-    test("a DELETE is retried like a read, and its 204 carries no value", async () => {
-      const { client, github } = over({
-        [`DELETE ${ISSUES}/7/labels`]: [BAD_GATEWAY, { status: 204 }],
-      });
+    // GitHub answers 404 for a thing already gone, which is what a DELETE retried after a lost reply gets. Read by each
+    // caller, the rule was missed one call site at a time; a 404 on a POST or a PATCH is no such thing.
+    const removals: [string, FakeReply[], Sent<undefined>, number][] = [
+      ["a 204 is the thing removed", [{ status: 204 }], { kind: "ok", value: undefined }, 1],
+      [
+        "a 502 then a 204 is the thing removed: a DELETE is retried like a read",
+        [BAD_GATEWAY, { status: 204 }],
+        { kind: "ok", value: undefined },
+        2,
+      ],
+      [
+        "a 502 then a 404 is the thing gone: the first attempt removed it",
+        [BAD_GATEWAY, { status: 404 }],
+        { kind: "ok", value: undefined },
+        2,
+      ],
+      ["a 403 is a refusal", [{ status: 403 }], { kind: "refused", status: 403 }, 1],
+      ["a 422 is a refusal", [{ status: 422 }], { kind: "refused", status: 422 }, 1],
+      ["a 502 on every attempt fails", [BAD_GATEWAY], { kind: "failed", reason: "HTTP 502" }, 4],
+    ];
 
-      expect(await client.send("DELETE", `${ISSUES}/7/labels`)).toEqual({
-        kind: "ok",
-        value: undefined,
-      });
-      expect(github.calls().length).toBe(2);
+    test.each(removals)("a removal: %s", async (_name, replies, expected, attempts) => {
+      const { client, github } = over({ [`DELETE ${ISSUES}/7/labels`]: replies });
+
+      expect(await client.remove(`${ISSUES}/7/labels`)).toEqual(expected);
+      expect(github.calls().length).toBe(attempts);
     });
 
     test("the fields travel as the JSON body under the token, and a bodiless 204 is ok with no value", async () => {
       const { client, github } = over({ [`DELETE ${ISSUES}/7/labels/a%3Ab`]: [{ status: 204 }] });
-      const sent = await client.send("DELETE", `${ISSUES}/7/labels/a%3Ab`);
+      const sent = await client.remove(`${ISSUES}/7/labels/a%3Ab`);
       const patched = await client.send("PATCH", `${ISSUES}/7`, { state: "open", body: "b" });
 
       expect([sent, patched]).toEqual([

@@ -140,14 +140,12 @@ class BranchDelivery {
     return call.stdout;
   }
 
-  /** A 404 is the label already off: a human took it off and put it back while an earlier run was still on its way here. */
+  /** A label already off counts as removed: a human took it off and put it back while an earlier run was still on its way here. */
   async removeLabel(): Promise<void> {
-    const removed = await this.github.send(
-      "DELETE",
+    const removed = await this.github.remove(
       `${this.issue}/labels/${encodeURIComponent(SYNC_LABEL)}`,
     );
     if (removed.kind === "ok") return;
-    if (removed.kind === "refused" && removed.status === 404) return;
 
     fail(`removing the ${SYNC_LABEL} label failed (${unansweredReason(removed)})`);
   }
