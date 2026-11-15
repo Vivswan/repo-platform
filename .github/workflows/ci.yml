@@ -317,11 +317,11 @@ jobs:
         with:
           bun-version-file: files/bun/.bun-version
       # The working-text probe's path check: a page naming a path a managed repository holds resolves through the shipped
-      # trees, the base and the one module that ships a hook of its own.
+      # trees, the base and the modules that ship a hook of their own.
       - name: Probe every path the pages name
         run: >-
           git ls-files 'README.md' 'docs/*.md'
-          | xargs bun .skills/skills/working-text/scripts/docs-probe.mts --base files/base --base files/npm
+          | xargs bun .skills/skills/working-text/scripts/docs-probe.mts --base files/base --base files/npm --base files/autofix
 
   # A caller job's permissions are the ceiling for the called workflow, so the scan grants sit here.
   codeql-javascript:
@@ -450,6 +450,13 @@ jobs:
           mode: after-propose
         env:
           GH_TOKEN: ${{ github.token }}
+      # Only a pull request carries the event it reads; a push with no autofix.push block starts no fix and calls nothing.
+      - id: autofix
+        if: github.event_name == 'pull_request'
+        uses: $/actions/autofix
+        with:
+          phase: plan
+          config: '{"label":{"paths":["**"],"delete":[]},"push":null}'
 
   # THE gate: this job's own check run is the ruleset's required check (files/settings/override.yml),
   # and alls-green passes only when every needed result is success, or skipped for a job named in allowed-skips.

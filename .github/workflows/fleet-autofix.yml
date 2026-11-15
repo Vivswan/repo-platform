@@ -1,0 +1,216 @@
+# Fixes a pull request's branch for the calling repository's managed auto-fix.yml (docs/modules/autofix.md): the
+# repository's own hook makes the changes, and the commit is pushed back to the branch.
+#
+# Two jobs on purpose, so no pull request code runs beside a write token:
+#   stage -> contents read; runs the pull request's hook and its installs; hands over a patch and a report, as data
+#   push  -> contents write; runs platform code alone; reads the event and the lists itself and judges every path again
+#
+# The lists come from the registration on the DEFAULT branch, so a pull request cannot widen what its own fix may touch.
+
+name: Fleet Autofix
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  # Whether this event starts a fix: the fix-lint label always, a push only when the registration declares autofix.push
+  # and a changed file matches its `on` list.
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      config: ${{ steps.registration.outputs.autofix-config }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Read the fix lists from the default branch's registration
+        id: registration
+        uses: $/actions/plan
+        with:
+          mode: autofix
+
+      - name: Decide whether the event starts a fix
+        id: plan
+        uses: $/actions/autofix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          phase: plan
+          config: ${{ steps.registration.outputs.autofix-config }}
+
+  # The pull request's code runs here, with a token that can only read: the hook, its installs, its fixer.
+  stage:
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      # The seeded hook fails, so a repository that has not filled it in never pushes an empty fix.
+      - name: Run the repository's fix hook
+        id: hook
+        uses: ./.github/actions/autofix
+        with:
+          event: ${{ github.event.action == 'labeled' && 'label' || 'push' }}
+
+      - name: Stage the allowed changes and write the patch
+        id: stage
+        uses: $/actions/autofix
+        with:
+          phase: stage
+          config: ${{ needs.plan.outputs.config }}
+          repository-directory: ${{ github.workspace }}
+          findings: ${{ steps.hook.outputs.findings }}
+          subject: ${{ steps.hook.outputs.subject }}
+
+      # The attempt in the name: a rerun of this job uploads beside the earlier attempt's artifact, never over it.
+      - name: Upload the patch and the report
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: autofix-${{ github.run_attempt }}
+          path: ${{ steps.stage.outputs.directory }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # No pull request code runs here. The head sha is checked out into head/ and the default branch into base/, so no
+  # process starts inside the pull request's tree, where its bunfig.toml would configure the platform's bun.
+  #   !cancelled()  -> a failed stage still reaches the label's removal; every other step gates on the stage's success
+  #   a failed plan -> on the label the job runs for the removal alone, so a broken registration leaves no label behind
+  push:
+    needs: [plan, stage]
+    if: >-
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      (needs.plan.outputs.run == 'true' ||
+      (needs.plan.result == 'failure' && github.event.action == 'labeled'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.stage.result == 'success'
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: base
+          sparse-checkout: .repo-platform.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # Read again here, never taken from the stage job: the lists this job judges with are the default branch's now.
+      - name: Read the fix lists from the default branch's registration
+        id: registration
+        if: needs.stage.result == 'success'
+        uses: $/actions/plan
+        with:
+          mode: autofix
+          path: base
+
+      # By id, into the runner's temp directory: only this artifact crosses, and it lands outside both checkouts.
+      - name: Download the patch and the report
+        if: needs.stage.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.stage.outputs.artifact-id }}
+          path: ${{ runner.temp }}/autofix-staged
+          digest-mismatch: error
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.stage.result == 'success'
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+          persist-credentials: false
+
+      - name: Read the hook's commit subject from the report
+        id: report
+        if: needs.stage.result == 'success'
+        uses: $/actions/autofix
+        with:
+          phase: read
+          staged-directory: ${{ runner.temp }}/autofix-staged
+
+      # The gate that will judge the commit on the branch judges its subject here. A refusal is not an error: the
+      # commit then carries the default subject.
+      - name: Ask the commit-names gate about the subject
+        id: subject
+        if: needs.stage.result == 'success' && steps.report.outputs.subject != ''
+        continue-on-error: true
+        uses: $/actions/validate-commit-names
+        with:
+          title: ${{ steps.report.outputs.subject }}
+
+      - name: Judge the patch, commit it, and push it leased to the head sha
+        id: push
+        if: needs.stage.result == 'success'
+        uses: $/actions/autofix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          phase: push
+          config: ${{ steps.registration.outputs.autofix-config }}
+          repository-directory: ${{ github.workspace }}/head
+          staged-directory: ${{ runner.temp }}/autofix-staged
+          subject: ${{ steps.report.outputs.subject }}
+          subject-accepted: ${{ steps.subject.outcome == 'success' }}
+
+      # always(): a refused or failed push words a notice before it fails the step above.
+      - name: Tell the pull request
+        if: always() && steps.push.outputs.notice != ''
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: repo-platform/autofix
+          message: ${{ steps.push.outputs.notice }}
+
+      # The label is a one-shot request: it goes even when a step above failed, so a broken run cannot loop.
+      - name: Remove the fix-lint label
+        if: always() && github.event.action == 'labeled'
+        uses: $/actions/autofix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          phase: unlabel
+
+  # A fork's pull request: the workflow token cannot push to its branch, so the label comes off with a note. The job
+  # checks nothing out and runs no pull request code, which is what makes pull_request_target safe here.
+  fork:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Remove the fix-lint label
+        id: fork
+        uses: $/actions/autofix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          phase: fork
+
+      - name: Say that forks are not fixed
+        if: steps.fork.outputs.notice != ''
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: repo-platform/autofix
+          message: ${{ steps.fork.outputs.notice }}

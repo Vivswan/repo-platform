@@ -16,9 +16,9 @@ bun is the one pinned toolchain: [files/bun/.bun-version](../files/bun/.bun-vers
 
 ## The biome pin
 
-biome is a tool pin, not a toolchain pin: one version spelled in the action's package.json, the root package.json, the floor's `$schema`, and the auto-format starter, held equal by a test, so a bump edits all four in one PR.
+biome is a tool pin, not a toolchain pin: one version spelled in the action's package.json, the root package.json, and the floor's `$schema`, held equal by a test, so a bump edits all three in one PR.
 
-A starter is written once, so an existing `auto-format.yml` keeps the version it was written with until the repository edits it; the gate's biome is always the action's.
+The gate's biome is always the action's. A repository's own fixer, run by its [autofix hook](modules/autofix.md), is the version its lockfile holds.
 
 The fleet's yamllint step is not a module pin: the action's own requirements pin it, and dependabot bumps it there.
 
@@ -50,7 +50,7 @@ Rules that follow:
 
 - **Never hand-edit the dotfile:** it is managed, so the next sync overwrites it, with the change visible only in the sync PR. Keep deliberate divergence in the workflow inputs above.
 
-- **Starters are written once:** repo-owned starters (`auto-format.yml`, `copilot-setup-steps.yml`, the `checks.yml` examples) are never resynced, so a later change to a starter reaches an existing copy only by hand.
+- **Starters are written once:** repo-owned starters (`copilot-setup-steps.yml`, the `checks.yml` examples) are never resynced, so a later change to a starter reaches an existing copy only by hand.
 
 - **Drop `packageManager`:** once the dotfile pins bun, drop any `packageManager` field for it from `package.json`. setup-bun falls back to `packageManager`/`engines.bun` only when no version input or file matched, so a stale field is at best dead and at worst a second, disagreeing pin.
 
