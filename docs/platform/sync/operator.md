@@ -31,6 +31,24 @@ The row lines are the vocabulary the [new-project skill](https://github.com/Vivs
 
 The residual is a slug another writable repository takes within the run: the row syncs that repository as the plan's.
 
+## Reading the GitHub API
+
+The scripts' reads of the GitHub API (the repository listing, a repository's registration and rendered settings, a commit's check runs and pull requests) go through one client ([shared/github.ts](../../../.github/scripts/shared/github.ts)), so one answer means one thing in every script.
+
+| GitHub answers                                                                                                         | The read                                                    |
+| ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| a 5xx, no response, or a reply cut off mid-body                                                                        | is tried again after 1, 4, and 9 seconds, then fails        |
+| a rate limit lifting within a minute                                                                                   | waits it out, once per request                              |
+| a longer rate limit, or any other 4xx but 404                                                                          | fails at once                                               |
+| 404                                                                                                                    | is "not there": the status alone, never the error's wording |
+| no answer within two minutes, its retries, waits, and pages included (15 seconds for the green gate's check-runs read) | fails, so a stalled network never holds a billed runner     |
+
+- **In the sync plan** a listing or a registration read that still fails ends the plan red and no row runs: an outage never reads as "no repositories" or "not adopted", and a transient 502 is tried again before it counts as one.
+- **The green gate** fails closed on a check-runs read that still fails; the settings apply's gate keeps asking until its own deadline ([all-green.md](../../all-green.md#consuming-the-gate)).
+- **A failure prints its status alone** (`HTTP 502`), never the URL or GitHub's error text, which name the repository ([private repositories](private-repositories.md#how-each-rule-is-kept)).
+- **The token** is `GH_TOKEN`, else `GITHUB_TOKEN`, an empty value skipped, as `gh` reads them. With neither, the script fails: an anonymous read of a private repository answers 404, which would read as "not adopted".
+- **A listing is whole or it is nothing:** every page must be an array, and one page that fails makes the listing fail, never a shorter fleet.
+
 ## Delivering a row
 
 The deliver step takes the writer's output: a commit and a PR in the target, one commit onto a dispatched branch with no PR, nothing when the tree already matches the build, or one failure issue.

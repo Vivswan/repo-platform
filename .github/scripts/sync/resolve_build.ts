@@ -49,7 +49,7 @@ const short = tip.slice(0, 12);
 if (!gitAnswersYes(["merge-base", "--is-ancestor", tip, MAIN])) {
   fail(`the stable tag names ${short}, which is not on main's history. ${heal}`);
 }
-const notGreen = allGreenFailure(repository, tip);
+const notGreen = await allGreenFailure(repository, tip);
 if (notGreen !== null) {
   fail(`the stable tag names ${short}, which is not green: ${notGreen}. ${heal}`);
 }

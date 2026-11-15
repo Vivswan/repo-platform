@@ -1,7 +1,9 @@
-import { beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { spawnFakeGithub } from "../shared/fake_github";
+import type { LoopbackServer } from "../shared/loopback_server";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -9,47 +11,9 @@ const temp = tempDirs();
 describe("discover_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/discover_repos.ts");
   const root = temp.dir("discover-repos-");
-  const bin = join(root, "bin");
 
-  beforeAll(() => {
-    mkdirSync(bin);
-    writeFileSync(
-      join(bin, "gh"),
-      [
-        "#!/usr/bin/env bash",
-        'if [ "$2" = "user" ]; then',
-        '  if [ -n "$STUB_FAIL_LOGIN" ]; then',
-        '    echo "gh: login boom" >&2',
-        "    exit 9",
-        "  fi",
-        '  echo "Vivswan"',
-        "  exit 0",
-        "fi",
-        'cat "$STUB_PAYLOAD"',
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
-    );
-  });
-
-  function run(name: string, extra: Record<string, string>) {
-    const temp = join(root, `temp-${name}`);
-    mkdirSync(temp, { recursive: true });
-    const proc = boundedSpawnSync(["bun", script], {
-      env: {
-        ...process.env,
-        PATH: `${bin}:${process.env.PATH}`,
-        RUNNER_TEMP: temp,
-        ...extra,
-      },
-    });
-    return {
-      exitCode: proc.exitCode,
-      stdout: proc.stdout,
-      stderr: proc.stderr,
-      discoveredPath: join(temp, "discovered.json"),
-    };
-  }
+  let api: LoopbackServer;
+  let downApi: LoopbackServer;
 
   function repoEntry(full_name: string, overrides: Record<string, unknown> = {}) {
     return {
@@ -62,23 +26,57 @@ describe("discover_repos.ts", () => {
     };
   }
 
-  test("snapshots the owner's writable repos as {repo, private} rows and logs only the count", () => {
-    const payload = join(root, "pages.json");
-    writeFileSync(
-      payload,
-      JSON.stringify([
-        [
-          repoEntry("Vivswan/hidden"),
-          repoEntry("Vivswan/pub", { private: false }),
-          repoEntry("Vivswan/archived-out", { archived: true }),
-          repoEntry("Vivswan/read-only", { permissions: { push: false } }),
+  beforeAll(async () => {
+    api = await spawnFakeGithub(
+      {
+        user: [{ status: 200, body: { login: "Vivswan" } }],
+        "user/repos": [
+          {
+            status: 200,
+            next: true,
+            body: [
+              repoEntry("Vivswan/hidden"),
+              repoEntry("Vivswan/pub", { private: false }),
+              repoEntry("Vivswan/archived-out", { archived: true }),
+              repoEntry("Vivswan/read-only", { permissions: { push: false } }),
+            ],
+          },
+          // Cross-owner writable repos are the scoping delta over
+          // discoverWritableRepos: the sync plan must drop them.
+          { status: 200, body: [repoEntry("Other/cross-owner")] },
         ],
-        // Cross-owner writable repos are the scoping delta over
-        // discoverWritableRepos: the sync plan must drop them.
-        [repoEntry("Other/cross-owner")],
-      ]),
+      },
+      join(root, "api.log"),
     );
-    const r = run("scope", { STUB_PAYLOAD: payload });
+    downApi = await spawnFakeGithub({ user: [{ status: 503 }] }, join(root, "down-api.log"));
+  });
+  afterAll(() => {
+    api.stop();
+    downApi.stop();
+  });
+
+  function run(name: string, server: LoopbackServer = api) {
+    const temp = join(root, `temp-${name}`);
+    mkdirSync(temp, { recursive: true });
+    const proc = boundedSpawnSync(["bun", script], {
+      env: {
+        ...process.env,
+        RUNNER_TEMP: temp,
+        GH_TOKEN: "stub-token",
+        GITHUB_API_URL: `${server.host}/${name}`,
+        GITHUB_RETRY_BASE_MS: "0",
+      },
+    });
+    return {
+      exitCode: proc.exitCode,
+      stdout: proc.stdout,
+      stderr: proc.stderr,
+      discoveredPath: join(temp, "discovered.json"),
+    };
+  }
+
+  test("snapshots the owner's writable repos as {repo, private} rows and logs only the count", () => {
+    const r = run("scope");
     expect(r.stderr).toBe("");
     expect(r.exitCode).toBe(0);
     // The sync selector (select_sync_repos.ts) parses these rows, and `private` decides what its public log may name.
@@ -89,11 +87,14 @@ describe("discover_repos.ts", () => {
     expect(r.stdout).toBe("discovered 2 writable repos for Vivswan\n");
   });
 
-  test("a failed login exits with gh's code before any listing or write", () => {
-    const r = run("login-fail", { STUB_FAIL_LOGIN: "1", STUB_PAYLOAD: "/dev/null" });
-    expect(r.exitCode).toBe(9);
-    expect(r.stderr).toContain("gh: login boom");
-    expect(r.stdout).toBe("");
-    expect(existsSync(r.discoveredPath)).toBe(false);
+  test("an unreadable login fails before any listing or write: the owner scope is the token's user, never a guess", () => {
+    const r = run("login-fail", downApi);
+    expect({ ...r, written: existsSync(r.discoveredPath) }).toEqual({
+      exitCode: 1,
+      stdout: "::error::discover_repos: the token's user could not be read (HTTP 503)\n",
+      stderr: "",
+      discoveredPath: r.discoveredPath,
+      written: false,
+    });
   });
 });

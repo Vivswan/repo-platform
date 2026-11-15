@@ -2,13 +2,14 @@
 // name, and each entry script's stdout is nothing but ::add-mask:: commands for every form of the
 // name after ONE listing, the name leaving through GITHUB_ENV alone, every refusal naming no repository.
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { supersededNotice } from "../../.github/scripts/fleet/newest_main.ts";
 import { MIN_MASKED_NAME, maskForms } from "../../.github/scripts/shared/mask.ts";
 import { matrixRows, resolveRow, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { type FakeGithubServer, type FakeReply, spawnFakeGithub } from "../shared/fake_github";
 import { parseGithubEnv } from "../shared/github_output";
 import { STUB_GIT_FAIL_REFUSAL, writeStubGit } from "../shared/stub_git";
 import { tempDirs } from "../shared/temp_dir";
@@ -46,8 +47,8 @@ const INCLUDE = "Vivswan/include";
 /** Selected by the plan, revoked from the grant before this row ran: in no listing. */
 const GONE = "Vivswan/Revoked-mid-run";
 
-/** The one network call a row makes: the listing discovery.ts reads. */
-const LISTING = "gh api user/repos --method GET --paginate --slurp -F per_page=100";
+/** The one API read a row makes: the listing discovery.ts reads. */
+const LISTING = "user/repos?per_page=100";
 
 /** The settings row's newest-wins read of main's tip, before its listing (fleet/newest_main.ts). */
 const TIP_READ = "git ls-remote --exit-code origin refs/heads/main";
@@ -60,13 +61,14 @@ const rows: Row[] = [
   { repo: INCLUDE, private: true },
 ];
 
-/** One run; env is the variables GITHUB_ENV carries, read back as the runner reads them. */
+/** One run; env is the variables GITHUB_ENV carries, read back as the runner reads them, calls the git commands it ran, reads the API paths it asked for. */
 interface Run {
   exitCode: number;
   stdout: string;
   stderr: string;
   env: Record<string, string>;
   calls: string[];
+  reads: string[];
 }
 
 /** The two workflows' entry scripts: one resolver each, with its own GITHUB_ENV contract. */
@@ -86,51 +88,72 @@ const ENTRIES = [
   },
 ];
 
-/** One stub PATH and one listing for every describe in this file. */
+/** One stub PATH for every describe in this file. */
 const fixture = (() => {
   const root = temp.dir("resolve-row-");
   const bin = join(root, "bin");
   mkdirSync(bin);
-  const entry = (full_name: string, overrides: Record<string, unknown> = {}) =>
-    JSON.stringify({
-      full_name,
-      archived: false,
-      private: true,
-      owner: { login: full_name.split("/")[0] },
-      permissions: { push: true },
-      ...overrides,
-    });
-  const pages = `[[${[
-    entry(HIDDEN),
-    entry(PUBLIC, { private: false }),
-    entry(BEEF),
-    entry(INCLUDE),
-    entry("Vivswan/archived-out", { archived: true }),
-    entry("Vivswan/read-only", { permissions: { push: false } }),
-    entry("Other/cross-owner"),
-  ].join(",")}]]`;
-  writeFileSync(join(root, "pages.json"), `${pages}\n`);
-  writeFileSync(join(root, "malformed.json"), '[[{"full_name":"Vivswan/shapeless"}]]\n');
-  writeFileSync(
-    join(bin, "gh"),
-    [
-      "#!/usr/bin/env bash",
-      'echo "gh $*" >> "$STUB_CALLS"',
-      'if [ -n "$STUB_FAIL_DISCOVERY" ]; then',
-      '  echo "HTTP 500 from stub" >&2',
-      "  exit 1",
-      "fi",
-      'cat "$STUB_PAGES"',
-      "",
-    ].join("\n"),
-    { mode: 0o755 },
-  );
   writeStubGit(bin);
-  return { bin, pages: join(root, "pages.json"), malformed: join(root, "malformed.json") };
+  return { root, bin };
 })();
 
+/** One user/repos item, a private repository the user can push to unless overridden. */
+const entry = (full_name: string, overrides: Record<string, unknown> = {}) => ({
+  full_name,
+  archived: false,
+  private: true,
+  owner: { login: full_name.split("/")[0] },
+  permissions: { push: true },
+  ...overrides,
+});
+
+/** The listings a row may meet, each served by its own API. */
+const LISTINGS: Record<"fleet" | "outage" | "malformed", FakeReply[]> = {
+  fleet: [
+    {
+      status: 200,
+      body: [
+        entry(HIDDEN),
+        entry(PUBLIC, { private: false }),
+        entry(BEEF),
+        entry(INCLUDE),
+        entry("Vivswan/archived-out", { archived: true }),
+        entry("Vivswan/read-only", { permissions: { push: false } }),
+        entry("Other/cross-owner"),
+      ],
+    },
+  ],
+  outage: [{ status: 500 }],
+  malformed: [{ status: 200, body: [{ full_name: "Vivswan/shapeless" }] }],
+};
+
+/** One API per listing, up for the whole file. */
+const apis: Partial<Record<keyof typeof LISTINGS, FakeGithubServer>> = {};
+
+/** Runs so far: each reads the API under its own name. */
+let runs = 0;
+
+beforeAll(async () => {
+  for (const name of Object.keys(LISTINGS) as (keyof typeof LISTINGS)[]) {
+    apis[name] = await spawnFakeGithub(
+      { "user/repos": LISTINGS[name] },
+      join(fixture.root, `${name}-api.log`),
+    );
+  }
+});
+afterAll(() => {
+  for (const server of Object.values(apis)) server.stop();
+});
+
 /** An entry script under the workflow's env for the step; a case sets a variable to undefined to leave it unset. */
-function run(script: string, env: Record<string, string | undefined>): Run {
+function run(
+  script: string,
+  env: Record<string, string | undefined>,
+  listing: keyof typeof LISTINGS = "fleet",
+): Run {
+  const api = apis[listing];
+  if (api === undefined) throw new Error(`the ${listing} API is not up`);
+  const name = `run-${++runs}`;
   const work = temp.dir("resolve-row-run-");
   const envFile = join(work, "env.txt");
   const callsFile = join(work, "calls.txt");
@@ -139,7 +162,9 @@ function run(script: string, env: Record<string, string | undefined>): Run {
   const merged: Record<string, string | undefined> = {
     PATH: `${fixture.bin}:${process.env.PATH}`,
     HOME: process.env.HOME,
-    STUB_PAGES: fixture.pages,
+    GH_TOKEN: PAT,
+    GITHUB_API_URL: `${api.host}/${name}`,
+    GITHUB_RETRY_BASE_MS: "0",
     STUB_CALLS: callsFile,
     STUB_MAIN_TIP: SHA,
     GITHUB_ENV: envFile,
@@ -160,6 +185,7 @@ function run(script: string, env: Record<string, string | undefined>): Run {
     calls: readFileSync(callsFile, "utf-8")
       .split("\n")
       .filter((line) => line !== ""),
+    reads: api.calls(name),
   };
 }
 
@@ -177,14 +203,21 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
     stdout: masks(row),
     stderr: "",
     env: handOn(row),
-    calls: [...before, LISTING],
+    calls: before,
+    reads: [LISTING],
   });
-  const refused = (exitCode: number, error: string, calls: string[]): Run => ({
+  const refused = (
+    exitCode: number,
+    error: string,
+    calls: string[],
+    reads: string[] = [],
+  ): Run => ({
     exitCode,
     stdout: `::error::${error}\n`,
     stderr: "",
     env: {},
     calls,
+    reads,
   });
   const MOVED =
     "the row's key names no repository in the owner's listing: the fleet moved since the plan job ran (a repository revoked or renamed mid-run); re-run the workflow";
@@ -203,28 +236,33 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
 
   // The privacy invariant on every refusal path, executed: no channel (stdout, stderr, GITHUB_ENV) carries a
   // repository name in any case, and TARGET is never written.
-  test.each<{ reason: string; env: Record<string, string | undefined>; outcome: Run }>([
+  test.each<{
+    reason: string;
+    env: Record<string, string | undefined>;
+    listing?: keyof typeof LISTINGS;
+    outcome: Run;
+  }>([
     // A public repository stays listed with push after its PAT grant is revoked, so this case proves
     // only the missing-listing refusal.
     {
       reason: "a row whose repository left the owner's listing since the plan",
       env: { ROW_KEY: keyOf(GONE) },
-      outcome: refused(1, MOVED, [...before, LISTING]),
+      outcome: refused(1, MOVED, before, [LISTING]),
     },
     {
       reason: "a key under another run's id",
       env: { ROW_KEY: rowKeyOf(PAT, "1")(PUBLIC) },
-      outcome: refused(1, MOVED, [...before, LISTING]),
+      outcome: refused(1, MOVED, before, [LISTING]),
     },
     {
       reason: "a key under another token",
       env: { ROW_KEY: rowKeyOf("other", RUN_ID)(PUBLIC) },
-      outcome: refused(1, MOVED, [...before, LISTING]),
+      outcome: refused(1, MOVED, before, [LISTING]),
     },
     {
       reason: "a bare slug where the key should be",
       env: { ROW_KEY: HIDDEN },
-      outcome: refused(1, MOVED, [...before, LISTING]),
+      outcome: refused(1, MOVED, before, [LISTING]),
     },
     // An empty value is unset to requireEnv, and the refusal comes before any listing; the other required variables
     // pass through the same gate, so these two rows stand for them.
@@ -235,23 +273,25 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
       outcome: refused(2, "ROW_KEY must be set", before),
     },
     {
-      reason: "a listing that fails (gh's own stderr, no row resolved)",
-      env: { ROW_KEY: keyOf(HIDDEN), STUB_FAIL_DISCOVERY: "1" },
-      outcome: {
-        exitCode: 1,
-        stdout: "",
-        stderr: "HTTP 500 from stub\n",
-        env: {},
-        calls: [...before, LISTING],
-      },
+      reason: "a listing that fails on every attempt (its status, no row resolved)",
+      env: { ROW_KEY: keyOf(HIDDEN) },
+      listing: "outage" as const,
+      outcome: refused(
+        1,
+        `${label}: user/repos response could not be read (HTTP 500)`,
+        before,
+        Array(4).fill(LISTING),
+      ),
     },
     {
       reason: "a listing off user/repos' shape (paths and codes, never the payload)",
-      env: { ROW_KEY: keyOf(HIDDEN), STUB_PAGES: fixture.malformed },
+      env: { ROW_KEY: keyOf(HIDDEN) },
+      listing: "malformed" as const,
       outcome: refused(
         1,
-        `${label}: user/repos response: unexpected shape - 0.0.archived: invalid_type; 0.0.private: invalid_type; 0.0.owner: invalid_type`,
-        [...before, LISTING],
+        `${label}: user/repos response could not be read (the reply: unexpected shape - 0.archived: invalid_type; 0.private: invalid_type; 0.owner: invalid_type)`,
+        before,
+        [LISTING],
       ),
     },
     // Newest wins is asked at the write, by the settings row alone: the row reads main's tip before listing anything.
@@ -267,6 +307,7 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
               stderr: "",
               env: {},
               calls: [TIP_READ],
+              reads: [],
             },
           },
           {
@@ -281,8 +322,8 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
           },
         ]
       : []),
-  ])("$reason: the row writes no TARGET and names no repository", ({ env, outcome }) => {
-    const result = run(script, env);
+  ])("$reason: the row writes no TARGET and names no repository", ({ env, listing, outcome }) => {
+    const result = run(script, env, listing);
     expect(result).toEqual(outcome);
     for (const channel of [result.stdout, result.stderr, ...Object.values(result.env)]) {
       for (const name of ["pub-repo", "hidden-server", "revoked-mid-run", "shapeless"]) {
@@ -310,7 +351,8 @@ describe("resolve_row.ts with a dispatched branch", () => {
       stdout: masks(rows[1]),
       stderr: "",
       env: handOn(rows[1]),
-      calls: [LISTING, probe(rows[1])],
+      calls: [probe(rows[1])],
+      reads: [LISTING],
     });
   });
 
@@ -342,7 +384,8 @@ describe("resolve_row.ts with a dispatched branch", () => {
       stdout: `${masks(rows[0])}::error::${error}\n`,
       stderr: "",
       env: {},
-      calls: [LISTING, probe(rows[0])],
+      calls: [probe(rows[0])],
+      reads: [LISTING],
     });
   });
 });

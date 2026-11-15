@@ -60,7 +60,7 @@ A pinned module declares its pin in `files.yml` (`modules.<name>.pin`, its keys 
 
 [refresh-upstream.yml](../.github/workflows/refresh-upstream.yml) (weekly cron plus manual dispatch) runs `release` pins as one matrix leg beside the `commit` pins of [platform/sync/files.md](platform/sync/files.md#upstream-refs), each on its own PR branch, so a toolchain bump is never held behind a gitignore diff:
 
-- **The latest release, never a prerelease,** is the pin's target; an unreachable source, or a "latest" older than the pin (a backport surfacing as latest), aborts the run, since such a view cannot tell "nothing moved" from "could not see upstream's newest".
+- **The latest release, never a prerelease,** is the pin's target; a source still unreachable after the API client's retries ([reading the GitHub API](platform/sync/operator.md#reading-the-github-api)), or a "latest" older than the pin (a backport surfacing as latest), aborts the run, since such a view cannot tell "nothing moved" from "could not see upstream's newest".
 - **A bun bump also pins `@types/bun`** to the same version in every package declaring it, which is why `.github/dependabot.yml` ignores that package; the types publish per bun release, so a run before they exist fails and the next run retries.
 - **One PR on `automation/refresh-release-pins`** when anything moved, a major-line bump leading its body with a callout, and closed once main already carries its pins.
 

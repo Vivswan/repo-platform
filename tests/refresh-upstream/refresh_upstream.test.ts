@@ -14,14 +14,16 @@ import {
   tagVersion,
   typesBunDirs,
 } from "../../.github/scripts/refresh-upstream/refresh_upstream.ts";
+import { GitHubClient } from "../../.github/scripts/shared/github.ts";
 import { parseFilesConfig, upstreamRefs } from "../../actions/plan/files_config.ts";
+import { clientOver, type FakeReply, type FakeRoutes, fakeGithub } from "../shared/fake_github";
 import { tempDirs } from "../shared/temp_dir";
 
 const REPO_ROOT = join(import.meta.dir, "../..");
 const FILES_YML = readFileSync(join(REPO_ROOT, "files.yml"), "utf-8");
 const OLD = "0123456789abcdef0123456789abcdef01234567";
 const NEW = "89abcdef0123456789abcdef0123456789abcdef";
-const API = "https://api.github.com/repos";
+
 const ref = (repository: string, sha: string, path: string) => ({ repository, sha, path });
 const temp = tempDirs();
 
@@ -80,36 +82,25 @@ describe("the commit pins", () => {
     );
   });
 
-  test("headSha reads the default branch head with the run token; a reply without a full sha, or not JSON, is refused with fixed text", async () => {
-    const calls: [string, Record<string, string> | undefined][] = [];
-    const answer = (body: string) => async (url: string, headers?: Record<string, string>) => {
-      calls.push([url, headers]);
-      return body;
-    };
-    const saved = process.env.GH_TOKEN;
-    process.env.GH_TOKEN = "ghp_SENTINEL";
-    try {
-      expect(await headSha("o/a", answer(`{"sha": "${NEW}"}`))).toBe(NEW);
-    } finally {
-      if (saved === undefined) delete process.env.GH_TOKEN;
-      else process.env.GH_TOKEN = saved;
-    }
-    expect(calls).toEqual([
-      [
-        `${API}/o/a/commits/HEAD`,
-        { accept: "application/vnd.github+json", authorization: "Bearer ghp_SENTINEL" },
-      ],
-    ]);
-    await expect(headSha("o/a", answer('{"sha": "abc"}'))).rejects.toThrow(
-      "o/a: the commits/HEAD reply carries no full sha",
-    );
-    // Exact equality, not a substring: the body never rides the run's public failure line, and a runtime's own JSON
-    // error text would carry it.
-    const message = await headSha("o/a", answer('{"sha": corrupt}')).then(
-      () => "resolved",
-      (error: unknown) => (error instanceof Error ? error.message : String(error)),
-    );
-    expect(message).toBe(`GET ${API}/o/a/commits/HEAD returned a body that is not valid JSON`);
+  // The sha lands in files.yml and in every fetch URL of the next sync; the failure line is the run's public annotation.
+  test.each<[string, FakeReply, string]>([
+    ["a full sha", { status: 200, body: { sha: NEW } }, NEW],
+    [
+      "a short sha",
+      { status: 200, body: { sha: "abc" } },
+      "o/a: commits/HEAD could not be read (the reply: unexpected shape - sha: invalid_format)",
+    ],
+    [
+      "a body that is not JSON",
+      { status: 200, body: '{"sha": corrupt}' },
+      "o/a: commits/HEAD could not be read (the reply: unexpected shape - (root): invalid_type)",
+    ],
+  ])("headSha reads the default branch head: %s", async (_name, reply, expected) => {
+    const { client: github } = clientOver({ "repos/o/a/commits/HEAD": [reply] });
+
+    const outcome = await headSha("o/a", github).catch((error: Error) => error.message);
+
+    expect(outcome).toBe(expected);
   });
 });
 
@@ -274,24 +265,40 @@ describe("the refresh", () => {
     }
     return root;
   };
-  const upstream = (answers: Record<string, string>) => {
+  /** The raw-content host by URL and the API by path; `fetched` is every read of either, in order. */
+  const upstream = (raw: Record<string, string>, routes: FakeRoutes) => {
     const fetched: string[] = [];
     const fetch = async (url: string) => {
       fetched.push(url);
-      const text = answers[url];
+      const text = raw[url];
       if (text === undefined) throw new Error(`GET ${url} failed: HTTP 503`);
       return text;
     };
-    return { fetched, fetch };
+    const api = fakeGithub(routes);
+    const github = new GitHubClient({
+      token: "stub-token",
+      baseUrl: "https://api.github.test",
+      retryBaseMs: 0,
+      fetch: ((input: string, init?: RequestInit) => {
+        fetched.push(new URL(input).pathname.slice(1));
+        return api.fetch(input, init);
+      }) as typeof globalThis.fetch,
+    });
+    return { fetched, fetch, github };
   };
   const answers: Record<string, string> = {
-    [`${API}/o/a/commits/HEAD`]: `{"sha": "${NEW}"}`,
     [`h/o/a/${OLD}/Global/Linux.gitignore`]: "*~\r\n",
     [`h/o/a/${NEW}/Global/Linux.gitignore`]: "*~\n",
     [`h/o/a/${OLD}/Node.gitignore`]: "node_modules/\n",
     [`h/o/a/${NEW}/Node.gitignore`]: "node_modules/\n.bun/\n",
-    [`${API}/oven-sh/bun/releases/latest`]: '{"tag_name": "bun-v1.4.1"}',
-    [`${API}/astral-sh/uv/releases/latest`]: '{"tag_name": "v3.0.0"}',
+  };
+  const HEAD = "repos/o/a/commits/HEAD";
+  const BUN_LATEST = "repos/oven-sh/bun/releases/latest";
+  const UV_LATEST = "repos/astral-sh/uv/releases/latest";
+  const routes: FakeRoutes = {
+    [HEAD]: [{ status: 200, body: { sha: NEW } }],
+    [BUN_LATEST]: [{ status: 200, body: { tag_name: "bun-v1.4.1" } }],
+    [UV_LATEST]: [{ status: 200, body: { tag_name: "v3.0.0" } }],
   };
 
   const rows: {
@@ -305,7 +312,7 @@ describe("the refresh", () => {
     {
       kind: "commit",
       fetched: [
-        `${API}/o/a/commits/HEAD`,
+        HEAD,
         `h/o/a/${OLD}/Global/Linux.gitignore`,
         `h/o/a/${OLD}/Node.gitignore`,
         `h/o/a/${NEW}/Global/Linux.gitignore`,
@@ -336,7 +343,7 @@ describe("the refresh", () => {
     },
     {
       kind: "release",
-      fetched: [`${API}/oven-sh/bun/releases/latest`, `${API}/astral-sh/uv/releases/latest`],
+      fetched: [BUN_LATEST, UV_LATEST],
       bumps: [
         { kind: "release", name: "bun", from: "1.4.0", to: "1.4.1" },
         { kind: "release", name: "uv", from: "2.9.5", to: "3.0.0" },
@@ -363,8 +370,8 @@ describe("the refresh", () => {
     "$kind pins: their files move, the others stay; one fetch per upstream; the PR words the kind",
     async (row) => {
       const root = plant();
-      const { fetched, fetch } = upstream(answers);
-      const bumps = await refresh({ kind: row.kind, root, host: "h", fetch });
+      const { fetched, fetch, github } = upstream(answers, routes);
+      const bumps = await refresh({ kind: row.kind, root, host: "h", fetch, github });
       expect(bumps).toEqual(row.bumps);
       expect(fetched).toEqual(row.fetched);
       const tree = Object.fromEntries(
@@ -378,19 +385,14 @@ describe("the refresh", () => {
 
   test("a pin already at upstream is reported current and nothing is written", async () => {
     const root = plant();
-    const current = upstream({
-      ...answers,
-      [`${API}/o/a/commits/HEAD`]: `{"sha": "${OLD}"}`,
-      [`${API}/oven-sh/bun/releases/latest`]: '{"tag_name": "bun-v1.4.0"}',
-      [`${API}/astral-sh/uv/releases/latest`]: '{"tag_name": "v2.9.5"}',
+    const current = upstream(answers, {
+      [HEAD]: [{ status: 200, body: { sha: OLD } }],
+      [BUN_LATEST]: [{ status: 200, body: { tag_name: "bun-v1.4.0" } }],
+      [UV_LATEST]: [{ status: 200, body: { tag_name: "v2.9.5" } }],
     });
-    expect(await refresh({ kind: "commit", root, host: "h", fetch: current.fetch })).toEqual([]);
-    expect(await refresh({ kind: "release", root, host: "h", fetch: current.fetch })).toEqual([]);
-    expect(current.fetched).toEqual([
-      `${API}/o/a/commits/HEAD`,
-      `${API}/oven-sh/bun/releases/latest`,
-      `${API}/astral-sh/uv/releases/latest`,
-    ]);
+    expect(await refresh({ kind: "commit", root, host: "h", ...current })).toEqual([]);
+    expect(await refresh({ kind: "release", root, host: "h", ...current })).toEqual([]);
+    expect(current.fetched).toEqual([HEAD, BUN_LATEST, UV_LATEST]);
     expect(readFileSync(join(root, "files.yml"), "utf-8")).toBe(CONFIG);
     expect(proseBumps([])).toBe("");
   });
@@ -399,10 +401,13 @@ describe("the refresh", () => {
   // drops): a bump of that pin would render the same bytes everywhere, so the pin stays and no PR opens for it.
   test("a commit pin whose fetched files are unchanged at upstream's new HEAD stays, after every file was compared", async () => {
     const root = plant();
-    const same = upstream({ ...answers, [`h/o/a/${NEW}/Node.gitignore`]: "node_modules/\n" });
-    expect(await refresh({ kind: "commit", root, host: "h", fetch: same.fetch })).toEqual([]);
+    const same = upstream(
+      { ...answers, [`h/o/a/${NEW}/Node.gitignore`]: "node_modules/\n" },
+      routes,
+    );
+    expect(await refresh({ kind: "commit", root, host: "h", ...same })).toEqual([]);
     expect(same.fetched).toEqual([
-      `${API}/o/a/commits/HEAD`,
+      HEAD,
       `h/o/a/${OLD}/Global/Linux.gitignore`,
       `h/o/a/${OLD}/Node.gitignore`,
       `h/o/a/${NEW}/Global/Linux.gitignore`,
@@ -414,20 +419,28 @@ describe("the refresh", () => {
   // A run that cannot see one upstream cannot tell "nothing moved" from "could not look", and an empty bumps output
   // lets the workflow's PR step close a still-valid refresh PR as caught up: every upstream answers, or nothing moves.
   test.each([
-    ["commit", `${API}/o/a/commits/HEAD`],
-    ["release", `${API}/astral-sh/uv/releases/latest`],
+    ["commit", HEAD, "o/a: commits/HEAD could not be read (HTTP 503)"],
+    ["release", UV_LATEST, "astral-sh/uv: releases/latest could not be read (HTTP 503)"],
   ] as const)(
     "%s pins: one unreachable upstream aborts the run before any pin moves",
-    async (kind, failing) => {
+    async (kind, failing, message) => {
       const root = plant();
-      const partial = Object.fromEntries(
-        Object.entries(answers).filter(([url]) => url !== failing),
-      );
-      await expect(
-        refresh({ kind, root, host: "h", fetch: upstream(partial).fetch }),
-      ).rejects.toThrow(`GET ${failing} failed: HTTP 503`);
+      const down = upstream(answers, { ...routes, [failing]: [{ status: 503 }] });
+      await expect(refresh({ kind, root, host: "h", ...down })).rejects.toThrow(message);
       expect(readFileSync(join(root, "files.yml"), "utf-8")).toBe(CONFIG);
       expect(readFileSync(join(root, "files/bun/.bun-version"), "utf-8")).toBe("1.4.0\n");
     },
   );
+
+  // Named incident: one 502 from releases/latest failed the weekly refresh, which had no second attempt.
+  test("a 502 followed by a 200 still moves the pin", async () => {
+    const root = plant();
+    const flaky = upstream(answers, {
+      ...routes,
+      [UV_LATEST]: [{ status: 502 }, { status: 200, body: { tag_name: "v3.0.0" } }],
+    });
+    const bumps = await refresh({ kind: "release", root, host: "h", ...flaky });
+    expect(bumps.map((bump) => `${bump.name} ${bump.to}`)).toEqual(["bun 1.4.1", "uv 3.0.0"]);
+    expect(flaky.fetched).toEqual([BUN_LATEST, UV_LATEST, UV_LATEST]);
+  });
 });
