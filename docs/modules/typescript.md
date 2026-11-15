@@ -22,6 +22,7 @@ Biome merges `extends` left to right and applies the extending file last. Measur
 
 - **The three thresholds warn** (`noExcessiveCognitiveComplexity`, `noExcessiveLinesPerFunction`, `useMaxParams`) because a threshold is a hint about readability, and a forced split can read worse. A known case stays visible as a warning, or goes quiet under a per-path `overrides` entry with its reason beside it.
 - **A finding is split, or folded:** two nameable concepts become named steps; a step called from one place that is no concept of its own folds back into its caller.
+- **The `fix-lint` label commits what biome can fix:** the [bun block](https://github.com/Vivswan/repo-platform/blob/main/files/bun/.github/workflows/auto-format.toolchain.yml) of the `auto-format.yml` starter lets the commit follow biome's non-zero exit, so a finding with no safe fix stays for the `biome` gate to report. A copy whose format step lacks `continue-on-error: true` fails there and commits nothing: add the line by hand ([starters are written once](../toolchains.md#overriding-per-toolchain)).
 - **A repository that already has a `biome.jsonc`:** move its content into `biome.local.jsonc` and delete it. Biome reads `biome.json` and silently ignores a `biome.jsonc` beside it, so the old file would be dead configuration.
 - **A repository that already has a `biome.json`:** the sync replaces it and reports the diff under Replaced local edits; its content moves into `biome.local.jsonc` the same way.
 
