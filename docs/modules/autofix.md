@@ -40,6 +40,8 @@ The repository's own commands run where the token can only read. The job that ca
 
 3. **Delete what it replaces:** the repository's `auto-format.yml`, any fix workflow of its own, and their scripts and tests. The sync does not remove a repo-owned file.
 
+   A registration whose `except` names `.github/workflows/auto-format.yml` drops that line in the first sync pull request after the platform stopped shipping that starter, whether or not it selects this module. Before that sync the line keeps the old starter out; from it on, the sync holds on an `except` line no entry writes.
+
 The managed `.github/workflows/auto-fix.yml` arrives with the sync. The `fix-lint` label is in every repository's settings already.
 
 ## The lists
