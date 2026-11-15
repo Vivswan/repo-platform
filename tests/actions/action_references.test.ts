@@ -84,7 +84,7 @@ function stepRead(read: ContextRead): { id: string; key: string | undefined } | 
  *  (`return { key: x }`). The text is read, not run: a reference to a name some other single-key record returns
  *  passes here and is caught by the step's own test. */
 function writesKey(text: string, key: string, form: "run" | "script"): boolean {
-  const name = key.replaceAll("-", "\\-");
+  const name = RegExp.escape(key);
   if (form === "run") return new RegExp(`(["']|echo\\s+)${name}=[^\\n]*GITHUB_OUTPUT`).test(text);
   const lines = text.replaceAll("\\n", "\n");
   return (
@@ -243,6 +243,41 @@ const CONTROL_ACTION: Action = {
     ],
   },
 };
+
+// GitHub takes any string as an output key (`outputs['path.*']`), so a key read as a pattern matches writes of other
+// keys and a reference to a key no step writes passes.
+test.each<{ name: string; text: string; key: string; form: "run" | "script"; written: boolean }>([
+  {
+    name: "a key holding a wildcard is not the key it would match",
+    text: 'echo "path=1" >> "$GITHUB_OUTPUT"',
+    key: "path.*",
+    form: "run",
+    written: false,
+  },
+  {
+    name: "a dot in a key is a dot",
+    text: "fooXbar=${value}",
+    key: "foo.bar",
+    form: "script",
+    written: false,
+  },
+  {
+    name: "a dotted key is found where it is written",
+    text: "foo.bar=${value}",
+    key: "foo.bar",
+    form: "script",
+    written: true,
+  },
+  {
+    name: "a hyphenated key is found where it is written",
+    text: 'echo "cache-hit=true" >> "$GITHUB_OUTPUT"',
+    key: "cache-hit",
+    form: "run",
+    written: true,
+  },
+])("writesKey: $name", ({ text, key, form, written }) => {
+  expect(writesKey(text, key, form)).toBe(written);
+});
 
 test("every steps.<id>, inputs.<x>, and output mapping in the action manifests names a step, an input, and a key the step writes", () => {
   const actions = new Map(ACTION_NAMES.map((name) => [name, loadAction(name)]));
