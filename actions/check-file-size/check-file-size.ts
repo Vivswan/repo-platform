@@ -6,7 +6,7 @@
 // Policy: docs/fleet-guidelines.md.
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import * as core from "@actions/core";
 import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
 import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
@@ -97,12 +97,6 @@ const REGION_BEGIN = /\bBEGIN GENERATED\b/;
 /** Closes it; a region never closed is not masked at all. */
 const REGION_END = /\bEND GENERATED\b/;
 
-function extensionOf(relPath: string): string {
-  const name = relPath.slice(relPath.lastIndexOf("/") + 1);
-  const dot = name.lastIndexOf(".");
-  return dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
-}
-
 /** The kind a tracked path is judged as, or null when it is exempt. */
 export function classify(relPath: string): Kind | null {
   const segments = relPath.split("/");
@@ -110,7 +104,7 @@ export function classify(relPath: string): Kind | null {
   if (dirs.some((dir) => EXEMPT_DIRS.has(dir))) return null;
 
   const name = segments[segments.length - 1];
-  const ext = extensionOf(relPath);
+  const ext = extname(name).slice(1).toLowerCase();
   const workflowsDir =
     dirs.length >= 2 &&
     dirs[dirs.length - 2] === ".github" &&
