@@ -103,7 +103,9 @@ Which labels each layer declares is the layer file's; the owner's two PR-flow la
 
 - **Why the dependabot labels are declared:** dependabot recreates its labels when missing, so an undeclared one would loop delete/recreate nightly.
 
-- **`merge-when-green`** is applied by the owner alone. Whoever runs the landing verifies the labeling actor is the repository owner and that no push followed the labeling, then merges once every check is green; a later push voids it.
+- **`merge-when-green`** is the owner's standing approval for the pull request's whole life, applied by the owner alone: no later push or force-push voids it. Whoever lands verifies, on the exact head that lands, that the label's last event is `labeled` by the repository owner, every check is green, every review thread is resolved, and a review that could block the landing ran on that head.
+
+- **What holds a `merge-when-green` landing:** a red check, an open thread, or a moved head holds the merge and never removes the label. A label set by anyone but the owner comes off, and the owner re-applies it. The merge pins the verified head, so a push racing the merge fails it instead of landing.
 
 - **`parked`** is applied by the owner alone. It says the PR is complete and kept open on purpose: whoever lands never merges it and never removes the label. A parked PR stays ready: non-draft, rebased on main, green.
 
