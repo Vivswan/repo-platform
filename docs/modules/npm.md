@@ -13,12 +13,12 @@ latest:      1.2.0       1.2.0       1.2.0                                  1.2.
 next:        1.2.0       1.2.0       1.2.1-main.57.20261114.g3f9c2ab        1.2.1
 ```
 
-After `1.2.0`, commits A and B change nothing a release would carry, so release-please leaves its PR alone and npm gets nothing. C is a fix: the release PR refreshes, and C's build goes to `next`. Merging the release PR publishes `1.2.1` to `latest` and moves `next` to it.
+After `1.2.0`, commits A and B change nothing a release would carry, so release-please leaves its PR alone and npm gets nothing. C is a fix: the release PR refreshes, and C's build goes to `next` as a pre-release of the `1.2.1` that PR will cut. Merging the release PR publishes `1.2.1` to `latest` and moves `next` to it.
 
-| Channel  | Publishes when                                                                 | Version                                 | Install                   |
-| -------- | ------------------------------------------------------------------------------ | --------------------------------------- | ------------------------- |
-| `latest` | release-please cuts a release                                                  | the one release-please wrote, `X.Y.Z`   | `npm install <name>`      |
-| `next`   | a push to main creates or refreshes the release PR (`prs_created`), never else | `X.Y.(Z+1)-main.<count>.<date>.g<sha7>` | `npm install <name>@next` |
+| Channel  | Publishes when                                                                 | Version                                                       | Install                   |
+| -------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------- | ------------------------- |
+| `latest` | release-please cuts a release                                                  | the one release-please wrote, `X.Y.Z`                         | `npm install <name>`      |
+| `next`   | a push to main creates or refreshes the release PR (`prs_created`), never else | `X.Y.Z-main.<count>.<date>.g<sha7>`, `X.Y.Z` the release PR's | `npm install <name>@next` |
 
 **`next` is never older than `latest`:** a release moves `next` to itself, and each release-PR refresh after it moves `next` on.
 
@@ -36,8 +36,10 @@ After `1.2.0`, commits A and B change nothing a release would carry, so release-
 
    | The package.json is at | In `release-please-config.json`, on the `.` package                                                 |
    | ---------------------- | --------------------------------------------------------------------------------------------------- |
-   | the repository root    | `"release-type": "node"` (the starter's `simple` leaves `package.json` alone)                       |
+   | the repository root    | `"release-type": "node"`, or the row below with `"path": "package.json"`                            |
    | `packages/cli`         | `"extra-files": [{ "type": "json", "path": "packages/cli/package.json", "jsonpath": "$.version" }]` |
+
+   The starter's `"release-type": "simple"` leaves `package.json` alone on its own. With the `extra-files` entry it bumps the version and nothing else npm-specific, which is all this module needs.
 
    **Never declare the release-please package on the subfolder.** release-please then reports its outputs under that path (`packages/cli--release_created`), which the fleet's release leg does not read: `npm-latest` never runs, and the release stays a draft.
 
@@ -57,6 +59,20 @@ After `1.2.0`, commits A and B change nothing a release would carry, so release-
 
 No token is stored anywhere: npm checks the run's OIDC token against that publisher. A fork runs neither leg.
 
+### The pull request that adds the module
+
+```text
+PR adds npm to modules  -> validate-managed-files is red: the hook starter is not on the branch yet
+add repo-platform:sync  -> the sync commits the hook starter and the manifest stamp onto the branch
+                        -> the CI and PR Title runs of that commit show action_required: approve them, or push a commit
+a sync lands on main    -> the PR conflicts on .github/repo-platform-manifest.json: merge main, then add the label again
+merge it as feat: ...   -> the release PR refreshes, and the first `next` publishes
+```
+
+- **The red check and the held runs** are every module change's, owned by [a module change on a pull request](../platform/sync/operator.md#a-module-change-on-a-pull-request): GitHub holds the runs of a commit the repository token pushed.
+- **The conflict returns with every sync that lands on main** while the PR is open, since both sides restamp the manifest. Keep the PR short-lived.
+- **The title needs a type release-please puts in the changelog,** `feat` or `fix`. Under `chore` the release PR does not refresh, so nothing publishes to `next` until a later commit refreshes it.
+
 ## What the job does
 
 ```text
@@ -67,7 +83,7 @@ checkout -> plan -> build hook -> publish
             reads the record, decides, and on next stamps the version
 ```
 
-- **The plan** reads the package's record from the registry, fresh. Nothing to publish skips the hook, with a notice saying why: on `next` the job ends there, green, and at a release it goes on to move `next`.
+- **The plan** reads the package's record from the registry, fresh, and on `next` the version on the release PR's branch. Nothing to publish skips the hook, with a notice saying why: on `next` the job ends there, green, and at a release it goes on to move `next`.
 - **The publish** reads the record again, since another run may have published meanwhile. After `npm publish` it reads the record until the version shows ([how long](#how-long-the-job-waits-for-the-registry)), then checks that the channel's dist-tag is not behind it.
 - **One lane:** both channels share the concurrency lane `npm-publish`, so one publish at a time judges and lands.
 
@@ -102,22 +118,33 @@ runs:
     - shell: bash
       run: bun run build
     - shell: bash
-      env: { VERSION: "${{ inputs.version }}" }
+      env:
+        VERSION: ${{ inputs.version }}
       run: test "$(node dist/cli.js --version)" = "$VERSION"
 ```
 
 ## The version on `next`
 
 ```text
-1.2.1-main.57.20261114.g3f9c2ab
+1.3.0-main.57.20261114.g3f9c2ab
   |        |     |        |
   |        |     |        the commit's short sha, behind a g so an all-digit sha stays an identifier
   |        |     the commit's committer date, UTC
   |        the commits on main's first-parent line up to this one
-  the next patch after the version on disk
+  the version the open release PR will cut
 ```
 
-It sorts above the last release, below the next one whatever its bump, and above every earlier `-main.<count>...` version of the same patch by the count. The version on disk must be a plain `X.Y.Z` on both channels.
+The base is read from the release PR's branch: the version release-please wrote into this `package.json` there.
+
+| `package.json` on main | The release PR will cut                     | `next`             |
+| ---------------------- | ------------------------------------------- | ------------------ |
+| `1.2.0`                | `1.2.1`, a fix                              | `1.2.1-main.57...` |
+| `1.2.0`                | `1.3.0`, a feature                          | `1.3.0-main.57...` |
+| `0.0.0`                | `0.1.0`, release-please's `initial-version` | `0.1.0-main.57...` |
+
+It sorts below the release it leads to, above every earlier release, and above every earlier `-main.<count>...` version of the same release by the count. The version on disk must be a plain `X.Y.Z` on both channels, and so must the release PR's, above the one on disk.
+
+**When the release PR's version drops** (a reverted feature turns `1.3.0` back into `1.2.1`), the lower pre-releases are skipped with a notice, and `next` stays on the last `1.3.0-main...` build until a version passes it. To move it sooner, run `npm dist-tag add <name>@<version> next` by hand.
 
 **A repository that already publishes `next`** must have its live `next` below the first version this module mints: the same scheme with a lower count is, and anything higher makes the first run skip as behind.
 
@@ -150,6 +177,8 @@ After the publish:
 - **npm's own configuration is refused** when its `tag` is not npm's default, or it names another registry for the package, in an `.npmrc` or a variable, checked in the plan and again after the build hook, before the publish. Trusted publishing is registry.npmjs.org's alone, so that is the one registry this module reads and publishes to.
 - **The package directory is npm's whole project:** every npm command runs with `--no-workspaces`, so an `.npmrc` at a workspace root above the package is not read.
 - **The release tag must end with `v<version>`.** A mismatch means release-please did not bump this `package.json` (step 2).
+- **The release PR's branch must show this `package.json`** at a plain `X.Y.Z` above the one on main, or `next` mints nothing. A PR that leaves the version alone means the same as the mismatched tag (step 2).
+- **A commit publishes one version,** once the registry shows it. A rerun finds the version its commit already published by the `main.<count>.<date>.g<sha7>` ending and judges that one, also after the release PR changed its version or merged.
 - **A failed write** is judged by the record, never by npm's message: the version being there counts as published. Otherwise the job fails with npm's error line and what to check on the trusted publisher.
 
 ## How long the job waits for the registry
@@ -173,6 +202,8 @@ The same two waits apply to the `next` tag a release moves.
 
 - **A failed `npm-latest` leaves the GitHub release a draft:** `publish-release` waits for it. "Re-run failed jobs" finishes both: a version that did land is skipped, and `next` is still moved.
 - **A rerun of a release that a newer one overtook** moves nothing: only the release `latest` names moves `next`, and the notice says which release is current.
+- **Two merges close together** can leave the newer build off `next`. release-please reads main's tip, so the older commit's run can refresh the release PR with both commits in it and publish its own build. The newer commit's run then finds the PR up to date and publishes nothing. The next refresh publishes a build that holds both commits, and nothing is lost at the release.
+- **"Re-run all jobs"** on a run that already refreshed the release PR finds it up to date too, and skips `npm-next`. Use "Re-run failed jobs", which keeps the release leg's answer.
 - **A burst of merges** can cancel a pending npm leg: a lane keeps one waiting job. "Re-run failed jobs" on that run finishes it, and the release stays a draft until `npm-latest` succeeds. A rerun that a newer version overtook does not publish: `next` skips as behind a newer `next`, and either channel fails as below a newer release.
 - **Removing the module** skips both legs; the hook stays (a starter), and the package stays on npm.
 
