@@ -5,6 +5,7 @@ import { Octokit } from "@octokit/core";
 import { retry } from "@octokit/plugin-retry";
 import { throttling } from "@octokit/plugin-throttling";
 import { RequestError } from "@octokit/request-error";
+import LinkHeader from "http-link-header";
 import { z } from "zod";
 import { env } from "./gha.ts";
 import { JsonShapeError, parseWithThrow } from "./json.ts";
@@ -24,17 +25,17 @@ const PAGE_SIZE = 100;
 /** The statuses the Fetch standard gives no body. */
 const BODILESS = [204, 205, 304];
 
-/** The next page's URL in a listing's Link header, as GitHub writes it. */
-const NEXT_LINK = /<([^<>]+)>;\s*rel="next"/;
+/** What a shape diagnosis calls the thing it judged. */
+const REPLY = "the reply";
 
-/** Any spelling of a next relation: one NEXT_LINK cannot read fails the listing, since ending there would shorten it. */
+/** Any spelling of a next relation in a Link header. */
 const NAMES_NEXT = /rel="?next\b/i;
+
+/** The failure of a listing whose Link header announces a next page the client cannot follow. */
+const UNREADABLE_NEXT = `${REPLY}: a Link header whose next page cannot be read`;
 
 /** The client class: the core with the retry and rate-limit policies plugged in. */
 const PlatformOctokit = Octokit.plugin(retry, throttling);
-
-/** What a shape diagnosis calls the thing it judged. */
-const REPLY = "the reply";
 
 /** A logger that prints nothing: the library's messages spell the request URL. */
 const SILENT = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
@@ -89,6 +90,26 @@ function wholeReplies(transport: typeof fetch): typeof fetch {
   return whole as typeof fetch;
 }
 
+/** The next page's URL from a listing's Link header, null on the last page.
+ *
+ * @throws {JsonShapeError} the header is malformed: ending the listing there would shorten it
+ */
+function nextPage(link: string | undefined): string | null {
+  if (link === undefined) return null;
+
+  let next: string | undefined;
+  try {
+    next = LinkHeader.parse(link).rel("next")[0]?.uri;
+  } catch {
+    throw new JsonShapeError(UNREADABLE_NEXT);
+  }
+
+  // The parser accepts some headers it then files under no relation (a valueless parameter before `rel`).
+  if (next === undefined && NAMES_NEXT.test(link)) throw new JsonShapeError(UNREADABLE_NEXT);
+
+  return next ?? null;
+}
+
 function failed(reason: string): Read<never> {
   return { kind: "failed", reason };
 }
@@ -112,6 +133,7 @@ export function unansweredReason(read: Exclude<Read<unknown>, { kind: "ok" }>): 
   return read.kind === "not-found" ? "HTTP 404" : read.reason;
 }
 
+/** A read that ends at its deadline leaves the request's own timers running, so a caller that continues after a failed read may end up to a minute late. */
 export class GitHubClient {
   readonly #octokit: InstanceType<typeof PlatformOctokit>;
 
@@ -179,14 +201,10 @@ export class GitHubClient {
       });
       for (;;) {
         items.push(...parseWithThrow(page, reply.data, REPLY));
-        const link = reply.headers.link ?? "";
-        const next = NEXT_LINK.exec(link);
-        if (next === null && NAMES_NEXT.test(link)) {
-          throw new JsonShapeError(`${REPLY}: a Link header whose next page cannot be read`);
-        }
+        const next = nextPage(reply.headers.link);
         if (next === null) return items;
 
-        reply = await this.#octokit.request({ method: "GET", url: next[1], request: { signal } });
+        reply = await this.#octokit.request({ method: "GET", url: next, request: { signal } });
       }
     });
   }

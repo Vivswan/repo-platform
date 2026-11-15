@@ -280,8 +280,19 @@ describe("GitHubClient", () => {
           status: 200,
           body: [{ name: "one" }],
           headers: {
-            link: '<https://api.github.test/user/repos?page=2>; title="more"; rel="next"',
+            link: '<https://api.github.test/user/repos?page=2; rel="next"',
           },
+        },
+      ],
+      "the reply: a Link header whose next page cannot be read",
+    ],
+    [
+      "a next relation the parser accepts but does not return",
+      [
+        {
+          status: 200,
+          body: [{ name: "one" }],
+          headers: { link: '<https://api.github.test/user/repos?page=2>; flag; rel="next"' },
         },
       ],
       "the reply: a Link header whose next page cannot be read",
