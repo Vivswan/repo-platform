@@ -237,7 +237,9 @@ jobs:
   # guard sits on the step: GitHub does not allow hashFiles in a job-level if.
   docs-check:
     needs: [standard-checks]
-    if: ${{ !cancelled() && contains(needs.standard-checks.outputs.modules, '"site"') && github.event_name == 'pull_request' }}
+    if: >-
+      !cancelled() && needs.standard-checks.outputs.modules != '' &&
+      contains(fromJSON(needs.standard-checks.outputs.modules), 'site') && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -262,7 +264,8 @@ jobs:
   release-pr:
     needs: [standard-checks]
     if: >-
-      !cancelled() && contains(needs.standard-checks.outputs.modules, '"release-please"') &&
+      !cancelled() && needs.standard-checks.outputs.modules != '' &&
+      contains(fromJSON(needs.standard-checks.outputs.modules), 'release-please') &&
       github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 10
