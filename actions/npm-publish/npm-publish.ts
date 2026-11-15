@@ -474,7 +474,7 @@ async function moveNextToRelease(
  * Publishes the built package when the record still allows it, waits for the record to show it, and checks the
  * channel's dist-tag. A release also moves `next` to itself, on a rerun too.
  *
- * @throws {Error} the hook changed the version, the verdict is a refusal, a write did not land, or a dist-tag ended
+ * @throws {Error} the hook changed the version or npm's tag or registry, the verdict is a refusal, a write did not land, or a dist-tag ended
  *   behind the version
  */
 export async function publishPackage(
@@ -488,6 +488,9 @@ export async function publishPackage(
       `package.json is at ${pkg.version}, not the planned ${version}: the build hook must leave the version alone`,
     );
   }
+
+  // Judged again: the build hook ran since the plan and may have written an .npmrc.
+  requireDefaultConfig(pkg, request.directory, tools);
 
   const before = await tools.readRecord(pkg.name);
   const verdict = verdictOf(channel, version, before);

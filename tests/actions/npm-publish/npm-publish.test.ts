@@ -647,7 +647,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => publish("next", MINTED, [BEFORE, BEFORE, BEFORE, AFTER]),
     expected: {
       outcome: { version: MINTED, published: true },
-      commands: ["npm publish --tag next"],
+      commands: [...CONFIG, "npm publish --tag next"],
       reads: 4,
       waitedOut: false,
       lines: [],
@@ -658,7 +658,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => publish("next", MINTED, [AFTER]),
     expected: {
       outcome: { version: MINTED, published: false },
-      commands: [],
+      commands: CONFIG,
       reads: 1,
       waitedOut: false,
       lines: [
@@ -674,7 +674,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => publish("latest", "1.2.0", [UNRELEASED, RELEASED, NEXT_MOVED]),
     expected: {
       outcome: { version: "1.2.0", published: true },
-      commands: ["npm publish", MOVE_NEXT],
+      commands: [...CONFIG, "npm publish", MOVE_NEXT],
       reads: 3,
       waitedOut: false,
       lines: [],
@@ -685,7 +685,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => publish("latest", "1.2.0", [RELEASED, NEXT_MOVED]),
     expected: {
       outcome: { version: "1.2.0", published: false },
-      commands: [MOVE_NEXT],
+      commands: [...CONFIG, MOVE_NEXT],
       reads: 2,
       waitedOut: false,
       lines: [
@@ -699,7 +699,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       publish("latest", "1.2.0", [record(["1.2.0", MINTED], { latest: "1.2.0", next: MINTED })]),
     expected: {
       outcome: { version: "1.2.0", published: false },
-      commands: [],
+      commands: CONFIG,
       reads: 1,
       waitedOut: false,
       lines: [
@@ -717,7 +717,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
         'Check the package\'s trusted publisher on npmjs.com: it must allow "npm dist-tag", which is off by default.',
         "Then re-run the job: the release is published, and only the tag is left to move.",
       ].join("\n"),
-      commands: [MOVE_NEXT],
+      commands: [...CONFIG, MOVE_NEXT],
       reads: 1,
       waitedOut: true,
       lines: [
@@ -731,7 +731,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => publish("next", MINTED, [BEFORE, AFTER], { publish: failed(E403) }),
     expected: {
       outcome: { version: MINTED, published: true },
-      commands: ["npm publish --tag next"],
+      commands: [...CONFIG, "npm publish --tag next"],
       reads: 2,
       waitedOut: false,
       lines: [
@@ -754,7 +754,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
         '  it allows "npm publish"',
         "  its repository is this one, and the package is the one named here",
       ].join("\n"),
-      commands: ["npm publish --tag next"],
+      commands: [...CONFIG, "npm publish --tag next"],
       reads: 1,
       waitedOut: true,
       lines: [["info", E403]],
@@ -765,7 +765,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => publish("next", MINTED, [BEFORE], { boundMs: 100 }),
     expected: {
       outcome: `npm reported @example/widget@${MINTED} published, but the registry did not show it within 0.1 s: re-run the job`,
-      commands: ["npm publish --tag next"],
+      commands: [...CONFIG, "npm publish --tag next"],
       reads: 1,
       waitedOut: true,
       lines: [],
@@ -780,7 +780,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       ]),
     expected: {
       outcome: `${MINTED} is on the registry, but next names 1.2.0, which is behind it`,
-      commands: ["npm publish --tag next"],
+      commands: [...CONFIG, "npm publish --tag next"],
       reads: 2,
       waitedOut: false,
       lines: [],
@@ -792,6 +792,19 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     expected: {
       outcome: `package.json is at 1.2.0, not the planned ${MINTED}: the build hook must leave the version alone`,
       commands: [],
+      reads: 0,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "a build hook that wrote a tag into .npmrc between the plan and the publish uploads nothing",
+    run: () => publish("latest", "1.2.0", [UNRELEASED], { config: { tag: "beta" } }),
+    expected: {
+      outcome:
+        "npm's tag is configured as 'beta': the channel decides the dist-tag, so remove the setting",
+      commands: CONFIG.slice(0, 1),
       reads: 0,
       waitedOut: false,
       lines: [],

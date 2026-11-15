@@ -147,7 +147,7 @@ After the publish:
 | a release `latest` no longer names (a rerun a newer release overtook) | `next` left there, with a notice naming the current release                  |
 
 - **The manifest is refused** when it is `private: true`, or sets `tag`, `publishConfig.tag`, or a registry in `publishConfig`.
-- **npm's own configuration is refused** when its `tag` is not npm's default, or it names another registry for the package, in an `.npmrc` or a variable. Trusted publishing is registry.npmjs.org's alone, so that is the one registry this module reads and publishes to.
+- **npm's own configuration is refused** when its `tag` is not npm's default, or it names another registry for the package, in an `.npmrc` or a variable, checked in the plan and again after the build hook, before the publish. Trusted publishing is registry.npmjs.org's alone, so that is the one registry this module reads and publishes to.
 - **The package directory is npm's whole project:** every npm command runs with `--no-workspaces`, so an `.npmrc` at a workspace root above the package is not read.
 - **The release tag must end with `v<version>`.** A mismatch means release-please did not bump this `package.json` (step 2).
 - **A failed write** is judged by the record, never by npm's message: the version being there counts as published. Otherwise the job fails with npm's error line and what to check on the trusted publisher.
