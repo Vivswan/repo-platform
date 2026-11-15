@@ -30,7 +30,8 @@ const GIT_BOUND_MS = 60_000;
 const NPM_BOUND_MS = 60_000;
 const PUBLISH_BOUND_MS = 600_000;
 const READ_BOUND_MS = 30_000;
-const CONFIRM = { everyMs: 5_000, boundMs: 120_000 } as const;
+// The registry shows a publish only after processing it, which npm's own notice puts at "a few minutes".
+const CONFIRM = { everyMs: 5_000, doneMs: 600_000, failedMs: 120_000 } as const;
 const STAMP_FLAGS = ["--no-git-tag-version", "--ignore-scripts"] as const;
 const BEHIND_RELEASE = {
   next: "the package.json on main is behind the registry",
@@ -95,8 +96,8 @@ export interface Tools {
   /** Reads a package's record from the registry, fresh on every call. */
   readRecord: (name: string) => Promise<RegistryRecord>;
 
-  /** How often, and for how long, a write is looked for on the record. */
-  confirm: { everyMs: number; boundMs: number };
+  /** How often a write is looked for on the record, and for how long: by whether npm reported it done or failed. */
+  confirm: { everyMs: number; doneMs: number; failedMs: number };
 
   /** Takes the run's notices. */
   log: Log;
@@ -310,10 +311,16 @@ function npmFailure(result: RunResult): string {
   return error ?? failureDetail(result);
 }
 
-/** The first record on which `holds`, read within the confirmation bound; undefined when none did. */
+/** How long the record is read for after a write: a failed one gets the short bound, where a longer one only delays its error. */
+function confirmBoundMs(write: RunResult, tools: Tools): number {
+  return succeeded(write.exit) ? tools.confirm.doneMs : tools.confirm.failedMs;
+}
+
+/** The first record on which `holds`, read within `boundMs`; undefined when none did. */
 function recordWhere(
   name: string,
   tools: Tools,
+  boundMs: number,
   holds: (record: RegistryRecord) => boolean,
 ): Promise<RegistryRecord | undefined> {
   return pWaitFor<RegistryRecord | undefined>(
@@ -323,7 +330,7 @@ function recordWhere(
     },
     {
       interval: tools.confirm.everyMs,
-      timeout: { milliseconds: tools.confirm.boundMs, fallback: () => undefined },
+      timeout: { milliseconds: boundMs, fallback: () => undefined },
     },
   );
 }
@@ -406,13 +413,14 @@ async function publishVersion(
   const id = `${pkg.name}@${version}`;
   // latest passes no tag: any tag, `latest` included, switches off npm's own refusal of a version below the newest release.
   const result = npm(tools, directory, PUBLISH_ARGS[channel], PUBLISH_BOUND_MS);
-  const record = await recordWhere(pkg.name, tools, (held) =>
+  const boundMs = confirmBoundMs(result, tools);
+  const record = await recordWhere(pkg.name, tools, boundMs, (held) =>
     Object.hasOwn(held.versions, version),
   );
 
   if (record === undefined && succeeded(result.exit)) {
     throw new Error(
-      `npm reported ${id} published, but the registry did not show it within ${tools.confirm.boundMs / 1000} s: re-run the job`,
+      `npm reported ${id} published, but the registry did not show it within ${boundMs / 1000} s: re-run the job, which passes once the registry shows it`,
     );
   }
 
@@ -457,7 +465,12 @@ async function moveNextToRelease(
     ["dist-tag", "add", `${pkg.name}@${version}`, "next"],
     NPM_BOUND_MS,
   );
-  const moved = await recordWhere(pkg.name, tools, (held) => !nextBelow(version, held));
+  const moved = await recordWhere(
+    pkg.name,
+    tools,
+    confirmBoundMs(result, tools),
+    (held) => !nextBelow(version, held),
+  );
   if (moved !== undefined) return;
 
   const said = succeeded(result.exit) ? "npm reported it moved" : npmFailure(result);
