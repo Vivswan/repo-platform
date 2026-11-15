@@ -71,13 +71,9 @@ export const syncReport = syncOutcome.extend({
 /** `detail` is why a held row was not written, or the stale record a write set aside; empty otherwise. */
 export type WrittenRow = z.infer<typeof writtenRow>;
 
-export type ReplacedEdit = z.infer<typeof replacedEdit>;
-
-/** The template a written file came from, tree-relative under files/, and whether its lines are the written file's:
- *  a split write adds region markers and a block splice shifts what follows, so neither maps. */
-export type TemplateRecord = z.infer<typeof templateRecord>;
-
-/** `templates` is by written path, for every sourced entry this run wrote or found current. */
+/** `templates` is by written path, for every sourced entry this run wrote or found current: the template it came
+ *  from, tree-relative under files/, and whether its lines are the written file's. A split write adds region markers
+ *  and a block splice shifts what follows, so neither maps. */
 export type SyncOutcome = z.infer<typeof syncOutcome>;
 
 export type SyncReport = z.infer<typeof syncReport>;
