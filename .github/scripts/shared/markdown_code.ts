@@ -4,8 +4,14 @@
 /** The shortest fence Markdown opens. */
 const SHORTEST_FENCE = 3;
 
-/** Markdown strips one space from each end of a code span: text that opens or closes on a space or a backtick is padded. */
+/** Markdown strips one space from each end of a code span that is not all spaces: text that opens or closes on a space or a backtick is padded. */
 const NEEDS_PADDING = /^[` ]|[` ]$/;
+
+/** A code span holding spaces alone is kept as written, so padding would add to it. */
+const ONLY_SPACES = /^ +$/;
+
+/** What stands for no text. Markdown has no empty code span: two backticks open a span that the next delimiter on the line closes. */
+const EMPTY = "(empty)";
 
 function longestRun(text: string): number {
   return (text.match(/`+/g) ?? []).reduce((longest, run) => Math.max(longest, run.length), 0);
@@ -17,9 +23,12 @@ export function fenced(text: string, info: string): string[] {
   return [`${fence}${info}`, text, fence];
 }
 
-/** `text` as an inline code span; the caller keeps it on one line. */
+/** `text` as an inline code span, or fixed words outside any span for no text; the caller keeps it on one line. */
 export function codeSpan(text: string): string {
+  if (text === "") return EMPTY;
+
   const ticks = "`".repeat(longestRun(text) + 1);
-  const pad = NEEDS_PADDING.test(text) ? " " : "";
+  const pad = NEEDS_PADDING.test(text) && !ONLY_SPACES.test(text) ? " " : "";
+
   return `${ticks}${pad}${text}${pad}${ticks}`;
 }

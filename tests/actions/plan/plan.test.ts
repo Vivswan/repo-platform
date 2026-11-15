@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseConfig } from "../../../actions/autofix/autofix.ts";
 import {
   codeqlLanguages,
   loadModuleData,
@@ -10,6 +11,7 @@ import {
   outputsOf,
   PlanError,
   type PlanInput,
+  planAutofix,
   planCi,
   planNpm,
   planSite,
@@ -391,6 +393,44 @@ describe("planSite", () => {
   });
 });
 
+// The plan action prints the registration's autofix block and the autofix action reads it, each through its own
+// schema. One that drifted from the other would fail every fix at the push job, or read a missing list as empty.
+describe("planAutofix", () => {
+  const block = (text: string) => input(`modules: [bun, autofix]\nautofix: ${text}`);
+
+  test.each([
+    ['{ label: { paths: ["src/**", "*.md"] } }'],
+    [
+      '{ label: { paths: ["**"] }, push: { on: ["src/**"], paths: [README.md], delete: [src/generated/] } }',
+    ],
+  ])("the document planned from %p is one the autofix action reads", (text) => {
+    const plan = planAutofix(block(text));
+    expect(parseConfig(outputsOf(plan)["autofix-config"])).toEqual(plan.autofix);
+  });
+
+  // A selected module with no block would plan nothing to judge with.
+  test.each([
+    ["modules: [bun]", "the autofix module is not selected"],
+    ["modules: [bun, autofix]", "the autofix module needs an autofix block"],
+  ])("%p is refused: %s", (text, message) => {
+    expect(() => planAutofix(input(text))).toThrow(message);
+  });
+
+  // The matcher reads a leading `!` as "every path but these", so one such entry in a list of allowed paths would
+  // allow the rest of the repository.
+  test("a list entry that negates, which the matcher would read as every other path, is refused by the registration's grammar", () => {
+    expect(new Bun.Glob("!src/**").match("LICENSE")).toBe(true);
+    const read = parseRegistration(
+      `modules: [autofix]\nautofix: { label: { paths: ["!src/**"] } }\n${PROJECT}`,
+    );
+    expect(read).toEqual({
+      errors: [
+        ".repo-platform.yml: autofix.label.paths.0: is a negation, which a list of allowed paths does not take",
+      ],
+    });
+  });
+});
+
 // Any workflow can call fleet-npm-publish.yml: without this refusal, a repository that does not select the module
 // would have the package.json at its root planned for publishing.
 test("planNpm plans the selected module's package and refuses a registration that does not select it", () => {
@@ -625,7 +665,7 @@ describe("plan.ts as a child", () => {
       reason: "an unknown mode",
       files: { ".repo-platform.yml": `modules: []\n${PROJECT}` },
       env: { MODE: "pages" },
-      error: () => "::error::MODE must be one of default, site, npm; got 'pages'\n",
+      error: () => "::error::MODE must be one of default, site, npm, autofix; got 'pages'\n",
     },
     ...([{ PRIVATE: "false" }, { MODE: "site" }] as Record<string, string>[]).map((env) => ({
       reason: `an unknown registration key under ${JSON.stringify(env)}`,

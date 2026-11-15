@@ -11,7 +11,7 @@ import {
   FLEET_ENVIRONMENT as ENVIRONMENT,
   FLEET_SECRET as SECRET,
 } from "../../.github/scripts/fleet/require_fleet_token.ts";
-import { parseExpression, subexpressions } from "../shared/github_expression.ts";
+import { expressionsIn, parseExpression, subexpressions } from "../shared/github_expression.ts";
 
 const root = join(import.meta.dir, "../..");
 const workflowsDir = ".github/workflows";
@@ -71,7 +71,7 @@ function readsSecretIn(expr: Expr): boolean {
  *  inside a string literal is text. A workflow-level `env` is every job's. */
 function readsSecret(...nodes: unknown[]): boolean {
   return strings(nodes)
-    .flatMap((text) => [...text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map(([, source]) => source))
+    .flatMap(expressionsIn)
     .some((source) => readsSecretIn(parseExpression(source).tree));
 }
 

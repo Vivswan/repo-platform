@@ -34,7 +34,7 @@ import {
 import { parseRegistration, type Registration, unknownModuleProblems } from "./registration.ts";
 import { type LabelTuple, type LayerSources, reservedLabelNames } from "./reserved_labels.ts";
 
-export const MODES = ["default", "site", "npm"] as const;
+export const MODES = ["default", "site", "npm", "autofix"] as const;
 export type Mode = (typeof MODES)[number];
 
 export class PlanError extends Error {
@@ -321,7 +321,37 @@ export function planNpm(input: PlanInput): NpmPlan {
   return { packagePath: input.registration.npm?.path ?? "." };
 }
 
-export function outputsOf(plan: CiPlan | SitePlan | NpmPlan): Record<string, string> {
+/** What the autofix action reads from the registration (docs/modules/autofix.md). */
+export interface AutofixPlan {
+  /** The registration's `autofix` block, a push block it does not declare spelled null. */
+  autofix: {
+    label: { paths: string[]; delete: string[] };
+    push: { on: string[]; paths: string[]; delete: string[] } | null;
+  };
+}
+
+export function planAutofix(input: PlanInput): AutofixPlan {
+  if (!selectModules(input).some((module) => module.name === "autofix")) {
+    throw new PlanError([
+      `${REGISTRATION_PATH}: the autofix module is not selected - nothing is fixed here`,
+    ]);
+  }
+
+  const declared = input.registration.autofix;
+  if (declared === undefined) {
+    throw new PlanError([
+      `${REGISTRATION_PATH}: the autofix module needs an autofix block - declare autofix.label.paths, the paths a fix may change`,
+    ]);
+  }
+
+  return { autofix: { label: declared.label, push: declared.push ?? null } };
+}
+
+type Plan = CiPlan | SitePlan | NpmPlan | AutofixPlan;
+
+export function outputsOf(plan: Plan): Record<string, string> {
+  if ("autofix" in plan) return { "autofix-config": JSON.stringify(plan.autofix) };
+
   if ("packagePath" in plan) return { "npm-path": plan.packagePath };
 
   if ("docs" in plan) {
@@ -391,10 +421,11 @@ export function resolvePrivate(input: string, repository: string): boolean {
   return value === "true";
 }
 
-const PLANNERS: Record<Mode, (input: PlanInput) => CiPlan | SitePlan | NpmPlan> = {
+const PLANNERS: Record<Mode, (input: PlanInput) => Plan> = {
   default: planCi,
   site: planSite,
   npm: planNpm,
+  autofix: planAutofix,
 };
 
 function main(): number {

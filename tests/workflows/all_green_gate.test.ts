@@ -11,13 +11,11 @@
 // does never skips under it, so it stays off allowed-skips and an all-skipped run still cannot pass.
 
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { CHECK_NAME } from "../../.github/scripts/shared/all_green.ts";
 import { sectionEntries } from "../../.github/scripts/sync/writer/settings_layers.ts";
-import { PLATFORM_OWNER } from "../../actions/shared/platform.ts";
 import { calledFunctions, evaluateCondition } from "../shared/github_expression.ts";
+import { shippedSource } from "../shared/shipped_source.ts";
 
 interface Job {
   needs?: string | string[];
@@ -27,10 +25,6 @@ interface Job {
   steps?: { with?: { "allowed-skips"?: string } }[];
 }
 type Rule = { type: string; parameters?: { required_status_checks?: { context: string }[] } };
-
-const ROOT = join(import.meta.dir, "../..");
-const read = (rel: string) =>
-  readFileSync(join(ROOT, rel), "utf8").replaceAll("{{github_username}}", PLATFORM_OWNER);
 
 /** One run a workflow can start: a trigger it declares, in a public or a private repository. */
 interface Run {
@@ -45,7 +39,7 @@ interface Workflow {
 
 /** The workflow's jobs and every run it can start. */
 function workflowOf(rel: string): Workflow {
-  const { on, jobs } = parseYaml(read(rel)) as { on: object; jobs: Record<string, Job> };
+  const { on, jobs } = parseYaml(shippedSource(rel)) as { on: object; jobs: Record<string, Job> };
   const runs = Object.keys(on).flatMap((event) => [
     { event, isPrivate: false },
     { event, isPrivate: true },
@@ -97,9 +91,10 @@ test.each([
 );
 
 test("both gate jobs post the check as CHECK_NAME, fail closed, and the override ruleset requires that context", () => {
-  const main = sectionEntries(parseYaml(read("files/settings/override.yml")), "rulesets").find(
-    (ruleset) => ruleset.name === "main",
-  );
+  const main = sectionEntries(
+    parseYaml(shippedSource("files/settings/override.yml")),
+    "rulesets",
+  ).find((ruleset) => ruleset.name === "main");
   const contexts = (main?.rules as Rule[] | undefined)
     ?.find((rule) => rule.type === "required_status_checks")
     ?.parameters?.required_status_checks?.map((check) => check.context);

@@ -2,7 +2,14 @@
 // text gets wrong, so a typo in a shipped workflow would pass the test that judges it.
 
 import { describe, expect, test } from "bun:test";
-import { type ContextRead, contextReads, interpolate, parseExpression } from "./github_expression";
+import {
+  type ContextRead,
+  contextReads,
+  interpolate,
+  parseExpression,
+  readsIn,
+  soleRead,
+} from "./github_expression";
 
 describe("interpolate", () => {
   test.each<{ name: string; text: string; context: Record<string, string>; filled: string }>([
@@ -70,5 +77,55 @@ describe("contextReads", () => {
     },
   ])("$name", ({ source, reads }) => {
     expect(contextReads(parseExpression(source).tree)).toEqual(reads);
+  });
+});
+
+describe("soleRead", () => {
+  test.each<{ name: string; value: string; read: ContextRead | null }>([
+    {
+      name: "an output wired without blanks or by bracket is the same wire",
+      value: "${{steps['plan'].outputs.modules}}",
+      read: ["steps", "plan", "outputs", "modules"],
+    },
+    {
+      name: "two expressions are no single wire, though the text opens and closes like one",
+      value: "${{ steps.a.outputs.x }}-${{ steps.b.outputs.y }}",
+      read: null,
+    },
+    {
+      name: "a computed value is no wire",
+      value: "${{ steps.a.outputs.x || 'none' }}",
+      read: null,
+    },
+    {
+      name: "a blank around the expression reaches the consumer, so it is no wire",
+      value: " ${{ steps.a.outputs.x }} ",
+      read: null,
+    },
+  ])("$name", ({ value, read }) => {
+    expect(soleRead(value)).toEqual(read);
+  });
+});
+
+describe("readsIn", () => {
+  test("a job's reads are its bare `if:` and its `${{ }}` spans at any depth; a name inside a string literal, outside an expression, or under an input named `if` is text", () => {
+    const job = {
+      if: "needs['plan'].outputs.site == 'true'",
+      steps: [
+        {
+          if: "${{ !cancelled() && steps.build.outcome == 'success' }}",
+          run: "echo steps.prose.outputs.none",
+          with: { if: "steps.input.outputs.none" },
+          env: {
+            NOTE: "${{ format('steps.quoted.outputs.none {0}', steps . build . outputs [ 'path' ]) }}",
+          },
+        },
+      ],
+    };
+    expect(readsIn(job)).toEqual([
+      ["needs", "plan", "outputs", "site"],
+      ["steps", "build", "outcome"],
+      ["steps", "build", "outputs", "path"],
+    ]);
   });
 });

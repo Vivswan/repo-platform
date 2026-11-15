@@ -18,10 +18,11 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pagesSite } from "../../../actions/shared/pages_site.ts";
-import { fill, loadAction, stepNamed } from "../../shared/action_step.ts";
+import { loadAction, stepNamed } from "../../shared/action_step.ts";
 import { argvStub } from "../../shared/argv_stub.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
+import { interpolate } from "../../shared/github_expression.ts";
 import { parseGithubOutput } from "../../shared/github_output.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
 import type { TempDirs } from "../../shared/temp_dir.ts";
@@ -159,8 +160,8 @@ export function runLinkCheck(
   linkCheckArgs: string,
   cwd: string,
 ): BoundedSpawnResult {
-  const args = fill(LINK_CHECK_STEP.with.args, {
-    "${{ steps.assemble.outputs.link-check-args }}": linkCheckArgs,
+  const args = interpolate(LINK_CHECK_STEP.with.args, {
+    "steps.assemble.outputs.link-check-args": linkCheckArgs,
   });
   return boundedSpawnSync(["bash", "-c", `'${lychee}' --format markdown ${args}`], { cwd });
 }

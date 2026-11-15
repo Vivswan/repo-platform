@@ -10,6 +10,7 @@ import { parse as parseYaml } from "yaml";
 import { parseFilesConfig } from "../../actions/plan/files_config.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
+import { rendered } from "../shared/shipped_source";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -83,7 +84,7 @@ function checkoutPath(step: Step): string | null {
 /** A composite action runs inside the caller's checkout and a spliced block's anchor follows the starter's checkout
  *  step, so both always count; a job checking out into subdirectories alone has no tree a sibling could land in. */
 function checkedOutStepLists(rel: string, text: string, fragment: boolean): Step[][] {
-  const stubbed = text.replaceAll(/^\{\{blocks\}\}$/gm, "").replaceAll(/\{\{[\w-]+\}\}/g, "x");
+  const stubbed = rendered(text);
   if (fragment) return [parseYaml(`steps:\n${stubbed}`).steps ?? []];
   if (rel.endsWith("action.yml")) {
     return [(parseYaml(stubbed) as { runs: { steps: Step[] } }).runs.steps];

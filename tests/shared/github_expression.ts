@@ -55,6 +55,7 @@ const RUNNER_FUNCTIONS = [...STATUS_FUNCTION_NAMES, "hashFiles"].map((name) => (
 const OPEN = "${{";
 const CLOSE = "}}";
 const PLAIN_NAME = /^[A-Za-z_][\w-]*$/;
+const JOB_OR_STEP_KEYS = ["run", "uses", "steps"];
 
 /** One piece of a workflow string: text the runner keeps as written, or the source of one `${{ }}` expression. */
 export type TemplateSegment = { literal: string } | { expression: string };
@@ -97,13 +98,17 @@ export function expressionsIn(text: string): string[] {
   );
 }
 
+/** The source of the one `${{ }}` a value is whole, or null for a value with text around it (a blank included: the
+ *  runner keeps it) or more than one. */
+export function soleExpression(value: string): string | null {
+  const segments = templateSegments(value);
+  const [only] = segments;
+  return segments.length === 1 && "expression" in only ? only.expression : null;
+}
+
 /** The expression an `if:` is: the text itself, or the inside of the one `${{ }}` that wraps it whole. */
 export function conditionSource(condition: string): string {
-  const segments = templateSegments(condition.trim());
-  const [only] = segments;
-  if (segments.length === 1 && "expression" in only) return only.expression;
-
-  return condition.trim();
+  return soleExpression(condition.trim()) ?? condition.trim();
 }
 
 /** The expression's value over the context, each key a dotted path. A key nobody set reads as null, as an unrun job's
@@ -215,6 +220,43 @@ export function contextReads(expr: Expr): ContextRead[] {
   if (path === null) return subexpressions(expr).flatMap(contextReads);
 
   return [path, ...indexReads(expr)];
+}
+
+/** The read a value is whole, as an output wired to one step is (`${{ steps.plan.outputs.modules }}`); null for a
+ *  value with text around the expression, more than one expression, or an expression that is no single read. */
+export function soleRead(value: string): ContextRead | null {
+  const source = soleExpression(value);
+  return source === null ? null : contextRead(parseExpression(source).tree);
+}
+
+/** Every string a YAML node holds, at any depth, keys left out. */
+export function stringsIn(node: unknown): string[] {
+  if (typeof node === "string") return [node];
+
+  if (node === null || typeof node !== "object") return [];
+
+  return Object.values(node).flatMap(stringsIn);
+}
+
+/** The source of every expression in a YAML node: the `if:` of a job or a step is an expression whole, everywhere
+ *  else only the `${{ }}` spans are. An `if` key beside none of a job's or a step's own keys is a name somebody
+ *  chose (`env: { if: production }`), so its value is text. */
+function expressionSources(node: unknown): string[] {
+  if (typeof node === "string") return expressionsIn(node);
+
+  if (node === null || typeof node !== "object") return [];
+
+  const conditional = JOB_OR_STEP_KEYS.some((key) => key in node);
+  return Object.entries(node).flatMap(([key, value]) =>
+    conditional && key === "if" && typeof value === "string"
+      ? [conditionSource(value)]
+      : expressionSources(value),
+  );
+}
+
+/** Every context read of a workflow, a job, a step, or an output spec, as GitHub's parser reads it. */
+export function readsIn(node: unknown): ContextRead[] {
+  return expressionSources(node).flatMap((source) => contextReads(parseExpression(source).tree));
 }
 
 /** The tree in one spelling whatever the source's spacing and quoting, for naming a term in a failure: a literal

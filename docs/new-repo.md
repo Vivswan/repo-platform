@@ -83,16 +83,16 @@ Adding a module is one dispatch of the operator with `add_modules`, and the sync
 
 What each module writes, its registration keys, and its companion steps are the add-module skill's ([what each module writes](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-add-module/SKILL.md#what-each-module-writes), [the per-module reference](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-add-module/references/modules.md)); the bun toolchain's Dependabot notes are [toolchains.md](toolchains.md#the-pins).
 
-- **Two base files' triggers:** label a PR `fix-lint` and the repo-owned `auto-format.yml` pushes a formatting commit ([re-triggering CI](#fix-commits-and-re-triggering-ci) applies); the managed `auto-assign.yml` assigns issues and PRs to the repository owner.
+- **Two triggers:** with the [autofix](modules/autofix.md) module, label a PR `fix-lint` and the managed `auto-fix.yml` runs the repo-owned autofix hook and pushes what it changed as one commit ([re-triggering CI](#fix-commits-and-re-triggering-ci) applies); the managed `auto-assign.yml` assigns issues and PRs to the repository owner.
 - **The community health files** (contributing guide, security policy, code of conduct, issue forms) are not written: GitHub serves them from the account's `<owner>/.github` repository. A repository's own file wins over the default, and the issue forms count as one set, so any file under its own .github/ISSUE_TEMPLATE folder replaces all of the default forms.
 
 ### Fix commits and re-triggering CI
 
-The `auto-format.yml` starter pushes its formatting commit to the PR branch with the default token (`github.token` / `GITHUB_TOKEN`).
+The autofix module pushes its fix commit to the PR branch with the default token (`github.token` / `GITHUB_TOKEN`).
 
 - **The held run:** GitHub creates the new head's `pull_request` run for such a push but holds it in an approval-required state ([its GITHUB_TOKEN docs](https://docs.github.com/en/actions/concepts/security/github_token)). The required `all-green` check sits unreported until someone approves the run from the PR's merge box or the Actions tab, or pushes a commit to the branch.
 
-A PAT with Contents:RW would start the run outright, but any same-repo PR's formatter tooling runs next to that token, so the starter deliberately does not wire one in.
+A PAT with Contents:RW would start the run outright, but it would sit one job away from any same-repo PR's own fixer tooling, so the module deliberately wires none in.
 
 ### The release pipeline (release-please)
 

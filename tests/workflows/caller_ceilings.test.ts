@@ -5,10 +5,12 @@
 //                   workflow is the CALLER's name, so a group built from it splits one lane between called and dispatched runs
 
 import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { PLATFORM_OWNER, PLATFORM_SLUG } from "../../actions/shared/platform.ts";
+import { PLATFORM_SLUG } from "../../actions/shared/platform.ts";
+import { parseExpression, printed, soleExpression } from "../shared/github_expression.ts";
+import { shippedSource } from "../shared/shipped_source.ts";
 
 type Permissions = Record<string, string> | string | undefined;
 interface Concurrency {
@@ -39,18 +41,18 @@ interface Call {
 const ROOT = join(import.meta.dir, "../..");
 const RANK: Record<string, number> = { none: 0, read: 1, write: 2 };
 const SKELETON = "files/base/.github/workflows/ci.yml";
-const CALLER_ROOTS = [".github/workflows", "files/base/.github/workflows"];
+const CALLER_ROOTS = [
+  ".github/workflows",
+  "files/base/.github/workflows",
+  "files/autofix/.github/workflows",
+];
 const LOCAL_CALL = /^[.$]\/\.github\/workflows\/(.+)$/;
 const PLATFORM_CALL = new RegExp(`^${PLATFORM_SLUG}/(\\.github/workflows/.+)@`);
 const FALLBACK_LANE =
-  /^\$\{\{ inputs\.([\w-]+) != '' && format\('[\w-]+-called-\{0\}', github\.run_id\) \|\| '([\w-]+)' \}\}$/;
+  /^inputs\.([\w-]+) != '' && format\('[\w-]+-called-\{0\}', github\.run_id\) \|\| '([\w-]+)'$/;
 
-/** The writer's two placeholders become YAML before parsing: the owner slug, and the `{{blocks}}` line a starter opens with. */
 function load(rel: string): Workflow {
-  const text = readFileSync(join(ROOT, rel), "utf8")
-    .replaceAll("{{github_username}}", PLATFORM_OWNER)
-    .replace(/^\{\{blocks\}\}$/gm, "");
-  return parseYaml(text) as Workflow;
+  return parseYaml(shippedSource(rel)) as Workflow;
 }
 
 /** A reusable workflow of this repository, whichever spelling the caller uses; a third-party call is GitHub's alone to
@@ -66,6 +68,12 @@ const workflowFiles = (root: string) =>
   readdirSync(join(ROOT, root))
     .filter((name) => name.endsWith(".yml"))
     .map((name) => `${root}/${name}`);
+
+/** The fallback a lane spells, matched in the parser's one spelling so spacing decides nothing; null for any other lane. */
+function fallbackOf(group: string): RegExpExecArray | null {
+  const source = soleExpression(group);
+  return source === null ? null : FALLBACK_LANE.exec(printed(parseExpression(source).tree));
+}
 
 const lanesOf = (workflow: Workflow): [string, string][] => {
   const lanes: [string, string][] = [];
@@ -188,7 +196,7 @@ function unionOfGrants(platformCalls: Call[]): Record<string, string> {
 function laneFindings({ site, job, called, heldByChain }: Call): string[] {
   const findings: string[] = [];
   for (const [where, group] of lanesOf(called)) {
-    const fallback = FALLBACK_LANE.exec(group);
+    const fallback = fallbackOf(group);
     if (fallback === null) {
       if (heldByChain.has(group.toLowerCase())) {
         findings.push(`${site} ${where}: group '${group}' is held by the caller chain`);
@@ -233,6 +241,7 @@ test("every called job's permissions fit its caller job's ceiling", () => {
     "files/base/.github/workflows/ci.yml job 'platform' -> .github/workflows/fleet.yml",
     ".github/workflows/fleet.yml job 'codeql' -> .github/workflows/reusable-codeql.yml",
     ".github/workflows/ci.yml job 'post-green' -> .github/workflows/post-green.yml",
+    "files/autofix/.github/workflows/auto-fix.yml job 'autofix' -> .github/workflows/fleet-autofix.yml",
   ];
   const sites = CALLS.map((call) => call.site);
   expect({ resolved: controls.filter((pair) => sites.includes(pair)), overCeiling }).toEqual({
@@ -263,7 +272,7 @@ test("no called lane is one its caller chain holds or reads github.workflow; a f
   const findings = [...CALLS.flatMap(laneFindings), ...lanesReadingGithubWorkflow()];
   const fallbackSites = CALLS.flatMap((call) =>
     lanesOf(call.called)
-      .filter(([, group]) => FALLBACK_LANE.test(group))
+      .filter(([, group]) => fallbackOf(group) !== null)
       .map(() => call.site),
   );
   // The armed controls: the two fallback-shaped callees were seen, and the sync callee's chain holds ci.yml's run lane as
