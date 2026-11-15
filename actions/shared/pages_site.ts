@@ -1,18 +1,19 @@
 // Where GitHub Pages serves a repository (docs/modules/site.md, "The hook"), spelled once for the site-urls action,
-// which hands the hook its base path, and the pages-site assembly, which lays the artifact out at it.
+// which hands the hook its base path, and the pages-site assembly, which lays the artifact out at it. A deploy reads
+// the address GitHub reports (pagesSiteAt); the rule (pagesSite) serves a build that has no Pages API to ask.
 //
 // DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal imports only.
 
 export interface PagesSite {
-  /** `https://<owner>.github.io`, the owner lowercased the way Pages serves it. */
+  /** The scheme and host, lowercased the way Pages serves them: `https://<owner>.github.io`, or a custom domain's. */
   origin: string;
 
-  /** `/` for the owner's user site, the repository named `<owner>.github.io` in any case; `/<repo>/` otherwise. */
+  /** The URL path the site sits under, always with a trailing slash: `/<repo>/`, or `/` at an origin's root. */
   basePath: string;
 }
 
-/** Where Pages serves `repository` (`owner/repo`, as GITHUB_REPOSITORY spells it): the origin, and the base path
- *  `/` when the repository is the owner's user site or `/<repo>/` otherwise. */
+/** Where Pages serves a repository with no custom domain, by rule: `repository` is `owner/repo` as GITHUB_REPOSITORY
+ *  spells it, and the base path is `/` when it is the owner's user site (`<owner>.github.io`, in any case). */
 export function pagesSite(repository: string): PagesSite {
   const [owner, repo] = repository.split("/");
   const host = `${owner.toLowerCase()}.github.io`;
@@ -20,6 +21,13 @@ export function pagesSite(repository: string): PagesSite {
     origin: `https://${host}`,
     basePath: repo.toLowerCase() === host ? "/" : `/${repo}/`,
   };
+}
+
+/** Where Pages serves the site GitHub reports at `url`: configure-pages' `base_url`, which carries no trailing slash
+ *  (`https://owner.github.io/repo`, `https://docs.example.com`). Throws on anything but a URL. */
+export function pagesSiteAt(url: string): PagesSite {
+  const { origin, pathname } = new URL(url);
+  return { origin, basePath: pathname.endsWith("/") ? pathname : `${pathname}/` };
 }
 
 /** The characters the URL parser would not keep as a path's own: `%` starts an escape, `\\` becomes `/` under https, and the whitespace is dropped. Spelled as the href to such a file must spell them. */

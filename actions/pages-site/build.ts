@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { error, notice, setOutput } from "@actions/core";
+import { z } from "zod";
 import {
   capture,
   env,
@@ -27,7 +28,7 @@ import {
   run,
   succeeded,
 } from "../shared/action_runtime.ts";
-import { ownLinksPattern, pagesSite } from "../shared/pages_site.ts";
+import { ownLinksPattern, pagesSite, pagesSiteAt } from "../shared/pages_site.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { type IncludeRoot, isUnwalkedEntry, LANDING_FILES } from "./.vitepress/conventions.ts";
 import { collectFacts } from "./facts.ts";
@@ -63,6 +64,9 @@ const GIT_READ_BOUND_MS = 60_000;
 
 /** `git archive` of one ref's tree, or its extraction: disk-bound, as long as the scripts' whole-tree calls (five minutes). */
 const TREE_EXTRACT_BOUND_MS = 300_000;
+
+/** CHECK's two spellings, an unset one reading as false. */
+const CHECK = z.stringbool({ truthy: ["true"], falsy: ["false", ""], case: "sensitive" });
 
 /** One VitePress build of one tier: inside the docs check's 15-minute job, so a wedged build dies named, not as the runner's kill. */
 const TIER_BUILD_BOUND_MS = 600_000;
@@ -160,7 +164,7 @@ interface Config extends SiteConfig {
   /** The Pages origin the site is served from. */
   origin: string;
 
-  /** The URL path the site is served under (pagesSite's base path). */
+  /** The URL path the site is served under, with its trailing slash (PagesSite's base path). */
   rootBase: string;
 
   /** The repository's edit URL up to the repo root; a page's edit link appends its own source path (an include root's page edits at that root, not under the docs directory). */
@@ -170,10 +174,23 @@ interface Config extends SiteConfig {
   defaultBranch: string;
 }
 
-function readConfig(): Config {
+/** Whether this run is the docs PR check. Parsed at the boundary: anything but the two honest spellings is a wiring
+ *  mistake, never a silent deploy. */
+function readCheck(): boolean {
+  const check = env("CHECK");
+  const parsed = CHECK.safeParse(check);
+  if (!parsed.success) throw new Error(`CHECK must be "true" or "false" (got '${check}')`);
+
+  return parsed.data;
+}
+
+/** A deploy is laid out where GitHub reports the site (SITE_URL, configure-pages' base_url). The check has no Pages
+ *  API to ask and builds at "/" with no version menu, so the rule's address reaches none of its output. */
+function readConfig(check: boolean): Config {
   const workspace = requireEnv("GITHUB_WORKSPACE");
   const repository = requireEnv("GITHUB_REPOSITORY");
-  const { origin, basePath: rootBase } = pagesSite(repository);
+  const address = check ? pagesSite(repository) : pagesSiteAt(requireEnv("SITE_URL"));
+  const { origin, basePath: rootBase } = address;
   const defaultBranch = env("DEFAULT_BRANCH", "main");
   const serverUrl = env("GITHUB_SERVER_URL", "https://github.com").replace(/\/+$/, "");
   // realpath'd: a scratch base behind a symlink (macOS /tmp) gives the
@@ -596,18 +613,12 @@ function setSiteOutputs(
 }
 
 async function main(): Promise<void> {
-  const cfg = readConfig();
+  const check = readCheck();
+  const cfg = readConfig(check);
   rmSync(cfg.scratch, { recursive: true, force: true });
   mkdirSync(cfg.scratch, { recursive: true });
 
-  // Parsed at the boundary: anything but the two honest spellings is a
-  // wiring mistake, never a silent deploy.
-  const check = env("CHECK", "false");
-  if (check !== "true" && check !== "false" && check !== "") {
-    throw new Error(`CHECK must be "true" or "false" (got '${check}')`);
-  }
-
-  if (check === "true") {
+  if (check) {
     if (cfg.docs === null) {
       notice("docs-check stood down: the registration turns the docs half off (site.path: null)");
       return;

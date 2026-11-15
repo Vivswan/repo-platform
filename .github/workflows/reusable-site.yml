@@ -41,11 +41,20 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.sha }}
 
-      # The base path the hook builds for, from the one rule in actions/shared/pages_site.ts (the assembly lays the
-      # artifact out at the same base path), and the edit and tree patterns the link-rot step reads.
+      # Where GitHub serves the site, asked before anything is built: a custom domain, or an owner's new name, moves
+      # the origin and the base path, and the hook and the assembly both build for them. No Pages site yet: GitHub
+      # reserves its creation to a token this job lacks, the module's settings layer creates it on the next daily
+      # apply, and until then this step fails on its own error (docs/modules/site.md, "Pages enablement").
+      - id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      # The base path the hook builds for (the assembly lays the artifact out at the same one), parsed from the
+      # address by actions/shared/pages_site.ts, and the edit and tree patterns the link-rot step reads.
       - name: Resolve the site URLs
         id: urls
         uses: $/actions/site-urls
+        with:
+          site-url: ${{ steps.pages.outputs.base_url }}
 
       # The registration's site keys, read before the hook; the assembly reads this step's config.
       - name: Plan the site from the registration
@@ -72,18 +81,14 @@ jobs:
           base-path: ${{ steps.urls.outputs.base-path }}
           origin: ${{ steps.urls.outputs.origin }}
 
-      # The Pages steps run whenever the assembly has something to publish. No pre-check of the Pages site: GitHub
-      # reserves its creation to a token this job lacks, the module's settings layer creates it on the next daily
-      # apply, and a deploy before that fails on configure-pages's own error (docs/modules/site.md, "Pages enablement").
+      # The upload and the deploy run whenever the assembly has something to publish.
       - name: Assemble the site
         id: site
         uses: $/actions/pages-site
         with:
           site-dir: ${{ steps.hook.outputs.dist }}
           config: ${{ steps.plan.outputs.config }}
-
-      - if: steps.site.outputs.publish == 'true'
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+          site-url: ${{ steps.pages.outputs.base_url }}
 
       # Artifacts belong to the RUN, not the attempt: a re-run after a failed prerequisite (post-green) re-runs this leg, and a second
       # github-pages artifact in the run makes deploy-pages refuse ("Multiple artifacts named github-pages").
