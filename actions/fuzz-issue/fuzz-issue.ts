@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
-import { setOutput } from "@actions/core";
+import { setFailed, setOutput } from "@actions/core";
 
 /** Lines of a report a summarized block quotes; a block shown in full is uncapped. */
 const REPORT_LINES = 60;
@@ -313,8 +313,7 @@ function main(): void {
 if (import.meta.main) {
   try {
     main();
-  } catch (error) {
-    console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
+  } catch (cause) {
+    setFailed(cause instanceof Error ? cause.message : String(cause));
   }
 }
