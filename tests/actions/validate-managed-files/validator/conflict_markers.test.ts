@@ -5,30 +5,40 @@ import { validatorRunner } from "./fixtures";
 const temp = tempDirs();
 const runValidator = validatorRunner(temp);
 
+const OURS = `${"<".repeat(7)} HEAD`;
+const SPLIT = "=".repeat(7);
+const THEIRS = `${">".repeat(7)} topic`;
+const BLOCK = [OURS, "ours", SPLIT, "theirs", THEIRS, ""].join("\n");
+
+const REPORT =
+  "carries conflict-marker lines (a line opening with '<<<<<<< ' or '>>>>>>> ', or reading '=======' whole) - " +
+  "resolve each conflict block, or move an example so no line reads as a marker";
+
 describe("conflict markers", () => {
-  // The motivating input: a synced Markdown doc quoting the markers inside a fence. The check reads lines, not
-  // intent, so the message names what stands in the file and never who left it.
-  // The angle markers are matched by prefix and the equals line whole, so only the equals line can hide behind a
-  // carriage return: the CRLF case carries it alone.
-  test.each([
-    {
-      ending: "LF",
-      newline: "\n",
-      markers: [`${"<".repeat(7)} ours`, "theirs", "=".repeat(7), `${">".repeat(7)} theirs`],
-    },
-    { ending: "CRLF", newline: "\r\n", markers: ["=".repeat(7)] },
-  ])(
-    "a fenced conflict-marker example ($ending) is reported by what the file carries; binary content is skipped",
-    ({ newline, markers }) => {
-      const { exitCode, stderr } = runValidator({
-        "docs/notes.md": ["```text", ...markers, "```", ""].join(newline),
-        "assets/blob.bin": "\xff\xfe\x00\x01",
-      });
-      expect(exitCode).toBe(1);
-      expect(stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
-        "error: docs/notes.md: carries conflict-marker lines (a line opening with '<<<<<<< ' or '>>>>>>> ', " +
-          "or reading '=======' whole) - resolve each conflict block, or move an example so no line reads as a marker",
-      ]);
-    },
-  );
+  // Incident: an unresolved block in `tool.mts` and `lib.rs` passed, since a suffix table decided what was text.
+  // What git reads as text is judged whatever its name; what git does not track, or reads as binary, is not.
+  test("every tracked text file carrying a marker line is reported, and nothing else is", () => {
+    const { exitCode, stderr } = runValidator(
+      {
+        "src/tool.mts": BLOCK,
+        "src/lib.rs": BLOCK,
+        // The check reads lines, not intent: a fenced example is reported like a real block.
+        "docs/notes.md": ["```text", OURS, SPLIT, THEIRS, "```", ""].join("\n"),
+        // The equals line is matched whole, so it alone can hide behind a carriage return.
+        "docs/crlf.txt": `${SPLIT}\r\n`,
+        // A setext heading's underline of any length but seven is no marker.
+        "docs/guide.md": ["Guide", "=".repeat(5), "", "Overview", "=".repeat(8), ""].join("\n"),
+        "docs/prose.md": `a diff shows ${OURS} mid-line, and ${SPLIT} too\n`,
+        "assets/blob.bin": `\x00\x01\n${BLOCK}`,
+      },
+      { "build/merged.txt": BLOCK },
+    );
+
+    expect([exitCode, stderr.split("\n").filter((line) => line.startsWith("error:"))]).toEqual([
+      1,
+      ["docs/crlf.txt", "docs/notes.md", "src/lib.rs", "src/tool.mts"].map(
+        (path) => `error: ${path}: ${REPORT}`,
+      ),
+    ]);
+  });
 });
