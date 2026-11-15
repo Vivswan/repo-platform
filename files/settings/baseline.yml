@@ -30,10 +30,12 @@ labels:
   - name: fix-lint
     color: "fbca04"
     description: Lint / formatting fixes
-  # The owner's standing approval on a pull request, applied by the owner
-  # alone: whoever runs the landing checks that the labeling actor is the
-  # repository owner and that no push followed it, then merges once every
-  # check is green. A later push voids it; the label comes off and is re-asked.
+  # The owner's standing approval for the pull request's whole life, applied
+  # by the owner alone: no later push or force-push voids it. Whoever lands
+  # verifies on the exact head the owner's labeling, green checks, resolved
+  # threads, and a review that could block. A label set by anyone else comes
+  # off; any other shortfall holds the merge and keeps the label
+  # (docs/settings.md, "What the baseline contains").
   - name: merge-when-green
     color: "0e8a16"
     description: "Owner approved: merge once every gate is green"
