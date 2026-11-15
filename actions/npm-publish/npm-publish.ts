@@ -27,6 +27,7 @@ const NPM_CLI = join(import.meta.dir, "node_modules", "npm", "bin", "npm-cli.js"
 const REGISTRY = "https://registry.npmjs.org";
 const DEFAULT_TAG = "latest";
 const PLAIN_RELEASE = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+const MAIN_COUNT = /^\d+\.\d+\.\d+-main\.(\d+)\.\d{8}\.g[0-9a-f]{7}$/;
 const GIT_BOUND_MS = 60_000;
 const NPM_BOUND_MS = 60_000;
 const PUBLISH_BOUND_MS = 600_000;
@@ -196,6 +197,20 @@ function publishedFor(position: MainPosition, record: RegistryRecord): string | 
   return Object.keys(record.versions).find((known) => known.endsWith(identifiers));
 }
 
+/** The place on main a minted version carries, its commit count; undefined for a version of any other scheme. */
+function mainCount(version: string): number | undefined {
+  const count = MAIN_COUNT.exec(version)?.[1];
+
+  return count === undefined ? undefined : Number(count);
+}
+
+/** The newest plain release on the record; undefined when it holds none. */
+function newestRelease(record: RegistryRecord): string | undefined {
+  const releases = Object.keys(record.versions).filter((known) => PLAIN_RELEASE.test(known));
+
+  return releases.sort(Bun.semver.order).at(-1);
+}
+
 /** Why `channel`'s dist-tag ended behind `version` on a record that shows the version, or null when it did not. */
 export function tagBehind(
   channel: Channel,
@@ -218,8 +233,7 @@ export function verdictOf(channel: Channel, version: string, record: RegistryRec
     return { action: "skip", reason: `${version} is already on the registry (a rerun)` };
   }
 
-  const releases = Object.keys(record.versions).filter((known) => PLAIN_RELEASE.test(known));
-  const newest = releases.sort(Bun.semver.order).at(-1);
+  const newest = newestRelease(record);
   if (newest !== undefined && Bun.semver.order(version, newest) <= 0) {
     return {
       action: "fail",
@@ -228,10 +242,21 @@ export function verdictOf(channel: Channel, version: string, record: RegistryRec
   }
 
   const next = record["dist-tags"].next;
-  if (channel === "next" && next !== undefined && Bun.semver.order(next, version) >= 0) {
+  if (channel !== "next" || next === undefined) return { action: "publish" };
+
+  if (Bun.semver.order(next, version) >= 0) {
     return {
       action: "skip",
       reason: `next names ${next}, which is not below this commit's ${version}: next never moves back`,
+    };
+  }
+
+  // A release PR that moved up since lifts an old commit's version over a later commit's, so the place on main is compared too.
+  const [held, own] = [mainCount(next), mainCount(version)];
+  if (held !== undefined && own !== undefined && held >= own) {
+    return {
+      action: "skip",
+      reason: `next names ${next}, the build of a commit not before this one on main (${version}): next never moves back`,
     };
   }
 
@@ -309,7 +334,7 @@ function upcomingRelease(run: Runner, cwd: string, pkg: Package, branch: string)
 
   if (Bun.semver.order(version, pkg.version) <= 0) {
     throw new Error(
-      `the release PR leaves this package.json at ${version}, not above main's ${pkg.version}: release-please does not bump it`,
+      `the release PR will cut ${version}, not above the ${pkg.version} in main's package.json: lower main's version (never below the registry's newest release) or raise the PR's (release-please's initial-version), or have release-please bump this file`,
     );
   }
 
@@ -417,21 +442,27 @@ async function judgedVersion(
   const position = mainPosition(tools.run, request.directory);
   const record = await tools.readRecord(pkg.name);
   // A rerun judges the version its commit published: by then the release PR may name another release, or be merged and its branch gone.
-  const version =
-    publishedFor(position, record) ??
-    nextVersion(
-      upcomingRelease(tools.run, request.directory, pkg, request.releaseBranch),
-      position,
-    );
+  const published = publishedFor(position, record);
+  if (published !== undefined) return { version: published, record };
 
-  return { version, record };
+  // The release PR's branch names the release after the registry's newest, whichever commit reads it.
+  const newest = newestRelease(record);
+  if (newest !== undefined && Bun.semver.order(pkg.version, newest) < 0) {
+    throw new Error(
+      `this commit's package.json is at ${pkg.version}, below the released ${newest}: a commit from before a release publishes nothing to next (a rerun of an old run ends here), and on main's newest commit ${BEHIND_RELEASE.next}`,
+    );
+  }
+
+  const upcoming = upcomingRelease(tools.run, request.directory, pkg, request.releaseBranch);
+
+  return { version: nextVersion(upcoming, position), record };
 }
 
 /**
  * Judges the package against the registry before anything is built, and on next stamps the version it will publish.
  *
  * @throws {Error} the version on disk is not a plain release, npm is configured with a tag or another registry, the
- *   release PR's branch does not name a later plain release, the release tag names another version, the checkout is
+ *   commit predates the registry's newest release, the release PR's branch does not name a later plain release, the release tag names another version, the checkout is
  *   shallow, or the verdict is a refusal
  */
 export async function planPublish(pkg: Package, request: PlanRequest, tools: Tools): Promise<Plan> {

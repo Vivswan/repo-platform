@@ -142,6 +142,32 @@ test.each<{
     verdict: SKIP_BEHIND("1.2.1-main.43.20261114.gbbbbbbb"),
   },
   {
+    reason:
+      "next on a later commit's build of a lower release, where a rerun of this commit read a release PR that has since moved up",
+    channel: "next",
+    version: "1.3.0-main.42.20261114.g0123456",
+    held: record(["1.2.0", "1.2.1-main.43.20261114.gbbbbbbb"], {
+      latest: "1.2.0",
+      next: "1.2.1-main.43.20261114.gbbbbbbb",
+    }),
+    verdict: {
+      action: "skip",
+      reason:
+        "next names 1.2.1-main.43.20261114.gbbbbbbb, the build of a commit not before this one on main (1.3.0-main.42.20261114.g0123456): next never moves back",
+    },
+  },
+  {
+    reason:
+      "next on a tag of another scheme, which carries no place on main to compare, whatever its last identifiers look like",
+    channel: "next",
+    version: MINTED,
+    held: record(["1.2.0", "1.2.1-ci-main.999.20261114.gbbbbbbb"], {
+      latest: "1.2.0",
+      next: "1.2.1-ci-main.999.20261114.gbbbbbbb",
+    }),
+    verdict: { action: "publish" },
+  },
+  {
     reason: "no next tag yet, the package's first pre-release",
     channel: "next",
     version: MINTED,
@@ -645,14 +671,93 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason:
-      "next: release-please's simple type leaves package.json alone, and a pre-release of the version on disk would sort below it",
+      "next: a rerun of a commit from before a release, the release PR since reopened for the next one, publishes nothing over that release",
     run: () =>
-      plan("next", RELEASE_BRANCH, [BEFORE], {
-        onReleaseBranch: { name: PKG.name, version: "1.2.0" },
-      }),
+      plan(
+        "next",
+        RELEASE_BRANCH,
+        [record(["1.2.0", "1.2.1"], { latest: "1.2.1", next: "1.2.1" })],
+        { onReleaseBranch: { name: PKG.name, version: "1.2.2" } },
+      ),
     expected: {
       outcome:
-        "the release PR leaves this package.json at 1.2.0, not above main's 1.2.0: release-please does not bump it",
+        "this commit's package.json is at 1.2.0, below the released 1.2.1: a commit from before a release publishes nothing to next (a rerun of an old run ends here), and on main's newest commit the package.json on main is behind the registry",
+      commands: [...CONFIG, ...POSITION],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "next: a release PR that cuts the version main already holds (0.0.0, nothing released) publishes no 0.0.0-main pre-release",
+    run: () =>
+      plan(
+        "next",
+        RELEASE_BRANCH,
+        [record([])],
+        { onReleaseBranch: { name: PKG.name, version: "0.0.0" } },
+        { name: PKG.name, version: "0.0.0" },
+      ),
+    expected: {
+      outcome:
+        "the release PR will cut 0.0.0, not above the 0.0.0 in main's package.json: lower main's version (never below the registry's newest release) or raise the PR's (release-please's initial-version), or have release-please bump this file",
+      commands: [...CONFIG, ...POSITION, UPCOMING],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "next: a ci.yml that passes no release branch publishes nothing from a commit that has not published",
+    run: () => plan("next", "", [BEFORE]),
+    expected: {
+      outcome:
+        "the next channel needs the release PR's branch (release-branch): this repository's ci.yml does not pass it yet, so merge its sync PR",
+      commands: [...CONFIG, ...POSITION],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "next: a ci.yml that passes no release branch still passes a rerun of a commit that already published",
+    run: () => plan("next", "", [AFTER]),
+    expected: {
+      outcome: { version: MINTED, publish: false },
+      commands: [...CONFIG, ...POSITION],
+      reads: 1,
+      waitedOut: false,
+      lines: [
+        [
+          "notice",
+          `@example/widget: nothing to publish, ${MINTED} is already on the registry (a rerun)`,
+        ],
+      ],
+    },
+  },
+  {
+    reason:
+      "next: a release branch deleted before this commit published leaves no release to mint a pre-release of",
+    run: () => plan("next", RELEASE_BRANCH, [BEFORE], { onReleaseBranch: null }),
+    expected: {
+      outcome: `the release PR's branch ${RELEASE_BRANCH} shows no package.json here, so this commit has no release to lead to (a merged release PR's branch is deleted): fatal: invalid object name`,
+      commands: [...CONFIG, ...POSITION, UPCOMING],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason: "next: a release PR that cuts a pre-release would be minted into a second pre-release",
+    run: () =>
+      plan("next", RELEASE_BRANCH, [BEFORE], {
+        onReleaseBranch: { name: PKG.name, version: "1.3.0-rc.1" },
+      }),
+    expected: {
+      outcome: "the release PR will cut 1.3.0-rc.1, which is not a plain release X.Y.Z",
       commands: [...CONFIG, ...POSITION, UPCOMING],
       reads: 1,
       waitedOut: false,

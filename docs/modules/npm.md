@@ -45,7 +45,7 @@ After `1.2.0`, commits A and B change nothing a release would carry, so release-
 
 3. **Fill in the build hook** the sync seeds, `.github/actions/npm-build/action.yml` ([below](#the-hook-githubactionsnpm-buildactionyml)). The seed fails on purpose.
 
-4. **Publish the package once by hand,** so it exists on npm: a trusted publisher is configured on an existing package.
+4. **Publish the package once by hand,** so it exists on npm: a trusted publisher is configured on an existing package. Publish the version on main or a lower one: `next` refuses a commit whose `package.json` is below a release on the registry.
 
 5. **Add the trusted publisher** on npmjs.com, in the package's settings:
 
@@ -62,6 +62,7 @@ No token is stored anywhere: npm checks the run's OIDC token against that publis
 ### The pull request that adds the module
 
 ```text
+ci.yml passes no release-branch -> merge the platform's own sync PR first: the label below cannot change a workflow file
 PR adds npm to modules  -> validate-managed-files is red: the hook starter is not on the branch yet
 add repo-platform:sync  -> the sync commits the hook starter and the manifest stamp onto the branch
                         -> the CI and PR Title runs of that commit show action_required: approve them, or push a commit
@@ -70,7 +71,8 @@ merge it as feat: ...   -> the release PR refreshes, and the first `next` publis
 ```
 
 - **The red check and the held runs** are every module change's, owned by [a module change on a pull request](../platform/sync/operator.md#a-module-change-on-a-pull-request): GitHub holds the runs of a commit the repository token pushed.
-- **The conflict returns with every sync that lands on main** while the PR is open, since both sides restamp the manifest. Keep the PR short-lived.
+- **A `ci.yml` whose `npm-next` job passes no `release-branch`** is from before `next` read the release PR, and only the platform's own sync PR updates it. The label's sync fails when its diff touches a file under `.github/workflows/`, with a comment naming the paths, and commits nothing. So merge the sync PR first, then open this one.
+- **The conflict can return when a sync with a different build lands on main** while the PR is open: both sides restamp the manifest, and identical stamps merge cleanly. Keep the PR short-lived.
 - **The title needs a type release-please puts in the changelog,** `feat` or `fix`. Under `chore` the release PR does not refresh, so nothing publishes to `next` until a later commit refreshes it.
 
 ## What the job does
@@ -152,15 +154,17 @@ It sorts below the release it leads to, above every earlier release, and above e
 
 Before the publish, judged in the plan and again in the publish step, the first row that matches:
 
-| The record shows                                           | Channel  | Outcome                                                        |
-| ---------------------------------------------------------- | -------- | -------------------------------------------------------------- |
-| the version already published, its channel's tag behind it | both     | fails: a rerun of a publish that left the tag behind stays red |
-| the version already published                              | both     | skipped with a notice, green: a rerun                          |
-| a release at or above this version                         | `next`   | fails: the `package.json` on main is behind the registry       |
-| a release at or above this version                         | `latest` | fails before any publish: a release never moves `latest` back  |
-| `next` at or above this version                            | `next`   | skipped with a notice, green: `next` never moves back          |
-| no such package, or anything the job cannot read           | both     | fails: it never publishes blind                                |
-| anything else                                              | both     | publishes                                                      |
+| The record shows                                            | Channel  | Outcome                                                        |
+| ----------------------------------------------------------- | -------- | -------------------------------------------------------------- |
+| the version already published, its channel's tag behind it  | both     | fails: a rerun of a publish that left the tag behind stays red |
+| the version already published                               | both     | skipped with a notice, green: a rerun                          |
+| a release above the version in this commit's `package.json` | `next`   | fails, in the plan: the commit predates that release           |
+| a release at or above this version                          | `next`   | fails: the `package.json` on main is behind the registry       |
+| a release at or above this version                          | `latest` | fails before any publish: a release never moves `latest` back  |
+| `next` at or above this version                             | `next`   | skipped with a notice, green: `next` never moves back          |
+| `next` on the build of this commit or a later one on main   | `next`   | skipped with a notice, green: `next` never moves back          |
+| no such package, or anything the job cannot read            | both     | fails: it never publishes blind                                |
+| anything else                                               | both     | publishes                                                      |
 
 After the publish:
 
@@ -177,7 +181,10 @@ After the publish:
 - **npm's own configuration is refused** when its `tag` is not npm's default, or it names another registry for the package, in an `.npmrc` or a variable, checked in the plan and again after the build hook, before the publish. Trusted publishing is registry.npmjs.org's alone, so that is the one registry this module reads and publishes to.
 - **The package directory is npm's whole project:** every npm command runs with `--no-workspaces`, so an `.npmrc` at a workspace root above the package is not read.
 - **The release tag must end with `v<version>`.** A mismatch means release-please did not bump this `package.json` (step 2).
-- **The release PR's branch must show this `package.json`** at a plain `X.Y.Z` above the one on main, or `next` mints nothing. A PR that leaves the version alone means the same as the mismatched tag (step 2).
+- **The release PR's branch must show this `package.json`** at a plain `X.Y.Z` above the one on main, or `next` mints nothing. A PR that never changes the file means the same as the mismatched tag (step 2).
+- **A release PR that proposes the version main already holds** (main at `1.0.0`, a first release PR for `1.0.0`) needs main's version lowered, never below the registry's newest release, or the PR's raised with release-please's `initial-version`.
+- **A commit from before a release that has not published yet publishes nothing to `next`,** whatever the release PR's branch says by the time its job runs or is rerun. Its `package.json` is below the registry's newest release, which fails the plan. So does a `package.json` on main that is behind the registry.
+- **A `ci.yml` that passes no `release-branch`** fails `npm-next` on a commit that has not published yet, naming the sync PR to merge. A rerun of a commit that already published reads no branch: it judges the version on the registry as [the first two rows above](#what-the-publish-refuses) do.
 - **A commit publishes one version,** once the registry shows it. A rerun finds the version its commit already published by the `main.<count>.<date>.g<sha7>` ending and judges that one, also after the release PR changed its version or merged.
 - **A failed write** is judged by the record, never by npm's message: the version being there counts as published. Otherwise the job fails with npm's error line and what to check on the trusted publisher.
 
@@ -204,7 +211,7 @@ The same two waits apply to the `next` tag a release moves.
 - **A rerun of a release that a newer one overtook** moves nothing: only the release `latest` names moves `next`, and the notice says which release is current.
 - **Two merges close together** can leave the newer build off `next`. release-please reads main's tip, so the older commit's run can refresh the release PR with both commits in it and publish its own build. The newer commit's run then finds the PR up to date and publishes nothing. The next refresh publishes a build that holds both commits, and nothing is lost at the release.
 - **"Re-run all jobs"** on a run that already refreshed the release PR finds it up to date too, and skips `npm-next`. Use "Re-run failed jobs", which keeps the release leg's answer.
-- **A burst of merges** can cancel a pending npm leg: a lane keeps one waiting job. "Re-run failed jobs" on that run finishes it, and the release stays a draft until `npm-latest` succeeds. A rerun that a newer version overtook does not publish: `next` skips as behind a newer `next`, and either channel fails as below a newer release.
+- **A burst of merges** can cancel a pending npm leg: a lane keeps one waiting job. "Re-run failed jobs" on that run finishes it, and the release stays a draft until `npm-latest` succeeds. A rerun that a newer version overtook does not publish: `next` skips as behind a newer `next` or a later commit's build, and either channel fails as below a newer release.
 - **Removing the module** skips both legs; the hook stays (a starter), and the package stays on npm.
 
 ## Private repositories
