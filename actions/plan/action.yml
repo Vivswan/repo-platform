@@ -14,17 +14,13 @@ description: |
 
   - autofix: the registration's autofix block, the lists the autofix action judges a fix against, as one JSON document.
 
-  GH_TOKEN is needed only when the private input is empty, since the visibility is then read from the API.
-
 inputs:
   mode:
     description: default (the fleet.yml job outputs), site (the pages-site configuration), npm (the package's directory), or autofix (the fix lists).
     required: false
     default: default
   private:
-    description: >-
-      The repository's visibility, "true" or "false" (pass github.event.repository.private), or empty to ask the API
-      with GH_TOKEN.
+    description: The repository's visibility, "true" or "false" (pass github.event.repository.private), which mode default requires.
     required: false
     default: ""
   path:
