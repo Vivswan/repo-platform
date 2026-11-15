@@ -66,4 +66,19 @@ A pinned module declares its pin in `files.yml` (`modules.<name>.pin`, its keys 
 
 Merging the PR moves the `stable` tag once its gate is green; the next sync rolls the pin out to the fleet.
 
+## The CI tool pins
+
+Two tools this repository's own [ci.yml](../.github/workflows/ci.yml) installs from a release archive, each as a version and the archive's sha256 in the installing step's `env`:
+
+| Tool   | `env` keys                        | Follows                  | Archive                              |
+| ------ | --------------------------------- | ------------------------ | ------------------------------------ |
+| pinact | `PINACT_VERSION`, `PINACT_SHA256` | `suzuki-shunsuke/pinact` | `pinact_linux_amd64.tar.gz`          |
+| Vale   | `VALE_VERSION`, `VALE_SHA256`     | `vale-cli/vale`          | `vale_<version>_Linux_64-bit.tar.gz` |
+
+The refresh's third leg, `tool`, moves each pair to the latest release under the same rules as a release pin. The pins are declared in [refresh_upstream.ts](../.github/scripts/refresh-upstream/refresh_upstream.ts), not in `files.yml`: nothing here reaches the fleet.
+
+- **The sha256 is GitHub's own digest of the release asset,** read from the release API; an asset with no recorded digest aborts the run.
+- **One PR on `automation/refresh-tool-pins`,** titled `ci: bump ...`, a major-line bump leading its body with the same callout.
+- **The refresh never edits a command line.** The PR's own checks run the new releases, so a release that changed its flags shows red there. The fix is a pull request of its own carrying the bump and the new command line: the next run rebuilds the refresh branch.
+
 Dependabot reaches the root workflows alone, so a bump that touches a managed root copy (`.github/workflows/sync-branch.yml`, written from `files/base/.github/workflows/sync-branch.yml`) goes into the shipped copy under `files/` instead. The root copy stays on the recorded pin, which the managed-files check holds it to, and the self-sync after the merge writes the bump into it. The pin census (`tests/workflows/delivery_pins.test.ts`) judges a managed root copy under `files/` alone.
