@@ -13,11 +13,11 @@ const action = loadAction("actions/fuzz-issue/action.yml");
 const LABEL = "fuzz-nightly";
 const CLOSE_COMMENT = "Nightly fuzz passed on 2026-03-04.\n\nClosing.";
 
-const fills = {
-  "${{ github.token }}": "t",
-  "${{ inputs.label }}": LABEL,
-  "${{ inputs.label-color }}": "B60205",
-  "${{ inputs.label-description }}": "Automated nightly fuzz failure",
+const context = {
+  "github.token": "t",
+  "inputs.label": LABEL,
+  "inputs.label-color": "B60205",
+  "inputs.label-description": "Automated nightly fuzz failure",
 };
 
 /** Runs `step` with a gh stub on PATH that records every argv and answers `issue list` with `listed`, exiting `listExit`. */
@@ -46,7 +46,7 @@ function runWithGh(
   const comment = join(root, "comment.md");
   writeFileSync(comment, CLOSE_COMMENT);
   const run = runBashStep(step, {
-    fills: { ...fills, "${{ steps.body.outputs.file }}": comment },
+    context: { ...context, "steps.body.outputs.file": comment },
     cwd: root,
     root,
     env: { PATH: `${bin}:${process.env.PATH ?? ""}`, GITHUB_REPOSITORY: "o/r" },

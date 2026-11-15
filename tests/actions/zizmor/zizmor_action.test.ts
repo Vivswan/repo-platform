@@ -14,7 +14,7 @@ const OWNER = "acme";
 describe("actions/zizmor", () => {
   const render = (workspace: string, runnerTemp: string) =>
     runBashStep(stepNamed(action, "Render the fleet policy"), {
-      fills: { "${{ github.action_path }}": ACTION_DIR, "${{ github.repository_owner }}": OWNER },
+      context: { "github.action_path": ACTION_DIR, "github.repository_owner": OWNER },
       env: { RUNNER_TEMP: runnerTemp },
       cwd: workspace,
       root: runnerTemp,
