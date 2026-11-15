@@ -21,6 +21,7 @@ repo-platform is public, and GitHub Actions has no log-level access control: run
 - **The row key** is an HMAC of the slug under the fleet token and the run id, in three-character groups (`edd~166~...`): opaque in the public log, so a private row is identified without being named. The runner drops a job output that carries a masked value, so no four characters of the matrix may spell a private name.
 - **The masked forms:** the slug and the bare name, each lower-cased too. The masker matches substrings, so every URL spelling of the slug falls with it.
 - **After the mask,** the name and its visibility ride `GITHUB_ENV` alone, which the next run step's preamble spells under `env:` already masked. The target is cloned by a script whose git output is captured, never by the checkout action.
+- **A failed API read prints its status alone:** the client's failure text is a fixed vocabulary (`HTTP 502`, `no response`), since the request URL and GitHub's error body both spell the repository.
 - **Only the vocabulary prints:** the writer's report and the delivery log never touch stdout, so the only lines printed are the operator's vocabulary ([the operator](operator.md)).
 
 The same job runs for public and private targets: nothing is conditional on visibility except the report's `Visibility` cell and a branch dispatch's job summary, which withholds a private repository's report ([syncing a branch](operator.md#syncing-a-branch)).

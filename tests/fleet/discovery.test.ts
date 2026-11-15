@@ -7,7 +7,6 @@ import {
   readDispatchAddModules,
   readDispatchBranch,
   readDispatchRepo,
-  scrubSlug,
 } from "../../.github/scripts/fleet/discovery.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -102,76 +101,6 @@ describe("captureNetwork", () => {
     // The scan read the scripts that make network calls, not an empty or
     // misaddressed directory.
     expect(bounded).toBeGreaterThan(0);
-  });
-});
-
-// scrubSlug keeps a private repo's slug and bare name out of captured error
-// text that both selectors print into publicly readable logs.
-describe("scrubSlug", () => {
-  const SLUG = "Vivswan/hidden-server";
-  const HINT = "h**-s**r";
-
-  test.each([
-    {
-      reason: "every occurrence goes: slugs in URLs, bare names, and repeats alike",
-      detail:
-        "fatal: 'https://github.com/Vivswan/hidden-server.git/': fetch of hidden-server failed; retrying hidden-server, then Vivswan/hidden-server again",
-      slug: SLUG,
-      hint: HINT,
-      expected:
-        "fatal: 'https://github.com/h**-s**r.git/': fetch of h**-s**r failed; retrying h**-s**r, then h**-s**r again",
-    },
-    {
-      reason: "a name embedded in a longer token is still masked (substring semantics)",
-      detail: "branch hidden-server-backup rejected",
-      slug: SLUG,
-      hint: HINT,
-      expected: "branch h**-s**r-backup rejected",
-    },
-    {
-      // GitHub identity is case-insensitive: error text may echo a casing
-      // other than discovery's canonical full_name (a redirect, a tool that
-      // lowercases URLs), and each variant is as private as the original.
-      reason: "every casing of the slug and bare name is scrubbed",
-      detail:
-        "GET https://api.github.com/repos/other/shared-private: 502; SHARED-PRIVATE is unreachable, Shared-Private retried",
-      slug: "Other/Shared-Private",
-      hint: "S**-P**e",
-      expected:
-        "GET https://api.github.com/repos/S**-P**e: 502; S**-P**e is unreachable, S**-P**e retried",
-    },
-    {
-      reason: "regex metacharacters in a slug are treated literally",
-      detail: "cannot read Vivswan/dotted.repo today",
-      slug: "Vivswan/dotted.repo",
-      hint: "d**.r**",
-      expected: "cannot read d**.r** today",
-    },
-    {
-      // The control for the row above: the "." must not match arbitrary
-      // characters, so an unrelated name one character apart stays untouched.
-      reason: "a near-miss of a metacharacter slug is left alone",
-      detail: "cannot read Vivswan/dottedXrepo today",
-      slug: "Vivswan/dotted.repo",
-      hint: "d**.r**",
-      expected: "cannot read Vivswan/dottedXrepo today",
-    },
-    {
-      reason: "a no-op when the display IS the slug: the bare name must not expand into the slug",
-      detail: "push to hidden-server rejected",
-      slug: SLUG,
-      hint: SLUG,
-      expected: "push to hidden-server rejected",
-    },
-    {
-      reason: "a slug without an owner segment scrubs as its own bare name",
-      detail: "cloning monorepo into monorepo",
-      slug: "monorepo",
-      hint: "m**o",
-      expected: "cloning m**o into m**o",
-    },
-  ])("$reason", ({ detail, slug, hint, expected }) => {
-    expect(scrubSlug(detail, slug, hint)).toBe(expected);
   });
 });
 

@@ -9,11 +9,11 @@ import { error, notice, setOutput, setSecret, summary, warning } from "@actions/
 import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { env, requireEnv } from "../shared/gha.ts";
+import { GitHubClient } from "../shared/github.ts";
 import { maskForms } from "../shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../sync/writer/settings_entry.ts";
 import {
-  captureNetwork,
   type DiscoveredRepo,
   discoverOwnerRepos,
   notAdoptedNotice,
@@ -21,7 +21,6 @@ import {
   PRIVATE_DISPLAY,
   pushProbeSkipNotice,
   readDispatchRepo,
-  scrubSlug,
   selectedLine,
 } from "./discovery.ts";
 import { moduleRoster } from "./modules.ts";
@@ -38,6 +37,7 @@ import {
 const pat = requireEnv("PAT");
 const owner = requireEnv("OWNER");
 const runId = requireEnv("GITHUB_RUN_ID");
+const github = new GitHubClient();
 
 const scope = parseScope(readDispatchRepo(), new Set(moduleRoster()));
 if (scope.kind === "error") {
@@ -63,90 +63,77 @@ async function warn(message: string): Promise<void> {
 type ProbeResult<T> =
   | { kind: "pass"; value: T }
   | { kind: "drop" }
-  | { kind: "retry"; detail: string };
+  | { kind: "unanswered"; detail: string };
+
+// The push advertisement is git's, not the REST API, so its retries are this loop's; a REST read carries the client's.
+const PUSH_ATTEMPTS = 3;
+
+// Test knob: the harness sets it to 0 so retry coverage does not sleep.
+const RETRY_DELAY_MS = Number(env("PROBE_RETRY_DELAY_MS", "5000"));
 
 // Enrollment = the token's actual grant (push_probe.ts; 200 only with push
 // permission; 401/403/404 = no grant; a transport failure reports 0).
 async function probePush(slug: string, display: string): Promise<ProbeResult<true>> {
-  const code = await pushProbeStatus(slug, pat);
-  if (code === 200) return { kind: "pass", value: true };
-  if (code === 401 || code === 403 || code === 404) {
-    notice(pushProbeSkipNotice(display));
-    return { kind: "drop" };
+  let detail = "";
+  for (let attempt = 1; attempt <= PUSH_ATTEMPTS; attempt++) {
+    const code = await pushProbeStatus(slug, pat);
+    if (code === 200) return { kind: "pass", value: true };
+    if (code === 401 || code === 403 || code === 404) {
+      notice(pushProbeSkipNotice(display));
+      return { kind: "drop" };
+    }
+    detail = `HTTP ${String(code).padStart(3, "0")}`;
+    if (attempt < PUSH_ATTEMPTS) {
+      console.log(
+        `${display}: push-permission probe failed (attempt ${attempt}/${PUSH_ATTEMPTS}: ${detail}); retrying...`,
+      );
+      await Bun.sleep(RETRY_DELAY_MS);
+    }
   }
-  return { kind: "retry", detail: `HTTP ${String(code).padStart(3, "0")}` };
-}
-
-/** The content is target-owned text: read for a fact, never printed. */
-function readRepoFile(slug: string, path: string) {
-  return captureNetwork([
-    "gh",
-    "api",
-    `repos/${slug}/contents/${path}`,
-    "-H",
-    "Accept: application/vnd.github.raw",
-  ]);
+  return { kind: "unanswered", detail };
 }
 
 // Only a 404 means "not adopted"; any other failure is a no-answer, so an outage never reads as an
-// opt-out.
-function probeAdoption(slug: string, display: string): ProbeResult<{ modules: string[] | null }> {
-  const probe = readRepoFile(slug, REGISTRATION_PATH);
-  if (probe.exitCode === 0) {
-    return { kind: "pass", value: { modules: declaredModules(probe.stdout) } };
-  }
-  if (/HTTP 404/.test(probe.stderr)) {
-    notice(notAdoptedNotice(display, "The settings apply only manages adopted repos."));
-    return { kind: "drop" };
-  }
-  return { kind: "retry", detail: probe.stderr.replace(/\n+$/, "") };
+// opt-out. The content is target-owned text: read for a fact, never printed.
+async function probeAdoption(
+  slug: string,
+  display: string,
+): Promise<ProbeResult<{ modules: string[] | null }>> {
+  const file = await github.text(`repos/${slug}/contents/${REGISTRATION_PATH}`);
+  if (file.kind === "ok") return { kind: "pass", value: { modules: declaredModules(file.value) } };
+  if (file.kind === "failed") return { kind: "unanswered", detail: file.reason };
+  notice(notAdoptedNotice(display, "The settings apply only manages adopted repos."));
+  return { kind: "drop" };
 }
 
 // The apply reads each target's own rendered settings document. A hand-written one applied alone would delete every fleet
 // label it does not list, so it fails the plan (counted below: the log is public and the target may be private); a
 // missing one is a repository before its first sync PR, skipped with a notice.
 let handWritten = 0;
-function probeRendered(slug: string, display: string): ProbeResult<true> {
-  const probe = readRepoFile(slug, SETTINGS_PATH);
-  if (probe.exitCode === 0) {
-    if (probe.stdout.split("\n", 1)[0] === RENDERED_HEADER) return { kind: "pass", value: true };
-    handWritten++;
-    return { kind: "drop" };
-  }
-  if (/HTTP 404/.test(probe.stderr)) {
+async function probeRendered(slug: string, display: string): Promise<ProbeResult<true>> {
+  const file = await github.text(`repos/${slug}/contents/${SETTINGS_PATH}`);
+  if (file.kind === "failed") return { kind: "unanswered", detail: file.reason };
+  if (file.kind === "not-found") {
     notice(notRenderedNotice(display));
     return { kind: "drop" };
   }
-  return { kind: "retry", detail: probe.stderr.replace(/\n+$/, "") };
+  if (file.value.split("\n", 1)[0] === RENDERED_HEADER) return { kind: "pass", value: true };
+  handWritten++;
+  return { kind: "drop" };
 }
 
-// No answer after the retries warns rather than notices: a silently dropped repo would heal nothing tonight.
-const ATTEMPTS = 3;
-
-// Test knob: the harness sets it to 0 so retry coverage does not sleep.
-const RETRY_DELAY_MS = Number(env("PROBE_RETRY_DELAY_MS", "5000"));
-
+// No answer warns rather than notices: a silently dropped repo would heal nothing tonight.
 async function probe<T>(
   label: string,
-  fn: (slug: string, display: string) => ProbeResult<T> | Promise<ProbeResult<T>>,
+  fn: (slug: string, display: string) => Promise<ProbeResult<T>>,
   slug: string,
   display: string,
 ): Promise<T | null> {
-  let detail = "";
-  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    const result = await fn(slug, display);
-    if (result.kind === "pass") return result.value;
-    if (result.kind === "drop") return null;
-    detail = scrubSlug(result.detail, slug, display);
-    if (attempt < ATTEMPTS) {
-      console.log(
-        `${display}: ${label} failed (attempt ${attempt}/${ATTEMPTS}: ${detail}); retrying...`,
-      );
-      await Bun.sleep(RETRY_DELAY_MS);
-    }
-  }
+  const result = await fn(slug, display);
+  if (result.kind === "pass") return result.value;
+  if (result.kind === "drop") return null;
   await warn(
-    `${display}: the ${label} failed ${ATTEMPTS} times (last error: ${detail}) - no answer, so the repo is skipped this run; the nightly apply retries it. If this persists, check the repo's availability and the fleet token.`,
+    `${display}: the ${label} got no answer after its retries (last error: ${result.detail}), so the repo is skipped this run; the nightly apply retries it. If this persists, check the repo's availability and the fleet token.`,
   );
   return null;
 }

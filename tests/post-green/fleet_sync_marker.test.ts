@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -8,8 +8,8 @@ import {
   readDirective,
 } from "../../.github/scripts/post-green/fleet_sync_marker.ts";
 import { loadLayer } from "../../.github/scripts/sync/writer/settings_layers.ts";
-import { argvStub } from "../shared/argv_stub";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
+import { type FakeGithubServer, type FakeRoutes, spawnFakeGithub } from "../shared/fake_github";
 import { fixtureGitEnv } from "../shared/fixture_git";
 import { parseGithubOutput } from "../shared/github_output";
 import { tempDirs } from "../shared/temp_dir";
@@ -82,14 +82,19 @@ describe("main", () => {
     return git(source, ["rev-parse", "HEAD"]);
   }
 
-  // The stub answers each commit's pull request lookup from a file; a commit
-  // without one answers `[]` (a direct push).
-  const pulls = join(root, "pulls");
-  mkdirSync(pulls);
-  const gh = argvStub(root, "gh", [
-    'path="$2"; sha="${path#repos/*/commits/}"; sha="${sha%/pulls}"',
-    `if [ -f "${pulls}/$sha.json" ]; then cat "${pulls}/$sha.json"; else printf '[]'; fi`,
-  ]);
+  // Each commit's pull request lookup, filled as the history below is written; a commit without one answers `[]`
+  // (a direct push). The API serves them from its own process, started once the table is whole.
+  const routes: FakeRoutes = { "repos/o/r/commits/*/pulls": [{ status: 200, body: [] }] };
+  let api: FakeGithubServer;
+  let downApi: FakeGithubServer;
+  beforeAll(async () => {
+    api = await spawnFakeGithub(routes);
+    downApi = await spawnFakeGithub({ "repos/o/r/commits/*/pulls": [{ status: 503 }] });
+  });
+  afterAll(() => {
+    api.stop();
+    downApi.stop();
+  });
   type Pull = { number: number; merge_commit_sha: string | null; labels: { name: string }[] };
   const labeled = (number: number, sha: string | null, ...names: string[]): Pull => ({
     number,
@@ -98,7 +103,7 @@ describe("main", () => {
   });
   function squash(title: string, answer: (sha: string) => Pull[]): string {
     const sha = commit(title);
-    writeFileSync(join(pulls, `${sha}.json`), JSON.stringify(answer(sha)));
+    routes[`repos/o/r/commits/${sha}/pulls`] = [{ status: 200, body: answer(sha) }];
     return sha;
   }
 
@@ -124,30 +129,36 @@ describe("main", () => {
   const clone = join(root, "clone");
   git(root, ["clone", "-q", source, clone]);
 
+  /** The latest run's name on the API, where its requests are listed; two tests may judge the same range. */
+  let latestRun = "";
+  let runs = 0;
+
   function run(
     cwd: string,
     sha: string,
     before: string,
-    extra: Record<string, string> = {},
+    server: FakeGithubServer = api,
   ): BoundedSpawnResult & { output: Record<string, string> } {
-    const outputFile = join(root, `out-${Bun.hash(cwd + sha + before).toString(16)}.txt`);
+    latestRun = `run-${++runs}`;
+    const name = latestRun;
+    const outputFile = join(root, `out-${name}.txt`);
     writeFileSync(outputFile, "");
     const proc = boundedSpawnSync(["bun", script], {
       cwd,
       env: {
         ...fixtureGitEnv(),
-        PATH: `${gh.bin}:${process.env.PATH}`,
         GH_TOKEN: "t",
+        GITHUB_API_URL: `${server.host}/${name}`,
+        GITHUB_RETRY_BASE_MS: "0",
         GITHUB_REPOSITORY: "o/r",
         SOURCE_SHA: sha,
         BEFORE_SHA: before,
         GITHUB_OUTPUT: outputFile,
-        ...extra,
       },
     });
     return { ...proc, output: parseGithubOutput(readFileSync(outputFile, "utf-8")) };
   }
-  const lookup = (sha: string) => ["gh", "api", `repos/o/r/commits/${sha}/pulls`];
+  const lookup = (sha: string) => `repos/o/r/commits/${sha}/pulls`;
 
   const short = (sha: string) => sha.slice(0, 12);
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
@@ -268,24 +279,22 @@ describe("main", () => {
       stdout: (_base: string, sha: string) =>
         lines(`::error::${short(sha)}: ${UNKNOWN("fleet-sync:private")}`),
     },
-  ])("a one-commit push, $reason", ({ sha, exitCode, output, stdout }) => {
+  ])("a one-commit push, $reason", async ({ sha, exitCode, output, stdout }) => {
     const before = git(clone, ["rev-parse", `${sha}~1`]);
-    const seen = gh.calls().length;
     const result = run(clone, sha, before);
     expect(result).toEqual({ exitCode, output, stdout: stdout(before, sha), stderr: "" });
-    expect(gh.calls().slice(seen)).toEqual([lookup(sha)]);
+    expect(await api.calls(latestRun)).toEqual([lookup(sha)]);
   });
 
-  test("a failed pull request lookup is red for the whole range, never a quiet armed=false", () => {
-    // The range is publicA then unlabeled; the first lookup fails and names its commit.
-    const seen = gh.calls().length;
-    const result = run(clone, unlabeled, seed, { STUB_EXIT: "22" });
+  test("a failed pull request lookup is red for the whole range, never a quiet armed=false", async () => {
+    // The range is publicA then unlabeled; the first lookup fails on every attempt and names its commit.
+    const result = run(clone, unlabeled, seed, downApi);
     expect(result).toEqual({
       exitCode: 1,
       output: {},
-      stdout: `::error::${short(publicA)}: repos/o/r/commits/${publicA}/pulls could not be read (gh api exit 22)\n`,
+      stdout: `::error::${short(publicA)}: repos/o/r/commits/${publicA}/pulls could not be read (HTTP 503)\n`,
       stderr: "",
     });
-    expect(gh.calls().slice(seen)).toEqual([lookup(publicA)]);
+    expect(await downApi.calls(latestRun)).toEqual(Array(4).fill(lookup(publicA)));
   });
 });

@@ -5,11 +5,12 @@ import { readFileSync, writeSync } from "node:fs";
 import { z } from "zod";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { env } from "../shared/gha.ts";
+import { READ_DEADLINE_MS } from "../shared/github.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
 
-/** A stalled-network backstop, not a latency budget: two minutes covers the paginated user/repos listing of several hundred repos, and the plan jobs' timeout-minutes are sized from it. */
-export const NETWORK_TIMEOUT_MS = 120_000;
+/** The spawned gh and git probes stall on the same network as the API client's reads, so they share its backstop. */
+export const NETWORK_TIMEOUT_MS = READ_DEADLINE_MS;
 
 /** A killed child usually dies silently, so an expiry appends its own stderr line. The line names
  * only the program: the argv tail can carry a private slug. */
@@ -149,23 +150,6 @@ export function readDispatchRepo(): string {
  * empty on every other run. Folded like the scope: module names are kebab-case. */
 export function readDispatchAddModules(): string {
   return foldedList(dispatchInputs().addModules);
-}
-
-// Case-insensitive replaceAll: GitHub identity is case-insensitive, so a
-// scrub keyed to one casing must catch every other. The replacement is a
-// thunk, so a `$` in it is never substitution syntax.
-function replaceAllFoldingCase(text: string, needle: string, replacement: string): string {
-  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-  return text.replace(new RegExp(RegExp.escape(needle), "gi"), () => replacement);
-}
-
-/** A public row (display IS the slug) is skipped: its bare-name pass would EXPAND bare names into
- * slugs instead of hiding anything. Substring on purpose: garbling an innocent embedding is
- * cosmetic, printing a private name is not. */
-export function scrubSlug(detail: string, slug: string, display: string): string {
-  if (display === slug) return detail;
-  const scrubbed = replaceAllFoldingCase(detail, slug, display);
-  return replaceAllFoldingCase(scrubbed, slug.split("/").pop() ?? slug, display);
 }
 
 /** A repository that left the fleet stays in discovery when public (a private one disappears), so
