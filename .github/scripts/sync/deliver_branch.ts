@@ -42,7 +42,7 @@ type Outcome =
   | { kind: "push rejected"; log: string }
   | { kind: "pushed"; commit: string; report: string };
 
-/** GitHub holds the pull_request run a repository-token push creates for approval; the auto-format starter's notice says the same. */
+/** GitHub holds the pull_request run a repository-token push creates for approval; the autofix action's notice says the same. */
 const APPROVAL_LINE =
   "GitHub holds the new head's pull_request run for approval, so its checks stay unreported until you approve the run from the merge box or push a commit of your own.";
 
