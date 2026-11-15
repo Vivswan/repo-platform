@@ -28,7 +28,9 @@ runs:
     # A repository with a website replaces the no-op step below with its toolchain setup and, for example:
     #   - id: build
     #     shell: bash
-    #     env: {PAGES_BASE_PATH: "${{ inputs.base-path }}", PAGES_ORIGIN: "${{ inputs.origin }}"}
+    #     env:
+    #       PAGES_BASE_PATH: ${{ inputs.base-path }}
+    #       PAGES_ORIGIN: ${{ inputs.origin }}
     #     run: |
     #       <your build command>
     #       echo "dist=<the built site directory>" >> "$GITHUB_OUTPUT"

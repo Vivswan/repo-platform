@@ -32,7 +32,6 @@ const GIT_BOUND_MS = 60_000;
 const NPM_BOUND_MS = 60_000;
 const PUBLISH_BOUND_MS = 600_000;
 const READ_BOUND_MS = 30_000;
-// The registry shows a publish only after processing it, which npm's own notice puts at "a few minutes".
 const CONFIRM = { everyMs: 5_000, doneMs: 600_000, failedMs: 120_000 } as const;
 const STAMP_FLAGS = ["--no-git-tag-version", "--ignore-scripts"] as const;
 const BEHIND_RELEASE = {

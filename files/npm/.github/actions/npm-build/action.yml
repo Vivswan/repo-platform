@@ -18,8 +18,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # A repository replaces the failing step below with its toolchain setup, its build, and a check that the built
-    # package carries the version. A manifest edit the published package needs goes here too. For a bun repository:
+    # A repository replaces the failing step with its setup, its build, and a version check. For a bun repository:
     #   - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
     #   - shell: bash
     #     env:
@@ -28,7 +27,7 @@ runs:
     #       bun install --frozen-lockfile
     #       bun run build
     #       test "$(node dist/cli.js --version)" = "$VERSION"
-    #       npm pkg delete scripts.prepare
+    #       npm pkg delete scripts.prepare # a manifest edit the published package needs
     - shell: bash
       run: |
         echo "::error::npm-build hook: not configured; fill in .github/actions/npm-build/action.yml before the npm module publishes"
