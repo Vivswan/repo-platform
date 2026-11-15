@@ -35,6 +35,8 @@ The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release
 
 The called workflow is one job: the checkout, GitHub's configure-pages (where the site is served), the shared [site-urls action](../../actions/site-urls/action.yml), the [plan](../../actions/plan/action.yml) of the registration's site keys, the repository's hook when it exists, the [pages-site](../../actions/pages-site/action.yml) assembly (the layout below, the internal link check, the link-rot ignore list, `versions.json`), the Pages deploy when something was built, and the link-rot check on the schedule alone ([below](#link-rot)).
 
+**A failed deploy is retried once.** GitHub's artifact listing can miss the artifact uploaded a moment earlier, so a failed first try is followed by a second in the same job. A second failure fails the leg; after a retry that ships, the leg is green and the first try's error annotations stay on the run.
+
 A repository with nothing to publish ends green with a notice (`nothing to publish`) and no deploy ([layout](#layout)), once its Pages site exists ([below](#pages-enablement)).
 
 ## Pages enablement
@@ -213,6 +215,17 @@ The docs mount carries the tag rules:
 ## What the theme provides
 
 The theme is one for the whole fleet, owned by [actions/pages-site/.vitepress/theme/](../../actions/pages-site/.vitepress/theme/README.md), whose README says what it provides and which file controls what. Nothing is configured per repository.
+
+**The license on the project card** is the one GitHub detects, asked per version at the commit that version was built from:
+
+| GitHub's answer for the commit            | The card's License row                                          |
+| ----------------------------------------- | --------------------------------------------------------------- |
+| a license it recognizes                   | its SPDX id (`MIT`, `AGPL-3.0`), linking the file GitHub picked |
+| a license file whose text it cannot match | the file's first heading, or `See <file>` when it has none      |
+| no license file                           | no row                                                          |
+| nothing: an error, a rate limit           | the deploy fails, naming the repository and the commit          |
+
+The docs PR check asks no API, so its card has no License row.
 
 ## Other roots on the site (`site.include`)
 

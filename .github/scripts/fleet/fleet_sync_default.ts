@@ -8,7 +8,7 @@
 // Usage: PR_NUMBER=<n> GITHUB_REPOSITORY=<owner/repo> bun .github/scripts/fleet/fleet_sync_default.ts
 
 import { notice, warning } from "@actions/core";
-import { type ZodType, z } from "zod";
+import { z } from "zod";
 import { PLATFORM_NAME, PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import {
   FLEET_SYNC_OVERLAY,
@@ -18,11 +18,10 @@ import {
   readDirective,
 } from "../post-green/fleet_sync_marker.ts";
 import { requireEnv } from "../shared/gha.ts";
-import { parseJsonWithThrow } from "../shared/json.ts";
+import { GitHubClient, type Read, type Sent, unansweredReason } from "../shared/github.ts";
 import { codeSpan } from "../shared/markdown_code.ts";
-import { BOT_LOGIN, issueCommentsPages, stickyComment } from "../shared/sticky_comment.ts";
+import { BOT_LOGIN, issueComment, stickyComment } from "../shared/sticky_comment.ts";
 import { loadLayer } from "../sync/writer/settings_layers.ts";
-import { captureNetwork } from "./discovery.ts";
 
 // The writer's data, its import closure, and its dependency versions. bun.lock is on it because the settings library's
 // version decides the rendered settings.yml's key order; package.json because its postinstall decides which action-local
@@ -177,20 +176,14 @@ const pull = z.object({
   changed_files: z.number(),
   base: z.object({ ref: z.string(), repo: z.object({ default_branch: z.string() }) }),
 });
-const filesPages = z.array(
-  z.array(z.object({ filename: z.string(), previous_filename: z.string().optional() })),
-);
-const eventsPages = z.array(
-  z.array(
-    z.object({
-      event: z.string(),
-      actor: z.object({ login: z.string() }).nullable(),
-      // Only label events carry `label`; every other event kind in the listing is skipped by that absence.
-      label: z.object({ name: z.string() }).optional(),
-    }),
-  ),
-);
-export type LabelEvent = z.infer<typeof eventsPages>[number][number];
+const changedFile = z.object({ filename: z.string(), previous_filename: z.string().optional() });
+const issueEvent = z.object({
+  event: z.string(),
+  actor: z.object({ login: z.string() }).nullable(),
+  // Only label events carry `label`; every other event kind in the listing is skipped by that absence.
+  label: z.object({ name: z.string() }).optional(),
+});
+export type LabelEvent = z.infer<typeof issueEvent>;
 
 /** Events arrive oldest first, so the last matching one is the current state's author. A label event by anyone but the
  *  bot is a human's. */
@@ -208,64 +201,86 @@ export function labelHistory(events: readonly LabelEvent[], label: string): Labe
   return history;
 }
 
-function api(endpoint: string, ...flags: string[]): string {
-  const result = captureNetwork(["gh", "api", endpoint, ...flags]);
-  if (result.exitCode !== 0) {
-    const detail = result.stderr.trim();
-    throw new Error(
-      `${endpoint}: gh api exit ${result.exitCode}${detail === "" ? "" : `: ${detail}`}`,
-    );
-  }
-  return result.stdout;
+/** The value of a read that must answer.
+ *
+ * @throws {Error} GitHub did not answer it, the endpoint and the client's reason for the warning
+ */
+async function answer<T>(endpoint: string, read: Promise<Read<T>>): Promise<T> {
+  const outcome = await read;
+  if (outcome.kind !== "ok") throw new Error(`${endpoint}: ${unansweredReason(outcome)}`);
+
+  return outcome.value;
 }
 
-function readPages<T>(schema: ZodType<T[][]>, endpoint: string): T[] {
-  return parseJsonWithThrow(schema, api(endpoint, "--paginate", "--slurp"), endpoint).flat();
+/** One write that must land.
+ *
+ * @throws {Error} GitHub refused or did not answer it
+ */
+async function write(endpoint: string, sent: Promise<Sent<undefined>>): Promise<void> {
+  const outcome = await sent;
+  if (outcome.kind !== "ok") throw new Error(`${endpoint}: ${unansweredReason(outcome)}`);
 }
 
-function applyLabel(issue: string, publicLabel: string, action: LabelAction): string {
+async function applyLabel(
+  github: GitHubClient,
+  issue: string,
+  publicLabel: string,
+  action: LabelAction,
+): Promise<string> {
   if (action === "add") {
-    api(`${issue}/labels`, "-X", "POST", "-f", `labels[]=${publicLabel}`);
+    const labels = `${issue}/labels`;
+    await write(labels, github.send("POST", labels, { labels: [publicLabel] }));
     return `added ${publicLabel}`;
   }
   if (action === "remove") {
-    api(`${issue}/labels/${encodeURIComponent(publicLabel)}`, "-X", "DELETE");
+    const label = `${issue}/labels/${encodeURIComponent(publicLabel)}`;
+    await write(label, github.remove(label));
     return `removed ${publicLabel}`;
   }
   return "label kept";
 }
 
-function applyComment(repository: string, issue: string, wanted: Wanted): string {
+async function applyComment(
+  github: GitHubClient,
+  repository: string,
+  issue: string,
+  wanted: Wanted,
+): Promise<string> {
   if (wanted.kind === "leave") return `comment left as it is (${wanted.reason})`;
+
   const comments = `${issue}/comments`;
-  const existing = stickyComment(readPages(issueCommentsPages, comments), MARKER);
+  const listed = await answer(comments, github.paginate(comments, issueComment));
+  const existing = stickyComment(listed, MARKER);
+  const own = (id: number) => `repos/${repository}/issues/comments/${id}`;
   if (wanted.kind === "clear") {
     if (existing === null) return `nothing to say (${wanted.reason})`;
-    api(`repos/${repository}/issues/comments/${existing.id}`, "-X", "DELETE");
+
+    await write(own(existing.id), github.remove(own(existing.id)));
     return `removed the comment: ${wanted.reason}`;
   }
   if (existing === null) {
-    api(comments, "-X", "POST", "-f", `body=${wanted.body}`);
+    await write(comments, github.send("POST", comments, { body: wanted.body }));
     return "posted the comment";
   }
   if (existing.body === wanted.body) return "the comment is current";
-  api(
-    `repos/${repository}/issues/comments/${existing.id}`,
-    "-X",
-    "PATCH",
-    "-f",
-    `body=${wanted.body}`,
-  );
+
+  await write(own(existing.id), github.send("PATCH", own(existing.id), { body: wanted.body }));
   return "updated the comment";
 }
 
 /** A file moved out of files/ changes the delivery as much as an edit, so a rename counts by both names. */
-function changedPaths(endpoint: string, changedFiles: number): string[] {
-  const files = readPages(filesPages, `${endpoint}/files`);
+async function changedPaths(
+  github: GitHubClient,
+  endpoint: string,
+  changedFiles: number,
+): Promise<string[]> {
+  const listing = `${endpoint}/files`;
+  const files = await answer(listing, github.paginate(listing, changedFile));
   // The listing stops at 3,000 files while changed_files counts them all; a short listing must never read as "nothing delivered".
   if (files.length !== changedFiles) {
-    throw new Error(`${endpoint}/files lists ${files.length} of ${changedFiles} changed files`);
+    throw new Error(`${listing} lists ${files.length} of ${changedFiles} changed files`);
   }
+
   return files.flatMap((file) =>
     file.previous_filename === undefined
       ? [file.filename]
@@ -273,26 +288,28 @@ function changedPaths(endpoint: string, changedFiles: number): string[] {
   );
 }
 
-function main(): number {
+async function main(): Promise<number> {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const number = requireEnv("PR_NUMBER");
   try {
+    const github = new GitHubClient();
     const known = fleetSyncLabels(loadLayer(FLEET_SYNC_OVERLAY).doc, FLEET_SYNC_OVERLAY);
     const publicLabel = labelOf(known, "public");
     const endpoint = `repos/${repository}/pulls/${number}`;
     const issue = `repos/${repository}/issues/${number}`;
-    const request = parseJsonWithThrow(pull, api(endpoint), endpoint);
+    const events = `${issue}/events`;
+    const request = await answer(endpoint, github.get(endpoint, pull));
     const pr: PullRequest = {
       open: request.state === "open",
-      changed: changedPaths(endpoint, request.changed_files),
+      changed: await changedPaths(github, endpoint, request.changed_files),
       labels: request.labels.map((label) => label.name),
       base: request.base.ref,
       defaultBranch: request.base.repo.default_branch,
-      history: labelHistory(readPages(eventsPages, `${issue}/events`), publicLabel),
+      history: labelHistory(await answer(events, github.paginate(events, issueEvent)), publicLabel),
     };
     const decided = plan(pr, known);
-    const label = applyLabel(issue, publicLabel, decided.label);
-    notice(`${label}; ${applyComment(repository, issue, decided.comment)}`);
+    const label = await applyLabel(github, issue, publicLabel, decided.label);
+    notice(`${label}; ${await applyComment(github, repository, issue, decided.comment)}`);
   } catch (error) {
     warning(
       `fleet-sync default skipped: ${error instanceof Error ? error.message : String(error)}`,
@@ -302,5 +319,5 @@ function main(): number {
 }
 
 if (import.meta.main) {
-  process.exit(main());
+  process.exit(await main());
 }

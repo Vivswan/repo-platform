@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { HUES } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 import {
   collectFacts,
+  type DetectedLicense,
+  detectedLicense,
   type FactsReader,
   hueOf,
   type ProjectFacts,
 } from "../../../actions/pages-site/facts.ts";
+import type { RunResult } from "../../../actions/shared/action_runtime.ts";
 
 // An enterprise server, so a link built from a github.com literal is red; an owner whose hash differs
 // from the bare name's, so a hue hashed from owner/name is red (the accent is the repository's alone).
@@ -17,7 +20,29 @@ const HEAD_INPUT = {
   ref: "HEAD",
   sha: "0123456789abcdef0123456789abcdef01234567",
   serverUrl: "https://ghe.example.test",
+  license: null,
 };
+
+const WHAT = "fixture-org/fixture-repo at 0123456";
+
+const NOT_FOUND_BODY = JSON.stringify({
+  message: "Not Found",
+  documentation_url:
+    "https://docs.github.com/rest/licenses/licenses#get-the-license-for-a-repository",
+  status: "404",
+});
+
+function answered(
+  path: string,
+  license: { key: string; spdx_id: string | null } | null,
+): RunResult {
+  const body = { name: path, path, sha: "0".repeat(40), encoding: "base64", content: "", license };
+  return { exit: { kind: "exited", code: 0 }, stdout: JSON.stringify(body), stderr: "" };
+}
+
+function refused(stdout: string, stderr: string): RunResult {
+  return { exit: { kind: "exited", code: 1 }, stdout, stderr };
+}
 
 const EMPTY_FACTS: ProjectFacts = {
   repository: "fixture-org/fixture-repo",
@@ -80,7 +105,8 @@ function treeOf(files: Record<string, string>): FactsReader {
 describe("collectFacts", () => {
   // The toolchain file roster is a fleet convention no file declares, and the `v` prefix is dropped in one place.
   test("reads every fact from a fully populated tree", () => {
-    expect(collectFacts(treeOf(FULL_TREE), HEAD_INPUT)).toEqual({
+    const input = { ...HEAD_INPUT, license: { path: "LICENSE.md", spdxId: null } };
+    expect(collectFacts(treeOf(FULL_TREE), input)).toEqual({
       ...EMPTY_FACTS,
       description: "A fixture repository",
       homepage: "https://example.test/docs",
@@ -210,83 +236,106 @@ describe("collectFacts", () => {
     );
   });
 
-  // GitHub's license template texts (Apache's centered header, GPL's header, CC0 under a publisher banner)
-  // are external file shapes; a known name past the head or only in the body is not the license.
-  test.each<[string, string, string]>([
+  // GitHub's answer outranks the file's own words, and names the file the card links. A text GitHub matches to
+  // nothing keeps its own heading, which is how a custom license is titled.
+  test.each<[string, DetectedLicense | null, string, ProjectFacts["license"]]>([
     [
-      "a heading over a custom license",
-      "# Individual and Small Organization License 1.1.0\n\nterms\n",
-      "Individual and Small Organization License 1.1.0",
+      "a detected license in the file GitHub picked, under a heading that says otherwise",
+      { path: "COPYING", spdxId: "GPL-2.0" },
+      "# Our License\n\nterms\n",
+      { name: "GPL-2.0", path: "COPYING" },
     ],
-    ["an H2 heading", "## Private Use License\n\nterms\n", "Private Use License"],
     [
-      "an indented heading with a closing sequence",
-      "   # Private Use License ##\n",
-      "Private Use License",
+      "an undetected text with a heading",
+      { path: "LICENSE.md", spdxId: null },
+      "<!-- BEGIN REPO-PLATFORM MANAGED -->\n# Individual and Small Organization License 1.1.0\n\nterms\n",
+      { name: "Individual and Small Organization License 1.1.0", path: "LICENSE.md" },
     ],
-    ["a heading ending in a hash", "# License for C#\n\nterms\n", "License for C#"],
     [
-      "a setext heading",
+      "an undetected text with a setext heading",
+      { path: "LICENSE.md", spdxId: null },
       "Private Use License\n===================\n\nterms\n",
-      "Private Use License",
-    ],
-    ["a heading over a known license", "# MIT License\n\nCopyright (c) 2026\n", "MIT"],
-    ["a The-prefixed heading", "# The MIT License (MIT)\n\nCopyright (c) 2026\n", "MIT"],
-    ["an Apache 2.0 heading", "# Apache License 2.0\n\nTERMS AND CONDITIONS\n", "Apache-2.0"],
-    [
-      "a heading that only mentions a known name",
-      "# Not the MIT License\n\nCustom terms\n",
-      "Not the MIT License",
+      { name: "Private Use License", path: "LICENSE.md" },
     ],
     [
-      "a custom heading over a body that mentions a known name",
-      "# Private Use License\n\nUnlike the MIT License, this grants nothing.\n",
-      "Private Use License",
+      "an undetected text with a closed, indented heading",
+      { path: "LICENSE.md", spdxId: null },
+      "   # License for C# ##\n",
+      { name: "License for C#", path: "LICENSE.md" },
     ],
     [
-      "a custom heading directly over a body whose next paragraph starts with a known name",
-      "# Private Use License\nCustom terms\n\nMIT License permissions do not apply.\n",
-      "Private Use License",
+      "an undetected text with no heading",
+      { path: "COPYING", spdxId: null },
+      "All rights reserved. Ask before use.\n",
+      { name: "See COPYING", path: "COPYING" },
+    ],
+    ["a license file GitHub did not detect", null, "MIT License\n", null],
+  ])("names the license for %s", (_case, detected, text, license) => {
+    const tree = treeOf(detected === null ? { "LICENSE.md": text } : { [detected.path]: text });
+    expect(collectFacts(tree, { ...HEAD_INPUT, license: detected }).license).toEqual(license);
+  });
+});
+
+describe("detectedLicense", () => {
+  // The answer's shape is GitHub's: "other" with NOASSERTION for a text it cannot match, and 404 for no license file.
+  // Every body here is hand-written to the shapes docs.github.com gives for the endpoint and for an error.
+  test.each<[string, RunResult, DetectedLicense | null]>([
+    [
+      "a matched license",
+      answered("LICENSE.md", { key: "agpl-3.0", spdx_id: "AGPL-3.0" }),
+      { path: "LICENSE.md", spdxId: "AGPL-3.0" },
     ],
     [
-      "no heading and a known name only in the body",
-      "Custom terms.\n\nUnlike the MIT License, this grants nothing.\n",
-      "See LICENSE.md",
-    ],
-    ["plain-text MIT", "MIT License\n\nCopyright (c) 2026 Someone\n", "MIT"],
-    [
-      "Apache's centered header",
-      "                                 Apache License\n                           Version 2.0, January 2004\n",
-      "Apache-2.0",
+      "a text matching no license",
+      answered("COPYING", { key: "other", spdx_id: "NOASSERTION" }),
+      { path: "COPYING", spdxId: null },
     ],
     [
-      "GPL-3.0's header",
-      "                    GNU GENERAL PUBLIC LICENSE\n                       Version 3, 29 June 2007\n",
-      "GPL-3.0",
+      "a license object without an SPDX id",
+      answered("LICENSE.md", { key: "other", spdx_id: null }),
+      { path: "LICENSE.md", spdxId: null },
     ],
-    ["BSD 3-Clause", "BSD 3-Clause License\n\nCopyright (c) 2026\n", "BSD-3-Clause"],
+    ["a null license object", answered("LICENSE.md", null), { path: "LICENSE.md", spdxId: null }],
+    ["no license file", refused(NOT_FOUND_BODY, "gh: Not Found (HTTP 404)\n"), null],
+  ])("reads %s", (_case, answer, detected) => {
+    expect(detectedLicense(answer, WHAT)).toEqual(detected);
+  });
+
+  // A failed read that passed as "no license" would publish a card with the row silently gone.
+  test.each<[string, RunResult, string]>([
     [
-      "MPL-2.0",
-      "Mozilla Public License Version 2.0\n==================================\n",
-      "MPL-2.0",
+      "a rate limit",
+      refused(
+        JSON.stringify({ message: "API rate limit exceeded", status: "403" }),
+        "gh: API rate limit exceeded (HTTP 403)\n",
+      ),
+      `cannot read the license of ${WHAT} from GitHub (gh: API rate limit exceeded (HTTP 403))`,
     ],
     [
-      "GitHub's CC0 form, titled under a publisher banner",
-      "Creative Commons Legal Code\n\nCC0 1.0 Universal\n\n    CREATIVE COMMONS CORPORATION IS NOT A LAW FIRM\n",
-      "CC0",
+      "a server error with no body",
+      refused("", "gh: HTTP 502\n"),
+      `cannot read the license of ${WHAT} from GitHub (gh: HTTP 502)`,
     ],
     [
-      "a banner over a known name in the body only",
-      "Legal Code\n\nTerms of the MIT License\n",
-      "See LICENSE.md",
+      "a missing token",
+      refused(
+        "",
+        "gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN environment variable.\n",
+      ),
+      `cannot read the license of ${WHAT} from GitHub (gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN environment variable.)`,
     ],
-    ["no heading and no known name", "All rights reserved. Ask before use.\n", "See LICENSE.md"],
-    ["a known name past the head", `${"\n".repeat(30)}MIT License\n`, "See LICENSE.md"],
-  ])("names the license from %s", (_case, text, name) => {
-    expect(collectFacts(treeOf({ "LICENSE.md": text }), HEAD_INPUT).license).toEqual({
-      name,
-      path: "LICENSE.md",
-    });
+    [
+      "a success that is not the license shape",
+      { exit: { kind: "exited", code: 0 }, stdout: NOT_FOUND_BODY, stderr: "" },
+      `GitHub's license answer for ${WHAT} has an unexpected shape`,
+    ],
+    [
+      "a success that is not JSON",
+      { exit: { kind: "exited", code: 0 }, stdout: "<html>", stderr: "" },
+      `GitHub's license answer for ${WHAT} has an unexpected shape`,
+    ],
+  ])("refuses %s", (_case, answer, message) => {
+    expect(() => detectedLicense(answer, WHAT)).toThrow(new Error(message));
   });
 });
 

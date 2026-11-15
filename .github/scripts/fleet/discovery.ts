@@ -6,12 +6,12 @@ import { error } from "@actions/core";
 import { z } from "zod";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { env } from "../shared/gha.ts";
-import { type GitHubClient, READ_DEADLINE_MS, unansweredReason } from "../shared/github.ts";
+import { type GitHubClient, REQUEST_DEADLINE_MS, unansweredReason } from "../shared/github.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
 
-/** The spawned git probes stall on the same network as the API client's reads, so they share its backstop. */
-export const NETWORK_TIMEOUT_MS = READ_DEADLINE_MS;
+/** The spawned git probes stall on the same network as the API client's requests, so they share its backstop. */
+export const NETWORK_TIMEOUT_MS = REQUEST_DEADLINE_MS;
 
 /** A killed child usually dies silently, so an expiry appends its own stderr line. The line names
  * only the program: the argv tail can carry a private slug. */

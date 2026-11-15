@@ -1,0 +1,9 @@
+// actions/shared loads modules by static import only. A specifier computed at run time cannot be judged by the import
+// rules, and a `require` bound by createRequire is not the global one the CommonJS rule sees.
+// A callee that merely contains require (`(require as NodeJS.Require)`) counts: over-matching is the loud direction.
+or {
+  `import($specifier)`,
+  `$callee($specifier)` where { $callee <: contains `require` }
+} as $site where {
+  register_diagnostic(span=$site, message="actions/shared is the dependency-free zone: load modules by static import, never through import() or require()")
+}

@@ -6,19 +6,15 @@ import { z } from "zod";
 /** The login GITHUB_TOKEN's writes carry. */
 export const BOT_LOGIN = "github-actions[bot]";
 
-/** What `gh api <issue>/comments --paginate --slurp` answers: one array per page. */
-export const issueCommentsPages = z.array(
-  z.array(
-    z.object({
-      id: z.number(),
-      body: z.string().optional(),
-      // null once the author's account is gone.
-      user: z.object({ login: z.string() }).nullable(),
-    }),
-  ),
-);
+/** One comment of an issue's comments listing. */
+export const issueComment = z.object({
+  id: z.number(),
+  body: z.string().optional(),
+  // null once the author's account is gone.
+  user: z.object({ login: z.string() }).nullable(),
+});
 
-export type IssueComment = z.infer<typeof issueCommentsPages>[number][number];
+export type IssueComment = z.infer<typeof issueComment>;
 
 /** The bot's own comment that opens with `marker`, or null. A reply quoting the comment carries the marker mid-text,
  *  and anyone can open a comment with it, so the marker alone would hand a human's comment to the job. */
