@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { bunLockDirs, HOOKS_PATH, installHooks } from "../../scripts/bootstrap";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -15,13 +15,16 @@ function plant(base: string, path: string, files: string[]): void {
 }
 
 describe("bunLockDirs", () => {
-  // A dependency's own lockfile under node_modules would be installed as a workspace.
-  test("a planted tree: no lock, a lock under node_modules, a nested lock", () => {
+  // A dependency's own lockfile under node_modules would be installed as a workspace, and so would a package a
+  // linked directory points at, once under each name.
+  test("a planted tree: no lock, a lock under node_modules, a nested lock, a lock behind a linked directory", () => {
     const base = temp.dir("bootstrap-discovery-");
     plant(base, "actions/with-lock", ["bun.lock", "package.json"]);
     plant(base, "actions/with-lock/node_modules/dep", ["bun.lock"]);
     plant(base, "actions/without-lock", ["package.json"]);
     plant(base, "actions/parent/nested", ["bun.lock"]);
+    plant(base, "elsewhere", ["bun.lock"]);
+    symlinkSync(join(base, "elsewhere"), join(base, "actions/linked"));
 
     const dirs = bunLockDirs(base);
     expect(dirs).toEqual(["actions/parent/nested", "actions/with-lock"]);

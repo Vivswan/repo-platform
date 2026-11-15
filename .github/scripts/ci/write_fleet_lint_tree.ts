@@ -7,8 +7,9 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
+import { parseJsonWith } from "../shared/json.ts";
 import { must } from "../shared/proc.ts";
-import type { SyncReport } from "../sync/writer/report.ts";
+import { syncReport } from "../sync/writer/report.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 const WRITER = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
@@ -96,7 +97,7 @@ export const SOURCES_FILE = ".shell-complexity-sources.json";
 export function templatesOf(
   summary: string,
 ): Record<string, { path: string; lineMapped: boolean }> {
-  const report = JSON.parse(readFileSync(summary, "utf-8")) as Pick<SyncReport, "templates">;
+  const report = parseJsonWith(syncReport, readFileSync(summary, "utf-8"), summary);
   return Object.fromEntries(
     Object.entries(report.templates).map(([written, { source, lineMapped }]) => [
       written,
