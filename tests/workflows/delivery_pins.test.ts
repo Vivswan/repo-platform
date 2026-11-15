@@ -4,13 +4,14 @@
 //   Dependabot reaches the root and actions/** alone, so one sha per action repo-wide holds only if the files/** pins are held to theirs.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { isManaged } from "../../actions/shared/managed_header";
 import { DELIVERY_REF, PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform";
 import { actionManifestPaths } from "../../scripts/lib/action_steps";
 import { REPO_ROOT } from "../shared/action_step";
+import { shippedSource } from "../shared/shipped_source";
 import {
   extractUsesPins,
   ownsPlatform,
@@ -20,17 +21,12 @@ import {
   sourceSelfPins,
 } from "../shared/uses_pins";
 
+/** Every regular file under `rel`, by its path from the repository root; a symbolic link is no file. */
 function walk(rel: string): string[] {
-  const found: string[] = [];
-  for (const name of readdirSync(join(REPO_ROOT, rel)).sort()) {
-    if (name === "node_modules") continue;
-    const child = `${rel}/${name}`;
-    const stat = lstatSync(join(REPO_ROOT, child));
-    if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) found.push(...walk(child));
-    else found.push(child);
-  }
-  return found;
+  return readdirSync(join(REPO_ROOT, rel), { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(REPO_ROOT, join(entry.parentPath, entry.name)))
+    .sort();
 }
 
 function read(rel: string): string {
@@ -185,7 +181,7 @@ describe("version comments pinact leaves unverified", () => {
   );
 
   test("no pin site carries one", () => {
-    const pins = PIN_SITES.flatMap((rel) => extractUsesPins(read(rel), rel));
+    const pins = PIN_SITES.flatMap((rel) => extractUsesPins(shippedSource(rel), rel));
     expect(pins.length).toBeGreaterThan(0);
     expect(
       unverifiablePins(pins).map((pin) => `${pin.file}: ${pin.action}@${pin.ref} # ${pin.version}`),
@@ -238,7 +234,7 @@ describe("one sha per action across the root and the shipped sources", () => {
   });
 
   test("every pin site names one ref per action", () => {
-    const pins = PIN_SITES.flatMap((rel) => extractUsesPins(read(rel), rel));
+    const pins = PIN_SITES.flatMap((rel) => extractUsesPins(shippedSource(rel), rel));
     expect(pins.length).toBeGreaterThan(0);
     expect(splitPins(pins)).toEqual([]);
   });

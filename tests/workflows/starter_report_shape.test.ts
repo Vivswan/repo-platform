@@ -4,10 +4,9 @@
 // fold found it skipped after a failed download); the nightly starter's two steps are exclusive and need nothing.
 
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { evaluateCondition, hasStatusFunction } from "../shared/github_expression.ts";
+import { shippedSource } from "../shared/shipped_source.ts";
 
 interface Step {
   name?: string;
@@ -18,14 +17,9 @@ interface Job {
   steps?: Step[];
 }
 
-const ROOT = join(import.meta.dir, "../..");
 const RESULTS = ["success", "failure", "cancelled", "skipped"];
 const reportJob = (rel: string) =>
-  (
-    parseYaml(
-      readFileSync(join(ROOT, rel), "utf8").replaceAll(/\{\{[\w]+\}\}/g, "placeholder"),
-    ) as { jobs: Record<string, Job> }
-  ).jobs.report;
+  (parseYaml(shippedSource(rel)) as { jobs: Record<string, Job> }).jobs.report;
 
 const contexts = (needs: string[]): Record<string, string>[] =>
   needs.reduce<Record<string, string>[]>(

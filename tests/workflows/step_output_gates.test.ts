@@ -26,6 +26,7 @@ import {
   subexpressions,
   ungrouped,
 } from "../shared/github_expression.ts";
+import { rendered } from "../shared/shipped_source.ts";
 
 // GitHub reads an unrun step's ABSENT output as the number 0, so a condition that tests a step output
 // negatively passes when the step never ran, wherever the guarded step is a push, a PR, or an issue
@@ -450,8 +451,7 @@ const fragments = new Set(
 
 /** A shipped file as a target's workflow parses: placeholders stubbed, and a fragment wrapped as one job. */
 function asWorkflow(fragment: boolean, text: string): string {
-  const stubbed = text.replaceAll(/^\{\{blocks\}\}$/gm, "").replaceAll(/\{\{[\w-]+\}\}/g, "x");
-  return fragment ? `jobs:\n  spliced:\n    steps:\n${stubbed}` : stubbed;
+  return fragment ? `jobs:\n  spliced:\n    steps:\n${rendered(text)}` : rendered(text);
 }
 
 describe("asWorkflow", () => {

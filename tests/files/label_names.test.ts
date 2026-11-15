@@ -14,6 +14,7 @@ import {
   TAGGED_LABEL,
 } from "../../actions/release-health/release-health";
 import { REPO_ROOT } from "../shared/action_step";
+import { shippedSource } from "../shared/shipped_source";
 
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
 const config = parseFilesConfig(read("files.yml"));
@@ -47,10 +48,7 @@ const DEPENDABOT_LANGUAGE_LABELS: Record<string, string> = {
 
 describe("labels other tools recreate are declared where their module is selected", () => {
   test("dependabot: `dependencies` and the base dependabot.yml's github-actions label in the baseline", () => {
-    // The trailing `{{blocks}}` line is the writer's splice anchor, not YAML.
-    const base = parseYaml(
-      read("files/base/.github/dependabot.yml").replace(/^\{\{blocks\}\}$/m, ""),
-    ) as {
+    const base = parseYaml(shippedSource("files/base/.github/dependabot.yml")) as {
       updates: { "package-ecosystem": string }[];
     };
     const ecosystems = base.updates.map((update) => update["package-ecosystem"]);
