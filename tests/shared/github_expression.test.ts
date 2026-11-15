@@ -60,6 +60,14 @@ describe("contextReads", () => {
         ["inputs", "mode"],
       ],
     },
+    {
+      name: "parentheses around a chain, a part of it, or its index name the same read",
+      source: "(steps).build['outputs'][('path')] != ((steps.build).outputs.path)",
+      reads: [
+        ["steps", "build", "outputs", "path"],
+        ["steps", "build", "outputs", "path"],
+      ],
+    },
   ])("$name", ({ source, reads }) => {
     expect(contextReads(parseExpression(source).tree)).toEqual(reads);
   });

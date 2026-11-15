@@ -175,25 +175,35 @@ export function subexpressions(expr: Expr): Expr[] {
   return [];
 }
 
-/** The read the node itself is, or null when it is no chain down from a context: `fromJSON(steps.a.outputs.b).c`
- *  holds a read and is none. Parentheses around a chain change nothing. */
-export function contextRead(expr: Expr): ContextRead | null {
-  if (expr instanceof ContextAccess) return [expr.name.lexeme];
+/** The node inside any parentheses around it. Grouping is the tree's one wrapper that changes no value, so every
+ *  reader of a node's kind asks this first and a parenthesis decides nothing. */
+export function ungrouped(expr: Expr): Expr {
+  return expr instanceof Grouping ? ungrouped(expr.group) : expr;
+}
 
-  if (expr instanceof Grouping) return contextRead(expr.group);
+/** The name a literal index reads, or null for a computed one or a `*`. */
+export function indexName(index: Expr): string | null {
+  const literal = ungrouped(index);
+  return literal instanceof Literal ? literal.literal.coerceString() : null;
+}
+
+/** The read the node itself is, or null when it is no chain down from a context: `fromJSON(steps.a.outputs.b).c`
+ *  holds a read and is none. */
+export function contextRead(grouped: Expr): ContextRead | null {
+  const expr = ungrouped(grouped);
+  if (expr instanceof ContextAccess) return [expr.name.lexeme];
 
   if (!(expr instanceof IndexAccess)) return null;
 
   const base = contextRead(expr.expr);
   if (base === null) return null;
 
-  return [...base, expr.index instanceof Literal ? expr.index.literal.coerceString() : null];
+  return [...base, indexName(expr.index)];
 }
 
 /** The reads inside the computed indexes of a chain: `env.ID` in `steps[env.ID].outputs.path`. */
-function indexReads(expr: Expr): ContextRead[] {
-  if (expr instanceof Grouping) return indexReads(expr.group);
-
+function indexReads(grouped: Expr): ContextRead[] {
+  const expr = ungrouped(grouped);
   if (!(expr instanceof IndexAccess)) return [];
 
   return [...indexReads(expr.expr), ...contextReads(expr.index)];

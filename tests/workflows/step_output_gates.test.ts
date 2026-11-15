@@ -3,11 +3,14 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   Binary,
+  ContextAccess,
   type Expr,
   FunctionCall,
   Grouping,
+  IndexAccess,
   Literal,
   Logical,
+  Star,
   Unary,
 } from "@actions/expressions/ast";
 import { TokenType } from "@actions/expressions/lexer";
@@ -17,9 +20,11 @@ import {
   type ContextRead,
   conditionSource,
   contextRead,
-  contextReads,
+  indexName,
   parseExpression,
   printed,
+  subexpressions,
+  ungrouped,
 } from "../shared/github_expression.ts";
 
 // GitHub reads an unrun step's ABSENT output as the number 0, so a condition that tests a step output
@@ -42,6 +47,24 @@ function isStepOutput(read: ContextRead): boolean {
   return read[0]?.toLowerCase() === "steps" && read[2]?.toLowerCase() === "outputs";
 }
 
+/** The reads the node's value comes from. A chain continued from a choice or a call continues every read inside
+ *  it: `(steps.a || steps.b).outputs.x` reaches that output of both steps. */
+function reachedReads(grouped: Expr): ContextRead[] {
+  const expr = ungrouped(grouped);
+  if (expr instanceof ContextAccess) return [[expr.name.lexeme]];
+
+  if (!(expr instanceof IndexAccess)) return subexpressions(expr).flatMap(reachedReads);
+
+  const continued = reachedReads(expr.expr).map((read) => [...read, indexName(expr.index)]);
+  return [...continued, ...reachedReads(expr.index)];
+}
+
+/** Whether the tree holds a step output read: a chain through `steps`, a step, and `outputs`, begun at the context
+ *  or continued from a parenthesized choice or a call that reads `steps`. */
+function readsStepOutput(expr: Expr): boolean {
+  return reachedReads(expr).some(isStepOutput);
+}
+
 /** Whether the node reads one named output of one named step: `steps.<id>.outputs.<key>`, in any spelling. */
 function isNamedOutput(expr: Expr): boolean {
   const read = contextRead(expr);
@@ -49,7 +72,8 @@ function isNamedOutput(expr: Expr): boolean {
 }
 
 /** The text of a string literal, or null for any other node. */
-function stringLiteral(expr: Expr): string | null {
+function stringLiteral(grouped: Expr): string | null {
+  const expr = ungrouped(grouped);
   const quoted = expr instanceof Literal && expr.token.type === TokenType.STRING;
   return quoted ? expr.literal.coerceString() : null;
 }
@@ -75,24 +99,21 @@ function failsOnAbsentOutput(term: Expr): boolean {
 }
 
 /** The first term of the tree an absent step output can satisfy, as text, or null. Terms without a step output
- *  (`env.*`, `needs.*`) are not this hazard, and a computed index (`steps[env.PROBE]`) is named whatever it compares
- *  against. A negated group inverts terms this check reads one by one, so it cannot be proven safe here. */
-function unsafeTerm(expr: Expr): string | null {
-  if (!contextReads(expr).some(isStepOutput)) return null;
+ *  (`env.*`, `needs.*`) are not this hazard. A read this check cannot pin to one named output (a computed index, a
+ *  chain continued from a choice) is named whatever it compares against. A negation inverts terms this check reads
+ *  one by one, so it cannot be proven safe here. */
+function unsafeTerm(grouped: Expr): string | null {
+  const expr = ungrouped(grouped);
+  if (!readsStepOutput(expr)) return null;
 
   if (expr instanceof Logical) {
     return expr.args.map(unsafeTerm).find((term) => term !== null) ?? null;
   }
 
-  if (expr instanceof Grouping) return unsafeTerm(expr.group);
-
-  if (expr instanceof Unary && expr.expr instanceof Grouping) {
-    return `a negated group: ${printed(expr)}`;
-  }
-
   if (failsOnAbsentOutput(expr)) return null;
 
-  return printed(expr);
+  const negatedGroup = expr instanceof Unary && expr.expr instanceof Grouping;
+  return negatedGroup ? `a negated group: ${printed(expr)}` : printed(expr);
 }
 
 /** The offending term of an `if:`, or null. */
@@ -146,7 +167,7 @@ function negativeGates(text: string): string[] {
 describe("unsafeStepCondition", () => {
   // Each row pins WHICH term is named: a regression that flags the safe first term of a compound and
   // skips the unsafe one cannot pass.
-  test.each([
+  const rejected: [condition: string, offending: string][] = [
     ["steps.merge.outputs.skipped != 'true'", "steps.merge.outputs.skipped != 'true'"],
     ["steps.render.outputs.skipped!='true'", "steps.render.outputs.skipped != 'true'"],
     ["'true' != steps.merge.outputs.skipped", "'true' != steps.merge.outputs.skipped"],
@@ -195,6 +216,23 @@ describe("unsafeStepCondition", () => {
       "fromJSON(steps.probe.outputs.json || '{\"ready\":\"yes\"}').ready == 'yes'",
     ],
     ["(steps.probe).outputs.changed != 'true'", "(steps.probe).outputs.changed != 'true'"],
+    // A chain continued from a choice reads the output of whichever step it picks, and of none when neither ran.
+    [
+      "(steps.probe || steps.fallback).outputs.changed != 'true'",
+      "(steps.probe || steps.fallback).outputs.changed != 'true'",
+    ],
+    [
+      "(steps.probe || steps.fallback).outputs.changed == 'true'",
+      "(steps.probe || steps.fallback).outputs.changed == 'true'",
+    ],
+    [
+      "fromJSON(toJSON(steps.probe)).outputs.changed != 'true'",
+      "fromJSON(toJSON(steps.probe)).outputs.changed != 'true'",
+    ],
+    [
+      "fromJSON(toJSON((steps || steps).probe)).outputs.changed != 'true'",
+      "fromJSON(toJSON((steps || steps).probe)).outputs.changed != 'true'",
+    ],
     [
       "contains(fromJSON('[\"a\"]'), steps.probe.outputs.kind)",
       "contains(fromJSON('[\"a\"]'), steps.probe.outputs.kind)",
@@ -204,11 +242,8 @@ describe("unsafeStepCondition", () => {
       "needs.steps.outputs.ready == 'true' && steps.probe.outputs.changed != 'true'",
       "steps.probe.outputs.changed != 'true'",
     ],
-  ])("rejects %s, naming the offending term", (condition, offending) => {
-    expect(unsafeStepCondition(condition)).toBe(offending);
-  });
-
-  test.each([
+  ];
+  const accepted = [
     "steps.merge.outputs.skipped == 'false'",
     "steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'",
     "success() && (steps.apply.outcome == 'success' || steps.render.outputs.skipped == 'true')",
@@ -233,11 +268,73 @@ describe("unsafeStepCondition", () => {
     // An operator inside a string literal is text.
     "steps.probe.outputs.kind == 'a||b'",
     "(steps.probe).outputs.changed == 'true'",
+    // A parenthesized literal is the literal.
+    "steps.probe.outputs.changed == ('true')",
+    "contains(steps.probe.outputs.kind, ('a'))",
+    "steps.probe.outputs[('bumps')] != ((''))",
+    // A choice between steps that reads no output is not this hazard.
+    "(steps.probe || steps.fallback).outcome == 'success'",
     "",
-  ])("accepts %s", (condition) => {
+  ];
+
+  test.each(rejected)("rejects %s, naming the offending term", (condition, offending) => {
+    expect(unsafeStepCondition(condition)).toBe(offending);
+  });
+
+  test.each(accepted)("accepts %s", (condition) => {
     expect(unsafeStepCondition(condition)).toBeNull();
   });
+
+  // GitHub evaluates a parenthesized node as the node, so a classifier that reads a node's kind before unwrapping
+  // it flips a verdict on a spelling the runner treats alike. Every row above is retried with each node
+  // parenthesized in turn.
+  const sources = [...rejected.map(([condition]) => condition), ...accepted]
+    .map(conditionSource)
+    .filter((source) => source !== "");
+
+  test.each(sources)("parentheses around any node of %s change no verdict", (source) => {
+    const { tree } = parseExpression(source);
+    const safe = unsafeTerm(tree) === null;
+    const flipped = groupedOnce(tree).filter((variant) => (unsafeTerm(variant) === null) !== safe);
+
+    expect(flipped.map(printed)).toEqual([]);
+  });
+
+  test("the retry reaches a literal and an index, the two nodes a parenthesis once misread (ARMED)", () => {
+    const variants = groupedOnce(parseExpression("steps.a.outputs['b'] == 'x'").tree).map(printed);
+
+    expect(variants).toContain("steps.a.outputs[('b')] == 'x'");
+    expect(variants).toContain("steps.a.outputs.b == ('x')");
+  });
 });
+
+/** The node with other direct subexpressions, in the order `subexpressions` lists them. */
+function withSubexpressions(expr: Expr, parts: Expr[]): Expr {
+  if (expr instanceof Unary) return new Unary(expr.operator, parts[0]);
+
+  if (expr instanceof Binary) return new Binary(parts[0], expr.operator, parts[1]);
+
+  if (expr instanceof Logical) return new Logical(expr.operator, parts);
+
+  if (expr instanceof FunctionCall) return new FunctionCall(expr.functionName, parts);
+
+  if (expr instanceof Grouping) return new Grouping(parts[0]);
+
+  if (expr instanceof IndexAccess) return new IndexAccess(parts[0], parts[1]);
+
+  return expr;
+}
+
+/** Every tree that is the given one with one more pair of parentheses, around the whole or around one node inside. */
+function groupedOnce(expr: Expr): Expr[] {
+  if (expr instanceof Star) return [];
+
+  const parts = subexpressions(expr);
+  const inside = parts.flatMap((part, at) =>
+    groupedOnce(part).map((variant) => withSubexpressions(expr, parts.with(at, variant))),
+  );
+  return [new Grouping(expr), ...inside];
+}
 
 describe("negativeGates", () => {
   const refresh = (condition: string) => `
