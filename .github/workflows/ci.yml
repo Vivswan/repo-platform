@@ -386,6 +386,8 @@ jobs:
         run: bun install --frozen-lockfile --silent
       - name: Plant the two pins
         id: pins
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bun .github/scripts/ci/bun_setup_smoke.ts plant
       - name: Set up the current bun (already on PATH)
         id: first
