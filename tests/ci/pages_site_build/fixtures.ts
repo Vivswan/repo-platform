@@ -17,6 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { pagesSite } from "../../../actions/shared/pages_site.ts";
 import { fill, loadAction, stepNamed } from "../../shared/action_step.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
@@ -161,6 +162,8 @@ export interface BuildResult extends BoundedSpawnResult {
   outputs: Record<string, string>;
 }
 
+/** `SITE_URL` defaults to the address GitHub reports for `repository` with no custom domain, in configure-pages'
+ *  slashless spelling; a caller's `env` names another. */
 export function buildSite(
   workspace: string,
   repository: string,
@@ -169,6 +172,7 @@ export function buildSite(
 ): BuildResult {
   const output = join(dirname(runner.alias), "github-output");
   writeFileSync(output, "");
+  const { origin, basePath } = pagesSite(repository);
   const result = boundedSpawnSync([process.execPath, BUILD_TS], {
     env: {
       ...process.env,
@@ -178,6 +182,7 @@ export function buildSite(
       GITHUB_OUTPUT: output,
       CONFIG: siteConfig(),
       SITE_DIR: "",
+      SITE_URL: origin + basePath.slice(0, -1),
       ...env,
     },
     timeoutMs: BUILD_TIMEOUT_MS,
