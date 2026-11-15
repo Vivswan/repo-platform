@@ -7,6 +7,7 @@
 import { REGISTRATION_PATH } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
 
+const STEP_SCRIPTS = ".github/scripts/";
 const SYMLINK_MODE = "120000";
 const SUBMODULE_MODE = "160000";
 const RAW_HEADER = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z])\d*$/;
@@ -65,7 +66,7 @@ export function matches(pattern: string, path: string): boolean {
   return new Bun.Glob(glob).match(path);
 }
 
-/** Why no list can ever allow `change`, or null: the workflows, the registration, a symlink, a submodule. */
+/** Why no list can ever allow `change`, or null: .github/ but its step scripts, the registration, a symlink, a submodule. */
 function alwaysRefused(change: Change): string | null {
   const problem = pathProblem(change.path);
   if (problem !== null) return `the path ${problem}`;
@@ -74,8 +75,11 @@ function alwaysRefused(change: Change): string | null {
   if (change.path.includes("\uFFFD")) return "the path is not valid UTF-8";
 
   // GitHub reads these names on a case-sensitive tree, and a case-insensitive checkout folds the rest onto them.
+  // The step scripts open in their exact case alone, so a folded spelling of them stays refused.
   const path = change.path.toLowerCase();
-  if (path.startsWith(".github/")) return "under .github/, which no fix changes";
+  if (path.startsWith(".github/") && !change.path.startsWith(STEP_SCRIPTS)) {
+    return "under .github/ outside .github/scripts/, which no fix changes";
+  }
 
   if (path === REGISTRATION_PATH) return "the registration, which no fix changes";
 

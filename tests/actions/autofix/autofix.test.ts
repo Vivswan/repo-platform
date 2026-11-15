@@ -30,7 +30,7 @@ import {
   subjectOf,
   type Tools,
 } from "../../../actions/autofix/autofix.ts";
-import { displacedBy, noticeOf } from "../../../actions/autofix/notice.ts";
+import { displacedBy, noticeOf, type Outcome } from "../../../actions/autofix/notice.ts";
 import {
   type Change,
   type FixEvent,
@@ -57,6 +57,7 @@ const GENERATED = {
   delete: ["src/retired/"],
 };
 const EVERYTHING: Lists = { paths: ["**"], delete: ["**"] };
+const GITHUB_REFUSED = "under .github/ outside .github/scripts/, which no fix changes";
 const CONFIG: Config = { label: FORMAT, push: { ...GENERATED, on: ["src/**", "README.md"] } };
 
 const file = (path: string, status = "M"): Change => ({
@@ -122,14 +123,122 @@ test.each<{ reason: string; change: Change; lists: Lists; refused: string | null
     reason: "a workflow, under lists that allow everything",
     change: file(".github/workflows/ci.yml"),
     lists: EVERYTHING,
-    refused: "under .github/, which no fix changes",
+    refused: GITHUB_REFUSED,
   },
   {
     reason:
       "a workflow directory in another case, which a case-insensitive checkout folds onto .github",
     change: file(".GitHub/dependabot.yml", "D"),
     lists: EVERYTHING,
-    refused: "under .github/, which no fix changes",
+    refused: GITHUB_REFUSED,
+  },
+  {
+    reason: "a step script, under lists that allow everything",
+    change: file(".github/scripts/check.ts"),
+    lists: EVERYTHING,
+    refused: null,
+  },
+  {
+    reason: "a step script the lists name",
+    change: file(".github/scripts/lib/check.ts", "A"),
+    lists: { paths: [".github/scripts/**"], delete: [] },
+    refused: null,
+  },
+  {
+    reason: "a step script the lists do not name",
+    change: file(".github/scripts/check.ts"),
+    lists: FORMAT,
+    refused: "outside the paths list",
+  },
+  {
+    reason: "a step script deleted where no deletion is listed",
+    change: file(".github/scripts/check.ts", "D"),
+    lists: { paths: ["**"], delete: [] },
+    refused: "a deletion outside the delete list",
+  },
+  {
+    reason: "a nested .github under the scripts directory, which GitHub reads nothing from",
+    change: file(".github/scripts/.github/workflows/x.yml", "A"),
+    lists: EVERYTHING,
+    refused: null,
+  },
+  {
+    reason: "the scripts directory under .github in another case",
+    change: file(".GitHub/scripts/x.ts"),
+    lists: EVERYTHING,
+    refused: GITHUB_REFUSED,
+  },
+  {
+    reason: "the scripts directory in another case",
+    change: file(".github/SCRIPTS/x.ts"),
+    lists: EVERYTHING,
+    refused: GITHUB_REFUSED,
+  },
+  {
+    reason: "both in another case",
+    change: file(".GitHub/Scripts/x.ts", "A"),
+    lists: EVERYTHING,
+    refused: GITHUB_REFUSED,
+  },
+  {
+    reason: "a file named scripts, not a directory",
+    change: file(".github/scripts", "A"),
+    lists: EVERYTHING,
+    refused: GITHUB_REFUSED,
+  },
+  {
+    reason: "a directory whose name only starts with scripts",
+    change: file(".github/scripts-evil/x.ts", "A"),
+    lists: EVERYTHING,
+    refused: GITHUB_REFUSED,
+  },
+  {
+    reason: "a file whose name only starts with scripts",
+    change: file(".github/scriptsx", "A"),
+    lists: EVERYTHING,
+    refused: GITHUB_REFUSED,
+  },
+  {
+    reason: "a path that climbs out of the scripts directory to a workflow",
+    change: file(".github/scripts/../workflows/ci.yml"),
+    lists: EVERYTHING,
+    refused: "the path carries an empty, '.', or '..' segment",
+  },
+  {
+    reason: "a path that climbs out of the scripts directory from deeper",
+    change: file(".github/scripts/x/../../workflows/ci.yml"),
+    lists: EVERYTHING,
+    refused: "the path carries an empty, '.', or '..' segment",
+  },
+  {
+    reason: "a symbolic link under the scripts directory",
+    change: { path: ".github/scripts/ci.yml", status: "A", oldMode: "000000", newMode: "120000" },
+    lists: EVERYTHING,
+    refused: "a symbolic link",
+  },
+  {
+    reason: "a submodule under the scripts directory",
+    change: { path: ".github/scripts/lib", status: "A", oldMode: "000000", newMode: "160000" },
+    lists: EVERYTHING,
+    refused: "a submodule",
+  },
+  {
+    reason: "a workflow moved into the scripts directory: the half that deletes the workflow",
+    change: file(".github/workflows/a.yml", "D"),
+    lists: EVERYTHING,
+    refused: GITHUB_REFUSED,
+  },
+  {
+    reason: "the hook, which a fixer must not rewrite",
+    change: file(".github/actions/autofix/action.yml"),
+    lists: EVERYTHING,
+    refused: GITHUB_REFUSED,
+  },
+  {
+    reason: "a file directly under .github",
+    change: file(".github/CODEOWNERS"),
+    lists: EVERYTHING,
+    refused: GITHUB_REFUSED,
   },
   {
     reason: "the registration, which holds the lists",
@@ -615,6 +724,42 @@ describe("stage and push", () => {
     }).toEqual({ changed: false, outcome: "refused", names: true, remote: base });
   });
 
+  // One fix, both rules: a formatter that also formats the step scripts under .github/scripts/ has that file carried
+  // when the lists reach it, while the workflow beside it stays out under any list.
+  test.each<{ kind: FixEvent; outcome: Outcome["kind"]; tree: string[]; named: string[] }>([
+    {
+      kind: "label",
+      outcome: "pushed",
+      tree: ["A\t.github/scripts/b.ts", "M\tsrc/a.ts"],
+      named: ["- `.github/workflows/c.yml`"],
+    },
+    {
+      kind: "push",
+      outcome: "refused",
+      tree: [""],
+      named: ["- `.github/workflows/c.yml`"],
+    },
+  ])(
+    "a fix that changes a source file, a step script, and a workflow under lists that allow everything: $kind",
+    ({ kind, outcome, tree: carried, named }) => {
+      const branch = `scripts-${kind}`;
+      const lists: Lists = { paths: ["**"], delete: [] };
+      const { out } = staged(kind, branch, lists, (directory) =>
+        write(directory, {
+          "src/a.ts": "export const a = 1;\n",
+          ".github/scripts/b.ts": "export const b = 1;\n",
+          ".github/workflows/c.yml": "name: Added\n",
+        }),
+      );
+      const result = pushed(kind, branch, lists, out);
+      expect({
+        outcome: result.outcome.kind,
+        tree: tree(branch),
+        named: result.notice.split("\n").filter((line) => line.startsWith("- ")),
+      }).toEqual({ outcome, tree: carried, named });
+    },
+  );
+
   // The stage job runs pull request code, so its patch may be anything. Each patch here is what a bypassed stage
   // could upload: built under lists that allow everything, then judged by the push job under the real ones.
   test.each<{
@@ -633,7 +778,14 @@ describe("stage and push", () => {
           "src/a.ts": "export const a = 1;\n",
         }),
       path: ".github/workflows/ci.yml",
-      why: "under .github/, which no fix changes",
+      why: GITHUB_REFUSED,
+    },
+    {
+      reason: "a step script the lists do not name",
+      branch: "bypass-script",
+      hook: (directory) => write(directory, { ".github/scripts/b.ts": "export const b = 1;\n" }),
+      path: ".github/scripts/b.ts",
+      why: "outside the paths list",
     },
     {
       reason: "a file deleted where only changes are listed",
