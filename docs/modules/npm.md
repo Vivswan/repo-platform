@@ -68,7 +68,7 @@ checkout -> plan -> build hook -> publish
 ```
 
 - **The plan** reads the package's record from the registry, fresh. Nothing to publish skips the hook, with a notice saying why: on `next` the job ends there, green, and at a release it goes on to move `next`.
-- **The publish** reads the record again, since another run may have published meanwhile. After `npm publish` it reads the record until the version shows, then checks that the channel's dist-tag is not behind it.
+- **The publish** reads the record again, since another run may have published meanwhile. After `npm publish` it reads the record until the version shows ([how long](#how-long-the-job-waits-for-the-registry)), then checks that the channel's dist-tag is not behind it.
 - **One lane:** both channels share the concurrency lane `npm-publish`, so one publish at a time judges and lands.
 
 ## The hook: `.github/actions/npm-build/action.yml`
@@ -137,20 +137,37 @@ Before the publish, judged in the plan and again in the publish step, the first 
 
 After the publish:
 
-| The record shows                                                      | Outcome                                                                      |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| the version, and the channel's tag at or above it                     | green                                                                        |
-| the version, and the channel's tag behind it                          | fails: the publish landed under the wrong tag, or something moved the tag    |
-| never the version, within two minutes                                 | fails, with npm's error line when npm failed; a rerun finds what did land    |
-| at a release, `next` missing or below the release                     | `npm dist-tag add` moves `next` to the release, then the record must show it |
-| at a release, `next` at or above the release                          | left there, with a notice                                                    |
-| a release `latest` no longer names (a rerun a newer release overtook) | `next` left there, with a notice naming the current release                  |
+| The record shows                                                               | Outcome                                                                      |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| the version, and the channel's tag at or above it                              | green                                                                        |
+| the version, and the channel's tag behind it                                   | fails: the publish landed under the wrong tag, or something moved the tag    |
+| never the version, within [the wait](#how-long-the-job-waits-for-the-registry) | fails, with npm's error line when npm failed; a rerun finds what did land    |
+| at a release, `next` missing or below the release                              | `npm dist-tag add` moves `next` to the release, then the record must show it |
+| at a release, `next` at or above the release                                   | left there, with a notice                                                    |
+| a release `latest` no longer names (a rerun a newer release overtook)          | `next` left there, with a notice naming the current release                  |
 
 - **The manifest is refused** when it is `private: true`, or sets `tag`, `publishConfig.tag`, or a registry in `publishConfig`.
 - **npm's own configuration is refused** when its `tag` is not npm's default, or it names another registry for the package, in an `.npmrc` or a variable, checked in the plan and again after the build hook, before the publish. Trusted publishing is registry.npmjs.org's alone, so that is the one registry this module reads and publishes to.
 - **The package directory is npm's whole project:** every npm command runs with `--no-workspaces`, so an `.npmrc` at a workspace root above the package is not read.
 - **The release tag must end with `v<version>`.** A mismatch means release-please did not bump this `package.json` (step 2).
 - **A failed write** is judged by the record, never by npm's message: the version being there counts as published. Otherwise the job fails with npm's error line and what to check on the trusted publisher.
+
+## How long the job waits for the registry
+
+```text
+npm notice Your package is being processed and may take a few minutes to become available.
+```
+
+npm prints that after every publish: the registry accepts the upload, then shows the version only once it has processed it. The job reads the record every five seconds, each read a cache miss, for as long as npm's own answer earns:
+
+| npm said            | The job waits up to | Then                                                                   |
+| ------------------- | ------------------- | ---------------------------------------------------------------------- |
+| the write succeeded | ten minutes         | fails: "re-run the job"                                                |
+| the write failed    | two minutes         | fails with npm's error line, since a longer wait only delays the error |
+
+The same two waits apply to the `next` tag a release moves.
+
+**A rerun after the wait ran out** publishes nothing twice. Once the registry shows the version, the plan judges it as [the first two rows above](#what-the-publish-refuses) do: with its tag in place, it skips the build and the publish, green. Before that, the rerun publishes again, and whatever npm answers, the job passes when the version shows within the wait.
 
 ## Reruns and failures
 
