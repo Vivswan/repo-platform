@@ -64,7 +64,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 - **A private repository's night runs no job.** `platform` and `all-green` carry one clause, `github.event_name != 'schedule' || !github.event.repository.private`, and every other job is behind them, so the run is all skips and bills nothing. It has no code scanning, so the night would buy nothing; its site rebuilds on a push or a dispatch.
 - **Every other event** runs in a private repository as in a public one, the gate included.
 
-**One ceiling for every platform call:** `platform`, `release`, `publish-release`, and `site` carry the same fixed `permissions:` block, the union of what any job behind those calls asks, and each called job narrows itself to its own need.
+**One ceiling for every platform call:** `platform`, `release`, `publish-release`, `npm-latest`, `npm-next`, and `site` carry the same fixed `permissions:` block, the union of what any job behind those calls asks, and each called job narrows itself to its own need.
 
 **The jobs beside them gate nothing:** the `post-green` caller and the static legs are gate-downstream ([after the gate](#after-the-gate)).
 
@@ -108,7 +108,7 @@ Post-gate work rides downstream in the same run, `needs: [all-green]` on a push 
 
 **Every push to main gets its own complete run:** ci.yml's group is keyed by the commit on a push and by the ref on a pull request (where a newer push cancels the stale run). So no merge timing cancels or coalesces another commit's run. Keyed by the ref, GitHub kept one pending run per group and replaced it with the newest, which left a burst's middle commits unjudged.
 
-**The lane rule:** the runs of neighbouring commits therefore overlap, and the legs that mutate shared state serialize on their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`, `pages`). On a lane, GitHub keeps one running plus one pending job and replaces the pending one with the newest, in arrival order rather than commit order.
+**The lane rule:** the runs of neighbouring commits therefore overlap, and the legs that mutate shared state serialize on their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`, `pages`, `npm-publish`). On a lane, GitHub keeps one running plus one pending job and replaces the pending one with the newest, in arrival order rather than commit order.
 
 **The `pages` lane also cancels its running deploy** when a newer one arrives, so the newest arrival wins and never waits behind a deploy already running.
 
@@ -161,12 +161,13 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 ### The static legs
 
 ```text
-checks + platform + release-gate -> all-green -> post-green (repo-owned hook) -> release -> update-release (hook) -> publish-release
+checks + platform + release-gate -> all-green -> post-green (repo-owned hook) -> release -> update-release (hook) -> npm-latest -> publish-release
                                             \                                          \-> update-release-pr (hook)
+                                             \                                          \-> npm-next
                                              \-> site, ordered behind release
 ```
 
-**The legs after the hook are STATIC:** every managed ci.yml carries the same `release`, `update-release`, `publish-release`, `update-release-pr`, and `site` jobs, present in every run, and each skips where its module is not selected.
+**The legs after the hook are STATIC:** every managed ci.yml carries the same `release`, `update-release`, `npm-latest`, `publish-release`, `update-release-pr`, `npm-next`, and `site` jobs, present in every run, and each skips where its module is not selected.
 
 - Adding a module needs no change to ci.yml ([changing the module selection](new-repo.md#changing-the-module-selection)).
 - How each leg's condition is spelled in the managed ci.yml, and which lanes the release cut holds, is [platform/post-green.md](platform/post-green.md#how-the-static-legs-gate).
@@ -185,6 +186,8 @@ checks + platform + release-gate -> all-green -> post-green (repo-owned hook) ->
 - **Known limit:** when a release merge and an ordinary push land within one run's span, the ordinary run's release-PR refresh can abort green while the merged release PR still wears `autorelease: pending`; the first push after the cut has relabelled it tagged refreshes the PR again.
 
 **Its outputs drive the release hooks** `update-release`, `publish-release`, and `update-release-pr`; [the release pipeline](new-repo.md#the-release-pipeline-release-please) owns what each one does, and why the two repo-owned hooks are seeded in every repository whatever its modules.
+
+**The two npm legs** call [fleet-npm-publish.yml](../.github/workflows/fleet-npm-publish.yml)`@stable` with the judged sha ([npm.md](modules/npm.md)). `npm-next` runs when the `release` leg created or refreshed the release PR; `npm-latest` runs at a cut, and `publish-release` waits for it, so a failed npm publish leaves the GitHub release a draft. Neither runs in a fork.
 
 **The `site` leg** calls [reusable-site.yml](../.github/workflows/reusable-site.yml)`@stable` with the judged sha, holding the `pages` lane ([site.md](modules/site.md)). The called workflow runs the repo-owned `.github/actions/site-build` hook from the checkout and reads the docs configuration from the repository's registration.
 
