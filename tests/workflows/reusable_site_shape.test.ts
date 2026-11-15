@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { buildBody, failureDirs } from "../../actions/fuzz-issue/fuzz-issue.ts";
 import { loadAction, REPO_ROOT, runBashStep, type StepRun, stepNamed } from "../shared/action_step";
-import { evaluateCondition } from "../shared/github_expression";
+import { evaluateCondition, interpolate } from "../shared/github_expression";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -24,16 +24,20 @@ interface Step extends Record<string, unknown> {
   run?: string;
   with?: Record<string, string | number | boolean>;
   env?: Record<string, string>;
+  "continue-on-error"?: boolean;
 }
 
 const source = readFileSync(
   join(import.meta.dir, "../../.github/workflows/reusable-site.yml"),
   "utf8",
 );
-const workflow = parseYaml(source) as { jobs: Record<string, { steps?: Step[] }> };
+const workflow = parseYaml(source) as {
+  jobs: Record<string, { steps?: Step[]; environment?: { url?: string } }>;
+};
 const steps = workflow.jobs.site?.steps ?? [];
 const SITE_URLS = loadAction("actions/site-urls/action.yml");
 const step = (id: string) => steps.find((candidate) => candidate.id === id);
+const PAGE_URL = "https://vivswan.github.io/Example-Repo/";
 
 describe("reusable-site.yml", () => {
   /** The site-urls action's own step run as the runner runs it, for `repository` checked out at `workspace`;
@@ -287,6 +291,77 @@ describe("reusable-site.yml", () => {
       upload: gate,
       deploy: gate,
       links: `github.event_name == 'schedule' && ${gate} && ${read("link-rot-label")} != ''`,
+    });
+  });
+
+  // What drifts silently: `continue-on-error` hides the first deploy's failure from the job, so only the retry's
+  // condition and the second operand of every page_url reader tell a missed artifact listing from a site that never
+  // shipped. The deploy steps run as the runner runs them: a failure without `continue-on-error` ends the job there.
+  test.each([
+    { run: "nothing to publish", publish: "false", results: [], job: "green", deploys: 0, url: "" },
+    {
+      run: "no publish output",
+      publish: undefined,
+      results: [],
+      job: "green",
+      deploys: 0,
+      url: "",
+    },
+    {
+      run: "a first deploy that ships",
+      publish: "true",
+      results: ["success"],
+      job: "green",
+      deploys: 1,
+      url: PAGE_URL,
+    },
+    {
+      run: "a missed artifact listing, then a retry that ships",
+      publish: "true",
+      results: ["failure", "success"],
+      job: "green",
+      deploys: 2,
+      url: PAGE_URL,
+    },
+    {
+      run: "two failed deploys",
+      publish: "true",
+      results: ["failure", "failure"],
+      job: "red",
+      deploys: 2,
+      url: "",
+    },
+  ])("$run ends $job after $deploys deploy(s), every page_url reader holding '$url'", (row) => {
+    const deploys = steps.filter((candidate) =>
+      candidate.uses?.startsWith("actions/deploy-pages@"),
+    );
+    const context: Record<string, string> = { "steps.site.outcome": "success" };
+    if (row.publish !== undefined) context["steps.site.outputs.publish"] = row.publish;
+    let job = "green";
+    let ran = 0;
+    for (const deploy of deploys) {
+      if (job === "red" || !evaluateCondition(String(deploy.if), context)) continue;
+
+      const outcome = row.results[ran] ?? "a deploy the row never expected";
+      ran += 1;
+      context[`steps.${deploy.id}.outcome`] = outcome;
+      if (outcome === "success") context[`steps.${deploy.id}.outputs.page_url`] = PAGE_URL;
+      if (outcome === "failure" && deploy["continue-on-error"] !== true) job = "red";
+    }
+
+    const readers = source.match(/\$\{\{[^}]*page_url[^}]*\}\}/g) ?? [];
+    expect(readers).toContain(String(workflow.jobs.site?.environment?.url));
+    expect({
+      job,
+      deploys: ran,
+      urls: new Set(readers.map((reader) => interpolate(reader, context))),
+      // One artifact at one pin: a retry naming another artifact would ship a different site.
+      same: deploys.map((deploy) => ({ uses: deploy.uses, with: deploy.with })),
+    }).toEqual({
+      job: row.job,
+      deploys: row.deploys,
+      urls: new Set([row.url]),
+      same: deploys.map(() => ({ uses: deploys[0].uses, with: deploys[0].with })),
     });
   });
 
