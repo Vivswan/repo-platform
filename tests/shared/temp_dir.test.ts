@@ -18,6 +18,8 @@ import { tempDirs } from "./temp_dir";
 const helper = join(import.meta.dir, "temp_dir.ts");
 const temp = tempDirs();
 const PROBE_PREFIX = "temp-dir-probe-";
+/** JSON.stringify is no escaping for code, so the probe source splices no value: it reads its prefix from its environment. */
+const MAKE_FIXTURE = "temp.dir(process.env.PROBE_PREFIX as string)";
 let root: string;
 beforeAll(() => {
   root = temp.dir("temp-dir-test-");
@@ -33,7 +35,7 @@ function probeSource(body: string): string {
     "const temp = tempDirs();",
     'let fixture = "";',
     "beforeAll(() => {",
-    `  fixture = temp.dir(${JSON.stringify(PROBE_PREFIX)});`,
+    `  fixture = ${MAKE_FIXTURE};`,
     '  console.error("FIXTURE=" + fixture + " exists=" + existsSync(fixture));',
     "});",
     body,
@@ -52,7 +54,7 @@ function runSource(
   const probe = join(root, `probe-${probes++}.test.ts`);
   writeFileSync(probe, source);
   const r = boundedSpawnSync(["bun", "test", ...flags, probe], {
-    env: { ...process.env, CI: "false", TMPDIR: root, ...env },
+    env: { ...process.env, CI: "false", TMPDIR: root, PROBE_PREFIX, ...env },
     timeoutMs: 60_000,
   });
   return { exitCode: r.exitCode, stderr: r.stderr, output: `${r.stdout}${r.stderr}` };
@@ -226,15 +228,15 @@ describe("tempDirs", () => {
   test.each<{ shape: string; source: string; flags?: string[] }>([
     {
       shape: "at the top level",
-      source: `const made = temp.dir(${JSON.stringify(PROBE_PREFIX)});\n${PASSING}`,
+      source: `const made = ${MAKE_FIXTURE};\n${PASSING}`,
     },
     {
       shape: "in a describe body",
-      source: `describe("d", () => { const made = temp.dir(${JSON.stringify(PROBE_PREFIX)}); ${PASSING} });`,
+      source: `describe("d", () => { const made = ${MAKE_FIXTURE}; ${PASSING} });`,
     },
     {
       shape: "at the top level, under a name filter matching nothing",
-      source: `const made = temp.dir(${JSON.stringify(PROBE_PREFIX)});\n${PASSING}`,
+      source: `const made = ${MAKE_FIXTURE};\n${PASSING}`,
       flags: ["-t", "matches-nothing"],
     },
   ])("temp.dir $shape is refused while the file loads, and makes nothing", ({ source, flags }) => {
