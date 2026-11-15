@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as core from "@actions/core";
 import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
-import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
+import { type Outcome as CheckOutcome, runCheck, tableCell } from "../shared/check_main.ts";
 import { isGenerated, isManaged } from "../shared/managed_header.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { EXEMPT_DIRS, repositoryFiles } from "../shared/repository_files.ts";
@@ -128,7 +128,9 @@ export function report(outcome: Outcome): string {
         "",
         "| File | Line | Rule |",
         "| --- | --- | --- |",
-        ...findings.map((finding) => `| \`${finding.path}\` | ${finding.line} | ${finding.rule} |`),
+        ...findings.map(
+          (finding) => `| \`${tableCell(finding.path)}\` | ${finding.line} | ${finding.rule} |`,
+        ),
       );
     }
 
