@@ -114,13 +114,14 @@ site:
     echo "dist=<the built site directory>" >> "$GITHUB_OUTPUT"
 ```
 
-| Variable                               | What the hook's steps read as `$NAME`     |
-| -------------------------------------- | ----------------------------------------- |
-| named in `site.vars` and set           | its value                                 |
-| named in `site.vars` and not set       | empty; the build does not fail            |
-| not named in `site.vars`               | nothing: the plan step does not export it |
-| a secret                               | nothing: no key hands one over            |
-| a name GitHub cannot store (lowercase) | the plan refuses the registration         |
+| Variable                                   | What the hook's steps read as `$NAME`     |
+| ------------------------------------------ | ----------------------------------------- |
+| named in `site.vars` and set               | its value                                 |
+| named in `site.vars` and not set           | empty; the build does not fail            |
+| not named in `site.vars`                   | nothing: the plan step does not export it |
+| a secret                                   | nothing: no key hands one over            |
+| a name GitHub cannot store (lowercase)     | the plan refuses the registration         |
+| `PATH` or `NODE_OPTIONS`, the runner's own | the plan refuses the registration         |
 
 - **Which variables:** the `vars` context of the deploy job, so the repository's, its organization's, and the `github-pages` environment's.
 - **How long:** the value is set for the rest of the deploy job, the hook's steps and the fleet's after them.

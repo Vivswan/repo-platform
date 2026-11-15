@@ -134,12 +134,13 @@ const label = z
     "must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters",
   );
 
-/** A repository variable's name as GitHub stores it; a name outside this shape can never be set, so it is a typo. */
+/** A name the hook can receive: the shape GitHub stores a variable's name in, so anything else is a typo, less the two the runner owns.
+ *  PATH unset is exported empty, which leaves the next step unable to find a command, and the runner refuses NODE_OPTIONS in GITHUB_ENV. */
 const variableName = z
   .string()
   .regex(
-    /^(?!GITHUB_)[A-Z_][A-Z0-9_]*$/,
-    "must be a repository variable's name: uppercase letters, digits, and underscores, not starting with a digit or GITHUB_",
+    /^(?!GITHUB_|(?:PATH|NODE_OPTIONS)$)[A-Z_][A-Z0-9_]*$/,
+    "must be a repository variable's name: uppercase letters, digits, and underscores, not starting with a digit or GITHUB_, and not PATH or NODE_OPTIONS",
   );
 
 /** One grammar for both documents that declare mirrors: files.yml's fleet list and the registration's own. `kind` is how a target carries the source: its bytes, or a relative symbolic link to it (docs/platform/sync/mirrors.md). */
