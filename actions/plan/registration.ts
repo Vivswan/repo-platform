@@ -3,9 +3,7 @@
 import { parse } from "yaml";
 import { z } from "zod";
 import {
-  includeListProblem,
-  includeMountProblem,
-  includePageProblem,
+  includeRootsSchema,
   includeWithoutDocsProblem,
   relPathProblem,
   urlSegmentProblem,
@@ -178,19 +176,7 @@ export const registrationSchema = z.strictObject({
   site: z
     .strictObject({
       path: urlSegment.nullable().optional(),
-      include: z
-        .array(
-          z.strictObject({
-            path: relativePath,
-            mount: judged(includeMountProblem),
-            page: judged(includePageProblem),
-          }),
-        )
-        .superRefine((roots, ctx) => {
-          const message = includeListProblem(roots);
-          if (message !== null) ctx.addIssue({ code: "custom", message });
-        })
-        .optional(),
+      include: includeRootsSchema(z).optional(),
       // The repository variables the site-build hook reads as environment values (docs/modules/site.md, "Repository variables").
       vars: z.array(variableName).optional(),
     })
