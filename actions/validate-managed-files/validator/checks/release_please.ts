@@ -1,9 +1,7 @@
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isMapping } from "../../../shared/values.ts";
-import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
-import { hasConflictMarker } from "../readers.ts";
 
 const CONFIG_PATH = "release-please-config.json";
 
@@ -13,15 +11,18 @@ const CONFIG_PATH = "release-please-config.json";
  *  (and with force-tag-creation would move the published tag). A version
  *  is forced once with a `Release-As: x.y.z` commit footer instead.
  *  Presence-gated, not module-gated: the file is a repo-owned starter, so
- *  it is the file, not the module selection, that can carry the pin. */
-export function checkReleasePlease(ctx: Context): Finding[] {
-  if (!ctx.files.includes(CONFIG_PATH)) return [];
+ *  it is the file, not the module selection, that can carry the pin.
+ *
+ *  @param conflictMarked - the files the conflict-marker check reports */
+export function checkReleasePlease(root: string, conflictMarked: readonly string[]): Finding[] {
+  const path = join(root, CONFIG_PATH);
+  if (lstatSync(path, { throwIfNoEntry: false })?.isFile() !== true) return [];
 
-  const text = readFileSync(join(ctx.root, CONFIG_PATH), "utf-8");
   // A conflict-marked config is the conflict-marker check's report; parsing
   // it here would only add a second, noisier diagnostic for the same damage.
-  if (hasConflictMarker(text)) return [];
+  if (conflictMarked.includes(CONFIG_PATH)) return [];
 
+  const text = readFileSync(path, "utf-8");
   let config: unknown;
   try {
     config = JSON.parse(text);
