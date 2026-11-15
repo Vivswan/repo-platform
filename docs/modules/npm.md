@@ -76,7 +76,9 @@ The hook is a starter: the sync writes it once when the module is selected and n
 | leaves          | the package directory ready for `npm publish`, its `package.json` version untouched             |
 | runs when       | there is something to publish; a skipped publish builds nothing                                 |
 
-The hook builds after the version is stamped, so a build that bakes the version in reads the right one. A bun repository, building and then checking what it built:
+The hook builds after the version is stamped, so a build that bakes the version in reads the right one.
+
+**A package with `workspace:*` dependencies** must have them rewritten to real versions by the hook: `npm publish` uploads the manifest as it stands, and the fleet rewrites nothing. A bun repository, building and then checking what it built:
 
 ```yaml
 inputs:
