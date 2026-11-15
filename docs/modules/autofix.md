@@ -101,7 +101,7 @@ runs:
 - **Run the repository's own fixer,** a script or a tool resolved from its lockfile, so no tool version is spelled a second time in the hook.
 - **Install without lifecycle scripts** (`--ignore-scripts`) where the repository can: the job runs the pull request's code, and the fewer scripts the better.
 - **A generator** (event `push`) runs with no `||`: a failed generator must stop the fix.
-- **The subject** is used when it is one line of at most 100 printable ASCII characters and the [commit-names gate](../../actions/validate-commit-names/action.yml) accepts it: the push job asks the gate itself. Anything else becomes `style: apply automated fixes`.
+- **The subject** is used, with the whitespace around it removed, when the rest is one line of at most 100 printable ASCII characters, is no workflow command (no leading `::`, no `##[`), and the [commit-names gate](../../actions/validate-commit-names/action.yml) accepts it: the push job asks the gate itself. Anything else becomes `style: apply automated fixes`.
 
 ## What the push job does and refuses
 
