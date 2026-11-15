@@ -30,7 +30,7 @@ import {
   subjectOf,
   type Tools,
 } from "../../../actions/autofix/autofix.ts";
-import { noticeOf } from "../../../actions/autofix/notice.ts";
+import { displacedBy, noticeOf } from "../../../actions/autofix/notice.ts";
 import {
   type Change,
   type FixEvent,
@@ -237,6 +237,37 @@ describe("the notice", () => {
       findingsCut: notice.includes("x".repeat(2001)),
     }).toEqual({ links: false, headings: false, path: true, findingsCut: false });
   });
+
+  // The sticky comment action finds a lane's comment by its marker anywhere in a comment's body. A path, a subject,
+  // or findings holding the other lane's marker would make that lane's next run replace or delete this lane's comment.
+  test.each<FixEvent>(["label", "push"])(
+    "no text the pull request chose leaves the %s lane's sticky marker in a notice",
+    (lane) => {
+      const marker = `<!-- Sticky Pull Request Comment repo-platform/autofix-${lane} -->`;
+      const notices = [
+        noticeOf(
+          "label",
+          { kind: "pushed", commit: "a".repeat(40), subject: `style: ${marker}` },
+          {
+            findings: `left ${marker}`,
+            dropped: [{ path: `src/${marker}.ts`, reason: displacedBy(`docs/${marker}.md`) }],
+          },
+        ),
+        noticeOf(
+          "push",
+          { kind: "refused", why: "x", refused: [{ path: `${marker}/a.ts`, reason: null }] },
+          { findings: "", dropped: [] },
+        ),
+      ];
+      expect({
+        markers: notices.filter((notice) => notice.includes(marker)).length,
+        comments: notices.filter((notice) => notice.includes("<!--")).length,
+        shown: notices[0].includes(
+          `left <\\x21-- Sticky Pull Request Comment repo-platform/autofix-${lane} -->`,
+        ),
+      }).toEqual({ markers: 0, comments: 0, shown: true });
+    },
+  );
 });
 
 describe("the event", () => {
@@ -664,7 +695,7 @@ describe("stage and push", () => {
 
     const result = pushFix(request(event("label", "moved"), FORMAT, repository, out), tools);
     expect({ outcome: result.outcome, remote: remote("moved") }).toEqual({
-      outcome: { kind: "superseded" },
+      outcome: { kind: "superseded", branch: "moved" },
       remote: head,
     });
   });
@@ -679,10 +710,37 @@ describe("stage and push", () => {
 
     const result = pushFix(request(event("label", "rewound"), FORMAT, repository, out), tools);
     expect({ outcome: result.outcome, remote: remote("rewound") }).toEqual({
-      outcome: { kind: "superseded" },
+      outcome: { kind: "superseded", branch: "moved" },
       remote: ancestor,
     });
   });
+
+  // A deleted branch refuses the leased push as a moved one does, and no new head follows it: a notice promising the
+  // new head its own run, or asking for the label again, would send the reader after a branch that is not there.
+  test.each<FixEvent>(["label", "push"])(
+    "a branch deleted while the %s fix was built reads as superseded, and the notice says it is gone",
+    (kind) => {
+      const branch = `gone-${kind}`;
+      const lists = kind === "label" ? FORMAT : GENERATED;
+      const { out } = staged(kind, branch, lists, (directory) =>
+        write(directory, { "README.md": "# Widget, fixed\n" }),
+      );
+      const repository = clone(branch, "push");
+      fixtureGit(origin, ["update-ref", "-d", `refs/heads/${branch}`]);
+
+      const result = pushFix(request(event(kind, branch), lists, repository, out), tools);
+      expect({
+        result,
+        branches: fixtureGit(origin, ["for-each-ref", `refs/heads/${branch}`]),
+      }).toEqual({
+        result: {
+          outcome: { kind: "superseded", branch: "gone" },
+          notice: "Not pushed: the branch was deleted while the fix was built.",
+        },
+        branches: "",
+      });
+    },
+  );
 
   // `git ls-remote origin refs/heads/topic` also answers for refs/heads/a/refs/heads/topic, which sorts first: git
   // matches the pattern against the tail of a ref name. Read by position, the decoy's sha stands for the branch's.
@@ -697,7 +755,7 @@ describe("stage and push", () => {
 
     const result = pushFix(request(event("label", "decoyed"), FORMAT, repository, out), tools);
     expect({ outcome: result.outcome, remote: remote("decoyed") }).toEqual({
-      outcome: { kind: "superseded" },
+      outcome: { kind: "superseded", branch: "moved" },
       remote: ancestor,
     });
   });
@@ -708,6 +766,7 @@ describe("stage and push", () => {
     reason: string;
     branch: string;
     spoil?: string;
+    unreadable?: boolean;
     headline: string;
   }>([
     {
@@ -730,24 +789,48 @@ describe("stage and push", () => {
       headline:
         "The push failed and the branch has not moved: git push was rejected; the run's log has git's words.",
     },
-  ])("a failed fix claims only what was checked: $reason", ({ branch, spoil, headline }) => {
-    const { out } = staged("label", branch, FORMAT, (directory) =>
-      write(directory, { "src/a.ts": "export const a = 1;\n" }),
-    );
-    if (spoil !== undefined) writeFileSync(join(out, "fix.patch"), spoil);
-    const hook = join(origin, "hooks/update");
-    mkdirSync(dirname(hook), { recursive: true });
-    writeFileSync(hook, '#!/bin/sh\ncase "$1" in refs/heads/guarded-*) exit 1 ;; esac\n');
-    chmodSync(hook, 0o755);
+    {
+      reason: "the remote refuses the push and then cannot be read",
+      branch: "guarded-unread",
+      unreadable: true,
+      headline:
+        "The push failed, and the branch could not be read back: git push was rejected; the run's log has git's words.",
+    },
+  ])(
+    "a failed fix claims only what was checked: $reason",
+    ({ branch, spoil, unreadable, headline }) => {
+      const { out } = staged("label", branch, FORMAT, (directory) =>
+        write(directory, { "src/a.ts": "export const a = 1;\n" }),
+      );
+      if (spoil !== undefined) writeFileSync(join(out, "fix.patch"), spoil);
+      const hook = join(origin, "hooks/update");
+      mkdirSync(dirname(hook), { recursive: true });
+      writeFileSync(hook, '#!/bin/sh\ncase "$1" in refs/heads/guarded-*) exit 1 ;; esac\n');
+      chmodSync(hook, 0o755);
 
-    const repository = clone(branch, "push");
-    const result = pushFix(request(event("label", branch), FORMAT, repository, out), tools);
-    expect({
-      outcome: result.outcome.kind,
-      headline: result.notice.split("\n")[0],
-      remote: remote(branch),
-    }).toEqual({ outcome: "failed", headline: headline.replace("BASE", base), remote: base });
-  });
+      const repository = clone(branch, "push");
+      // The remote goes away after it refused the push: the read back is the one command that finds it gone.
+      const losingRemote: Tools = {
+        ...tools,
+        run: (command, options) => {
+          if (unreadable === true && command[1] === "ls-remote") {
+            fixtureGit(repository, ["remote", "set-url", "origin", join(root, "no-such.git")]);
+          }
+
+          return run(command, options);
+        },
+      };
+      const result = pushFix(
+        request(event("label", branch), FORMAT, repository, out),
+        losingRemote,
+      );
+      expect({
+        outcome: result.outcome.kind,
+        headline: result.notice.split("\n")[0],
+        remote: remote(branch),
+      }).toEqual({ outcome: "failed", headline: headline.replace("BASE", base), remote: base });
+    },
+  );
 
   // A file name is bytes, and git's are read here as UTF-8: a name that is none comes back changed. Unstaged by the
   // name as read, the file stayed in the patch, and the push job refused the whole fix for one stray file. The name is
@@ -820,6 +903,56 @@ describe("stage and push", () => {
     });
   });
 
+  // Git holds a name as a file or as a directory, never both. Bringing a refused deletion back into the index evicts
+  // the allowed file that took its place: the commit lacked it, the run was green, and the notice named only the deletion.
+  test.each<{
+    reason: string;
+    branch: string;
+    paths: string[];
+    hook: (directory: string) => void;
+    dropped: string[];
+  }>([
+    {
+      reason: "a directory's file deleted and a file added under the directory's name",
+      branch: "evicted-file",
+      paths: ["src/a.ts", "src/retired"],
+      hook: (directory) => {
+        rmSync(join(directory, "src/retired"), { recursive: true });
+        write(directory, { "src/retired": "now a file\n" });
+      },
+      dropped: [
+        "- `src/retired`: cannot be carried without deleting `src/retired/old.ts`",
+        "- `src/retired/old.ts`",
+      ],
+    },
+    {
+      reason: "a file deleted and a file added under a directory of its name",
+      branch: "evicted-directory",
+      paths: ["src/a.ts", "LICENSE/x.txt"],
+      hook: (directory) => {
+        rmSync(join(directory, "LICENSE"));
+        write(directory, { "LICENSE/x.txt": "x\n" });
+      },
+      dropped: ["- `LICENSE`", "- `LICENSE/x.txt`: cannot be carried without deleting `LICENSE`"],
+    },
+  ])(
+    "the label names an allowed addition that a refused deletion takes out of the commit: $reason",
+    ({ branch, paths, hook, dropped }) => {
+      const lists = { paths, delete: [] };
+      const { out } = staged("label", branch, lists, (directory) => {
+        hook(directory);
+        write(directory, { "src/a.ts": "export const a = 1;\n" });
+      });
+
+      const result = pushed("label", branch, lists, out);
+      expect({
+        outcome: result.outcome.kind,
+        tree: tree(branch),
+        dropped: result.notice.split("\n").filter((line) => line.startsWith("- ")),
+      }).toEqual({ outcome: "pushed", tree: ["M\tsrc/a.ts"], dropped });
+    },
+  );
+
   test("a hook that changed nothing: no commit, the label says so and a push says nothing", () => {
     const label = staged("label", "clean-label", FORMAT, () => {});
     const push = staged("push", "clean-push", GENERATED, () => {});
@@ -886,6 +1019,48 @@ describe("stage and push", () => {
       said: lines.some((line) => line.includes("::error::forged")),
       commands: lines.filter((line) => !line.startsWith("  | ") || line.includes("##[")),
     }).toEqual({ outcome: "failed", said: true, commands: [] });
+  });
+
+  // A phase that throws ends as an error annotation, and git's errors name the pull request's paths. The annotation
+  // is one more place the pull request's text is published, so it passes the same quoting as the notice.
+  test("a stage that git fails names the path in its error annotation with no HTML comment opener", () => {
+    fixtureGit(origin, ["update-ref", "refs/heads/unreadable", base]);
+    const repository = clone("unreadable", "stage");
+    write(repository, { "src/<!-- marker -->.ts": "x\n" });
+    chmodSync(join(repository, "src/<!-- marker -->.ts"), 0o000);
+    const payload = {
+      action: "labeled",
+      label: { name: "fix-lint" },
+      pull_request: {
+        number: 7,
+        head: { sha: base, ref: "unreadable" },
+        user: { login: "octocat" },
+      },
+    };
+    writeFileSync(join(root, "unreadable-event.json"), JSON.stringify(payload));
+
+    const child = boundedSpawnSync(
+      [process.execPath, join(REPO_ROOT, "actions/autofix/autofix.ts")],
+      {
+        cwd: root,
+        env: {
+          ...fixtureGitEnv(),
+          PATH: process.env.PATH ?? "",
+          PHASE: "stage",
+          CONFIG: JSON.stringify(CONFIG),
+          REPOSITORY_DIRECTORY: repository,
+          RUNNER_TEMP: join(root, "unreadable-temp"),
+          GITHUB_REPOSITORY: "example/widget",
+          GITHUB_EVENT_PATH: join(root, "unreadable-event.json"),
+        },
+      },
+    );
+    const annotation = child.stdout.split("\n").find((line) => line.startsWith("::error::")) ?? "";
+    expect({
+      exitCode: child.exitCode,
+      named: annotation.includes("src/<\\x21-- marker -->.ts"),
+      opener: child.stdout.includes("<!--"),
+    }).toEqual({ exitCode: 1, named: true, opener: false });
   });
 
   // What crosses from the stage job is data, read as data: anything that is not the two regular files is refused

@@ -24,7 +24,16 @@ import {
   requireEnv,
   succeeded,
 } from "../shared/action_runtime.ts";
-import { FORK_NOTICE, type NamedPath, noticeOf, type Outcome, type Remarks } from "./notice.ts";
+import {
+  displacedBy,
+  FORK_NOTICE,
+  type NamedPath,
+  noticeOf,
+  type Outcome,
+  quoted,
+  quotedFailure,
+  type Remarks,
+} from "./notice.ts";
 import {
   type FixEvent,
   judge,
@@ -32,6 +41,7 @@ import {
   matches,
   parseRawDiff,
   type RawChange,
+  type Rejection,
   rejection,
 } from "./paths.ts";
 
@@ -78,13 +88,15 @@ const eventSchema = z.object({
   }),
 });
 
-const reportedPaths = z.array(z.string().max(REPORT_CAPS.path)).max(REPORT_CAPS.paths);
+const reportedPath = z.string().max(REPORT_CAPS.path);
+
+const droppedSchema = z.strictObject({ path: reportedPath, without: reportedPath.nullable() });
 
 const reportSchema = z.strictObject({
   subject: z.string().max(REPORT_CAPS.subject),
   findings: z.string().max(REPORT_CAPS.findings),
-  dropped: reportedPaths,
-  refused: reportedPaths,
+  dropped: z.array(droppedSchema).max(REPORT_CAPS.paths),
+  refused: z.array(reportedPath).max(REPORT_CAPS.paths),
 });
 
 /** Runs one child with a deadline and returns its exit and output; a test hands in a recorder. */
@@ -107,6 +119,9 @@ export type Config = z.infer<typeof configSchema>;
 
 /** What the stage job hands the push job beside the patch. */
 export type Report = z.infer<typeof reportSchema>;
+
+/** A change the label's rule left out of the commit: `without` is the refused deletion that took an allowed change along, or null. */
+type Dropped = z.infer<typeof droppedSchema>;
 
 /** The pull request event a run answers, read from the event payload. */
 export interface PullRequestEvent {
@@ -356,6 +371,57 @@ function unstage(tools: Tools, repository: string, changes: readonly RawChange[]
   }
 }
 
+/** A staged change's identity: the name's own bytes and what happened to it. */
+function changeKey({ name, status }: RawChange): string {
+  return `${status} ${name.toString("hex")}`;
+}
+
+/**
+ * Takes the `rejected` changes out of the index and returns every change that left it, read from the index itself.
+ *
+ * Git holds a name as a file or as a directory. Bringing back a deleted `d/f` evicts a staged file `d`, and bringing
+ * back a deleted `f` evicts a staged `f/x`: an allowed change leaves with the refused deletion, and is named with it.
+ */
+function drop(
+  tools: Tools,
+  repository: string,
+  staged: readonly RawChange[],
+  rejected: readonly Rejection[],
+): Dropped[] {
+  // By the decoded name: two names that decode alike are both not UTF-8, and both dropped.
+  const refused = new Set(rejected.map(({ path }) => path));
+  unstage(
+    tools,
+    repository,
+    staged.filter(({ path }) => refused.has(path)),
+  );
+
+  const kept = new Set(stagedChanges(tools, repository).map(changeKey));
+  const deletions = staged.filter(({ path, status }) => status === "D" && refused.has(path));
+
+  return staged
+    .filter((change) => !kept.has(changeKey(change)))
+    .map(({ path }) => {
+      if (refused.has(path)) return { path, without: null };
+
+      const displacing = deletions.find(
+        (deletion) => deletion.path.startsWith(`${path}/`) || path.startsWith(`${deletion.path}/`),
+      );
+      return { path, without: displacing?.path ?? null };
+    });
+}
+
+/** Why each dropped change is not carried, for the run's annotations. */
+function droppedReasons(dropped: readonly Dropped[], rejected: readonly Rejection[]): string[] {
+  const reasons = new Map(rejected.map(({ path, reason }) => [path, reason]));
+
+  return dropped.map(({ path, without }) => {
+    const displaced =
+      without === null ? "left the index with a dropped change" : displacedBy(without);
+    return `${quoted(path)} (${reasons.get(path) ?? displaced})`;
+  });
+}
+
 /**
  * Stages what the hook changed and the lists allow, and writes the patch and the report for the push job.
  *
@@ -368,19 +434,17 @@ export function stageFix(request: StageRequest, tools: Tools): boolean {
 
   const changes = stagedChanges(tools, repository);
   const judgment = judge(request.kind, changes, request.lists);
-  const rejected = judgment.kind === "refuse" ? judgment.refused : judgment.dropped;
-  for (const { path, reason } of rejected.slice(0, WARNED_PATHS)) {
-    tools.log.warning(`not carried by the fix: ${path} (${reason})`);
-  }
-
   mkdirSync(out, { recursive: true });
   if (judgment.kind === "refuse") mustGit(tools, repository, ["reset", "--quiet"]);
 
-  if (judgment.kind === "stage") {
-    // By the decoded name: two names that decode alike are both not UTF-8, and both dropped.
-    const dropped = new Set(judgment.dropped.map(({ path }) => path));
-    const leaving = changes.filter(({ path }) => dropped.has(path));
-    unstage(tools, repository, leaving);
+  const rejected = judgment.kind === "refuse" ? judgment.refused : judgment.dropped;
+  const dropped = judgment.kind === "stage" ? drop(tools, repository, changes, rejected) : [];
+  const notCarried =
+    judgment.kind === "refuse"
+      ? rejected.map(({ path, reason }) => `${quoted(path)} (${reason})`)
+      : droppedReasons(dropped, rejected);
+  for (const line of notCarried.slice(0, WARNED_PATHS)) {
+    tools.log.warning(`not carried by the fix: ${line}`);
   }
 
   const patch = join(out, PATCH_FILE);
@@ -388,18 +452,22 @@ export function stageFix(request: StageRequest, tools: Tools): boolean {
   mustGit(tools, repository, [...diff, "--no-ext-diff", "--no-textconv", `--output=${patch}`]);
 
   // Cut to the report's caps here, so an honest hook's long output is shortened and never refused.
-  const paths = rejected
-    .slice(0, REPORT_CAPS.paths)
-    .map(({ path }) => path.slice(0, REPORT_CAPS.path));
+  const cut = (path: string) => path.slice(0, REPORT_CAPS.path);
   const report: Report = {
     subject: request.subject.slice(0, REPORT_CAPS.subject),
     findings: request.findings.slice(0, REPORT_CAPS.findings),
-    dropped: judgment.kind === "stage" ? paths : [],
-    refused: judgment.kind === "refuse" ? paths : [],
+    dropped: dropped.slice(0, REPORT_CAPS.paths).map(({ path, without }) => ({
+      path: cut(path),
+      without: without === null ? null : cut(without),
+    })),
+    refused:
+      judgment.kind === "refuse"
+        ? rejected.slice(0, REPORT_CAPS.paths).map(({ path }) => cut(path))
+        : [],
   };
   writeFileSync(join(out, REPORT_FILE), JSON.stringify(report));
 
-  return judgment.kind === "stage" && judgment.staged.length > 0;
+  return lstatSync(patch).size > 0;
 }
 
 /** A file of the downloaded artifact; a link, a directory, or nothing where a regular file belongs is refused. */
@@ -510,7 +578,7 @@ function pushCommit(request: PushRequest, commit: string, tools: Tools): Outcome
 
   if (head === event.sha) return { kind: "failed", branch: "unmoved", detail };
 
-  return { kind: "superseded" };
+  return { kind: "superseded", branch: head === "" ? "gone" : "moved" };
 }
 
 function applyAndPush(request: PushRequest, report: Report, tools: Tools): Outcome {
@@ -562,7 +630,11 @@ function applyAndPush(request: PushRequest, report: Report, tools: Tools): Outco
 export function pushFix(request: PushRequest, tools: Tools): PushResult {
   const report = readReport(request.staged);
   const outcome = applyAndPush(request, report, tools);
-  const remarks: Remarks = { findings: report.findings, dropped: unnamed(report.dropped) };
+  const dropped = report.dropped.map(({ path, without }) => ({
+    path,
+    reason: without === null ? null : displacedBy(without),
+  }));
+  const remarks: Remarks = { findings: report.findings, dropped };
 
   return { outcome, notice: noticeOf(request.event.kind, outcome, remarks) };
 }
@@ -693,6 +765,6 @@ if (import.meta.main) {
   try {
     await main();
   } catch (cause) {
-    core.setFailed(messageOf(cause));
+    core.setFailed(quotedFailure(messageOf(cause)));
   }
 }

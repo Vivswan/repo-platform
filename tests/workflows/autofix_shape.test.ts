@@ -9,7 +9,14 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { parseEvent } from "../../actions/autofix/autofix";
 import { REPO_ROOT } from "../shared/action_step";
-import { evaluateCondition, hasStatusFunction, interpolate } from "../shared/github_expression";
+import {
+  contextReads,
+  evaluateCondition,
+  expressionsIn,
+  hasStatusFunction,
+  interpolate,
+  parseExpression,
+} from "../shared/github_expression";
 
 interface Step {
   id?: string;
@@ -35,6 +42,12 @@ const load = (rel: string) =>
   ) as Workflow;
 const caller = load("files/autofix/.github/workflows/auto-fix.yml");
 const called = load(".github/workflows/fleet-autofix.yml");
+
+const stickyStep = (job: Job) =>
+  (job.steps ?? []).find((step) => step.uses?.startsWith("marocchino/") === true);
+const NO_NOTICE_LINE = interpolate(stickyStep(called.jobs.push)?.with?.message ?? "", {
+  "steps.push.outputs.notice": "",
+});
 
 const REPOSITORY = "example/widget";
 
@@ -334,12 +347,9 @@ describe("the called fleet-autofix.yml", () => {
     };
     const steps = stepsRunning(called.jobs.push.steps ?? [], context, fails);
     const phase = (name: string) => steps.some((step) => step.with?.phase === name);
-    const sticky = steps.find((step) => step.uses?.startsWith("marocchino/") === true);
+    const sticky = steps.find((step) => step === stickyStep(called.jobs.push));
     const say = (key: string) => interpolate(sticky?.with?.[key] ?? "", context);
-    const notice = outputs["steps.push.outputs.notice"] ?? "";
-    // The fixed line's wording is the workflow's own; what is pinned is that a run with no notice still says something.
-    const fixed = say("message") === "" ? "nothing" : "the fixed line";
-    const message = say("message") === notice ? notice : fixed;
+    const message = say("message") === NO_NOTICE_LINE ? "the fixed line" : say("message");
     expect({
       ran: {
         fix: phase("push"),
@@ -353,15 +363,30 @@ describe("the called fleet-autofix.yml", () => {
     }).toEqual({ ran, told });
   });
 
+  // The comment is posted with the write token, and its message is not quoted by anything: a message that read the
+  // pull request's title or branch name would post the pull request's own Markdown. The one value it may read is
+  // the notice the push step worded, and the line that stands in for a missing one is fixed text.
+  test("the notice step's message reads the push step's notice alone, and its stand-in is fixed text", () => {
+    const expressions = expressionsIn(stickyStep(called.jobs.push)?.with?.message ?? "");
+    expect({
+      reads: expressions.flatMap((source) => contextReads(parseExpression(source).tree)),
+      standIn: { said: NO_NOTICE_LINE !== "", expression: NO_NOTICE_LINE.includes("${{") },
+    }).toEqual({
+      reads: [["steps", "push", "outputs", "notice"]],
+      standIn: { said: true, expression: false },
+    });
+  });
+
   // A fork is told through the label lane's comment: the label is what it answers, and a second comment for it
-  // would never be replaced.
+  // would never be replaced. A job with no sticky step, or a step with no header, reads here as absent, never as equal.
   test("the fork job's note and a label run's notice are one comment", () => {
-    const header = (job: Job, context: Context) => {
-      const sticky = (job.steps ?? []).find((step) => step.uses?.startsWith("marocchino/"));
-      return interpolate(sticky?.with?.header ?? "", context);
-    };
-    const labeled = { "github.event.action": "labeled" };
-    expect(header(called.jobs.fork, labeled)).toBe(header(called.jobs.push, labeled));
+    const header = (job: Job) =>
+      interpolate(stickyStep(job)?.with?.header ?? "", { "github.event.action": "labeled" });
+    const headers = { fork: header(called.jobs.fork), push: header(called.jobs.push) };
+    expect({ present: Object.values(headers).every((name) => name !== ""), headers }).toEqual({
+      present: true,
+      headers: { fork: headers.push, push: headers.fork },
+    });
   });
 
   // The gate's step runs under continue-on-error, and a skipped or failed one must read as "not accepted": a loose

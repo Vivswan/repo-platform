@@ -1,5 +1,6 @@
-// What the pull request is told. Every path and every word of the hook's findings came from code the pull request
-// controls, so each is quoted here before it reaches Markdown: a path as a one-line code span, findings as a fenced block.
+// What the pull request is told. Every path, the commit subject, and every word of the hook's findings came from code
+// the pull request controls, so each is quoted here before it reaches Markdown: a one-line code span, or a fenced block
+// for findings. `visible` is the one place all of it passes.
 // FORK_NOTICE is what a fork's pull request is told when it is given the label.
 
 import { codeSpan, fenced } from "../../.github/scripts/shared/markdown_code.ts";
@@ -26,7 +27,7 @@ export interface NamedPath {
   /** The path, as git printed it. */
   path: string;
 
-  /** Why it was left out, or null when the unprivileged job reported it. */
+  /** Why it was left out, as Markdown, or null when the unprivileged job reported it without a reason. */
   reason: string | null;
 }
 
@@ -34,7 +35,7 @@ export interface NamedPath {
 export type Outcome =
   | { kind: "pushed"; commit: string; subject: string }
   | { kind: "nothing" }
-  | { kind: "superseded" }
+  | { kind: "superseded"; branch: "moved" | "gone" }
   | { kind: "refused"; why: string; refused: NamedPath[] }
   | { kind: "failed"; branch: keyof typeof FAILED_HEADLINE; detail: string };
 
@@ -47,20 +48,43 @@ export interface Remarks {
   dropped: NamedPath[];
 }
 
-/** `text` with every control character but a line feed and a tab spelled visibly, cut to `limit` characters. */
+/**
+ * `text` with every control character but a line feed and a tab spelled visibly, cut to `limit` characters.
+ *
+ * An HTML comment's opener is spelled too. The sticky comment action finds a lane's comment by a marker,
+ * `<!-- Sticky Pull Request Comment<header> -->`, anywhere in a body: quoted text holding the other lane's marker
+ * would hand this comment to that lane's next run.
+ */
 function visible(text: string, limit: number): string {
-  const spelled = text.replaceAll(
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: the control characters are the ones replaced
-    /[\x00-\x08\x0b-\x1f\x7f]/g,
-    (char) => `\\x${char.charCodeAt(0).toString(16).padStart(2, "0")}`,
-  );
+  const spelled = text
+    .replaceAll(
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: the control characters are the ones replaced
+      /[\x00-\x08\x0b-\x1f\x7f]/g,
+      (char) => `\\x${char.charCodeAt(0).toString(16).padStart(2, "0")}`,
+    )
+    .replaceAll("<!--", "<\\x21--");
 
   return spelled.length > limit ? `${spelled.slice(0, limit)}...` : spelled;
 }
 
+/** A failure's words for an annotation: git's errors name the pull request's paths. */
+export function quotedFailure(text: string): string {
+  return visible(text, SHOWN_FINDINGS_LENGTH);
+}
+
+/** One line of the pull request's own text (a path, a commit subject) as a code span, safe in Markdown and in an annotation. */
+export function quoted(text: string): string {
+  return codeSpan(visible(text, SHOWN_PATH_LENGTH).replaceAll(/[\n\t]/g, " "));
+}
+
+/** Why an allowed change left the commit with the refused deletion of `path`: git holds a name as a file or as a directory. */
+export function displacedBy(path: string): string {
+  return `cannot be carried without deleting ${quoted(path)}`;
+}
+
 function pathLines(paths: readonly NamedPath[]): string[] {
   const lines = paths.slice(0, SHOWN_PATHS).map(({ path, reason }) => {
-    const span = codeSpan(visible(path, SHOWN_PATH_LENGTH).replaceAll(/[\n\t]/g, " "));
+    const span = quoted(path);
     return reason === null ? `- ${span}` : `- ${span}: ${reason}`;
   });
   if (paths.length > SHOWN_PATHS) lines.push(`- and ${paths.length - SHOWN_PATHS} more`);
@@ -71,7 +95,7 @@ function pathLines(paths: readonly NamedPath[]): string[] {
 function headline(event: FixEvent, outcome: Outcome, remarks: Remarks): string[] {
   if (outcome.kind === "pushed") {
     const commit = outcome.commit.slice(0, SHORT_SHA);
-    return [`Pushed ${codeSpan(outcome.subject)} as ${commit}.`, "", HELD_RUN];
+    return [`Pushed ${quoted(outcome.subject)} as ${commit}.`, "", HELD_RUN];
   }
 
   if (outcome.kind === "nothing" && remarks.dropped.length > 0) {
@@ -79,6 +103,10 @@ function headline(event: FixEvent, outcome: Outcome, remarks: Remarks): string[]
   }
 
   if (outcome.kind === "nothing") return ["Nothing to fix: the fixer changed no file."];
+
+  if (outcome.kind === "superseded" && outcome.branch === "gone") {
+    return ["Not pushed: the branch was deleted while the fix was built."];
+  }
 
   if (outcome.kind === "superseded") {
     const next =
@@ -104,7 +132,7 @@ export function noticeOf(event: FixEvent, outcome: Outcome, remarks: Remarks): s
   if (remarks.dropped.length > 0) {
     lines.push(
       "",
-      "Left out of the commit, outside the registration's `autofix` lists or never changed by a fix:",
+      "Left out of the commit: outside the registration's `autofix` lists, never changed by a fix, or as its line says:",
       "",
       ...pathLines(remarks.dropped),
     );

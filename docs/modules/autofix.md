@@ -40,7 +40,7 @@ The repository's own commands run where the token can only read. The job that ca
 
 3. **Delete what it replaces:** the repository's `auto-format.yml`, any fix workflow of its own, and their scripts and tests. The sync does not remove a repo-owned file.
 
-   A registration whose `except` names `.github/workflows/auto-format.yml` drops that line in the first sync pull request after the platform stopped shipping that starter, whether or not it selects this module. Before that sync the line keeps the old starter out; from it on, the sync holds on an `except` line no entry writes.
+   A registration whose `except` names the old `auto-format.yml` workflow drops that line in the first sync pull request after the platform stopped shipping that starter, whether or not it selects this module. Before that sync the line keeps the old starter out; from it on, the sync holds on an `except` line no entry writes.
 
 The managed `.github/workflows/auto-fix.yml` arrives with the sync. The `fix-lint` label is in every repository's settings already.
 
@@ -115,6 +115,7 @@ In order, the first row that matches ends the run:
 | a patched path outside the lists, or in the never-carried set | the whole patch is refused, red, even on the label: the stage job was bypassed |
 | the branch still at the head sha                              | one commit pushed; the notice says the new head's run waits for approval       |
 | the branch moved while the fix was built                      | superseded, green, with a notice; the branch is left alone                     |
+| the branch deleted while the fix was built                    | superseded, green; the notice says the branch is gone                          |
 | the push rejected with the branch unmoved                     | failed, red; the notice says the branch has not moved                          |
 | the push rejected and the branch unreadable                   | failed, red; the notice says the branch could not be read back                 |
 
@@ -122,7 +123,14 @@ In order, the first row that matches ends the run:
 - **The commit** is authored by `github-actions[bot]` and carries the date of the commit it fixes, so a rerun of the push job rebuilds the same commit and finds it pushed.
 - **A Dependabot pull request's commit** carries `[dependabot skip]`, so Dependabot keeps rebasing the pull request.
 - **Git hooks never run** in the push job, and the patch is applied to the index alone.
-- **Paths and findings are quoted** in the notice and the run summary: a path as a code span, findings as a fenced block, each cut to a cap.
+- **Paths, the subject, and findings are quoted** in the notice and the run summary: a code span, or a fenced block for findings, each cut to a cap. A control character and an HTML comment's opener are spelled out (`<\x21--`), so no quoted text can pass for a comment's hidden marker.
+- **A dropped deletion can take an allowed change with it.** Git holds a name as a file or as a directory:
+
+  ```text
+  the fixer                          lists                               the commit       the notice names
+  deletes d/f, adds a file d         paths: [d]      delete: []          neither change   d/f, and d: cannot be carried without deleting d/f
+  deletes f, adds f/x                paths: ["f/x"]  delete: []          neither change   f, and f/x: cannot be carried without deleting f
+  ```
 
 ## The notice
 
