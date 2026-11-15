@@ -74,9 +74,11 @@ export function deriveRewrites(
   return rewrites;
 }
 
-/** `order` and `group` are the sidebar's frontmatter keys (docs/modules/site.md). */
+/** `order` and `group` are the sidebar's frontmatter keys (docs/modules/site.md).
+ *  `declaredTitle` is the `title` key alone, never the h1: it labels the directory whose README states it. */
 export interface PageMeta {
   title: string;
+  declaredTitle: string | null;
   order: number | null;
   group: string | null;
 }
@@ -97,9 +99,11 @@ export function pageMeta(
   const env: MarkdownEnv = { path: join(srcDir, file), relativePath: file, cleanUrls: false };
   md.render(source, env);
   const data = env.frontmatter ?? {};
+  const declaredTitle = text(data.title);
 
   return {
-    title: text(data.title) ?? text(env.title) ?? untitledPageTitle(file, data.name),
+    title: declaredTitle ?? text(env.title) ?? untitledPageTitle(file, data.name),
+    declaredTitle,
     order: frontmatterOrder(file, data.order),
     group: frontmatterGroup(file, data.group),
   };
