@@ -1,0 +1,94 @@
+# Publishes the calling repository's npm package through trusted publishing, called by the managed ci.yml's `npm-next`
+# and `npm-latest` legs (docs/modules/npm.md).
+#
+# One job on purpose: the repo-owned npm-build hook builds in the workspace the plan stamped and the publish reads.
+#
+# The registry has no compare-and-set, so the job's lane is what keeps a verdict true until its publish lands.
+#   one lane for both channels -> a release and a next publish never interleave; no caller holds it
+#   cancel-in-progress: false  -> a publish under way always finishes and confirms
+#   one pending job            -> a lane keeps one waiting job and cancels an older one: a rerun publishes it
+
+name: Fleet npm Publish
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: The dist-tag to publish under, next or latest
+        required: true
+        type: string
+      sha:
+        description: The commit to publish
+        required: true
+        type: string
+      tag:
+        description: The release's tag, read on the latest channel
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  npm-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # npm validates the run's OIDC token against the package's trusted publisher: no token is stored anywhere.
+    # The hook step runs under this grant too: a composite action declares no permissions of its own.
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: npm-publish
+      cancel-in-progress: false
+    steps:
+      # The next version counts main's commits, which needs fetch-depth 0.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+
+      # The registry-url writes the .npmrc npm's trusted publishing reads the registry from. No dependency cache: a
+      # publishing job restores nothing another run could have written.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      # The registration's npm.path, read first so a bad registration fails before any build.
+      - name: Read the package's directory from the registration
+        id: registration
+        uses: $/actions/plan
+        with:
+          mode: npm
+
+      # Before the build: the record decides whether there is anything to publish, and on next the version is stamped
+      # into package.json, so the build carries it.
+      - name: Plan the publish
+        id: plan
+        uses: $/actions/npm-publish
+        with:
+          phase: plan
+          channel: ${{ inputs.channel }}
+          path: ${{ steps.registration.outputs.npm-path }}
+          tag: ${{ inputs.tag }}
+
+      # The seeded hook fails, so a repository that has not filled it in never publishes an unbuilt package.
+      - name: Build the package
+        if: steps.plan.outputs.publish == 'true'
+        uses: ./.github/actions/npm-build
+        with:
+          version: ${{ steps.plan.outputs.version }}
+
+      # A release runs this with nothing to publish too: a rerun still moves `next` to the release.
+      - name: Publish the package
+        if: steps.plan.outputs.publish == 'true' || inputs.channel == 'latest'
+        uses: $/actions/npm-publish
+        with:
+          phase: publish
+          channel: ${{ inputs.channel }}
+          path: ${{ steps.registration.outputs.npm-path }}
+          version: ${{ steps.plan.outputs.version }}

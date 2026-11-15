@@ -65,6 +65,7 @@ interface Scenario {
   ref?: string;
   headRef?: string;
   isPrivate?: boolean;
+  isFork?: boolean;
 }
 
 /** Simulates GitHub's own rules, which the body mirrors; `outputs` stands in for the step outputs
@@ -74,12 +75,18 @@ interface Scenario {
  *   a condition with no status function -> implicit success() over the WHOLE ancestry
  *   the run's ref                       -> main's head unless given (ci.yml's push trigger is filtered to main)
  *   the PR head branch                  -> unset unless given, as on every event but pull_request
- *   the repository's visibility         -> public unless given */
+ *   the repository's visibility         -> public, and no fork, unless given */
 function jobsRunning(
   jobs: Record<string, Job>,
   event: string,
   outputs: Record<string, string>,
-  { failed = [], ref = "refs/heads/main", headRef, isPrivate = false }: Scenario = {},
+  {
+    failed = [],
+    ref = "refs/heads/main",
+    headRef,
+    isPrivate = false,
+    isFork = false,
+  }: Scenario = {},
 ): string[] {
   const ran = new Set<string>();
   const pending = Object.keys(jobs);
@@ -96,6 +103,7 @@ function jobsRunning(
       "github.event_name": event,
       "github.ref": ref,
       "github.event.repository.private": isPrivate,
+      "github.event.repository.fork": isFork,
       ...needsContext(needs, ran, failed, outputs),
     };
     if (headRef !== undefined) context["github.head_ref"] = headRef;
@@ -176,7 +184,7 @@ describe("post-green wiring", () => {
     ) as { jobs: Record<string, Job> };
     const every = Object.keys(skeleton.jobs).sort();
     const released = {
-      modules: '["release-please","site"]',
+      modules: '["release-please","npm","site"]',
       release_created: "true",
       prs_created: "true",
       tag_name: "v1.2.3",
@@ -207,6 +215,45 @@ describe("post-green wiring", () => {
       pullRequest: ["all-green", "checks", "platform"],
       releasePullRequest: ["all-green", "checks", "platform", "release-gate"],
       redHook: ["all-green", "checks", "platform", "site"],
+    });
+  });
+
+  // The npm legs gate on the same skip rules. A condition on publish-release reading `success` alone would leave every
+  // release of a repository without the npm module a draft, green; one without the prs_created clause would publish
+  // `next` on every merge. A fork carries the registration and none of npm's trust, so its legs would fail on every push.
+  test("the skeleton's npm legs: next publishes on the push that refreshes the release PR alone; a red release publish holds the GitHub release a draft, and a repository without the module still publishes it; a fork publishes nothing to npm", () => {
+    const skeleton = parseYaml(
+      read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
+    ) as { jobs: Record<string, Job> };
+    const cut = {
+      modules: '["release-please","npm"]',
+      release_created: "true",
+      prs_created: "false",
+      tag_name: "v1.2.3",
+    };
+    const refresh = { ...cut, release_created: "false", prs_created: "true" };
+    const legs = (outputs: Record<string, string>, scenario?: Scenario) =>
+      jobsRunning(skeleton.jobs, "push", outputs, scenario)
+        .filter((job) => /^(npm-|publish-release$)/.test(job))
+        .sort();
+    expect({
+      releasePush: legs(cut),
+      refreshPush: legs(refresh),
+      quietPush: legs({ ...refresh, prs_created: "false" }),
+      releaseWithoutNpm: legs({ ...cut, modules: '["release-please"]' }),
+      refreshWithoutNpm: legs({ ...refresh, modules: '["release-please"]' }),
+      redNpmLatest: legs(cut, { failed: ["npm-latest"] }),
+      forkReleasePush: legs(cut, { isFork: true }),
+      forkRefreshPush: legs(refresh, { isFork: true }),
+    }).toEqual({
+      releasePush: ["npm-latest", "publish-release"],
+      refreshPush: ["npm-next"],
+      quietPush: [],
+      releaseWithoutNpm: ["publish-release"],
+      refreshWithoutNpm: [],
+      redNpmLatest: [],
+      forkReleasePush: ["publish-release"],
+      forkRefreshPush: [],
     });
   });
 });
