@@ -3,12 +3,12 @@
 // The script exemptions mirror VS Code's "allowed locales": a script's punctuation is allowed only in files carrying that script's text.
 
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import * as core from "@actions/core";
 import { AmbiguousCharacters, InvisibleCharacters } from "monaco-editor/base/common/strings.js";
+import { capture, failureDetail } from "../shared/action_runtime.ts";
+import { type Outcome, runCheck } from "../shared/check_main.ts";
 import { repositoryFiles } from "../shared/repository_files.ts";
-
-/** The checkout judged: the first argument, else the working directory. */
-const ROOT = resolve(process.argv[2] ?? ".");
 
 /** Directories a repository may track whose files the check still leaves alone: vendored installs, build output, agent state. */
 const SKIP_DIRS = new Set([
@@ -30,72 +30,11 @@ const SKIP_DIRS = new Set([
   ".codex",
 ]);
 
-/** Extensions the check reads; an extensionless file (a hook) is read too. */
-const EXTENSIONS = new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".astro",
-  ".py",
-  ".pyi",
-  ".yml",
-  ".yaml",
-  ".json",
-  ".md",
-  ".html",
-  ".css",
-  ".toml",
-  ".cfg",
-  ".ini",
-  ".txt",
-  ".template",
-  ".sh",
-  ".bashrc",
-  ".zsh",
-  ".zshrc",
-  ".zprofile",
-  ".profile",
-  ".ps1",
-  ".psm1",
-  ".psd1",
-  ".rs",
-  ".mts",
-  ".cts",
-  ".svg",
-  ".xml",
-  ".plist",
-  ".entitlements",
-  ".lock",
-]);
-
-/** Extensionless text files (hooks, licenses) are checked too; "forbidden
- *  everywhere" must include .githooks/pre-commit and friends. */
-function isCheckable(name: string): boolean {
-  const dot = name.lastIndexOf(".");
-  if (dot === -1) return true;
-
-  return EXTENSIONS.has(name.slice(dot));
-}
-
 /** .typography-allow is written by the sync in managed repos; .typography-allow.local is repo-owned and never synced. */
-const ALLOW_FILES = [join(ROOT, ".typography-allow"), join(ROOT, ".typography-allow.local")];
+const ALLOW_FILES = [".typography-allow", ".typography-allow.local"];
 
-/** The path prefixes the allow files exempt, blank and `#` lines dropped. */
-const ALLOWED_PREFIXES = ALLOW_FILES.flatMap((file) =>
-  existsSync(file)
-    ? readFileSync(file, "utf-8")
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !line.startsWith("#"))
-    : [],
-);
-
-function isExempt(relPath: string): boolean {
-  return ALLOWED_PREFIXES.some((prefix) => relPath === prefix || relPath.startsWith(prefix));
-}
+/** The deadline of one `git grep` over the checkout: two of them stay well inside a ten-minute job. */
+const GREP_TIMEOUT_MS = 120_000;
 
 /** VS Code's unicode-highlight data, straight from monaco-editor. An empty locale set selects the _common + _default confusables (what VS Code highlights regardless of user locale). */
 const AMBIGUOUS = AmbiguousCharacters.getInstance(new Set());
@@ -162,11 +101,33 @@ const NAMES: Record<number, string> = {
   180: "acute accent used as apostrophe (use ')",
 };
 
+/** What every failing run tells the reader to do. */
+const REMEDY = `Replace each with its plain ASCII form, or exempt the path in ${ALLOW_FILES[1]}.`;
+
 function hex(code: number): string {
   return `U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
 type ScriptContext = { cjk: boolean; devanagari: boolean };
+
+/** One refused character; `line` is 1-based. */
+interface Finding {
+  path: string;
+  line: number;
+  what: string;
+}
+
+interface Verdict {
+  /** Every refused character, in file order. */
+  findings: Finding[];
+
+  /** How many text files were read: a count of zero says the check judged nothing. */
+  judged: number;
+}
+
+function isExempt(relPath: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((prefix) => relPath.startsWith(prefix));
+}
 
 function violation(code: number, context: ScriptContext): string | null {
   const control = CONTROL_NAMES[code];
@@ -202,30 +163,110 @@ function violation(code: number, context: ScriptContext): string | null {
   return null;
 }
 
-function isJudged(relPath: string): boolean {
-  const segments = relPath.split("/");
-  const name = segments[segments.length - 1];
-  return !segments.slice(0, -1).some((dir) => SKIP_DIRS.has(dir)) && isCheckable(name);
+/** The path prefixes the allow files exempt, blank and `#` lines dropped. */
+function allowedPrefixes(root: string): string[] {
+  return ALLOW_FILES.map((file) => join(root, file))
+    .filter((file) => existsSync(file))
+    .flatMap((file) => readFileSync(file, "utf-8").split("\n"))
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
 }
 
-const failures: string[] = [];
-for (const relPath of repositoryFiles(ROOT, { untracked: true })) {
-  if (!isJudged(relPath) || isExempt(relPath)) continue;
+/** The paths one `git grep -I` lists: the files with a line that git reads as text. */
+function grepText(root: string, scope: string[]): string[] {
+  // Each --no-* flag answers a user's git config that would change the listing or refuse the grep:
+  //   color.grep         -> paths wrapped in escape codes
+  //   grep.fullName      -> paths rooted at the repository instead of `root`
+  //   submodule.recurse  -> "--untracked not supported with --recurse-submodules"
+  const stable = ["--no-color", "--no-full-name", "--no-recurse-submodules"];
+  const args = ["-C", root, "grep", "-I", "-l", "-z", ...stable, ...scope];
+  const listed = capture(["git", ...args, "-e", ""], { timeoutMs: GREP_TIMEOUT_MS });
+  // Exit 1 is git grep's "no file has a line".
+  const answered = listed.exit.kind === "exited" && listed.exit.code <= 1;
+  if (!answered) throw new Error(`git grep failed in ${root}: ${failureDetail(listed)}`);
 
-  const content = readFileSync(join(ROOT, relPath), "utf-8");
-  const context = { cjk: CJK_TEXT.test(content), devanagari: DEVANAGARI_TEXT.test(content) };
-  content.split("\n").forEach((line, index) => {
-    for (const ch of line) {
-      const message = violation(ch.codePointAt(0)!, context);
-      if (message) failures.push(`${relPath}:${index + 1} ${message}`);
-    }
+  return listed.stdout.split("\0");
+}
+
+/** The repository's files git itself reads as text (no NUL byte, no `binary` or `-diff` attribute), whatever their
+ *  name. An empty file has no line and is not listed. */
+function textFiles(root: string): string[] {
+  // Two greps: --untracked drops a tracked file an ignore rule matches, which the plain one lists.
+  const text = new Set([...grepText(root, []), ...grepText(root, ["--untracked"])]);
+  return repositoryFiles(root, { untracked: true }).filter((relPath) => text.has(relPath));
+}
+
+function check(root: string): Verdict {
+  const prefixes = allowedPrefixes(root);
+  const judged = textFiles(root).filter((relPath) => {
+    const dirs = relPath.split("/").slice(0, -1);
+    return !dirs.some((dir) => SKIP_DIRS.has(dir)) && !isExempt(relPath, prefixes);
   });
+
+  const findings: Finding[] = [];
+  for (const path of judged) {
+    const content = readFileSync(join(root, path), "utf-8");
+    const context = { cjk: CJK_TEXT.test(content), devanagari: DEVANAGARI_TEXT.test(content) };
+    content.split("\n").forEach((line, index) => {
+      for (const ch of line) {
+        const what = violation(ch.codePointAt(0)!, context);
+        if (what) findings.push({ path, line: index + 1, what });
+      }
+    });
+  }
+
+  return { findings, judged: judged.length };
 }
 
-if (failures.length > 0) {
-  console.error("Typographic look-alike characters found:\n");
-  for (const failure of failures) console.error(`  ${failure}`);
-  console.error(`\n${failures.length} occurrence(s). Replace them with plain ASCII equivalents.`);
-  process.exit(1);
+function outcomeOf(verdict: Verdict): Outcome<Verdict> {
+  return { state: verdict.findings.length > 0 ? "findings" : "clean", verdict };
 }
-console.log("Typography check passed.");
+
+/** A table cell's text: a pipe would end the cell (`use "|"` is a real remedy). */
+function cell(text: string): string {
+  return text.replaceAll("|", "\\|");
+}
+
+function report(outcome: Outcome<Verdict>): string {
+  const parts = ["## Typography check", ""];
+  if (outcome.state === "error") {
+    parts.push(`The check did not run to completion: ${outcome.message}`);
+    return `${parts.join("\n")}\n`;
+  }
+
+  const { findings, judged } = outcome.verdict;
+  if (outcome.state === "clean") {
+    parts.push(`No look-alike or invisible character in ${judged} text file(s).`);
+    return `${parts.join("\n")}\n`;
+  }
+
+  parts.push(
+    `${findings.length} occurrence(s) in ${judged} text file(s). ${REMEDY}`,
+    "",
+    "| Where | Character |",
+    "| --- | --- |",
+    ...findings.map(({ path, line, what }) => `| \`${cell(path)}:${line}\` | ${cell(what)} |`),
+  );
+  return `${parts.join("\n")}\n`;
+}
+
+if (import.meta.main) {
+  await runCheck<Verdict>(
+    {
+      name: "check-typography",
+      check,
+      outcomeOf,
+      report,
+      warnings: () => [],
+      errors: (verdict) =>
+        verdict.findings.map(({ path, line, what }) => ({
+          message: `${path}:${line} ${what}`,
+          file: path,
+          line,
+        })),
+      passed: (verdict) => `Typography check passed (${verdict.judged} text file(s) judged).`,
+      failed: (count) => `${count} occurrence(s). ${REMEDY}`,
+    },
+    core,
+  );
+}

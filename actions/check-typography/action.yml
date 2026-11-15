@@ -7,6 +7,11 @@ description: |
     - Trojan-Source bidi controls
     - VS Code's ambiguous confusables
 
+  Judged: every tracked or untracked-and-not-ignored file git reads as text, whatever its name. Git's own reading
+  decides (`git grep -I`): a file holding a NUL byte, or one `.gitattributes` marks `binary` or `-diff`, is not read.
+
+  Findings are one table in the step summary and an error annotation each.
+
   Exemptions: `.typography-allow` and `.typography-allow.local`, each listing relative path
   prefixes to skip.
 
