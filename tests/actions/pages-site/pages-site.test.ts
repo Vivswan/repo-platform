@@ -17,6 +17,7 @@ import {
   deriveRewrites,
   detectLocales,
   pageMeta,
+  readPage,
   routeOf,
   walkMarkdown,
 } from "../../../actions/pages-site/.vitepress/derive.ts";
@@ -51,8 +52,10 @@ import { fixtureGit } from "../../shared/fixture_git.ts";
 import { parseGithubOutput } from "../../shared/github_output.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
+import { vitepressRenderer } from "./vitepress_renderer.ts";
 
 const temp = tempDirs();
+const md = await vitepressRenderer();
 const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 
 describe("parseSiteConfig", () => {
@@ -578,8 +581,41 @@ describe("derive", () => {
       "---\ndescription: '# not a heading'\n---\n\nno heading\n",
       { title: "pages", order: null, group: null },
     ],
+    // The four below: a title read by a line pattern, not by the renderer, puts a row in the sidebar that the page's own title contradicts.
+    [
+      "a # line inside a code fence is not a heading",
+      "guide/set-up.md",
+      "Intro.\n\n```sh\n# install deps\nbun install\n```\n",
+      { title: "set up", order: null, group: null },
+    ],
+    [
+      "a code span reads as its text",
+      "plan.md",
+      "# The `plan` action\n",
+      { title: "The plan action", order: null, group: null },
+    ],
+    [
+      "a setext heading is the title",
+      "page.md",
+      "My Title\n========\n",
+      { title: "My Title", order: null, group: null },
+    ],
+    [
+      "a link, emphasis and a closing # read as their text",
+      "fleet.md",
+      "# [Fleet](https://x.y) **guide** #\n",
+      { title: "Fleet guide", order: null, group: null },
+    ],
   ])("%s", (_, file, source, expected) => {
-    expect(pageMeta(file, source)).toEqual(expected);
+    expect(pageMeta(md, "/repo/docs", file, source)).toEqual(expected);
+  });
+
+  // VitePress resolves a code snippet beside the page's own file, so a title read without the page's path fails the build on a page that imports one.
+  test("a page importing a code snippet is titled by its heading", () => {
+    const dir = temp.dir("derive-");
+    writeFileSync(join(dir, "install.sh"), "# install deps\nbun install\n");
+    writeFileSync(join(dir, "guide.md"), "# Guide\n\n<<< ./install.sh\n");
+    expect(readPage(md, dir, "guide.md")).toEqual({ title: "Guide", order: null, group: null });
   });
 
   // The error names the page for the fleet's docs-check. `.nan` is YAML's not-a-number spelling and gray-matter reads
@@ -591,9 +627,9 @@ describe("derive", () => {
     ["group: 3", "'group' must be a non-empty string"],
     ["group: ''", "'group' must be a non-empty string"],
   ])("malformed frontmatter (%s) fails the build naming the page", (line, message) => {
-    expect(() => pageMeta("modules/pages.md", `---\n${line}\n---\n\n# Pages\n`)).toThrow(
-      `modules/pages.md: frontmatter ${message}`,
-    );
+    expect(() =>
+      pageMeta(md, "/repo/docs", "modules/pages.md", `---\n${line}\n---\n\n# Pages\n`),
+    ).toThrow(`modules/pages.md: frontmatter ${message}`);
   });
 
   // `search-index.md` as a directory index, or a README beside an index.md, would be two files on one route,

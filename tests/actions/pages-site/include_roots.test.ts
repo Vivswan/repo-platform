@@ -7,6 +7,9 @@ import {
 } from "../../../actions/pages-site/.vitepress/derive.ts";
 import { isLandingFile, sourcePathOf } from "../../../actions/pages-site/.vitepress/source-path.ts";
 import { parseSiteConfig } from "../../../actions/pages-site/lib.ts";
+import { vitepressRenderer } from "./vitepress_renderer.ts";
+
+const md = await vitepressRenderer();
 
 const SKILLS = { path: "skills", mount: "skills", page: "SKILL.md" };
 
@@ -149,7 +152,7 @@ describe("include root routes", () => {
       "getting started now",
     ],
   ])("titles a page with %s", (_, file, source, title) => {
-    expect(pageMeta(file, source)).toEqual({ title, order: null, group: null });
+    expect(pageMeta(md, "/repo/docs", file, source)).toEqual({ title, order: null, group: null });
   });
 });
 
