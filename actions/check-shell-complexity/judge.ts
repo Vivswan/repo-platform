@@ -6,8 +6,17 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BinaryCmd, CallExpr, Node, ParseError, WhileClause } from "mvdan-sh";
-import mvdan from "mvdan-sh";
+import {
+  BinCmdOperator,
+  type File,
+  LangVariant,
+  type Node,
+  ParseError,
+  parse,
+  ShSyntaxError,
+  type Word,
+  walk,
+} from "sh-syntax/sync";
 import { capture, failureDetail, succeeded } from "../shared/action_runtime.ts";
 
 export type Dialect = "bash" | "powershell" | "cmd";
@@ -24,6 +33,12 @@ export interface Body {
   code: string;
 }
 
+/** A construct a node opens, at the line a finding names: its keyword's, or a `||` chain's operator's. */
+interface Construct {
+  label: string;
+  line: number;
+}
+
 /** Each dialect as the report names it. */
 export const DIALECT_LABEL: Readonly<Record<Dialect, string>> = {
   bash: "bash/sh/zsh",
@@ -31,33 +46,33 @@ export const DIALECT_LABEL: Readonly<Record<Dialect, string>> = {
   cmd: "cmd",
 };
 
-/** mvdan-sh is Go compiled to JavaScript; `syntax` is its parser package, bound once for every walk below. */
-const { syntax } = mvdan;
+/** sh and zsh bodies parse as bash too: mvdan/sh's bash is a superset of POSIX sh, and its zsh variant is experimental. */
+const AS_BASH = { variant: LangVariant.LangBash } as const;
 
-/** sh and zsh bodies parse as bash too: mvdan's bash is a superset of POSIX sh, and its zsh variant is experimental. */
-const bashParser = syntax.NewParser(syntax.Variant(syntax.LangBash));
+/** sh-syntax gives a language error's place only in its message: `2:6: parameter expansion flags are a zsh feature`. */
+const LANGUAGE_ERROR = /^(\d+):\d+: (.*)$/s;
 
-/** mvdan-sh exposes no operator constants, so the `||` operator's value is read off a parse of `a || b` once. */
-const OR_OPERATOR = (() => {
-  let op = -1;
-  syntax.Walk(bashParser.Parse("a || b", "or.sh"), (node) => {
-    if (node !== null && syntax.NodeType(node) === "BinaryCmd") op = (node as BinaryCmd).Op;
+/** The word's text when it is plain literals only, else "": a quoted or expanded word names no command. */
+function literalOf(word: Word): string {
+  const texts: string[] = [];
+  for (const part of word.parts) {
+    if (part.type !== "Lit") return "";
 
-    return node !== null;
-  });
-  return op;
-})();
+    texts.push(part.value);
+  }
+
+  return texts.join("");
+}
 
 /** A command substitution is refused only where its result is tested: inside `[[ ]]`, or as an argument of `test` or `[`,
  *  reached directly or through the executing wrappers `builtin`, `command`, and `command -p`; `command -v` and `-V`
  *  only look a name up. */
 function testsItsArguments(node: Node): boolean {
-  const type = syntax.NodeType(node);
-  if (type === "TestClause") return true;
+  if (node.type === "TestClause") return true;
 
-  if (type !== "CallExpr") return false;
+  if (node.type !== "CallExpr") return false;
 
-  const words = (node as CallExpr).Args.map((word) => word.Lit());
+  const words = node.args.map(literalOf);
   let at = 0;
   while (words[at] === "command" || words[at] === "builtin") {
     at += 1;
@@ -71,88 +86,84 @@ function testsItsArguments(node: Node): boolean {
   return command === "test" || command === "[";
 }
 
-function isParseError(error: unknown): error is ParseError {
-  return (
-    typeof error === "object" && error !== null && typeof (error as ParseError).Error === "function"
-  );
-}
-
 /** The construct a node opens, or null: an `elif`/`else` branch is its `if`'s, and a `||` directly under a `||` is the
  *  same chain. A command substitution is a construct only where its result is tested. */
-function constructOf(node: Node, parent: Node | undefined, ancestors: Node[]): string | null {
-  switch (syntax.NodeType(node)) {
-    case "IfClause":
-      return parent !== undefined && syntax.NodeType(parent) === "IfClause" ? null : "if";
+function constructOf(node: Node, ancestors: Node[]): Construct | null {
+  switch (node.type) {
+    case "IfClause": {
+      const branch = ancestors.at(-1)?.type === "IfClause";
+      return branch ? null : { label: "if", line: node.position.line };
+    }
     case "CaseClause":
-      return "case";
+      return { label: "case", line: node.case.line };
     case "ForClause":
-      return "for";
+      return { label: "for", line: node.forPos.line };
     case "WhileClause":
-      return (node as WhileClause).Until ? "until" : "while";
+      return { label: node.until ? "until" : "while", line: node.whilePos.line };
     case "BinaryCmd": {
-      if ((node as BinaryCmd).Op !== OR_OPERATOR) return null;
+      if (node.op !== BinCmdOperator.OrStmt) return null;
+
       // `a || b || c` nests right through a Stmt: the inner chain is the outer one.
-      const enclosing = ancestors.findLast((ancestor) => syntax.NodeType(ancestor) !== "Stmt");
-      const chained =
-        enclosing !== undefined &&
-        syntax.NodeType(enclosing) === "BinaryCmd" &&
-        (enclosing as BinaryCmd).Op === OR_OPERATOR;
-      return chained ? null : "||";
+      const enclosing = ancestors.findLast((ancestor) => ancestor.type !== "Stmt");
+      const chained = enclosing?.type === "BinaryCmd" && enclosing.op === BinCmdOperator.OrStmt;
+      return chained ? null : { label: "||", line: node.opPos.line };
     }
     case "CmdSubst": {
       // Only what sits between this substitution and the one enclosing it can test its result, and only through the
       // test command's arguments: `X="$(x)" test -n ok` assigns the substitution, it does not test it.
-      const enclosing = ancestors.findLastIndex(
-        (ancestor) => syntax.NodeType(ancestor) === "CmdSubst",
-      );
+      const enclosing = ancestors.findLastIndex((ancestor) => ancestor.type === "CmdSubst");
       const between = ancestors.slice(enclosing + 1);
       const tester = between.findLastIndex(testsItsArguments);
       if (tester === -1) return null;
 
-      const assigned = between
-        .slice(tester + 1)
-        .some((ancestor) => syntax.NodeType(ancestor) === "Assign");
-      return assigned ? null : "$(...) tested";
+      const assigned = between.slice(tester + 1).some((ancestor) => ancestor.type === "Assign");
+      return assigned ? null : { label: "$(...) tested", line: node.left.line };
     }
     default:
       return null;
   }
 }
 
+/** The finding for a body the parser refused, at the parser's line. */
+function unparsed(error: ShSyntaxError): Refusal {
+  if (error instanceof ParseError) {
+    return { line: error.pos?.line ?? 1, construct: `does not parse as bash: ${error.text}` };
+  }
+
+  const [, line = "1", text = error.message] = LANGUAGE_ERROR.exec(error.message) ?? [];
+  return { line: Number(line), construct: `does not parse as bash: ${text}` };
+}
+
 /** One level of a construct is allowed; a construct inside another is refused, and so is a function at any depth. */
 export function judgeBash(code: string): Refusal[] {
-  let file: Node;
+  let file: File;
   try {
-    file = bashParser.Parse(code, "body.sh");
+    file = parse(code, AS_BASH);
   } catch (error) {
-    if (!isParseError(error)) throw error;
+    if (!(error instanceof ShSyntaxError)) throw error;
 
-    return [{ line: error.Pos.Line(), construct: `does not parse as bash: ${error.Text}` }];
+    return [unparsed(error)];
   }
 
   const refusals: Refusal[] = [];
   const ancestors: Node[] = [];
   const opened: (string | null)[] = [];
-  syntax.Walk(file, (node) => {
-    if (node === null) {
+  walk(file, {
+    enter(node) {
+      const construct = constructOf(node, ancestors);
+      const outer = opened.findLast((label) => label !== null);
+      if (node.type === "FuncDecl") {
+        refusals.push({ line: node.position.line, construct: "function" });
+      } else if (construct !== null && outer !== undefined) {
+        refusals.push({ line: construct.line, construct: `${construct.label} inside ${outer}` });
+      }
+      ancestors.push(node);
+      opened.push(construct?.label ?? null);
+    },
+    exit() {
       ancestors.pop();
       opened.pop();
-      return false;
-    }
-
-    const construct = constructOf(node, ancestors[ancestors.length - 1], ancestors);
-    if (syntax.NodeType(node) === "FuncDecl") {
-      refusals.push({ line: node.Pos().Line(), construct: "function" });
-    } else if (construct !== null) {
-      const outer = opened.findLast((label) => label !== null);
-      if (outer !== undefined) {
-        const line = construct === "||" ? (node as BinaryCmd).OpPos.Line() : node.Pos().Line();
-        refusals.push({ line, construct: `${construct} inside ${outer}` });
-      }
-    }
-    ancestors.push(node);
-    opened.push(construct);
-    return true;
+    },
   });
   return dedupe(refusals);
 }
