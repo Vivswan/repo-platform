@@ -21,19 +21,6 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 /** How many leftover temp entries the failure names; the rest is a count. */
 const LISTED_LEFTOVERS = 20;
 
-/** bun runs no afterAll hook in a file a name filter empties (tests/shared/temp_dir.test.ts pins it), and a signal-killed child may have
- *  died before its hooks, so leftovers are judged only on a full run that exited on its own.
- *  A short-option cluster holding `t` counts as a filter: over-detecting costs a verdict, under-detecting a false red. */
-export function leftoversJudgeable(args: string[], signalCode: string | number | null): boolean {
-  if (signalCode !== null) return false;
-  for (const arg of args) {
-    if (arg === "--") return true;
-    if (arg === "--test-name-pattern" || arg.startsWith("--test-name-pattern=")) return false;
-    if (/^-[^-]/.test(arg) && arg.includes("t")) return false;
-  }
-  return true;
-}
-
 export function leftoverExitCode(exitCode: number, leftovers: string[]): number {
   if (leftovers.length === 0) return exitCode;
   const sorted = [...leftovers].sort();
@@ -66,7 +53,9 @@ async function main(argv: string[]): Promise<number> {
       stdio: ["inherit", "inherit", "inherit"],
     });
     await child.exited;
-    if (!leftoversJudgeable(args, child.signalCode)) return exitCodeOf(child);
+    // A signal-killed child may have died before its hooks ran, so what it left is no verdict on the tests.
+    if (child.signalCode !== null) return exitCodeOf(child);
+
     return leftoverExitCode(exitCodeOf(child), readdirSync(scratch));
   } finally {
     rmSync(scratch, { recursive: true, force: true });

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { leftoversJudgeable } from "../../scripts/run_tests";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -78,11 +77,12 @@ describe("run_tests launcher", () => {
       leaked: false,
     },
     {
+      // A name filter earns no exemption: tests/shared/temp_dir.ts refuses a fixture made while the file loads.
       probe: "name-filtered leaking",
       ending: LEAKING_PASS,
       flags: ["-t", "probe"],
-      exitCode: 0,
-      leaked: false,
+      exitCode: 1,
+      leaked: true,
     },
   ])(
     "a $probe run's fixtures live in the launcher's scratch and die with it (exit $exitCode)",
@@ -90,22 +90,4 @@ describe("run_tests launcher", () => {
       expect(runLauncher(ending, flags)).toEqual({ exitCode, noticed: leaked, named: leaked });
     },
   );
-
-  test("leftoversJudgeable: a signal death or a name filter in any bun spelling stands the verdict down", () => {
-    expect(leftoversJudgeable(["./tests"], null)).toBe(true);
-    expect(leftoversJudgeable(["--only", "-u", "./tests"], null)).toBe(true);
-    expect(leftoversJudgeable(["./tests", "--", "-t", "x"], null)).toBe(true);
-    expect(leftoversJudgeable(["./tests"], "SIGTERM")).toBe(false);
-    for (const args of [
-      ["-t", "x", "./tests"],
-      ["-t=x"],
-      ["-tx"],
-      ["-ut", "x"],
-      ["-utx"],
-      ["--test-name-pattern", "x"],
-      ["--test-name-pattern=x"],
-    ]) {
-      expect(leftoversJudgeable(args, null)).toBe(false);
-    }
-  });
 });
