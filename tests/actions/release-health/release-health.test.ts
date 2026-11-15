@@ -2,7 +2,7 @@
 // gh's (list truncation, pagination, 403 for a rate limit too) and GitHub's (case-insensitive labels, an open PR
 // listed against a commit it merely contains), none of which the code can enforce for itself.
 
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -153,19 +153,21 @@ function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
 // and one removed since is still in it. The head is the one the run was started for (after-refresh mode).
 
 const JUDGED = "1111111111111111111111111111111111111111";
-const eventDir = temp.dir("release-health-");
-const eventPath = join(eventDir, "event.json");
-writeFileSync(
-  eventPath,
-  JSON.stringify({
-    pull_request: {
-      number: 12,
-      labels: [{ name: "autorelease: pending" }, { name: "release-override" }],
-      head: { sha: JUDGED },
-      base: { ref: "main" },
-    },
-  }),
-);
+let eventPath: string;
+beforeAll(() => {
+  eventPath = join(temp.dir("release-health-"), "event.json");
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      pull_request: {
+        number: 12,
+        labels: [{ name: "autorelease: pending" }, { name: "release-override" }],
+        head: { sha: JUDGED },
+        base: { ref: "main" },
+      },
+    }),
+  );
+});
 
 /** The rejection's exact message; `rejects.toThrow(string)` matches a substring and would pass an appended remedy. */
 const rejection = (promise: Promise<unknown>): Promise<string> =>
@@ -536,10 +538,10 @@ describe("runHealthCheck", () => {
   // The multi-label row reads its Config through parseConfig from the env action.yml sets, so the wiring from
   // TRACKING_LABELS to the gates is executed once: a parser that dropped the labels would run no tracking
   // gate and pass, green.
-  test.each<{ reason: string; config: Config; fixture: Fixture; expected: Run }>([
+  test.each<{ reason: string; config: () => Config; fixture: Fixture; expected: Run }>([
     {
       reason: "all gates green is a one-line success",
-      config: prConfig(),
+      config: () => prConfig(),
       fixture: { issues: {}, alerts: [], prViewLabels: [] },
       expected: {
         exit: 0,
@@ -555,7 +557,7 @@ describe("runHealthCheck", () => {
     },
     {
       reason: "an empty tracking-label list runs no tracking gate",
-      config: prConfig({ trackingLabels: [] }),
+      config: () => prConfig({ trackingLabels: [] }),
       fixture: { issues: {}, alerts: [], prViewLabels: [] },
       expected: {
         exit: 0,
@@ -571,12 +573,13 @@ describe("runHealthCheck", () => {
     },
     {
       reason: "each tracking label from the env is its own gate, queried and reported by label",
-      config: parseConfig({
-        GITHUB_REPOSITORY: REPO,
-        MODE: "pull-request",
-        GITHUB_EVENT_PATH: eventPath,
-        TRACKING_LABELS: "fuzz-nightly,nightly-failure",
-      } as NodeJS.ProcessEnv),
+      config: () =>
+        parseConfig({
+          GITHUB_REPOSITORY: REPO,
+          MODE: "pull-request",
+          GITHUB_EVENT_PATH: eventPath,
+          TRACKING_LABELS: "fuzz-nightly,nightly-failure",
+        } as NodeJS.ProcessEnv),
       fixture: {
         issues: { "fuzz-nightly": [], "nightly-failure": [3], "release-blocker": [] },
         alerts: [],
@@ -597,7 +600,7 @@ describe("runHealthCheck", () => {
     {
       reason:
         "each failing gate is an error annotation with its advice, exit 1; the advisory security gate warns first and fails nothing",
-      config: prConfig(),
+      config: () => prConfig(),
       fixture: {
         issues: { "fuzz-nightly": [2], "release-blocker": [7] },
         alerts: [11],
@@ -626,7 +629,7 @@ describe("runHealthCheck", () => {
     {
       reason:
         "the override turns failures into warnings plus a loud notice, exit 0, every gate still run; an advisory alert is no failure to bypass",
-      config: prConfig(),
+      config: () => prConfig(),
       fixture: {
         issues: { "fuzz-nightly": [], "release-blocker": [7] },
         alerts: [5],
@@ -650,7 +653,7 @@ describe("runHealthCheck", () => {
       },
     },
   ])("pull-request mode: $reason", async ({ config, fixture, expected }) => {
-    expect(await run(config, fixture)).toEqual(expected);
+    expect(await run(config(), fixture)).toEqual(expected);
   });
 
   // `release-cut` is fleet-release.yml's switch: "true" tags the release-PR merge and drafts the release, "false"

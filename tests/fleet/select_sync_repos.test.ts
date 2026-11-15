@@ -33,8 +33,8 @@ const temp = tempDirs();
 //   badlist, hidden-nomods        -> unreadable modules lists, filter runs only: anywhere else they would select and shift each exact row list
 describe("select_sync_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_sync_repos.ts");
-  const root = temp.dir("select-sync-");
-  const fixture = join(root, "fixture");
+  let root: string;
+  let fixture: string;
 
   const discovered = [
     { repo: "Vivswan/steady", private: false },
@@ -54,6 +54,8 @@ describe("select_sync_repos.ts", () => {
   const file = (body: string): FakeReply[] => [{ status: 200, body }];
 
   beforeAll(async () => {
+    root = temp.dir("select-sync-");
+    fixture = join(root, "fixture");
     api = await spawnFakeGithub(
       {
         [registration("unadopted")]: [{ status: 404 }],

@@ -15,6 +15,7 @@ import { MANIFEST_NAME } from "../../../actions/shared/platform.ts";
 import { sha256 } from "../../../actions/shared/values.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../../shared/fixture_git";
+import type { LoopbackServer } from "../../shared/loopback_server";
 import { tempDirs } from "../../shared/temp_dir";
 import { snapshotTree } from "../../shared/tree_snapshot";
 import { spawnStubUpstream } from "../../shared/upstream_server";
@@ -23,10 +24,13 @@ import { spawnStubUpstream } from "../../shared/upstream_server";
 
 const temp = tempDirs();
 const REPO_ROOT = new URL("../../..", import.meta.url).pathname;
-const upstream = await spawnStubUpstream(
-  parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
-  temp.dir("check-upstream-"),
-);
+let upstream: LoopbackServer;
+beforeAll(async () => {
+  upstream = await spawnStubUpstream(
+    parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
+    temp.dir("check-upstream-"),
+  );
+});
 afterAll(() => upstream.stop());
 
 // The fixtures record BUILD as the commit they were synced at; REGISTRATION is the least the writer accepts, and

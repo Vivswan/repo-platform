@@ -1,9 +1,10 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { parseFilesConfig } from "../../actions/plan/files_config";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import type { LoopbackServer } from "../shared/loopback_server";
 import { tempDirs } from "../shared/temp_dir";
 import { spawnStubUpstream } from "../shared/upstream_server";
 
@@ -13,7 +14,10 @@ const temp = tempDirs();
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 const SCRIPT = join(REPO_ROOT, ".github/scripts/ci/write_fleet_lint_tree.ts");
 const FILES = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
-const upstream = await spawnStubUpstream(FILES, temp.dir("fleet-lint-upstream-"));
+let upstream: LoopbackServer;
+beforeAll(async () => {
+  upstream = await spawnStubUpstream(FILES, temp.dir("fleet-lint-upstream-"));
+});
 afterAll(() => upstream.stop());
 
 describe("write_fleet_lint_tree.ts", () => {

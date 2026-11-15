@@ -100,7 +100,22 @@ describe("captureNetwork", () => {
 });
 
 describe("the dispatch inputs", () => {
-  const root = temp.dir("discovery-dispatch-");
+  let root: string;
+  let dispatchEntry: string;
+  beforeAll(() => {
+    root = temp.dir("discovery-dispatch-");
+    // The malformed cases exit the process (parseJsonWith), so they run behind
+    // a subprocess entry file.
+    dispatchEntry = join(root, "dispatch_entry.ts");
+    writeFileSync(
+      dispatchEntry,
+      [
+        `import { readDispatchAddModules, readDispatchBranch, readDispatchRepo } from ${JSON.stringify(DISCOVERY)};`,
+        "console.log(JSON.stringify([readDispatchRepo(), readDispatchBranch(), readDispatchAddModules()]));",
+        "",
+      ].join("\n"),
+    );
+  });
 
   function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
     const saved = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
@@ -237,18 +252,6 @@ describe("the dispatch inputs", () => {
     });
   });
 
-  // The malformed cases exit the process (parseJsonWith), so they run behind
-  // a subprocess entry file.
-  const dispatchEntry = join(root, "dispatch_entry.ts");
-  writeFileSync(
-    dispatchEntry,
-    [
-      `import { readDispatchAddModules, readDispatchBranch, readDispatchRepo } from ${JSON.stringify(DISCOVERY)};`,
-      "console.log(JSON.stringify([readDispatchRepo(), readDispatchBranch(), readDispatchAddModules()]));",
-      "",
-    ].join("\n"),
-  );
-
   // A bare identifier is the leaking form of an unparsable payload: Bun's raw JSON.parse error echoes it
   // ('Unexpected identifier "hiddenserver"'), so the fixed diagnostic must replace it.
   test.each<{
@@ -316,7 +319,8 @@ describe("the dispatch inputs", () => {
 // discoverWritableRepos exits the process on failure, so it runs behind a
 // subprocess entry file against a loopback API.
 describe("discoverWritableRepos", () => {
-  const root = temp.dir("discovery-proc-");
+  let root: string;
+  let discoverEntry: string;
   const LABEL = "discovery.test: user/repos response";
 
   function repoEntry(full_name: string, overrides: Record<string, unknown> = {}) {
@@ -357,6 +361,18 @@ describe("discoverWritableRepos", () => {
   };
   const servers: Record<string, LoopbackServer> = {};
   beforeAll(async () => {
+    root = temp.dir("discovery-proc-");
+    discoverEntry = join(root, "discover_entry.ts");
+    writeFileSync(
+      discoverEntry,
+      [
+        `import { discoverWritableRepos } from ${JSON.stringify(DISCOVERY)};`,
+        `import { GitHubClient } from ${JSON.stringify(GITHUB)};`,
+        `const repos = await discoverWritableRepos(new GitHubClient(), ${JSON.stringify(LABEL)});`,
+        "console.log(JSON.stringify(repos.map((repo) => repo.full_name)));",
+        "",
+      ].join("\n"),
+    );
     for (const [name, replies] of Object.entries(LISTINGS)) {
       servers[name] = await spawnFakeGithub({ "user/repos": replies }, join(root, `${name}.log`));
     }
@@ -364,18 +380,6 @@ describe("discoverWritableRepos", () => {
   afterAll(() => {
     for (const server of Object.values(servers)) server.stop();
   });
-
-  const discoverEntry = join(root, "discover_entry.ts");
-  writeFileSync(
-    discoverEntry,
-    [
-      `import { discoverWritableRepos } from ${JSON.stringify(DISCOVERY)};`,
-      `import { GitHubClient } from ${JSON.stringify(GITHUB)};`,
-      `const repos = await discoverWritableRepos(new GitHubClient(), ${JSON.stringify(LABEL)});`,
-      "console.log(JSON.stringify(repos.map((repo) => repo.full_name)));",
-      "",
-    ].join("\n"),
-  );
 
   function runDiscover(name: string) {
     return boundedSpawnSync(["bun", discoverEntry], {

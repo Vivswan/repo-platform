@@ -17,6 +17,7 @@ import { MANIFEST_NAME } from "../../../.github/scripts/sync/writer/manifest.ts"
 import { sha256 } from "../../../actions/shared/values.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../../shared/fixture_git";
+import type { LoopbackServer } from "../../shared/loopback_server";
 import { tempDirs } from "../../shared/temp_dir";
 import { snapshotTree } from "../../shared/tree_snapshot";
 import { spawnUpstream } from "../../shared/upstream_server";
@@ -25,7 +26,10 @@ const temp = tempDirs();
 const REPO_ROOT = new URL("../../..", import.meta.url).pathname;
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const FIXTURES = join(REPO_ROOT, "tests/ci/sync_end_to_end/fixtures");
-const upstream = await spawnUpstream(join(FIXTURES, "upstream"));
+let upstream: LoopbackServer;
+beforeAll(async () => {
+  upstream = await spawnUpstream(join(FIXTURES, "upstream"));
+});
 afterAll(() => upstream.stop());
 const REGISTRATION =
   "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n" +

@@ -10,7 +10,7 @@ const temp = tempDirs();
 
 describe("discover_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/discover_repos.ts");
-  const root = temp.dir("discover-repos-");
+  let root: string;
 
   let api: LoopbackServer;
   let downApi: LoopbackServer;
@@ -27,6 +27,7 @@ describe("discover_repos.ts", () => {
   }
 
   beforeAll(async () => {
+    root = temp.dir("discover-repos-");
     api = await spawnFakeGithub(
       {
         user: [{ status: 200, body: { login: "Vivswan" } }],
