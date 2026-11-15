@@ -4,10 +4,11 @@
 // rendered, and nothing without it. The test reads the two rust files alone,
 // so every upstream file is a stub and never the network.
 
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFilesConfig } from "../../actions/plan/files_config";
+import type { LoopbackServer } from "../shared/loopback_server";
 import { syncedCheckout } from "../shared/synced_checkout";
 import { tempDirs } from "../shared/temp_dir";
 import { spawnStubUpstream } from "../shared/upstream_server";
@@ -15,7 +16,10 @@ import { spawnStubUpstream } from "../shared/upstream_server";
 const temp = tempDirs();
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
-const upstream = await spawnStubUpstream(config, temp.dir("clippy-floor-upstream-"));
+let upstream: LoopbackServer;
+beforeAll(async () => {
+  upstream = await spawnStubUpstream(config, temp.dir("clippy-floor-upstream-"));
+});
 afterAll(() => upstream.stop());
 
 interface LintTables {

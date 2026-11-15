@@ -5,7 +5,7 @@
 // there, and the stale PR passes green with no refresh, so the record written to GITHUB_OUTPUT is pinned too, read
 // back the way the runner reads it.
 
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
@@ -14,7 +14,6 @@ import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../../actions/release-health/freshness.ts");
-const scratch = temp.dir("release-freshness-");
 
 const GIT_PINS = {
   GIT_CONFIG_GLOBAL: "/dev/null",
@@ -37,7 +36,7 @@ function git(repo: string, args: string[]): string {
 }
 
 /** main: root -> tip, with origin/main at the tip; `fresh` branches from the tip, `stale` from the root. */
-function history(): { repo: string; tip: string } {
+function history(scratch: string): { repo: string; tip: string } {
   const repo = join(scratch, "repo");
   mkdirSync(repo);
   git(repo, ["init", "-q", "-b", "main"]);
@@ -53,7 +52,13 @@ function history(): { repo: string; tip: string } {
   return { repo, tip };
 }
 
-const { repo, tip } = history();
+let scratch: string;
+let repo: string;
+let tip: string;
+beforeAll(() => {
+  scratch = temp.dir("release-freshness-");
+  ({ repo, tip } = history(scratch));
+});
 
 interface Check {
   exitCode: number;
@@ -78,42 +83,42 @@ function check(branch: string, base: string): Check {
   };
 }
 
-test.each<{ reason: string; branch: string; base: string; expected: Check }>([
+test.each<{ reason: string; branch: string; base: string; expected: () => Check }>([
   {
     reason: "the head contains the base tip",
     branch: "fresh",
     base: "main",
-    expected: {
+    expected: () => ({
       exitCode: 0,
       stdout: `release PR contains the main tip (${tip})`,
       stderr: "",
       outputs: { behind: "false" },
-    },
+    }),
   },
   {
     reason: "the head behind the base tip is a warning and behind=true, never a failure",
     branch: "stale",
     base: "main",
-    expected: {
+    expected: () => ({
       exitCode: 0,
       stdout: `::warning::Release PR is behind main (tip ${tip}); its version and changelog would miss commits already on main. release-please refreshes it from main in this run.`,
       stderr: "",
       outputs: { behind: "true" },
-    },
+    }),
   },
   {
     reason:
       "no origin/<base> in the checkout is an errored look, never a verdict in either direction",
     branch: "fresh",
     base: "develop",
-    expected: {
+    expected: () => ({
       exitCode: 1,
       stdout:
         "::error::origin/develop does not resolve in this checkout (fatal: Needed a single revision); the check needs a full-history checkout of the PR head",
       stderr: "",
       outputs: {},
-    },
+    }),
   },
 ])("$reason", ({ branch, base, expected }) => {
-  expect(check(branch, base)).toEqual(expected);
+  expect(check(branch, base)).toEqual(expected());
 });

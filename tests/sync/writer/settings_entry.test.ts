@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -101,7 +101,10 @@ function tree(layers: Record<string, string> = LAYERS): string {
   return root;
 }
 
-const TREE = tree();
+let TREE: string;
+beforeAll(() => {
+  TREE = tree();
+});
 const CONFIG = (() => {
   const config = parseFilesConfig(FILES_YML);
   return { ...config, trackingTuples: trackingTuples(config).tuples };

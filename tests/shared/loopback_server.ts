@@ -8,9 +8,12 @@ export interface LoopbackServer {
 }
 
 /** Bound: the only read is the port line, and a child that exits without printing ends it; the child itself lives until
- *  stop() kills it, which the caller's afterAll owns. */
+ *  stop() kills it, which the caller's afterAll owns. Start it from beforeAll.
+ *
+ *  `--no-orphans` ends a child whose spawner died without stop(): bun runs no afterAll in a file whose tests a name
+ *  filter empties. */
 export async function spawnLoopback(argv: string[], label: string): Promise<LoopbackServer> {
-  const proc = Bun.spawn(["bun", ...argv], { stdout: "pipe", stderr: "inherit" });
+  const proc = Bun.spawn(["bun", "--no-orphans", ...argv], { stdout: "pipe", stderr: "inherit" });
   const reader = proc.stdout.getReader();
   let text = "";
   while (!text.includes("\n")) {

@@ -45,7 +45,7 @@ const keyOf = rowKeyOf("stub-token", RUN_ID);
 // and the matrix output names no target at all: each row rides as its index and the plan's key.
 describe("select_settings_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_settings_repos.ts");
-  const root = temp.dir("select-settings-");
+  let root: string;
   let probes: LoopbackServer;
   let api: LoopbackServer;
   let handWrittenApi: LoopbackServer;
@@ -96,6 +96,7 @@ describe("select_settings_repos.ts", () => {
   };
 
   beforeAll(async () => {
+    root = temp.dir("select-settings-");
     api = await spawnFakeGithub(ROUTES, join(root, "api.log"));
     handWrittenApi = await spawnFakeGithub(
       { ...ROUTES, [settings("steady")]: file("repository:\n  description: mine\n") },
