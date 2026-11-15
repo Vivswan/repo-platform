@@ -62,16 +62,28 @@ No token is stored anywhere: npm checks the run's OIDC token against that publis
 ### The pull request that adds the module
 
 ```text
-ci.yml passes no release-branch -> merge the platform's own sync PR first: the label below cannot change a workflow file
 PR adds npm to modules  -> validate-managed-files is red: the hook starter is not on the branch yet
 add repo-platform:sync  -> the sync commits the hook starter and the manifest stamp onto the branch
                         -> the CI and PR Title runs of that commit show action_required: approve them, or push a commit
+   or "NOT pushed"      -> the sync also changes a workflow file (a ci.yml that is behind): see the table below
 a sync lands on main    -> the PR conflicts on .github/repo-platform-manifest.json: merge main, then add the label again
 merge it as feat: ...   -> the release PR refreshes, and the first `next` publishes
 ```
 
 - **The red check and the held runs** are every module change's, owned by [a module change on a pull request](../platform/sync/operator.md#a-module-change-on-a-pull-request): GitHub holds the runs of a commit the repository token pushed.
-- **A `ci.yml` whose `npm-next` job passes no `release-branch`** is from before `next` read the release PR, and only the platform's own sync PR updates it. The label's sync fails when its diff touches a file under `.github/workflows/`, with a comment naming the paths, and commits nothing. So merge the sync PR first, then open this one.
+- **The label delivers this module only while every managed workflow is up to date.** The module's own file is the hook, an action. The label's sync commits its whole diff or nothing, with the repository token, which cannot write under `.github/workflows/`:
+
+  | The sync's diff holds                          | The label                                        | Then                                                                                                                         |
+  | ---------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+  | the hook and the manifest stamp                | pushes one commit                                | approve the held runs                                                                                                        |
+  | a workflow file too, a `ci.yml` that is behind | commits nothing; its comment names each workflow | merge the repository's open sync PR, merge main, and add the label again; or the platform's owner dispatches the sync, below |
+
+  ```bash
+  gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>
+  ```
+
+- **A `ci.yml` whose `npm-next` job passes no `release-branch`** is from before `next` read the release PR: the second row above. Until it is updated, an `npm-next` run that gets as far as reading that branch fails, naming the sync PR to merge.
+- **A check that refuses the registration instead,** with `module "npm" is not a module files.yml offers` or `Unrecognized key: "npm"`, means the build this repository's manifest records is older than the module. Either route in the second row moves it: both sync at `stable` and restamp the manifest.
 - **The conflict can return when a sync with a different build lands on main** while the PR is open: both sides restamp the manifest, and identical stamps merge cleanly. Keep the PR short-lived.
 - **The title needs a type release-please puts in the changelog,** `feat` or `fix`. Under `chore` the release PR does not refresh, so nothing publishes to `next` until a later commit refreshes it.
 

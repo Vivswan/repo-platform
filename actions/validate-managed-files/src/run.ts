@@ -33,19 +33,35 @@ interface Paths {
 
 const notJudged = (reason: string): Integrity => ({ kind: "not-judged", reason });
 
+/** The recorded build refuses a registration key or module the platform added after it, and its message cannot say so. */
+function olderBuildHint(short: string, behind: number): string {
+  return (
+    `\n\nThis repository's manifest records build ${short}, and ${DELIVERY_REF} is ${behind} ${behind === 1 ? "commit" : "commits"} past it. ` +
+    `A registration key or module the platform added after ${short} is refused here until a sync restamps the manifest: ` +
+    `merge this repository's open sync PR and update this branch, or sync this branch (the \`${SYNC_LABEL}\` label, ` +
+    "or the owner's branch dispatch when the sync changes a workflow file)."
+  );
+}
+
 /** What check.ts printed, fenced as a diff (its lines are finding lines and unified diffs), with the remedy. The
- *  writer's refusal (exit 2) carries its own remedy. */
-function checkFindings(short: string, exitCode: number, output: string): string {
-  const remedy =
-    exitCode === 2
-      ? ""
-      : `\n\nEach path named differs from what ${PLATFORM_NAME} writes at the commit this repository was synced ` +
-        "with (the + lines are the sync's). Restore it from git history, or run the sync: on a pull request, the " +
-        `\`${SYNC_LABEL}\` label syncs its branch and brings a registration change's files with it.`;
+ *  writer's refusal (exit 2) carries its own remedy, plus the older build's hint when `stable` is `behind` commits ahead. */
+function checkFindings(
+  short: string,
+  exitCode: number,
+  output: string,
+  behind: number | null,
+): string {
+  const drift =
+    `\n\nEach path named differs from what ${PLATFORM_NAME} writes at the commit this repository was synced ` +
+    "with (the + lines are the sync's). Restore it from git history, or run the sync: on a pull request, the " +
+    `\`${SYNC_LABEL}\` label syncs its branch and brings a registration change's files with it, unless the sync ` +
+    "changes a workflow file: that one is the owner's branch dispatch.";
+  const refusal = behind === null ? "" : olderBuildHint(short, behind);
+  const remedy = exitCode === 2 ? refusal : drift;
   return `#### ${PLATFORM_NAME} at ${short}\n\n\`\`\`diff\n${output}\n\`\`\`${remedy}`;
 }
 
-function judgeCheck(result: RunResult, short: string): Integrity {
+function judgeCheck(result: RunResult, short: string, behind: number | null): Integrity {
   if (result.stderr !== "") console.error(result.stderr);
 
   const output = result.stdout.replace(/\n+$/, "");
@@ -53,7 +69,7 @@ function judgeCheck(result: RunResult, short: string): Integrity {
   if (exit.kind === "exited" && exit.code === 0) return { kind: "clean" };
 
   if (exit.kind === "exited" && (exit.code === 1 || exit.code === 2) && output !== "") {
-    return { kind: "findings", findings: checkFindings(short, exit.code, output) };
+    return { kind: "findings", findings: checkFindings(short, exit.code, output, behind) };
   }
 
   return notJudged(
@@ -61,12 +77,18 @@ function judgeCheck(result: RunResult, short: string): Integrity {
   );
 }
 
-/** Information only: the exit code never follows it. */
-async function reportFreshness(platform: string, commit: string, short: string): Promise<void> {
+/** Information only: the exit code never follows it. Returns how many commits `stable` is past the recorded one, or
+ *  null when it is not ahead or git could not say. */
+async function reportFreshness(
+  platform: string,
+  commit: string,
+  short: string,
+): Promise<number | null> {
   const git = (args: string[]) =>
     capture(["git", ...args], { cwd: platform, timeoutMs: STEP_TIMEOUT_MS });
   const tag = git(["rev-parse", "--verify", "--quiet", `refs/tags/${DELIVERY_REF}^{commit}`]);
   let line: string;
+  let behind: number | null = null;
   if (!succeeded(tag.exit)) {
     line = `The ${DELIVERY_REF} tag was not fetched, so freshness is unknown.`;
     warning(line);
@@ -80,6 +102,7 @@ async function reportFreshness(platform: string, commit: string, short: string):
       ? git(["rev-list", "--count", `${commit}..${tip}`])
       : null;
     if (count !== null && succeeded(count.exit)) {
+      behind = Number(count.stdout.trim());
       line =
         `${DELIVERY_REF} moved ${count.stdout.trim()} commits past the synced commit (${short} -> ${tip.slice(0, 12)}). ` +
         "A sync moves this repository's judge once it writes a change or the checker differs. Nothing here fails for that.";
@@ -93,6 +116,7 @@ async function reportFreshness(platform: string, commit: string, short: string):
     }
   }
   await summary.addRaw(`${line}\n\n`).write();
+  return behind;
 }
 
 async function judgeAtRecordedCommit(paths: Paths, commit: string): Promise<Integrity> {
@@ -133,8 +157,8 @@ async function judgeAtRecordedCommit(paths: Paths, commit: string): Promise<Inte
     ],
     { cwd: paths.root, timeoutMs: STEP_TIMEOUT_MS },
   );
-  await reportFreshness(paths.platform, commit, short);
-  return judgeCheck(checked, short);
+  const behind = await reportFreshness(paths.platform, commit, short);
+  return judgeCheck(checked, short, behind);
 }
 
 function hygiene(paths: Paths): Integrity {

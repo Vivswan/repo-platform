@@ -16,7 +16,7 @@ permissions: {}
 
 jobs:
   # Whether this event starts a fix: the fix-lint label always, a push only when the registration declares autofix.push
-  # and a changed file matches its `on` list.
+  # and a changed file matches its `on` list. A default branch that does not select the module starts none, green.
   plan:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -94,14 +94,16 @@ jobs:
   # No pull request code runs here. The head sha is checked out into head/ and the default branch into base/, so no
   # process starts inside the pull request's tree, where its bunfig.toml would configure the platform's bun.
   #   !cancelled()  -> a failed stage still reaches the label's removal; every other step gates on the stage's success
-  #   a failed plan -> on the label the job runs for the removal alone, so a broken registration leaves no label behind
+  #   the label     -> the job runs for the removal alone when no fix was planned (a failed plan, a default branch
+  #                    that does not select the module), so no run leaves the label behind
   push:
     needs: [plan, stage]
     if: >-
       !cancelled() &&
       github.event_name == 'pull_request' &&
       (needs.plan.outputs.run == 'true' ||
-      (needs.plan.result == 'failure' && github.event.action == 'labeled'))
+      (github.event.action == 'labeled' &&
+      (needs.plan.result == 'failure' || needs.plan.outputs.run == 'false')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
