@@ -48,10 +48,10 @@ test("the skills pins share one sha and the `# main` comment, the skills checkou
   const verify = at((step) => (step.run ?? "").includes("pinact run"));
   expect(writer).toBeGreaterThanOrEqual(0);
   expect(verify).toBeGreaterThan(writer);
-  // -verify-comment is what resolves each version comment's tag and compares it with the sha (pinact code 001); without it
+  // --verify-comment is what resolves each version comment's tag and compares it with the sha (pinact code 001); without it
   // a stale or lying comment passes, and delivery_pins judges comment shape alone.
   const commands = (steps[verify].run ?? "")
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("#"));
-  expect(commands.join("\n")).toMatch(/\bpinact run -check -verify-comment\)?$/m);
+  expect(commands.join("\n")).toMatch(/\bpinact run --check --verify-comment\)?$/m);
 });
