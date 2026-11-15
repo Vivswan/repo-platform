@@ -3,7 +3,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import matter from "gray-matter";
+import type { MarkdownEnv, MarkdownRenderer } from "vitepress";
 import { isLocaleDir, isUnwalkedEntry, owningRoot } from "./conventions.ts";
 
 /** Only directories that carry markdown count. */
@@ -81,16 +81,25 @@ export interface PageMeta {
   group: string | null;
 }
 
-export function readPage(srcDir: string, file: string): PageMeta {
-  return pageMeta(file, readFileSync(join(srcDir, file), "utf-8"));
+export function readPage(md: MarkdownRenderer, srcDir: string, file: string): PageMeta {
+  return pageMeta(md, srcDir, file, readFileSync(join(srcDir, file), "utf-8"));
 }
 
-/** `file` names the page in the error a malformed key raises, so a fleet repository's docs PR check points at it. */
-export function pageMeta(file: string, source: string): PageMeta {
-  const { data, content } = matter(source);
-  const heading = /^#\s+(.+?)\s*$/m.exec(content)?.[1] ?? null;
+/** The title is the one VitePress's own renderer gives the page's first h1, so the sidebar row is the page's title.
+ *  `file` names the page in the error a malformed key raises, so a fleet repository's docs PR check points at it. */
+export function pageMeta(
+  md: MarkdownRenderer,
+  srcDir: string,
+  file: string,
+  source: string,
+): PageMeta {
+  // The path is the snippet rule's: `<<< ./file` resolves beside the page.
+  const env: MarkdownEnv = { path: join(srcDir, file), relativePath: file, cleanUrls: false };
+  md.render(source, env);
+  const data = env.frontmatter ?? {};
+
   return {
-    title: text(data.title) ?? heading ?? untitledPageTitle(file, data.name),
+    title: text(data.title) ?? text(env.title) ?? untitledPageTitle(file, data.name),
     order: frontmatterOrder(file, data.order),
     group: frontmatterGroup(file, data.group),
   };

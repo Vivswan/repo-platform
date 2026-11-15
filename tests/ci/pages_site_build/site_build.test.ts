@@ -375,7 +375,7 @@ describe("the theme in the built pages", () => {
       "Zulu",
       "Delta",
       "Alerts",
-      "Bravo",
+      "Bravo notes",
       "Setup",
       "Guide",
       "Guide",
@@ -391,6 +391,10 @@ describe("the theme in the built pages", () => {
       "beta",
       "Gamma",
       "SKILL",
+    ]);
+    // The row above is the h1's text, as the document title is: the config reads both from VitePress's renderer.
+    expect(texts(readSite(site, "docs/latest/bravo.html"), "title")).toEqual([
+      "Bravo notes | Fixture Docs",
     ]);
     expect(readSite(site, "docs/latest/delta.html")).not.toContain("group: Basics");
     expect(readSite(site, "docs/latest/zulu.html")).not.toContain("order: 1");

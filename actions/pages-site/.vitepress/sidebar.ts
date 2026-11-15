@@ -1,5 +1,6 @@
 // A page's place comes from its own frontmatter (`order`, `group`) and its title: the fleet's repos carry only markdown.
 
+import type { MarkdownRenderer } from "vitepress";
 import { deriveRewrites, detectLocales, type PageMeta, readPage, routeOf } from "./derive.ts";
 import { dirTitle } from "./dir-title.ts";
 import { isLandingFile } from "./source-path.ts";
@@ -24,8 +25,8 @@ export interface PageSource {
   page(file: string): PageMeta;
 }
 
-export function fileSource(srcDir: string): PageSource {
-  return { page: (file) => readPage(srcDir, file) };
+export function fileSource(md: MarkdownRenderer, srcDir: string): PageSource {
+  return { page: (file) => readPage(md, srcDir, file) };
 }
 
 export function sidebarTrees(files: string[]): { prefix: string; files: string[] }[] {
