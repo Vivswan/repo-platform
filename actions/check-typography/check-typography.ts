@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as core from "@actions/core";
 import { AmbiguousCharacters, InvisibleCharacters } from "monaco-editor/base/common/strings.js";
+import { codeSpan } from "../../.github/scripts/shared/markdown_code.ts";
 import { capture, failureDetail } from "../shared/action_runtime.ts";
 import { type Outcome, runCheck } from "../shared/check_main.ts";
 import { repositoryFiles } from "../shared/repository_files.ts";
@@ -245,7 +246,9 @@ function report(outcome: Outcome<Verdict>): string {
     "",
     "| Where | Character |",
     "| --- | --- |",
-    ...findings.map(({ path, line, what }) => `| \`${cell(path)}:${line}\` | ${cell(what)} |`),
+    ...findings.map(
+      ({ path, line, what }) => `| ${cell(codeSpan(`${path}:${line}`))} | ${cell(what)} |`,
+    ),
   );
   return `${parts.join("\n")}\n`;
 }

@@ -609,7 +609,8 @@ describe("the check over a checkout", () => {
     const root = checkout(temp, "check-shell-complexity-", {
       ".github/workflows/release.yml": INCIDENT,
       "actions/pin/action.yml": PIN_ACTION,
-      "scripts/a|b.sh": "#!/bin/bash\nif true; then\n  make || echo failed\nfi\n",
+      "scripts/a|b`[x](evil.example)`.sh":
+        "#!/bin/bash\nif true; then\n  make || echo failed\nfi\n",
       "scripts/open.sh": "echo 'never closed\n",
       [ALLOWLIST_FILE]: "actions/pin/action.yml # the pre-bun pin walk\n",
     });
@@ -617,7 +618,7 @@ describe("the check over a checkout", () => {
       exitCode: 1,
       stdout: [
         `::error file=.github/workflows/release.yml,line=20::.github/workflows/release.yml:20: $(...) tested inside if; ${REMEDY}`,
-        `::error file=scripts/a|b.sh,line=3::scripts/a|b.sh:3: || inside if; ${REMEDY}`,
+        `::error file=scripts/a|b\`[x](evil.example)\`.sh,line=3::scripts/a|b\`[x](evil.example)\`.sh:3: || inside if; ${REMEDY}`,
         `::error file=scripts/open.sh,line=1::scripts/open.sh:1: does not parse as bash: reached EOF without closing quote \`'\`; ${REMEDY}`,
         "",
       ].join("\n"),
@@ -630,8 +631,8 @@ describe("the check over a checkout", () => {
         "",
         "| Where | Construct | Source |",
         "| --- | --- | --- |",
-        "| `.github/workflows/release.yml:20` | `` $(...) tested inside if `` | workflow run step, bash/sh/zsh |",
-        "| `scripts/a\\|b.sh:3` | `` \\|\\| inside if `` | script file, bash/sh/zsh |",
+        "| `.github/workflows/release.yml:20` | `$(...) tested inside if` | workflow run step, bash/sh/zsh |",
+        "| ``scripts/a\\|b`[x](evil.example)`.sh:3`` | `\\|\\| inside if` | script file, bash/sh/zsh |",
         "| `scripts/open.sh:1` | `` does not parse as bash: reached EOF without closing quote `'` `` | script file, bash/sh/zsh |",
         "",
         `Move each block to a TypeScript script run by bun, or list the file in \`${ALLOWLIST_FILE}\` with a \`# reason\` (a block that must stay shell).`,

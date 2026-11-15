@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import * as core from "@actions/core";
+import { codeSpan } from "../../.github/scripts/shared/markdown_code.ts";
 import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
 import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
 import { isManaged } from "../shared/managed_header.ts";
@@ -245,7 +246,7 @@ function census(verdict: Verdict): string {
 
   if (verdict.unreadable.length > 0) {
     parts.push(
-      `${verdict.unreadable.length} file(s) not readable as yaml and skipped: ${verdict.unreadable.map((problem) => `\`${where(problem)}\``).join(", ")}.`,
+      `${verdict.unreadable.length} file(s) not readable as yaml and skipped: ${verdict.unreadable.map((problem) => codeSpan(where(problem))).join(", ")}.`,
     );
   }
 
@@ -274,10 +275,9 @@ export function report(outcome: Outcome): string {
         "",
         "| Where | Construct | Source |",
         "| --- | --- | --- |",
-        // The construct's code span is two backticks wide: a parser message quotes with single ones.
         ...findings.map(
           (finding) =>
-            `| \`${cell(where(finding))}\` | \`\` ${cell(finding.construct)} \`\` | ${SOURCE_LABEL[finding.source]}, ${DIALECT_LABEL[finding.dialect]} |`,
+            `| ${cell(codeSpan(where(finding)))} | ${cell(codeSpan(finding.construct))} | ${SOURCE_LABEL[finding.source]}, ${DIALECT_LABEL[finding.dialect]} |`,
         ),
       );
     }

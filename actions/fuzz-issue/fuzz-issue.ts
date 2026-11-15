@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 import { setFailed, setOutput } from "@actions/core";
+import { codeSpan } from "../../.github/scripts/shared/markdown_code.ts";
 
 /** Lines of a report a summarized block quotes; a block shown in full is uncapped. */
 const REPORT_LINES = 60;
@@ -177,7 +178,7 @@ export function buildBody(
   // Without an artifact the body is the only record, so every report rides whole, cut only at its share of the body limit.
   const summary = artifactName !== "";
   const artifactsNote = summary
-    ? `\nThe full ${words.artifacts}${words.artifactsDetail} are attached to the run as \`${artifactName}\`.`
+    ? `\nThe full ${words.artifacts}${words.artifactsDetail} are attached to the run as ${codeSpan(artifactName)}.`
     : "";
   // Reserved up front at its largest count, whether or not it is shown.
   const omissionNotice = (count: number) =>
@@ -224,7 +225,7 @@ export function buildBody(
 
 export function buildGenericBody(env: NodeJS.ProcessEnv): string {
   const date = new Date().toISOString().slice(0, 10);
-  const workflow = env.GITHUB_WORKFLOW ? `\`${env.GITHUB_WORKFLOW}\`` : "The nightly workflow";
+  const workflow = env.GITHUB_WORKFLOW ? codeSpan(env.GITHUB_WORKFLOW) : "The nightly workflow";
   const url = runUrl(env);
   const parts = [
     `${workflow} failed on ${date}.`,

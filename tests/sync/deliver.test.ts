@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   BODY_CAP,
   boundedReport,
+  branchSummary,
   closedFences,
   failureBody,
   prBody,
@@ -903,6 +904,20 @@ describe("closedFences", () => {
   ])("$reason", ({ text, closed }) => {
     expect(closedFences(text)).toBe(closed);
   });
+});
+
+// A dispatched branch's name is the operator's input, and git lets it hold backticks: one each side would close on
+// the name's own and the rest of the name would be Markdown in the public run summary.
+test("a branch name holding backticks is one code span in the run summary", () => {
+  const summary = branchSummary({
+    private: false,
+    branch: "topic`__forged__`tail",
+    build: "0123456789ab",
+    report: "",
+  });
+  expect(summary.split("\n")[0]).toBe(
+    "Build `0123456789ab` pushed onto ``topic`__forged__`tail``.",
+  );
 });
 
 describe("boundedReport", () => {

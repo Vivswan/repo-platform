@@ -194,8 +194,9 @@ const REMEDY =
   "Each path named differs from what repo-platform writes at the commit this repository was synced with " +
   "(the + lines are the sync's). Restore it from git history, or run the sync: on a pull request, the " +
   "`repo-platform:sync` label syncs its branch and brings a registration change's files with it.";
-const checkSection = (body: string, remedy = `\n\n${REMEDY}`) =>
-  `#### repo-platform at ${SHORT}\n\n\`\`\`diff\n${body}\n\`\`\`${remedy}`;
+const FENCE_DIFF = "README.md: differs\n ```\n # forged\n+x";
+const checkSection = (body: string, remedy = `\n\n${REMEDY}`, fence = "```") =>
+  `#### repo-platform at ${SHORT}\n\n${fence}diff\n${body}\n${fence}${remedy}`;
 const REFUSED = "1 manifest record is not a shape the writer records";
 const HYGIENE = "#### Errors (1)\n\n- docs/notes.md: carries conflict-marker lines";
 
@@ -225,6 +226,16 @@ describe("the recorded commit's check and the hygiene checks reach the report as
       verdict: { kind: "findings", findings: checkSection(DIFF) },
       gate: BLOCKED,
       comment: `${HEADING}${checkSection(DIFF)}\n\n${FAILS}\n`,
+    },
+    {
+      // A diff quotes the repository's own lines: a context line of three backticks closed the fixed fence, and the
+      // lines after it were Markdown of their own in the comment.
+      reason: "a diff quoting a fence line stays inside a longer fence",
+      env: { CHECK_EXIT: "1", CHECK_STDOUT: FENCE_DIFF },
+      runExit: 1,
+      verdict: { kind: "findings", findings: checkSection(FENCE_DIFF, undefined, "````") },
+      gate: BLOCKED,
+      comment: `${HEADING}${checkSection(FENCE_DIFF, undefined, "````")}\n\n${FAILS}\n`,
     },
     {
       reason: "the writer's refusal is posted as it was printed, its message being the remedy",

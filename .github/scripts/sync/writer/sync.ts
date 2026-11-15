@@ -16,6 +16,7 @@ import type { Selection } from "../../../../actions/shared/selection.ts";
 import { sha256 } from "../../../../actions/shared/values.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
+import { codeSpan } from "../../shared/markdown_code.ts";
 import { loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
 import { parseFlags } from "./flags.ts";
 import { checkerChanged, judgedCommit } from "./judged_commit.ts";
@@ -276,13 +277,13 @@ function carry(run: Run, path: string): void {
 function markStale(run: Run, path: string, declared: ReadonlySet<string>, stale: string[]): void {
   const problem = pathProblem(path);
   if (problem !== null) {
-    run.notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
+    run.notes.push(`manifest record for ${codeSpan(path)} ignored: the path ${problem}`);
     return;
   }
   stale.push(path);
   if (!declared.has(path) && occupant(run.options.target, path) !== null) {
     run.notes.push(
-      `manifest record for \`${path}\` had no writer: no files.yml entry declares the path now; ` +
+      `manifest record for ${codeSpan(path)} had no writer: no files.yml entry declares the path now; ` +
         "it is retired as a stale record (the Retired row has the outcome)",
     );
   }
@@ -428,7 +429,7 @@ function noteDroppedMirrors(run: Run): void {
       continue;
     }
     run.notes.push(
-      `manifest record for \`${path}\` dropped: no mirror in files.yml or ${REGISTRATION_PATH} reaches it now, so ` +
+      `manifest record for ${codeSpan(path)} dropped: no mirror in files.yml or ${REGISTRATION_PATH} reaches it now, so ` +
         "the file is the repository's own (a mirror declared again adopts it while it still holds " +
         "the source's content)",
     );
@@ -487,7 +488,7 @@ export async function runSync(options: SyncOptions): Promise<SyncReport> {
   notes.push(
     ...(registration.except ?? [])
       .filter((path) => !declared.has(path))
-      .map((path) => `\`except\` names \`${path}\`, a path no files.yml entry writes`),
+      .map((path) => `\`except\` names ${codeSpan(path)}, a path no files.yml entry writes`),
   );
   // A Map, so a path named like an inherited property (constructor) is
   // looked up like any other.

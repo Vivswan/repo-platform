@@ -427,6 +427,17 @@ describe("buildGenericBody", () => {
       ],
     },
     {
+      // A workflow's name is the repository's own text, and one backtick each side would close on the name's own.
+      reason: "a workflow name holding backticks stays one code span",
+      bodyEnv: { GITHUB_WORKFLOW: "nightly`__forged__`tail" },
+      expected: [
+        `\`\`nightly\`__forged__\`tail\`\` failed on ${date}.`,
+        "",
+        "This stream writes no failure reports; the run log names the failing",
+        "step(s). Repeat failures update this issue until a green night closes it.",
+      ],
+    },
+    {
       reason: "missing context degrades to prose, not to empty backticks or a facts block",
       bodyEnv: {},
       expected: [

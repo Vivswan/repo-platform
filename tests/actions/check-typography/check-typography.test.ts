@@ -35,7 +35,7 @@ function run(root: string): { exitCode: number; log: string; summary: string; re
 }
 
 // Three incidents in one checkout. A gitignored `.skills/` checkout once failed the check while git never judged it.
-// A table of extensions once decided what was text, so `main.go` and `Dockerfile.dev` holding a bidi control passed
+// A table of extensions once decided what was text, so `main.go` and a suffixed Dockerfile holding a bidi control passed
 // unread. And the findings once reached the log alone, with no annotation and no step summary.
 test("judges every file git reads as text, whatever its name, and reports each finding where a reviewer looks", () => {
   const root = checkout(
@@ -46,7 +46,7 @@ test("judges every file git reads as text, whatever its name, and reports each f
       ".typography-allow.local": "# upstream text, kept byte for byte\nupstream/\n",
       "README.md": "plain ascii\n",
       "main.go": "// \u202Ereversed\n",
-      "Dockerfile.dev": "FROM scratch\nRUN echo \u2026\n",
+      "Dockerfile`[x](evil.example)`.dev": "FROM scratch\nRUN echo \u2026\n",
       "upstream/NOTICE": CURLY,
       "blob.dat": `\u0000${CURLY}`,
     },
@@ -60,7 +60,7 @@ test("judges every file git reads as text, whatever its name, and reports each f
     log: [
       "::error file=notes.md,line=1::notes.md:1 curly quote (use ' or \")",
       "::error file=notes.md,line=1::notes.md:1 curly quote (use ' or \")",
-      '::error file=Dockerfile.dev,line=2::Dockerfile.dev:2 ellipsis (use "...")',
+      '::error file=Dockerfile`[x](evil.example)`.dev,line=2::Dockerfile`[x](evil.example)`.dev:2 ellipsis (use "...")',
       "::error file=main.go,line=1::main.go:1 bidi control character (delete it)",
       `4 occurrence(s). ${REMEDY}`,
       "",
@@ -74,7 +74,7 @@ test("judges every file git reads as text, whatever its name, and reports each f
       "| --- | --- |",
       "| `notes.md:1` | curly quote (use ' or \") |",
       "| `notes.md:1` | curly quote (use ' or \") |",
-      '| `Dockerfile.dev:2` | ellipsis (use "...") |',
+      '| ``Dockerfile`[x](evil.example)`.dev:2`` | ellipsis (use "...") |',
       "| `main.go:1` | bidi control character (delete it) |",
       "",
     ].join("\n"),

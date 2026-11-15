@@ -10,6 +10,8 @@ const SPLIT = "=".repeat(7);
 const THEIRS = `${">".repeat(7)} topic`;
 const BLOCK = [OURS, "ours", SPLIT, "theirs", THEIRS, ""].join("\n");
 
+const LINKED = "src/tool`[x](https:evil.example)`.md";
+
 const REPORT =
   "carries conflict-marker lines (a line opening with '<<<<<<< ' or '>>>>>>> ', or reading '=======' whole) - " +
   "resolve each conflict block, or move an example so no line reads as a marker";
@@ -22,6 +24,8 @@ describe("conflict markers", () => {
       {
         "src/tool.mts": BLOCK,
         "src/lib.rs": BLOCK,
+        // A name spelled as a link: the finding is a Markdown list item in the report, so the name is code there.
+        [LINKED]: BLOCK,
         // The check reads lines, not intent: a fenced example is reported like a real block.
         "docs/notes.md": ["```text", OURS, SPLIT, THEIRS, "```", ""].join("\n"),
         // The equals line is matched whole, so it alone can hide behind a carriage return.
@@ -36,9 +40,11 @@ describe("conflict markers", () => {
 
     expect([exitCode, stderr.split("\n").filter((line) => line.startsWith("error:"))]).toEqual([
       1,
-      ["docs/crlf.txt", "docs/notes.md", "src/lib.rs", "src/tool.mts"].map(
-        (path) => `error: ${path}: ${REPORT}`,
-      ),
+      [
+        ...["docs/crlf.txt", "docs/notes.md", "src/lib.rs"].map((path) => `\`${path}\``),
+        "`src/tool.mts`",
+        `\`\`${LINKED}\`\``,
+      ].map((span) => `error: ${span}: ${REPORT}`),
     ]);
   });
 });

@@ -1,3 +1,4 @@
+import { codeSpan } from "../../../../.github/scripts/shared/markdown_code.ts";
 import { capture, failureDetail } from "../../../shared/action_runtime.ts";
 import { error, type Finding } from "../findings.ts";
 
@@ -29,7 +30,7 @@ export function conflictMarkedFiles(root: string): string[] {
 export function checkConflictMarkers(marked: readonly string[]): Finding[] {
   return marked.map((path) =>
     error(
-      `${path}: carries conflict-marker lines (a line opening with '<<<<<<< ' or '>>>>>>> ', or reading ` +
+      `${codeSpan(path)}: carries conflict-marker lines (a line opening with '<<<<<<< ' or '>>>>>>> ', or reading ` +
         "'=======' whole) - resolve each conflict block, or move an example so no line reads as a marker",
     ),
   );

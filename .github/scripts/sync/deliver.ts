@@ -31,7 +31,7 @@ import {
   type WriteMethod,
 } from "../shared/github.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
-import { fenced } from "../shared/markdown_code.ts";
+import { codeSpan, fenced } from "../shared/markdown_code.ts";
 import { capture, redactText } from "../shared/proc.ts";
 import { tokenUrl } from "../shared/token_url.ts";
 import { readMigrated } from "./migrate.ts";
@@ -245,7 +245,7 @@ export function branchSummary(input: {
     return `Build \`${input.build}\` pushed onto the dispatched branch. The report is withheld: the repository is private, and the commit on the branch is the record.\n`;
   }
   return [
-    `Build \`${input.build}\` pushed onto \`${input.branch}\`.`,
+    `Build \`${input.build}\` pushed onto ${codeSpan(input.branch)}.`,
     "",
     boundedReport(input.report).replace(/\n$/, ""),
     "",

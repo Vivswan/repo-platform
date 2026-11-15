@@ -239,11 +239,11 @@ describe("select_settings_repos.ts", () => {
         `${display}: push-permission probe failed (attempt ${attempt}/3: ${detail}); retrying...`,
     );
   const GAVE_UP = (display: string, probe: string, detail: string) =>
-    `${display}: the ${probe} got no answer after its retries (last error: ${detail}), so the repo is skipped this run; the nightly apply retries it. If this persists, check the repo's availability and the fleet token.`;
+    `\`${display}\`: the ${probe} got no answer after its retries (last error: ${detail}), so the repo is skipped this run; the nightly apply retries it. If this persists, check the repo's availability and the fleet token.`;
   const DEADAPI_DETAIL = "HTTP 502";
   const DEADPROBE_DETAIL = "HTTP 500";
   const NOMODS_WARNING =
-    `${PRIVATE_DISPLAY}: its .repo-platform.yml has no readable top-level modules list, so the ` +
+    `\`${PRIVATE_DISPLAY}\`: its .repo-platform.yml has no readable top-level modules list, so the ` +
     "modules filter cannot judge it - left out of this run; fix the file (the sync would fail on " +
     "it too), then dispatch the repo by slug or re-run.";
   const UNADOPTED_NOTICE = notAdoptedNotice(

@@ -21,6 +21,7 @@ import {
 } from "../../../actions/plan/files_config.ts";
 import { BUN_PIN_FILE, bunLockDirs } from "../../../scripts/bootstrap.ts";
 import { GitHubClient, unansweredReason } from "../shared/github.ts";
+import { fenced } from "../shared/markdown_code.ts";
 import { must } from "../shared/proc.ts";
 import { unifiedDiff } from "../sync/writer/report.ts";
 import { type Fetch, fetchText, fetchUpstream, RAW_HOST } from "../sync/writer/upstream.ts";
@@ -336,7 +337,7 @@ function section(bump: Bump): string {
   const head = `## ${bump.name}: \`${shown(bump, bump.from)}\` -> \`${shown(bump, bump.to)}\``;
   if (bump.kind !== "commit") return head;
   const blocks = [...bump.diffs].map(
-    ([path, diff]) => `### ${path}\n\n\`\`\`\`diff\n${diff}\n\`\`\`\``,
+    ([path, diff]) => `### ${path}\n\n${fenced(diff, "diff").join("\n")}`,
   );
   return `${head}\n\n${blocks.join("\n\n")}`;
 }

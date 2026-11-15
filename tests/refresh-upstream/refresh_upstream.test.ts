@@ -390,9 +390,9 @@ describe("the refresh", () => {
         "",
         "### Node.gitignore",
         "",
-        "````diff",
+        "```diff",
         NODE_DIFF,
-        "````",
+        "```",
         "",
         "The next sync renders these files wherever files.yml names them as a source or a block, one sync PR per repository whose rendered bytes moved (auto-merged when clean). Merging this moves the stable tag once green.",
       ].join("\n"),
@@ -461,6 +461,23 @@ describe("the refresh", () => {
       expect(prBody(row.kind, bumps)).toBe(row.body);
     },
   );
+
+  // An upstream file's diff is another repository's text. A context line of four backticks closed the fixed fence,
+  // and the lines after it were Markdown of their own in the pull request body.
+  test("an upstream diff quoting a fence line stays inside a fence one backtick longer", () => {
+    const diff = "--- a.md\n+++ a.md\n@@ -1,2 +1,2 @@\n ````\n-x\n+ # forged";
+    const bump: Bump = {
+      kind: "commit",
+      name: "o/a",
+      from: OLD,
+      to: NEW,
+      diffs: new Map([["a.md", diff]]),
+    };
+    const fences = prBody("commit", [bump])
+      .split("\n")
+      .filter((line) => line.startsWith("`````"));
+    expect(fences).toEqual(["`````diff", "`````"]);
+  });
 
   test("a pin already at upstream is reported current and nothing is written", async () => {
     const root = plant();

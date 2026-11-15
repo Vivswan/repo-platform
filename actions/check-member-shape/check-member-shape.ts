@@ -7,6 +7,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as core from "@actions/core";
+import { codeSpan } from "../../.github/scripts/shared/markdown_code.ts";
 import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
 import { type Outcome as CheckOutcome, runCheck, tableCell } from "../shared/check_main.ts";
 import { isGenerated, isManaged } from "../shared/managed_header.ts";
@@ -129,7 +130,8 @@ export function report(outcome: Outcome): string {
         "| File | Line | Rule |",
         "| --- | --- | --- |",
         ...findings.map(
-          (finding) => `| \`${tableCell(finding.path)}\` | ${finding.line} | ${finding.rule} |`,
+          (finding) =>
+            `| ${tableCell(codeSpan(finding.path))} | ${finding.line} | ${finding.rule} |`,
         ),
       );
     }
@@ -143,7 +145,7 @@ export function report(outcome: Outcome): string {
         "",
         `${unparsed.length} file(s) oxc could not parse, not judged:`,
         "",
-        ...unparsed.map((path) => `- \`${path}\``),
+        ...unparsed.map((path) => `- ${codeSpan(path)}`),
       );
     }
     parts.push(

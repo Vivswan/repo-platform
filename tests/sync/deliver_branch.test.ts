@@ -27,7 +27,7 @@ import {
 
 const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/deliver_branch.ts");
-const REPOSITORY = "Vivswan/some-repo";
+const REPOSITORY = "octo-org/some-repo";
 const BRANCH = "feat/take-the-module";
 const TICKED_BRANCH = "topic`__forged__`tail";
 const BUILD = "abcdef0123456789abcdef0123456789abcdef01";
@@ -265,7 +265,7 @@ describe("the branch delivery's outcomes", () => {
     {
       reason:
         "unchanged on a human's commit: green, no approval line (the human's own run judged it)",
-      options: { stub: { STUB_CHANGED: "", STUB_AUTHOR: "Vivswan" } },
+      options: { stub: { STUB_CHANGED: "", STUB_AUTHOR: "octocat" } },
       exitCode: 0,
       committed: false,
       pushAttempted: false,
@@ -397,7 +397,7 @@ describe("the branch delivery's outcomes", () => {
       commented: false,
     },
   ])("the label removal: $reason", ({ label, exitCode, commented }) => {
-    const result = run({ label, stub: { STUB_CHANGED: "", STUB_AUTHOR: "Vivswan" } });
+    const result = run({ label, stub: { STUB_CHANGED: "", STUB_AUTHOR: "octocat" } });
     expect({ exitCode: result.exitCode, commented: result.comment !== null }).toEqual({
       exitCode,
       commented,
@@ -417,7 +417,7 @@ describe("the branch delivery's outcomes", () => {
       expected: `POST ${COMMENTS}`,
     },
   ])("$name", ({ comments, expected }) => {
-    const result = run({ comments, stub: { STUB_CHANGED: "", STUB_AUTHOR: "Vivswan" } });
+    const result = run({ comments, stub: { STUB_CHANGED: "", STUB_AUTHOR: "octocat" } });
     expect(result.commentCall).toBe(expected);
   });
 });

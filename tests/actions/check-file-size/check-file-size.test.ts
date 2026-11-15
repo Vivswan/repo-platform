@@ -775,6 +775,8 @@ describe("the CLI", () => {
   const POSTED = gateValue("Post the findings as a sticky PR comment");
   const DELETED = gateValue("Remove a stale sticky comment");
   const REMEDY = `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`;
+  // A tracked name may hold a pipe, backticks, and a link: the table must keep it in one cell, as code.
+  const HOSTILE_PATH = "src/wi|de`[x](evil.example)`.sh";
   const hardLines = HARD.lines.source + 1;
   const wide = `${"a ".repeat(140).trim()}\n`;
   const stale = `${ALLOWLIST_FILE}:1: 'src/fine.ts' is stale (under every cap, or not a tracked file); remove the entry`;
@@ -790,7 +792,7 @@ describe("the CLI", () => {
     "",
     ...table([
       `| \`src/big.ts\` | ${hardLines} lines | hard | ${HARD.lines.source} |`,
-      `| \`src/wi\\|de.sh:1\` | 279 chars | hard | ${HARD_WIDTH} |`,
+      `| \`\`src/wi\\|de\`[x](evil.example)\`.sh:1\`\` | 279 chars | hard | ${HARD_WIDTH} |`,
       `| \`src/chatty.ts:2\` | ${COMMENT_CAPS.block + 1} comment lines | warn | ${COMMENT_CAPS.block} |`,
       `| \`src/header.ts:1\` | ${COMMENT_CAPS.header + 1} comment lines (header) | warn | ${COMMENT_CAPS.header} |`,
       `| \`src/marker.sh:1\` | comment-cap: ignore without a reason | warn | - |`,
@@ -872,7 +874,7 @@ describe("the CLI", () => {
         checkout(temp, "check-file-size-", {
           "src/big.ts": lines(hardLines),
           // A `|` in a tracked path is a cell delimiter even inside a code span: unescaped, the row gains a column.
-          "src/wi|de.sh": wide,
+          [HOSTILE_PATH]: wide,
           "src/chatty.ts": `x\n${"// c\n".repeat(COMMENT_CAPS.block + 1)}x\n`,
           "src/header.ts": `${"// h\n".repeat(COMMENT_CAPS.header + 1)}x\n`,
           "src/marker.sh": `# ${COMMENT_MARKER}\necho x\n`,
@@ -885,7 +887,7 @@ describe("the CLI", () => {
           `::warning::src/header.ts:1: ${COMMENT_CAPS.header + 1} comment lines (cap ${COMMENT_CAPS.header} for a header)`,
           `::warning::src/marker.sh:1: ${COMMENT_MARKER} needs a reason`,
           `::error::src/big.ts: ${hardLines} lines (cap ${HARD.lines.source} for source)`,
-          `::error::src/wi|de.sh:1: 279 chars (cap ${HARD_WIDTH})`,
+          `::error::${HOSTILE_PATH}:1: 279 chars (cap ${HARD_WIDTH})`,
         ],
         stderr: [
           `2 finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,

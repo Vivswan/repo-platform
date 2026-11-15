@@ -5,6 +5,7 @@
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { error, notice, setFailed, summary, warning } from "@actions/core";
+import { fenced } from "../../../.github/scripts/shared/markdown_code.ts";
 import {
   capture,
   env,
@@ -42,7 +43,7 @@ function checkFindings(short: string, exitCode: number, output: string): string 
       : `\n\nEach path named differs from what ${PLATFORM_NAME} writes at the commit this repository was synced ` +
         "with (the + lines are the sync's). Restore it from git history, or run the sync: on a pull request, the " +
         `\`${SYNC_LABEL}\` label syncs its branch and brings a registration change's files with it.`;
-  return `#### ${PLATFORM_NAME} at ${short}\n\n\`\`\`diff\n${output}\n\`\`\`${remedy}`;
+  return `#### ${PLATFORM_NAME} at ${short}\n\n${fenced(output, "diff").join("\n")}${remedy}`;
 }
 
 function judgeCheck(result: RunResult, short: string): Integrity {

@@ -10,6 +10,7 @@ import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { GitHubClient } from "../shared/github.ts";
+import { codeSpan } from "../shared/markdown_code.ts";
 import { maskForms } from "../shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../sync/writer/settings_entry.ts";
@@ -133,7 +134,7 @@ async function probe<T>(
   if (result.kind === "pass") return result.value;
   if (result.kind === "drop") return null;
   await warn(
-    `${display}: the ${label} got no answer after its retries (last error: ${result.detail}), so the repo is skipped this run; the nightly apply retries it. If this persists, check the repo's availability and the fleet token.`,
+    `${codeSpan(display)}: the ${label} got no answer after its retries (last error: ${result.detail}), so the repo is skipped this run; the nightly apply retries it. If this persists, check the repo's availability and the fleet token.`,
   );
   return null;
 }
@@ -173,7 +174,7 @@ for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
   if (filters !== null) {
     if (adopted.modules === null) {
       await warn(
-        `${display}: its ${REGISTRATION_PATH} has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`,
+        `${codeSpan(display)}: its ${REGISTRATION_PATH} has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`,
       );
       continue;
     }
