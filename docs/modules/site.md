@@ -228,17 +228,6 @@ The docs mount carries the tag rules:
 
 The theme is one for the whole fleet, owned by [actions/pages-site/.vitepress/theme/](../../actions/pages-site/.vitepress/theme/README.md), whose README says what it provides and which file controls what. Nothing is configured per repository.
 
-**The license on the project card** is the one GitHub detects, asked per version at the commit that version was built from:
-
-| GitHub's answer for the commit            | The card's License row                                          |
-| ----------------------------------------- | --------------------------------------------------------------- |
-| a license it recognizes                   | its SPDX id (`MIT`, `AGPL-3.0`), linking the file GitHub picked |
-| a license file whose text it cannot match | the file's first heading, or `See <file>` when it has none      |
-| no license file                           | no row                                                          |
-| nothing: an error, a rate limit           | the deploy fails, naming the repository and the commit          |
-
-The docs PR check asks no API, so its card has no License row.
-
 ## Other roots on the site (`site.include`)
 
 The docs mount can render other repository directories beside `docs/`, so one artifact carries them and one link check covers them. Each root is one entry of the registration's `site.include` list:
