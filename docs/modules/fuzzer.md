@@ -21,7 +21,9 @@ Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter wo
 
 - **Set up the toolchain** the fuzzer needs in the steps above it (rust nightly and cargo-fuzz, a docker stack, a corpus cache), and point the upload step's `path` at your failure-report directory. The artifact carries the failure directories themselves, so the `report` job's download path and `artifacts-dir` stay as they are.
 
-- **The `report` job is the machinery:** it downloads every `fuzz-failures-*` artifact of the run into `.fuzz-failures` (a pattern download of nothing succeeds, so a night that wrote no artifact files the bare notice; a download that fails still files it, since the filing step leads with `always()`) and runs the action once. Leave it as it is; only [sharding](#sharding) touches its `artifact-name`.
+- **The `report` job is the machinery:** it downloads the fuzz job's artifact into `.fuzz-failures` (a pattern download of nothing succeeds, so a night that wrote no artifact files the bare notice; a download that fails still files it, since the filing step leads with `always()`) and runs the action once. Leave it as it is; only [sharding](#sharding) touches its `pattern` and `artifact-name`.
+
+- **A re-run reports its own attempt:** a run keeps the artifacts of every attempt, so the download names one, `fuzz-failures-<attempt>`, from the `attempt` output the fuzz job records. A re-run of the whole night reads the new attempt's failures alone, and a re-run of the `report` job alone still reads the attempt the fuzz job ran in.
 
 ## The failure-report contract (v1)
 
@@ -62,9 +64,11 @@ A coverage-guided fuzzer that found a crash yesterday can miss it today, so one 
 
 ## Sharding
 
-The starter carries a commented-out shard matrix. Sharding multiplies nightly coverage at the same wall-clock cost, and the `report` job already sits outside the fuzz job: it merges every shard's `fuzz-failures-*` artifact into one directory and judges the matrix's aggregate result, so no shard's green resolve can close the issue another shard just filed.
+The starter carries a commented-out shard matrix. Sharding multiplies nightly coverage at the same wall-clock cost, and the `report` job already sits outside the fuzz job: it merges the shards' artifacts into one directory and judges the matrix's aggregate result, so no shard's green resolve can close the issue another shard just filed.
 
 1. Uncomment the matrix.
-2. Append the shard from the matrix to the upload's artifact name, since two uploads cannot share a name, and set the report step's `artifact-name` to the download's pattern, `fuzz-failures-*`: the action prints that name verbatim in the issue body, so the pointer covers every shard's artifact (left alone, it names an artifact no shard uploaded).
+2. Append the shard from the matrix to the upload's artifact name, since two uploads cannot share a name, and set the download's `pattern` and the report step's `artifact-name` to `fuzz-failures-*`: the action prints that name verbatim in the issue body, so the pointer covers every shard's artifact (left alone, both name an artifact no shard uploaded).
 3. Put the shard in each failure directory's name: the merge keeps one copy of a path two shards both wrote.
 4. Keep a shared corpus cache per-shard or read-only.
+
+A shard can be re-run alone, so no single attempt holds every failing shard's artifact: after a re-run, a sharded report also carries the earlier attempts' failures.
