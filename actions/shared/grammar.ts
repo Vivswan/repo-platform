@@ -3,7 +3,7 @@
 //
 // DEPENDENCY-FREE ZONE: actions/shared/ runs from the delivery commit where no node_modules exist (composite
 // actions before their own installs), so node builtins and zone-internal relative imports only;
-// tests/actions/shared_zone.test.ts enforces it.
+// biome.local.jsonc's actions/shared block enforces it.
 
 import { MANAGED_REGION_LABEL } from "./platform.ts";
 

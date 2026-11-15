@@ -209,6 +209,35 @@
       ],
       "plugins": ["./biome/stream_write.grit"]
     },
+    // The dependency-free zone: only the running action's node_modules exist on a runner, and bun resolves a bare import
+    // from the importing file's directory, so a zone module reaches node builtins and its own siblings, nothing else.
+    {
+      "includes": ["actions/shared/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                // A loader bound by createRequire keeps no `require` in its name, and `Module` and the namespace carry it too.
+                "paths": {
+                  "node:module": {
+                    "message": "actions/shared is the dependency-free zone: load modules by static import, never through node:module"
+                  }
+                },
+                "patterns": [
+                  {
+                    "group": ["**", "!node:*", "!node:*/**", "!./*"],
+                    "message": "actions/shared is the dependency-free zone: node: builtins and ./ siblings only"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "plugins": ["./biome/runtime_load.grit"]
+    },
     // A test table is data, not a function body.
     {
       "includes": ["tests/**"],
