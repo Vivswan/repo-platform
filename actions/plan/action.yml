@@ -10,11 +10,13 @@ description: |
     for no docs half, the include roots, the link-rot label). Given the vars input, it also exports the repository
     variables the registration's site.vars names as environment values of the job.
 
+  - npm: the directory of the package the npm-publish action publishes.
+
   GH_TOKEN is needed only when the private input is empty, since the visibility is then read from the API.
 
 inputs:
   mode:
-    description: default (the fleet.yml job outputs) or site (the pages-site configuration).
+    description: default (the fleet.yml job outputs), site (the pages-site configuration), or npm (the package's directory).
     required: false
     default: default
   private:
@@ -53,6 +55,9 @@ outputs:
   site-vars:
     description: The names of the repository variables the registration's site.vars declares, comma-separated and empty for none (mode site).
     value: ${{ steps.plan.outputs.site-vars }}
+  npm-path:
+    description: The directory of the package to publish, relative to the repository root, "." for the root (mode npm).
+    value: ${{ steps.plan.outputs.npm-path }}
 
 runs:
   using: composite
