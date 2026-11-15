@@ -1,7 +1,7 @@
 {
   "name": "github-client",
   "private": true,
-  "description": "Dependency manifest for the one GitHub REST client the scripts and the actions share: octokit's core with its retry and throttling plugins, http-link-header for a listing's next page, zod for a reply's shape.",
+  "description": "Dependency manifest for the one GitHub REST client the scripts and the actions share: octokit's core with its retry and throttling plugins, http-link-header for a listing's next page, zod for a reply's shape. A caller builds its schema with its own zod install, so each caller's manifest pins this exact zod version by hand: the typecheck catches only some version splits, and nothing else enforces the match.",
   "devDependencies": {
     "@types/bun": "1.4.4",
     "@types/http-link-header": "1.0.7",
