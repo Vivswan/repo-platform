@@ -1,6 +1,7 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { boundedSpawnSync } from "../../../shared/bounded_spawn.ts";
+import { checkout } from "../../../shared/fixture_checkout.ts";
+import { fixtureGitEnv } from "../../../shared/fixture_git.ts";
 import type { TempDirs } from "../../../shared/temp_dir.ts";
 
 export const VALIDATOR = join(
@@ -29,16 +30,15 @@ export interface ValidatorResult {
 }
 
 /** tests/shared/temp_dir.ts binds its afterAll to the registering file, so each suite hands in its own TempDirs
- *  and this module never calls tempDirs() itself. */
+ *  and this module never calls tempDirs() itself. The tree is a git checkout, as on a runner: BASELINE and `extra`
+ *  are tracked, `untracked` is written beside them. */
 export function validatorRunner(temp: TempDirs) {
-  return function runValidator(extra: Record<string, string> = {}): ValidatorResult {
-    const root = temp.dir("validate-managed-");
-    const tree: Record<string, string> = { ...BASELINE, ...extra };
-    for (const [rel, content] of Object.entries(tree)) {
-      mkdirSync(join(root, dirname(rel)), { recursive: true });
-      writeFileSync(join(root, rel), content);
-    }
-    const result = boundedSpawnSync([process.execPath, VALIDATOR, root]);
+  return function runValidator(
+    extra: Record<string, string> = {},
+    untracked: Record<string, string> = {},
+  ): ValidatorResult {
+    const root = checkout(temp, "validate-managed-", { ...BASELINE, ...extra }, untracked);
+    const result = boundedSpawnSync([process.execPath, VALIDATOR, root], { env: fixtureGitEnv() });
     return {
       exitCode: result.exitCode,
       stdout: result.stdout,

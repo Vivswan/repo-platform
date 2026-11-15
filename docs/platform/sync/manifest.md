@@ -39,4 +39,4 @@ The fleet's `validate-managed-files` check judges a repository as [check.ts](../
 
 - **A pending registration change** is red until the sync that carries it lands.
 - **Freshness never fails:** the action reports how far `stable` has moved past the recorded commit, and a sync moves the judge under [the stamp rule](#when-the-judged-commit-moves).
-- **The hygiene checks** (a `release-as` key in `release-please-config.json`, a conflict marker in a source, config, or markdown file) read no platform data and run from the action at `stable`; YAML syntax and duplicate keys are the yamllint step's, in the same job.
+- **The hygiene checks** (a `release-as` key in `release-please-config.json`, a conflict-marker line in any tracked file git reads as text) read no platform data and run from the action at `stable`; YAML syntax and duplicate keys are the yamllint step's, in the same job.
