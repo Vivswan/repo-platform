@@ -11,6 +11,7 @@ import { isManaged } from "../../actions/shared/managed_header";
 import { DELIVERY_REF, PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform";
 import { actionManifestPaths } from "../../scripts/lib/action_steps";
 import { REPO_ROOT } from "../shared/action_step";
+import { shippedSource } from "../shared/shipped_source";
 import {
   extractUsesPins,
   ownsPlatform,
@@ -185,7 +186,7 @@ describe("version comments pinact leaves unverified", () => {
   );
 
   test("no pin site carries one", () => {
-    const pins = PIN_SITES.flatMap((rel) => extractUsesPins(read(rel), rel));
+    const pins = PIN_SITES.flatMap((rel) => extractUsesPins(shippedSource(rel), rel));
     expect(pins.length).toBeGreaterThan(0);
     expect(
       unverifiablePins(pins).map((pin) => `${pin.file}: ${pin.action}@${pin.ref} # ${pin.version}`),
@@ -238,7 +239,7 @@ describe("one sha per action across the root and the shipped sources", () => {
   });
 
   test("every pin site names one ref per action", () => {
-    const pins = PIN_SITES.flatMap((rel) => extractUsesPins(read(rel), rel));
+    const pins = PIN_SITES.flatMap((rel) => extractUsesPins(shippedSource(rel), rel));
     expect(pins.length).toBeGreaterThan(0);
     expect(splitPins(pins)).toEqual([]);
   });
