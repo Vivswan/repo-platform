@@ -19,6 +19,8 @@ import {
 } from "../post-green/fleet_sync_marker.ts";
 import { requireEnv } from "../shared/gha.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
+import { codeSpan } from "../shared/markdown_code.ts";
+import { BOT_LOGIN, issueCommentsPages, stickyComment } from "../shared/sticky_comment.ts";
 import { loadLayer } from "../sync/writer/settings_layers.ts";
 import { captureNetwork } from "./discovery.ts";
 
@@ -43,9 +45,6 @@ export function deliveredBySync(path: string): boolean {
     root.endsWith("/") ? path.startsWith(root) : path === root,
   );
 }
-
-/** The actor GITHUB_TOKEN's writes carry; a label event by anyone else is a human's. */
-export const BOT_LOGIN = "github-actions[bot]";
 
 /** The first line of the leg's own comment, which it finds again by this. */
 export const MARKER = `<!-- ${PLATFORM_NAME}/fleet-sync-default -->`;
@@ -91,7 +90,7 @@ function noteFrame(known: FleetSyncLabels, note: Note): [lead: string, closing: 
 
 export function noteBody(paths: readonly string[], known: FleetSyncLabels, note: Note): string {
   const [lead, closing] = noteFrame(known, note);
-  const listed = paths.slice(0, LISTED_PATHS).map((path) => `- \`${path}\``);
+  const listed = paths.slice(0, LISTED_PATHS).map((path) => `- ${codeSpan(path)}`);
   if (paths.length > LISTED_PATHS) listed.push(`- and ${paths.length - LISTED_PATHS} more`);
   return [MARKER, lead, "", ...listed, "", `${closing} Details: [all-green.md](${DOCS}).`, ""].join(
     "\n",
@@ -181,7 +180,6 @@ const pull = z.object({
 const filesPages = z.array(
   z.array(z.object({ filename: z.string(), previous_filename: z.string().optional() })),
 );
-const commentsPages = z.array(z.array(z.object({ id: z.number(), body: z.string().optional() })));
 const eventsPages = z.array(
   z.array(
     z.object({
@@ -194,7 +192,8 @@ const eventsPages = z.array(
 );
 export type LabelEvent = z.infer<typeof eventsPages>[number][number];
 
-/** Events arrive oldest first, so the last matching one is the current state's author. */
+/** Events arrive oldest first, so the last matching one is the current state's author. A label event by anyone but the
+ *  bot is a human's. */
 export function labelHistory(events: readonly LabelEvent[], label: string): LabelHistory {
   const history: LabelHistory = { lastAddedBy: null, removedBy: null };
   for (const event of events) {
@@ -239,9 +238,7 @@ function applyLabel(issue: string, publicLabel: string, action: LabelAction): st
 function applyComment(repository: string, issue: string, wanted: Wanted): string {
   if (wanted.kind === "leave") return `comment left as it is (${wanted.reason})`;
   const comments = `${issue}/comments`;
-  // startsWith, not includes: a reply quoting the comment carries the marker mid-text.
-  const existing =
-    readPages(commentsPages, comments).find((comment) => comment.body?.startsWith(MARKER)) ?? null;
+  const existing = stickyComment(readPages(issueCommentsPages, comments), MARKER);
   if (wanted.kind === "clear") {
     if (existing === null) return `nothing to say (${wanted.reason})`;
     api(`repos/${repository}/issues/comments/${existing.id}`, "-X", "DELETE");

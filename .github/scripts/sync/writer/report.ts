@@ -1,48 +1,82 @@
 // `hold` is decided here alone, from the rows, so no writer can forget to raise it.
 
 import { createTwoFilesPatch, FILE_HEADERS_ONLY } from "diff";
+import { z } from "zod";
 import type { FileClass } from "../../../../actions/plan/files_config.ts";
+import { codeSpan, fenced } from "../../shared/markdown_code.ts";
 import type { MirrorRow } from "./mirrors.ts";
 import type { RetireRow } from "./retire.ts";
 import type { Change } from "./write_managed.ts";
 
+// The report's shape is declared once, as the schema every reader of the writer's summary.json parses it through. A row
+// a sibling module builds is spelled against that module's type, so the compiler refuses a spelling here that the type
+// does not have, and the writer refuses a row here that the schema would not read back.
+
+const fileClass = z.enum(["managed", "split", "starter"]) satisfies z.ZodType<FileClass>;
+
+const change = z.enum([
+  "created",
+  "updated",
+  "unchanged",
+  "region added",
+  "replaced local edits",
+  "held",
+]) satisfies z.ZodType<Change>;
+
+const writtenRow = z.object({
+  path: z.string(),
+  class: fileClass,
+  change,
+  detail: z.string(),
+});
+
+const replacedEdit = z.object({ path: z.string(), diff: z.string() });
+
+const templateRecord = z.object({ source: z.string(), lineMapped: z.boolean() });
+
+const retireRow = z.object({
+  path: z.string(),
+  outcome: z.enum(["deleted", "region removed", "held", "released"]),
+  detail: z.string(),
+}) satisfies z.ZodType<RetireRow>;
+
+const mirrorEnds = { source: z.string(), target: z.string() };
+
+const mirrorRow = z.union([
+  z.object({
+    ...mirrorEnds,
+    outcome: z.enum(["written", "current", "replaced local edits"]),
+    detail: z.literal(""),
+  }),
+  z.object({ ...mirrorEnds, outcome: z.literal("replaced"), detail: z.string() }),
+]) satisfies z.ZodType<MirrorRow>;
+
+const syncOutcome = z.object({
+  build: z.string(),
+  modules: z.array(z.string()),
+  private: z.boolean(),
+  written: z.array(writtenRow),
+  templates: z.record(z.string(), templateRecord),
+  replaced: z.array(replacedEdit),
+  retired: z.array(retireRow),
+  notes: z.array(z.string()),
+  mirrors: z.array(mirrorRow),
+});
+
+export const syncReport = syncOutcome.extend({
+  hold: z.boolean(),
+  holdReasons: z.array(z.string()),
+});
+
 /** `detail` is why a held row was not written, or the stale record a write set aside; empty otherwise. */
-export interface WrittenRow {
-  path: string;
-  class: FileClass;
-  change: Change;
-  detail: string;
-}
+export type WrittenRow = z.infer<typeof writtenRow>;
 
-export interface ReplacedEdit {
-  path: string;
-  diff: string;
-}
+/** `templates` is by written path, for every sourced entry this run wrote or found current: the template it came
+ *  from, tree-relative under files/, and whether its lines are the written file's. A split write adds region markers
+ *  and a block splice shifts what follows, so neither maps. */
+export type SyncOutcome = z.infer<typeof syncOutcome>;
 
-/** The template a written file came from, tree-relative under files/, and whether its lines are the written file's:
- *  a split write adds region markers and a block splice shifts what follows, so neither maps. */
-export interface TemplateRecord {
-  source: string;
-  lineMapped: boolean;
-}
-
-/** `templates` is by written path, for every sourced entry this run wrote or found current. */
-export interface SyncOutcome {
-  build: string;
-  modules: string[];
-  private: boolean;
-  written: WrittenRow[];
-  templates: Record<string, TemplateRecord>;
-  replaced: ReplacedEdit[];
-  retired: RetireRow[];
-  notes: string[];
-  mirrors: MirrorRow[];
-}
-
-export interface SyncReport extends SyncOutcome {
-  hold: boolean;
-  holdReasons: string[];
-}
+export type SyncReport = z.infer<typeof syncReport>;
 
 export function holdReasons(outcome: SyncOutcome): string[] {
   const reasons: string[] = [];
@@ -106,26 +140,13 @@ export function unifiedDiff(
 const oneLine = (text: string) => text.replace(/[\r\n]+/g, " ");
 
 /** An inline code span, flattened first: a newline would end it. */
-const code = (text: string) => `\`${oneLine(text)}\``;
+const code = (text: string) => codeSpan(oneLine(text));
 
 /** A pipe inside a cell would split it; the escape keeps the column count. */
 const cell = (text: string) => oneLine(text).replaceAll("|", "\\|");
 
 /** A list item, flattened first: a newline would end it. */
 const bullet = (text: string) => `- ${oneLine(text)}`;
-
-/** A diff line quoting the target's own content may open with backticks
- *  (a context line is its text behind one space), so the fence is one
- *  backtick longer than any such run and the content cannot close it.
- *  Markdown ends a line at a bare CR too, which the diff keeps inside a
- *  line, so the scan splits on every line ending. */
-function fencedDiff(diff: string): string[] {
-  const longest = diff
-    .split(/\r\n|\r|\n/)
-    .reduce((max, line) => Math.max(max, /^ {0,3}(`+)/.exec(line)?.[1].length ?? 0), 2);
-  const fence = "`".repeat(longest + 1);
-  return [`${fence}diff`, diff, fence];
-}
 
 function table(header: string[], rows: string[][]): string {
   const line = (cells: string[]) => `| ${cells.map(cell).join(" | ")} |`;
@@ -163,7 +184,7 @@ export function renderReport(report: SyncReport): string {
       "> These files held content no manifest record vouched for. The platform version replaced it; the text it replaced is below.",
     );
     for (const row of report.replaced) {
-      parts.push("", `#### ${code(row.path)}`, "", ...fencedDiff(row.diff));
+      parts.push("", `#### ${code(row.path)}`, "", ...fenced(row.diff, "diff"));
     }
   }
   if (report.retired.length > 0) {
