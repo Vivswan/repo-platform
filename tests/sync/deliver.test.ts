@@ -731,6 +731,19 @@ describe("failureBody", () => {
     expect(tail(file, 10)).toBe("... (43 earlier bytes not shown)\nxxxxxxxEND");
     expect(tail(join(dir, "missing"))).toBe("");
   });
+
+  // UTF-8: a byte cut can land inside a character, and the quote would then open with U+FFFD in place of it.
+  test("tail starts on a character boundary when the byte cut lands inside one", () => {
+    const file = join(temp.dir("deliver-tail-"), "log");
+    writeFileSync(file, "path/\u00e9t\u00e9 \u{1F600}END");
+    expect([8, 7, 6, 5, 4].map((bytes) => tail(file, bytes))).toEqual([
+      "... (10 earlier bytes not shown)\n \u{1F600}END",
+      "... (11 earlier bytes not shown)\n\u{1F600}END",
+      "... (15 earlier bytes not shown)\nEND",
+      "... (15 earlier bytes not shown)\nEND",
+      "... (15 earlier bytes not shown)\nEND",
+    ]);
+  });
 });
 
 describe("closedFences", () => {

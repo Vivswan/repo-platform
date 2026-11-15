@@ -3,7 +3,7 @@
 // goes to $RUNNER_TEMP/verdict.txt, `failed` only once the issue is filed. The one exception is a branch delivery's report,
 // written to the public job summary for a public target and withheld for a private one.
 
-import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { summary } from "@actions/core";
 import MarkdownIt from "markdown-it";
@@ -52,12 +52,17 @@ export function prTitle(build: string): string {
   return `${SYNC_PR_TITLE_PREFIX} ${build.slice(0, 12)}`;
 }
 
+/** The last `bytes` of the file at `path` as text, behind a line saying how much came before; empty for no file. */
 export function tail(path: string, bytes = TAIL_BYTES): string {
   if (!existsSync(path)) return "";
-  const size = statSync(path).size;
   const buffer = readFileSync(path);
-  const cut = buffer.subarray(Math.max(0, size - bytes)).toString("utf-8");
-  return size > bytes ? `... (${size - bytes} earlier bytes not shown)\n${cut}` : cut;
+  if (buffer.length <= bytes) return buffer.toString("utf-8");
+
+  // A cut inside a multi-byte character would open the quote with U+FFFD: UTF-8 continuation bytes are 10xxxxxx.
+  let start = buffer.length - bytes;
+  while (start < buffer.length && (buffer[start] & 0xc0) === 0x80) start += 1;
+
+  return `... (${start} earlier bytes not shown)\n${buffer.subarray(start).toString("utf-8")}`;
 }
 
 export function failureBody(input: {
