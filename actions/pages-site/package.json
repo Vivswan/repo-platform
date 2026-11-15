@@ -10,7 +10,6 @@
     "@panzoom/panzoom": "4.6.2",
     "entities": "^8.0.0",
     "github-slugger": "^2.0.0",
-    "gray-matter": "^4.0.3",
     "medium-zoom": "1.1.0",
     "mermaid": "11.17.2",
     "reka-ui": "2.10.4",
