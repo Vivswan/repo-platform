@@ -274,9 +274,10 @@ export function report(outcome: Outcome): string {
         "",
         "| Where | Construct | Source |",
         "| --- | --- | --- |",
+        // The construct's code span is two backticks wide: a parser message quotes with single ones.
         ...findings.map(
           (finding) =>
-            `| \`${cell(where(finding))}\` | \`${cell(finding.construct)}\` | ${SOURCE_LABEL[finding.source]}, ${DIALECT_LABEL[finding.dialect]} |`,
+            `| \`${cell(where(finding))}\` | \`\` ${cell(finding.construct)} \`\` | ${SOURCE_LABEL[finding.source]}, ${DIALECT_LABEL[finding.dialect]} |`,
         ),
       );
     }

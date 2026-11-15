@@ -7,7 +7,7 @@
       "dependencies": {
         "@actions/core": "3.0.1",
         "dockerfile-ast": "0.7.1",
-        "mvdan-sh": "0.10.1",
+        "sh-syntax": "0.8.6",
         "yaml": "^2.9.0",
       },
       "devDependencies": {
@@ -73,7 +73,7 @@
 
     "dockerfile-ast": ["dockerfile-ast@0.7.1", "", { "dependencies": { "vscode-languageserver-textdocument": "^1.0.8", "vscode-languageserver-types": "^3.17.3" } }, "sha512-oX/A4I0EhSkGqrFv0YuvPkBUSYp1XiY8O8zAKc8Djglx8ocz+JfOr8gP0ryRMC2myqvDLagmnZaU9ot1vG2ijw=="],
 
-    "mvdan-sh": ["mvdan-sh@0.10.1", "", {}, "sha512-kMbrH0EObaKmK3nVRKUIIya1dpASHIEusM13S4V1ViHFuxuNxCo+arxoa6j/dbV22YBGjl7UKJm9QQKJ2Crzhg=="],
+    "sh-syntax": ["sh-syntax@0.8.6", "", {}, "sha512-lgHned7JAGYS11rNoFrWlu51JTw3S+gJD/oxj1On04umGH0c3JrTcniz+9nCMnVCwvDEHBjsP9Yz9tKeCFe/8w=="],
 
     "tunnel": ["tunnel@0.0.6", "", {}, "sha512-1h/Lnq9yajKY2PEbBadPXj3VxsDDu844OnaAo52UVmIzIvwwtBPIuNvkjuzBlTWpfJyUbG3ez0KSBibQkj4ojg=="],
 
