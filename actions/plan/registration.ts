@@ -186,6 +186,8 @@ export const registrationSchema = z.strictObject({
       if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
     })
     .optional(),
+  // The directory of the package the npm legs publish; absent is the repository root (docs/modules/npm.md).
+  npm: z.strictObject({ path: relativePath.optional() }).optional(),
   labels: z.record(z.string(), label).optional(),
   // Paths the repository keeps as its own: no files.yml entry there is
   // written for it (docs/platform/sync/files.md, Selection).

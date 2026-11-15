@@ -25,6 +25,12 @@
       // commitlint.config.mjs names the preset in `extends` and commitlint's load() resolves it; nothing imports it.
       "ignoreDependencies": ["@commitlint/config-conventional"]
     },
+    "actions/npm-publish": {
+      "entry": ["*.ts", "!*[._]{test,spec}.ts"],
+      "project": ["**/*.{ts,mts}"],
+      // npm is the CLI the action runs by path (node_modules/npm/bin/npm-cli.js); nothing imports it.
+      "ignoreDependencies": ["npm"]
+    },
     "actions/validate-managed-files": {
       // The three step scripts and the hygiene validator action.yml runs, and the byte-to-byte check run by path.
       "entry": [
