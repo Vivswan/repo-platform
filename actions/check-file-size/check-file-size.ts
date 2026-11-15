@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import * as core from "@actions/core";
 import { loadAllowlist, staleEntries } from "../shared/allowlist.ts";
-import { type Outcome as CheckOutcome, runCheck } from "../shared/check_main.ts";
+import { type Outcome as CheckOutcome, runCheck, tableCell } from "../shared/check_main.ts";
 import { COMMENT_LINE, isGenerated, isManaged } from "../shared/managed_header.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { EXEMPT_DIRS, repositoryFiles } from "../shared/repository_files.ts";
@@ -409,7 +409,7 @@ export function report(outcome: Outcome): string {
     const rows = [...failures, ...warnings].map((finding) => {
       const where = finding.measure === "lines" ? finding.path : `${finding.path}:${finding.line}`;
       const [size, cap] = sizeCells(finding);
-      return `| \`${where}\` | ${size} | ${finding.tier} | ${cap} |`;
+      return `| \`${tableCell(where)}\` | ${size} | ${finding.tier} | ${cap} |`;
     });
     if (rows.length > 0) {
       parts.push("", "| File | Size | Tier | Cap |", "| --- | --- | --- | --- |", ...rows);
