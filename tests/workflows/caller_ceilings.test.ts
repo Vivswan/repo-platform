@@ -41,7 +41,11 @@ interface Call {
 const ROOT = join(import.meta.dir, "../..");
 const RANK: Record<string, number> = { none: 0, read: 1, write: 2 };
 const SKELETON = "files/base/.github/workflows/ci.yml";
-const CALLER_ROOTS = [".github/workflows", "files/base/.github/workflows"];
+const CALLER_ROOTS = [
+  ".github/workflows",
+  "files/base/.github/workflows",
+  "files/autofix/.github/workflows",
+];
 const LOCAL_CALL = /^[.$]\/\.github\/workflows\/(.+)$/;
 const PLATFORM_CALL = new RegExp(`^${PLATFORM_SLUG}/(\\.github/workflows/.+)@`);
 const FALLBACK_LANE =
@@ -237,6 +241,7 @@ test("every called job's permissions fit its caller job's ceiling", () => {
     "files/base/.github/workflows/ci.yml job 'platform' -> .github/workflows/fleet.yml",
     ".github/workflows/fleet.yml job 'codeql' -> .github/workflows/reusable-codeql.yml",
     ".github/workflows/ci.yml job 'post-green' -> .github/workflows/post-green.yml",
+    "files/autofix/.github/workflows/auto-fix.yml job 'autofix' -> .github/workflows/fleet-autofix.yml",
   ];
   const sites = CALLS.map((call) => call.site);
   expect({ resolved: controls.filter((pair) => sites.includes(pair)), overCeiling }).toEqual({

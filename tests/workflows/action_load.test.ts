@@ -2,6 +2,7 @@
 // that loader. So every shipped action is named by a step of a gating job in ci.yml on every push and pull request, or
 // the fleet is the first to load it, via `stable`.
 //   dependency-review -> pull requests only: its upstream action refuses every other event
+//   autofix           -> pull requests only: every phase reads the pull request from the event
 //   release-assets    -> never: it reads a draft release by its id, and this repository cuts no releases
 //   npm-publish       -> never: it publishes a package to npm, and this repository has none
 
@@ -63,6 +64,7 @@ test("every shipped action is run, so loaded, by a gating job's step on every pu
   );
   expect(judged).toEqual({
     ...Object.fromEntries(shipped.map((dir) => [dir, "every event"])),
+    "actions/autofix": "pull requests",
     "actions/dependency-review": "pull requests",
     "actions/npm-publish": "never",
     "actions/release-assets": "never",

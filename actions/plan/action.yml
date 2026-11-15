@@ -12,11 +12,13 @@ description: |
 
   - npm: the directory of the package the npm-publish action publishes.
 
+  - autofix: the registration's autofix block, the lists the autofix action judges a fix against, as one JSON document.
+
   GH_TOKEN is needed only when the private input is empty, since the visibility is then read from the API.
 
 inputs:
   mode:
-    description: default (the fleet.yml job outputs), site (the pages-site configuration), or npm (the package's directory).
+    description: default (the fleet.yml job outputs), site (the pages-site configuration), npm (the package's directory), or autofix (the fix lists).
     required: false
     default: default
   private:
@@ -25,6 +27,10 @@ inputs:
       with GH_TOKEN.
     required: false
     default: ""
+  path:
+    description: The directory holding the registration, relative to the workspace, for a job that checks the repository out beside another tree.
+    required: false
+    default: "."
   vars:
     description: |
       The caller's `vars` context as JSON (toJSON(vars), which a composite action cannot read), from which mode site exports the variables the registration's site.vars names, and no others, a name the repository has not set as empty; empty exports nothing.
@@ -59,6 +65,12 @@ outputs:
     description: The directory of the package to publish, relative to the repository root, "." for the root (mode npm).
     value: ${{ steps.plan.outputs.npm-path }}
 
+  autofix-config:
+    description: >-
+      The registration's autofix block as compact JSON {"label": {"paths", "delete"}, "push": {"on", "paths", "delete"}},
+      the autofix action's config input, with push null when the registration declares none (mode autofix).
+    value: ${{ steps.plan.outputs.autofix-config }}
+
 runs:
   using: composite
   steps:
@@ -83,6 +95,7 @@ runs:
     - name: Resolve the plan
       id: plan
       shell: bash
+      working-directory: ${{ inputs.path }}
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         MODE: ${{ inputs.mode }}
