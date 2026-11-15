@@ -8,19 +8,25 @@ import { gitAnswersYes } from "../../shared/git_yes_no.ts";
 /** The fleet check's entry at a recorded commit; the action's other entries run at `stable` and restamp nothing. */
 export const CHECK_ENTRY = "actions/validate-managed-files/check.ts";
 
-/** The checker surface: every file check.ts imports, followed through relative imports (named or side-effect) in the
- *  platform checkout at `root`, as paths relative to it. Derived rather than listed, so an operator script or a stable-run
- *  validator file beside an imported one never restamps the fleet. A change to any of these can turn the recorded
- *  commit's verdict away from the build's with no byte written: the build's registration parser accepts a value the
- *  recorded one rejects, so its check would stay red with no sync PR to move the stamp. */
+/** bun's own import scanner, so the surface is what the runtime loads: a type-only import is erased and runs nothing. */
+const SCANNER = new Bun.Transpiler({ loader: "ts" });
+
+/** The scanner refuses a `#!` line, which bun itself skips when it runs the file. */
+const SHEBANG = /^#!.*/;
+
+/** The checker surface: every file check.ts loads, followed through relative imports (static, dynamic, or re-exported)
+ *  in the platform checkout at `root`, as paths relative to it. Derived rather than listed, so an operator script or a
+ *  stable-run validator file beside an imported one never restamps the fleet. A change to any of these can turn the
+ *  recorded commit's verdict away from the build's with no byte written: the build's registration parser accepts a
+ *  value the recorded one rejects, so its check would stay red with no sync PR to move the stamp. */
 export function checkerSurface(root: string): string[] {
   const seen = new Set<string>();
   const visit = (path: string) => {
     if (seen.has(path)) return;
     seen.add(path);
-    const source = readFileSync(join(root, path), "utf-8");
-    for (const [, spec] of source.matchAll(/(?:from|import)\s+"(\.[^"]+)"/g)) {
-      visit(relative(root, resolve(root, dirname(path), spec)));
+    const source = readFileSync(join(root, path), "utf-8").replace(SHEBANG, "");
+    for (const { path: spec } of SCANNER.scanImports(source)) {
+      if (spec.startsWith(".")) visit(relative(root, resolve(root, dirname(path), spec)));
     }
   };
   visit(CHECK_ENTRY);
