@@ -219,6 +219,12 @@
             "noRestrictedImports": {
               "level": "error",
               "options": {
+                // A loader bound by createRequire keeps no `require` in its name, and `Module` and the namespace carry it too.
+                "paths": {
+                  "node:module": {
+                    "message": "actions/shared is the dependency-free zone: load modules by static import, never through node:module"
+                  }
+                },
                 "patterns": [
                   {
                     "group": ["**", "!node:*", "!node:*/**", "!./*"],

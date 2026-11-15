@@ -29,6 +29,9 @@ test("the linter reds each way out of the zone, in the zone only, and passes eac
     'import { readFileSync } from "node:fs";',
     'import { readFile } from "node:fs/promises";',
     'import { createRequire } from "node:module";',
+    'import * as loaders from "node:module";',
+    'import loader from "node:module";',
+    'import { Module } from "node:module";',
     'import { peer } from "./peer.ts";',
     'import { z } from "zod";',
     'import { core } from "@actions/core";',
@@ -41,8 +44,10 @@ test("the linter reds each way out of the zone, in the zone only, and passes eac
     'const old = require("node:fs");',
     "const require = createRequire(import.meta.url);",
     'const viaCast = (require as NodeJS.Require)(String("zod"));',
+    "const load = createRequire(import.meta.url);",
+    'const viaRenamed = load("zod");',
     'const text = "import(";',
-    "export const all = [readFileSync, readFile, z, core, join, up, deep, lazy, computed, old, viaCast, text] as Only[];",
+    "export const all = [readFileSync, readFile, loaders, loader, Module, z, core, join, up, deep, lazy, computed, old, viaCast, viaRenamed, text] as Only[];",
     "",
   ].join("\n");
   const files: Record<string, string> = {
@@ -83,16 +88,20 @@ test("the linter reds each way out of the zone, in the zone only, and passes eac
 
   expect(seen).toEqual(
     [
+      "actions/shared/x.ts:3 lint/style/noRestrictedImports",
+      "actions/shared/x.ts:4 lint/style/noRestrictedImports",
       "actions/shared/x.ts:5 lint/style/noRestrictedImports",
       "actions/shared/x.ts:6 lint/style/noRestrictedImports",
-      "actions/shared/x.ts:7 lint/style/noRestrictedImports",
       "actions/shared/x.ts:8 lint/style/noRestrictedImports",
       "actions/shared/x.ts:9 lint/style/noRestrictedImports",
       "actions/shared/x.ts:10 lint/style/noRestrictedImports",
-      "actions/shared/x.ts:11 plugin",
-      "actions/shared/x.ts:12 plugin",
-      "actions/shared/x.ts:13 plugin",
+      "actions/shared/x.ts:11 lint/style/noRestrictedImports",
+      "actions/shared/x.ts:12 lint/style/noRestrictedImports",
+      "actions/shared/x.ts:13 lint/style/noRestrictedImports",
+      "actions/shared/x.ts:14 plugin",
       "actions/shared/x.ts:15 plugin",
+      "actions/shared/x.ts:16 plugin",
+      "actions/shared/x.ts:18 plugin",
     ].sort(),
   );
 });
