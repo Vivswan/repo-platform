@@ -7,7 +7,6 @@ description: |
   - The configuration is the config input, or the registration read through the plan action when the input is empty.
   - With neither part the step ends green with publish false and no directory.
   - A deploy needs a full checkout (fetch-depth 0): version tags and per-ref trees come from git history.
-  - A deploy reads each version's license from GitHub with the job's token; the check asks no API.
   - Under `check`, the site is built and its internal links verified, and nothing is deployed; a dead link fails the
     step, and the fix is the link.
 
@@ -100,8 +99,6 @@ runs:
         CONFIG: ${{ inputs.config != '' && inputs.config || steps.plan.outputs.config }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
-        # A deploy reads each version's license from GitHub's detection; the check reads none.
-        GH_TOKEN: ${{ github.token }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/build.ts"'
 
     # Every same-site link of a page built from HEAD must resolve in the

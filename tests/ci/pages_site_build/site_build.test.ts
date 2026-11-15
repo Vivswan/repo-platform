@@ -236,28 +236,6 @@ describe("the artifact a deploy lands", () => {
     ).toEqual(["Fixture Docs"]);
   });
 
-  test("names each tier's license as GitHub detects it at that tier's commit, asked with nothing but the path in the arguments", () => {
-    // The card's name is GitHub's answer for the commit the tier was built from: a read of the default branch alone
-    // would stamp today's license on every tagged version. The stub answers MIT in LICENSE; the fixture ships no file.
-    const refs: [string, string, string][] = [
-      ["docs/latest/", "main", "HEAD"],
-      ["docs/v0.2.0/", "v0.2.0", "v0.2.0"],
-      ["docs/v0.1.0/", "v0.1.0", "v0.1.0"],
-    ];
-    for (const [rel, label] of refs) {
-      const page = readSite(site, `${rel}index.html`);
-      expect([rel, texts(page, `.fleet-facts a[href$="/blob/${label}/LICENSE"]`)]).toEqual([
-        rel,
-        ["MIT"],
-      ]);
-    }
-    const asked = refs.map(([, , ref]) => {
-      const sha = fixtureGit(workspace, ["rev-parse", `${ref}^{commit}`]).trim();
-      return `gh api repos/${FLEET_REPO}/license?ref=${sha}`;
-    });
-    expect(new Set(built.gh.map((call) => call.join(" ")))).toEqual(new Set(asked));
-  });
-
   test("links a shipped favicon at the tier's own base and serves it there, for the tag and HEAD tiers; a tier whose tree ships none links none", () => {
     // Per-tier `head` and public/ copy. v0.1.0, from before the icon, is the control: an invented icon link would
     // 404 on every page there.
@@ -578,31 +556,9 @@ describe("link strictness on HEAD", () => {
         expect(result.exitCode, describeRun(result)).toBe(1);
         expect(result.stderr).toContain("missing-page");
       }
-      // The check asks no API, so a pull request's check cannot fail on GitHub's rate limit; the deploy is the control.
-      expect([deploy.gh.length > 0, check.gh]).toEqual([true, []]);
     },
     TEST_TIMEOUT_MS,
   );
-});
-
-describe("a license read GitHub does not answer", () => {
-  test("fails the deploy naming the repository, the commit, and gh's reason, before any tier builds", () => {
-    // Read as "no license", a failed read would publish every card with the row silently gone.
-    const repo = temp.dir("pages-site-unanswered-");
-    mkdirSync(join(repo, "docs"));
-    writeFileSync(join(repo, "docs", "README.md"), "# Home\n");
-    initRepo(repo);
-    commitAll(repo, "docs");
-    const sha = fixtureGit(repo, ["rev-parse", "HEAD"]).trim();
-    const result = buildSite(repo, FLEET_REPO, runnerTemp(temp, FLEET_BASE), {
-      GH_ANSWER: "",
-      STUB_EXIT: "1",
-    });
-    expect([result.exitCode, result.stdout.trim().split("\n").at(-1)]).toEqual([
-      1,
-      `::error::cannot read the license of ${FLEET_REPO} at ${sha} from GitHub (exit 1)`,
-    ]);
-  });
 });
 
 describe("layouts that build no docs tier", () => {
