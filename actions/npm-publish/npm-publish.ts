@@ -234,11 +234,25 @@ export function verdictOf(channel: Channel, version: string, record: RegistryRec
   return { action: "publish" };
 }
 
-/** Whether a release must move `next` to itself: `next` is never older than `latest`, and never moves back. */
-export function nextNeedsRelease(version: string, record: RegistryRecord): boolean {
+function nextBelow(version: string, record: RegistryRecord): boolean {
   const next = record["dist-tags"].next;
 
   return next === undefined || Bun.semver.order(next, version) < 0;
+}
+
+/**
+ * Why the release `version` leaves `next` where it is, or null when it must move `next` to itself: `next` is never
+ * older than `latest`, never moves back, and only the release `latest` names moves it.
+ */
+export function nextStays(version: string, record: RegistryRecord): string | null {
+  const { latest, next } = record["dist-tags"];
+  if (latest !== version) {
+    return `latest names ${latest ?? "nothing"}, so ${version} is not the current release: next is left at ${next ?? "nothing"}`;
+  }
+
+  if (nextBelow(version, record)) return null;
+
+  return `next names ${next}, not below ${version}: left there`;
 }
 
 function git(run: Runner, cwd: string, args: string[]): string {
@@ -431,10 +445,9 @@ async function moveNextToRelease(
   tools: Tools,
 ): Promise<void> {
   const { version, directory } = request;
-  if (!nextNeedsRelease(version, record)) {
-    tools.log.notice(
-      `${pkg.name}: next names ${record["dist-tags"].next}, not below ${version}; left there`,
-    );
+  const stays = nextStays(version, record);
+  if (stays !== null) {
+    tools.log.notice(`${pkg.name}: ${stays}`);
     return;
   }
 
@@ -444,7 +457,7 @@ async function moveNextToRelease(
     ["dist-tag", "add", `${pkg.name}@${version}`, "next"],
     NPM_BOUND_MS,
   );
-  const moved = await recordWhere(pkg.name, tools, (held) => !nextNeedsRelease(version, held));
+  const moved = await recordWhere(pkg.name, tools, (held) => !nextBelow(version, held));
   if (moved !== undefined) return;
 
   const said = succeeded(result.exit) ? "npm reported it moved" : npmFailure(result);

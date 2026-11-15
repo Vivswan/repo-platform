@@ -6,7 +6,7 @@
 import { expect, test } from "bun:test";
 import {
   type Channel,
-  nextNeedsRelease,
+  nextStays,
   nextVersion,
   type Package,
   parsePackage,
@@ -248,21 +248,33 @@ test.each<{
 });
 
 // `next` is never older than `latest` and never moves back: a pre-release of the release itself sorts below it, and
-// one of the patch after sorts above.
-test.each<{ reason: string; next: string | undefined; moves: boolean }>([
-  { reason: "no next tag", next: undefined, moves: true },
+// one of the patch after sorts above. A rerun of a release that a newer one overtook must move nothing: `next` at the
+// older release would sit below `latest`.
+test.each<{ reason: string; tags: Record<string, string>; stays: string | null }>([
+  { reason: "no next tag", tags: { latest: "1.2.0" }, stays: null },
   {
     reason: "next on a pre-release of this release",
-    next: "1.2.0-main.40.20261110.gddddddd",
-    moves: true,
+    tags: { latest: "1.2.0", next: "1.2.0-main.40.20261110.gddddddd" },
+    stays: null,
   },
-  { reason: "next on this release", next: "1.2.0", moves: false },
-  { reason: "next on a pre-release after this release", next: MINTED, moves: false },
-])("a release moves next to itself: $reason", ({ next, moves }) => {
-  const tags: Record<string, string> = { latest: "1.2.0" };
-  if (next !== undefined) tags.next = next;
-
-  expect(nextNeedsRelease("1.2.0", record(["1.2.0"], tags))).toBe(moves);
+  {
+    reason: "next on this release",
+    tags: { latest: "1.2.0", next: "1.2.0" },
+    stays: "next names 1.2.0, not below 1.2.0: left there",
+  },
+  {
+    reason: "next on a pre-release after this release",
+    tags: { latest: "1.2.0", next: MINTED },
+    stays: `next names ${MINTED}, not below 1.2.0: left there`,
+  },
+  {
+    reason: "a rerun of a release a newer one overtook, next still on its own pre-release",
+    tags: { latest: "1.3.0", next: "1.2.0-main.42.20261114.g0123456" },
+    stays:
+      "latest names 1.3.0, so 1.2.0 is not the current release: next is left at 1.2.0-main.42.20261114.g0123456",
+  },
+])("a release moves next to itself: $reason", ({ tags, stays }) => {
+  expect(nextStays("1.2.0", record(["1.2.0", "1.3.0"], tags))).toBe(stays);
 });
 
 // npm publishes none of these as the channels mean them: `private` never, a manifest's own tag in place of the tag
@@ -692,7 +704,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       waitedOut: false,
       lines: [
         ["notice", "@example/widget: not published, 1.2.0 is already on the registry (a rerun)"],
-        ["notice", `@example/widget: next names ${MINTED}, not below 1.2.0; left there`],
+        ["notice", `@example/widget: next names ${MINTED}, not below 1.2.0: left there`],
       ],
     },
   },

@@ -137,13 +137,14 @@ Before the publish, judged in the plan and again in the publish step, the first 
 
 After the publish:
 
-| The record shows                                  | Outcome                                                                      |
-| ------------------------------------------------- | ---------------------------------------------------------------------------- |
-| the version, and the channel's tag at or above it | green                                                                        |
-| the version, and the channel's tag behind it      | fails: the publish landed under the wrong tag, or something moved the tag    |
-| never the version, within two minutes             | fails, with npm's error line when npm failed; a rerun finds what did land    |
-| at a release, `next` missing or below the release | `npm dist-tag add` moves `next` to the release, then the record must show it |
-| at a release, `next` at or above the release      | left there, with a notice                                                    |
+| The record shows                                                      | Outcome                                                                      |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| the version, and the channel's tag at or above it                     | green                                                                        |
+| the version, and the channel's tag behind it                          | fails: the publish landed under the wrong tag, or something moved the tag    |
+| never the version, within two minutes                                 | fails, with npm's error line when npm failed; a rerun finds what did land    |
+| at a release, `next` missing or below the release                     | `npm dist-tag add` moves `next` to the release, then the record must show it |
+| at a release, `next` at or above the release                          | left there, with a notice                                                    |
+| a release `latest` no longer names (a rerun a newer release overtook) | `next` left there, with a notice naming the current release                  |
 
 - **The manifest is refused** when it is `private: true`, or sets `tag`, `publishConfig.tag`, or a registry in `publishConfig`.
 - **npm's own configuration is refused** when its `tag` is not npm's default, or it names another registry for the package, in an `.npmrc` or a variable. Trusted publishing is registry.npmjs.org's alone, so that is the one registry this module reads and publishes to.
@@ -154,6 +155,7 @@ After the publish:
 ## Reruns and failures
 
 - **A failed `npm-latest` leaves the GitHub release a draft:** `publish-release` waits for it. "Re-run failed jobs" finishes both: a version that did land is skipped, and `next` is still moved.
+- **A rerun of a release that a newer one overtook** moves nothing: only the release `latest` names moves `next`, and the notice says which release is current.
 - **A burst of merges** can cancel a pending npm leg: a lane keeps one waiting job. "Re-run failed jobs" on that run finishes it, and the release stays a draft until `npm-latest` succeeds. A rerun that a newer version overtook does not publish: `next` skips as behind a newer `next`, and either channel fails as below a newer release.
 - **Removing the module** skips both legs; the hook stays (a starter), and the package stays on npm.
 
