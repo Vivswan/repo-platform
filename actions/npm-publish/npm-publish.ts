@@ -9,6 +9,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as core from "@actions/core";
+import pWaitFor from "p-wait-for";
 import { z } from "zod";
 import {
   capture,
@@ -28,9 +29,12 @@ const GIT_BOUND_MS = 60_000;
 const NPM_BOUND_MS = 60_000;
 const PUBLISH_BOUND_MS = 600_000;
 const READ_BOUND_MS = 30_000;
-const CONFIRM_EVERY_MS = 5_000;
-const CONFIRM_READS = 24;
+const CONFIRM = { everyMs: 5_000, boundMs: 120_000 } as const;
 const STAMP_FLAGS = ["--no-git-tag-version", "--ignore-scripts", "--no-workspaces-update"] as const;
+const BEHIND_RELEASE = {
+  next: "the package.json on main is behind the registry",
+  latest: "a release never moves latest back",
+} as const;
 const PUBLISH_ARGS = { next: ["publish", "--tag", "next"], latest: ["publish"] } as const;
 
 const packageSchema = z.object({
@@ -89,8 +93,8 @@ export interface Tools {
   /** Reads a package's record from the registry, fresh on every call. */
   readRecord: (name: string) => Promise<RegistryRecord>;
 
-  /** Waits between two reads of the record. */
-  sleep: (ms: number) => Promise<unknown>;
+  /** How often, and for how long, a write is looked for on the record. */
+  confirm: { everyMs: number; boundMs: number };
 
   /** Takes the run's notices. */
   log: Log;
@@ -198,10 +202,8 @@ export function verdictOf(channel: Channel, version: string, record: RegistryRec
     return { action: "skip", reason: `${version} is already on the registry (a rerun)` };
   }
 
-  if (channel === "latest") return { action: "publish" };
-
   const next = record["dist-tags"].next;
-  if (next !== undefined && Bun.semver.order(next, version) >= 0) {
+  if (channel === "next" && next !== undefined && Bun.semver.order(next, version) >= 0) {
     return {
       action: "skip",
       reason: `next names ${next}, which is not below this commit's ${version}: next never moves back`,
@@ -213,7 +215,7 @@ export function verdictOf(channel: Channel, version: string, record: RegistryRec
   if (newest !== undefined && Bun.semver.order(version, newest) <= 0) {
     return {
       action: "fail",
-      reason: `${version} is not above the released ${newest}: the package.json on main is behind the registry`,
+      reason: `${version} is not above the released ${newest}: ${BEHIND_RELEASE[channel]}`,
     };
   }
 
@@ -277,19 +279,21 @@ function npmFailure(result: RunResult): string {
 }
 
 /** The first record on which `holds`, read within the confirmation bound; undefined when none did. */
-async function recordWhere(
+function recordWhere(
   name: string,
   tools: Tools,
   holds: (record: RegistryRecord) => boolean,
 ): Promise<RegistryRecord | undefined> {
-  for (let read = 0; read < CONFIRM_READS; read++) {
-    if (read > 0) await tools.sleep(CONFIRM_EVERY_MS);
-
-    const record = await tools.readRecord(name);
-    if (holds(record)) return record;
-  }
-
-  return undefined;
+  return pWaitFor<RegistryRecord | undefined>(
+    async () => {
+      const record = await tools.readRecord(name);
+      return holds(record) && pWaitFor.resolveWith(record);
+    },
+    {
+      interval: tools.confirm.everyMs,
+      timeout: { milliseconds: tools.confirm.boundMs, fallback: () => undefined },
+    },
+  );
 }
 
 /**
@@ -335,7 +339,7 @@ async function publishVersion(
 ): Promise<RegistryRecord> {
   const { channel, version, directory } = request;
   const id = `${pkg.name}@${version}`;
-  // latest passes no tag: any tag, `latest` included, switches off npm's refusal of a version below the newest release.
+  // latest passes no tag: any tag, `latest` included, switches off npm's own refusal of a version below the newest release.
   const result = npm(tools, directory, PUBLISH_ARGS[channel], PUBLISH_BOUND_MS);
   const record = await recordWhere(pkg.name, tools, (held) =>
     Object.hasOwn(held.versions, version),
@@ -343,7 +347,7 @@ async function publishVersion(
 
   if (record === undefined && succeeded(result.exit)) {
     throw new Error(
-      `npm reported ${id} published, but ${CONFIRM_READS} reads of the registry did not show it: re-run the job`,
+      `npm reported ${id} published, but the registry did not show it within ${tools.confirm.boundMs / 1000} s: re-run the job`,
     );
   }
 
@@ -494,7 +498,7 @@ async function main(): Promise<void> {
   const tools: Tools = {
     run: capture,
     readRecord: (name) => readRecord(registry, name),
-    sleep: Bun.sleep,
+    confirm: CONFIRM,
     log: core,
   };
 

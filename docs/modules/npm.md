@@ -116,15 +116,15 @@ It sorts above the last release, below the next one whatever its bump, and above
 
 Before the publish, judged in the plan and again in the publish step:
 
-| The record shows                                           | Channel  | Outcome                                                                   |
-| ---------------------------------------------------------- | -------- | ------------------------------------------------------------------------- |
-| the version already published                              | both     | skipped with a notice, green: a rerun                                     |
-| the version already published, its channel's tag behind it | both     | fails: a rerun of a publish that left the tag behind stays red            |
-| `next` at or above this version                            | `next`   | skipped with a notice, green: `next` never moves back                     |
-| a release at or above this version                         | `next`   | fails: the `package.json` on main is behind the registry                  |
-| a release above this one                                   | `latest` | fails, by npm itself: a plain `npm publish` refuses to move `latest` back |
-| no such package, or anything the job cannot read           | both     | fails: it never publishes blind                                           |
-| anything else                                              | both     | publishes                                                                 |
+| The record shows                                           | Channel  | Outcome                                                        |
+| ---------------------------------------------------------- | -------- | -------------------------------------------------------------- |
+| the version already published                              | both     | skipped with a notice, green: a rerun                          |
+| the version already published, its channel's tag behind it | both     | fails: a rerun of a publish that left the tag behind stays red |
+| `next` at or above this version                            | `next`   | skipped with a notice, green: `next` never moves back          |
+| a release at or above this version                         | `next`   | fails: the `package.json` on main is behind the registry       |
+| a release at or above this version                         | `latest` | fails before any publish: a release never moves `latest` back  |
+| no such package, or anything the job cannot read           | both     | fails: it never publishes blind                                |
+| anything else                                              | both     | publishes                                                      |
 
 After the publish:
 
@@ -132,7 +132,7 @@ After the publish:
 | ------------------------------------------------- | ---------------------------------------------------------------------------- |
 | the version, and the channel's tag at or above it | green                                                                        |
 | the version, and the channel's tag behind it      | fails: the publish landed under the wrong tag, or something moved the tag    |
-| never the version, in 24 reads five seconds apart | fails, with npm's error line when npm failed; a rerun finds what did land    |
+| never the version, within two minutes             | fails, with npm's error line when npm failed; a rerun finds what did land    |
 | at a release, `next` missing or below the release | `npm dist-tag add` moves `next` to the release, then the record must show it |
 | at a release, `next` at or above the release      | left there, with a notice                                                    |
 
@@ -143,7 +143,7 @@ After the publish:
 ## Reruns and failures
 
 - **A failed `npm-latest` leaves the GitHub release a draft:** `publish-release` waits for it. "Re-run failed jobs" finishes both: a version that did land is skipped, and `next` is still moved.
-- **A burst of merges** can cancel a waiting publish: a lane keeps one waiting job. The cancelled leg is red, and a rerun publishes it or skips it as behind.
+- **A burst of merges** can cancel a pending npm leg: a lane keeps one waiting job. "Re-run failed jobs" on that run finishes it, and the release stays a draft until `npm-latest` succeeds. A rerun that a newer version overtook does not publish: `next` skips as behind, and a release fails as below the newer one.
 - **Removing the module** skips both legs; the hook stays (a starter), and the package stays on npm.
 
 ## Private repositories

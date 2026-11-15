@@ -161,10 +161,20 @@ test.each<{
     },
   },
   {
-    reason: "a release, which npm's own guard orders",
+    reason: "a release below one already published, whatever npm's configuration says of the tag",
     channel: "latest",
     version: "1.2.0",
     held: record(["1.3.0"], { latest: "1.3.0" }),
+    verdict: {
+      action: "fail",
+      reason: "1.2.0 is not above the released 1.3.0: a release never moves latest back",
+    },
+  },
+  {
+    reason: "a release above every one published",
+    channel: "latest",
+    version: "1.2.0",
+    held: record(["1.1.0", "1.2.0-main.40.20261110.gddddddd"], { latest: "1.1.0" }),
     verdict: { action: "publish" },
   },
 ])("the verdict: $reason", ({ channel, version, held, verdict }) => {
@@ -276,17 +286,35 @@ test.each<{ reason: string; manifest: object; outcome: Package | string }>([
 type Line = ["info" | "notice", string];
 
 interface Run {
+  /** What the phase returned, or the message it threw. */
   outcome: unknown;
+
+  /** The git and npm commands, in order. */
   commands: string[];
+
+  /** The records the run consumed, of those the registry was given. */
   reads: number;
+
+  /** Whether the run read the last record again at least twice: it polled, where one confirming read would not. */
+  waitedOut: boolean;
+
+  /** What the run logged. */
   lines: Line[];
 }
 
 /** What the fake npm and checkout answer; every npm command succeeds unless named here. */
 interface Answers {
+  /** What `npm publish` answers. */
   publish?: RunResult;
+
+  /** What `npm dist-tag` answers. */
   distTag?: RunResult;
+
+  /** Whether the checkout is shallow. */
   shallow?: boolean;
+
+  /** The confirmation bound: generous unless the row waits it out, so load alone cannot end a wait that would succeed. */
+  boundMs?: number;
 }
 
 /** One phase against a fake checkout, npm, and registry: `records` answers the reads in order, its last entry from then on. */
@@ -329,7 +357,7 @@ async function runWith(
       reads += 1;
       return Promise.resolve(held);
     },
-    sleep: () => Promise.resolve(),
+    confirm: { everyMs: 1, boundMs: answers.boundMs ?? 60_000 },
     log: {
       info: (message) => lines.push(["info", message]),
       notice: (message) => lines.push(["notice", String(message)]),
@@ -342,7 +370,13 @@ async function runWith(
     outcome = (cause as Error).message;
   }
 
-  return { outcome, commands, reads, lines };
+  return {
+    outcome,
+    commands,
+    reads: Math.min(reads, records.length),
+    waitedOut: reads >= records.length + 2,
+    lines,
+  };
 }
 
 const plan = (
@@ -405,6 +439,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: MINTED, publish: true },
       commands: [...POSITION, STAMP],
       reads: 1,
+      waitedOut: false,
       lines: [],
     },
   },
@@ -415,6 +450,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: MINTED, publish: false },
       commands: POSITION,
       reads: 1,
+      waitedOut: false,
       lines: [
         [
           "notice",
@@ -426,7 +462,13 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   {
     reason: "latest: the release on disk, left as release-please wrote it",
     run: () => plan("latest", "v1.2.0", [UNRELEASED]),
-    expected: { outcome: { version: "1.2.0", publish: true }, commands: [], reads: 1, lines: [] },
+    expected: {
+      outcome: { version: "1.2.0", publish: true },
+      commands: [],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
   },
   {
     reason: "latest: a rerun plans no build",
@@ -435,6 +477,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: "1.2.0", publish: false },
       commands: [],
       reads: 1,
+      waitedOut: false,
       lines: [
         [
           "notice",
@@ -451,6 +494,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
         "the release tag 'v11.2.0' does not end with v1.2.0: release-please did not bump this package.json",
       commands: [],
       reads: 0,
+      waitedOut: false,
       lines: [],
     },
   },
@@ -461,6 +505,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: "the checkout is shallow: the next version counts main's commits (fetch-depth: 0)",
       commands: POSITION.slice(0, 1),
       reads: 0,
+      waitedOut: false,
       lines: [],
     },
   },
@@ -471,6 +516,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: "the version on disk, 1.2.0-rc.1, must be a plain release X.Y.Z",
       commands: [],
       reads: 0,
+      waitedOut: false,
       lines: [],
     },
   },
@@ -490,6 +536,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: MINTED, published: true },
       commands: ["npm publish --tag next"],
       reads: 4,
+      waitedOut: false,
       lines: [],
     },
   },
@@ -500,6 +547,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: MINTED, published: false },
       commands: [],
       reads: 1,
+      waitedOut: false,
       lines: [
         [
           "notice",
@@ -515,6 +563,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: "1.2.0", published: true },
       commands: ["npm publish", MOVE_NEXT],
       reads: 3,
+      waitedOut: false,
       lines: [],
     },
   },
@@ -525,6 +574,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: "1.2.0", published: false },
       commands: [MOVE_NEXT],
       reads: 2,
+      waitedOut: false,
       lines: [
         ["notice", "@example/widget: not published, 1.2.0 is already on the registry (a rerun)"],
       ],
@@ -538,6 +588,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: "1.2.0", published: false },
       commands: [],
       reads: 1,
+      waitedOut: false,
       lines: [
         ["notice", "@example/widget: not published, 1.2.0 is already on the registry (a rerun)"],
         ["notice", `@example/widget: next names ${MINTED}, not below 1.2.0; left there`],
@@ -546,7 +597,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason: "latest: a tag write the record never shows fails, naming the publisher's switch",
-    run: () => publish("latest", "1.2.0", [RELEASED], { distTag: failed(E403) }),
+    run: () => publish("latest", "1.2.0", [RELEASED], { distTag: failed(E403), boundMs: 100 }),
     expected: {
       outcome: [
         "next was not moved to 1.2.0: npm error code E403",
@@ -554,7 +605,8 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
         "Then re-run the job: the release is published, and only the tag is left to move.",
       ].join("\n"),
       commands: [MOVE_NEXT],
-      reads: 25,
+      reads: 1,
+      waitedOut: true,
       lines: [
         ["notice", "@example/widget: not published, 1.2.0 is already on the registry (a rerun)"],
         ["info", E403],
@@ -568,6 +620,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: MINTED, published: true },
       commands: ["npm publish --tag next"],
       reads: 2,
+      waitedOut: false,
       lines: [
         ["info", E403],
         [
@@ -579,7 +632,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason: "a failed publish the record never shows fails, after the whole wait",
-    run: () => publish("next", MINTED, [BEFORE], { publish: failed(E403) }),
+    run: () => publish("next", MINTED, [BEFORE], { publish: failed(E403), boundMs: 100 }),
     expected: {
       outcome: [
         `npm publish failed and @example/widget@${MINTED} is not on the registry: npm error code E403`,
@@ -589,17 +642,19 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
         "  its repository is this one, and the package is the one named here",
       ].join("\n"),
       commands: ["npm publish --tag next"],
-      reads: 25,
+      reads: 1,
+      waitedOut: true,
       lines: [["info", E403]],
     },
   },
   {
     reason: "a publish npm reports and the record never shows fails: a dry run uploads nothing",
-    run: () => publish("next", MINTED, [BEFORE]),
+    run: () => publish("next", MINTED, [BEFORE], { boundMs: 100 }),
     expected: {
-      outcome: `npm reported @example/widget@${MINTED} published, but 24 reads of the registry did not show it: re-run the job`,
+      outcome: `npm reported @example/widget@${MINTED} published, but the registry did not show it within 0.1 s: re-run the job`,
       commands: ["npm publish --tag next"],
-      reads: 25,
+      reads: 1,
+      waitedOut: true,
       lines: [],
     },
   },
@@ -614,6 +669,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: `${MINTED} is on the registry, but next names 1.2.0, which is behind it`,
       commands: ["npm publish --tag next"],
       reads: 2,
+      waitedOut: false,
       lines: [],
     },
   },
@@ -624,6 +680,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: `package.json is at 1.2.0, not the planned ${MINTED}: the build hook must leave the version alone`,
       commands: [],
       reads: 0,
+      waitedOut: false,
       lines: [],
     },
   },
