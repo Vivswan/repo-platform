@@ -1,4 +1,7 @@
+import { isMap, isScalar, Lexer, parseDocument, visit } from "yaml";
 import { PLATFORM_NAME, PLATFORM_OWNER } from "../../actions/shared/platform";
+
+const OWNER = /^[A-Za-z0-9_.-]+$/;
 
 export interface Pin {
   /** The source the line was read from, as handed to the extractor. */
@@ -14,22 +17,38 @@ export interface Pin {
   version: string | null;
 }
 
-/** Every `uses:` pin of a source, commented example lines included.
- *  A placeholder-owner line is a self pin (sourceSelfPins), not a third-party one. */
+/** The pin a `uses:` value names, or null for a path in the caller's checkout, a `$/` path, or an image. `comment`
+ *  is the one trailing the step's line. */
+function pinOf(value: unknown, comment: string | null | undefined, file: string): Pin | null {
+  const [path, ref] = String(value).split("@");
+  const [owner, name] = path.split("/");
+  if (ref === undefined || name === undefined || !OWNER.test(owner)) return null;
+
+  return {
+    file,
+    action: `${owner}/${name}`,
+    ref,
+    version: comment?.trim().split(/\s+/)[0] ?? null,
+  };
+}
+
+/** Every `uses:` pin of a YAML source as the parser reads it, then those of its commented example lines, each comment
+ *  read as a document of its own. A source is rendered first (shipped_source.ts): a placeholder is no YAML. */
 export function extractUsesPins(text: string, file: string): Pin[] {
   const pins: Pin[] = [];
-  for (const rawLine of text.split("\n")) {
-    // A line can carry BOTH a real pin and an unrelated placeholder, so the placeholder becomes a sentinel no owner or ref can hold.
-    const line = rawLine.replace(/\{\{[^}]*\}\}/g, "<PLACEHOLDER>");
-    const match = line.match(
-      /uses:\s*['"]?([A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+)@([^\s'"]+)['"]?(?:[ \t]+#[ \t]*(\S+))?/,
-    );
-    if (!match) continue;
-    if (match[2].includes("<PLACEHOLDER>")) continue;
-    const action = match[1].split("/").slice(0, 2).join("/");
-    pins.push({ file, action, ref: match[2], version: match[3] ?? null });
-  }
-  return pins;
+  visit(parseDocument(text), {
+    Pair(_key, pair, path) {
+      if (!isScalar(pair.key) || pair.key.value !== "uses" || !isScalar(pair.value)) return;
+
+      // A flow-style step's trailing comment sits on its mapping, a block-style one's on the value.
+      const step = path.at(-1);
+      const flowComment = isMap(step) && step.flow ? step.comment : null;
+      const pin = pinOf(pair.value.value, pair.value.comment ?? flowComment, file);
+      if (pin !== null) pins.push(pin);
+    },
+  });
+  const comments = [...new Lexer().lex(text)].filter((token) => token.startsWith("#"));
+  return [...pins, ...comments.flatMap((comment) => extractUsesPins(comment.slice(1), file))];
 }
 
 export interface SelfPin {

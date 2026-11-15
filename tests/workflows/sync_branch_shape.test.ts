@@ -6,19 +6,17 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { PLATFORM_OWNER, SYNC_LABEL } from "../../actions/shared/platform.ts";
+import { SYNC_LABEL } from "../../actions/shared/platform.ts";
+import { shippedSource } from "../shared/shipped_source.ts";
 
 const ROOT = join(import.meta.dir, "../..");
 
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
 test("the label the sync-branch condition reads is the platform's, and the baseline layer declares it", () => {
-  const workflow = parseYaml(
-    read("files/base/.github/workflows/sync-branch.yml").replaceAll(
-      "{{github_username}}",
-      PLATFORM_OWNER,
-    ),
-  ) as { jobs: Record<string, { if?: string }> };
+  const workflow = parseYaml(shippedSource("files/base/.github/workflows/sync-branch.yml")) as {
+    jobs: Record<string, { if?: string }>;
+  };
   const baseline = parseYaml(read("files/settings/baseline.yml")) as {
     labels: { name: string }[];
   };
