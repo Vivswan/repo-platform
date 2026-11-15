@@ -7,15 +7,16 @@
 // tree is compared: a held link leaves no diff. The repository token cannot create or update a file under
 // .github/workflows, so a diff touching one is refused whole and the comment names the operator's branch dispatch.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PLATFORM_NAME, PLATFORM_SLUG, SYNC_LABEL } from "../../../actions/shared/platform.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
+import { GitHubClient, unansweredReason } from "../shared/github.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { codeSpan, fenced } from "../shared/markdown_code.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
-import { issueCommentsPages, stickyComment } from "../shared/sticky_comment.ts";
+import { issueComment, stickyComment } from "../shared/sticky_comment.ts";
 import {
   boundedReport,
   DELIVERY_CALL_BOUND_MS,
@@ -114,25 +115,20 @@ class BranchDelivery {
   /** The platform commit the build checkout is at. */
   readonly build = mustCapture(["git", "-C", "build", "rev-parse", "HEAD"]);
 
+  /** The API under the repository token, so comments and label removals appear as the bot login. */
+  readonly github = new GitHubClient();
+
+  /** The pull request as an issue: its labels and comments live there. */
+  readonly issue = `repos/${this.repository}/issues/${this.prNumber}`;
+
   /** A git argv against the target clone. */
   git(...args: string[]): string[] {
     return ["git", "-C", "target", ...args];
   }
 
-  /** A gh api argv; under the repository token, so comments and label removals appear as the bot login. */
-  api(...args: string[]): string[] {
-    return ["gh", "api", ...args];
-  }
-
   /** One bounded call; its stderr is echoed to the job log once it returns. */
-  run(
-    argv: string[],
-    env?: Record<string, string>,
-  ): { ok: boolean; stdout: string; stderr: string } {
-    const result = capture(argv, {
-      timeoutMs: DELIVERY_CALL_BOUND_MS,
-      ...(env === undefined ? {} : { env }),
-    });
+  run(argv: string[]): { ok: boolean; stdout: string; stderr: string } {
+    const result = capture(argv, { timeoutMs: DELIVERY_CALL_BOUND_MS });
     if (result.stderr !== "") console.error(result.stderr.replace(/\n$/, ""));
     return { ok: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr };
   }
@@ -144,56 +140,51 @@ class BranchDelivery {
     return call.stdout;
   }
 
-  /** A 404 is the label already off: a human took it off and put it back while an earlier run was still on its way here. */
-  removeLabel(): void {
-    const removed = this.run(
-      this.api(
-        "--method",
-        "DELETE",
-        "--silent",
-        `repos/${this.repository}/issues/${this.prNumber}/labels/${encodeURIComponent(SYNC_LABEL)}`,
-      ),
+  /** A label already off counts as removed: a human took it off and put it back while an earlier run was still on its way here. */
+  async removeLabel(): Promise<void> {
+    const removed = await this.github.remove(
+      `${this.issue}/labels/${encodeURIComponent(SYNC_LABEL)}`,
     );
-    if (!removed.ok && !/HTTP 404/.test(removed.stderr)) {
-      fail(`removing the ${SYNC_LABEL} label failed`);
-    }
+    if (removed.kind === "ok") return;
+
+    fail(`removing the ${SYNC_LABEL} label failed (${unansweredReason(removed)})`);
   }
 
   /** One comment per pull request: the earlier one is replaced in place. */
-  comment(outcome: Outcome): void {
-    const bodyFile = join(this.runnerTemp, "sync-branch-comment.md");
-    writeFileSync(
-      bodyFile,
-      commentBody(outcome, { build: this.build, branch: this.branch, runUrl: this.runUrl }),
-    );
-    const comments = `repos/${this.repository}/issues/${this.prNumber}/comments`;
-    const listed = this.run(this.api(comments, "--paginate", "--slurp"));
-    if (!listed.ok) fail("listing the pull request's comments failed");
-    const pages = parseJsonWith(issueCommentsPages, listed.stdout, comments);
-    const earlier = stickyComment(pages.flat(), COMMENT_MARKER);
-    this.must(
+  async comment(outcome: Outcome): Promise<void> {
+    const body = commentBody(outcome, {
+      build: this.build,
+      branch: this.branch,
+      runUrl: this.runUrl,
+    });
+    const comments = `${this.issue}/comments`;
+    const listed = await this.github.paginate(comments, issueComment);
+    if (listed.kind !== "ok") {
+      fail(`listing the pull request's comments failed (${unansweredReason(listed)})`);
+    }
+
+    const earlier = stickyComment(listed.value, COMMENT_MARKER);
+    const posted =
       earlier === null
-        ? this.api("--method", "POST", "--silent", comments, "-F", `body=@${bodyFile}`)
-        : this.api(
-            "--method",
+        ? await this.github.send("POST", comments, { body })
+        : await this.github.send(
             "PATCH",
-            "--silent",
             `repos/${this.repository}/issues/comments/${earlier.id}`,
-            "-F",
-            `body=@${bodyFile}`,
-          ),
-      "posting the pull request comment failed",
-    );
+            { body },
+          );
+    if (posted.kind !== "ok") {
+      fail(`posting the pull request comment failed (${unansweredReason(posted)})`);
+    }
   }
 
   /** The branch sync end to end; every outcome ends as the one comment on the pull request. */
-  deliver(): void {
-    this.removeLabel();
+  async deliver(): Promise<void> {
+    await this.removeLabel();
     const migrate = requireEnv("MIGRATE_OUTCOME");
     const writer = requireEnv("WRITER_OUTCOME");
     if (migrate !== "success" || writer !== "success") {
       const what = migrate === "success" ? "the writer" : "a migration rung";
-      this.comment({ kind: "failed", what, log: tail(join(this.runnerTemp, SYNC_LOG)) });
+      await this.comment({ kind: "failed", what, log: tail(join(this.runnerTemp, SYNC_LOG)) });
       fail(`${what} failed; its log is in the pull request comment`);
     }
     const summary = parseJsonWith(
@@ -203,7 +194,7 @@ class BranchDelivery {
     );
     const report = readFileSync(join(this.runnerTemp, SYNC_LOG), "utf-8");
     if (summary.hold) {
-      this.comment({ kind: "held", report });
+      await this.comment({ kind: "held", report });
       fail(summary.holdReasons.map((reason) => `the writer holds the branch: ${reason}`));
     }
 
@@ -221,7 +212,7 @@ class BranchDelivery {
     );
     const workflows = changed.filter((path) => path.startsWith(WORKFLOWS_DIR));
     if (workflows.length > 0) {
-      this.comment({ kind: "workflow files", paths: workflows, report });
+      await this.comment({ kind: "workflow files", paths: workflows, report });
       fail(
         `the sync changes ${workflows.join(", ")}: the repository token cannot create or update a workflow file`,
       );
@@ -232,7 +223,7 @@ class BranchDelivery {
         this.git("log", "-1", "--format=%an"),
         "reading the tip's author failed",
       ).trim();
-      this.comment({ kind: "unchanged", tipIsOurs: author === SYNC_IDENTITY.name });
+      await this.comment({ kind: "unchanged", tipIsOurs: author === SYNC_IDENTITY.name });
       console.log(`the branch already matches build ${this.build}; nothing to push`);
       return;
     }
@@ -253,16 +244,16 @@ class BranchDelivery {
       ),
     );
     if (!pushed.ok) {
-      this.comment({ kind: "push rejected", log: pushed.stderr });
+      await this.comment({ kind: "push rejected", log: pushed.stderr });
       fail(`pushing ${this.branch} was refused; git's message is in the pull request comment`);
     }
     const commit = this.must(
       this.git("rev-parse", "HEAD"),
       "reading the pushed commit failed",
     ).trim();
-    this.comment({ kind: "pushed", commit, report });
+    await this.comment({ kind: "pushed", commit, report });
     console.log(`build ${this.build} pushed onto ${this.branch} as ${commit}`);
   }
 }
 
-if (import.meta.main) new BranchDelivery().deliver();
+if (import.meta.main) await new BranchDelivery().deliver();
