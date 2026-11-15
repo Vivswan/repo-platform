@@ -451,7 +451,8 @@ export function fleetRepo(repo: string): void {
   write(repo, "docs/setup.md", `${SETUP_MD}HEAD-only line.\n`);
   write(repo, "docs/zulu.md", "---\norder: 1\ngroup: Basics\n---\n\n# Zulu\n\nRanked.\n");
   write(repo, "docs/delta.md", "---\ngroup: Basics\n---\n\n# Delta\n\nGrouped.\n");
-  write(repo, "docs/bravo.md", "# Bravo\n\nUnplaced.\n");
+  // The two h2s share an id under VitePress's default slugs and none under GitHub's, so a render at the defaults refuses the page.
+  write(repo, "docs/bravo.md", "# `Bravo` notes\n\nUnplaced.\n\n## a.b\n\n## Explicit {#a-b}\n");
   write(
     repo,
     "skills/alpha/SKILL.md",

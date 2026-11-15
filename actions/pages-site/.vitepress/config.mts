@@ -14,7 +14,13 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createCssVariablesTheme, normalizeTheme } from "shiki";
-import { defineConfigWithTheme, type MarkdownOptions } from "vitepress";
+import {
+  createMarkdownRenderer,
+  defineConfigWithTheme,
+  disposeMdItInstance,
+  type MarkdownOptions,
+  type MarkdownRenderer,
+} from "vitepress";
 import type { ThemeConfig } from "vitepress-carbon";
 // Carbon's base config wires the theme package into vite (alias, optimize
 // lists, the llms.txt plugin); the deep import is the path its own demo
@@ -65,6 +71,16 @@ function nativeName(tag: string): string {
   } catch {
     return tag;
   }
+}
+
+/** A renderer with the build's own options, so a page the build accepts is titled here too, less the highlighter: a title reads no code block.
+ *  VitePress keeps one renderer per process, so the caller releases this one (disposeMdItInstance) and the build makes its own. */
+function titleRenderer(
+  srcDir: string,
+  options: MarkdownOptions,
+  base: string,
+): Promise<MarkdownRenderer> {
+  return createMarkdownRenderer(srcDir, { ...options, highlight: () => "" }, base);
 }
 
 const srcDir = required("DOCS_SITE_SRC");
@@ -118,7 +134,7 @@ const markdown: MarkdownOptions = {
   container: CUSTOM_BLOCK_LABELS,
 };
 
-const source = fileSource(srcDir);
+const source = fileSource(await titleRenderer(srcDir, markdown, base), srcDir);
 const sidebar: NonNullable<ThemeConfig["sidebar"]> = {};
 const locales: Record<string, { label: string; lang: string }> = {
   root: { label: "English", lang: "en" },
@@ -137,6 +153,7 @@ for (const tree of sidebarTrees(files)) {
   const dir = tree.prefix.slice(0, -1);
   locales[dir] = { label: nativeName(dir), lang: dir };
 }
+disposeMdItInstance();
 
 export default defineConfigWithTheme<FleetThemeConfig>({
   extends: baseConfig,

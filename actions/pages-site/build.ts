@@ -3,7 +3,6 @@
 // Any run that builds a docs tier needs a committed git checkout at GITHUB_WORKSPACE.
 // The tier's project facts and commit are read from the ref's tree with git, never from the working files.
 
-import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -19,7 +18,15 @@ import {
 } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { error, notice, setOutput } from "@actions/core";
-import { env } from "../shared/action_runtime.ts";
+import {
+  capture,
+  env,
+  failureDetail,
+  type RunOptions,
+  requireEnv,
+  run,
+  succeeded,
+} from "../shared/action_runtime.ts";
 import { ownLinksPattern, pagesSite } from "../shared/pages_site.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { type IncludeRoot, isUnwalkedEntry, LANDING_FILES } from "./.vitepress/conventions.ts";
@@ -51,52 +58,47 @@ export const DOCS_DIR = "docs";
 /** Newest version tags a docs mount serves (docs/modules/site.md, "Versions"). */
 const MAX_VERSIONS = 5;
 
-function requireEnv(name: string): string {
-  const value = env(name);
-  if (value === "") throw new Error(`${name} is required and empty`);
+/** A local git read answers in under a second, so a minute names a wedged one (release-health bounds its own the same). */
+const GIT_READ_BOUND_MS = 60_000;
 
-  return value;
+/** `git archive` of one ref's tree, or its extraction: disk-bound, as long as the scripts' whole-tree calls (five minutes). */
+const TREE_EXTRACT_BOUND_MS = 300_000;
+
+/** One VitePress build of one tier: inside the docs check's 15-minute job, so a wedged build dies named, not as the runner's kill. */
+const TIER_BUILD_BOUND_MS = 600_000;
+
+function mustRun(command: string[], options: RunOptions): void {
+  const exit = run(command, options);
+  if (succeeded(exit)) return;
+
+  const detail = failureDetail({ exit, stdout: "", stderr: "" });
+  throw new Error(`command failed (${detail}): ${command.join(" ")}`);
 }
 
-function run(argv: string[], opts: { cwd?: string; env?: Record<string, string> } = {}): void {
-  const proc = spawnSync(argv[0], argv.slice(1), {
-    cwd: opts.cwd,
-    stdio: "inherit",
-    env: { ...process.env, ...(opts.env ?? {}) },
-  });
-  if (proc.error) throw proc.error;
-
-  if (proc.status !== 0) {
-    throw new Error(`command failed (exit ${proc.status}): ${argv.join(" ")}`);
-  }
-}
-
-function capture(argv: string[], cwd?: string): string {
-  const proc = spawnSync(argv[0], argv.slice(1), { cwd, encoding: "utf-8" });
-  if (proc.error) throw proc.error;
-
-  if (proc.status !== 0) {
-    throw new Error(`command failed (exit ${proc.status}): ${argv.join(" ")}\n${proc.stderr}`);
+function git(workspace: string, args: string[]): string {
+  const result = capture(["git", "-C", workspace, ...args], { timeoutMs: GIT_READ_BOUND_MS });
+  if (!succeeded(result.exit)) {
+    throw new Error(`git ${args.join(" ")} failed (${failureDetail(result)})`);
   }
 
-  return proc.stdout;
+  return result.stdout;
 }
 
 /** `git ls-tree` separates the honest answers (exit 0, entry listed or not) from failures (bad ref, corrupt repository).
- *  A failure throws via capture instead of collapsing into absent. */
+ *  A failure throws instead of collapsing into absent. */
 function treeHas(workspace: string, ref: string, path: string): boolean {
-  return capture(["git", "-C", workspace, "ls-tree", ref, "--", path]).trim() !== "";
+  return git(workspace, ["ls-tree", ref, "--", path]).trim() !== "";
 }
 
 /** `git show` on a symlink yields its target path text, which must never be judged as content. */
 function treeFile(workspace: string, ref: string, path: string): string | null {
-  const entry = capture(["git", "-C", workspace, "ls-tree", ref, "--", path]).trim();
+  const entry = git(workspace, ["ls-tree", ref, "--", path]).trim();
   if (entry === "") return null;
 
   const mode = entry.split(" ")[0];
   if (mode !== "100644" && mode !== "100755") return null;
 
-  return capture(["git", "-C", workspace, "show", `${ref}:${path}`]);
+  return git(workspace, ["show", `${ref}:${path}`]);
 }
 
 function writeExclusive(path: string, content: string, what: string): void {
@@ -199,18 +201,21 @@ function readConfig(): Config {
 function extractTree(workspace: string, ref: string, into: string, subtree?: string): void {
   mkdirSync(into, { recursive: true });
   const tar = `${into}.tar`;
-  run([
-    "git",
-    "-C",
-    workspace,
-    "archive",
-    "--format=tar",
-    "-o",
-    tar,
-    ref,
-    ...(subtree === undefined ? [] : ["--", subtree]),
-  ]);
-  run(["tar", "-xf", tar, "-C", into]);
+  mustRun(
+    [
+      "git",
+      "-C",
+      workspace,
+      "archive",
+      "--format=tar",
+      "-o",
+      tar,
+      ref,
+      ...(subtree === undefined ? [] : ["--", subtree]),
+    ],
+    { timeoutMs: TREE_EXTRACT_BOUND_MS },
+  );
+  mustRun(["tar", "-xf", tar, "-C", into], { timeoutMs: TREE_EXTRACT_BOUND_MS });
   rmSync(tar);
 }
 
@@ -379,7 +384,7 @@ function buildVitepressTier(
   // ever installs anything.
   symlinkSync(join(ACTION_DIR, "node_modules"), join(root, "node_modules"));
   const strictLinks = tierStrictLinks(tier);
-  const sha = capture(["git", "-C", cfg.workspace, "rev-parse", `${tier.ref}^{commit}`]).trim();
+  const sha = git(cfg.workspace, ["rev-parse", `${tier.ref}^{commit}`]).trim();
   const facts = collectFacts((path) => treeFile(cfg.workspace, tier.ref, path), {
     repository: cfg.repository,
     docsDir: DOCS_DIR,
@@ -390,20 +395,24 @@ function buildVitepressTier(
   });
   // The action's own bun (the one running this script), never `bun` off
   // PATH: the hook's toolchain setup may have put the repository's bun first.
-  run([process.execPath, join(ACTION_DIR, "node_modules", ".bin", "vitepress"), "build", root], {
-    env: {
-      DOCS_SITE_SRC: srcDir,
-      DOCS_SITE_TITLE: cfg.siteTitle,
-      DOCS_SITE_BASE: opts.base ?? urlBase(cfg.rootBase, tier.rel),
-      DOCS_SITE_ORIGIN: cfg.origin,
-      DOCS_SITE_VERSIONS: JSON.stringify(versions),
-      DOCS_SITE_CURRENT: tier.version,
-      DOCS_SITE_INCLUDES: JSON.stringify(staged),
-      DOCS_SITE_EDIT_BASE: fromWorkspace ? cfg.editBase : "",
-      DOCS_SITE_IGNORE_DEAD_LINKS: strictLinks ? "" : "1",
-      DOCS_SITE_FACTS: JSON.stringify(facts),
+  mustRun(
+    [process.execPath, join(ACTION_DIR, "node_modules", ".bin", "vitepress"), "build", root],
+    {
+      timeoutMs: TIER_BUILD_BOUND_MS,
+      env: {
+        DOCS_SITE_SRC: srcDir,
+        DOCS_SITE_TITLE: cfg.siteTitle,
+        DOCS_SITE_BASE: opts.base ?? urlBase(cfg.rootBase, tier.rel),
+        DOCS_SITE_ORIGIN: cfg.origin,
+        DOCS_SITE_VERSIONS: JSON.stringify(versions),
+        DOCS_SITE_CURRENT: tier.version,
+        DOCS_SITE_INCLUDES: JSON.stringify(staged),
+        DOCS_SITE_EDIT_BASE: fromWorkspace ? cfg.editBase : "",
+        DOCS_SITE_IGNORE_DEAD_LINKS: strictLinks ? "" : "1",
+        DOCS_SITE_FACTS: JSON.stringify(facts),
+      },
     },
-  });
+  );
   return {
     dist: assertTierIndex(
       join(root, ".vitepress", "dist"),
@@ -640,18 +649,17 @@ async function main(): Promise<void> {
   // version tags" and would silently serve HEAD at the root with every
   // version dropped, so the absence of tags is only believed from a full
   // clone.
-  if (
-    capture(["git", "-C", cfg.workspace, "rev-parse", "--is-shallow-repository"]).trim() !== "false"
-  ) {
+  if (git(cfg.workspace, ["rev-parse", "--is-shallow-repository"]).trim() !== "false") {
     throw new Error(
       "the checkout is shallow - version tags and per-ref trees come from history, so the " +
         "calling workflow must check out with fetch-depth: 0",
     );
   }
 
-  const kept = versionTags(
-    capture(["git", "-C", cfg.workspace, "tag", "--list", "v*"]).split("\n"),
-  ).slice(0, MAX_VERSIONS);
+  const kept = versionTags(git(cfg.workspace, ["tag", "--list", "v*"]).split("\n")).slice(
+    0,
+    MAX_VERSIONS,
+  );
 
   mkdirSync(cfg.site, { recursive: true });
   const scopes: TierScope[] = [];
