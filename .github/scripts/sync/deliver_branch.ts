@@ -26,7 +26,7 @@ import {
   tail,
 } from "./deliver.ts";
 import { readMigrated } from "./migrate.ts";
-import type { SyncReport } from "./writer/report.ts";
+import { syncReport } from "./writer/report.ts";
 
 /** The first line of the sticky comment; the finder matches it, so it never changes shape. */
 const COMMENT_MARKER = `<!-- ${PLATFORM_NAME} sync-branch -->`;
@@ -199,9 +199,11 @@ class BranchDelivery {
       this.comment({ kind: "failed", what, log: tail(join(this.runnerTemp, SYNC_LOG)) });
       fail(`${what} failed; its log is in the pull request comment`);
     }
-    const summary = JSON.parse(
+    const summary = parseJsonWith(
+      syncReport,
       readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8"),
-    ) as SyncReport;
+      SUMMARY_FILE,
+    );
     const report = readFileSync(join(this.runnerTemp, SYNC_LOG), "utf-8");
     if (summary.hold) {
       this.comment({ kind: "held", report });

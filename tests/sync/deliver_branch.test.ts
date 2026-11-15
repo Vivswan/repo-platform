@@ -19,6 +19,7 @@ import {
   committedDiff,
   MISSING_PATH,
   MISSING_PATH_LINE,
+  quietReport,
   WRITTEN_DIFF,
   writtenTree,
 } from "../shared/written_tree";
@@ -100,14 +101,7 @@ function run(options: Options = {}): Run {
   mkdirSync(target);
   mkdirSync(join(root, "build"));
   writeFileSync(join(runnerTemp, "migrated.txt"), "");
-  const summary = options.written?.(root) ?? {
-    hold: options.hold ?? false,
-    holdReasons: options.hold === true ? ["replaced local edits in .editorconfig"] : [],
-    written: [],
-    retired: [],
-    mirrors: [],
-    templates: {},
-  };
+  const summary = options.written?.(root) ?? quietReport(BUILD, options.hold ?? false);
   writeFileSync(join(runnerTemp, "summary.json"), JSON.stringify(summary));
   writeFileSync(join(runnerTemp, "sync.log"), REPORT);
   const committed = join(root, "committed");

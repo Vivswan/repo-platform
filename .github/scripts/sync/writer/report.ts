@@ -1,48 +1,85 @@
 // `hold` is decided here alone, from the rows, so no writer can forget to raise it.
 
 import { createTwoFilesPatch, FILE_HEADERS_ONLY } from "diff";
+import { z } from "zod";
 import type { FileClass } from "../../../../actions/plan/files_config.ts";
 import type { MirrorRow } from "./mirrors.ts";
 import type { RetireRow } from "./retire.ts";
 import type { Change } from "./write_managed.ts";
 
-/** `detail` is why a held row was not written, or the stale record a write set aside; empty otherwise. */
-export interface WrittenRow {
-  path: string;
-  class: FileClass;
-  change: Change;
-  detail: string;
-}
+// The report's shape is declared once, as the schema every reader of the writer's summary.json parses it through. A row
+// a sibling module builds is spelled against that module's type, so the compiler refuses a spelling here that the type
+// does not have, and the writer refuses a row here that the schema would not read back.
 
-export interface ReplacedEdit {
-  path: string;
-  diff: string;
-}
+const fileClass = z.enum(["managed", "split", "starter"]) satisfies z.ZodType<FileClass>;
+
+const change = z.enum([
+  "created",
+  "updated",
+  "unchanged",
+  "region added",
+  "replaced local edits",
+  "held",
+]) satisfies z.ZodType<Change>;
+
+const writtenRow = z.object({
+  path: z.string(),
+  class: fileClass,
+  change,
+  detail: z.string(),
+});
+
+const replacedEdit = z.object({ path: z.string(), diff: z.string() });
+
+const templateRecord = z.object({ source: z.string(), lineMapped: z.boolean() });
+
+const retireRow = z.object({
+  path: z.string(),
+  outcome: z.enum(["deleted", "region removed", "held", "released"]),
+  detail: z.string(),
+}) satisfies z.ZodType<RetireRow>;
+
+const mirrorEnds = { source: z.string(), target: z.string() };
+
+const mirrorRow = z.union([
+  z.object({
+    ...mirrorEnds,
+    outcome: z.enum(["written", "current", "replaced local edits"]),
+    detail: z.literal(""),
+  }),
+  z.object({ ...mirrorEnds, outcome: z.literal("replaced"), detail: z.string() }),
+]) satisfies z.ZodType<MirrorRow>;
+
+const syncOutcome = z.object({
+  build: z.string(),
+  modules: z.array(z.string()),
+  private: z.boolean(),
+  written: z.array(writtenRow),
+  templates: z.record(z.string(), templateRecord),
+  replaced: z.array(replacedEdit),
+  retired: z.array(retireRow),
+  notes: z.array(z.string()),
+  mirrors: z.array(mirrorRow),
+});
+
+export const syncReport = syncOutcome.extend({
+  hold: z.boolean(),
+  holdReasons: z.array(z.string()),
+});
+
+/** `detail` is why a held row was not written, or the stale record a write set aside; empty otherwise. */
+export type WrittenRow = z.infer<typeof writtenRow>;
+
+export type ReplacedEdit = z.infer<typeof replacedEdit>;
 
 /** The template a written file came from, tree-relative under files/, and whether its lines are the written file's:
  *  a split write adds region markers and a block splice shifts what follows, so neither maps. */
-export interface TemplateRecord {
-  source: string;
-  lineMapped: boolean;
-}
+export type TemplateRecord = z.infer<typeof templateRecord>;
 
 /** `templates` is by written path, for every sourced entry this run wrote or found current. */
-export interface SyncOutcome {
-  build: string;
-  modules: string[];
-  private: boolean;
-  written: WrittenRow[];
-  templates: Record<string, TemplateRecord>;
-  replaced: ReplacedEdit[];
-  retired: RetireRow[];
-  notes: string[];
-  mirrors: MirrorRow[];
-}
+export type SyncOutcome = z.infer<typeof syncOutcome>;
 
-export interface SyncReport extends SyncOutcome {
-  hold: boolean;
-  holdReasons: string[];
-}
+export type SyncReport = z.infer<typeof syncReport>;
 
 export function holdReasons(outcome: SyncOutcome): string[] {
   const reasons: string[] = [];

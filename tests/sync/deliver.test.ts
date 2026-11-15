@@ -27,6 +27,7 @@ import {
   committedDiff,
   MISSING_PATH,
   MISSING_PATH_LINE,
+  quietReport,
   WRITTEN_DIFF,
   writtenTree,
 } from "../shared/written_tree";
@@ -88,6 +89,7 @@ interface Options {
   checkoutLog?: string;
   stub?: Record<string, string>;
   written?: (root: string) => SyncReport;
+  summaryText?: string;
 }
 
 /** What the run left behind; summary is the job summary (GITHUB_STEP_SUMMARY), empty unless a branch delivery wrote
@@ -113,14 +115,8 @@ function run(options: Options = {}): Run {
   const target = join(root, "target");
   mkdirSync(target);
   writeFileSync(join(runnerTemp, "migrated.txt"), "");
-  const summary = options.written?.(root) ?? {
-    hold: options.hold ?? false,
-    written: [],
-    retired: [],
-    mirrors: [],
-    templates: {},
-  };
-  writeFileSync(join(runnerTemp, "summary.json"), JSON.stringify(summary));
+  const summary = options.written?.(root) ?? quietReport(BUILD, options.hold ?? false);
+  writeFileSync(join(runnerTemp, "summary.json"), options.summaryText ?? JSON.stringify(summary));
   writeFileSync(join(runnerTemp, "sync.log"), REPORT);
   if (options.checkoutLog !== undefined) {
     writeFileSync(join(runnerTemp, "checkout.log"), options.checkoutLog);
@@ -688,6 +684,21 @@ describe("deliver.ts", () => {
 
   // The failed verdict is written only once the issue exists; otherwise verdict.ts's row step goes red instead of
   // reading a stale verdict as a delivery.
+  // What would drift silently: a summary the delivery cannot read crashing the step, with a stack in the public log
+  // and no verdict, instead of the failure issue every other failure files.
+  test.each([
+    { what: "not JSON", summaryText: "{" },
+    { what: "JSON of another shape", summaryText: '{"hold": false}' },
+  ])("a summary that is $what files the failure and says nothing publicly", ({ summaryText }) => {
+    const result = run({ summaryText });
+    silent(result);
+    expect({ exitCode: result.exitCode, verdict: result.verdict }).toEqual({
+      exitCode: 0,
+      verdict: "failed",
+    });
+    expect(result.issueBody).toContain("failed: the writer's summary is not a sync report.");
+  });
+
   test("a failure the target cannot take (the issue write refused) leaves no verdict and exits red", () => {
     const result = run({ writer: "failure", stub: { STUB_ISSUE_FAIL: "1" } });
     silent(result);

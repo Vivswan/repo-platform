@@ -7,6 +7,7 @@ import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } fro
 import { join } from "node:path";
 import { summary } from "@actions/core";
 import MarkdownIt from "markdown-it";
+import { z } from "zod";
 import {
   AUTOMATION_BRANCH,
   FAILURE_ISSUE_TITLE,
@@ -18,11 +19,12 @@ import {
 import { NETWORK_TIMEOUT_MS, readDispatchBranch } from "../fleet/discovery.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
+import { parseJsonWithThrow } from "../shared/json.ts";
 import { capture, redactText } from "../shared/proc.ts";
 import { tokenUrl } from "../shared/token_url.ts";
 import { readMigrated } from "./migrate.ts";
 import { type DeliveryVerdict, VERDICT_FILE } from "./verdict.ts";
-import { REPLACED_HEADING, REVIEW_HEADING, type SyncReport } from "./writer/report.ts";
+import { REPLACED_HEADING, REVIEW_HEADING, type SyncReport, syncReport } from "./writer/report.ts";
 
 /** The checkout step's log in RUNNER_TEMP, tailed into the failure issue. */
 export const CHECKOUT_LOG = "checkout.log";
@@ -38,6 +40,9 @@ export const SUMMARY_FILE = "summary.json";
 
 /** How much of each log's end the failure issue quotes. */
 export const TAIL_BYTES = 20_000;
+
+/** What `gh pr list --json number,isCrossRepository` answers. */
+const prListing = z.array(z.object({ number: z.number(), isCrossRepository: z.boolean() }));
 
 /** Every subprocess here is one gh call, one git network call, or one local git call on the clone, each answering in seconds, so the fleet's stalled-network bound applies. */
 export const DELIVERY_CALL_BOUND_MS = NETWORK_TIMEOUT_MS;
@@ -459,9 +464,9 @@ class Delivery {
       "listing the sync pull request failed",
       "gh pr list",
     );
-    let listed: { number: number; isCrossRepository: boolean }[];
+    let listed: z.infer<typeof prListing>;
     try {
-      listed = JSON.parse(list);
+      listed = parseJsonWithThrow(prListing, list, "gh pr list");
     } catch {
       this.fileFailure("listing the sync pull request failed");
     }
@@ -604,13 +609,22 @@ class Delivery {
     }
   }
 
+  /** The writer's summary; one that is not a sync report files the failure, its diagnosis in the delivery log. */
+  readSummary(): SyncReport {
+    const text = readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8");
+    try {
+      return parseJsonWithThrow(syncReport, text, SUMMARY_FILE);
+    } catch (error) {
+      this.log(error instanceof Error ? error.message : String(error));
+      this.fileFailure("the writer's summary is not a sync report");
+    }
+  }
+
   /** The sync end to end: nothing staged ends it unchanged, a dispatched branch gets one commit, the default branch a PR. */
   async deliver(): Promise<void> {
     if (env("CHECKOUT_OUTCOME") !== "success") this.fileFailure("the target checkout failed");
     if (env("WRITER_OUTCOME") !== "success") this.fileFailure("the writer exited with an error");
-    const summary = JSON.parse(
-      readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8"),
-    ) as SyncReport;
+    const summary = this.readSummary();
     const report = readFileSync(join(this.runnerTemp, SYNC_LOG), "utf-8");
 
     for (const argv of [
