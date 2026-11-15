@@ -70,7 +70,7 @@ The managed `.github/workflows/auto-fix.yml` arrives with the sync. The `fix-lin
   .github/dependabot.yml                left out             left out
   ```
 
-  A script there may later run in a workflow that holds a write token, as any code in the repository may: the fix lands on the pull request's branch and is reviewed before it merges.
+  A script there may later run in a workflow that holds a write token, as any code in the repository may. The fixer is the pull request's own code, run at its head, so the author could have pushed the same change by hand: autofix adds no power. It is no review guarantee: an approval given before the fix still stands.
 - **A rename** is judged as a deletion and an addition.
 - **A pull request changing more than 3000 files** runs the hook on every push without asking which files: GitHub lists no more than that.
 
