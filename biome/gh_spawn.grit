@@ -1,0 +1,6 @@
+// An action asks GitHub through actions/github-client/github.ts: a spawned gh has no retry, no reply schema, and a
+// status only its stderr text spells. Any "gh" string counts, an argv head or not: over-matching is the loud direction.
+string() as $head where {
+  $head <: r"[\"']gh[\"']",
+  register_diagnostic(span=$head, message="ask GitHub through actions/github-client/github.ts, never a spawned gh")
+}

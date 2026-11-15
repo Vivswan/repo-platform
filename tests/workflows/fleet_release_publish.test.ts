@@ -4,15 +4,16 @@
 // caller's `with:`, the publish job's steps under the runner's bash, and release-assets' own script, against a fake
 // repository.
 //
-// The tag the draft wears reaches a step only as the fake's answer to the lookup by id. So a step that names the
+// The tag the draft wears reaches a step only as the fake API's answer to the lookup by id. So a step that names the
 // cut's tag, or an id lost on the way, publishes nothing here.
 
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadAction, REPO_ROOT, runBashStep } from "../shared/action_step";
 import { argvStub } from "../shared/argv_stub";
+import { type FakeGithubServer, type FakeRoutes, spawnFakeGithub } from "../shared/fake_github";
 import { evaluateCondition, interpolate } from "../shared/github_expression";
 import { shippedSource } from "../shared/shipped_source";
 import { tempDirs } from "../shared/temp_dir";
@@ -54,6 +55,7 @@ type Outputs = Record<string, string> | null;
 // The fake repository holds two releases. One is the draft, id 4242, wearing `v1.2.3`, with one asset and a bundle a
 // prior attempt left. The other is the latest published release, id 4100, wearing `v1.2.2`: what gh answers when the
 // tag it is given is empty. Every other tag names no release, as the cut's tag does once a hook renamed the draft.
+// The action asks the fake API (the lookup by id, the bundle's removal); the workflow's own steps ask the fake gh.
 //
 // CUT is what release-please-action writes for the draft it created; each case adds the tag it gave the draft.
 
@@ -71,20 +73,28 @@ const skeleton = parseYaml(shippedSource("files/base/.github/workflows/ci.yml"))
 };
 
 const REPO = "o/r";
-const DRAFT = JSON.stringify({
+const DRAFT = {
   tag_name: "v1.2.3",
   draft: true,
-  assets: [{ name: "app.tar.gz" }, { name: "attestation.json" }],
-});
-const LATEST_PUBLISHED = JSON.stringify({
+  assets: [
+    { id: 11, name: "app.tar.gz" },
+    { id: 12, name: "attestation.json" },
+  ],
+};
+const LATEST_PUBLISHED = {
   tag_name: "v1.2.2",
   draft: false,
-  assets: [{ name: "app.tar.gz" }],
-});
+  assets: [{ id: 10, name: "app.tar.gz" }],
+};
+const FOUND_BY_ID = `repos/${REPO}/releases/4242`;
+const BUNDLE_DELETED = `DELETE repos/${REPO}/releases/assets/12`;
+const FAKE_API: FakeRoutes = {
+  [FOUND_BY_ID]: [{ status: 200, body: DRAFT }],
+  [`repos/${REPO}/releases/4100`]: [{ status: 200, body: LATEST_PUBLISHED }],
+  [BUNDLE_DELETED]: [{ status: 204 }],
+};
 const FAKE_GH = [
   'case "$*" in',
-  `  "api repos/${REPO}/releases/4242") echo '${DRAFT}' ;;`,
-  `  "api repos/${REPO}/releases/4100") echo '${LATEST_PUBLISHED}' ;;`,
   '  "release view v1.2.3 --json databaseId --jq "*) echo "id=4242" ;;',
   '  "release view  --json databaseId --jq "*) echo "id=4100" ;;',
   '  "release "*" v1.2.3 "* | "release "*" v1.2.2 "*) ;;',
@@ -93,9 +103,8 @@ const FAKE_GH = [
 ];
 
 const gh = (...args: string[]) => ["gh", ...args];
-const FOUND_BY_ID = gh("api", `repos/${REPO}/releases/4242`);
+const INSPECTED = [FOUND_BY_ID, BUNDLE_DELETED];
 const PUBLISHED = [
-  gh("release", "delete-asset", "v1.2.3", "attestation.json", "--yes", "--repo", REPO),
   gh("release", "download", "v1.2.3", "--dir", "assets"),
   gh("release", "upload", "v1.2.3", "attestation.json", "--clobber"),
   gh("release", "edit", "v1.2.3", "--draft=false"),
@@ -103,6 +112,17 @@ const PUBLISHED = [
 
 const CUT = { release_created: "true", id: "4242" };
 const SKELETON_SENDS = skeleton.jobs["publish-release"].with ?? {};
+
+let api: FakeGithubServer;
+let runs = 0;
+
+beforeAll(async () => {
+  api = await spawnFakeGithub(FAKE_API, join(temp.dir("publish-release-api-"), "api.log"));
+});
+
+afterAll(() => {
+  api.stop();
+});
 
 function under(path: string, values: Record<string, string>): Context {
   return Object.fromEntries(
@@ -223,13 +243,16 @@ function stepOutputs(
 }
 
 /** The publish job as the runner runs it for a public repository, from what the cut step wrote and what the caller
- *  sends: the step that turned it red (or the refused call), and every `gh` call it made. */
+ *  sends: the step that turned it red (or the refused call), every `gh` call it made, and every API request. */
 function publish(
   cut: Record<string, string>,
   sent: Record<string, string>,
-): { red: string | null; calls: string[][] } {
+): { red: string | null; calls: string[][]; requests: string[] } {
   const inputs = inputsOf(sent, releaseOutputs(cut));
-  if (typeof inputs === "string") return { red: inputs, calls: [] };
+  if (typeof inputs === "string") return { red: inputs, calls: [], requests: [] };
+
+  runs += 1;
+  const run = `run-${runs}`;
 
   const root = temp.dir("publish-release-");
   const fake = argvStub(root, "gh", FAKE_GH);
@@ -245,19 +268,20 @@ function publish(
     ...declaredEnv,
     PATH: `${fake.bin}:${process.env.PATH ?? ""}`,
     GITHUB_REPOSITORY: REPO,
+    GITHUB_API_URL: `${api.host}/${run}`,
   };
 
   for (const step of publishJob.steps ?? []) {
     const id = String(step.id ?? step.name ?? step.uses);
     const runs = step.if === undefined || evaluateCondition(step.if, context);
     const outputs = runs ? stepOutputs(step, context, jobEnv, root) : {};
-    if (outputs === null) return { red: id, calls: fake.calls() };
+    if (outputs === null) return { red: id, calls: fake.calls(), requests: api.calls(run) };
 
     context[`steps.${id}.outcome`] = runs ? "success" : "skipped";
     Object.assign(context, under(`steps.${id}.outputs`, outputs));
   }
 
-  return { red: null, calls: fake.calls() };
+  return { red: null, calls: fake.calls(), requests: api.calls(run) };
 }
 
 test.each<{
@@ -271,13 +295,13 @@ test.each<{
       "the update-release hook renamed the draft, so the tag the cut reported names no release",
     cut: { ...CUT, tag_name: "source-v1.2.3" },
     sent: SKELETON_SENDS,
-    calls: [FOUND_BY_ID, ...PUBLISHED],
+    calls: PUBLISHED,
   },
   {
     reason: "the hook left the draft under the cut's tag",
     cut: { ...CUT, tag_name: "v1.2.3" },
     sent: SKELETON_SENDS,
-    calls: [FOUND_BY_ID, ...PUBLISHED],
+    calls: PUBLISHED,
   },
   {
     reason: "a ci.yml the sync has not replaced sends the cut's tag and no id",
@@ -285,21 +309,20 @@ test.each<{
     sent: { tag: "${{ needs.release.outputs.tag_name }}" },
     calls: [
       gh("release", "view", "v1.2.3", "--json", "databaseId", "--jq", '"id=\\(.databaseId)"'),
-      FOUND_BY_ID,
       ...PUBLISHED,
     ],
   },
 ])(
   "the draft the cut created is published under the tag it wears by then: $reason",
   ({ cut, sent, calls }) => {
-    expect(publish(cut, sent)).toEqual({ red: null, calls });
+    expect(publish(cut, sent)).toEqual({ red: null, calls, requests: INSPECTED });
   },
 );
 
 // The cut reports a release and no id, and the skeleton sends no tag. Asked for an empty tag, gh answers the latest
 // published release, so the job would attest and publish that one, green, with the cut's draft still a draft.
-test("a publish job sent neither an id nor a tag is red at its first step, before any gh call", () => {
+test("a publish job sent neither an id nor a tag is red at its first step, before any gh call or API request", () => {
   const cut = { release_created: "true", tag_name: "v1.2.3" };
 
-  expect(publish(cut, SKELETON_SENDS)).toEqual({ red: "by-tag", calls: [] });
+  expect(publish(cut, SKELETON_SENDS)).toEqual({ red: "by-tag", calls: [], requests: [] });
 });

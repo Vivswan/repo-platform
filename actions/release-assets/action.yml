@@ -46,6 +46,14 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
+    # The GitHub client is a sibling package with its own lockfile: its octokit resolves from its own node_modules.
+    - name: Install the GitHub client's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH/../github-client"'
+
     - name: Inspect the draft release's assets
       id: inspect
       shell: bash

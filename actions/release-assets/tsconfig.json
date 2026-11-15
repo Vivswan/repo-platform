@@ -9,5 +9,5 @@
     "allowImportingTsExtensions": true,
     "types": ["bun"]
   },
-  "include": ["*.ts", "../shared/*.ts"]
+  "include": ["*.ts", "../shared/*.ts", "../github-client/*.ts"]
 }

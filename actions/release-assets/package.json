@@ -1,12 +1,13 @@
 {
   "name": "release-assets",
   "private": true,
-  "description": "Dependency manifest for the release-assets action: @actions/core annotates the run.",
+  "description": "Dependency manifest for the release-assets action: @actions/core annotates the run, zod states the release reply's shape at the same version as actions/github-client, which reads it.",
   "devDependencies": {
     "@types/bun": "1.4.4",
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@actions/core": "3.0.1"
+    "@actions/core": "3.0.1",
+    "zod": "4.6.7"
   }
 }

@@ -221,6 +221,16 @@
       ],
       "plugins": ["./biome/octokit_import.grit"]
     },
+    // The exclusions are the actions that still spawn gh; each line goes when its action moves onto the client.
+    {
+      "includes": [
+        "actions/**",
+        "!actions/pages-site/build.ts",
+        "!actions/plan/plan.ts",
+        "!actions/release-health/release-health.ts"
+      ],
+      "plugins": ["./biome/gh_spawn.grit"]
+    },
     // The dependency-free zone: only the running action's node_modules exist on a runner, and bun resolves a bare import
     // from the importing file's directory, so a zone module reaches node builtins and its own siblings, nothing else.
     {
