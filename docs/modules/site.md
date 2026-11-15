@@ -174,6 +174,8 @@ The docs mount carries the tag rules:
 
 - **Sidebar and nav** derive from the file tree and each page's frontmatter: `title` (else the h1, else the file name), `order` (a number, ascending; pages without one follow, by title), `group` (a heading placed where the group's first member falls). A directory reads as its folder name with each word capitalized, after the level's pages.
 
+- **An h1 titles its row as it titles the page,** by its text: ``# The `plan` action`` is the row "The plan action".
+
 - **A landing page titled exactly like the site** reads Overview in the sidebar.
 
 - **Links** are written as they read on GitHub: a link inside `docs/` (or into another staged root, below) becomes the page's route, a link to any other repository file becomes that file on GitHub at the version being read, and absolute URLs pass through. Heading anchors are GitHub's.
