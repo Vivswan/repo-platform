@@ -14,6 +14,7 @@ import { parse as parseYaml } from "yaml";
 import { loadAction, REPO_ROOT, runBashStep } from "../shared/action_step";
 import { argvStub } from "../shared/argv_stub";
 import { evaluateCondition, interpolate } from "../shared/github_expression";
+import { shippedSource } from "../shared/shipped_source";
 import { tempDirs } from "../shared/temp_dir";
 
 interface Step {
@@ -65,9 +66,9 @@ const publishWorkflow = parseYaml(
   read(".github/workflows/fleet-release-publish.yml"),
 ) as CalledWorkflow;
 const publishJob = publishWorkflow.jobs["publish-release"];
-const skeleton = parseYaml(
-  read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
-) as { jobs: Record<string, Job> };
+const skeleton = parseYaml(shippedSource("files/base/.github/workflows/ci.yml")) as {
+  jobs: Record<string, Job>;
+};
 
 const REPO = "o/r";
 const DRAFT = JSON.stringify({

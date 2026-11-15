@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { evaluateCondition, hasStatusFunction } from "../shared/github_expression.ts";
+import { shippedSource } from "../shared/shipped_source.ts";
 
 const root = join(import.meta.dir, "../..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
@@ -153,9 +154,9 @@ describe("post-green wiring", () => {
   // commits' verdicts; every run that did run was green. Keyed by the commit, every push run completes; PR pushes keep
   // cancelling their stale runs. The skeleton every fleet repository runs carries the same block.
   test("ci.yml and the skeleton key a push run by its commit and never cancel it; only pull-request lanes cancel", () => {
-    const skeleton = parseYaml(
-      read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
-    ) as { concurrency: Concurrency };
+    const skeleton = parseYaml(shippedSource("files/base/.github/workflows/ci.yml")) as {
+      concurrency: Concurrency;
+    };
     for (const doc of [ci, skeleton]) {
       expect(doc.concurrency).toEqual({
         group:
@@ -179,9 +180,9 @@ describe("post-green wiring", () => {
   // A private repository's nightly runs no job at all (a skipped job bills nothing), and its other events run as a
   // public repository's do; a clause on `platform` alone would leave the gate running and red every night.
   test("the skeleton: every leg runs on a release commit's push; the schedule rebuilds the site alone, and nothing when private; a red hook skips the release and the deploy still runs; the release gate runs on the release PR and a dispatch alone", () => {
-    const skeleton = parseYaml(
-      read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
-    ) as { jobs: Record<string, Job> };
+    const skeleton = parseYaml(shippedSource("files/base/.github/workflows/ci.yml")) as {
+      jobs: Record<string, Job>;
+    };
     const every = Object.keys(skeleton.jobs).sort();
     const released = {
       modules: '["release-please","npm","site"]',
@@ -222,9 +223,9 @@ describe("post-green wiring", () => {
   // release of a repository without the npm module a draft, green; one without the prs_created clause would publish
   // `next` on every merge. A fork carries the registration and none of npm's trust, so its legs would fail on every push.
   test("the skeleton's npm legs: next publishes on the push that refreshes the release PR alone; a red release publish holds the GitHub release a draft, and a repository without the module still publishes it; a fork publishes nothing to npm", () => {
-    const skeleton = parseYaml(
-      read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
-    ) as { jobs: Record<string, Job> };
+    const skeleton = parseYaml(shippedSource("files/base/.github/workflows/ci.yml")) as {
+      jobs: Record<string, Job>;
+    };
     const cut = {
       modules: '["release-please","npm"]',
       release_created: "true",

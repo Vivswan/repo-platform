@@ -35,28 +35,18 @@ export interface StepRun {
   outputs: Record<string, string>;
 }
 
-export function fill(text: string, fills: Record<string, string>): string {
-  let filled = text;
-  for (const [expr, value] of Object.entries(fills)) filled = filled.replaceAll(expr, value);
-  if (filled.includes("${{")) throw new Error(`unresolved expression in ${filled}`);
-  return filled;
-}
-
 /** The step run under the runner's bash, its `env:` and `run:` filled once over `context`: each key a dotted path
  *  (`inputs.label`), each value what the runner would hand the step. */
 export function runBashStep(
   step: Step,
   options: {
     context?: Record<string, string | boolean>;
-    fills?: Record<string, string>;
     env?: Record<string, string>;
     cwd: string;
     root: string;
   },
 ): StepRun {
-  const { fills } = options;
-  const filled = (text: string): string =>
-    fills === undefined ? interpolate(text, options.context ?? {}) : fill(text, fills);
+  const filled = (text: string): string => interpolate(text, options.context ?? {});
   const outputs = join(options.root, `${String(step.id ?? step.name)}-outputs.txt`);
   writeFileSync(outputs, "");
   const stepEnv = Object.fromEntries(
