@@ -433,10 +433,6 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: lychee-verdict
-        uses: $/actions/lychee-verdict
-        with:
-          exit-code: "0"
       # No inputs: it reads this repository's own coordinates from the runner's environment.
       - id: site-urls
         uses: $/actions/site-urls

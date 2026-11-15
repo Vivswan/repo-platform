@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { buildBody, failureDirs } from "../../actions/fuzz-issue/fuzz-issue.ts";
 import { loadAction, REPO_ROOT, runBashStep, type StepRun, stepNamed } from "../shared/action_step";
+import { evaluateCondition } from "../shared/github_expression";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -250,5 +251,33 @@ describe("reusable-site.yml", () => {
       deploy: gate,
       links: `github.event_name == 'schedule' && ${gate} && ${read("link-rot-label")} != ''`,
     });
+  });
+
+  // What drifts silently: `fail: false` keeps the check green whatever lychee did, so only these conditions tell a
+  // crashed lychee, or a check that never ran, from a clean night that closes the issue. The steps after the check
+  // run as the runner runs them, a step after a failed one skipped; exit codes 1 and 3 are lychee's own errors and
+  // 101 a Rust panic.
+  test.each([
+    { night: "a push, the check skipped", outcome: "skipped", code: undefined, does: [] },
+    { night: "a clean night", outcome: "success", code: "0", does: ["resolve"] },
+    { night: "broken links", outcome: "success", code: "2", does: ["report"] },
+    { night: "lychee's general failure", outcome: "success", code: "1", does: ["fail"] },
+    { night: "lychee's config failure", outcome: "success", code: "3", does: ["fail"] },
+    { night: "a lychee panic", outcome: "success", code: "101", does: ["fail"] },
+    { night: "an empty code", outcome: "success", code: "", does: ["fail"] },
+    { night: "no code published", outcome: "success", code: undefined, does: ["fail"] },
+  ])("after the link check, $night does $does and nothing else", ({ outcome, code, does }) => {
+    const context: Record<string, string> = { "steps.links.outcome": outcome };
+    if (code !== undefined) context["steps.links.outputs.exit_code"] = code;
+    const after = steps.slice(steps.indexOf(step("links") as Step) + 1);
+    const done: string[] = [];
+    for (const next of after) {
+      if (next.if !== undefined && !evaluateCondition(next.if, context)) continue;
+
+      done.push(/^exit 1$/m.test(next.run ?? "") ? "fail" : String(next.with?.mode));
+      if (done.at(-1) === "fail") break;
+    }
+
+    expect(done).toEqual([...does]);
   });
 });
