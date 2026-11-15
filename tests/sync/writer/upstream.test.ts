@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
@@ -9,6 +9,7 @@ import {
   UpstreamBodies,
 } from "../../../.github/scripts/sync/writer/upstream.ts";
 import { parseFilesConfig, upstreamRefs } from "../../../actions/plan/files_config.ts";
+import type { LoopbackServer } from "../../shared/loopback_server.ts";
 import { serveUpstream } from "../../shared/upstream_server.ts";
 
 const FIXTURES = join(import.meta.dir, "../../ci/sync_end_to_end/fixtures");
@@ -16,7 +17,10 @@ const config = parseFilesConfig(readFileSync(join(FIXTURES, "files.yml"), "utf-8
 const refs = upstreamRefs(config.files);
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const ref = (path: string) => ({ repository: "github/gitignore", sha: SHA, path });
-const served = serveUpstream(join(FIXTURES, "upstream"));
+let served: LoopbackServer;
+beforeAll(() => {
+  served = serveUpstream(join(FIXTURES, "upstream"));
+});
 afterAll(() => served.stop());
 
 // A test that spawns the writer without --upstream passes online and fails offline, so the roster is pinned. A spawner

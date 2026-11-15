@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -26,26 +26,29 @@ function fixtureRepo(): { cwd: string; first: string; second: string } {
 }
 
 describe("git yes/no helpers", () => {
-  const repo = fixtureRepo();
+  let repo: ReturnType<typeof fixtureRepo>;
+  beforeAll(() => {
+    repo = fixtureRepo();
+  });
   const env = fixtureGitEnv();
 
   // The test process's own cwd is another repository, so a cwd option the helper ignored would
   // fail every row that names a fixture commit.
-  test.each([
-    ["an ancestor is a yes", ["merge-base", "--is-ancestor", repo.first, repo.second], true],
-    ["a descendant is a no", ["merge-base", "--is-ancestor", repo.second, repo.first], false],
+  test.each<[question: string, args: () => string[], answer: boolean]>([
+    ["an ancestor is a yes", () => ["merge-base", "--is-ancestor", repo.first, repo.second], true],
+    ["a descendant is a no", () => ["merge-base", "--is-ancestor", repo.second, repo.first], false],
     [
       "a present commit verifies",
-      ["rev-parse", "--verify", "--quiet", `${repo.first}^{commit}`],
+      () => ["rev-parse", "--verify", "--quiet", `${repo.first}^{commit}`],
       true,
     ],
     [
       "an absent ref is a no",
-      ["rev-parse", "--verify", "--quiet", "refs/heads/nope^{commit}"],
+      () => ["rev-parse", "--verify", "--quiet", "refs/heads/nope^{commit}"],
       false,
     ],
   ])("%s", (_question, args, answer) => {
-    expect(gitAnswersYes(args, { cwd: repo.cwd, env })).toBe(answer);
+    expect(gitAnswersYes(args(), { cwd: repo.cwd, env })).toBe(answer);
   });
 
   test("a remote ref reads as the sha listed, an absent ref as empty, and an errored look throws", () => {

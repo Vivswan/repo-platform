@@ -2,10 +2,11 @@
 // heading must be the repository-specific one with or without blocks. The test
 // reads AGENTS.md alone, so every upstream file is a stub and never the network.
 
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type FileEntry, parseFilesConfig } from "../../actions/plan/files_config";
+import type { LoopbackServer } from "../shared/loopback_server";
 import { syncedCheckout } from "../shared/synced_checkout";
 import { tempDirs } from "../shared/temp_dir";
 import { spawnStubUpstream } from "../shared/upstream_server";
@@ -15,7 +16,10 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const FILES_TREE = join(REPO_ROOT, "files");
 
 const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
-const upstream = await spawnStubUpstream(config, temp.dir("agents-tail-upstream-"));
+let upstream: LoopbackServer;
+beforeAll(async () => {
+  upstream = await spawnStubUpstream(config, temp.dir("agents-tail-upstream-"));
+});
 afterAll(() => upstream.stop());
 
 function writtenAgents(label: string, modules: string[]): string {

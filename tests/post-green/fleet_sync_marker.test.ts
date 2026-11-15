@@ -10,7 +10,7 @@ import {
 import { loadLayer } from "../../.github/scripts/sync/writer/settings_layers.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 import { type FakeGithubServer, type FakeRoutes, spawnFakeGithub } from "../shared/fake_github";
-import { fixtureGitEnv } from "../shared/fixture_git";
+import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { parseGithubOutput } from "../shared/github_output";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -59,22 +59,16 @@ describe("readDirective", () => {
 
 describe("main", () => {
   const script = join(import.meta.dir, "../../.github/scripts/post-green/fleet_sync_marker.ts");
-  const root = temp.dir("fleet-sync-marker-");
+  let root: string;
+  let source: string;
+  let clone: string;
 
   function git(cwd: string, args: string[]): string {
-    const proc = boundedSpawnSync(
-      ["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@x.test", ...args],
-      { env: fixtureGitEnv() },
-    );
-    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
-    return proc.stdout.trimEnd();
+    return fixtureGit(cwd, ["-c", "user.name=t", "-c", "user.email=t@x.test", ...args]);
   }
 
   // main's history, one commit per squash merge or direct push; the leg runs in a clone of it, as
   // actions/checkout leaves one.
-  const source = join(root, "source");
-  mkdirSync(source);
-  git(source, ["init", "-q", "-b", "main"]);
   function commit(message: string): string {
     const file = join(root, `msg-${Bun.hash(message).toString(16)}.txt`);
     writeFileSync(file, message);
@@ -88,6 +82,13 @@ describe("main", () => {
   let api: FakeGithubServer;
   let downApi: FakeGithubServer;
   beforeAll(async () => {
+    root = temp.dir("fleet-sync-marker-");
+    source = join(root, "source");
+    mkdirSync(source);
+    git(source, ["init", "-q", "-b", "main"]);
+    writeHistory();
+    clone = join(root, "clone");
+    git(root, ["clone", "-q", source, clone]);
     api = await spawnFakeGithub(routes, join(root, "api.log"));
     downApi = await spawnFakeGithub(
       { "repos/o/r/commits/*/pulls": [{ status: 503 }] },
@@ -110,27 +111,36 @@ describe("main", () => {
     return sha;
   }
 
-  const seed = commit("seed");
-  const publicA = squash("feat: a (#40)", (sha) => [labeled(40, sha, "fleet-sync:public")]);
-  const unlabeled = squash("feat: b (#41)", (sha) => [labeled(41, sha, "bug")]);
-  const direct = commit("chore: a direct push\n\nNo pull request produced this commit.");
-  const whole = squash("feat: c (#42)", (sha) => [labeled(42, sha, "bug", "fleet-sync:all")]);
-  const twoScopes = squash("feat: d (#43)", (sha) => [
-    labeled(43, sha, "fleet-sync:public", "fleet-sync:all"),
-  ]);
-  const unknown = squash("feat: e (#44)", (sha) => [labeled(44, sha, "fleet-sync:private")]);
-  const publicB = squash("feat: f (#45)", (sha) => [labeled(45, sha, "Fleet-Sync:Public")]);
-  const twoPulls = squash("feat: reopened after a closed attempt (#47)", (sha) => [
-    labeled(46, "0123456789abcdef0123456789abcdef01234567", "fleet-sync:all"),
-    labeled(47, sha, "fleet-sync:public"),
-  ]);
-  const ambiguous = squash("feat: two merges claim it (#49)", (sha) => [
-    labeled(48, sha, "fleet-sync:public"),
-    labeled(49, sha),
-  ]);
-
-  const clone = join(root, "clone");
-  git(root, ["clone", "-q", source, clone]);
+  let seed: string;
+  let publicA: string;
+  let unlabeled: string;
+  let direct: string;
+  let whole: string;
+  let twoScopes: string;
+  let unknown: string;
+  let publicB: string;
+  let twoPulls: string;
+  let ambiguous: string;
+  function writeHistory(): void {
+    seed = commit("seed");
+    publicA = squash("feat: a (#40)", (sha) => [labeled(40, sha, "fleet-sync:public")]);
+    unlabeled = squash("feat: b (#41)", (sha) => [labeled(41, sha, "bug")]);
+    direct = commit("chore: a direct push\n\nNo pull request produced this commit.");
+    whole = squash("feat: c (#42)", (sha) => [labeled(42, sha, "bug", "fleet-sync:all")]);
+    twoScopes = squash("feat: d (#43)", (sha) => [
+      labeled(43, sha, "fleet-sync:public", "fleet-sync:all"),
+    ]);
+    unknown = squash("feat: e (#44)", (sha) => [labeled(44, sha, "fleet-sync:private")]);
+    publicB = squash("feat: f (#45)", (sha) => [labeled(45, sha, "Fleet-Sync:Public")]);
+    twoPulls = squash("feat: reopened after a closed attempt (#47)", (sha) => [
+      labeled(46, "0123456789abcdef0123456789abcdef01234567", "fleet-sync:all"),
+      labeled(47, sha, "fleet-sync:public"),
+    ]);
+    ambiguous = squash("feat: two merges claim it (#49)", (sha) => [
+      labeled(48, sha, "fleet-sync:public"),
+      labeled(49, sha),
+    ]);
+  }
 
   /** The latest run's name on the API, where its requests are listed; two tests may judge the same range. */
   let latestRun = "";
@@ -215,14 +225,14 @@ describe("main", () => {
 
   test.each<{
     reason: string;
-    sha: string;
+    sha: () => string;
     exitCode: number;
     output: Record<string, string>;
     stdout: (base: string, sha: string) => string;
   }>([
     {
       reason: "a pull request with the public label arms public",
-      sha: publicA,
+      sha: () => publicA,
       exitCode: 0,
       output: { armed: "true", repos: "public" },
       stdout: (base: string, sha: string) =>
@@ -230,28 +240,28 @@ describe("main", () => {
     },
     {
       reason: "a pull request with the all label arms the whole fleet",
-      sha: whole,
+      sha: () => whole,
       exitCode: 0,
       output: { armed: "true", repos: "all" },
       stdout: (base: string, sha: string) => lines(label(sha, "all"), syncing(base, sha, "all")),
     },
     {
       reason: "a pull request without a fleet-sync label arms nothing",
-      sha: unlabeled,
+      sha: () => unlabeled,
       exitCode: 0,
       output: { armed: "false" },
       stdout: (base: string, sha: string) => lines(noLabel(base, sha)),
     },
     {
       reason: "a direct push has no pull request and arms nothing",
-      sha: direct,
+      sha: () => direct,
       exitCode: 0,
       output: { armed: "false" },
       stdout: (base: string, sha: string) => lines(noLabel(base, sha)),
     },
     {
       reason: "two pull requests list the commit: the one it is the merge of wins",
-      sha: twoPulls,
+      sha: () => twoPulls,
       exitCode: 0,
       output: { armed: "true", repos: "public" },
       stdout: (base: string, sha: string) =>
@@ -259,7 +269,7 @@ describe("main", () => {
     },
     {
       reason: "two pull requests claim the commit as their merge: refused, nothing armed",
-      sha: ambiguous,
+      sha: () => ambiguous,
       exitCode: 1,
       output: {},
       stdout: (_base: string, sha: string) =>
@@ -269,20 +279,21 @@ describe("main", () => {
     },
     {
       reason: "two scopes on the judged commit's pull request: red leg, nothing armed",
-      sha: twoScopes,
+      sha: () => twoScopes,
       exitCode: 1,
       output: {},
       stdout: (_base: string, sha: string) => lines(`::error::${short(sha)}: ${TWO_SCOPES}`),
     },
     {
       reason: "an undeclared fleet-sync label on the judged commit's pull request: red leg",
-      sha: unknown,
+      sha: () => unknown,
       exitCode: 1,
       output: {},
       stdout: (_base: string, sha: string) =>
         lines(`::error::${short(sha)}: ${UNKNOWN("fleet-sync:private")}`),
     },
-  ])("a one-commit push, $reason", ({ sha, exitCode, output, stdout }) => {
+  ])("a one-commit push, $reason", ({ sha: judged, exitCode, output, stdout }) => {
+    const sha = judged();
     const before = git(clone, ["rev-parse", `${sha}~1`]);
     const result = run(clone, sha, before);
     expect(result).toEqual({ exitCode, output, stdout: stdout(before, sha), stderr: "" });
