@@ -225,8 +225,6 @@ jobs:
         id: plan
         with:
           private: ${{ github.event.repository.private }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: $/actions/validate-managed-files
         with:
           private: ${{ steps.plan.outputs.private }}

@@ -111,12 +111,12 @@ describe("readRegistration", () => {
     {
       reason: "a duplicated module",
       text: `modules: [bun, bun]\n${PROJECT_YAML}`,
-      expected: '.repo-platform.yml: duplicate modules entry "bun"',
+      expected: '.repo-platform.yml: modules.1: duplicate entry "bun"',
     },
     {
       reason: "no module selection",
       text: PROJECT_YAML,
-      expected: ".repo-platform.yml: no module selection found",
+      expected: ".repo-platform.yml: modules: no module selection found",
     },
     {
       reason: "no project block",
