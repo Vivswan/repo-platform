@@ -91,7 +91,7 @@ The opt-in waits for the weekly sync cron (or a hand dispatch) when:
 
 ## The default label: fleet-sync-default.yml
 
-**The public sync by default, never a gate:** [fleet-sync-default.yml](../../.github/workflows/fleet-sync-default.yml) adds `fleet-sync:public` to a pull request of this repository that changes what a sync delivers and wears no fleet-sync label. It keeps one sticky comment saying so ([its script](../../.github/scripts/fleet/fleet_sync_default.ts)).
+**The public sync by default, never a gate:** [fleet-sync-default.yml](../../.github/workflows/fleet-sync-default.yml) adds `fleet-sync:public` to a pull request of this repository that changes what a sync delivers and wears no fleet-sync label. It keeps one sticky comment saying so ([its script](../../.github/scripts/fleet/fleet_sync_default.ts)): the comment is its own only when it opens with the marker and was written by `github-actions[bot]`, so a comment anyone else opens with the marker is never rewritten or deleted.
 
 - **Watches the delivered surface** (`DELIVERED_SURFACE` in [its script](../../.github/scripts/fleet/fleet_sync_default.ts)), so a lockfile bump gets the label too; any other change is live at `stable` on merge and gets no label. Whether that sync then moves a repository's judge is the stamp rule ([platform/sync/manifest.md](sync/manifest.md#when-the-judged-commit-moves)).
 
