@@ -53,8 +53,8 @@ jobs:
     steps:
       - name: File or update the nightly issue
         if: >-
-          contains(fromJSON('["failure","cancelled"]'), needs.checks.result) ||
-          contains(fromJSON('["failure","cancelled"]'), needs.release-gate.result)
+          needs.checks.result == 'failure' || needs.checks.result == 'cancelled' ||
+          needs.release-gate.result == 'failure' || needs.release-gate.result == 'cancelled'
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
