@@ -312,7 +312,11 @@ export interface NpmPlan {
 }
 
 export function planNpm(input: PlanInput): NpmPlan {
-  selectModules(input);
+  if (!selectModules(input).some((module) => module.name === "npm")) {
+    throw new PlanError([
+      `${REGISTRATION_PATH}: the npm module is not selected - there is no package to publish`,
+    ]);
+  }
 
   return { packagePath: input.registration.npm?.path ?? "." };
 }

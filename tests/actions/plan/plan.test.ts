@@ -11,6 +11,7 @@ import {
   PlanError,
   type PlanInput,
   planCi,
+  planNpm,
   planSite,
   REQUIRED_DEFAULTS,
   type SitePlan,
@@ -388,6 +389,15 @@ describe("planSite", () => {
       ".repo-platform.yml: no selected module declares a docs path - there is no site to deploy",
     );
   });
+});
+
+// Any workflow can call fleet-npm-publish.yml: without this refusal, a repository that does not select the module
+// would have the package.json at its root planned for publishing.
+test("planNpm plans the selected module's package and refuses a registration that does not select it", () => {
+  expect(planNpm(input("modules: [bun, npm]"))).toEqual({ packagePath: "." });
+  expect(() => planNpm(input("modules: [bun]"))).toThrow(
+    ".repo-platform.yml: the npm module is not selected - there is no package to publish",
+  );
 });
 
 describe("plan.ts as a child", () => {

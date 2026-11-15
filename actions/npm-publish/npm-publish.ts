@@ -23,14 +23,15 @@ import {
 } from "../shared/action_runtime.ts";
 
 const NPM_CLI = join(import.meta.dir, "node_modules", "npm", "bin", "npm-cli.js");
-const DEFAULT_REGISTRY = "https://registry.npmjs.org";
+const REGISTRY = "https://registry.npmjs.org";
+const DEFAULT_TAG = "latest";
 const PLAIN_RELEASE = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
 const GIT_BOUND_MS = 60_000;
 const NPM_BOUND_MS = 60_000;
 const PUBLISH_BOUND_MS = 600_000;
 const READ_BOUND_MS = 30_000;
 const CONFIRM = { everyMs: 5_000, boundMs: 120_000 } as const;
-const STAMP_FLAGS = ["--no-git-tag-version", "--ignore-scripts", "--no-workspaces-update"] as const;
+const STAMP_FLAGS = ["--no-git-tag-version", "--ignore-scripts"] as const;
 const BEHIND_RELEASE = {
   next: "the package.json on main is behind the registry",
   latest: "a release never moves latest back",
@@ -41,7 +42,8 @@ const packageSchema = z.object({
   name: z.string().min(1),
   version: z.string(),
   private: z.unknown().optional(),
-  publishConfig: z.object({ tag: z.unknown().optional() }).optional(),
+  tag: z.unknown().optional(),
+  publishConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
 const recordSchema = z.object({
@@ -145,8 +147,8 @@ export interface Outcome {
 /**
  * The package a package.json declares.
  *
- * @throws {Error} the text is not a publishable manifest: no name, `private: true`, or a `publishConfig.tag`, which
- *   would move a release off the latest channel
+ * @throws {Error} the text is not a publishable manifest: no name, `private: true`, a `tag` or `publishConfig.tag`,
+ *   which npm takes over the channel's, or a registry in `publishConfig`, which the record is not read from
  */
 export function parsePackage(text: string): Package {
   const parsed = packageSchema.safeParse(JSON.parse(text));
@@ -159,8 +161,18 @@ export function parsePackage(text: string): Package {
     throw new Error("the package is private: true, which npm never publishes");
   }
 
-  if (parsed.data.publishConfig?.tag !== undefined) {
-    throw new Error("publishConfig.tag is set: the channel decides the dist-tag, so remove it");
+  const publishConfig = parsed.data.publishConfig ?? {};
+  if (parsed.data.tag !== undefined || publishConfig.tag !== undefined) {
+    throw new Error(
+      "tag or publishConfig.tag is set: the channel decides the dist-tag, so remove it",
+    );
+  }
+
+  const registryKey = Object.keys(publishConfig).find((key) => /(^|:)registry$/.test(key));
+  if (registryKey !== undefined) {
+    throw new Error(
+      `publishConfig.${registryKey} is set: this module publishes to ${REGISTRY} alone, so remove it`,
+    );
   }
 
   return { name: parsed.data.name, version: parsed.data.version };
@@ -202,20 +214,20 @@ export function verdictOf(channel: Channel, version: string, record: RegistryRec
     return { action: "skip", reason: `${version} is already on the registry (a rerun)` };
   }
 
-  const next = record["dist-tags"].next;
-  if (channel === "next" && next !== undefined && Bun.semver.order(next, version) >= 0) {
-    return {
-      action: "skip",
-      reason: `next names ${next}, which is not below this commit's ${version}: next never moves back`,
-    };
-  }
-
   const releases = Object.keys(record.versions).filter((known) => PLAIN_RELEASE.test(known));
   const newest = releases.sort(Bun.semver.order).at(-1);
   if (newest !== undefined && Bun.semver.order(version, newest) <= 0) {
     return {
       action: "fail",
       reason: `${version} is not above the released ${newest}: ${BEHIND_RELEASE[channel]}`,
+    };
+  }
+
+  const next = record["dist-tags"].next;
+  if (channel === "next" && next !== undefined && Bun.semver.order(next, version) >= 0) {
+    return {
+      action: "skip",
+      reason: `next names ${next}, which is not below this commit's ${version}: next never moves back`,
     };
   }
 
@@ -263,8 +275,14 @@ function releasedVersion(version: string, tag: string): string {
   return version;
 }
 
+/** The pinned npm with the package directory as its whole project, so every command reads one configuration. */
+function npmCommand(args: readonly string[]): string[] {
+  // Inside a workspace npm would read the root's .npmrc on publish, refuse `config get`, and resolve the workspace on `version`.
+  return ["node", NPM_CLI, ...args, "--no-workspaces"];
+}
+
 function npm(tools: Tools, cwd: string, args: readonly string[], timeoutMs: number): RunResult {
-  const result = tools.run(["node", NPM_CLI, ...args], { cwd, timeoutMs });
+  const result = tools.run(npmCommand(args), { cwd, timeoutMs });
   const said = `${result.stdout}${result.stderr}`.trim();
   if (said !== "") tools.log.info(said);
 
@@ -296,17 +314,50 @@ function recordWhere(
   );
 }
 
+function npmConfig(tools: Tools, cwd: string, key: string): string {
+  const result = tools.run(npmCommand(["config", "get", key]), { cwd, timeoutMs: NPM_BOUND_MS });
+  if (!succeeded(result.exit)) {
+    throw new Error(`npm config get ${key} failed: ${failureDetail(result)}`);
+  }
+
+  return result.stdout.trim();
+}
+
+/** A configured tag moves the bare release publish off `latest`, and a configured registry moves the upload away from the record read here. */
+function requireDefaultConfig(pkg: Package, cwd: string, tools: Tools): void {
+  const tag = npmConfig(tools, cwd, "tag");
+  if (tag !== DEFAULT_TAG) {
+    throw new Error(
+      `npm's tag is configured as '${tag}': the channel decides the dist-tag, so remove the setting`,
+    );
+  }
+
+  const keys = ["registry"];
+  if (pkg.name.startsWith("@")) keys.push(`${pkg.name.split("/")[0]}:registry`);
+
+  for (const key of keys) {
+    const configured = npmConfig(tools, cwd, key).replace(/\/+$/, "");
+    if (configured === REGISTRY || configured === "undefined") continue;
+
+    throw new Error(
+      `npm's ${key} is configured as ${configured}: this module publishes to ${REGISTRY} alone`,
+    );
+  }
+}
+
 /**
  * Judges the package against the registry before anything is built, and on next stamps the version it will publish.
  *
- * @throws {Error} the version on disk is not a plain release, the release tag names another version, the checkout is
- *   shallow, or the verdict is a refusal
+ * @throws {Error} the version on disk is not a plain release, npm is configured with a tag or another registry, the
+ *   release tag names another version, the checkout is shallow, or the verdict is a refusal
  */
 export async function planPublish(pkg: Package, request: PlanRequest, tools: Tools): Promise<Plan> {
   const { channel, directory } = request;
   if (!PLAIN_RELEASE.test(pkg.version)) {
     throw new Error(`the version on disk, ${pkg.version}, must be a plain release X.Y.Z`);
   }
+
+  requireDefaultConfig(pkg, directory, tools);
 
   const version =
     channel === "next"
@@ -322,7 +373,7 @@ export async function planPublish(pkg: Package, request: PlanRequest, tools: Too
   }
 
   if (channel === "next") {
-    // The stamp runs before the hook installed anything, so it runs no lifecycle script and resolves no workspace.
+    // The stamp runs before the hook installed anything, so it runs no lifecycle script.
     const stamped = npm(tools, directory, ["version", version, ...STAMP_FLAGS], NPM_BOUND_MS);
     if (!succeeded(stamped.exit)) {
       throw new Error(`npm version ${version} failed: ${failureDetail(stamped)}`);
@@ -458,8 +509,8 @@ function readPackage(directory: string): Package {
 }
 
 /** A fresh query string makes the read a cache miss: the registry serves a record for five minutes otherwise. */
-async function readRecord(registry: string, name: string): Promise<RegistryRecord> {
-  const url = `${registry.replace(/\/+$/, "")}/${name.replace("/", "%2F")}?fresh=${Date.now()}`;
+async function readRecord(name: string): Promise<RegistryRecord> {
+  const url = `${REGISTRY}/${name.replaceAll("/", "%2F")}?fresh=${Date.now()}`;
   const response = await fetch(url, {
     headers: { accept: "application/json" },
     signal: AbortSignal.timeout(READ_BOUND_MS),
@@ -467,17 +518,17 @@ async function readRecord(registry: string, name: string): Promise<RegistryRecor
 
   if (response.status === 404) {
     throw new Error(
-      `${name} is not on ${registry}: the package must exist on npm, with a trusted publisher, before this leg publishes it`,
+      `${name} is not on ${REGISTRY}: the package must exist on npm, with a trusted publisher, before this leg publishes it`,
     );
   }
 
   if (response.status !== 200) {
-    throw new Error(`reading ${name} from ${registry} answered ${response.status}`);
+    throw new Error(`reading ${name} from ${REGISTRY} answered ${response.status}`);
   }
 
   const parsed = recordSchema.safeParse(await response.json());
   if (!parsed.success) {
-    throw new Error(`the record ${registry} holds for ${name} has no versions or dist-tags`);
+    throw new Error(`the record ${REGISTRY} holds for ${name} has no versions or dist-tags`);
   }
 
   return parsed.data;
@@ -493,11 +544,10 @@ async function main(): Promise<void> {
   const phase = requireEnv("PHASE");
   const channel = channelOf(requireEnv("CHANNEL"));
   const directory = join(process.cwd(), requireEnv("PACKAGE_PATH"));
-  const registry = env("NPM_CONFIG_REGISTRY") || DEFAULT_REGISTRY;
   const pkg = readPackage(directory);
   const tools: Tools = {
     run: capture,
-    readRecord: (name) => readRecord(registry, name),
+    readRecord,
     confirm: CONFIRM,
     log: core,
   };

@@ -32,7 +32,14 @@ After `1.2.0`, commits A and B change nothing a release would carry, so release-
      path: packages/cli # only when package.json is not at the repository root
    ```
 
-2. **Let release-please write the version** into that `package.json`: give the package `"release-type": "node"` in `release-please-config.json` (the starter's `simple` leaves `package.json` alone), and keep `always-update` off, the default. With it on, release-please refreshes the PR on every push and every merge would publish `next`.
+2. **Let release-please write the version** into that `package.json`, from a release-please package declared at the repository root (`.`), and keep `always-update` off, the default. With it on, release-please refreshes the PR on every push and every merge would publish `next`.
+
+   | The package.json is at | In `release-please-config.json`, on the `.` package                                                 |
+   | ---------------------- | --------------------------------------------------------------------------------------------------- |
+   | the repository root    | `"release-type": "node"` (the starter's `simple` leaves `package.json` alone)                       |
+   | `packages/cli`         | `"extra-files": [{ "type": "json", "path": "packages/cli/package.json", "jsonpath": "$.version" }]` |
+
+   **Never declare the release-please package on the subfolder.** release-please then reports its outputs under that path (`packages/cli--release_created`), which the fleet's release leg does not read: `npm-latest` never runs, and the release stays a draft.
 
 3. **Fill in the build hook** the sync seeds, `.github/actions/npm-build/action.yml` ([below](#the-hook-githubactionsnpm-buildactionyml)). The seed fails on purpose.
 
@@ -116,15 +123,15 @@ It sorts above the last release, below the next one whatever its bump, and above
 
 ## What the publish refuses
 
-Before the publish, judged in the plan and again in the publish step:
+Before the publish, judged in the plan and again in the publish step, the first row that matches:
 
 | The record shows                                           | Channel  | Outcome                                                        |
 | ---------------------------------------------------------- | -------- | -------------------------------------------------------------- |
-| the version already published                              | both     | skipped with a notice, green: a rerun                          |
 | the version already published, its channel's tag behind it | both     | fails: a rerun of a publish that left the tag behind stays red |
-| `next` at or above this version                            | `next`   | skipped with a notice, green: `next` never moves back          |
+| the version already published                              | both     | skipped with a notice, green: a rerun                          |
 | a release at or above this version                         | `next`   | fails: the `package.json` on main is behind the registry       |
 | a release at or above this version                         | `latest` | fails before any publish: a release never moves `latest` back  |
+| `next` at or above this version                            | `next`   | skipped with a notice, green: `next` never moves back          |
 | no such package, or anything the job cannot read           | both     | fails: it never publishes blind                                |
 | anything else                                              | both     | publishes                                                      |
 
@@ -138,14 +145,16 @@ After the publish:
 | at a release, `next` missing or below the release | `npm dist-tag add` moves `next` to the release, then the record must show it |
 | at a release, `next` at or above the release      | left there, with a notice                                                    |
 
-- **The manifest is refused** when it is `private: true`, or sets `publishConfig.tag`: the channel decides the dist-tag.
+- **The manifest is refused** when it is `private: true`, or sets `tag`, `publishConfig.tag`, or a registry in `publishConfig`.
+- **npm's own configuration is refused** when its `tag` is not npm's default, or it names another registry for the package, in an `.npmrc` or a variable. Trusted publishing is registry.npmjs.org's alone, so that is the one registry this module reads and publishes to.
+- **The package directory is npm's whole project:** every npm command runs with `--no-workspaces`, so an `.npmrc` at a workspace root above the package is not read.
 - **The release tag must end with `v<version>`.** A mismatch means release-please did not bump this `package.json` (step 2).
 - **A failed write** is judged by the record, never by npm's message: the version being there counts as published. Otherwise the job fails with npm's error line and what to check on the trusted publisher.
 
 ## Reruns and failures
 
 - **A failed `npm-latest` leaves the GitHub release a draft:** `publish-release` waits for it. "Re-run failed jobs" finishes both: a version that did land is skipped, and `next` is still moved.
-- **A burst of merges** can cancel a pending npm leg: a lane keeps one waiting job. "Re-run failed jobs" on that run finishes it, and the release stays a draft until `npm-latest` succeeds. A rerun that a newer version overtook does not publish: `next` skips as behind, and a release fails as below the newer one.
+- **A burst of merges** can cancel a pending npm leg: a lane keeps one waiting job. "Re-run failed jobs" on that run finishes it, and the release stays a draft until `npm-latest` succeeds. A rerun that a newer version overtook does not publish: `next` skips as behind a newer `next`, and either channel fails as below a newer release.
 - **Removing the module** skips both legs; the hook stays (a starter), and the package stays on npm.
 
 ## Private repositories

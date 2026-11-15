@@ -151,6 +151,17 @@ test.each<{
     verdict: { action: "publish" },
   },
   {
+    reason:
+      "the package.json on main behind a release that moved next to itself: red, not a green skip",
+    channel: "next",
+    version: MINTED,
+    held: record(["1.2.0", "1.2.1"], { latest: "1.2.1", next: "1.2.1" }),
+    verdict: {
+      action: "fail",
+      reason: `${MINTED} is not above the released 1.2.1: the package.json on main is behind the registry`,
+    },
+  },
+  {
     reason: "the package.json on main behind a released version",
     channel: "next",
     version: MINTED,
@@ -254,33 +265,55 @@ test.each<{ reason: string; next: string | undefined; moves: boolean }>([
   expect(nextNeedsRelease("1.2.0", record(["1.2.0"], tags))).toBe(moves);
 });
 
-// npm publishes neither of these as the channels mean them: `private` never, and a publishConfig.tag in place of the
-// channel's, which on latest also disarms npm's guard.
-test.each<{ reason: string; manifest: object; outcome: Package | string }>([
-  {
-    reason: "a publishable manifest",
-    manifest: { name: "@example/widget", version: "1.2.0", scripts: { build: "tsc" } },
-    outcome: PKG,
-  },
+// npm publishes none of these as the channels mean them: `private` never, a manifest's own tag in place of the tag
+// the action passes (libnpmpublish reads `manifest.tag` first), and a publishConfig.registry somewhere the record is
+// not read from, where a real upload would never be confirmed.
+test.each<{ reason: string; manifest: object; outcome: string }>([
   {
     reason: "private: true",
     manifest: { name: "widget", version: "1.2.0", private: true },
     outcome: "the package is private: true, which npm never publishes",
   },
   {
+    reason: "a top-level tag, which would publish a release under next and move it back",
+    manifest: { name: "widget", version: "1.2.1", tag: "next" },
+    outcome: "tag or publishConfig.tag is set: the channel decides the dist-tag, so remove it",
+  },
+  {
     reason: "a publishConfig.tag",
     manifest: { name: "widget", version: "1.2.0", publishConfig: { tag: "latest" } },
-    outcome: "publishConfig.tag is set: the channel decides the dist-tag, so remove it",
+    outcome: "tag or publishConfig.tag is set: the channel decides the dist-tag, so remove it",
+  },
+  {
+    reason: "a publishConfig registry for the package's scope",
+    manifest: {
+      name: "@example/widget",
+      version: "1.2.0",
+      publishConfig: { "@example:registry": "https://npm.example.com/" },
+    },
+    outcome:
+      "publishConfig.@example:registry is set: this module publishes to https://registry.npmjs.org alone, so remove it",
+  },
+  {
+    reason: "a publishConfig.registry",
+    manifest: {
+      name: "widget",
+      version: "1.2.0",
+      publishConfig: { registry: "https://npm.example.com" },
+    },
+    outcome:
+      "publishConfig.registry is set: this module publishes to https://registry.npmjs.org alone, so remove it",
   },
 ])("the manifest: $reason", ({ manifest, outcome }) => {
-  let read: Package | string;
-  try {
-    read = parsePackage(JSON.stringify(manifest));
-  } catch (cause) {
-    read = (cause as Error).message;
-  }
-  expect(read).toEqual(outcome);
+  expect(() => parsePackage(JSON.stringify(manifest))).toThrow(new Error(outcome));
 });
+
+/** What the pinned npm prints for the three keys in a directory that configures none of them. */
+const NPM_DEFAULTS: Record<string, string> = {
+  "tag": "latest",
+  "registry": "https://registry.npmjs.org/",
+  "@example:registry": "undefined",
+};
 
 /** A log line as the recorder saw it: core's method, then the message. */
 type Line = ["info" | "notice", string];
@@ -313,8 +346,45 @@ interface Answers {
   /** Whether the checkout is shallow. */
   shallow?: boolean;
 
+  /** What `npm config get <key>` prints, over npm's defaults. */
+  config?: Record<string, string>;
+
   /** The confirmation bound: generous unless the row waits it out, so load alone cannot end a wait that would succeed. */
   boundMs?: number;
+}
+
+/** An npm command as the rows spell it. Every one must carry --no-workspaces: without it npm inside a workspace reads
+ *  the root's .npmrc on publish and refuses `config get`, so the plan would judge another configuration than the publish uses. */
+function spokenNpm(command: string[]): string[] {
+  if (command.at(-1) !== "--no-workspaces") {
+    throw new Error(`npm ran without --no-workspaces: ${command.slice(2).join(" ")}`);
+  }
+
+  return ["npm", ...command.slice(2, -1)];
+}
+
+/** What the fake checkout and npm answer one command. */
+function answerTo(line: string, answers: Answers): RunResult {
+  const git: Record<string, string> = {
+    "git rev-parse --is-shallow-repository": String(answers.shallow ?? false),
+    "git rev-list --count --first-parent HEAD": "42",
+    "git show -s --format=%ct HEAD": COMMITTED,
+    "git rev-parse HEAD": SHA,
+  };
+  if (line in git) return ok(`${git[line]}\n`);
+
+  if (line.startsWith("npm config get ")) {
+    const key = line.slice("npm config get ".length);
+    return ok(`${{ ...NPM_DEFAULTS, ...answers.config }[key]}\n`);
+  }
+
+  if (line.startsWith("npm publish")) return answers.publish ?? ok();
+
+  if (line.startsWith("npm dist-tag ")) return answers.distTag ?? ok();
+
+  if (line.startsWith("npm version ")) return ok();
+
+  throw new Error(`unexpected command: ${line}`);
 }
 
 /** One phase against a fake checkout, npm, and registry: `records` answers the reads in order, its last entry from then on. */
@@ -325,30 +395,16 @@ async function runWith(
 ): Promise<Run> {
   const commands: string[] = [];
   const lines: Line[] = [];
-  const git: Record<string, string> = {
-    "git rev-parse --is-shallow-repository": String(answers.shallow ?? false),
-    "git rev-list --count --first-parent HEAD": "42",
-    "git show -s --format=%ct HEAD": COMMITTED,
-    "git rev-parse HEAD": SHA,
-  };
   let reads = 0;
   const tools: Tools = {
     run: (command, options) => {
       if (options.cwd !== "/work/pkg") throw new Error(`ran outside the package: ${options.cwd}`);
 
-      // The pinned npm runs as `node <cli>`; the recorder names it npm.
-      const spoken = command[0] === "node" ? ["npm", ...command.slice(2)] : command;
+      // The pinned npm runs as `node <cli> ... --no-workspaces`; the recorder names it npm and requires the flag.
+      const spoken = command[0] === "node" ? spokenNpm(command) : command;
       const line = spoken.join(" ");
       commands.push(line);
-      if (line in git) return ok(`${git[line]}\n`);
-
-      if (line.startsWith("npm publish")) return answers.publish ?? ok();
-
-      if (line.startsWith("npm dist-tag ")) return answers.distTag ?? ok();
-
-      if (line.startsWith("npm version ")) return ok();
-
-      throw new Error(`unexpected command: ${line}`);
+      return answerTo(line, answers);
     },
     readRecord: (name) => {
       if (name !== PKG.name) throw new Error(`read another package: ${name}`);
@@ -410,13 +466,18 @@ const publish = (
     answers,
   );
 
+const CONFIG = [
+  "npm config get tag",
+  "npm config get registry",
+  "npm config get @example:registry",
+];
 const POSITION = [
   "git rev-parse --is-shallow-repository",
   "git rev-list --count --first-parent HEAD",
   "git show -s --format=%ct HEAD",
   "git rev-parse HEAD",
 ];
-const STAMP = `npm version ${MINTED} --no-git-tag-version --ignore-scripts --no-workspaces-update`;
+const STAMP = `npm version ${MINTED} --no-git-tag-version --ignore-scripts`;
 const MOVE_NEXT = "npm dist-tag add @example/widget@1.2.0 next";
 const EARLIER = "1.1.1-main.30.20261020.gccccccc";
 const BEFORE = record(["1.2.0"], { latest: "1.2.0", next: "1.2.0" });
@@ -426,8 +487,10 @@ const RELEASED = record(["1.1.0", EARLIER, "1.2.0"], { latest: "1.2.0", next: EA
 const NEXT_MOVED = record(["1.1.0", EARLIER, "1.2.0"], { latest: "1.2.0", next: "1.2.0" });
 const E403 = "npm notice package: @example/widget\nnpm error code E403\nnpm error 403 Forbidden";
 
-// The stamp's two extra flags are npm's contract: without them `npm version` runs the package's version scripts and
-// updates its workspace, both before the build hook has installed anything.
+// The stamp's --ignore-scripts is npm's contract: without it `npm version` runs the package's version scripts, before
+// the build hook has installed anything.
+// npm reads its tag and registry from files and variables the action never sees, and takes them over the action's own:
+// the three refusals at the end are the only place a configured one is caught before a publish.
 // The plan runs before the repository's build, so what it leaves is the build's input: the version in package.json on
 // next, and a verdict that keeps the build from running for nothing. The count and the UTC date are what place the
 // version among those already published.
@@ -437,7 +500,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => plan("next", "", [BEFORE]),
     expected: {
       outcome: { version: MINTED, publish: true },
-      commands: [...POSITION, STAMP],
+      commands: [...CONFIG, ...POSITION, STAMP],
       reads: 1,
       waitedOut: false,
       lines: [],
@@ -448,7 +511,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => plan("next", "", [record(["1.2.0"], { next: "1.2.1-main.43.20261114.gbbbbbbb" })]),
     expected: {
       outcome: { version: MINTED, publish: false },
-      commands: POSITION,
+      commands: [...CONFIG, ...POSITION],
       reads: 1,
       waitedOut: false,
       lines: [
@@ -464,7 +527,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => plan("latest", "v1.2.0", [UNRELEASED]),
     expected: {
       outcome: { version: "1.2.0", publish: true },
-      commands: [],
+      commands: CONFIG,
       reads: 1,
       waitedOut: false,
       lines: [],
@@ -475,7 +538,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => plan("latest", "v1.2.0", [RELEASED]),
     expected: {
       outcome: { version: "1.2.0", publish: false },
-      commands: [],
+      commands: CONFIG,
       reads: 1,
       waitedOut: false,
       lines: [
@@ -492,7 +555,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     expected: {
       outcome:
         "the release tag 'v11.2.0' does not end with v1.2.0: release-please did not bump this package.json",
-      commands: [],
+      commands: CONFIG,
       reads: 0,
       waitedOut: false,
       lines: [],
@@ -503,7 +566,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     run: () => plan("next", "", [BEFORE], { shallow: true }),
     expected: {
       outcome: "the checkout is shallow: the next version counts main's commits (fetch-depth: 0)",
-      commands: POSITION.slice(0, 1),
+      commands: [...CONFIG, ...POSITION.slice(0, 1)],
       reads: 0,
       waitedOut: false,
       lines: [],
@@ -515,6 +578,44 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
     expected: {
       outcome: "the version on disk, 1.2.0-rc.1, must be a plain release X.Y.Z",
       commands: [],
+      reads: 0,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "a tag configured for npm (a checked-in .npmrc tag=beta) would publish a release under beta",
+    run: () => plan("latest", "v1.2.0", [UNRELEASED], { config: { tag: "beta" } }),
+    expected: {
+      outcome:
+        "npm's tag is configured as 'beta': the channel decides the dist-tag, so remove the setting",
+      commands: CONFIG.slice(0, 1),
+      reads: 0,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason: "a registry configured for the package's scope is not the one the record is read from",
+    run: () =>
+      plan("next", "", [BEFORE], { config: { "@example:registry": "https://npm.example.com/" } }),
+    expected: {
+      outcome:
+        "npm's @example:registry is configured as https://npm.example.com: this module publishes to https://registry.npmjs.org alone",
+      commands: CONFIG,
+      reads: 0,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason: "a default registry configured elsewhere",
+    run: () => plan("next", "", [BEFORE], { config: { registry: "https://npm.example.com/" } }),
+    expected: {
+      outcome:
+        "npm's registry is configured as https://npm.example.com: this module publishes to https://registry.npmjs.org alone",
+      commands: CONFIG.slice(0, 2),
       reads: 0,
       waitedOut: false,
       lines: [],
