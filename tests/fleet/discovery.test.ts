@@ -76,34 +76,26 @@ describe("captureNetwork", () => {
     expect(got).toEqual(outcome);
   });
 
-  test("every fleet gh/curl subprocess goes through captureNetwork (class sweep)", () => {
-    // A bare capture/spawnSync around a gh or curl argv reintroduces the
-    // unbounded-hang class this helper closed; new network calls must
-    // carry the deadline too.
-    const BARE = /\b(?:capture|mustCapture|spawnSync)\(\s*\[\s*"(?:gh|curl)"/g;
-    // The sweep's own controls: an empty offender list is evidence only
-    // if the pattern catches the offender shapes and the scan reaches the
-    // real call sites.
-    const catches = (line: string) => new RegExp(BARE.source).test(line);
+  // The fleet scripts ask GitHub through the client (shared/github.ts), which carries the deadline, the retry rule, and
+  // the fixed failure text. A spawned gh or curl, bounded or not, brings back stderr that spells a private slug.
+  test("no fleet script spawns gh or curl (class sweep)", () => {
+    const SPAWNED = /\[\s*"(?:gh|curl)"/g;
+    // The sweep's own controls: an empty offender list is evidence only if the pattern catches the offender shapes
+    // and the scan reaches the scripts.
+    const catches = (line: string) => new RegExp(SPAWNED.source).test(line);
     expect(catches('capture(["gh", "api", "user"])')).toBe(true);
-    expect(catches('mustCapture(["gh", "api"])')).toBe(true);
-    expect(catches('spawnSync([ "curl", "-sS"])')).toBe(true);
-    expect(catches('captureNetwork(["gh", "api"])')).toBe(false);
+    expect(catches('captureNetwork([ "curl", "-sS"])')).toBe(true);
+    expect(catches('captureNetwork(["git", "ls-remote"])')).toBe(false);
 
     const dir = join(import.meta.dir, "../../.github/scripts/fleet");
-    const offenders: string[] = [];
-    let bounded = 0;
-    for (const entry of readdirSync(dir)) {
-      if (!entry.endsWith(".ts")) continue;
-      const source = readFileSync(join(dir, entry), "utf-8");
-      bounded += source.match(/\bcaptureNetwork\(\s*\[\s*"(?:gh|curl)"/g)?.length ?? 0;
-      const bare = source.match(BARE);
-      for (const match of bare ?? []) offenders.push(`${entry}: ${match.replace(/\s+/g, " ")}`);
-    }
+    const scanned = readdirSync(dir).filter((entry) => entry.endsWith(".ts"));
+    const offenders = scanned.flatMap((entry) =>
+      (readFileSync(join(dir, entry), "utf-8").match(SPAWNED) ?? []).map(
+        (match) => `${entry}: ${match.replace(/\s+/g, " ")}`,
+      ),
+    );
     expect(offenders).toEqual([]);
-    // The scan read the scripts that make network calls, not an empty or
-    // misaddressed directory.
-    expect(bounded).toBeGreaterThan(0);
+    expect(scanned).toContain("discovery.ts");
   });
 });
 

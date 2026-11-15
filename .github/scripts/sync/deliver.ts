@@ -2,6 +2,9 @@
 // Nothing this script says reaches the public log: every line goes to $RUNNER_TEMP/deliver.log, and the verdict verdict.ts reads
 // goes to $RUNNER_TEMP/verdict.txt, `failed` only once the issue is filed. The one exception is a branch delivery's report,
 // written to the public job summary for a public target and withheld for a private one.
+//
+// GitHub is asked through the scripts' client. Auto-merge alone stays on `gh pr merge`: gh merges a pull request that is
+// already mergeable and arms the rest, a choice no single API call makes.
 
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,6 +22,14 @@ import {
 import { NETWORK_TIMEOUT_MS, readDispatchBranch } from "../fleet/discovery.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
+import {
+  type Fields,
+  GitHubClient,
+  type Read,
+  type Sent,
+  unansweredReason,
+  type WriteMethod,
+} from "../shared/github.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
 import { fenced } from "../shared/markdown_code.ts";
 import { capture, redactText } from "../shared/proc.ts";
@@ -42,11 +53,31 @@ export const SUMMARY_FILE = "summary.json";
 /** How much of each log's end the failure issue quotes. */
 export const TAIL_BYTES = 20_000;
 
-/** What `gh pr list --json number,isCrossRepository` answers. */
-const prListing = z.array(z.object({ number: z.number(), isCrossRepository: z.boolean() }));
-
 /** Every subprocess here is one gh call, one git network call, or one local git call on the clone, each answering in seconds, so the fleet's stalled-network bound applies. */
 export const DELIVERY_CALL_BOUND_MS = NETWORK_TIMEOUT_MS;
+
+/** The token's own account, which files the failure issue. */
+const account = z.object({ login: z.string() });
+
+/** One row of the issues listing, which lists pull requests too: only those carry `pull_request`. */
+const listedIssue = z.object({
+  number: z.number(),
+  state: z.string(),
+  title: z.string(),
+  pull_request: z.unknown().optional(),
+});
+
+/** One row of the pulls listing. `auto_merge` is required: a listing without it must not read as "not armed". */
+const listedPull = z.object({
+  number: z.number(),
+  auto_merge: z.looseObject({}).nullable(),
+  // The head repository is null once a fork is deleted.
+  head: z.object({ ref: z.string(), repo: z.object({ id: z.number() }).nullable() }),
+  base: z.object({ repo: z.object({ id: z.number() }) }),
+});
+
+/** The pull request a create answers with. */
+const createdPull = z.object({ number: z.number() });
 
 export function prTitle(build: string): string {
   return `${SYNC_PR_TITLE_PREFIX} ${build.slice(0, 12)}`;
@@ -91,7 +122,7 @@ export function failureBody(input: {
   ].join("\n");
 }
 
-/** GitHub refuses a PR body past 65,536 characters, and gh would fail after the branch is pushed; the report is cut under this. */
+/** GitHub refuses a PR body past 65,536 characters, and the refusal would come after the branch is pushed; the report is cut under this. */
 export const BODY_CAP = 60_000;
 
 export function truncatedLines(text: string, budget: number): string {
@@ -260,8 +291,31 @@ function commandLabel(argv: string[]): string {
 /** stdout exists only on exit 0 (a deadline expiry never is, proc.ts): an errored call has no answer to misread. */
 type Call = { ok: true; stdout: string } | { ok: false };
 
+/** The target's open sync pull request. */
+interface SyncPull {
+  /** Its number in the target. */
+  number: number;
+
+  /** Auto-merge is on: it could merge on its own. */
+  armed: boolean;
+}
+
+/** The target's failure issue, `none` when it has none, `unreadable` when GitHub did not say. */
+type FailureIssue = { number: number; state: string } | "none" | "unreadable";
+
+/** A delivery step failed: the entry point files `reason` as the target's failure issue. */
+class DeliveryFailed extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+  }
+}
+
+function failDelivery(reason: string): never {
+  throw new DeliveryFailed(reason);
+}
+
 class Delivery {
-  /** The run's scratch directory: the writer's summary and logs, and this step's body files. */
+  /** The run's scratch directory: the writer's summary and logs. */
   readonly runnerTemp = requireEnv("RUNNER_TEMP");
 
   /** The owner/name slug the sync delivers to. */
@@ -285,6 +339,9 @@ class Delivery {
   /** This step's call log, tailed into the failure issue. */
   readonly logFile = join(this.runnerTemp, DELIVER_LOG);
 
+  /** The API under the fleet token. */
+  readonly github = new GitHubClient();
+
   /** The log starts empty, so every line it quotes is this run's. */
   constructor() {
     writeFileSync(this.logFile, "");
@@ -301,11 +358,8 @@ class Delivery {
   }
 
   /** One bounded call, logged under its label; a failure logs its stderr and yields no stdout. */
-  run(argv: string[], label = commandLabel(argv), extraEnv?: Record<string, string>): Call {
-    const result = capture(argv, {
-      timeoutMs: DELIVERY_CALL_BOUND_MS,
-      ...(extraEnv === undefined ? {} : { env: extraEnv }),
-    });
+  run(argv: string[], label = commandLabel(argv)): Call {
+    const result = capture(argv, { timeoutMs: DELIVERY_CALL_BOUND_MS });
     this.log(`$ ${label} -> exit ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
     if (result.stderr !== "") this.log(result.stderr.replace(/\n$/, ""));
     return result.exitCode === 0 ? { ok: true, stdout: result.stdout } : { ok: false };
@@ -316,314 +370,222 @@ class Delivery {
     return ["git", "-C", this.targetDir, ...args];
   }
 
-  /** A failed call files the failure and never returns; the stdout otherwise. */
+  /** A failed call fails the delivery with `reason`; the stdout otherwise. */
   must(argv: string[], reason: string, label = commandLabel(argv)): string {
     const call = this.run(argv, label);
-    if (!call.ok) this.fileFailure(reason);
+    if (!call.ok) failDelivery(reason);
     return call.stdout;
   }
 
+  /** One API answer, logged as the call's method and its path under the target, with its status and never its text. */
+  async answered<A extends Read<unknown> | Sent<unknown>>(
+    call: string,
+    pending: Promise<A>,
+  ): Promise<A> {
+    const answer = await pending;
+    this.log(`$ ${call} -> ${answer.kind === "ok" ? "ok" : unansweredReason(answer)}`);
+    return answer;
+  }
+
+  /** One write under the target's `repos/<owner>/<name>/`, its reply validated when the caller reads it. */
+  send(method: WriteMethod, path: string, fields?: Fields): Promise<Sent<undefined>>;
+
+  send<T>(method: WriteMethod, path: string, fields: Fields, reply: z.ZodType<T>): Promise<Sent<T>>;
+
+  send<T>(
+    method: WriteMethod,
+    path: string,
+    fields: Fields = {},
+    reply?: z.ZodType<T>,
+  ): Promise<Sent<T | undefined>> {
+    const target = `repos/${this.target}/${path}`;
+    const sent: Promise<Sent<T | undefined>> =
+      reply === undefined
+        ? this.github.send(method, target, fields)
+        : this.github.send(method, target, fields, reply);
+    return this.answered(`${method} ${path}`, sent);
+  }
+
+  /** A write that must land: anything but `ok` fails the delivery with `reason`. */
+  async mustSend(method: WriteMethod, path: string, fields: Fields, reason: string): Promise<void> {
+    const sent = await this.send(method, path, fields);
+    if (sent.kind !== "ok") failDelivery(reason);
+  }
+
   /** An open report outranks an older closed one: it is the one being watched, so a clean run closes it and a failure refreshes it. */
-  findFailureIssue(): { number: string; state: string } | "" | null {
-    const login = this.run(["gh", "api", "user", "--jq", ".login"]);
-    if (!login.ok) return null;
-    // gh refuses `--slurp` beside `--jq`, so the filter runs per page and
-    // prints one line per matching issue; created-ascending, the first
-    // line across the pages is the oldest.
-    const list = this.run(
-      [
-        "gh",
-        "api",
-        `repos/${this.target}/issues`,
-        "--method",
-        "GET",
-        "--paginate",
-        "-f",
-        "state=all",
-        "-f",
-        `creator=${login.stdout.trim()}`,
-        "-f",
-        "sort=created",
-        "-f",
-        "direction=asc",
-        "-F",
-        "per_page=100",
-        "--jq",
-        `.[] | select(has("pull_request") | not) | select(.title == env.ISSUE_TITLE) | "\\(.number) \\(.state)"`,
-      ],
-      "gh api issues GET",
-      { ISSUE_TITLE: FAILURE_ISSUE_TITLE },
+  async findFailureIssue(): Promise<FailureIssue> {
+    const self = await this.answered("GET user", this.github.get("user", account));
+    if (self.kind !== "ok") return "unreadable";
+
+    // Created-ascending, so the first report across the pages is the oldest.
+    const listed = await this.answered(
+      "GET issues",
+      this.github.paginate(`repos/${this.target}/issues`, listedIssue, {
+        state: "all",
+        creator: self.value.login,
+        sort: "created",
+        direction: "asc",
+      }),
     );
-    if (!list.ok) return null;
-    const reports = list.stdout
-      .split("\n")
-      .filter((line) => line !== "")
-      .map((line) => {
-        const [number, state] = line.split(" ");
-        return { number, state };
-      });
-    return reports.find((report) => report.state === "open") ?? reports[0] ?? "";
+    if (listed.kind !== "ok") return "unreadable";
+
+    const reports = listed.value.filter(
+      (issue) => issue.pull_request === undefined && issue.title === FAILURE_ISSUE_TITLE,
+    );
+    return reports.find((report) => report.state === "open") ?? reports[0] ?? "none";
   }
 
   /** Files or refreshes the failure issue, writes the failed verdict, and exits 0: the row failed, not the plan. */
-  fileFailure(reason: string): never {
+  async fileFailure(reason: string): Promise<never> {
     this.log(`filing the failure report: ${reason}`);
-    const bodyFile = join(this.runnerTemp, "failure-issue-body.md");
-    writeFileSync(
-      bodyFile,
-      failureBody({
-        runUrl: this.runUrl,
-        build: this.build,
-        reason,
-        checkoutLog: tail(join(this.runnerTemp, CHECKOUT_LOG)),
-        syncLog: tail(join(this.runnerTemp, SYNC_LOG)),
-        deliverLog: tail(this.logFile),
-      }),
-    );
-    const found = this.findFailureIssue();
-    if (found === null) process.exit(1);
+    const body = failureBody({
+      runUrl: this.runUrl,
+      build: this.build,
+      reason,
+      checkoutLog: tail(join(this.runnerTemp, CHECKOUT_LOG)),
+      syncLog: tail(join(this.runnerTemp, SYNC_LOG)),
+      deliverLog: tail(this.logFile),
+    });
+    const found = await this.findFailureIssue();
+    if (found === "unreadable") process.exit(1);
+
     const write =
-      found === ""
-        ? this.run(
-            [
-              "gh",
-              "api",
-              `repos/${this.target}/issues`,
-              "--method",
-              "POST",
-              "--silent",
-              "-f",
-              `title=${FAILURE_ISSUE_TITLE}`,
-              "-F",
-              `body=@${bodyFile}`,
-            ],
-            "gh api issues POST",
-          )
-        : this.run(
-            [
-              "gh",
-              "api",
-              `repos/${this.target}/issues/${found.number}`,
-              "--method",
-              "PATCH",
-              "--silent",
-              "-f",
-              "state=open",
-              "-F",
-              `body=@${bodyFile}`,
-            ],
-            "gh api issues PATCH",
-          );
-    if (!write.ok) process.exit(1);
+      found === "none"
+        ? await this.send("POST", "issues", { title: FAILURE_ISSUE_TITLE, body })
+        : await this.send("PATCH", `issues/${found.number}`, { state: "open", body });
+    if (write.kind !== "ok") process.exit(1);
+
     this.verdict("failed");
     process.exit(0);
   }
 
   /** The open failure issue, if there is one, is closed with a healthy-again note. */
-  closeFailureIssue(): void {
-    const found = this.findFailureIssue();
-    if (found === null || found === "" || found.state !== "open") return;
-    const bodyFile = join(this.runnerTemp, "failure-issue-close.md");
-    writeFileSync(
-      bodyFile,
-      `Healthy again: the ${PLATFORM_NAME} sync delivered cleanly as of ${this.runUrl}. The last failure report is in this issue's edit history.\n`,
-    );
-    this.run(
-      [
-        "gh",
-        "api",
-        `repos/${this.target}/issues/${found.number}`,
-        "--method",
-        "PATCH",
-        "--silent",
-        "-f",
-        "state=closed",
-        "-F",
-        `body=@${bodyFile}`,
-      ],
-      "gh api issues PATCH",
-    );
+  async closeFailureIssue(): Promise<void> {
+    const found = await this.findFailureIssue();
+    if (found === "unreadable" || found === "none" || found.state !== "open") return;
+
+    await this.send("PATCH", `issues/${found.number}`, {
+      state: "closed",
+      body: `Healthy again: the ${PLATFORM_NAME} sync delivered cleanly as of ${this.runUrl}. The last failure report is in this issue's edit history.\n`,
+    });
   }
 
-  /** `--head` matches the branch name in forks too, and a fork's PR is never the sync's. */
-  openPr(): { number: string } | null {
-    const list = this.must(
-      [
-        "gh",
-        "pr",
-        "list",
-        "-R",
-        this.target,
-        "--head",
-        AUTOMATION_BRANCH,
-        "--state",
-        "open",
-        "--json",
-        "number,isCrossRepository",
-      ],
-      "listing the sync pull request failed",
-      "gh pr list",
+  /** The listing's `head` filter matches by owner and branch, and GitHub ignores one it cannot read, so each row is
+   *  checked here: the automation branch of the target itself, never a fork's branch of the same name. */
+  async openPr(): Promise<SyncPull | null> {
+    const [owner] = this.target.split("/");
+    const listed = await this.answered(
+      "GET pulls",
+      this.github.paginate(`repos/${this.target}/pulls`, listedPull, {
+        state: "open",
+        head: `${owner}:${AUTOMATION_BRANCH}`,
+      }),
     );
-    let listed: z.infer<typeof prListing>;
-    try {
-      listed = parseJsonWithThrow(prListing, list, "gh pr list");
-    } catch {
-      this.fileFailure("listing the sync pull request failed");
-    }
-    const own = listed.find((pr) => !pr.isCrossRepository);
-    return own === undefined ? null : { number: String(own.number) };
+    if (listed.kind !== "ok") failDelivery("listing the sync pull request failed");
+
+    const own = listed.value.find(
+      (pull) => pull.head.ref === AUTOMATION_BRANCH && pull.head.repo?.id === pull.base.repo.id,
+    );
+    return own === undefined ? null : { number: own.number, armed: own.auto_merge !== null };
   }
 
-  /** A failed read or disarm files the failure: an armed PR could merge on its own. */
-  disarm(number: string): void {
-    const armed = this.must(
-      [
-        "gh",
-        "pr",
-        "view",
-        number,
-        "-R",
-        this.target,
-        "--json",
-        "autoMergeRequest",
-        "--jq",
-        ".autoMergeRequest != null",
-      ],
-      "reading the sync pull request's auto-merge state failed",
-      "gh pr view",
-    );
-    if (armed.trim() !== "true") return;
+  /** A failed disarm fails the delivery: an armed PR could merge on its own. */
+  disarm(pull: SyncPull): void {
+    if (!pull.armed) return;
+
     this.must(
-      ["gh", "pr", "merge", number, "-R", this.target, "--disable-auto"],
+      ["gh", "pr", "merge", String(pull.number), "-R", this.target, "--disable-auto"],
       "disarming the sync pull request's auto-merge failed",
       "gh pr merge --disable-auto",
     );
   }
 
   /** A selection reverted on the default branch, say, leaves the open sync PR carrying stale files that must never merge. */
-  closeObsoletePr(): void {
-    const existing = this.openPr();
+  async closeObsoletePr(): Promise<void> {
+    const existing = await this.openPr();
     if (existing === null) return;
-    this.disarm(existing.number);
-    this.must(
-      [
-        "gh",
-        "pr",
-        "close",
-        existing.number,
-        "-R",
-        this.target,
-        "--delete-branch",
-        "--comment",
-        `superseded: the target already matches build ${this.build}`,
-      ],
-      "closing the obsolete sync pull request failed",
-      "gh pr close",
+
+    this.disarm(existing);
+    const reason = "closing the obsolete sync pull request failed";
+    await this.mustSend(
+      "POST",
+      `issues/${existing.number}/comments`,
+      { body: `superseded: the target already matches build ${this.build}` },
+      reason,
     );
+    await this.mustSend("PATCH", `pulls/${existing.number}`, { state: "closed" }, reason);
+    await this.mustSend("DELETE", `git/refs/heads/${AUTOMATION_BRANCH}`, {}, reason);
+
     this.log(`closed the obsolete sync pull request #${existing.number} and deleted its branch`);
   }
 
-  /** The PR body on disk, since `gh` reads it from a file. */
-  writePrBody(report: string, staged: readonly string[]): string {
-    const bodyFile = join(this.runnerTemp, "pr-body.md");
-    writeFileSync(
-      bodyFile,
-      prBody({
-        operator: requireEnv("GITHUB_REPOSITORY"),
-        build: this.build,
-        runUrl: this.runUrl,
-        report,
-        addModules: this.addModules,
-        registrationChanged: staged.includes(REGISTRATION_PATH),
-      }),
-    );
-    return bodyFile;
-  }
-
-  /** The sync PR opened, or the open one refreshed onto the pushed branch; `number` is empty when gh printed no URL. */
-  openOrRefreshPr(
-    existing: { number: string } | null,
+  /** The sync PR opened, or the open one refreshed onto the pushed branch. */
+  async openOrRefreshPr(
+    existing: SyncPull | null,
     base: string,
-    bodyFile: string,
-  ): { number: string; outcome: DeliveryVerdict } {
+    body: string,
+  ): Promise<{ number: number; outcome: DeliveryVerdict }> {
+    const title = prTitle(this.build);
     if (existing === null) {
-      const created = this.must(
-        [
-          "gh",
-          "pr",
-          "create",
-          "-R",
-          this.target,
-          "--base",
-          base,
-          "--head",
-          AUTOMATION_BRANCH,
-          "--title",
-          prTitle(this.build),
-          "--body-file",
-          bodyFile,
-        ],
-        "creating the sync pull request failed",
-        "gh pr create",
+      const created = await this.send(
+        "POST",
+        "pulls",
+        { title, head: AUTOMATION_BRANCH, base, body },
+        createdPull,
       );
-      return { number: created.trim().split("/").pop() ?? "", outcome: "opened" };
+      if (created.kind !== "ok") failDelivery("creating the sync pull request failed");
+
+      return { number: created.value.number, outcome: "opened" };
     }
-    // The base follows the checkout: the default branch may have been
-    // renamed while the PR was open.
-    this.must(
-      [
-        "gh",
-        "pr",
-        "edit",
-        existing.number,
-        "-R",
-        this.target,
-        "--base",
-        base,
-        "--title",
-        prTitle(this.build),
-        "--body-file",
-        bodyFile,
-      ],
+
+    // The base follows the checkout: the default branch may have been renamed while the PR was open.
+    await this.mustSend(
+      "PATCH",
+      `pulls/${existing.number}`,
+      { title, base, body },
       "refreshing the sync pull request failed",
-      "gh pr edit",
     );
     return { number: existing.number, outcome: "refreshed" };
   }
 
-  /** Auto-merge is armed unless the report holds, the run is manual, or modules are being added; the reason it stays off is logged. */
-  armAutoMerge(summary: SyncReport, number: string): void {
-    if (summary.hold) {
-      this.log("auto-merge left off: the report holds the PR for review");
-    } else if (env("MANUAL") === "true") {
-      this.log("auto-merge left off: manual run");
-    } else if (this.addModules !== "") {
-      this.log("auto-merge left off: the run adds modules to the registration");
-    } else if (number !== "") {
-      // A refused arm (auto-merge disabled in the target) is the target's
-      // choice: the PR waits for a human, and the log says so.
-      this.run(
-        ["gh", "pr", "merge", number, "-R", this.target, "--squash", "--auto"],
-        "gh pr merge --auto",
-      );
-    }
+  /** Why auto-merge stays off for this run, null when it is armed. */
+  autoMergeHeld(summary: SyncReport): string | null {
+    if (summary.hold) return "the report holds the PR for review";
+    if (env("MANUAL") === "true") return "manual run";
+    if (this.addModules !== "") return "the run adds modules to the registration";
+
+    return null;
   }
 
-  /** The writer's summary; one that is not a sync report files the failure, its diagnosis in the delivery log. */
+  /** A refused arm (auto-merge disabled in the target) is the target's choice: the PR waits for a human, and the log says so. */
+  armAutoMerge(summary: SyncReport, number: number): void {
+    const held = this.autoMergeHeld(summary);
+    if (held !== null) {
+      this.log(`auto-merge left off: ${held}`);
+      return;
+    }
+
+    this.run(
+      ["gh", "pr", "merge", String(number), "-R", this.target, "--squash", "--auto"],
+      "gh pr merge --auto",
+    );
+  }
+
+  /** The writer's summary; one that is not a sync report fails the delivery, its diagnosis in the delivery log. */
   readSummary(): SyncReport {
     const text = readFileSync(join(this.runnerTemp, SUMMARY_FILE), "utf-8");
     try {
       return parseJsonWithThrow(syncReport, text, SUMMARY_FILE);
     } catch (error) {
       this.log(error instanceof Error ? error.message : String(error));
-      this.fileFailure("the writer's summary is not a sync report");
+      failDelivery("the writer's summary is not a sync report");
     }
   }
 
   /** The sync end to end: nothing staged ends it unchanged, a dispatched branch gets one commit, the default branch a PR. */
   async deliver(): Promise<void> {
-    if (env("CHECKOUT_OUTCOME") !== "success") this.fileFailure("the target checkout failed");
-    if (env("WRITER_OUTCOME") !== "success") this.fileFailure("the writer exited with an error");
+    if (env("CHECKOUT_OUTCOME") !== "success") failDelivery("the target checkout failed");
+    if (env("WRITER_OUTCOME") !== "success") failDelivery("the writer exited with an error");
     const summary = this.readSummary();
     const report = readFileSync(join(this.runnerTemp, SYNC_LOG), "utf-8");
 
@@ -642,8 +604,8 @@ class Delivery {
     if (staged.length === 0) {
       this.log("the tree already matches the build; nothing to deliver");
       if (this.branch === "") {
-        this.closeObsoletePr();
-        this.closeFailureIssue();
+        await this.closeObsoletePr();
+        await this.closeFailureIssue();
       }
       this.verdict("unchanged");
       return;
@@ -654,7 +616,7 @@ class Delivery {
       this.git("symbolic-ref", "HEAD"),
       "git symbolic-ref failed in the target",
     ).trim();
-    if (!head.startsWith("refs/heads/")) this.fileFailure("the target checkout is not on a branch");
+    if (!head.startsWith("refs/heads/")) failDelivery("the target checkout is not on a branch");
     const base = head.slice("refs/heads/".length);
     if (this.branch !== "") {
       await this.deliverOntoBranch(report);
@@ -668,8 +630,8 @@ class Delivery {
 
     // An armed PR is disarmed before the branch moves: the incoming
     // revision may need review; re-arming below is the clean path's call.
-    const existing = this.openPr();
-    if (existing !== null) this.disarm(existing.number);
+    const existing = await this.openPr();
+    if (existing !== null) this.disarm(existing);
 
     // The lease is the branch's remote tip, so a concurrent writer fails loudly.
     const lease = this.must(
@@ -679,10 +641,17 @@ class Delivery {
     );
     this.push(AUTOMATION_BRANCH, lease.trim().split("\t")[0] ?? "", "the automation branch");
 
-    const bodyFile = this.writePrBody(report, staged);
-    const { number, outcome } = this.openOrRefreshPr(existing, base, bodyFile);
+    const body = prBody({
+      operator: requireEnv("GITHUB_REPOSITORY"),
+      build: this.build,
+      runUrl: this.runUrl,
+      report,
+      addModules: this.addModules,
+      registrationChanged: staged.includes(REGISTRATION_PATH),
+    });
+    const { number, outcome } = await this.openOrRefreshPr(existing, base, body);
     this.armAutoMerge(summary, number);
-    this.closeFailureIssue();
+    await this.closeFailureIssue();
     this.verdict(outcome);
   }
 
@@ -726,6 +695,17 @@ class Delivery {
       .write();
     this.verdict("pushed");
   }
+
+  /** The delivery, and the failure issue when a step of it failed. */
+  async deliverOrReport(): Promise<void> {
+    try {
+      await this.deliver();
+    } catch (error) {
+      if (!(error instanceof DeliveryFailed)) throw error;
+
+      await this.fileFailure(error.reason);
+    }
+  }
 }
 
-if (import.meta.main) await new Delivery().deliver();
+if (import.meta.main) await new Delivery().deliverOrReport();

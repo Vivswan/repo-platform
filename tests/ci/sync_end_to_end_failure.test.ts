@@ -2,11 +2,12 @@
 // the writer log, deliver.ts files that log into the target's failure issue, verdict.ts prints the row's
 // line. deliver.test and verdict.test pin each script alone against stubs; the hand-off has no other home.
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { type FakeGithubServer, spawnFakeGithub } from "../shared/fake_github";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -19,17 +20,22 @@ const TARGET = "OwnerOrg/demo";
 const PAT = "ghp_SENTINEL";
 const RUN_URL = "https://github.com/OwnerOrg/repo-platform/actions/runs/1";
 
-const GH_LINES = [
-  // The real gh refuses `--slurp` beside `--jq` as a flag error before any request; the stub does the same, then
-  // answers the failure path's calls.
-  'if [[ " $* " == *" --slurp "* && ( " $* " == *" --jq "* || " $* " == *" -q "* || " $* " == *" --template "* || " $* " == *" -t "* ) ]]; then echo "the \\`--slurp\\` option is not supported with \\`--jq\\` or \\`--template\\`" >&2; exit 1; fi',
-  'case "$*" in',
-  '  "api user "*) echo token-bot ;;',
-  '  *"/issues --method GET"*) printf "%s" "${STUB_ISSUE:-}" ;;',
-  "esac",
-];
+const ISSUES = `repos/${TARGET}/issues`;
 
 describe("the sync row's failure path", () => {
+  let api: FakeGithubServer;
+  beforeAll(async () => {
+    api = await spawnFakeGithub(
+      {
+        user: [{ status: 200, body: { login: "token-bot" } }],
+        [ISSUES]: [{ status: 200, body: [] }],
+        [`POST ${ISSUES}`]: [{ status: 201, body: {} }],
+      },
+      join(temp.dir("sync-e2e-failure-api-"), "api.log"),
+    );
+  });
+  afterAll(() => api.stop());
+
   test("a writer refusal lands in the target's failure issue and the row prints the failed line", () => {
     const root = temp.dir("sync-e2e-failure-");
     const runnerTemp = join(root, "temp");
@@ -77,11 +83,10 @@ describe("the sync row's failure path", () => {
 
     // The delivery step, with the writer's outcome as the runner reports it.
     const git = argvStub(root, "git");
-    const gh = argvStub(root, "gh", GH_LINES);
     const deliver = boundedSpawnSync(["bun", join(SCRIPTS, "deliver.ts")], {
       cwd: root,
       env: {
-        PATH: `${gh.bin}:${process.env.PATH}`,
+        PATH: `${git.bin}:${process.env.PATH}`,
         HOME: process.env.HOME,
         RUNNER_TEMP: runnerTemp,
         TARGET,
@@ -89,6 +94,8 @@ describe("the sync row's failure path", () => {
         TARGET_DIR: target,
         PAT,
         GH_TOKEN: PAT,
+        GITHUB_API_URL: `${api.host}/row`,
+        GITHUB_RETRY_BASE_MS: "0",
         BUILD,
         RUN_URL,
         GITHUB_REPOSITORY: "OwnerOrg/repo-platform",
@@ -100,9 +107,9 @@ describe("the sync row's failure path", () => {
     expect(deliver).toEqual({ exitCode: 0, stdout: "", stderr: "" });
     expect(readFileSync(join(runnerTemp, "verdict.txt"), "utf-8")).toBe("failed\n");
     expect(git.calls()).toEqual([]);
-    const filed = gh.calls().find((argv) => argv.includes("POST"));
-    expect(filed?.slice(1, 5)).toEqual(["api", `repos/${TARGET}/issues`, "--method", "POST"]);
-    const body = readFileSync(join(runnerTemp, "failure-issue-body.md"), "utf-8");
+    const filed = api.writes("row");
+    expect(filed.map((write) => write.path)).toEqual([`POST ${ISSUES}`]);
+    const { body } = filed[0].body as { body: string };
     expect(body).toContain(
       "The repo-platform sync for this repository failed: the writer exited with an error.",
     );

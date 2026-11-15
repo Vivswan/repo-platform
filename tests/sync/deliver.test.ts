@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -20,6 +20,13 @@ import {
 import { FAILURE_ISSUE_TITLE } from "../../actions/shared/platform.ts";
 import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import {
+  type FakeGithubServer,
+  type FakeReply,
+  type FakeRoutes,
+  type FakeWrite,
+  spawnFakeGithub,
+} from "../shared/fake_github";
 import { FIXTURE_GITCONFIG, fixtureGit } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 import {
@@ -37,11 +44,14 @@ const TARGET = "Vivswan/hidden-server";
 const PAT = "ghp_SENTINEL";
 const BUILD = "abcdef0123456789abcdef0123456789abcdef01";
 const REPORT = "## Sync report\n\n| Build |\n| --- |\n| x |\n";
-const PR_URL = `https://github.com/${TARGET}/pull/7`;
+const REPO = `repos/${TARGET}`;
+const AUTOMATION = "automation/repo-platform";
+const DELETE_BRANCH = `DELETE ${REPO}/git/refs/heads/${AUTOMATION}`;
 const REAL_GIT = Bun.which("git") ?? "git";
 
 const GIT_LINES = [
-  'printf "git %s\\n" "$*" >>"$STUB_SEQUENCE"',
+  // Both stubs log into the fake API's request log under the run's name, so one file holds a run's calls in order.
+  'printf "%s\\tgit %s\\n" "$STUB_RUN" "$*" >>"$STUB_SEQUENCE"',
   // With STUB_REAL_GIT set, every call but the network ones (push, ls-remote) runs the real git over the fixture checkout.
   'if [ -n "${STUB_REAL_GIT:-}" ]; then case " $* " in *" push "*|*" ls-remote "*) ;; *) exec "$STUB_REAL_GIT" "$@" ;; esac; fi',
   'case "$*" in',
@@ -59,24 +69,38 @@ const GIT_LINES = [
   "esac",
 ];
 const GH_LINES = [
-  'printf "gh %s\\n" "$*" >>"$STUB_SEQUENCE"',
-  // Like the real gh, the stub refuses `--slurp` beside `--jq` before any request.
-  'if [[ " $* " == *" --slurp "* && ( " $* " == *" --jq "* || " $* " == *" -q "* || " $* " == *" --template "* || " $* " == *" -t "* ) ]]; then echo "the \\`--slurp\\` option is not supported with \\`--jq\\` or \\`--template\\`" >&2; exit 1; fi',
-  'case "$*" in',
-  '  "${STUB_GH_FAIL:-<none>}"*) echo "gh: HTTP 502" >&2; exit 1 ;;',
-  '  "api user "*) echo token-bot ;;',
-  '  *"/issues --method GET"*) printf "%s" "${STUB_ISSUE:-}" ;;',
-  '  *"/issues --method POST"*|*"/issues/"*" --method PATCH"*) if [ "${STUB_ISSUE_FAIL:-}" = 1 ]; then echo "gh: Forbidden (HTTP 403)" >&2; exit 1; fi ;;',
-  '  "pr list "*) if [ -n "${STUB_PR_LIST:-}" ]; then printf "%s" "$STUB_PR_LIST"; elif [ -n "${STUB_PR:-}" ]; then printf \'[{"number":%s,"isCrossRepository":false}]\' "$STUB_PR"; else echo "[]"; fi ;;',
-  '  "pr view "*) echo "${STUB_ARMED:-false}" ;;',
-  `  "pr create "*) echo "${PR_URL}" ;;`,
-  "esac",
+  // Auto-merge is the one thing still asked of gh.
+  'printf "%s\\tgh %s\\n" "$STUB_RUN" "$*" >>"$STUB_SEQUENCE"',
+  'if [ "${STUB_GH_FAIL:-}" = 1 ]; then echo "gh: HTTP 502" >&2; exit 1; fi',
 ];
 
-/** The run's inputs, three of them past the outcome flags:
+/** A row of the pulls listing: `head` and `base` are repository ids, equal for the target's own branch. */
+interface Pull {
+  number: number;
+  auto_merge: object | null;
+  head: { ref: string; repo: { id: number } | null };
+  base: { repo: { id: number } };
+}
+const ownPull = (number: number, armed = false): Pull => ({
+  number,
+  auto_merge: armed ? { merge_method: "squash" } : null,
+  head: { ref: AUTOMATION, repo: { id: 1 } },
+  base: { repo: { id: 1 } },
+});
+const forkPull = (number: number): Pull => ({
+  ...ownPull(number, true),
+  head: { ref: AUTOMATION, repo: { id: 2 } },
+});
+const report = (number: number, state: string) => ({ number, state, title: FAILURE_ISSUE_TITLE });
+const OK: FakeReply = { status: 200, body: {} };
+
+/** The run's inputs, past the outcome flags:
  *    addModules   the plan's add_modules output, as the row's step env carries it
  *    checkoutLog  the clone log checkout_target.ts left behind, when any
- *    written      builds a real checkout under root/target and answers the writer's summary over it; git then runs for real */
+ *    written      builds a real checkout under root/target and answers the writer's summary over it; git then runs for real
+ *    pulls        the target's open pull requests, none when absent
+ *    issues       the issues the token's account filed in the target, oldest first, none when absent
+ *    replies      answers a route in the default's place */
 interface Options {
   hold?: boolean;
   manual?: boolean;
@@ -89,10 +113,17 @@ interface Options {
   stub?: Record<string, string>;
   written?: (root: string) => SyncReport;
   summaryText?: string;
+  pulls?: Pull[];
+  issues?: object[];
+  replies?: FakeRoutes;
 }
 
-/** What the run left behind; summary is the job summary (GITHUB_STEP_SUMMARY), empty unless a branch delivery wrote
- *  its report there. */
+/** What the run left behind:
+ *    summary    the job summary (GITHUB_STEP_SUMMARY), empty unless a branch delivery wrote its report there
+ *    gh         the gh stub's calls
+ *    writes     every API write, in order, with what it sent
+ *    issueBody  the body of the failure report filed or reopened, null when none was
+ *    sequence   every git, gh, and API call in order: a read by its path and query, a write led by its method */
 interface Run {
   exitCode: number;
   stdout: string;
@@ -101,10 +132,34 @@ interface Run {
   log: string;
   git: string[][];
   gh: string[][];
+  writes: FakeWrite[];
   issueBody: string | null;
   sequence: string[];
   summary: string;
   target: string;
+}
+
+let api: FakeGithubServer;
+let runs = 0;
+beforeAll(async () => {
+  api = await spawnFakeGithub({}, join(temp.dir("deliver-api-"), "api.log"));
+});
+afterAll(() => api.stop());
+
+/** The target as GitHub answers for it: every write lands unless the run's `replies` say otherwise. */
+function routesFor(options: Options): FakeRoutes {
+  return {
+    user: [{ status: 200, body: { login: "token-bot" } }],
+    [`${REPO}/issues`]: [{ status: 200, body: options.issues ?? [] }],
+    [`POST ${REPO}/issues`]: [{ status: 201, body: {} }],
+    [`PATCH ${REPO}/issues/*`]: [OK],
+    [`POST ${REPO}/issues/*/comments`]: [{ status: 201, body: {} }],
+    [`${REPO}/pulls`]: [{ status: 200, body: options.pulls ?? [] }],
+    [`POST ${REPO}/pulls`]: [{ status: 201, body: { number: 7 } }],
+    [`PATCH ${REPO}/pulls/*`]: [OK],
+    [DELETE_BRANCH]: [{ status: 204 }],
+    ...options.replies,
+  };
 }
 
 function run(options: Options = {}): Run {
@@ -120,8 +175,8 @@ function run(options: Options = {}): Run {
   if (options.checkoutLog !== undefined) {
     writeFileSync(join(runnerTemp, "checkout.log"), options.checkoutLog);
   }
-  const sequenceFile = join(root, "sequence.log");
-  writeFileSync(sequenceFile, "");
+  const name = `run-${++runs}`;
+  api.routes(name, routesFor(options));
   const summaryFile = join(root, "step-summary.md");
   writeFileSync(summaryFile, "");
   let eventPath = "";
@@ -144,8 +199,11 @@ function run(options: Options = {}): Run {
       TARGET_DIR: target,
       PAT,
       GH_TOKEN: PAT,
+      GITHUB_API_URL: `${api.host}/${name}`,
+      GITHUB_RETRY_BASE_MS: "0",
       STUB_PAT: PAT,
-      STUB_SEQUENCE: sequenceFile,
+      STUB_SEQUENCE: api.log,
+      STUB_RUN: name,
       BUILD,
       RUN_URL: "https://github.com/Vivswan/repo-platform/actions/runs/1",
       GITHUB_REPOSITORY: "Vivswan/repo-platform",
@@ -159,20 +217,34 @@ function run(options: Options = {}): Run {
     },
   });
   const verdictFile = join(runnerTemp, "verdict.txt");
-  const bodyFile = join(runnerTemp, "failure-issue-body.md");
+  const writes = api.writes(name);
+  const filed = writes.find(
+    (write) =>
+      write.path === `POST ${REPO}/issues` ||
+      (write.path.startsWith(`PATCH ${REPO}/issues/`) && fields(write).state === "open"),
+  );
   return {
     ...result,
     verdict: existsSync(verdictFile) ? readFileSync(verdictFile, "utf-8").trim() : null,
     log: readFileSync(join(runnerTemp, "deliver.log"), "utf-8"),
     git: git.calls(),
     gh: gh.calls(),
-    issueBody: existsSync(bodyFile) ? readFileSync(bodyFile, "utf-8") : null,
-    sequence: readFileSync(sequenceFile, "utf-8")
-      .split("\n")
-      .filter((line) => line !== ""),
+    writes,
+    issueBody: filed === undefined ? null : fields(filed).body,
+    sequence: api.calls(name),
     summary: readFileSync(summaryFile, "utf-8"),
     target,
   };
+}
+
+/** A write's JSON fields. */
+function fields(write: FakeWrite): Record<string, string> {
+  return write.body as Record<string, string>;
+}
+
+/** The sequence's API calls alone. */
+function apiCalls(result: Run): string[] {
+  return result.sequence.filter((line) => !/^(git|gh) /.test(line));
 }
 
 const calls = (list: string[][], ...lead: string[]) =>
@@ -186,119 +258,131 @@ const silent = (result: Run) => {
 };
 
 describe("deliver.ts", () => {
-  const prCommands = (result: Run) => calls(result.gh, "pr").map((argv) => argv[2]);
-  const CLOSE = [
-    "12",
-    "-R",
-    TARGET,
-    "--delete-branch",
-    "--comment",
-    `superseded: the target already matches build ${BUILD}`,
+  const merges = (result: Run) => calls(result.gh, "pr", "merge").map((argv) => argv.slice(3));
+  const DISARM = ["12", "-R", TARGET, "--disable-auto"];
+  const CLOSE: FakeWrite[] = [
+    {
+      path: `POST ${REPO}/issues/12/comments`,
+      body: { body: `superseded: the target already matches build ${BUILD}` },
+    },
+    { path: `PATCH ${REPO}/pulls/12`, body: { state: "closed" } },
+    { path: DELETE_BRANCH, body: null },
   ];
 
   // A stale sync PR must never merge: an armed one is disarmed BEFORE it is closed, every open one is closed with
   // the reason and its branch deleted, and nothing is pushed, edited, or armed.
-  test.each<{ reason: string; stub: Record<string, string>; pr: string[]; close: string[] | null }>(
-    [
-      { reason: "no open PR: nothing beyond the lookup", stub: {}, pr: ["list"], close: null },
-      {
-        reason: "an open PR never armed is closed without a disarm call",
-        stub: { STUB_PR: "12" },
-        pr: ["list", "view", "close"],
-        close: CLOSE,
-      },
-      {
-        reason: "an open armed PR is disarmed, then closed as obsolete",
-        stub: { STUB_PR: "12", STUB_ARMED: "true" },
-        pr: ["list", "view", "merge", "close"],
-        close: CLOSE,
-      },
-    ],
-  )("a tree the build already matches is unchanged: $reason", ({ stub, pr, close }) => {
-    const result = run({ stub });
+  test.each<{ reason: string; options: Options; merge: string[][]; close: FakeWrite[] }>([
+    { reason: "no open PR: nothing beyond the lookup", options: {}, merge: [], close: [] },
+    {
+      reason: "an open PR never armed is closed without a disarm call",
+      options: { pulls: [ownPull(12)] },
+      merge: [],
+      close: CLOSE,
+    },
+    {
+      reason: "an open armed PR is disarmed, then closed as obsolete",
+      options: { pulls: [ownPull(12, true)] },
+      merge: [DISARM],
+      close: CLOSE,
+    },
+  ])("a tree the build already matches is unchanged: $reason", ({ options, merge, close }) => {
+    const result = run(options);
     silent(result);
     expect(result.exitCode).toBe(0);
     expect(result.verdict).toBe("unchanged");
-    expect(prCommands(result)).toEqual(pr);
-    const closes: string[][] = close === null ? [] : [close];
-    expect(calls(result.gh, "pr", "close").map((argv) => argv.slice(3))).toEqual(closes);
+    expect(merges(result)).toEqual(merge);
+    expect(result.writes).toEqual(close);
     expect(calls(result.git, "push")).toEqual([]);
-    expect(result.gh.some((argv) => argv[4] === "POST" || argv.includes("--auto"))).toBe(false);
     const disarmAt = result.sequence.findIndex((line) => line.includes("--disable-auto"));
-    const closeAt = result.sequence.findIndex((line) => line.startsWith("gh pr close"));
-    expect(disarmAt >= 0).toBe(pr.includes("merge"));
-    if (disarmAt >= 0) expect(closeAt).toBeGreaterThan(disarmAt);
-    if (close !== null) expect(result.log).toContain("closed the obsolete sync pull request #12");
+    const closeAt = result.sequence.findIndex((line) => line.startsWith("POST "));
+    if (merge.length > 0) expect(closeAt).toBeGreaterThan(disarmAt);
+    if (close.length > 0) expect(result.log).toContain("closed the obsolete sync pull request #12");
   });
 
-  // GitHub's `gh pr list --head` matches a fork's branch of the same name, so a fork could impersonate the sync PR:
-  // the listing asks isCrossRepository and only the target's own PR is viewed, closed, or refreshed.
-  test.each<{ reason: string; stub: Record<string, string>; verdict: string; pr: string[] }>([
+  // A fork's branch of the same name could impersonate the sync PR, and GitHub answers every open pull request when it
+  // cannot read the listing's head filter: only the target's own automation branch is disarmed, closed, or refreshed.
+  test.each<{ reason: string; options: Options; verdict: string; merge: string[][] }>([
     {
       reason:
-        "beside the target's own PR, the fork's is skipped and the target's is the one closed",
-      stub: {
-        STUB_PR_LIST: JSON.stringify([
-          { number: 9, isCrossRepository: true },
-          { number: 12, isCrossRepository: false },
-        ]),
-        STUB_ARMED: "true",
-      },
+        "a fork's PR beside the target's own: the fork's is skipped and the target's is the one closed",
+      options: { pulls: [forkPull(9), ownPull(12, true)] },
       verdict: "unchanged",
-      pr: ["list", "view", "merge", "close"],
+      merge: [DISARM],
     },
     {
-      reason: "alone, it is no sync PR: a change opens the target's own",
-      stub: {
-        STUB_DIRTY: "1",
-        STUB_PR_LIST: JSON.stringify([{ number: 9, isCrossRepository: true }]),
+      reason: "a fork's PR alone is no sync PR: a change opens the target's own",
+      options: { stub: { STUB_DIRTY: "1" }, pulls: [forkPull(9)] },
+      verdict: "opened",
+      merge: [["7", "-R", TARGET, "--squash", "--auto"]],
+    },
+    {
+      reason: "the target's PR from another branch is no sync PR: a change opens the target's own",
+      options: {
+        stub: { STUB_DIRTY: "1" },
+        pulls: [{ ...ownPull(9, true), head: { ref: "feat/other", repo: { id: 1 } } }],
       },
       verdict: "opened",
-      pr: ["list", "create", "merge"],
+      merge: [["7", "-R", TARGET, "--squash", "--auto"]],
     },
-  ])("a fork's PR from a same-named branch, $reason", ({ stub, verdict, pr }) => {
-    const result = run({ stub });
+  ])("a listed pull request that is not the sync's, $reason", ({ options, verdict, merge }) => {
+    const result = run(options);
     silent(result);
     expect(result.verdict).toBe(verdict);
-    expect(calls(result.gh, "pr", "list")[0]).toContain("number,isCrossRepository");
-    expect(prCommands(result)).toEqual(pr);
-    for (const argv of calls(result.gh, "pr", "view").concat(calls(result.gh, "pr", "close"))) {
-      expect(argv[3]).toBe("12");
-    }
-    expect(result.sequence.some((line) => line.includes(" 9 "))).toBe(false);
+    expect(merges(result)).toEqual(merge);
+    expect(result.sequence.filter((line) => /[ /]9( |$)/.test(line))).toEqual([]);
   });
 
-  // The must() chain fails closed at each gh call with its own reason, nothing runs after it, and a non-JSON answer
-  // from gh is a failure too, never a crash.
-  test.each<{ reason: string; stub: Record<string, string>; failure: string; last: string }>([
-    ...(
-      [
-        ["pr list", "listing the sync pull request failed"],
-        ["pr view", "reading the sync pull request's auto-merge state failed"],
-        ["pr merge", "disarming the sync pull request's auto-merge failed"],
-        ["pr close", "closing the obsolete sync pull request failed"],
-      ] as const
-    ).map(([command, failure]) => ({
-      reason: `gh ${command} fails`,
-      stub: { STUB_PR: "12", STUB_ARMED: "true", STUB_GH_FAIL: command },
-      failure,
-      last: `gh ${command}`,
-    })),
+  // Each step of the cleanup fails closed with its own reason and nothing runs after it; a listing GitHub did not
+  // really give (an outage, another shape) is a failure too, never "no PR".
+  const ARMED: Options = { pulls: [ownPull(12, true)] };
+  test.each<{ reason: string; options: Options; failure: string; last: string }>([
     {
-      reason: "gh pr list answers non-JSON",
-      stub: { STUB_PR_LIST: "not json" },
+      reason: "the listing answers 502",
+      options: { replies: { [`${REPO}/pulls`]: [{ status: 502 }] } },
       failure: "listing the sync pull request failed",
-      last: "gh pr list",
+      last: `${REPO}/pulls?`,
+    },
+    {
+      reason: "the listing is not a list",
+      options: { replies: { [`${REPO}/pulls`]: [{ status: 200, body: { number: 12 } }] } },
+      failure: "listing the sync pull request failed",
+      last: `${REPO}/pulls?`,
+    },
+    {
+      reason: "the disarm fails",
+      options: { ...ARMED, stub: { STUB_GH_FAIL: "1" } },
+      failure: "disarming the sync pull request's auto-merge failed",
+      last: "gh pr merge",
+    },
+    {
+      reason: "the closing comment is refused",
+      options: { ...ARMED, replies: { [CLOSE[0].path]: [{ status: 403 }] } },
+      failure: "closing the obsolete sync pull request failed",
+      last: CLOSE[0].path,
+    },
+    {
+      reason: "the close answers 502",
+      options: { ...ARMED, replies: { [CLOSE[1].path]: [{ status: 502 }] } },
+      failure: "closing the obsolete sync pull request failed",
+      last: CLOSE[1].path,
+    },
+    {
+      reason:
+        "the branch's deletion is refused (a 422: a rule protects the branch, which is still there)",
+      options: { ...ARMED, replies: { [DELETE_BRANCH]: [{ status: 422 }] } },
+      failure: "closing the obsolete sync pull request failed",
+      last: DELETE_BRANCH,
     },
   ])(
     "an unchanged tree whose obsolete-PR cleanup fails ($reason) files the failure and stops there",
-    ({ stub, failure, last }) => {
-      const result = run({ stub });
+    ({ options, failure, last }) => {
+      const result = run(options);
       silent(result);
       expect(result.verdict).toBe("failed");
       expect(result.issueBody).toContain(failure);
-      const prLines = result.sequence.filter((line) => line.startsWith("gh pr"));
-      expect(prLines.at(-1)?.startsWith(last)).toBe(true);
+      // The failure report opens by reading the token's account: the call before it is the one that failed.
+      const before = result.sequence[result.sequence.indexOf("user") - 1];
+      expect(before.startsWith(last)).toBe(true);
     },
   );
 
@@ -348,17 +432,14 @@ describe("deliver.ts", () => {
       const push = calls(result.git, "push")[0];
       expect(push).toContain("--force-with-lease=automation/repo-platform:");
       expect(push).toContain(`https://x-access-token:${PAT}@github.com/${TARGET}.git`);
-      const create = calls(result.gh, "pr", "create")[0];
-      expect(create.slice(create.indexOf("--base"), create.indexOf("--base") + 2)).toEqual([
-        "--base",
-        "main",
-      ]);
-      const body = readFileSync(create[create.indexOf("--body-file") + 1], "utf-8");
+      expect(result.writes.map((write) => write.path)).toEqual([`POST ${REPO}/pulls`]);
+      const { body, ...create } = fields(result.writes[0]);
+      expect(create).toEqual({ title: prTitle(BUILD), head: AUTOMATION, base: "main" });
       expect(body).toContain(`build \`${BUILD}\``);
       expect(body).toContain(REPORT.trimEnd());
       expect(body.includes("Dispatched with `add_modules=")).toBe(line !== undefined);
       if (line !== undefined) expect(body).toContain(line);
-      expect(calls(result.gh, "pr", "merge").map((argv) => argv.slice(3))).toEqual(merge);
+      expect(merges(result)).toEqual(merge);
       if (log !== null) expect(result.log).toContain(log);
       expect(result.log).not.toContain(PAT);
       expect(body).not.toContain(PAT);
@@ -373,12 +454,13 @@ describe("deliver.ts", () => {
     const TIP = "2222222222222222222222222222222222222222";
     const onBranch = { STUB_HEAD: `refs/heads/${BRANCH}`, STUB_HEAD_SHA: TIP };
 
-    test("a change is one commit on the checkout's branch, pushed with a lease on the cloned tip, with no gh call at all", () => {
+    test("a change is one commit on the checkout's branch, pushed with a lease on the cloned tip, with no gh or API call at all", () => {
       const result = run({ branch: BRANCH, public: true, stub: { ...onBranch, STUB_DIRTY: "1" } });
       silent(result);
       expect(result.exitCode).toBe(0);
       expect(result.verdict).toBe("pushed");
       expect(result.gh).toEqual([]);
+      expect(apiCalls(result)).toEqual([]);
       expect(calls(result.git, "checkout")).toEqual([]);
       expect(result.git.map((argv) => argv[3])).toEqual([
         "config",
@@ -420,6 +502,7 @@ describe("deliver.ts", () => {
       silent(result);
       expect(result.verdict).toBe("unchanged");
       expect(result.gh).toEqual([]);
+      expect(apiCalls(result)).toEqual([]);
       expect(calls(result.git, "push")).toEqual([]);
       expect(result.summary).toBe("");
     });
@@ -494,12 +577,8 @@ describe("deliver.ts", () => {
   test("an existing armed PR is disarmed before the push, refreshed onto the checkout's branch, and left disarmed when the report holds", () => {
     const result = run({
       hold: true,
-      stub: {
-        STUB_DIRTY: "1",
-        STUB_TIP: "0123456789012345678901234567890123456789",
-        STUB_PR: "12",
-        STUB_ARMED: "true",
-      },
+      pulls: [ownPull(12, true)],
+      stub: { STUB_DIRTY: "1", STUB_TIP: "0123456789012345678901234567890123456789" },
     });
     silent(result);
     expect(result.verdict).toBe("refreshed");
@@ -510,14 +589,11 @@ describe("deliver.ts", () => {
     expect(calls(result.git, "push")[0]).toContain(
       "--force-with-lease=automation/repo-platform:0123456789012345678901234567890123456789",
     );
-    expect(calls(result.gh, "pr", "edit")[0].slice(3, 8)).toEqual([
-      "12",
-      "-R",
-      TARGET,
-      "--base",
-      "main",
-    ]);
-    expect(result.gh.some((argv) => argv.includes("--auto"))).toBe(false);
+    expect(result.writes.map((write) => write.path)).toEqual([`PATCH ${REPO}/pulls/12`]);
+    const { body, ...refresh } = fields(result.writes[0]);
+    expect(refresh).toEqual({ title: prTitle(BUILD), base: "main" });
+    expect(body).toContain(REPORT.trimEnd());
+    expect(merges(result)).toEqual([DISARM]);
     expect(result.log).toContain("holds the PR for review");
   });
 
@@ -552,9 +628,8 @@ describe("deliver.ts", () => {
       silent(result);
       expect(result.exitCode).toBe(0);
       expect(result.verdict).toBe("failed");
-      const create = result.gh.find((argv) => argv[4] === "POST");
-      expect(create?.slice(1, 5)).toEqual(["api", `repos/${TARGET}/issues`, "--method", "POST"]);
-      expect(create).toContain(`title=${FAILURE_ISSUE_TITLE}`);
+      expect(result.writes.map((write) => write.path)).toEqual([`POST ${REPO}/issues`]);
+      expect(fields(result.writes[0]).title).toBe(FAILURE_ISSUE_TITLE);
       for (const line of says) expect(result.issueBody).toContain(line);
       expect(calls(result.git, "commit")).toEqual([]);
       expect(calls(result.git, "push")).toEqual([]);
@@ -625,59 +700,66 @@ describe("deliver.ts", () => {
   // git prints the token URL in its 403; the redaction is the one thing between the PAT and a public issue body.
   test("a refused push files the issue with git's redacted error and reopens an existing report", () => {
     const result = run({
-      stub: { STUB_DIRTY: "1", STUB_PUSH_FAIL: "1", STUB_ISSUE: "41 closed" },
+      issues: [report(41, "closed")],
+      stub: { STUB_DIRTY: "1", STUB_PUSH_FAIL: "1" },
     });
     silent(result);
     expect(result.verdict).toBe("failed");
-    const patch = result.gh.find((argv) => argv[2] === `repos/${TARGET}/issues/41`);
-    expect(patch).toContain("state=open");
+    expect(result.writes.map((write) => write.path)).toEqual([`PATCH ${REPO}/issues/41`]);
     expect(result.issueBody).toContain("pushing the automation branch failed");
     expect(result.issueBody).toContain("https://***@github.com/o/r.git");
     expect(result.issueBody).not.toContain(PAT);
     expect(result.log).not.toContain(PAT);
   });
 
-  // GitHub lists issues created-ascending across pages; the open report is the one being watched, so it outranks
-  // an older closed one, whether the delivery closes it or reopens it.
+  // GitHub lists issues created-ascending, pull requests among them; the open report is the one being watched, so it
+  // outranks an older closed one, whether the delivery closes it or reopens it, and a pull request or an issue of
+  // another title is never the report.
+  const MIXED = [
+    { ...report(5, "open"), pull_request: {} },
+    { ...report(6, "open"), title: "another issue" },
+    report(8, "closed"),
+    report(12, "open"),
+  ];
   test.each<{
     reason: string;
     stub: Record<string, string>;
-    issues: string;
+    issues: object[];
     verdict: string;
     patches: string[][];
   }>([
     {
       reason: "a clean delivery closes the one open report",
       stub: {},
-      issues: "41 open",
+      issues: [report(41, "open")],
       verdict: "opened",
-      patches: [["41", "state=closed"]],
+      patches: [["41", "closed"]],
     },
     {
       reason: "a clean delivery",
       stub: {},
-      issues: "8 closed\n12 open\n",
+      issues: MIXED,
       verdict: "opened",
-      patches: [["12", "state=closed"]],
+      patches: [["12", "closed"]],
     },
     {
       reason: "a failed delivery",
       stub: { STUB_PUSH_FAIL: "1" },
-      issues: "8 closed\n12 open\n",
+      issues: MIXED,
       verdict: "failed",
-      patches: [["12", "state=open"]],
+      patches: [["12", "open"]],
     },
   ])(
     "$reason addresses the open failure report, never the older closed one",
     ({ stub, issues, verdict, patches }) => {
-      const result = run({ stub: { STUB_DIRTY: "1", ...stub, STUB_ISSUE: issues } });
+      const result = run({ issues, stub: { STUB_DIRTY: "1", ...stub } });
       silent(result);
       expect(result.verdict).toBe(verdict);
       expect(
-        result.gh
-          .filter((argv) => argv[1] === "api" && argv[4] === "PATCH")
-          .map((argv) => [argv[2], argv.find((word) => word.startsWith("state="))]),
-      ).toEqual(patches.map(([number, state]) => [`repos/${TARGET}/issues/${number}`, state]));
+        result.writes
+          .filter((write) => write.path.startsWith(`PATCH ${REPO}/issues/`))
+          .map((write) => [write.path, fields(write).state]),
+      ).toEqual(patches.map(([number, state]) => [`PATCH ${REPO}/issues/${number}`, state]));
     },
   );
 
@@ -698,12 +780,33 @@ describe("deliver.ts", () => {
     expect(result.issueBody).toContain("failed: the writer's summary is not a sync report.");
   });
 
-  test("a failure the target cannot take (the issue write refused) leaves no verdict and exits red", () => {
-    const result = run({ writer: "failure", stub: { STUB_ISSUE_FAIL: "1" } });
-    silent(result);
-    expect(result.exitCode).toBe(1);
-    expect(result.verdict).toBeNull();
-  });
+  // The delivery log is tailed into the target's issue and GitHub's error body can quote anything: the log carries the
+  // call and its status alone.
+  test.each<{ reason: string; replies: FakeRoutes; logged: string }>([
+    {
+      reason: "the issue write refused",
+      replies: {
+        [`POST ${REPO}/issues`]: [{ status: 403, body: { message: "REFUSAL-TEXT for token-bot" } }],
+      },
+      logged: "$ GET user -> ok\n$ GET issues -> ok\n$ POST issues -> HTTP 403\n",
+    },
+    {
+      reason: "the report's lookup unanswered",
+      replies: { [`${REPO}/issues`]: [{ status: 502, body: { message: "REFUSAL-TEXT" } }] },
+      logged: "$ GET user -> ok\n$ GET issues -> HTTP 502\n",
+    },
+  ])(
+    "a failure the target cannot take ($reason) leaves no verdict and exits red",
+    ({ replies, logged }) => {
+      const result = run({ writer: "failure", replies });
+      silent(result);
+      expect(result.exitCode).toBe(1);
+      expect(result.verdict).toBeNull();
+      expect(result.log).toBe(
+        `filing the failure report: the writer exited with an error\n${logged}`,
+      );
+    },
+  );
 });
 
 describe("failureBody", () => {

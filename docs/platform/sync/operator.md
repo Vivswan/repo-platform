@@ -33,7 +33,7 @@ The residual is a slug another writable repository takes within the run: the row
 
 ## Reading the GitHub API
 
-The scripts' reads of the GitHub API (the repository listing, a repository's registration and rendered settings, a commit's check runs and pull requests) go through one client ([shared/github.ts](../../../.github/scripts/shared/github.ts)), so one answer means one thing in every script.
+The scripts' reads and writes of the GitHub API go through one client ([shared/github.ts](../../../.github/scripts/shared/github.ts)), so one answer means one thing in every script. The reads are the repository listing, a repository's registration and rendered settings, a commit's check runs, and a target's pull requests, issues, and comments.
 
 | GitHub answers                                                                                                         | The read                                                    |
 | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -48,6 +48,16 @@ The scripts' reads of the GitHub API (the repository listing, a repository's reg
 - **A failure prints its status alone** (`HTTP 502`), never the URL or GitHub's error text, which name the repository ([private repositories](private-repositories.md#how-each-rule-is-kept)).
 - **The token** is `GH_TOKEN`, else `GITHUB_TOKEN`, an empty value skipped, as `gh` reads them. With neither, the script fails: an anonymous read of a private repository answers 404, which would read as "not adopted".
 - **A listing is whole or it is nothing:** every page must be an array, and one page that fails makes the listing fail, never a shorter fleet.
+
+A write (an issue, a comment, a label, a pull request) is read by its status too, and is sent twice only when twice is safe:
+
+| The write                                   | On a 5xx, no response, or a cut reply                                                  | On a 4xx                                                             |
+| ------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `PATCH`, `DELETE`                           | is tried again like a read: the same request twice leaves the same state               | is GitHub's answer, read by its status: a 404 on a removal is "gone" |
+| `POST` (a new issue, comment, pull request) | fails at once: the first attempt may have created the thing, and the next run finds it | is GitHub's answer, read by its status                               |
+
+- **A rate limit** is waited out for a write as for a read: GitHub did not act on the refused request.
+- **Auto-merge alone is still asked of `gh`** (`gh pr merge`): gh merges a pull request that is already mergeable and arms the rest, a choice no single API call makes.
 
 ## Delivering a row
 
