@@ -57,6 +57,8 @@ modules:
     description: "publishes one npm package through trusted publishing: latest at a release, next when the release PR refreshes"
   pr-title:
     description: Conventional Commit PR title check, its own required workflow
+  autofix:
+    description: "commits a pull request's automated fixes: the fix-lint label, or a declared push, runs the repo-owned autofix hook"
   fuzzer:
     description: nightly fuzz starter with issue filing, replay inputs, auto-close
     gitignore_sources: [fuzzer]
@@ -211,14 +213,6 @@ files:
   - { path: .yamllint, class: managed }
   - { path: .github/workflows/auto-assign.yml, class: managed }
   - { path: .github/workflows/sync-branch.yml, class: managed }
-  - path: .github/workflows/auto-format.yml
-    class: starter
-    when: { any: { declaring: toolchain_steps } }
-    blocks: toolchain_steps
-    sources:
-      bun: files/bun/.github/workflows/auto-format.toolchain.yml
-      uv: files/uv/.github/workflows/auto-format.toolchain.yml
-      rust: files/rust/.github/workflows/auto-format.toolchain.yml
   - { path: .typography-allow, class: managed, when: { without: [release-please] } }
   - { path: .typography-allow, class: managed, when: { modules: [release-please] } }
   - path: AGENTS.md
@@ -246,6 +240,8 @@ files:
   - { path: release-please-config.json, class: starter, when: { modules: [release-please] } }
   - { path: .github/actions/npm-build/action.yml, class: starter, when: { modules: [npm] } }
   - { path: .github/workflows/pr-title.yml, class: managed, when: { modules: [pr-title] } }
+  - { path: .github/workflows/auto-fix.yml, class: managed, when: { modules: [autofix] } }
+  - { path: .github/actions/autofix/action.yml, class: starter, when: { modules: [autofix] } }
   - { path: Cargo.toml, class: starter, when: { modules: [rust] } }
   - { path: ruff.toml, class: managed, when: { modules: [uv] } }
   - { path: clippy.toml, class: managed, when: { modules: [rust] } }
