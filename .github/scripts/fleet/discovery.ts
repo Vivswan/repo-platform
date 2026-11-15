@@ -1,15 +1,17 @@
 // The selectors' logs and step summaries are public, so every privacy-sensitive piece (discovery,
 // the dispatch-input read, the slug scrub) lives here once (docs/platform/sync/private-repositories.md).
 
-import { readFileSync, writeSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { error } from "@actions/core";
 import { z } from "zod";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { env } from "../shared/gha.ts";
+import { type GitHubClient, READ_DEADLINE_MS, unansweredReason } from "../shared/github.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
 
-/** A stalled-network backstop, not a latency budget: two minutes covers the paginated user/repos listing of several hundred repos, and the plan jobs' timeout-minutes are sized from it. */
-export const NETWORK_TIMEOUT_MS = 120_000;
+/** The spawned git probes stall on the same network as the API client's reads, so they share its backstop. */
+export const NETWORK_TIMEOUT_MS = READ_DEADLINE_MS;
 
 /** A killed child usually dies silently, so an expiry appends its own stderr line. The line names
  * only the program: the argv tail can carry a private slug. */
@@ -22,41 +24,22 @@ export function captureNetwork(command: string[], timeoutMs = NETWORK_TIMEOUT_MS
 }
 
 // user/repos reports the USER's permissions, not the fine-grained token's grant, so this is only a pre-filter: push_probe.ts asks per repo.
-const userReposPages = z.array(
-  z.array(
-    z.object({
-      full_name: z.string(),
-      archived: z.boolean(),
-      private: z.boolean(),
-      owner: z.object({ login: z.string() }),
-      permissions: z.object({ push: z.boolean().optional() }).optional(),
-    }),
-  ),
-);
+const userRepo = z.object({
+  full_name: z.string(),
+  archived: z.boolean(),
+  private: z.boolean(),
+  owner: z.object({ login: z.string() }),
+  permissions: z.object({ push: z.boolean().optional() }).optional(),
+});
 
 /** A failed or malformed listing exits: without a trustworthy fleet list nothing downstream may run. */
-export function discoverWritableRepos(label: string) {
-  // -F alone would flip gh api to POST; this is a read. --paginate emits
-  // concatenated page arrays, so --slurp makes one array of pages first.
-  const list = captureNetwork([
-    "gh",
-    "api",
-    "user/repos",
-    "--method",
-    "GET",
-    "--paginate",
-    "--slurp",
-    "-F",
-    "per_page=100",
-  ]);
-  if (list.exitCode !== 0) {
-    // writeSync: an async stream write racing the process.exit below
-    // truncates at the pipe buffer (~64 KiB).
-    writeSync(2, list.stderr);
-    process.exit(list.exitCode);
+export async function discoverWritableRepos(github: GitHubClient, label: string) {
+  const listing = await github.paginate("user/repos", userRepo);
+  if (listing.kind !== "ok") {
+    error(`${label} could not be read (${unansweredReason(listing)})`);
+    process.exit(1);
   }
-  const pages = parseJsonWith(userReposPages, list.stdout, label);
-  return pages.flat().filter((repo) => !repo.archived && repo.permissions?.push === true);
+  return listing.value.filter((repo) => !repo.archived && repo.permissions?.push === true);
 }
 
 export interface DiscoveredRepo {
@@ -78,8 +61,13 @@ export function selectedLine(rows: DiscoveredRepo[], prefix: string, none: strin
 }
 
 /** `private !== false` fails closed: the flag decides what the selectors' public logs may name. */
-export function discoverOwnerRepos(owner: string, label: string): DiscoveredRepo[] {
-  return discoverWritableRepos(label)
+export async function discoverOwnerRepos(
+  github: GitHubClient,
+  owner: string,
+  label: string,
+): Promise<DiscoveredRepo[]> {
+  const repos = await discoverWritableRepos(github, label);
+  return repos
     .filter((repo) => repo.owner.login === owner)
     .map((repo) => ({ repo: repo.full_name, private: repo.private !== false }));
 }
@@ -149,23 +137,6 @@ export function readDispatchRepo(): string {
  * empty on every other run. Folded like the scope: module names are kebab-case. */
 export function readDispatchAddModules(): string {
   return foldedList(dispatchInputs().addModules);
-}
-
-// Case-insensitive replaceAll: GitHub identity is case-insensitive, so a
-// scrub keyed to one casing must catch every other. The replacement is a
-// thunk, so a `$` in it is never substitution syntax.
-function replaceAllFoldingCase(text: string, needle: string, replacement: string): string {
-  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-  return text.replace(new RegExp(RegExp.escape(needle), "gi"), () => replacement);
-}
-
-/** A public row (display IS the slug) is skipped: its bare-name pass would EXPAND bare names into
- * slugs instead of hiding anything. Substring on purpose: garbling an innocent embedding is
- * cosmetic, printing a private name is not. */
-export function scrubSlug(detail: string, slug: string, display: string): string {
-  if (display === slug) return detail;
-  const scrubbed = replaceAllFoldingCase(detail, slug, display);
-  return replaceAllFoldingCase(scrubbed, slug.split("/").pop() ?? slug, display);
 }
 
 /** A repository that left the fleet stays in discovery when public (a private one disappears), so

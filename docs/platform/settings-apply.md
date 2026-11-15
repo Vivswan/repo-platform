@@ -69,6 +69,8 @@ A target is selected when all three probes pass, in this order, over every disco
 
 A probe that fails skips the target, save a rendered file without the header, which fails the plan:
 
+- **No answer is not "no":** the two file reads carry the API client's retries ([reading the GitHub API](sync/operator.md#reading-the-github-api)) and the push probe is tried three times. A probe still unanswered skips the target with a warning in the log and the step summary, and the nightly apply retries it.
+
 - **The hand-written refusal keeps a first sync safe:** a `.github/settings.yml` the sync did not render is never applied on its own. Applying it in `repos` mode would delete every fleet label it does not declare. The plan stays red until the sync PR that renders it merges.
 
 ### Private targets

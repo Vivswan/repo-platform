@@ -1,18 +1,14 @@
 #!/usr/bin/env bun
 
-import {
-  allGreenFailure,
-  type GhRunner,
-  type VerdictWait,
-  verdictPending,
-} from "../shared/all_green.ts";
+import { allGreenFailure, type VerdictWait, verdictPending } from "../shared/all_green.ts";
 import { env, fail, requireEnv } from "../shared/gha.ts";
+import type { GitHubClient } from "../shared/github.ts";
 
 export interface GreenWaitOptions {
   deadlineMs?: number;
   pollMs?: number;
-  gh?: GhRunner;
-  sleep?: (ms: number) => void;
+  github?: GitHubClient;
+  sleep?: (ms: number) => unknown;
   log?: (message: string) => void;
 }
 
@@ -29,21 +25,18 @@ function boundedMs(name: string, fallback: number): number {
 }
 
 /** allGreenFailure's own verdict poll is zeroed: THIS loop owns all waiting, on its own clock and injections. */
-export function waitForGreen(
+export async function waitForGreen(
   repository: string,
   sha: string,
   options: GreenWaitOptions = {},
-): string | null {
+): Promise<string | null> {
   const deadlineMs = options.deadlineMs ?? boundedMs("GREEN_WAIT_MS", 20 * 60 * 1000);
   const pollMs = options.pollMs ?? boundedMs("GREEN_POLL_MS", 30_000);
-  const sleep = options.sleep ?? Bun.sleepSync;
+  const sleep = options.sleep ?? Bun.sleep;
   const log = options.log ?? console.log;
   const started = Date.now();
   for (;;) {
-    const reason =
-      options.gh === undefined
-        ? allGreenFailure(repository, sha, undefined, { deadlineMs: 0 })
-        : allGreenFailure(repository, sha, options.gh, { deadlineMs: 0 });
+    const reason = await allGreenFailure(repository, sha, options.github, { deadlineMs: 0 });
     if (reason === null) return null;
     // A final verdict fails now; a pending one (verdictPending lives next
     // to the reason strings it matches) deserves this loop's deadline.
@@ -52,11 +45,11 @@ export function waitForGreen(
       return `${reason} (and the ${Math.round(deadlineMs / 60_000)}-minute wait for a verdict is over)`;
     }
     log(`waiting for a CI verdict at ${sha.slice(0, 12)}: ${reason}`);
-    sleep(pollMs);
+    await sleep(pollMs);
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const sha = requireEnv("GITHUB_SHA");
   if (!/^[0-9a-f]{40}$/.test(sha)) {
@@ -77,7 +70,9 @@ function main(): void {
   let refusal: string | null;
   try {
     refusal =
-      sourceSha === "" ? tipRefusal(repository, sha) : calledRefusal(repository, sha, sourceSha);
+      sourceSha === ""
+        ? await tipRefusal(repository, sha)
+        : await calledRefusal(repository, sha, sourceSha);
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
@@ -87,12 +82,12 @@ function main(): void {
 
 /** Every trigger halts alike on a red tip: the nightly heal never applies from an older green commit, so a red nightly is the signal
  *  that drift goes unhealed. */
-export function tipRefusal(
+export async function tipRefusal(
   repository: string,
   sha: string,
   options: GreenWaitOptions = {},
-): string | null {
-  const notGreen = waitForGreen(repository, sha, options);
+): Promise<string | null> {
+  const notGreen = await waitForGreen(repository, sha, options);
   if (notGreen === null) return null;
   return (
     `refusing the settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
@@ -104,12 +99,12 @@ export function tipRefusal(
 }
 
 /** The Checks API can trail the gate job, so the read goes through the mover's bounded poll. */
-export function calledRefusal(
+export async function calledRefusal(
   repository: string,
   sha: string,
   sourceSha: string,
-  options: { gh?: GhRunner; wait?: VerdictWait } = {},
-): string | null {
+  options: { github?: GitHubClient; wait?: VerdictWait } = {},
+): Promise<string | null> {
   if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
     return `SOURCE_SHA is not a full commit sha (got '${sourceSha}')`;
   }
@@ -120,7 +115,7 @@ export function calledRefusal(
       "that called it (post-green.yml), whose checkouts read that commit; nothing else is vouched for."
     );
   }
-  const notGreen = allGreenFailure(repository, sha, options.gh, options.wait);
+  const notGreen = await allGreenFailure(repository, sha, options.github, options.wait);
   if (notGreen === null) return null;
   return (
     `refusing the called settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
@@ -130,5 +125,5 @@ export function calledRefusal(
 }
 
 if (import.meta.main) {
-  main();
+  await main();
 }

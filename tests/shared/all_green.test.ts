@@ -1,64 +1,44 @@
 import { describe, expect, test } from "bun:test";
-import {
-  allGreenFailure,
-  type GhRunner,
-  verdictPending,
-} from "../../.github/scripts/shared/all_green.ts";
-import type { RunResult } from "../../.github/scripts/shared/proc.ts";
+import { allGreenFailure, verdictPending } from "../../.github/scripts/shared/all_green.ts";
+import { clientOver, type FakeReply } from "./fake_github";
 
 const SHA = "a".repeat(40);
 const NO_WAIT = { deadlineMs: 0 };
+const CHECK_RUNS = `repos/o/r/commits/${SHA}/check-runs`;
 
-function ghReturning(
+/** One check-runs reply, each check defaulting to the gate's own green verdict. */
+function listing(
   checks: {
     name?: string;
     status?: string;
     conclusion?: string | null;
     app?: string | null;
   }[],
-): (command: string[]) => RunResult {
-  return () => ({
-    exitCode: 0,
-    timedOut: false,
-    stdout: JSON.stringify({
+): FakeReply {
+  return {
+    status: 200,
+    body: {
       check_runs: checks.map((check) => ({
         name: check.name ?? "all-green",
         status: check.status ?? "completed",
         conclusion: check.conclusion === undefined ? "success" : check.conclusion,
         app: check.app === null ? null : { slug: check.app ?? "github-actions" },
       })),
-    }),
-    stderr: "",
-    pid: 0,
-  });
+    },
+  };
 }
 
-const ghFailing =
-  (exitCode: number, stderr: string): GhRunner =>
-  () => ({
-    exitCode,
-    stdout: "",
-    stderr,
-    timedOut: false,
-    pid: 0,
-  });
+/** The client and its request log over the replies the check-runs read gets, in order. */
+const answering = (...replies: FakeReply[]) => clientOver({ [CHECK_RUNS]: replies });
 
 describe("allGreenFailure", () => {
   // Pinned explicitly: GitHub's default is latest today, and `all` would list a re-run's stale check run beside the
   // fresh one.
-  test("queries the sha's all-green check runs by name with filter=latest", () => {
-    const calls: string[][] = [];
-    const gh = (command: string[]): RunResult => {
-      calls.push(command);
-      return ghReturning([{}])(command);
-    };
-    expect(allGreenFailure("Vivswan/repo-platform", SHA, gh, NO_WAIT)).toBeNull();
-    expect(calls).toEqual([
-      [
-        "gh",
-        "api",
-        `repos/Vivswan/repo-platform/commits/${SHA}/check-runs?check_name=all-green&filter=latest&per_page=100`,
-      ],
+  test("queries the sha's all-green check runs by name with filter=latest", async () => {
+    const { client, github } = answering(listing([{}]));
+    expect(await allGreenFailure("o/r", SHA, client, NO_WAIT)).toBeNull();
+    expect(github.calls().map((call) => call.path)).toEqual([
+      `${CHECK_RUNS}?check_name=all-green&filter=latest&per_page=100`,
     ]);
   });
 
@@ -70,108 +50,94 @@ describe("allGreenFailure", () => {
     "no all-green verdict check exists there (waited 0s) - CI has not vouched for the commit; re-run the sha's CI run (the all-green job posts the check) if one should exist";
   const API_FAILURE = (detail: string) =>
     `reading its all-green check runs failed (${detail}) - an API failure, not proof the commit is red, but the gate fails closed`;
-  const verdicts: [string, GhRunner, string | null][] = [
-    ["a completed successful verdict is green", ghReturning([{}]), null],
+  const verdicts: [string, FakeReply, string | null][] = [
+    ["a completed successful verdict is green", listing([{}]), null],
     [
       "any success among several verdicts is green (a re-judged sha ran the same tree)",
-      ghReturning([{ conclusion: "failure" }, {}]),
+      listing([{ conclusion: "failure" }, {}]),
       null,
     ],
     [
       "a failed verdict names its conclusion",
-      ghReturning([{ conclusion: "failure" }]),
+      listing([{ conclusion: "failure" }]),
       "its all-green verdict concluded 'failure'",
     ],
     [
       "at the deadline a stale failure with no success is the reported reason",
-      ghReturning([{ conclusion: "cancelled" }]),
+      listing([{ conclusion: "cancelled" }]),
       "its all-green verdict concluded 'cancelled'",
     ],
-    ["no check at all fails closed and names the re-run unwedge path", ghReturning([]), NO_CHECK],
+    ["no check at all fails closed and names the re-run unwedge path", listing([]), NO_CHECK],
     [
       "a look-alike check from another app never vouches",
-      ghReturning([{ app: "some-other-app" }]),
+      listing([{ app: "some-other-app" }]),
       NO_CHECK,
     ],
-    ["an app-less check never vouches", ghReturning([{ app: null }]), NO_CHECK],
+    ["an app-less check never vouches", listing([{ app: null }]), NO_CHECK],
     [
       "a differently named check never vouches even if the API returns it",
-      ghReturning([{ name: "all-green-ish" }]),
+      listing([{ name: "all-green-ish" }]),
       NO_CHECK,
     ],
     [
       "an incomplete verdict is not green yet",
-      ghReturning([{ status: "in_progress", conclusion: null }]),
+      listing([{ status: "in_progress", conclusion: null }]),
       "its all-green verdict is still 'in_progress' after 0s",
     ],
     [
-      "an API failure fails closed with the error's tail, not a pass",
-      ghFailing(1, "gh: HTTP 502\n"),
-      API_FAILURE("gh: HTTP 502"),
+      "an API failure fails closed with its status, not a pass",
+      { status: 502 },
+      API_FAILURE("HTTP 502"),
     ],
     [
-      "a multi-line gh failure reports its LAST line (gh's offline diagnostic puts the detail second)",
-      ghFailing(
-        1,
-        "error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n",
-      ),
-      API_FAILURE("check your internet connection or https://githubstatus.com"),
+      "a sha GitHub does not know fails closed like any failed read",
+      { status: 404 },
+      API_FAILURE("HTTP 404"),
     ],
-    ["a silent API failure still reports the exit code", ghFailing(4, ""), API_FAILURE("exit 4")],
   ];
-  test.each(verdicts)("%s", (_reason, gh, expected) => {
-    expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toBe(expected);
+  test.each(verdicts)("%s", async (_reason, reply, expected) => {
+    expect(await allGreenFailure("o/r", SHA, answering(reply).client, NO_WAIT)).toBe(expected);
   });
 
-  test("a missing check is polled for under the deadline - a fresh run's check races the caller", () => {
-    const responses = [ghReturning([]), ghReturning([]), ghReturning([{}])];
-    let probes = 0;
-    const gh = (command: string[]): RunResult => {
-      const response = responses[Math.min(probes, responses.length - 1)](command);
-      probes++;
-      return response;
-    };
+  test("a missing check is polled for under the deadline - a fresh run's check races the caller", async () => {
+    const { client, github } = answering(listing([]), listing([]), listing([{}]));
     const sleeps: number[] = [];
-    const reason = allGreenFailure("o/r", SHA, gh, {
+    const reason = await allGreenFailure("o/r", SHA, client, {
       deadlineMs: 60_000,
       sleepMs: 5,
       sleep: (ms) => sleeps.push(ms),
     });
     expect(reason).toBeNull();
-    expect(probes).toBe(3);
+    expect(github.calls().length).toBe(3);
     expect(sleeps).toEqual([5, 5]);
   });
 
-  test("a stale completed failure is polled through - a re-judged sha's fresh success can trail it", () => {
-    const responses = [
-      ghReturning([{ conclusion: "failure" }]),
-      ghReturning([{ conclusion: "failure" }, {}]),
-    ];
-    let probes = 0;
-    const gh = (command: string[]): RunResult => {
-      const response = responses[Math.min(probes, responses.length - 1)](command);
-      probes++;
-      return response;
-    };
-    const reason = allGreenFailure("o/r", SHA, gh, {
+  test("a stale completed failure is polled through - a re-judged sha's fresh success can trail it", async () => {
+    const { client, github } = answering(
+      listing([{ conclusion: "failure" }]),
+      listing([{ conclusion: "failure" }, {}]),
+    );
+    const reason = await allGreenFailure("o/r", SHA, client, {
       deadlineMs: 60_000,
       sleepMs: 5,
       sleep: () => {},
     });
     expect(reason).toBeNull();
-    expect(probes).toBe(2);
+    expect(github.calls().length).toBe(2);
   });
 
-  test("verdictPending tells REAL pending reasons from final ones through the same strings", () => {
+  test("verdictPending tells REAL pending reasons from final ones through the same strings", async () => {
     // Pinned through allGreenFailure's actual output, not copied prose: a
     // reworded reason that desyncs retryability fails here.
+    const reasonOf = (reply: FakeReply) =>
+      allGreenFailure("o/r", SHA, answering(reply).client, NO_WAIT);
     const pending = [
-      allGreenFailure("o/r", SHA, ghReturning([]), NO_WAIT),
-      allGreenFailure("o/r", SHA, ghReturning([{ status: "queued", conclusion: null }]), NO_WAIT),
-      allGreenFailure("o/r", SHA, ghFailing(1, "gh: HTTP 502\n"), NO_WAIT),
+      await reasonOf(listing([])),
+      await reasonOf(listing([{ status: "queued", conclusion: null }])),
+      await reasonOf({ status: 502 }),
     ];
     for (const reason of pending) expect(verdictPending(reason ?? "")).toBe(true);
-    const final = allGreenFailure("o/r", SHA, ghReturning([{ conclusion: "failure" }]), NO_WAIT);
+    const final = await reasonOf(listing([{ conclusion: "failure" }]));
     expect(verdictPending(final ?? "")).toBe(false);
   });
 });
