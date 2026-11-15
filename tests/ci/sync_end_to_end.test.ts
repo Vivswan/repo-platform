@@ -14,6 +14,7 @@ import { parse as parseYaml } from "yaml";
 import { sha256 } from "../../actions/shared/values.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
+import type { LoopbackServer } from "../shared/loopback_server";
 import { tempDirs } from "../shared/temp_dir";
 import { snapshotTree } from "../shared/tree_snapshot";
 import { spawnUpstream } from "../shared/upstream_server";
@@ -21,7 +22,10 @@ import { spawnUpstream } from "../shared/upstream_server";
 // The fixture's github/gitignore, served over loopback: the writer fetches its registered blocks from here, never the network.
 
 const temp = tempDirs();
-const upstream = await spawnUpstream(join(import.meta.dir, "sync_end_to_end/fixtures/upstream"));
+let upstream: LoopbackServer;
+beforeAll(async () => {
+  upstream = await spawnUpstream(join(import.meta.dir, "sync_end_to_end/fixtures/upstream"));
+});
 afterAll(() => upstream.stop());
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");

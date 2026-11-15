@@ -1,7 +1,7 @@
 // tempDirs probed through child bun processes. Every probe and every child's TMPDIR sits under one root this file
 // removes ITSELF: a stubbed-out helper removal leaks its fixture, and that leak must not reach the real temp directory.
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -17,17 +17,27 @@ import { tempDirs } from "./temp_dir";
 
 const helper = join(import.meta.dir, "temp_dir.ts");
 const temp = tempDirs();
-const root = temp.dir("temp-dir-test-");
+const PROBE_PREFIX = "temp-dir-probe-";
+/** JSON.stringify is no escaping for code, so the probe source splices no value: it reads its prefix from its environment. */
+const MAKE_FIXTURE = "temp.dir(process.env.PROBE_PREFIX as string)";
+let root: string;
+beforeAll(() => {
+  root = temp.dir("temp-dir-test-");
+});
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
+/** A probe file whose one fixture is made in beforeAll: the helper refuses one made while the file loads. */
 function probeSource(body: string): string {
   return [
     'import { beforeAll, describe, expect, test } from "bun:test";',
     'import { chmodSync, existsSync, mkdirSync } from "node:fs";',
     `import { tempDirs } from ${JSON.stringify(helper)};`,
     "const temp = tempDirs();",
-    'const fixture = temp.dir("temp-dir-probe-");',
-    'console.error("FIXTURE=" + fixture + " exists=" + existsSync(fixture));',
+    'let fixture = "";',
+    "beforeAll(() => {",
+    `  fixture = ${MAKE_FIXTURE};`,
+    '  console.error("FIXTURE=" + fixture + " exists=" + existsSync(fixture));',
+    "});",
     body,
     "",
   ].join("\n");
@@ -36,28 +46,41 @@ function probeSource(body: string): string {
 /** CI=false is set, not deleted: bun also reads runner markers such as
  * GITHUB_ACTIONS, and CI=false is the override that beats them. */
 let probes = 0;
+function runSource(
+  source: string,
+  flags: string[] = [],
+  env: Record<string, string | undefined> = {},
+) {
+  const probe = join(root, `probe-${probes++}.test.ts`);
+  writeFileSync(probe, source);
+  const r = boundedSpawnSync(["bun", "test", ...flags, probe], {
+    env: { ...process.env, CI: "false", TMPDIR: root, PROBE_PREFIX, ...env },
+    timeoutMs: 60_000,
+  });
+  return { exitCode: r.exitCode, stderr: r.stderr, output: `${r.stdout}${r.stderr}` };
+}
+
 function runProbe(
   body: string,
   flags: string[] = [],
   env: Record<string, string | undefined> = {},
 ) {
-  const probe = join(root, `probe-${probes++}.test.ts`);
-  writeFileSync(probe, probeSource(body));
-  const r = boundedSpawnSync(["bun", "test", ...flags, probe], {
-    env: { ...process.env, CI: "false", TMPDIR: root, ...env },
-    timeoutMs: 60_000,
-  });
+  const r = runSource(probeSource(body), flags, env);
   const seen = /^FIXTURE=(.+) exists=(true|false)$/m.exec(r.stderr);
-  expect(seen?.[2]).toBe("true");
+  expect(seen?.[2], r.output).toBe("true");
   const fixture = seen?.[1] as string;
   return {
     exitCode: r.exitCode,
     fixtureSurvives: existsSync(fixture),
     inner: /^INNER=(.+)$/m.exec(r.stderr)?.[1],
-    output: `${r.stdout}${r.stderr}`,
+    output: r.output,
     fixture,
   };
 }
+
+/** The probe fixtures still in the children's TMPDIR; every probe before this one removed its own. */
+const probeLeftovers = (): string[] =>
+  readdirSync(root).filter((name) => name.startsWith(PROBE_PREFIX));
 
 /** The child's output rides as the failure message, so a mismatch says why
  * instead of showing a two-field diff. */
@@ -114,6 +137,12 @@ describe("tempDirs", () => {
       env: { GITHUB_ACTIONS: "true" },
       exitCode: 0,
     },
+    {
+      shape: "name filter matching one of two tests",
+      body: 'test("skipped", () => { throw new Error("must not run"); }); test("chosen", () => {});',
+      flags: ["-t", "chosen"],
+      exitCode: 0,
+    },
     { shape: "file with no tests", body: "", exitCode: 0 },
   ])(
     "a $shape file's fixtures are gone once the child exits (exit $exitCode)",
@@ -146,10 +175,8 @@ describe("tempDirs", () => {
     }
   });
 
-  // Shapes where bun runs no hook at all, so the fixture SURVIVES; the
-  // launcher's per-run TMPDIR (scripts/run_tests.ts) is what removes it. If
-  // the name-filter row goes green-by-removal on a future bun, the launcher's
-  // filter carve-out can go with it.
+  // Shapes where bun runs no hook at all: a fixture made while the file loads would SURVIVE these, which is
+  // why the helper refuses one there. Made in beforeAll, it is never made.
   test.each<{
     shape: string;
     body: string;
@@ -177,17 +204,65 @@ describe("tempDirs", () => {
       notice: /\.only is disabled in CI environments/,
     })),
   ])(
-    "PINNED bun behaviour: $shape skips afterAll, so the fixture survives",
+    "PINNED bun behaviour: $shape runs no hook, so no fixture is made",
     ({ body, flags, env, notice }) => {
-      const r = runProbe(body, flags, env);
+      const r = runSource(probeSource(body), flags, env);
       try {
-        expectOutcome(r, { exitCode: 1, fixtureSurvives: true });
+        expect(
+          { exitCode: r.exitCode, made: /^FIXTURE=/m.test(r.stderr), left: probeLeftovers() },
+          r.output,
+        ).toEqual({
+          exitCode: 1,
+          made: false,
+          left: [],
+        });
         expect(r.output).toMatch(notice);
       } finally {
-        rmSync(r.fixture, { recursive: true, force: true });
+        for (const name of probeLeftovers())
+          rmSync(join(root, name), { recursive: true, force: true });
       }
     },
   );
+
+  // The incident: about two dozen test files made their fixtures at load, and `bun test -t <name>` left each one behind.
+  test.each<{ shape: string; source: string; flags?: string[] }>([
+    {
+      shape: "at the top level",
+      source: `const made = ${MAKE_FIXTURE};\n${PASSING}`,
+    },
+    {
+      shape: "in a describe body",
+      source: `describe("d", () => { const made = ${MAKE_FIXTURE}; ${PASSING} });`,
+    },
+    {
+      shape: "at the top level, under a name filter matching nothing",
+      source: `const made = ${MAKE_FIXTURE};\n${PASSING}`,
+      flags: ["-t", "matches-nothing"],
+    },
+  ])("temp.dir $shape is refused while the file loads, and makes nothing", ({ source, flags }) => {
+    const r = runSource(
+      [
+        'import { describe, expect, test } from "bun:test";',
+        `import { tempDirs } from ${JSON.stringify(helper)};`,
+        "const temp = tempDirs();",
+        source,
+        "",
+      ].join("\n"),
+      flags,
+    );
+    try {
+      expect({ exitCode: r.exitCode, left: probeLeftovers() }, r.output).toEqual({
+        exitCode: 1,
+        left: [],
+      });
+      expect(r.output).toContain(
+        `temp.dir("${PROBE_PREFIX}") ran while the test file loads; call it from beforeAll or from a test`,
+      );
+    } finally {
+      for (const name of probeLeftovers())
+        rmSync(join(root, name), { recursive: true, force: true });
+    }
+  });
 });
 
 describe("the biome ban on bare mkdtemp under tests/", () => {

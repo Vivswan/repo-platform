@@ -2,21 +2,27 @@
 // removes everything the file made. Call tempDirs() at the file's top
 // level: bun:test binds hooks to the registering file, so a module-level
 // hook would serve only its first importer.
+// dir() is refused while the file loads: bun runs no hook in a file whose
+// tests a name filter empties, so a fixture made at load would outlive the run.
 // biome.local.jsonc bans mkdtemp under tests/** and exempts this one path by name,
 // so a rename or move of this file must update that exemption with it.
 
-import { afterAll } from "bun:test";
+import { afterAll, beforeAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export interface TempDirs {
-  /** The prefix names the suite in the launcher's leftover listing, so keep it specific. */
+  /** A fresh directory, from a hook or a test only. The prefix names the suite in the launcher's leftover listing, so keep it specific. */
   dir(prefix: string): string;
 }
 
 export function tempDirs(): TempDirs {
   const made: string[] = [];
+  let fileLoaded = false;
+  beforeAll(() => {
+    fileLoaded = true;
+  });
   afterAll(() => {
     const failed: string[] = [];
     for (const dir of made.splice(0)) {
@@ -32,6 +38,12 @@ export function tempDirs(): TempDirs {
   });
   return {
     dir(prefix: string): string {
+      if (!fileLoaded) {
+        throw new Error(
+          `temp.dir("${prefix}") ran while the test file loads; call it from beforeAll or from a test`,
+        );
+      }
+
       const dir = mkdtempSync(join(tmpdir(), prefix));
       made.push(dir);
       return dir;
