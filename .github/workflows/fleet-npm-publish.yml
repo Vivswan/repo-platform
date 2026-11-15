@@ -33,7 +33,9 @@ permissions:
 jobs:
   npm-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Above the sum of the action's own bounds, with room for the setup and the build:
+    #   npm publish 10 min + its confirmation 10 min + npm dist-tag 1 min + its confirmation 10 min = 31 min
+    timeout-minutes: 45
     # npm validates the run's OIDC token against the package's trusted publisher: no token is stored anywhere.
     # The hook step runs under this grant too: a composite action declares no permissions of its own.
     permissions:

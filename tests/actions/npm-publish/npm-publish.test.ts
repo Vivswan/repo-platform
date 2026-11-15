@@ -361,8 +361,11 @@ interface Answers {
   /** What `npm config get <key>` prints, over npm's defaults. */
   config?: Record<string, string>;
 
-  /** The confirmation bound: generous unless the row waits it out, so load alone cannot end a wait that would succeed. */
-  boundMs?: number;
+  /** The wait for a write npm reported done: generous unless the row waits it out, so load alone cannot end a wait that would succeed. */
+  doneMs?: number;
+
+  /** The wait for a write npm reported failed, generous by the same rule. */
+  failedMs?: number;
 }
 
 /** An npm command as the rows spell it. Every one must carry --no-workspaces: without it npm inside a workspace reads
@@ -425,7 +428,11 @@ async function runWith(
       reads += 1;
       return Promise.resolve(held);
     },
-    confirm: { everyMs: 1, boundMs: answers.boundMs ?? 60_000 },
+    confirm: {
+      everyMs: 1,
+      doneMs: answers.doneMs ?? 60_000,
+      failedMs: answers.failedMs ?? 60_000,
+    },
     log: {
       info: (message) => lines.push(["info", message]),
       notice: (message) => lines.push(["notice", String(message)]),
@@ -497,6 +504,7 @@ const AFTER = record(["1.2.0", MINTED], { latest: "1.2.0", next: MINTED });
 const UNRELEASED = record(["1.1.0", EARLIER], { latest: "1.1.0", next: EARLIER });
 const RELEASED = record(["1.1.0", EARLIER, "1.2.0"], { latest: "1.2.0", next: EARLIER });
 const NEXT_MOVED = record(["1.1.0", EARLIER, "1.2.0"], { latest: "1.2.0", next: "1.2.0" });
+const STILL_PROCESSING = Array.from({ length: 61 }, () => BEFORE);
 const E403 = "npm notice package: @example/widget\nnpm error code E403\nnpm error 403 Forbidden";
 
 // The stamp's --ignore-scripts is npm's contract: without it `npm version` runs the package's version scripts, before
@@ -641,6 +649,9 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
 // each change what npm itself refuses, and a `next` publish without its tag would move `latest`.
 // The outcomes are the registry's: its answer to a failed write is prose, so the record alone says whether it landed,
 // and a run that ends before the record shows it hands the lane's next holder a stale read.
+// The registry shows a publish it accepted only after processing it, "a few minutes" by npm's own notice, so a write npm
+// reported done is waited for longer than one npm reported failed, where the wait only delays the error. The slow row
+// polls more often than fit the 20 ms it gives a failed write.
 test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   {
     reason: "next: publishes under the next tag and waits for the record",
@@ -649,6 +660,18 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
       outcome: { version: MINTED, published: true },
       commands: [...CONFIG, "npm publish --tag next"],
       reads: 4,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "next: the registry shows a publish npm reported only minutes later, past the wait a failed write gets",
+    run: () => publish("next", MINTED, [...STILL_PROCESSING, AFTER], { failedMs: 20 }),
+    expected: {
+      outcome: { version: MINTED, published: true },
+      commands: [...CONFIG, "npm publish --tag next"],
+      reads: STILL_PROCESSING.length + 1,
       waitedOut: false,
       lines: [],
     },
@@ -710,7 +733,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason: "latest: a tag write the record never shows fails, naming the publisher's switch",
-    run: () => publish("latest", "1.2.0", [RELEASED], { distTag: failed(E403), boundMs: 100 }),
+    run: () => publish("latest", "1.2.0", [RELEASED], { distTag: failed(E403), failedMs: 100 }),
     expected: {
       outcome: [
         "next was not moved to 1.2.0: npm error code E403",
@@ -745,7 +768,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason: "a failed publish the record never shows fails, after the whole wait",
-    run: () => publish("next", MINTED, [BEFORE], { publish: failed(E403), boundMs: 100 }),
+    run: () => publish("next", MINTED, [BEFORE], { publish: failed(E403), failedMs: 100 }),
     expected: {
       outcome: [
         `npm publish failed and @example/widget@${MINTED} is not on the registry: npm error code E403`,
@@ -762,9 +785,9 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason: "a publish npm reports and the record never shows fails: a dry run uploads nothing",
-    run: () => publish("next", MINTED, [BEFORE], { boundMs: 100 }),
+    run: () => publish("next", MINTED, [BEFORE], { doneMs: 100 }),
     expected: {
-      outcome: `npm reported @example/widget@${MINTED} published, but the registry did not show it within 0.1 s: re-run the job`,
+      outcome: `npm reported @example/widget@${MINTED} published, but the registry did not show it within 0.1 s: re-run the job, which passes once the registry shows it`,
       commands: [...CONFIG, "npm publish --tag next"],
       reads: 1,
       waitedOut: true,
