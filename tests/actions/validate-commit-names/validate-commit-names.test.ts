@@ -2,7 +2,7 @@
 // event's commit range, the pr-title workflow hands over the PR title (no checkout, no event payload). Every row here
 // runs the action as CI runs it and reads the whole verdict: the exit status and commitlint's problem list.
 
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
@@ -12,7 +12,10 @@ import { tempDirs } from "../../shared/temp_dir.ts";
 const temp = tempDirs();
 const root = join(import.meta.dir, "../../..");
 const ACTION = join(root, "actions/validate-commit-names/validate-commit-names.ts");
-const scratch = temp.dir("validate-commit-names-");
+let scratch: string;
+beforeAll(() => {
+  scratch = temp.dir("validate-commit-names-");
+});
 let serial = 0;
 
 // No user or system git config: a global commit.gpgsign or core.commentChar would change what the scratch repo stores.
@@ -130,18 +133,24 @@ function scratchRepo(): { repo: string; base: string; head: string; orphan: stri
 const RANGE_PROBLEMS = [SUBJECT_CASE, ONE_SCOPE];
 
 describe("the event's commit range", () => {
-  const { repo, base, head, orphan } = scratchRepo();
+  let repo: string;
+  let base: string;
+  let head: string;
+  let orphan: string;
+  beforeAll(() => {
+    ({ repo, base, head, orphan } = scratchRepo());
+  });
 
   // The `-z` log read, the merge exemption judged on the subject alone, and the 150-character body line (the
   // cap the fleet turns off) in one run; the payload's empty `commits` list is never consulted while both ends resolve.
   test.each([
     {
       event: "pull_request",
-      payload: { pull_request: { base: { sha: base }, head: { sha: head } } },
+      payload: () => ({ pull_request: { base: { sha: base }, head: { sha: head } } }),
     },
-    { event: "push", payload: { before: base, after: head, commits: [] } },
+    { event: "push", payload: () => ({ before: base, after: head, commits: [] }) },
   ])("$event: the event's range, merge subjects ignored", ({ event, payload }) => {
-    const eventPath = eventFile(payload);
+    const eventPath = eventFile(payload());
     const result = runAction({ GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: eventPath }, repo);
     expect(verdict(result)).toEqual({ exitCode: 1, stderr: "", problems: RANGE_PROBLEMS });
   });
@@ -149,15 +158,15 @@ describe("the event's commit range", () => {
   // A new branch's `before` is the zero sha and a force-push orphans it or re-roots the history: the payload's
   // messages are judged instead. A body line shaped like a merge subject exempts nothing; a merge subject ending in
   // CRLF (`--cleanup=verbatim` stores it) is still the merge subject.
-  const FALLBACKS: [name: string, before: string][] = [
-    ["zero before sha", "0".repeat(40)],
-    ["before sha no longer in the repository", "1".repeat(40)],
-    ["before sha from an unrelated history", orphan],
+  const FALLBACKS: [name: string, before: () => string][] = [
+    ["zero before sha", () => "0".repeat(40)],
+    ["before sha no longer in the repository", () => "1".repeat(40)],
+    ["before sha from an unrelated history", () => orphan],
   ];
   for (const [name, before] of FALLBACKS) {
     test(`push, ${name}: the payload's commit messages, one verdict each`, () => {
       const eventPath = eventFile({
-        before,
+        before: before(),
         after: head,
         commits: [
           "style(contract): x",

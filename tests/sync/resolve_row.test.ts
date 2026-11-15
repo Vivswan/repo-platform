@@ -89,13 +89,7 @@ const ENTRIES = [
 ];
 
 /** One stub PATH for every describe in this file. */
-const fixture = (() => {
-  const root = temp.dir("resolve-row-");
-  const bin = join(root, "bin");
-  mkdirSync(bin);
-  writeStubGit(bin);
-  return { root, bin };
-})();
+let fixture: { root: string; bin: string };
 
 /** One user/repos item, a private repository the user can push to unless overridden. */
 const entry = (full_name: string, overrides: Record<string, unknown> = {}) => ({
@@ -134,6 +128,12 @@ const apis: Partial<Record<keyof typeof LISTINGS, FakeGithubServer>> = {};
 let runs = 0;
 
 beforeAll(async () => {
+  const root = temp.dir("resolve-row-");
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  writeStubGit(bin);
+  fixture = { root, bin };
+
   for (const name of Object.keys(LISTINGS) as (keyof typeof LISTINGS)[]) {
     apis[name] = await spawnFakeGithub(
       { "user/repos": LISTINGS[name] },
@@ -338,8 +338,11 @@ describe.each(ENTRIES)("$script", ({ script, label, handOn, newestWins }) => {
 describe("resolve_row.ts with a dispatched branch", () => {
   const { script, handOn } = ENTRIES[0];
   const BRANCH = "feat/add-site";
-  const eventFile = join(temp.dir("resolve-row-branch-"), "event.json");
-  writeFileSync(eventFile, JSON.stringify({ inputs: { branch: BRANCH } }));
+  let eventFile: string;
+  beforeAll(() => {
+    eventFile = join(temp.dir("resolve-row-branch-"), "event.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: { branch: BRANCH } }));
+  });
   const probe = (row: Row) =>
     `git ls-remote --exit-code --symref https://x-access-token:${PAT}@github.com/${row.repo}.git HEAD refs/heads/${BRANCH}`;
   const dispatched = (env: Record<string, string>) =>

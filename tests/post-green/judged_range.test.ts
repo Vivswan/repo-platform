@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -16,33 +16,43 @@ const ZEROS = "0".repeat(40);
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 describe("resolveBase", () => {
-  const root = temp.dir("judged-range-");
-
   function git(cwd: string, args: string[]): string {
     return fixtureGit(cwd, ["-c", "user.name=t", "-c", "user.email=t@x.test", ...args]);
   }
 
-  const source = join(root, "source");
-  mkdirSync(source);
-  git(source, ["init", "-q", "-b", "main"]);
-  function commit(message: string): string {
-    git(source, ["commit", "-q", "--allow-empty", "-m", message]);
-    return git(source, ["rev-parse", "HEAD"]);
-  }
-  const c0 = commit("root");
-  const c1 = commit("the tag's previous commit");
-  const c2 = commit("superseded push");
-  const c3 = commit("judged");
-  const c4 = commit("tip");
-  git(source, ["checkout", "-q", "-b", "side", c0]);
-  const side = commit("side");
-  git(source, ["checkout", "-q", "main"]);
+  let root: string;
+  let c0: string;
+  let c1: string;
+  let c2: string;
+  let c3: string;
+  let c4: string;
+  let side: string;
+  let clone: string;
+  let shallow: string;
+  beforeAll(() => {
+    root = temp.dir("judged-range-");
+    const source = join(root, "source");
+    mkdirSync(source);
+    git(source, ["init", "-q", "-b", "main"]);
+    function commit(message: string): string {
+      git(source, ["commit", "-q", "--allow-empty", "-m", message]);
+      return git(source, ["rev-parse", "HEAD"]);
+    }
+    c0 = commit("root");
+    c1 = commit("the tag's previous commit");
+    c2 = commit("superseded push");
+    c3 = commit("judged");
+    c4 = commit("tip");
+    git(source, ["checkout", "-q", "-b", "side", c0]);
+    side = commit("side");
+    git(source, ["checkout", "-q", "main"]);
 
-  // The leg runs in a clone of the pushed repository, as actions/checkout leaves it.
-  const clone = join(root, "clone");
-  git(root, ["clone", "-q", source, clone]);
-  const shallow = join(root, "shallow");
-  git(root, ["clone", "-q", "--depth", "1", `file://${source}`, shallow]);
+    // The leg runs in a clone of the pushed repository, as actions/checkout leaves it.
+    clone = join(root, "clone");
+    git(root, ["clone", "-q", source, clone]);
+    shallow = join(root, "shallow");
+    git(root, ["clone", "-q", "--depth", "1", `file://${source}`, shallow]);
+  });
 
   const short = (sha: string) => sha.slice(0, 12);
 
@@ -51,34 +61,28 @@ describe("resolveBase", () => {
     return { base, commits: rangeCommits(cwd, sha, base), label: rangeLabel(sha, base) };
   }
 
-  type Row = { reason: string; sha: string; before: string } & Pick<
-    ReturnType<typeof read>,
-    "base" | "commits"
-  >;
-  test.each<Row>([
+  type Row = { sha: string; before: string } & Pick<ReturnType<typeof read>, "base" | "commits">;
+  test.each<{ reason: string; row: () => Row }>([
     {
       reason:
         "the coalescing case: the tag's previous commit covers a superseded push, not the push's own before",
-      sha: c3,
-      before: c1,
-      base: { kind: "commit", base: c1 },
-      commits: [c2, c3],
+      row: () => ({ sha: c3, before: c1, base: { kind: "commit", base: c1 }, commits: [c2, c3] }),
     },
     {
       reason: "the push's own before (the tag did not move): the judged commit alone",
-      sha: c3,
-      before: c2,
-      base: { kind: "commit", base: c2 },
-      commits: [c3],
+      row: () => ({ sha: c3, before: c2, base: { kind: "commit", base: c2 }, commits: [c3] }),
     },
     {
       reason: "a branch-creating push: the empty tree, so the whole history",
-      sha: c1,
-      before: ZEROS,
-      base: { kind: "empty-tree", base: EMPTY_TREE },
-      commits: [c0, c1],
+      row: () => ({
+        sha: c1,
+        before: ZEROS,
+        base: { kind: "empty-tree", base: EMPTY_TREE },
+        commits: [c0, c1],
+      }),
     },
-  ])("$reason", ({ sha, before, base, commits }) => {
+  ])("$reason", ({ row }) => {
+    const { sha, before, base, commits } = row();
     expect(read(clone, sha, before)).toEqual({
       base,
       commits,
@@ -91,29 +95,36 @@ describe("resolveBase", () => {
     {
       reason:
         "a base that is no ancestor of the judged commit (a force-push or an out-of-band tag move)",
-      cwd: clone,
-      sha: c3,
-      before: side,
-      error:
-        `the base ${short(side)} is not an ancestor of ${short(c3)}: the range means nothing ` +
-        "(a force-push, a foreign payload, or a tag moved out of band) - the next push to main reads " +
-        "from this run's move; dispatch sync-repos.yml by hand for this commit's opt-in",
+      row: () => ({
+        cwd: clone,
+        sha: c3,
+        before: side,
+        error:
+          `the base ${short(side)} is not an ancestor of ${short(c3)}: the range means nothing ` +
+          "(a force-push, a foreign payload, or a tag moved out of band) - the next push to main reads " +
+          "from this run's move; dispatch sync-repos.yml by hand for this commit's opt-in",
+      }),
     },
     {
       reason: "a base equal to the judged commit (an empty range)",
-      cwd: clone,
-      sha: c3,
-      before: c3,
-      error: `the base ${short(c3)} is the judged commit itself: an empty range reads nothing`,
+      row: () => ({
+        cwd: clone,
+        sha: c3,
+        before: c3,
+        error: `the base ${short(c3)} is the judged commit itself: an empty range reads nothing`,
+      }),
     },
     {
       reason: "a base a depth-1 checkout cannot see",
-      cwd: shallow,
-      sha: c4,
-      before: c2,
-      error: `the base ${short(c2)} is not in this checkout: fetch the full history (actions/checkout fetch-depth: 0)`,
+      row: () => ({
+        cwd: shallow,
+        sha: c4,
+        before: c2,
+        error: `the base ${short(c2)} is not in this checkout: fetch the full history (actions/checkout fetch-depth: 0)`,
+      }),
     },
-  ])("$reason is refused", ({ cwd, sha, before, error }) => {
+  ])("$reason is refused", ({ row }) => {
+    const { cwd, sha, before, error } = row();
     expect(() => resolveBase(cwd, sha, before)).toThrow(error);
   });
 

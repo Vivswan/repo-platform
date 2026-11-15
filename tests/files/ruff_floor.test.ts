@@ -1,11 +1,12 @@
 // Two facts that would drift silently: the uv module's wiring lands ruff.toml, and every `uvx ruff` site spells one
 // pinned version. The test reads ruff.toml alone, so every upstream file is a stub and never the network.
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseFilesConfig } from "../../actions/plan/files_config";
 import { isManaged } from "../../actions/shared/managed_header";
+import type { LoopbackServer } from "../shared/loopback_server";
 import { syncedCheckout } from "../shared/synced_checkout";
 import { tempDirs } from "../shared/temp_dir";
 import { spawnStubUpstream } from "../shared/upstream_server";
@@ -21,7 +22,10 @@ const RUFF_SITES = [
 ];
 
 const config = parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8"));
-const upstream = await spawnStubUpstream(config, temp.dir("ruff-floor-upstream-"));
+let upstream: LoopbackServer;
+beforeAll(async () => {
+  upstream = await spawnStubUpstream(config, temp.dir("ruff-floor-upstream-"));
+});
 afterAll(() => upstream.stop());
 
 const synced = (label: string, modules: string[]) =>

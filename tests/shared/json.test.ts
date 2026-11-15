@@ -5,7 +5,7 @@
 // The entry lives under the OS temp dir, outside the repo tree, and imports zod by its resolved path: a bare "zod"
 // there would auto-install from the global cache and the network.
 
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,19 +19,21 @@ const temp = tempDirs();
 const jsonPath = join(import.meta.dir, "../../.github/scripts/shared/json.ts");
 const zodPath = fileURLToPath(import.meta.resolve("zod"));
 
-const root = temp.dir("json-proc-");
-const entry = join(root, "entry.ts");
-writeFileSync(
-  entry,
-  [
-    `import { z } from ${JSON.stringify(zodPath)};`,
-    `import { parseJsonWith } from ${JSON.stringify(jsonPath)};`,
-    "const schema = z.object({ repo: z.string() });",
-    'const parsed = parseJsonWith(schema, process.env.PAYLOAD ?? "", "json.test: payload");',
-    `console.log(\`repo-name-length=\${parsed.repo.length}\`);`,
-    "",
-  ].join("\n"),
-);
+let entry: string;
+beforeAll(() => {
+  entry = join(temp.dir("json-proc-"), "entry.ts");
+  writeFileSync(
+    entry,
+    [
+      `import { z } from ${JSON.stringify(zodPath)};`,
+      `import { parseJsonWith } from ${JSON.stringify(jsonPath)};`,
+      "const schema = z.object({ repo: z.string() });",
+      'const parsed = parseJsonWith(schema, process.env.PAYLOAD ?? "", "json.test: payload");',
+      `console.log(\`repo-name-length=\${parsed.repo.length}\`);`,
+      "",
+    ].join("\n"),
+  );
+});
 
 // The bare identifier is the leaking form Bun's raw error would quote.
 const LEAK = "hiddenserver";

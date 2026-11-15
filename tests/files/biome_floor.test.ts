@@ -5,12 +5,13 @@
 // The root copy is not pinned here: this repository syncs itself after a merge, so a PR that changes the shipped file
 // stays green until that sync writes the root. The writer runs over the real files.yml with every upstream file a stub.
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SyncReport } from "../../.github/scripts/sync/writer/report.ts";
 import { parseFilesConfig } from "../../actions/plan/files_config";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import type { LoopbackServer } from "../shared/loopback_server";
 import { tempDirs } from "../shared/temp_dir";
 import { spawnStubUpstream } from "../shared/upstream_server";
 
@@ -22,10 +23,13 @@ const SHIPPED_FLOOR = readFileSync(join(FILES_TREE, "bun/biome.json"), "utf-8");
 const SHIPPED_LOCAL = readFileSync(join(FILES_TREE, "bun/biome.local.jsonc"), "utf-8");
 const LOCAL_EDIT = '// edited by the repository\n{ "formatter": { "lineWidth": 100 } }\n';
 
-const upstream = await spawnStubUpstream(
-  parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
-  temp.dir("biome-floor-upstream-"),
-);
+let upstream: LoopbackServer;
+beforeAll(async () => {
+  upstream = await spawnStubUpstream(
+    parseFilesConfig(readFileSync(join(REPO_ROOT, "files.yml"), "utf-8")),
+    temp.dir("biome-floor-upstream-"),
+  );
+});
 afterAll(() => upstream.stop());
 
 function registered(label: string, modules: string[]): string {
