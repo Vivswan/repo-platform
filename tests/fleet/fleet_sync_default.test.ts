@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  BOT_LOGIN,
   DELIVERED_SURFACE,
   deliveredBySync,
   type LabelEvent,
@@ -19,6 +18,7 @@ import {
   FLEET_SYNC_OVERLAY,
   fleetSyncLabels,
 } from "../../.github/scripts/post-green/fleet_sync_marker.ts";
+import { BOT_LOGIN } from "../../.github/scripts/shared/sticky_comment.ts";
 import { loadLayer } from "../../.github/scripts/sync/writer/settings_layers.ts";
 import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -258,7 +258,8 @@ describe("main", () => {
   ]);
 
   type File = { filename: string; previous_filename?: string };
-  type Comment = { id: number; body: string };
+  type Comment = { id: number; body: string; user: { login: string } | null };
+  const own = (id: number, body: string): Comment => ({ id, body, user: { login: BOT_LOGIN } });
   /** What the gh stub answers about the pull request; changedFiles is its own count, the listing's length unless a
    *  scenario says otherwise. */
   interface Scenario {
@@ -344,12 +345,12 @@ describe("main", () => {
       calls: [...READS, labelAdded, COMMENTS_READ, posted(body)],
     });
     // A reply quoting the note carries the marker mid-text and is not the sticky comment.
-    const quoting = { id: 3, body: `> ${MARKER}\n> Added...\n\nWhy?` };
+    const quoting = own(3, `> ${MARKER}\n> Added...\n\nWhy?`);
     const steady = {
       files: trigger,
       labels: [PUBLIC],
       events: botAdded,
-      comments: [quoting, { id: 5, body }],
+      comments: [quoting, own(5, body)],
     };
     expect(run("steady", steady)).toEqual({
       exitCode: 0,
@@ -359,9 +360,24 @@ describe("main", () => {
     });
   });
 
+  test("a comment that opens with the marker under another login is not the bot's: it is neither rewritten nor deleted", () => {
+    const theirs = { id: 4, body: `${MARKER}\nmine`, user: { login: HUMAN } };
+    const orphaned = { id: 6, body: `${MARKER}\nwhose`, user: null };
+    const comments = [theirs, orphaned];
+    expect(run("theirs", { files: trigger, labels: [], events: [], comments }).calls).toEqual([
+      ...READS,
+      labelAdded,
+      COMMENTS_READ,
+      posted(note(...TWO)),
+    ]);
+    expect(
+      run("theirs-clear", { files: workflow, labels: [], events: [], comments }).calls,
+    ).toEqual([...READS, COMMENTS_READ]);
+  });
+
   test("a changed path list rewrites the note in place, the listing read across pages", () => {
     const pages = [[file("docs/sync.md"), file("files.yml")], [file("files/base/AGENTS.md")]];
-    const stale = { id: 5, body: note("files.yml") };
+    const stale = own(5, note("files.yml"));
     expect(
       run("patch", { files: pages, labels: [PUBLIC], events: botAdded, comments: [stale] }),
     ).toEqual({
@@ -384,7 +400,7 @@ describe("main", () => {
 
   test("a human's removal is final: the note changes, the label is not re-added", () => {
     const events = [...botAdded, ev("unlabeled", HUMAN, PUBLIC)];
-    const existing = [{ id: 5, body: note(...TWO) }];
+    const existing = [own(5, note(...TWO))];
     expect(run("kept-off", { files: trigger, labels: [], events, comments: existing })).toEqual({
       exitCode: 0,
       stdout: notice("label kept", "updated the comment"),
@@ -398,7 +414,7 @@ describe("main", () => {
   });
 
   test("the bot's label is withdrawn when a human picks all or the paths leave the diff; a closed pull request is left alone", () => {
-    const existing = [{ id: 5, body: note(...TWO) }];
+    const existing = [own(5, note(...TWO))];
     const withdrawn = (reason: string) => ({
       exitCode: 0,
       stdout: notice("removed fleet-sync:public", `removed the comment: ${reason}`),
@@ -438,7 +454,7 @@ describe("main", () => {
   });
 
   test("a failed read, a refused write, or a capped listing is a warning and exit 0, and nothing is deleted", () => {
-    const existing = [{ id: 5, body: note("files.yml") }];
+    const existing = [own(5, note("files.yml"))];
     const fresh = { files: trigger, labels: [], events: [], comments: [] };
     expect(run("down", { ...fresh, stubEnv: { STUB_EXIT: "1" } })).toEqual({
       exitCode: 0,

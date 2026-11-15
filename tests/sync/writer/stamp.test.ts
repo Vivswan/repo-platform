@@ -286,4 +286,43 @@ describe("the checker surface", () => {
     appendFileSync(join(copy, CHECK_ENTRY), 'import "./added.ts";\n');
     expect(checkerSurface(copy)).toEqual([...surface, added].sort());
   });
+
+  // What would drift silently: a checker file reached only by a spelling the reader misses never restamps the fleet,
+  // and text that only looks like an import sends the writer to read a file that is not there.
+  test.each([
+    {
+      spelling: "a dynamic import",
+      source: 'export const late = await import("./late.ts");\n',
+      reached: ["late.ts"],
+    },
+    {
+      spelling: "a single-quoted import",
+      source: "import './quoted.ts';\n",
+      reached: ["quoted.ts"],
+    },
+    {
+      spelling: "a re-export",
+      source: 'export { late } from "./late.ts";\n',
+      reached: ["late.ts"],
+    },
+    {
+      spelling: "import text in a comment and in a template literal",
+      source: '// import "./absent.ts"\nexport const text = `import "./missing.ts"`;\n',
+      reached: [],
+    },
+    {
+      spelling: "a type-only import, which runs nothing",
+      source: 'import type { Late } from "./late.ts";\nexport const late: Late | null = null;\n',
+      reached: [],
+    },
+  ])("reads $spelling as the runtime does", ({ source, reached }) => {
+    const root = temp.dir("stamp-spelling-");
+    const dir = dirname(CHECK_ENTRY);
+    mkdirSync(join(root, dir), { recursive: true });
+    writeFileSync(join(root, CHECK_ENTRY), `#!/usr/bin/env bun\n${source}`);
+    for (const name of ["late.ts", "quoted.ts"]) {
+      writeFileSync(join(root, dir, name), "export type Late = 1;\nexport const late = 1;\n");
+    }
+    expect(checkerSurface(root)).toEqual([CHECK_ENTRY, ...reached.map((name) => `${dir}/${name}`)]);
+  });
 });

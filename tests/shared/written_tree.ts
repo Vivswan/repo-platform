@@ -105,6 +105,21 @@ export function writtenTree(root: string, build: string): SyncReport {
   });
 }
 
+/** The summary of a sync that wrote nothing, built as the writer builds it; a hold is one replaced edit. */
+export function quietReport(build: string, hold: boolean): SyncReport {
+  return buildReport({
+    build,
+    modules: [],
+    private: false,
+    written: [],
+    templates: {},
+    replaced: hold ? [{ path: ".editorconfig", diff: "" }] : [],
+    retired: [],
+    notes: [],
+    mirrors: [],
+  });
+}
+
 /** The paths one commit changed against its parent, sorted. */
 export function committedDiff(target: string): string[] {
   return fixtureGit(target, ["diff", "--name-only", "HEAD~1", "HEAD"]).split("\n").sort();
