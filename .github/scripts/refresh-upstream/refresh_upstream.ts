@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { setOutput } from "@actions/core";
 import { isScalar, parseDocument, visit } from "yaml";
+import { z } from "zod";
 import {
   type FilesConfig,
   type ModulePin,
@@ -17,38 +18,30 @@ import {
   upstreamRefs,
 } from "../../../actions/plan/files_config.ts";
 import { BUN_PIN_FILE, bunLockDirs } from "../../../scripts/bootstrap.ts";
+import { GitHubClient, unansweredReason } from "../shared/github.ts";
 import { must } from "../shared/proc.ts";
 import { unifiedDiff } from "../sync/writer/report.ts";
 import { type Fetch, fetchText, fetchUpstream, RAW_HOST } from "../sync/writer/upstream.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
-const API_HOST = "https://api.github.com";
 
 export const PIN_KINDS = ["commit", "release"] as const;
 export type PinKind = (typeof PIN_KINDS)[number];
 
-/** One api.github.com reply under the repository, read with the run token; the failure line is fixed text, never the body. */
-async function api(repository: string, path: string, fetch: Fetch): Promise<unknown> {
-  const headers: Record<string, string> = { accept: "application/vnd.github+json" };
-  const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (token) headers.authorization = `Bearer ${token}`;
-  const url = `${API_HOST}/repos/${repository}/${path}`;
-  const body = await fetch(url, headers);
-  try {
-    return JSON.parse(body);
-  } catch {
-    throw new Error(`GET ${url} returned a body that is not valid JSON`);
-  }
-}
+const headCommit = z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/) });
 
-/** HEAD of the default branch. */
-export async function headSha(repository: string, fetch: Fetch): Promise<string> {
-  const reply = (await api(repository, "commits/HEAD", fetch)) as { sha?: unknown } | null;
-  const sha = reply?.sha;
-  if (typeof sha !== "string" || !/^[0-9a-f]{40}$/.test(sha)) {
-    throw new Error(`${repository}: the commits/HEAD reply carries no full sha`);
+const latestReleaseReply = z.object({ tag_name: z.string() });
+
+/** HEAD of the default branch.
+ *
+ * @throws {Error} the read failed or carried no full sha; the message is fixed text, never the reply
+ */
+export async function headSha(repository: string, github: GitHubClient): Promise<string> {
+  const head = await github.get(`repos/${repository}/commits/HEAD`, headCommit);
+  if (head.kind !== "ok") {
+    throw new Error(`${repository}: commits/HEAD could not be read (${unansweredReason(head)})`);
   }
-  return sha;
+  return head.value.sha;
 }
 
 /** An upstream ref's pin and every file files.yml fetches at it, sorted. */
@@ -216,11 +209,14 @@ function releasePins(config: FilesConfig, root: string): ReleasePin[] {
 }
 
 /** releases/latest never returns a prerelease, so this is the latest stable. */
-async function latestRelease(pin: ModulePin, fetch: Fetch): Promise<string> {
-  const reply = (await api(pin.repository, "releases/latest", fetch)) as {
-    tag_name?: unknown;
-  } | null;
-  return tagVersion(reply?.tag_name, pin.tag, `${pin.repository} latest release tag`);
+async function latestRelease(pin: ModulePin, github: GitHubClient): Promise<string> {
+  const latest = await github.get(`repos/${pin.repository}/releases/latest`, latestReleaseReply);
+  if (latest.kind !== "ok") {
+    throw new Error(
+      `${pin.repository}: releases/latest could not be read (${unansweredReason(latest)})`,
+    );
+  }
+  return tagVersion(latest.value.tag_name, pin.tag, `${pin.repository} latest release tag`);
 }
 
 const shown = (bump: Bump, sha: string) => (bump.kind === "commit" ? sha.slice(0, 7) : sha);
@@ -266,6 +262,7 @@ export interface Refresh {
   root: string;
   host: string;
   fetch: Fetch;
+  github: GitHubClient;
 }
 
 /** files.yml as read: the parsed config beside the text the commit pins are rewritten in. */
@@ -276,11 +273,14 @@ interface FilesSource {
 }
 
 /** A commit pin moves only when a fetched file's normalized body moved with it: a HEAD that changes other paths alone leaves the pin. */
-async function refreshCommitPins(files: FilesSource, host: string, fetch: Fetch): Promise<Bump[]> {
+async function refreshCommitPins(
+  files: FilesSource,
+  { host, fetch, github }: Pick<Refresh, "host" | "fetch" | "github">,
+): Promise<Bump[]> {
   const bumps: Bump[] = [];
   let rewritten = files.text;
   for (const pin of pins(upstreamRefs(files.config.files))) {
-    const head = await headSha(pin.repository, fetch);
+    const head = await headSha(pin.repository, github);
     if (head === pin.sha) {
       console.log(`${pin.repository}: ${pin.sha} is HEAD`);
       continue;
@@ -304,11 +304,11 @@ async function refreshCommitPins(files: FilesSource, host: string, fetch: Fetch)
 async function refreshReleasePins(
   config: FilesConfig,
   root: string,
-  fetch: Fetch,
+  github: GitHubClient,
 ): Promise<Bump[]> {
   const moved: (ReleasePin & { latest: string })[] = [];
   for (const pin of releasePins(config, root)) {
-    const latest = await latestRelease(pin, fetch);
+    const latest = await latestRelease(pin, github);
     if (decideBump(pin.version, latest, pin.module) === "current") {
       console.log(`${pin.module}: ${pin.version} is current`);
       continue;
@@ -336,12 +336,12 @@ async function refreshReleasePins(
 /** Moves every pin of the kind that upstream moved and returns the bumps. Every fetch and every verdict come before any
  *  write: an unreachable upstream or a downgrade aborts before a pin moves, so "nothing moved" (which lets the workflow
  *  close a stale refresh PR) is never a view that could not look. */
-export async function refresh({ kind, root, host, fetch }: Refresh): Promise<Bump[]> {
+export async function refresh({ kind, root, host, fetch, github }: Refresh): Promise<Bump[]> {
   const path = join(root, "files.yml");
   const text = readFileSync(path, "utf-8");
   const config = parseFilesConfig(text);
-  if (kind === "commit") return refreshCommitPins({ path, text, config }, host, fetch);
-  return refreshReleasePins(config, root, fetch);
+  if (kind === "commit") return refreshCommitPins({ path, text, config }, { host, fetch, github });
+  return refreshReleasePins(config, root, github);
 }
 
 function isPinKind(value: string | undefined): value is PinKind {
@@ -354,7 +354,13 @@ async function main(argv: string[]): Promise<number> {
     console.error(`usage: refresh_upstream.ts <${PIN_KINDS.join("|")}>`);
     return 2;
   }
-  const bumps = await refresh({ kind, root: REPO_ROOT, host: RAW_HOST, fetch: fetchText });
+  const bumps = await refresh({
+    kind,
+    root: REPO_ROOT,
+    host: RAW_HOST,
+    fetch: fetchText,
+    github: new GitHubClient(),
+  });
   if (bumps.length === 0) console.log(`every ${kind} pin is current`);
   if (process.env.GITHUB_OUTPUT) {
     setOutput("bumps", proseBumps(bumps));

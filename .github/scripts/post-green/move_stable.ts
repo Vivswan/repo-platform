@@ -38,7 +38,7 @@ if (
 }
 
 // The green gate at the commit being named: the caller's needs edge already gated the call, and this read is the sole gate on a dispatch.
-const notGreen = allGreenFailure(repository, sourceSha);
+const notGreen = await allGreenFailure(repository, sourceSha);
 
 if (notGreen !== null) {
   fail(

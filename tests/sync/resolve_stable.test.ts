@@ -1,30 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { parseGithubOutput } from "../shared/github_output";
 import { tempDirs } from "../shared/temp_dir";
+import { verdictApis } from "../shared/verdict_api";
 
 const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/resolve_build.ts");
 const TAG = "refs/tags/stable";
 
-function verdict(conclusion: string): string {
-  return JSON.stringify({
-    check_runs: [
-      {
-        name: "all-green",
-        status: "completed",
-        conclusion,
-        external_id: "workflow_run",
-        app: { slug: "github-actions" },
-      },
-    ],
-  });
-}
+const verdicts = verdictApis(temp, "resolve-build-api-");
 
 interface Scenario {
   /** m0 predates files.yml; m1..m3 carry it; side is off main. */
@@ -36,7 +24,7 @@ interface Scenario {
   /** The operator's checkout already holds a local `stable` tag at this commit from an earlier fetch. */
   staleLocalTag?: "m0" | "m1" | "m2" | "m3" | "side";
 
-  /** The conclusion the stub gh answers; success unless a scenario says otherwise. */
+  /** The conclusion the fixture API answers; success unless a scenario says otherwise. */
   conclusion?: string;
 
   /** The git question a stubbed git answers with exit 128 (every other call reaches the real git). */
@@ -58,14 +46,16 @@ interface Outcome {
   exitCode: number;
   output: string;
   outputs: Record<string, string>;
-  ghCalls: string[];
+  reads: string[];
   shas: Record<"m0" | "m1" | "m2" | "m3" | "side", string>;
 }
 
 function run(scenario: Scenario): Outcome {
   const root = temp.dir("resolve-build-");
-  const gh = argvStub(root, "gh", [`printf '%s' '${verdict(scenario.conclusion ?? "success")}'`]);
-  const bin = gh.bin;
+  const api = verdicts.answering(scenario.conclusion ?? "success");
+  const name = verdicts.nextRun();
+  const bin = join(root, "bin");
+  mkdirSync(bin);
   const origin = join(root, "origin.git");
   fixtureGit(root, ["init", "--quiet", "--bare", "-b", "main", "origin.git"]);
   const work = join(root, "work");
@@ -133,6 +123,9 @@ function run(scenario: Scenario): Outcome {
       GITHUB_REPOSITORY: "o/r",
       GITHUB_OUTPUT: outputFile,
       ALL_GREEN_WAIT_MS: "0",
+      GH_TOKEN: "stub-token",
+      GITHUB_API_URL: `${api.host}/${name}`,
+      GITHUB_RETRY_BASE_MS: "0",
     },
   });
   const outputs = parseGithubOutput(readFileSync(outputFile, "utf-8"));
@@ -140,7 +133,7 @@ function run(scenario: Scenario): Outcome {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
     outputs,
-    ghCalls: gh.calls().map((call) => call.slice(1).join(" ")),
+    reads: api.calls(name),
     shas,
   };
 }
@@ -151,8 +144,8 @@ describe("resolve_build.ts behavior (real git)", () => {
     const r = run({ tag: "m3" });
     expect(r.exitCode).toBe(0);
     expect(r.outputs).toEqual({ build: r.shas.m3 });
-    expect(r.ghCalls).toEqual([
-      `api repos/o/r/commits/${r.shas.m3}/check-runs?check_name=all-green&filter=latest&per_page=100`,
+    expect(r.reads).toEqual([
+      `repos/o/r/commits/${r.shas.m3}/check-runs?check_name=all-green&filter=latest&per_page=100`,
     ]);
     expect(r.output).toContain(`build ${r.shas.m3.slice(0, 12)} verified`);
   });
@@ -181,41 +174,41 @@ describe("resolve_build.ts behavior (real git)", () => {
   });
 
   // Every gate refuses closed with its own words and ships no output; the tag fetch and the ancestry gate run
-  // before the green gate is read, so those refusals make no gh call. The two real "no" rows are the controls for
+  // before the green gate is read, so those refusals make no API read. The two real "no" rows are the controls for
   // the git-error list below: a genuine no never carries the refusing-to-guess diagnostic.
-  test.each<{ reason: string; scenario: Scenario; says: string[]; ghCalls: number }>([
+  test.each<{ reason: string; scenario: Scenario; says: string[]; reads: number }>([
     {
       reason: "a tag off main's history",
       scenario: { tag: "side" },
       says: ["is not on main's history"],
-      ghCalls: 0,
+      reads: 0,
     },
     {
       reason: "a red commit under the tag",
       scenario: { tag: "m3", conclusion: "failure" },
       says: ["is not green: its all-green verdict concluded 'failure'"],
-      ghCalls: 1,
+      reads: 1,
     },
     {
       reason: "no stable tag on origin",
       scenario: {},
       says: ["fetching the stable tag failed", "Dispatch post-green.yml"],
-      ghCalls: 0,
+      reads: 0,
     },
     {
       reason: "a tagged commit without the writer's data file",
       scenario: { tag: "m0" },
       says: ["carries no files.yml"],
-      ghCalls: 1,
+      reads: 1,
     },
   ])(
     "$reason is refused with the gate's reason, and nothing is shipped",
-    ({ scenario, says, ghCalls }) => {
+    ({ scenario, says, reads }) => {
       const r = run(scenario);
       expect(r.exitCode).toBe(1);
       for (const line of says) expect(r.output).toContain(line);
       expect(r.output).not.toContain("refusing to guess");
-      expect(r.ghCalls).toHaveLength(ghCalls);
+      expect(r.reads).toHaveLength(reads);
       expect(r.outputs).toEqual({});
     },
   );

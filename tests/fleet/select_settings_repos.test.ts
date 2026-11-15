@@ -11,6 +11,7 @@ import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
+import { type FakeReply, type FakeRoutes, spawnFakeGithub } from "../shared/fake_github";
 import { parseGithubOutput } from "../shared/github_output";
 import type { LoopbackServer } from "../shared/loopback_server";
 import { spawnPushProbeServer } from "../shared/push_probe_server";
@@ -39,96 +40,67 @@ const ALL_MASKS = PRIVATE_SLUGS.flatMap(maskForms).length;
 const RUN_ID = "4242";
 const keyOf = rowKeyOf("stub-token", RUN_ID);
 
-// End-to-end harness against a stub `gh` on PATH and a loopback push advertisement; PROBE_RETRY_DELAY_MS is zeroed so the retry loop costs no wall time.
+// End-to-end harness against a loopback GitHub API (tests/shared/fake_github.ts) and a loopback push advertisement; PROBE_RETRY_DELAY_MS and GITHUB_RETRY_BASE_MS are zeroed so no retry costs wall time.
 // PRIVATE personas' every public line says "a private repository" while the masks cover the slug,
 // and the matrix output names no target at all: each row rides as its index and the plan's key.
 describe("select_settings_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_settings_repos.ts");
   const root = temp.dir("select-settings-");
-  const bin = join(root, "bin");
   let probes: LoopbackServer;
+  let api: LoopbackServer;
+  let handWrittenApi: LoopbackServer;
+
+  const registration = (repo: string) => `repos/Vivswan/${repo}/contents/.repo-platform.yml`;
+  const settings = (repo: string) => `repos/Vivswan/${repo}/contents/.github/settings.yml`;
+  const file = (body: string): FakeReply[] => [{ status: 200, body }];
+  const BAD_GATEWAY: FakeReply = { status: 502 };
+  // The rendered document: the header line, then target-owned content the selector must never print.
+  const RENDERED = `${RENDERED_HEADER}\n# Rendered by the sync\nrepository:\n  description: target-owned\n`;
+  const ROUTES: FakeRoutes = {
+    "user/repos": [
+      {
+        status: 200,
+        body: PERSONAS.map((persona) => ({
+          full_name: `Vivswan/${persona.name}`,
+          private: persona.private,
+          archived: false,
+          owner: { login: "Vivswan" },
+          permissions: { push: true },
+        })),
+      },
+    ],
+    [registration("flaky")]: [BAD_GATEWAY, ...file("modules: [settings-sync]\n")],
+    [settings("flaky")]: [BAD_GATEWAY, ...file(RENDERED)],
+    // Named incident: "not adopted" was read off the error text, so an outage whose text quoted a 404 dropped the
+    // repository with the opt-out notice instead of the no-answer warning.
+    [registration("deadapi")]: [{ status: 502, body: { message: "upstream said HTTP 404" } }],
+    [registration("nomodule")]: file("modules: [uv, release-please]\n"),
+    [registration("repo-platform")]: file("modules: [bun, pr-title]\n"),
+    [registration("unadopted")]: [{ status: 404 }],
+    [registration("hidden-nomods")]: file("notmodules: true\n"),
+    [registration("hidden-server")]: file("modules: [uv, pages]\n"),
+    // GitHub's error body with the slug in a URL and the bare name in another casing: the warning carries the status alone.
+    [registration("hidden-deadapi")]: [
+      {
+        status: 502,
+        body: {
+          message:
+            "https://api.github.com/repos/Vivswan/hidden-deadapi bad gateway; HIDDEN-DEADAPI unreachable",
+        },
+      },
+    ],
+    [registration("*")]: file("modules: [settings-sync]\n"),
+    [settings("unrendered")]: [{ status: 404 }],
+    [settings("hidden-unrendered")]: [{ status: 404 }],
+    [settings("*")]: file(RENDERED),
+  };
 
   beforeAll(async () => {
-    mkdirSync(bin);
-    const listing = PERSONAS.map(
-      (p) =>
-        `{"full_name":"Vivswan/${p.name}","private":${p.private},"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}`,
-    ).join(",");
-    writeFileSync(
-      join(bin, "gh"),
-      [
-        "#!/usr/bin/env bash",
-        'if [ "$2" = "user/repos" ]; then',
-        `  printf '[[%s]]\\n' '${listing}'`,
-        "  exit 0",
-        "fi",
-        'case "$2" in',
-        "  repos/Vivswan/flaky/contents/.repo-platform.yml)",
-        '    if [ -e "$STUB_STATE/flaky-opt-in" ]; then echo "modules: [settings-sync]"; exit 0; fi',
-        '    touch "$STUB_STATE/flaky-opt-in"',
-        '    echo "HTTP 502 from stub" >&2',
-        "    exit 1",
-        "    ;;",
-        "  repos/Vivswan/flaky/contents/.github/settings.yml)",
-        `    if [ -e "$STUB_STATE/flaky-rendered" ]; then echo "${RENDERED_HEADER}"; exit 0; fi`,
-        '    touch "$STUB_STATE/flaky-rendered"',
-        '    echo "HTTP 502 from stub" >&2',
-        "    exit 1",
-        "    ;;",
-        "  repos/Vivswan/deadapi/contents/.repo-platform.yml)",
-        '    echo "HTTP 502 from stub" >&2',
-        "    exit 1",
-        "    ;;",
-        "  repos/Vivswan/nomodule/contents/.repo-platform.yml)",
-        '    echo "modules: [uv, release-please]"',
-        "    ;;",
-        "  repos/Vivswan/repo-platform/contents/.repo-platform.yml)",
-        '    echo "modules: [bun, pr-title]"',
-        "    ;;",
-        "  repos/Vivswan/unadopted/contents/.repo-platform.yml)",
-        '    echo "HTTP 404 from stub" >&2',
-        "    exit 1",
-        "    ;;",
-        "  repos/Vivswan/hidden-nomods/contents/.repo-platform.yml)",
-        '    echo "notmodules: true"',
-        "    ;;",
-        "  repos/Vivswan/hidden-server/contents/.repo-platform.yml)",
-        '    echo "modules: [uv, pages]"',
-        "    ;;",
-        // Error text with the slug in a URL, the bare name, and a case
-        // variant: every retry line and the final warning must scrub all
-        // three to the display.
-        "  repos/Vivswan/hidden-deadapi/contents/.repo-platform.yml)",
-        '    echo "HTTP 502: https://api.github.com/repos/Vivswan/hidden-deadapi bad gateway; HIDDEN-DEADAPI unreachable" >&2',
-        "    exit 1",
-        "    ;;",
-        "  repos/*/contents/.repo-platform.yml)",
-        '    echo "modules: [settings-sync]"',
-        "    ;;",
-        "  repos/Vivswan/unrendered/contents/.github/settings.yml|repos/Vivswan/hidden-unrendered/contents/.github/settings.yml)",
-        '    echo "HTTP 404 from stub" >&2',
-        "    exit 1",
-        "    ;;",
-        // A hand-written document (no generator header) under a flag, so the fleet run above stays a control for it.
-        "  repos/Vivswan/steady/contents/.github/settings.yml)",
-        '    if [ -n "$STUB_HANDWRITTEN_STEADY" ]; then printf "repository:\\n  description: mine\\n"; exit 0; fi',
-        `    printf '%s\\n# Rendered by the sync\\nrepository:\\n  description: %s\\n' "${RENDERED_HEADER}" "$2"`,
-        "    ;;",
-        // The rendered document: the header line, then target-owned
-        // content the selector must never print.
-        "  repos/*/contents/.github/settings.yml)",
-        `    printf '%s\\n# Rendered by the sync\\nrepository:\\n  description: %s\\n' "${RENDERED_HEADER}" "$2"`,
-        "    ;;",
-        "  *)",
-        '    echo "HTTP 404 from stub" >&2',
-        "    exit 1",
-        "    ;;",
-        "esac",
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
+    api = await spawnFakeGithub(ROUTES, join(root, "api.log"));
+    handWrittenApi = await spawnFakeGithub(
+      { ...ROUTES, [settings("steady")]: file("repository:\n  description: mine\n") },
+      join(root, "hand-written-api.log"),
     );
-    writeFileSync(join(bin, "sleep"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
     // The push advertisement answers 403 for a repository the token sees without push, 404 for one it cannot see at
     // all (the grant revoked, or the repository gone): both are "not in the fleet", never a transport failure to retry.
     probes = await spawnPushProbeServer("stub-token", {
@@ -139,7 +111,11 @@ describe("select_settings_repos.ts", () => {
       "Vivswan/flaky": [500, 200],
     });
   });
-  afterAll(() => probes.stop());
+  afterAll(() => {
+    probes.stop();
+    api.stop();
+    handWrittenApi.stop();
+  });
 
   /** One run; stdout is without the leading ::add-mask:: lines, whose registered values masked carries in order. */
   interface Run {
@@ -159,7 +135,7 @@ describe("select_settings_repos.ts", () => {
 
   function run(name: string, env: Record<string, string> = {}): Run {
     const work = join(root, `work-${name}`);
-    mkdirSync(join(work, "state"), { recursive: true });
+    mkdirSync(work, { recursive: true });
     const outputFile = join(work, "output.txt");
     const summaryFile = join(work, "summary.md");
     writeFileSync(outputFile, "");
@@ -170,15 +146,15 @@ describe("select_settings_repos.ts", () => {
       cwd: work,
       env: {
         ...process.env,
-        PATH: `${bin}:${process.env.PATH}`,
         PAT: "stub-token",
         PROBE_RETRY_DELAY_MS: "0",
         GH_TOKEN: "stub-token",
+        GITHUB_API_URL: `${api.host}/${name}`,
+        GITHUB_RETRY_BASE_MS: "0",
         OWNER: "Vivswan",
         GITHUB_RUN_ID: RUN_ID,
         GITHUB_OUTPUT: outputFile,
         GITHUB_STEP_SUMMARY: summaryFile,
-        STUB_STATE: join(work, "state"),
         GITHUB_SERVER_URL: `${probes.host}/${name}`,
         // The spread above carries CI's real event file; the dispatch
         // tests supply their own.
@@ -255,15 +231,16 @@ describe("select_settings_repos.ts", () => {
     main = run("main");
   }, TEST_TIMEOUT_MS);
 
-  const RETRY = (display: string, probe: string, detail: string) =>
+  // Only the push advertisement's retries print: a REST read's are the client's, silent until they are spent.
+  const PUSH_RETRY = (display: string, detail: string) =>
     [1, 2].map(
-      (attempt) => `${display}: ${probe} failed (attempt ${attempt}/3: ${detail}); retrying...`,
+      (attempt) =>
+        `${display}: push-permission probe failed (attempt ${attempt}/3: ${detail}); retrying...`,
     );
   const GAVE_UP = (display: string, probe: string, detail: string) =>
-    `${display}: the ${probe} failed 3 times (last error: ${detail}) - no answer, so the repo is skipped this run; the nightly apply retries it. If this persists, check the repo's availability and the fleet token.`;
-  const DEADAPI_DETAIL = "HTTP 502 from stub";
+    `${display}: the ${probe} got no answer after its retries (last error: ${detail}), so the repo is skipped this run; the nightly apply retries it. If this persists, check the repo's availability and the fleet token.`;
+  const DEADAPI_DETAIL = "HTTP 502";
   const DEADPROBE_DETAIL = "HTTP 500";
-  const HIDDEN_DEADAPI_DETAIL = `HTTP 502: https://api.github.com/repos/${PRIVATE_DISPLAY} bad gateway; ${PRIVATE_DISPLAY} unreachable`;
   const NOMODS_WARNING =
     `${PRIVATE_DISPLAY}: its .repo-platform.yml has no readable top-level modules list, so the ` +
     "modules filter cannot judge it - left out of this run; fix the file (the sync would fail on " +
@@ -279,20 +256,14 @@ describe("select_settings_repos.ts", () => {
       : `### Settings apply warnings\n${warnings.map((line) => `- ${line}\n`).join("")}`;
 
   // Every public persona's probe output, in slug order; the rendered probe
-  // runs after the modules filter, so a filter run never reaches flaky's
-  // third retry or the un-rendered notices.
+  // runs after the modules filter, so a filter run never reaches the un-rendered notices.
   const PUBLIC_PROBES_HEAD = [
-    ...RETRY("Vivswan/deadapi", "adoption check", DEADAPI_DETAIL),
     `::warning::${GAVE_UP("Vivswan/deadapi", "adoption check", DEADAPI_DETAIL)}`,
-    ...RETRY("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL),
+    ...PUSH_RETRY("Vivswan/deadprobe", DEADPROBE_DETAIL),
     `::warning::${GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL)}`,
     "Vivswan/flaky: push-permission probe failed (attempt 1/3: HTTP 500); retrying...",
-    "Vivswan/flaky: adoption check failed (attempt 1/3: HTTP 502 from stub); retrying...",
   ];
-  const PUBLIC_PROBES = [
-    ...PUBLIC_PROBES_HEAD,
-    "Vivswan/flaky: rendered settings check failed (attempt 1/3: HTTP 502 from stub); retrying...",
-  ];
+  const PUBLIC_PROBES = PUBLIC_PROBES_HEAD;
   const PUBLIC_PROBES_TAIL_HEAD = [
     `::notice::${pushProbeSkipNotice("Vivswan/locked")}`,
     `::notice::${UNADOPTED_NOTICE}`,
@@ -308,15 +279,14 @@ describe("select_settings_repos.ts", () => {
   ];
   // Every private persona's, named only as a private repository.
   const PRIVATE_PROBES_HEAD = [
-    ...RETRY(PRIVATE_DISPLAY, "adoption check", HIDDEN_DEADAPI_DETAIL),
-    `::warning::${GAVE_UP(PRIVATE_DISPLAY, "adoption check", HIDDEN_DEADAPI_DETAIL)}`,
+    `::warning::${GAVE_UP(PRIVATE_DISPLAY, "adoption check", DEADAPI_DETAIL)}`,
     `::notice::${pushProbeSkipNotice(PRIVATE_DISPLAY)}`,
   ];
   const PRIVATE_PROBES = [
     ...PRIVATE_PROBES_HEAD,
     `::notice::${notRenderedNotice(PRIVATE_DISPLAY)}`,
   ];
-  const PRIVATE_WARNINGS = [GAVE_UP(PRIVATE_DISPLAY, "adoption check", HIDDEN_DEADAPI_DETAIL)];
+  const PRIVATE_WARNINGS = [GAVE_UP(PRIVATE_DISPLAY, "adoption check", DEADAPI_DETAIL)];
   const ALL_PROBES = [...PUBLIC_PROBES, ...PRIVATE_PROBES, ...PUBLIC_PROBES_TAIL];
   const ALL_WARNINGS = [...PUBLIC_WARNINGS, ...PRIVATE_WARNINGS];
   const PUBLIC_TARGETS = [
@@ -376,7 +346,10 @@ describe("select_settings_repos.ts", () => {
   test(
     "a hand-written .github/settings.yml fails the plan with a count: applied alone it would delete every fleet label it does not list",
     () => {
-      const r = run("handwritten", { ONLY_REPO: "Vivswan/steady", STUB_HANDWRITTEN_STEADY: "1" });
+      const r = run("handwritten", {
+        ONLY_REPO: "Vivswan/steady",
+        GITHUB_API_URL: `${handWrittenApi.host}/handwritten`,
+      });
       expect({ ...r, masked: r.masked.length }).toEqual({
         exitCode: 1,
         stdout: lines(

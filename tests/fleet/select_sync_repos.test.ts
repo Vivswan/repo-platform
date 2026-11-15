@@ -9,6 +9,7 @@ import {
 import { moduleRoster } from "../../.github/scripts/fleet/modules.ts";
 import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
+import { type FakeReply, spawnFakeGithub } from "../shared/fake_github";
 import { parseGithubOutput } from "../shared/github_output";
 import type { LoopbackServer } from "../shared/loopback_server";
 import { spawnPushProbeServer } from "../shared/push_probe_server";
@@ -24,7 +25,7 @@ const outputFor = (rows: { repo: string; private: boolean }[], addModules = "") 
 
 const temp = tempDirs();
 
-// End-to-end harness for the sync fan-out selector against a stub gh on PATH and a loopback push advertisement (the bounds
+// End-to-end harness for the sync fan-out selector against a loopback GitHub API (tests/shared/fake_github.ts) and a loopback push advertisement (the bounds
 // rationale is select_settings_repos.test.ts's). The personas carry the facts the stubs cannot show:
 //   private ones                  -> never reach the public log: skips counted, the rows file alone carries their slugs
 //   locked (403), ungranted (404) -> the push advertisement's "no grant" answers (401 has no persona): a notice each, never a retry or a failure
@@ -33,7 +34,6 @@ const temp = tempDirs();
 describe("select_sync_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_sync_repos.ts");
   const root = temp.dir("select-sync-");
-  const bin = join(root, "bin");
   const fixture = join(root, "fixture");
 
   const discovered = [
@@ -48,41 +48,37 @@ describe("select_sync_repos.ts", () => {
   const HIDDEN_NOMODS = { repo: "Vivswan/hidden-nomods", private: true };
   const BADLIST = { repo: "Vivswan/badlist", private: false };
   let probes: LoopbackServer;
+  let api: LoopbackServer;
+
+  const registration = (repo: string) => `repos/Vivswan/${repo}/contents/.repo-platform.yml`;
+  const file = (body: string): FakeReply[] => [{ status: 200, body }];
 
   beforeAll(async () => {
-    mkdirSync(bin);
-    writeFileSync(
-      join(bin, "gh"),
-      [
-        "#!/usr/bin/env bash",
-        'case "$2" in',
-        "  repos/Vivswan/unadopted/contents/.repo-platform.yml)",
-        '    echo "HTTP 404 from stub" >&2',
-        "    exit 1",
-        "    ;;",
-        // A private repo whose adoption check fails hard, with the slug
-        // and bare name woven through the error text (a URL, a sentence,
-        // a repeat, a case variant): the selector must scrub them all. The
-        // partial body left on stdout (as a timed-out raw read leaves it)
-        // names another private repo and must not print at all.
-        "  repos/Vivswan/hidden-blocked/contents/.repo-platform.yml)",
-        "    echo 'modules: [site] # shared with Vivswan/hidden-billing'",
-        '    echo "HTTP 500: https://api.github.com/repos/Vivswan/hidden-blocked failed; hidden-blocked unavailable, retry HIDDEN-BLOCKED later" >&2',
-        "    exit 1",
-        "    ;;",
-        "  repos/Vivswan/steady/contents/.repo-platform.yml) echo 'modules: [uv, site]' ;;",
-        "  repos/Vivswan/hidden-server/contents/.repo-platform.yml) echo 'modules: [site, release-please]' ;;",
-        "  repos/Vivswan/hidden-nomods/contents/.repo-platform.yml) echo 'notmodules: true' ;;",
-        "  repos/Vivswan/badlist/contents/.repo-platform.yml) echo 'modules: notalist' ;;",
-        "  repos/*/contents/.repo-platform.yml) echo 'modules: [uv]' ;;",
-        "  *)",
-        '    echo "HTTP 404 from stub" >&2',
-        "    exit 1",
-        "    ;;",
-        "esac",
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
+    api = await spawnFakeGithub(
+      {
+        [registration("unadopted")]: [{ status: 404 }],
+        // A private repo whose adoption check fails hard, GitHub's error body spelling the slug, the bare name, and a
+        // case variant, and naming another private repo: none of it may print.
+        [registration("hidden-blocked")]: [
+          {
+            status: 500,
+            body: {
+              message:
+                "https://api.github.com/repos/Vivswan/hidden-blocked failed; HIDDEN-BLOCKED shares with Vivswan/hidden-billing",
+            },
+          },
+        ],
+        [registration("flaky")]: [{ status: 502 }, ...file("modules: [uv]\n")],
+        [registration("hidden-quoting")]: [
+          { status: 502, body: { message: "upstream said HTTP 404" } },
+        ],
+        [registration("steady")]: file("modules: [uv, site]\n"),
+        [registration("hidden-server")]: file("modules: [site, release-please]\n"),
+        [registration("hidden-nomods")]: file("notmodules: true\n"),
+        [registration("badlist")]: file("modules: notalist\n"),
+        [registration("*")]: file("modules: [uv]\n"),
+      },
+      join(root, "api.log"),
     );
     probes = await spawnPushProbeServer("stub-token", {
       "Vivswan/hidden-locked": [403],
@@ -95,7 +91,10 @@ describe("select_sync_repos.ts", () => {
     // cwd); nothing in it is read.
     mkdirSync(fixture, { recursive: true });
   });
-  afterAll(() => probes.stop());
+  afterAll(() => {
+    probes.stop();
+    api.stop();
+  });
 
   interface Run {
     exitCode: number;
@@ -128,9 +127,10 @@ describe("select_sync_repos.ts", () => {
       cwd: fixture,
       env: {
         ...process.env,
-        PATH: `${bin}:${process.env.PATH}`,
         PAT: "stub-token",
         GH_TOKEN: "stub-token",
+        GITHUB_API_URL: `${api.host}/${name}`,
+        GITHUB_RETRY_BASE_MS: "0",
         OWNER: "Vivswan",
         GITHUB_REPOSITORY: "Vivswan/repo-platform",
         ONLY_REPO: "",
@@ -530,8 +530,8 @@ describe("select_sync_repos.ts", () => {
   test(
     "a private repo's hard adoption failure names no slug, wherever the slug hid",
     () => {
-      // The stub's error text carries the slug in a URL, the bare name, and an uppercase variant, and its stdout names
-      // another private repository: the failure surfaces with every spelling scrubbed and the body unprinted.
+      // GitHub's error body carries the slug in a URL, the bare name in another casing, and another private
+      // repository's name: the failure surfaces as its status alone.
       const r = run(
         "hidden-blocked",
         payloadEnv("hidden-blocked", { repo: "Vivswan/hidden-blocked" }),
@@ -539,17 +539,49 @@ describe("select_sync_repos.ts", () => {
       );
       expect(r).toEqual({
         exitCode: 1,
-        stdout: expect.stringMatching(
-          /^::error::adoption check failed for a private repository: HTTP 500: https:\/\/api\.github\.com\/repos\/a private repository failed; a private repository unavailable, retry a private repository later%0A\n$/,
-        ),
+        stdout: "::error::adoption check failed for a private repository: HTTP 500\n",
         stderr: "",
         outputs: {},
         rows: null,
       });
-      for (const channel of publicChannels(r)) {
-        expect(channel.toLowerCase()).not.toContain("hidden-blocked");
-        expect(channel.toLowerCase()).not.toContain("hidden-billing");
-      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  // Named incident: one transient 502 on one repository's registration read ended the plan, and the weekly sync
+  // delivered nothing to the whole fleet.
+  test(
+    "a 502 followed by a 200 on a registration read still selects the repository",
+    () => {
+      const flaky = { repo: "Vivswan/flaky", private: false };
+      const r = run("flaky", { ONLY_REPO: "Vivswan/flaky" }, [...discovered, flaky]);
+      expect(r).toEqual({
+        exitCode: 0,
+        stdout: lines("syncing: Vivswan/flaky"),
+        stderr: "",
+        outputs: outputFor([flaky]),
+        rows: [flaky],
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  // Named incident: "no registration" was read off the error text, so an outage whose text quoted a 404 skipped the
+  // repository as not adopted, green, instead of failing the plan.
+  test(
+    "an outage whose error text mentions a 404 fails the plan: only the 404 status is no registration",
+    () => {
+      const r = run("quoting", { ONLY_REPO: "Vivswan/hidden-quoting" }, [
+        ...discovered,
+        { repo: "Vivswan/hidden-quoting", private: true },
+      ]);
+      expect(r).toEqual({
+        exitCode: 1,
+        stdout: "::error::adoption check failed for a private repository: HTTP 502\n",
+        stderr: "",
+        outputs: {},
+        rows: null,
+      });
     },
     TEST_TIMEOUT_MS,
   );

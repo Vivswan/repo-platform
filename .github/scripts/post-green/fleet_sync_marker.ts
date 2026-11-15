@@ -7,9 +7,8 @@
 import { resolve } from "node:path";
 import { notice, setOutput, warning } from "@actions/core";
 import { z } from "zod";
-import { captureNetwork } from "../fleet/discovery.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
-import { parseJsonWithThrow } from "../shared/json.ts";
+import { GitHubClient, unansweredReason } from "../shared/github.ts";
 import { loadLayer, sectionEntries } from "../sync/writer/settings_layers.ts";
 import {
   type DiffBase,
@@ -97,18 +96,17 @@ const associatedPulls = z.array(
 
 /** The merged pull request's label names, or null for a commit no pull request produced. A failed lookup throws: an unreadable pull
  *  request must never read as "no label". */
-function mergedPullLabels(repository: string, commit: string): string[] | null {
+async function mergedPullLabels(
+  github: GitHubClient,
+  repository: string,
+  commit: string,
+): Promise<string[] | null> {
   const endpoint = `repos/${repository}/commits/${commit}/pulls`;
-  const lookup = captureNetwork(["gh", "api", endpoint]);
-  if (lookup.exitCode !== 0) {
-    const detail = lookup.stderr.trim();
-    throw new Error(
-      `${endpoint} could not be read (gh api exit ${lookup.exitCode})${detail === "" ? "" : `: ${detail}`}`,
-    );
+  const lookup = await github.get(endpoint, associatedPulls);
+  if (lookup.kind !== "ok") {
+    throw new Error(`${endpoint} could not be read (${unansweredReason(lookup)})`);
   }
-  const merged = parseJsonWithThrow(associatedPulls, lookup.stdout, endpoint).filter(
-    (pull) => pull.merge_commit_sha === commit,
-  );
+  const merged = lookup.value.filter((pull) => pull.merge_commit_sha === commit);
   if (merged.length > 1) {
     throw new Error(
       `${endpoint}: ${merged.length} pull requests claim this commit as their merge (${merged.map((pull) => `#${pull.number}`).join(", ")}); refusing to pick one`,
@@ -119,25 +117,31 @@ function mergedPullLabels(repository: string, commit: string): string[] | null {
 }
 
 /** The directive of the pull request that merged `commit`; none for a commit no pull request produced. */
-function commitDirective(repository: string, commit: string, known: FleetSyncLabels): Directive {
-  const labels = mergedPullLabels(repository, commit);
+async function commitDirective(
+  github: GitHubClient,
+  repository: string,
+  commit: string,
+  known: FleetSyncLabels,
+): Promise<Directive> {
+  const labels = await mergedPullLabels(github, repository, commit);
   if (labels === null) return { kind: "none" };
   return readDirective(labels, known);
 }
 
 /** The scope the range's merges opted into, the widest winning; null when no merge carried a label. */
-function rangeScope(
+async function rangeScope(
+  github: GitHubClient,
   commits: readonly string[],
   repository: string,
   sha: string,
   known: FleetSyncLabels,
-): { scope: FleetSyncScope | null } | { failure: string } {
+): Promise<{ scope: FleetSyncScope | null } | { failure: string }> {
   let scope: FleetSyncScope | null = null;
   for (const commit of commits) {
     const short = commit.slice(0, 12);
     let directive: Directive;
     try {
-      directive = commitDirective(repository, commit, known);
+      directive = await commitDirective(github, repository, commit, known);
     } catch (error) {
       // Every commit's lookup is fatal, the older ones included: a label
       // that cannot be read must fail the leg, never quietly disarm it.
@@ -159,7 +163,7 @@ function rangeScope(
   return { scope };
 }
 
-function main(): number {
+async function main(): Promise<number> {
   const { sha, before } = judgedRangeEnv();
   const repository = requireEnv("GITHUB_REPOSITORY");
   const cwd = process.cwd();
@@ -171,7 +175,13 @@ function main(): number {
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
   }
-  const found = rangeScope(rangeCommits(cwd, sha, base), repository, sha, known);
+  const found = await rangeScope(
+    new GitHubClient(),
+    rangeCommits(cwd, sha, base),
+    repository,
+    sha,
+    known,
+  );
   if ("failure" in found) return fail(found.failure);
   const { scope } = found;
   const range = rangeLabel(sha, base);
@@ -187,5 +197,5 @@ function main(): number {
 }
 
 if (import.meta.main) {
-  process.exit(main());
+  process.exit(await main());
 }
