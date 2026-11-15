@@ -1,7 +1,7 @@
 // Every inline shell body a checkout carries, with the file line it starts on, so a parser's line maps to the real one.
 // The yaml and Dockerfile readers are libraries; this file only knows where each source kind keeps its shell.
 
-import { basename } from "node:path";
+import { basename, extname } from "node:path";
 import {
   DockerfileParser,
   type From,
@@ -90,9 +90,6 @@ const SHELL_DIALECT: ReadonlyMap<string, Dialect> = new Map([
   ["cmd", "cmd"],
 ]);
 
-/** `#!`, the interpreter, and an optional first argument (`env bash`). */
-const SHEBANG = /^#!\s*(\S+)(?:[ \t]+(\S+))?/;
-
 /** Each dialect's line continuation: syntactically nothing, one source line. */
 const CONTINUATION: Readonly<Record<Dialect, string>> = {
   bash: " \\\n",
@@ -113,14 +110,13 @@ export function sourceKindOf(relPath: string): SourceKind | null {
 
   if (CONTAINERFILE_NAME.test(name)) return "containerfile";
 
-  if (SCRIPT_DIALECT.has(extensionOf(name))) return "script";
+  if (SCRIPT_DIALECT.has(extensionOf(relPath))) return "script";
 
   return null;
 }
 
-function extensionOf(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot === -1 ? "" : name.slice(dot).toLowerCase();
+function extensionOf(relPath: string): string {
+  return extname(relPath).toLowerCase();
 }
 
 /** Unset, or an expression GitHub resolves at run time (`${{ matrix.shell }}`), is the runner default. */
@@ -156,7 +152,7 @@ export function collectFile(relPath: string, text: string): Collected {
     case "containerfile":
       return { bodies: collectContainerfile(relPath, text), problems: [] };
     case "script": {
-      const dialect = SCRIPT_DIALECT.get(extensionOf(basename(relPath)));
+      const dialect = SCRIPT_DIALECT.get(extensionOf(relPath));
       if (dialect === undefined) return { bodies: [], problems: [] };
 
       return { bodies: [{ path: relPath, line: 1, kind, dialect, code: text }], problems: [] };
@@ -175,15 +171,20 @@ export function collectFile(relPath: string, text: string): Collected {
 
 /** A hook or tool script with no extension (`.githooks/pre-commit`, `.profile`); its shebang names the shell. */
 export function isExtensionless(relPath: string): boolean {
-  return basename(relPath).lastIndexOf(".") <= 0;
+  return extname(relPath) === "";
 }
 
-/** The dialect a first-line shebang names, `#!/usr/bin/env bash` included; null for no shebang or another program. */
+/** The dialect a first-line shebang names, or null for no shebang or another program. `env` runs the first word after
+ *  its own options, `-S` attached or apart: `#!/usr/bin/env -S bash -e` and `#!/usr/bin/env -Sbash -e` are bash. */
 export function shebangDialect(text: string): Dialect | null {
-  const match = SHEBANG.exec(text.split("\n", 1)[0] ?? "");
-  if (match === null) return null;
+  const line = text.split("\n", 1)[0] ?? "";
+  if (!line.startsWith("#!")) return null;
 
-  const program = basename(match[1]) === "env" ? (match[2] ?? "") : match[1];
+  const [interpreter = "", ...args] = line.slice(2).trim().split(/\s+/);
+  if (basename(interpreter) !== "env") return SHELL_DIALECT.get(shellName(interpreter)) ?? null;
+
+  const words = args.map((arg) => arg.replace(/^-S/, ""));
+  const program = words.find((word) => word !== "" && !word.startsWith("-")) ?? "";
   return SHELL_DIALECT.get(shellName(program)) ?? null;
 }
 

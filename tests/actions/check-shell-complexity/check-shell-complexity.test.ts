@@ -456,6 +456,22 @@ describe("the collector", () => {
         problems: [],
       },
     ],
+    [
+      "bin/strict",
+      "#!/usr/bin/env -S bash -e\nmake\n",
+      {
+        bodies: [body("bin/strict", 1, "script", "bash", "#!/usr/bin/env -S bash -e\nmake\n")],
+        problems: [],
+      },
+    ],
+    [
+      "bin/attached",
+      "#!/usr/bin/env -Sbash -e\nmake\n",
+      {
+        bodies: [body("bin/attached", 1, "script", "bash", "#!/usr/bin/env -Sbash -e\nmake\n")],
+        problems: [],
+      },
+    ],
     ["bin/tool", "#!/usr/bin/env python3\nprint(1)\n", { bodies: [], problems: [] }],
     [
       ".profile",
