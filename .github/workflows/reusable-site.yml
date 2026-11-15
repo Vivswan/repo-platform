@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 60
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment-retry.outputs.page_url }}
     # The hook step runs under this token too: a composite action declares
     # no permissions of its own. issues: write is the link-rot issue's.
     permissions:
@@ -101,6 +101,15 @@ jobs:
 
       - id: deployment
         if: steps.site.outputs.publish == 'true'
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
+
+      # GitHub's artifact listing can miss an artifact finalized under a second earlier, and deploy-pages lists once
+      # (actions/deploy-pages#451). One more try, with no continue-on-error: a second failure fails the job.
+      - id: deployment-retry
+        if: steps.site.outputs.publish == 'true' && steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: github-pages-${{ github.run_attempt }}
