@@ -39,10 +39,11 @@ jobs:
       - name: actionlint the written workflows
         run: bun .github/scripts/ci/run_in_fleet_lint_trees.ts "$RUNNER_TEMP/fleet-lint" -- actionlint -color
       # The archive's sha256 is the pin: the release's checksums file comes from the same place as the archive.
+      # refresh-upstream.yml's tool leg moves the two values together (docs/toolchains.md).
       - name: Install the pinned pinact release
         env:
-          PINACT_VERSION: 4.1.1
-          PINACT_SHA256: d1cffebe5704b74e2e5f8a864efb9f7e54768972dc686188c008033fb1797841
+          PINACT_VERSION: 5.0.2
+          PINACT_SHA256: 7f003d8f51e984c2264d2009d430e3e0e87ae404a0e2dc2a9a277b0f731bf5b7
         run: |
           curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/pinact.tar.gz" \
             "https://github.com/suzuki-shunsuke/pinact/releases/download/v${PINACT_VERSION}/pinact_linux_amd64.tar.gz"
@@ -59,7 +60,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PINACT_CONFIG: ${{ github.workspace }}/.github/pinact.yaml
-        run: bun .github/scripts/ci/run_in_fleet_lint_trees.ts --with-checkout "$RUNNER_TEMP/fleet-lint" -- pinact run -check -verify-comment
+        run: bun .github/scripts/ci/run_in_fleet_lint_trees.ts --with-checkout "$RUNNER_TEMP/fleet-lint" -- pinact run --check --verify-comment
 
   # fetch-depth 0 so the event's commit range resolves; pull-requests read because the action lists
   # the PR's commits to build that range. Comments off keeps that scope at read; findings still land
@@ -386,6 +387,8 @@ jobs:
         run: bun install --frozen-lockfile --silent
       - name: Plant the two pins
         id: pins
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bun .github/scripts/ci/bun_setup_smoke.ts plant
       - name: Set up the current bun (already on PATH)
         id: first

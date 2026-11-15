@@ -4,15 +4,55 @@ import {
   type SmokeReading,
   smokeProblems,
 } from "../../.github/scripts/ci/bun_setup_smoke";
+import { clientOver } from "../shared/fake_github";
 
 describe("earlierRelease", () => {
-  // bun's release lines each start at .0, so the previous minor's .0 exists; a wrong
-  // "previous" makes the smoke's second call install a version that does not exist.
-  test.each([
-    ["1.4.0", "1.3.0"],
-    ["1.4.2", "1.4.1"],
-  ])("%s -> %s", (version, previous) => {
-    expect(earlierRelease(version)).toBe(previous);
+  interface Release {
+    tag_name: string;
+    draft: boolean;
+    prerelease: boolean;
+  }
+
+  const release = (tag_name: string, flags: Partial<Release> = {}): Release => ({
+    tag_name,
+    draft: false,
+    prerelease: false,
+    ...flags,
+  });
+
+  const listing = (tags: Release[]) =>
+    clientOver({ "repos/oven-sh/bun/releases": [{ status: 200, body: tags }] }).client;
+
+  // The smoke's second call installs this version, so it must be one bun published. Arithmetic on the pin guessed it:
+  // a new major had no answer (the job went red on the pull request bumping bun) and a skipped number named no release.
+  test.each<{ reason: string; pin: string; tags: Release[]; previous: string }>([
+    {
+      reason: "a new major's predecessor is the last release of the old major",
+      pin: "2.0.0",
+      tags: [release("bun-v2.0.0"), release("bun-v1.9.3"), release("bun-v1.9.2")],
+      previous: "1.9.3",
+    },
+    {
+      reason: "a patch number upstream skipped is not a release",
+      pin: "1.4.3",
+      tags: [release("bun-v1.4.1"), release("bun-v1.4.3"), release("bun-v1.4.0")],
+      previous: "1.4.1",
+    },
+    {
+      reason: "a canary, a pre-release, a draft, and a newer release are never the predecessor",
+      pin: "1.4.0",
+      tags: [
+        release("canary", { prerelease: true }),
+        release("bun-v1.4.1"),
+        release("bun-v1.3.12", { prerelease: true }),
+        release("bun-v1.3.11", { draft: true }),
+        release("bun-v1.3.9"),
+        release("bun-v1.3.10"),
+      ],
+      previous: "1.3.10",
+    },
+  ])("$reason", async ({ pin, tags, previous }) => {
+    expect(await earlierRelease(pin, listing(tags))).toBe(previous);
   });
 });
 
