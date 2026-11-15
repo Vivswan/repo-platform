@@ -3,9 +3,7 @@
 import { parse } from "yaml";
 import { z } from "zod";
 import {
-  includeListProblem,
-  includeMountProblem,
-  includePageProblem,
+  includeRootsSchema,
   includeWithoutDocsProblem,
   relPathProblem,
   urlSegmentProblem,
@@ -13,7 +11,6 @@ import {
 import { LABEL_RE } from "../shared/label.ts";
 import { REGISTRATION_PATH } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
-import { isMapping } from "../shared/values.ts";
 
 /** The one refusal of a module files.yml does not offer.
  *  The plan on every PR and the sync writer speak it alike, so no reader drops a name quietly. */
@@ -39,53 +36,53 @@ function describeEntry(entry: unknown): string {
   return JSON.stringify(entry) ?? String(entry);
 }
 
+/** Module names, each once. `when` keeps the duplicate check running beside an entry that is no name, which zod would otherwise skip, hence its string test. */
+const moduleNames = z
+  .array(
+    z
+      .string({ error: (issue) => `${describeEntry(issue.input)} is not a module name` })
+      .min(1, { error: '"" is not a module name' }),
+    {
+      error: (issue) =>
+        issue.input === undefined
+          ? "no module selection found - add a top-level `modules: [...]` list (the sync never assumes an empty selection, which would strip every module from the repo)"
+          : "must be a list of module names",
+    },
+  )
+  .superRefine(
+    (names, ctx) => {
+      names.forEach((name, index) => {
+        if (typeof name !== "string" || names.indexOf(name) === index) return;
+
+        ctx.addIssue({ code: "custom", message: `duplicate entry "${name}"`, path: [index] });
+      });
+    },
+    { when: (payload) => Array.isArray(payload.value) },
+  );
+
+/** A document's top level, for both schemas that read one: any other shape is named in the document's own word. */
+const MAPPING: { error: z.core.$ZodErrorMap } = {
+  error: (issue) => (issue.code === "invalid_type" ? "must be a mapping" : undefined),
+};
+
+/** The selection alone, whatever else the document carries: the fleet plans read it from registrations they do not otherwise judge. */
+const selectionSchema = z.looseObject({ modules: moduleNames }, MAPPING);
+
+/** Every issue as one line, the place before the problem. */
+function problemLines(error: z.ZodError, label: string): string[] {
+  return error.issues.map(
+    (issue) => `${label}: ${issue.path.join(".") || "(top level)"}: ${issue.message}`,
+  );
+}
+
 export function readModules(
   data: unknown,
   label = REGISTRATION_PATH,
 ): { modules: string[] | null; errors: string[] } {
-  if (!isMapping(data)) {
-    return { modules: null, errors: [`${label}: top level must be a mapping`] };
-  }
+  const read = selectionSchema.safeParse(data);
+  if (!read.success) return { modules: null, errors: problemLines(read.error, label) };
 
-  const raw: unknown = data.modules;
-  const key = "modules";
-  if (raw === undefined) {
-    return {
-      modules: null,
-      errors: [
-        `${label}: no module selection found - add a top-level ` +
-          `\`modules: [...]\` list (the sync never assumes an empty selection, ` +
-          `which would strip every module from the repo)`,
-      ],
-    };
-  }
-
-  if (!Array.isArray(raw)) {
-    return { modules: null, errors: [`${label}: ${key} must be a list of module names`] };
-  }
-
-  const errors: string[] = [];
-  const seen = new Set<string>();
-  const modules: string[] = [];
-  for (const entry of raw) {
-    if (typeof entry !== "string" || entry === "") {
-      errors.push(`${label}: ${key} entry ${describeEntry(entry)} is not a module name`);
-      continue;
-    }
-
-    if (seen.has(entry)) {
-      errors.push(`${label}: duplicate ${key} entry "${entry}"`);
-      continue;
-    }
-    seen.add(entry);
-    modules.push(entry);
-  }
-
-  if (errors.length > 0) {
-    return { modules: null, errors };
-  }
-
-  return { modules, errors: [] };
+  return { modules: read.data.modules, errors: [] };
 }
 
 /** logLevel error: the parser's default level prints warned-on source lines (target content) to stderr.
@@ -165,56 +162,45 @@ export const mirrorsSchema = z.array(
 );
 
 /** Module names and `labels` keys are checked against files.yml by the reader that has it; the schema pins shapes alone. */
-export const registrationSchema = z.strictObject({
-  modules: z.array(z.unknown()),
-  project: z.strictObject({
-    name: plainText("project.name").pipe(z.string().min(1)),
-    slug,
-    description: plainText("project.description"),
-    copyright_holder: plainText("project.copyright_holder").pipe(z.string().min(1)).optional(),
-  }),
-  // `path: null` turns the docs half off (docs/modules/site.md, "Turning the docs
-  // half off"): the site is the hook's website alone.
-  site: z
-    .strictObject({
-      path: urlSegment.nullable().optional(),
-      include: z
-        .array(
-          z.strictObject({
-            path: relativePath,
-            mount: judged(includeMountProblem),
-            page: judged(includePageProblem),
-          }),
-        )
-        .superRefine((roots, ctx) => {
-          const message = includeListProblem(roots);
-          if (message !== null) ctx.addIssue({ code: "custom", message });
-        })
-        .optional(),
-      // The repository variables the site-build hook reads as environment values (docs/modules/site.md, "Repository variables").
-      vars: z.array(variableName).optional(),
-    })
-    .superRefine((site, ctx) => {
-      const message = includeWithoutDocsProblem(site.path, site.include ?? []);
-      if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
-    })
-    .optional(),
-  // The directory of the package the npm legs publish; absent is the repository root (docs/modules/npm.md).
-  npm: z.strictObject({ path: relativePath.optional() }).optional(),
-  // What a fix may carry, per trigger: the fix-lint label, and a push to a pull request touching `on` (docs/modules/autofix.md).
-  autofix: z
-    .strictObject({ label: fixLists, push: fixLists.extend({ on: fixGlobs.min(1) }).optional() })
-    .optional(),
-  labels: z.record(z.string(), label).optional(),
-  // Paths the repository keeps as its own: no files.yml entry there is
-  // written for it (docs/platform/sync/files.md, Selection).
-  except: z.array(judged(pathProblem)).optional(),
-  mirrors: mirrorsSchema.optional(),
-});
+export const registrationSchema = z.strictObject(
+  {
+    modules: moduleNames,
+    project: z.strictObject({
+      name: plainText("project.name").pipe(z.string().min(1)),
+      slug,
+      description: plainText("project.description"),
+      copyright_holder: plainText("project.copyright_holder").pipe(z.string().min(1)).optional(),
+    }),
+    // `path: null` turns the docs half off (docs/modules/site.md, "Turning the docs
+    // half off"): the site is the hook's website alone.
+    site: z
+      .strictObject({
+        path: urlSegment.nullable().optional(),
+        include: includeRootsSchema(z).optional(),
+        // The repository variables the site-build hook reads as environment values (docs/modules/site.md, "Repository variables").
+        vars: z.array(variableName).optional(),
+      })
+      .superRefine((site, ctx) => {
+        const message = includeWithoutDocsProblem(site.path, site.include ?? []);
+        if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
+      })
+      .optional(),
+    // The directory of the package the npm legs publish; absent is the repository root (docs/modules/npm.md).
+    npm: z.strictObject({ path: relativePath.optional() }).optional(),
+    // What a fix may carry, per trigger: the fix-lint label, and a push to a pull request touching `on` (docs/modules/autofix.md).
+    autofix: z
+      .strictObject({ label: fixLists, push: fixLists.extend({ on: fixGlobs.min(1) }).optional() })
+      .optional(),
+    labels: z.record(z.string(), label).optional(),
+    // Paths the repository keeps as its own: no files.yml entry there is
+    // written for it (docs/platform/sync/files.md, Selection).
+    except: z.array(judged(pathProblem)).optional(),
+    mirrors: mirrorsSchema.optional(),
+  },
+  MAPPING,
+);
 
-export type Registration = Omit<z.infer<typeof registrationSchema>, "modules"> & {
-  modules: string[];
-};
+export type Registration = z.infer<typeof registrationSchema>;
 
 export type RegistrationRead = { registration: Registration } | { errors: string[] };
 
@@ -227,17 +213,8 @@ export function parseRegistration(text: string, label = REGISTRATION_PATH): Regi
     return { errors: [`${label}: YAML parse error: ${detail}`] };
   }
 
-  const modules = readModules(data, label);
-  if (modules.modules === null) return { errors: modules.errors };
-
   const result = registrationSchema.safeParse(data);
-  if (!result.success) {
-    return {
-      errors: result.error.issues.map(
-        (issue) => `${label}: ${issue.path.join(".") || "(top level)"}: ${issue.message}`,
-      ),
-    };
-  }
+  if (!result.success) return { errors: problemLines(result.error, label) };
 
-  return { registration: { ...result.data, modules: modules.modules } };
+  return { registration: result.data };
 }

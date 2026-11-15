@@ -4,15 +4,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { error, exportVariable, setFailed, setOutput } from "@actions/core";
+import { z } from "zod";
 import type { DocsConfig, SiteConfigJson } from "../pages-site/.vitepress/conventions.ts";
-import {
-  capture,
-  env,
-  failureDetail,
-  messageOf,
-  requireEnv,
-  succeeded,
-} from "../shared/action_runtime.ts";
+import { env, messageOf, requireEnv } from "../shared/action_runtime.ts";
 import { LABEL_RE } from "../shared/label.ts";
 import { REGISTRATION_PATH } from "../shared/platform.ts";
 import { moduleList } from "../shared/selection.ts";
@@ -36,6 +30,9 @@ import { type LabelTuple, type LayerSources, reservedLabelNames } from "./reserv
 
 export const MODES = ["default", "site", "npm", "autofix"] as const;
 export type Mode = (typeof MODES)[number];
+
+/** The `private` input: the two spellings an Actions boolean takes as text, and no other. */
+const VISIBILITY = z.stringbool({ truthy: ["true"], falsy: ["false"], case: "sensitive" });
 
 export class PlanError extends Error {
   constructor(readonly problems: string[]) {
@@ -398,27 +395,16 @@ export function readRegistration(root: string): Registration {
   return read.registration;
 }
 
-/** The API fallback keeps an empty input from reading as public. */
-export function resolvePrivate(input: string, repository: string): boolean {
-  if (input === "true") return true;
-
-  if (input === "false") return false;
-
-  if (input !== "") {
-    throw new PlanError([`private input must be true, false, or empty; got '${input}'`]);
-  }
-
-  const result = capture(["gh", "api", `repos/${repository}`, "--jq", ".private"], {
-    timeoutMs: 60_000,
-  });
-  const value = result.stdout.trim();
-  if (!succeeded(result.exit) || (value !== "true" && value !== "false")) {
+/** Every caller passes the event's own fact, so an empty input is a caller's mistake and is refused, never read as public. */
+export function resolvePrivate(input: string): boolean {
+  const read = VISIBILITY.safeParse(input);
+  if (!read.success) {
     throw new PlanError([
-      `cannot read the visibility of ${repository}: ${succeeded(result.exit) ? `unexpected answer '${value}'` : failureDetail(result)}`,
+      `the private input must be true or false (pass github.event.repository.private); got '${input}'`,
     ]);
   }
 
-  return value === "true";
+  return read.data;
 }
 
 const PLANNERS: Record<Mode, (input: PlanInput) => Plan> = {
@@ -442,8 +428,7 @@ function main(): number {
     registration: readRegistration(root),
     ...moduleData,
     reservedLabels: reservedLabelNames(moduleData.layers, tree),
-    private:
-      mode === "default" ? resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")) : false,
+    private: mode === "default" ? resolvePrivate(env("PRIVATE")) : false,
   };
   const plan = PLANNERS[mode as Mode](input);
   const exported = "vars" in plan ? siteVars(plan.vars, env("VARS")) : {};

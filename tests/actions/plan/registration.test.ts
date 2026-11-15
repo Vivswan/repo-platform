@@ -14,7 +14,7 @@ import {
 
 const FILE = ".repo-platform.yml";
 const PROJECT = "project: {name: My Project, slug: my-project, description: One line}\n";
-const NO_SELECTION = `${FILE}: no module selection found - add a top-level \`modules: [...]\` list (the sync never assumes an empty selection, which would strip every module from the repo)`;
+const NO_SELECTION = `${FILE}: modules: no module selection found - add a top-level \`modules: [...]\` list (the sync never assumes an empty selection, which would strip every module from the repo)`;
 
 describe("parseRegistration", () => {
   test("the full document, every section; a mirror's kind defaults to the copy the writer materializes", () => {
@@ -309,35 +309,45 @@ describe("readModules and declaredModules", () => {
       reason: "a non-list modules value",
       yaml: "modules: agents",
       modules: null,
-      errors: [`${FILE}: modules must be a list of module names`],
+      errors: [`${FILE}: modules: must be a list of module names`],
     },
     {
       reason: "a non-string entry",
       yaml: "modules: [agents, 3]",
       modules: null,
-      errors: [`${FILE}: modules entry 3 is not a module name`],
+      errors: [`${FILE}: modules.1: 3 is not a module name`],
     },
     {
       reason: "a self-referencing alias and other nested entries, named by shape",
       yaml: "modules: [&loop [*loop], {a: 1}, null]",
       modules: null,
       errors: [
-        `${FILE}: modules entry (a list) is not a module name`,
-        `${FILE}: modules entry (a mapping) is not a module name`,
-        `${FILE}: modules entry null is not a module name`,
+        `${FILE}: modules.0: (a list) is not a module name`,
+        `${FILE}: modules.1: (a mapping) is not a module name`,
+        `${FILE}: modules.2: null is not a module name`,
+      ],
+    },
+    {
+      // zod skips a list's refinement once an entry failed; left to that default, the duplicate would cost a second red run.
+      reason: "a duplicate beside an entry that is no name, both in one run",
+      yaml: "modules: [agents, agents, 3]",
+      modules: null,
+      errors: [
+        `${FILE}: modules.2: 3 is not a module name`,
+        `${FILE}: modules.1: duplicate entry "agents"`,
       ],
     },
     {
       reason: "a duplicate entry",
       yaml: "modules: [agents, agents]",
       modules: null,
-      errors: [`${FILE}: duplicate modules entry "agents"`],
+      errors: [`${FILE}: modules.1: duplicate entry "agents"`],
     },
     {
       reason: "a non-mapping document",
       yaml: "- just\n- a list",
       modules: null,
-      errors: [`${FILE}: top level must be a mapping`],
+      errors: [`${FILE}: (top level): must be a mapping`],
     },
   ])("$reason", ({ yaml, modules, errors }) => {
     expect(readModules(parse(yaml))).toEqual({ modules, errors });
