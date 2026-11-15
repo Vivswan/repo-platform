@@ -6,8 +6,8 @@
 //
 // Usage: bun scripts/bootstrap.ts
 
-import { existsSync, readdirSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { globSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { must } from "../.github/scripts/shared/proc.ts";
 
 /** The platform checkout, one level above scripts/. */
@@ -28,17 +28,16 @@ export function installHooks(root: string): void {
   });
 }
 
+/** The root, and every directory under actions/, that holds a bun.lock. A dependency's own lockfile under node_modules
+ *  is not a package of this repository, and a linked directory is not walked: its package counts where it lives.
+ *  The glob walks no dot directory either. */
 export function bunLockDirs(root: string): string[] {
-  const found: string[] = [];
-  const walk = (dir: string) => {
-    if (existsSync(join(dir, "bun.lock"))) found.push(relative(root, dir));
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory() && entry.name !== "node_modules") walk(join(dir, entry.name));
-    }
-  };
-  if (existsSync(join(root, "bun.lock"))) found.push(".");
-  walk(join(root, "actions"));
-  return found.sort();
+  return globSync(["bun.lock", "actions/**/bun.lock"], {
+    cwd: root,
+    exclude: (name) => name === "node_modules",
+  })
+    .map((lock) => dirname(lock))
+    .sort();
 }
 
 function main(): void {

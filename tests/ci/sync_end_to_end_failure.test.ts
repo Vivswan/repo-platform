@@ -107,7 +107,7 @@ describe("the sync row's failure path", () => {
       "The repo-platform sync for this repository failed: the writer exited with an error.",
     );
     expect(body).toContain(`Run: ${RUN_URL}\nBuild: \`${BUILD}\``);
-    expect(body).toContain(`## Writer log\n\n\`\`\`\`text\n${writer.stdout.trimEnd()}\n\`\`\`\``);
+    expect(body).toContain(`## Writer log\n\n\`\`\`text\n${writer.stdout.trimEnd()}\n\`\`\``);
     expect(body).toContain("## Delivery log");
 
     // The printer: the one line the public log carries for the row.
