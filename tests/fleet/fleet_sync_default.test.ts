@@ -471,6 +471,29 @@ describe("main", () => {
     });
   });
 
+  // GitHub answers 404 for a label that is already off, which is what a retried removal gets once its first reply was
+  // lost: stopping there would leave the note telling the reader a label is on.
+  test("a label removal answered 404 is the label off and the note is cleared; any other refusal is still a warning", () => {
+    const existing = [own(5, note(...TWO))];
+    const left = { files: workflow, labels: [PUBLIC], events: botAdded, comments: existing };
+    const lostReply = { [labelRemoved.path]: [{ status: 502 }, { status: 404 }] };
+    expect(run("gone", { ...left, replies: lostReply })).toEqual({
+      exitCode: 0,
+      stdout: notice(
+        "removed fleet-sync:public",
+        "removed the comment: no path here reaches the fleet through a sync",
+      ),
+      stderr: "",
+      calls: [...READS, labelRemoved, labelRemoved, COMMENTS_READ, deleted(5)],
+    });
+    expect(run("held", { ...left, replies: { [labelRemoved.path]: [{ status: 403 }] } })).toEqual({
+      exitCode: 0,
+      stdout: warning(`${ISSUE}/labels/fleet-sync%253Apublic: HTTP 403`),
+      stderr: "",
+      calls: [...READS, labelRemoved],
+    });
+  });
+
   test("a failed read, a refused write, or a capped listing is a warning and exit 0, and nothing is deleted", () => {
     const existing = [own(5, note("files.yml"))];
     const fresh = { files: trigger, labels: [], events: [], comments: [] };

@@ -232,6 +232,18 @@ async function write(
   if (sent.kind !== "ok") throw new Error(`${endpoint}: ${unansweredReason(sent)}`);
 }
 
+/** The label off the pull request. A 404 is the label already off, as a removal retried after a lost reply finds it.
+ *
+ * @throws {Error} GitHub refused the removal otherwise, or did not answer it
+ */
+async function removeLabel(github: GitHubClient, endpoint: string): Promise<void> {
+  const removed = await github.send("DELETE", endpoint);
+  if (removed.kind === "ok") return;
+  if (removed.kind === "refused" && removed.status === 404) return;
+
+  throw new Error(`${endpoint}: ${unansweredReason(removed)}`);
+}
+
 async function applyLabel(
   github: GitHubClient,
   issue: string,
@@ -243,7 +255,7 @@ async function applyLabel(
     return `added ${publicLabel}`;
   }
   if (action === "remove") {
-    await write(github, "DELETE", `${issue}/labels/${encodeURIComponent(publicLabel)}`);
+    await removeLabel(github, `${issue}/labels/${encodeURIComponent(publicLabel)}`);
     return `removed ${publicLabel}`;
   }
   return "label kept";

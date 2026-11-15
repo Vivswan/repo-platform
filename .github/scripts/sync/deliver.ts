@@ -79,6 +79,9 @@ const listedPull = z.object({
 /** The pull request a create answers with. */
 const createdPull = z.object({ number: z.number() });
 
+/** A branch's ref as a read answers it: present, whatever it points at. */
+const branchRef = z.object({ ref: z.string() });
+
 export function prTitle(build: string): string {
   return `${SYNC_PR_TITLE_PREFIX} ${build.slice(0, 12)}`;
 }
@@ -500,6 +503,22 @@ class Delivery {
     );
   }
 
+  /** The automation branch gone from the target: deleted now, or confirmed absent after a refused deletion. */
+  async deleteAutomationBranch(reason: string): Promise<void> {
+    const deleted = await this.send("DELETE", `git/refs/heads/${AUTOMATION_BRANCH}`);
+    if (deleted.kind === "ok") return;
+
+    if (deleted.kind !== "refused" || deleted.status !== 422) failDelivery(reason);
+
+    // GitHub answers 422 for a ref a rule protects and for one a retried deletion already removed: only the ref's own 404 tells them apart.
+    const path = `git/ref/heads/${AUTOMATION_BRANCH}`;
+    const ref = await this.answered(
+      `GET ${path}`,
+      this.github.get(`repos/${this.target}/${path}`, branchRef),
+    );
+    if (ref.kind !== "not-found") failDelivery(reason);
+  }
+
   /** A selection reverted on the default branch, say, leaves the open sync PR carrying stale files that must never merge. */
   async closeObsoletePr(): Promise<void> {
     const existing = await this.openPr();
@@ -514,7 +533,7 @@ class Delivery {
       reason,
     );
     await this.mustSend("PATCH", `pulls/${existing.number}`, { state: "closed" }, reason);
-    await this.mustSend("DELETE", `git/refs/heads/${AUTOMATION_BRANCH}`, {}, reason);
+    await this.deleteAutomationBranch(reason);
 
     this.log(`closed the obsolete sync pull request #${existing.number} and deleted its branch`);
   }

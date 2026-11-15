@@ -47,6 +47,7 @@ const REPORT = "## Sync report\n\n| Build |\n| --- |\n| x |\n";
 const REPO = `repos/${TARGET}`;
 const AUTOMATION = "automation/repo-platform";
 const DELETE_BRANCH = `DELETE ${REPO}/git/refs/heads/${AUTOMATION}`;
+const BRANCH_REF = `${REPO}/git/ref/heads/${AUTOMATION}`;
 const REAL_GIT = Bun.which("git") ?? "git";
 
 const GIT_LINES = [
@@ -285,6 +286,17 @@ describe("deliver.ts", () => {
       merge: [DISARM],
       close: CLOSE,
     },
+    {
+      // GitHub answers 422 for a ref that is already gone: a deletion that landed must not file a failure for a close that worked.
+      reason:
+        "the branch's deletion landed but its reply was lost, and the retry answers 422 for a ref that is gone",
+      options: {
+        pulls: [ownPull(12)],
+        replies: { [DELETE_BRANCH]: [{ status: 502 }, { status: 422 }] },
+      },
+      merge: [],
+      close: [...CLOSE, CLOSE[2]],
+    },
   ])("a tree the build already matches is unchanged: $reason", ({ options, merge, close }) => {
     const result = run(options);
     silent(result);
@@ -335,6 +347,19 @@ describe("deliver.ts", () => {
   // Each step of the cleanup fails closed with its own reason and nothing runs after it; a listing GitHub did not
   // really give (an outage, another shape) is a failure too, never "no PR".
   const ARMED: Options = { pulls: [ownPull(12, true)] };
+  const BRANCH_REF_PRESENT: FakeReply = {
+    status: 200,
+    body: {
+      ref: `refs/heads/${AUTOMATION}`,
+      node_id: "REF_node",
+      url: `https://api.github.test/${BRANCH_REF}`,
+      object: {
+        type: "commit",
+        sha: BUILD,
+        url: `https://api.github.test/${REPO}/git/commits/${BUILD}`,
+      },
+    },
+  };
   test.each<{ reason: string; options: Options; failure: string; last: string }>([
     {
       reason: "the listing answers 502",
@@ -369,9 +394,22 @@ describe("deliver.ts", () => {
     {
       reason:
         "the branch's deletion is refused (a 422: a rule protects the branch, which is still there)",
-      options: { ...ARMED, replies: { [DELETE_BRANCH]: [{ status: 422 }] } },
+      options: {
+        ...ARMED,
+        replies: { [DELETE_BRANCH]: [{ status: 422 }], [BRANCH_REF]: [BRANCH_REF_PRESENT] },
+      },
       failure: "closing the obsolete sync pull request failed",
-      last: DELETE_BRANCH,
+      last: BRANCH_REF,
+    },
+    {
+      reason:
+        "the branch's deletion answers 422 and the ref cannot be read (a 502): unknown is not gone",
+      options: {
+        ...ARMED,
+        replies: { [DELETE_BRANCH]: [{ status: 422 }], [BRANCH_REF]: [{ status: 502 }] },
+      },
+      failure: "closing the obsolete sync pull request failed",
+      last: BRANCH_REF,
     },
   ])(
     "an unchanged tree whose obsolete-PR cleanup fails ($reason) files the failure and stops there",

@@ -191,14 +191,7 @@ describe("GitHubClient", () => {
       [
         "a PATCH is retried like a read: twice leaves the same state",
         "PATCH",
-        [BAD_GATEWAY, CREATED],
-        { kind: "ok", value: { number: 7 } },
-        2,
-      ],
-      [
-        "a DELETE is retried like a read",
-        "DELETE",
-        [BAD_GATEWAY, CREATED],
+        [BAD_GATEWAY, { status: 200, body: { number: 7 } }],
         { kind: "ok", value: { number: 7 } },
         2,
       ],
@@ -237,6 +230,18 @@ describe("GitHubClient", () => {
 
       expect(await client.send(method, ISSUES, { title: "t" }, issue)).toEqual(expected);
       expect(github.calls().length).toBe(attempts);
+    });
+
+    test("a DELETE is retried like a read, and its 204 carries no value", async () => {
+      const { client, github } = over({
+        [`DELETE ${ISSUES}/7/labels`]: [BAD_GATEWAY, { status: 204 }],
+      });
+
+      expect(await client.send("DELETE", `${ISSUES}/7/labels`)).toEqual({
+        kind: "ok",
+        value: undefined,
+      });
+      expect(github.calls().length).toBe(2);
     });
 
     test("the fields travel as the JSON body under the token, and a bodiless 204 is ok with no value", async () => {
