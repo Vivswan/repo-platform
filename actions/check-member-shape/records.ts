@@ -3,6 +3,7 @@
 // that belong to it. The TypeScript is read by oxc-parser (TypeScript 7 is the native port and exposes no in-process
 // compiler API); line numbers come from offsets through lines-and-columns.
 
+import { extname } from "node:path";
 import type {
   ClassBody,
   Node,
@@ -105,7 +106,7 @@ const RECORD_KINDS: Readonly<Record<RecordBody["type"], RecordKind>> = {
 };
 
 /** TypeScript in every flavor oxc reads as such. */
-const TS_EXTENSIONS: ReadonlySet<string> = new Set(["ts", "mts", "cts", "tsx"]);
+const TS_EXTENSIONS: ReadonlySet<string> = new Set([".ts", ".mts", ".cts", ".tsx"]);
 
 /** The member node types that are methods, an accessor's `kind` aside. */
 const METHOD_TYPES: ReadonlySet<string> = new Set([
@@ -418,7 +419,7 @@ function attribute(
 
 /** The judged extensions: TypeScript in every flavor oxc reads as such. */
 export function isTypeScript(relPath: string): boolean {
-  return TS_EXTENSIONS.has(relPath.slice(relPath.lastIndexOf(".") + 1));
+  return TS_EXTENSIONS.has(extname(relPath));
 }
 
 /** The record model of one file, or null when oxc cannot parse it (a file the check warns about, never judges).
