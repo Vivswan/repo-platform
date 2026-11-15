@@ -1,13 +1,15 @@
 #!/usr/bin/env bun
 // The one writer of the upstream pins: a commit pin (an upstream ref's sha in files.yml, fetched at by every sync) moves
 // to its repository's HEAD; a release pin (a module's version dotfile under files/, read by the sync, the operator's
-// workflows, and the composite actions) moves to its repository's latest release. The workflow around this script runs
-// it once per kind and commits each kind on its own PR branch, so a toolchain bump is never held behind a gitignore diff.
+// workflows, and the composite actions) moves to its repository's latest release; a tool pin (a release archive this
+// repository's own workflow installs by version and sha256) moves to its repository's latest release and that archive's
+// digest. The workflow around this script runs it once per kind and commits each kind on its own PR branch, so a
+// toolchain bump is never held behind a gitignore diff.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { setOutput } from "@actions/core";
-import { isScalar, parseDocument, visit } from "yaml";
+import { CST, isScalar, Parser, parseDocument, visit } from "yaml";
 import { z } from "zod";
 import {
   type FilesConfig,
@@ -25,12 +27,62 @@ import { type Fetch, fetchText, fetchUpstream, RAW_HOST } from "../sync/writer/u
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
-export const PIN_KINDS = ["commit", "release"] as const;
+export const PIN_KINDS = ["commit", "release", "tool"] as const;
 export type PinKind = (typeof PIN_KINDS)[number];
 
 const headCommit = z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/) });
 
 const latestReleaseReply = z.object({ tag_name: z.string() });
+
+const latestAssetsReply = latestReleaseReply.extend({
+  assets: z.array(z.object({ name: z.string(), digest: z.string().nullable() })),
+});
+
+/** A release archive one workflow step downloads and checks against a recorded sha256, both spelled in that step's `env`. */
+interface ToolPin {
+  /** What the PR calls the tool. */
+  name: string;
+
+  /** The github.com repository whose latest release the pin follows. */
+  repository: string;
+
+  /** The release tag, with `{version}` where the version stands. */
+  tag: string;
+
+  /** The archive's file name in the release, with `{version}` wherever it spells the version. */
+  asset: string;
+
+  /** The workflow that installs the tool. */
+  file: string;
+
+  /** The `env` key holding the version. */
+  versionKey: string;
+
+  /** The `env` key holding the archive's sha256. */
+  sha256Key: string;
+}
+
+/** The tools this repository's own CI installs from a release archive. */
+const TOOL_PINS: ToolPin[] = [
+  {
+    name: "pinact",
+    repository: "suzuki-shunsuke/pinact",
+    tag: "v{version}",
+    asset: "pinact_linux_amd64.tar.gz",
+    file: ".github/workflows/ci.yml",
+    versionKey: "PINACT_VERSION",
+    sha256Key: "PINACT_SHA256",
+  },
+  {
+    name: "vale",
+    repository: "vale-cli/vale",
+    tag: "v{version}",
+    asset: "vale_{version}_Linux_64-bit.tar.gz",
+    file: ".github/workflows/ci.yml",
+    versionKey: "VALE_VERSION",
+    sha256Key: "VALE_SHA256",
+  },
+];
 
 /** HEAD of the default branch.
  *
@@ -94,7 +146,7 @@ export function repin(
     .reduce((out, [start, end]) => `${out.slice(0, start)}${to}${out.slice(end)}`, text);
 }
 
-/** `name` is the repository of a commit pin or the module of a release pin. `diffs` maps each fetched path whose body,
+/** `name` is the repository of a commit pin, the module of a release pin, or the tool of a tool pin. `diffs` maps each fetched path whose body,
  *  normalized as the writer fetches it, differs between the two commits to its unified diff; `refreshCommitPins`, the
  *  one constructor, builds a commit bump only from a non-empty map. */
 export type Bump =
@@ -106,7 +158,7 @@ export type Bump =
       diffs: Map<string, string>;
     }
   | {
-      kind: "release";
+      kind: "release" | "tool";
       name: string;
       from: string;
       to: string;
@@ -208,15 +260,61 @@ function releasePins(config: FilesConfig, root: string): ReleasePin[] {
   );
 }
 
-/** releases/latest never returns a prerelease, so this is the latest stable. */
-async function latestRelease(pin: ModulePin, github: GitHubClient): Promise<string> {
-  const latest = await github.get(`repos/${pin.repository}/releases/latest`, latestReleaseReply);
+/** releases/latest never returns a prerelease, so this is the latest stable; `version` is what its tag spells under the pin's template. */
+async function latestRelease<T extends { tag_name: string }>(
+  pin: Pick<ModulePin, "repository" | "tag">,
+  reply: z.ZodType<T>,
+  github: GitHubClient,
+): Promise<T & { version: string }> {
+  const latest = await github.get(`repos/${pin.repository}/releases/latest`, reply);
   if (latest.kind !== "ok") {
     throw new Error(
       `${pin.repository}: releases/latest could not be read (${unansweredReason(latest)})`,
     );
   }
-  return tagVersion(latest.value.tag_name, pin.tag, `${pin.repository} latest release tag`);
+  const version = tagVersion(
+    latest.value.tag_name,
+    pin.tag,
+    `${pin.repository} latest release tag`,
+  );
+  return { ...latest.value, version };
+}
+
+/** The one scalar a workflow spells under `key`, as the token `CST.setScalarValue` rewrites in place.
+ *
+ * @throws {Error} the key is spelled nowhere, or more than once
+ */
+function envScalar(workflow: CST.Token[], key: string, file: string): CST.FlowScalar {
+  const found: CST.FlowScalar[] = [];
+  for (const token of workflow) {
+    if (token.type !== "document") continue;
+
+    CST.visit(token, (item) => {
+      if (!CST.isScalar(item.key) || item.key.source !== key) return;
+      if (item.value?.type === "scalar") found.push(item.value);
+    });
+  }
+  if (found.length !== 1) {
+    throw new Error(`${file}: ${key} is spelled ${found.length} times, not once`);
+  }
+
+  return found[0];
+}
+
+/** The sha256 GitHub recorded for the pinned archive of a release.
+ *
+ * @throws {Error} the release holds no such asset, or its digest is null: GitHub recorded none for an asset uploaded before it kept them
+ */
+function assetSha256(
+  assets: z.infer<typeof latestAssetsReply>["assets"],
+  name: string,
+  repository: string,
+): string {
+  const digest = assets.find((asset) => asset.name === name)?.digest;
+  const sha256 = /^sha256:([0-9a-f]{64})$/.exec(digest ?? "")?.[1];
+  if (sha256 === undefined)
+    throw new Error(`${repository}: the latest release records no sha256 for ${name}`);
+  return sha256;
 }
 
 const shown = (bump: Bump, sha: string) => (bump.kind === "commit" ? sha.slice(0, 7) : sha);
@@ -229,14 +327,14 @@ export function proseBumps(bumps: Bump[]): string {
 
 function majorJumps(bumps: Bump[]): string {
   return bumps
-    .filter((b) => b.kind === "release" && b.from.split(".")[0] !== b.to.split(".")[0])
+    .filter((b) => b.kind !== "commit" && b.from.split(".")[0] !== b.to.split(".")[0])
     .map((b) => `${b.name} ${b.from.split(".")[0]} -> ${b.to.split(".")[0]}`)
     .join(", ");
 }
 
 function section(bump: Bump): string {
   const head = `## ${bump.name}: \`${shown(bump, bump.from)}\` -> \`${shown(bump, bump.to)}\``;
-  if (bump.kind === "release") return head;
+  if (bump.kind !== "commit") return head;
   const blocks = [...bump.diffs].map(
     ([path, diff]) => `### ${path}\n\n\`\`\`\`diff\n${diff}\n\`\`\`\``,
   );
@@ -248,6 +346,7 @@ const FOOTER: Record<PinKind, string> = {
     "The next sync renders these files wherever files.yml names them as a source or a block, one sync PR per repository whose rendered bytes moved (auto-merged when clean). Merging this moves the stable tag once green.",
   release:
     "The next sync writes each dotfile to every repository selecting its module (docs/toolchains.md). Merging this moves the stable tag once green.",
+  tool: "This pull request's own checks install each tool at its new version, by the sha256 GitHub records for the release archive, so a green run is the proof the bump works. Nothing here reaches the fleet (docs/toolchains.md).",
 };
 
 export function prBody(kind: PinKind, bumps: Bump[]): string {
@@ -308,7 +407,7 @@ async function refreshReleasePins(
 ): Promise<Bump[]> {
   const moved: (ReleasePin & { latest: string })[] = [];
   for (const pin of releasePins(config, root)) {
-    const latest = await latestRelease(pin, github);
+    const { version: latest } = await latestRelease(pin, latestReleaseReply, github);
     if (decideBump(pin.version, latest, pin.module) === "current") {
       console.log(`${pin.module}: ${pin.version} is current`);
       continue;
@@ -333,10 +432,42 @@ async function refreshReleasePins(
   }));
 }
 
+/** A tool's version and sha256 move together, each in the `env` of the step that installs it. */
+async function refreshToolPins(root: string, github: GitHubClient): Promise<Bump[]> {
+  const moved: (ToolPin & { from: string; to: string; digest: string })[] = [];
+  for (const pin of TOOL_PINS) {
+    const workflow = [...new Parser().parse(readFileSync(join(root, pin.file), "utf-8"))];
+    const from = versionFrom(
+      CST.resolveAsScalar(envScalar(workflow, pin.versionKey, pin.file)).value,
+      /^(\d+\.\d+\.\d+)$/,
+      `${pin.file} ${pin.versionKey}`,
+    );
+    const latest = await latestRelease(pin, latestAssetsReply, github);
+    if (decideBump(from, latest.version, pin.name) === "current") {
+      console.log(`${pin.name}: ${from} is current`);
+      continue;
+    }
+    const asset = pin.asset.replaceAll(PIN_VERSION_TOKEN, latest.version);
+    const digest = assetSha256(latest.assets, asset, pin.repository);
+    console.log(`${pin.name}: ${from} -> ${latest.version}`);
+    moved.push({ ...pin, from, to: latest.version, digest });
+  }
+  for (const pin of moved) {
+    const path = join(root, pin.file);
+    const workflow = [...new Parser().parse(readFileSync(path, "utf-8"))];
+    CST.setScalarValue(envScalar(workflow, pin.versionKey, pin.file), pin.to);
+    CST.setScalarValue(envScalar(workflow, pin.sha256Key, pin.file), pin.digest);
+    writeFileSync(path, workflow.map((token) => CST.stringify(token)).join(""));
+  }
+  return moved.map(({ name, from, to }) => ({ kind: "tool", name, from, to }));
+}
+
 /** Moves every pin of the kind that upstream moved and returns the bumps. Every fetch and every verdict come before any
  *  write: an unreachable upstream or a downgrade aborts before a pin moves, so "nothing moved" (which lets the workflow
  *  close a stale refresh PR) is never a view that could not look. */
 export async function refresh({ kind, root, host, fetch, github }: Refresh): Promise<Bump[]> {
+  if (kind === "tool") return refreshToolPins(root, github);
+
   const path = join(root, "files.yml");
   const text = readFileSync(path, "utf-8");
   const config = parseFilesConfig(text);
