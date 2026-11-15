@@ -7,5 +7,8 @@
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
+      # biome exits non-zero on a finding it cannot fix, after writing the rest, and the commit must still follow.
+      # The pull request's own checks report the finding.
       - name: Format (biome)
+        continue-on-error: true
         run: bun x @biomejs/biome@2.6.4 check --write .
