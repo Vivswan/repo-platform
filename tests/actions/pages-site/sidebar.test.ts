@@ -7,12 +7,16 @@ import {
   sidebarTrees,
 } from "../../../actions/pages-site/.vitepress/sidebar.ts";
 
-function source(pages: Record<string, [string, number | null, string | null]>): PageSource {
+/** A fixture page: its h1, `order`, `group`, and the `title` key where the front matter states one. */
+type FixturePage = [heading: string, order: number | null, group: string | null, titleKey?: string];
+
+function source(pages: Record<string, FixturePage>): PageSource {
   return {
     page(file): PageMeta {
       const page = pages[file];
       if (page === undefined) throw new Error(`no fixture page ${file}`);
-      return { title: page[0], order: page[1], group: page[2] };
+      const declaredTitle = page[3] ?? null;
+      return { title: declaredTitle ?? page[0], declaredTitle, order: page[1], group: page[2] };
     },
   };
 }
@@ -144,6 +148,148 @@ describe("deriveSidebar", () => {
       { text: "C", link: "/c" },
       { text: "Later", items: [{ text: "E", link: "/e" }] },
       { text: "Sub", collapsed: false, items: [{ text: "X", link: "/sub/x" }] },
+    ]);
+  });
+
+  // Nothing else orders directories: without the README's `order` they fall back to folder-name order (About, Run,
+  // Start, Use) with nothing red. The README row inside each directory stays first under its own title.
+  test("directories take their place from their README's `order`, and their label from its `title` key", () => {
+    const files = [
+      "README.md",
+      "about/README.md",
+      "run/README.md",
+      "run/deploy.md",
+      "start/README.md",
+      "use/README.md",
+    ];
+    const pages = source({
+      "README.md": plain("Home"),
+      "about/README.md": ["About", 4, null],
+      "run/README.md": ["Run", 3, null],
+      "run/deploy.md": ["Deploy", 1, null],
+      "start/README.md": ["Start", 1, null, "Start here"],
+      "use/README.md": ["Use", 2, null],
+    });
+    expect(deriveSidebar(files, pages)).toEqual([
+      { text: "Home", link: "/" },
+      { text: "Start here", collapsed: false, items: [{ text: "Start here", link: "/start/" }] },
+      { text: "Use", collapsed: false, items: [{ text: "Use", link: "/use/" }] },
+      {
+        text: "Run",
+        collapsed: false,
+        items: [
+          { text: "Run", link: "/run/" },
+          { text: "Deploy", link: "/run/deploy" },
+        ],
+      },
+      { text: "About", collapsed: false, items: [{ text: "About", link: "/about/" }] },
+    ]);
+  });
+
+  // One ranked list per level, so a page and a directory compare as two pages do: a second list for directories would
+  // put every page before `first/` whatever the numbers say. `tie/` ranks with tie.md and follows it by title.
+  test("a ranked directory and a ranked page share one list: `order` ascending, ties by the title shown", () => {
+    const files = [
+      "README.md",
+      "first/README.md",
+      "last.md",
+      "loose.md",
+      "plain/x.md",
+      "tie.md",
+      "tie/README.md",
+    ];
+    const pages = source({
+      "README.md": plain("Home"),
+      "first/README.md": ["First", 1, null],
+      "last.md": ["Last", 9, null],
+      "loose.md": plain("Loose"),
+      "plain/x.md": plain("X"),
+      "tie.md": ["Alpha", 5, null],
+      "tie/README.md": ["Tie", 5, null, "Beta"],
+    });
+    expect(deriveSidebar(files, pages).map((item) => item.text)).toEqual([
+      "Home",
+      "First",
+      "Alpha",
+      "Beta",
+      "Last",
+      "Loose",
+      "Plain",
+    ]);
+  });
+
+  // Each row is a way a README could move its directory without the author asking: an h1 relabelling it, a `group`
+  // read at two levels, an include root's article (whose `order` already places it inside its directory), an index.md.
+  test("only a landing README.md's `order` and `title` keys reach its directory; a `title` alone relabels it in place", () => {
+    const files = [
+      "README.md",
+      "alpha/README.md",
+      "beta/README.md",
+      "beta/b.md",
+      "gamma/README.md",
+      "indexed/index.md",
+      "manuals/topic/README.md",
+      "page.md",
+    ];
+    const pages = source({
+      "README.md": plain("Home"),
+      "alpha/README.md": ["Heading of alpha", null, null],
+      "beta/README.md": ["Beta", null, "Inside"],
+      "beta/b.md": plain("B"),
+      "gamma/README.md": ["Gamma", null, null, "Renamed"],
+      "indexed/index.md": ["Indexed", 1, null, "Indexed first"],
+      "manuals/topic/README.md": ["Topic", 1, null, "Topic first"],
+      "page.md": ["Inside", 1, null],
+    });
+    expect(deriveSidebar(files, pages, { indexPages: ["manuals/topic/README.md"] })).toEqual([
+      { text: "Home", link: "/" },
+      { text: "Inside", link: "/page" },
+      {
+        text: "Alpha",
+        collapsed: false,
+        items: [{ text: "Heading of alpha", link: "/alpha/" }],
+      },
+      {
+        text: "Beta",
+        collapsed: false,
+        items: [
+          { text: "Inside", items: [{ text: "Beta", link: "/beta/" }] },
+          { text: "B", link: "/beta/b" },
+        ],
+      },
+      { text: "Renamed", collapsed: false, items: [{ text: "Renamed", link: "/gamma/" }] },
+      {
+        text: "Indexed",
+        collapsed: false,
+        items: [{ text: "Indexed first", link: "/indexed/" }],
+      },
+      {
+        text: "Manuals",
+        collapsed: false,
+        items: [
+          {
+            text: "Topic",
+            collapsed: false,
+            items: [{ text: "Topic first", link: "/manuals/topic/" }],
+          },
+        ],
+      },
+    ]);
+  });
+
+  // A group heading and a directory can now sit side by side under one text. Matching the heading by its text would
+  // file the page inside the directory.
+  test("a page whose `group` reads like the directory before it gets its own heading", () => {
+    const files = ["README.md", "member.md", "start/README.md"];
+    const pages = source({
+      "README.md": plain("Home"),
+      "member.md": ["Member", 2, "Start here"],
+      "start/README.md": ["Start", 1, null, "Start here"],
+    });
+    expect(deriveSidebar(files, pages)).toEqual([
+      { text: "Home", link: "/" },
+      { text: "Start here", collapsed: false, items: [{ text: "Start here", link: "/start/" }] },
+      { text: "Start here", items: [{ text: "Member", link: "/member" }] },
     ]);
   });
 
