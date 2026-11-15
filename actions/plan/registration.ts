@@ -134,8 +134,7 @@ const label = z
     "must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters",
   );
 
-/** A name the hook can receive: the shape GitHub stores a variable's name in, so anything else is a typo, less the two the runner owns.
- *  PATH unset is exported empty, which leaves the next step unable to find a command, and the runner refuses NODE_OPTIONS in GITHUB_ENV. */
+/** A name the hook can receive: GitHub's shape for a variable name, less PATH (exported empty when unset, it breaks command lookup) and NODE_OPTIONS (refused in GITHUB_ENV). */
 const variableName = z
   .string()
   .regex(
