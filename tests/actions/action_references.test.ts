@@ -8,7 +8,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { PLATFORM_OWNER, PLATFORM_SLUG } from "../../actions/shared/platform.ts";
+import { PLATFORM_SLUG } from "../../actions/shared/platform.ts";
 import { type Action, REPO_ROOT, type Step } from "../shared/action_step";
 import {
   type ContextRead,
@@ -17,6 +17,7 @@ import {
   expressionsIn,
   parseExpression,
 } from "../shared/github_expression";
+import { shippedSource } from "../shared/shipped_source";
 
 const ACTIONS_DIR = join(REPO_ROOT, "actions");
 const ACTION_NAMES = readdirSync(ACTIONS_DIR)
@@ -38,11 +39,7 @@ interface Caller {
 }
 
 function loadYaml(rel: string): unknown {
-  const text = readFileSync(join(REPO_ROOT, rel), "utf8")
-    .replace(/^\{\{blocks\}\}$/gm, "")
-    .replaceAll("{{github_username}}", PLATFORM_OWNER)
-    .replace(/\{\{(\w+)\}\}/g, "$1");
-  return parseYaml(text);
+  return parseYaml(shippedSource(rel));
 }
 
 const loadAction = (name: string): Action => loadYaml(`actions/${name}/action.yml`) as Action;

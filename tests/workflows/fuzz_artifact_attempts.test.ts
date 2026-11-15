@@ -4,10 +4,9 @@
 // alone keeps the fuzz job's outputs and artifacts of the earlier attempt, which the report must still read.
 
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { interpolate } from "../shared/github_expression.ts";
+import { shippedSource } from "../shared/shipped_source.ts";
 
 interface Step {
   name?: string;
@@ -18,12 +17,7 @@ interface Workflow {
 }
 
 const { fuzz, report } = (
-  parseYaml(
-    readFileSync(
-      join(import.meta.dir, "../../files/fuzzer/.github/workflows/nightly-fuzz.yml"),
-      "utf8",
-    ).replaceAll(/\{\{[\w]+\}\}/g, "placeholder"),
-  ) as Workflow
+  parseYaml(shippedSource("files/fuzzer/.github/workflows/nightly-fuzz.yml")) as Workflow
 ).jobs;
 
 const inputs = (steps: Step[], name: string): Record<string, string> =>
