@@ -13,8 +13,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { fill } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { interpolate } from "../../shared/github_expression";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -65,16 +65,19 @@ function toolsDir(root: string): string {
 
 function runStep(
   step: Step,
-  fills: Record<string, string>,
+  context: Record<string, string>,
   path: string,
   root: string,
 ): { exitCode: number; stdout: string; outputs: Record<string, string> } {
   const outputs = join(root, `${String(step.id)}-outputs.txt`);
   writeFileSync(outputs, "");
   const env = Object.fromEntries(
-    Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [k, fill(v, fills)]),
+    Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [
+      k,
+      interpolate(v, context),
+    ]),
   );
-  const proc = boundedSpawnSync([...RUNNER_BASH, fill(String(step.run), fills)], {
+  const proc = boundedSpawnSync([...RUNNER_BASH, interpolate(String(step.run), context)], {
     env: { ...env, PATH: `${path}:${toolsDir(root)}`, GITHUB_OUTPUT: outputs },
   });
   return {
@@ -131,7 +134,7 @@ describe("actions/bun-setup", () => {
     mkdirSync(join(root, "a/b/c"), { recursive: true });
     plant(root);
     const start = from(root);
-    const locate = runStep(stepById("locate"), { "${{ inputs.from }}": start }, BUN_DIR, root);
+    const locate = runStep(stepById("locate"), { "inputs.from": start }, BUN_DIR, root);
     expect([locate.exitCode, locate.outputs]).toEqual([exitCode, outputs(root)]);
     if (exitCode !== 0) expect(locate.stdout).toContain(error(start));
   });
@@ -212,18 +215,13 @@ describe("actions/bun-setup", () => {
     const pin = join(root, ".bun-version");
     writeFileSync(pin, `${Bun.version}\n`);
     const path = pathFor(onPath, root);
-    const probe = runStep(
-      stepById("probe"),
-      { "${{ steps.locate.outputs.file }}": pin },
-      path,
-      root,
-    );
+    const probe = runStep(stepById("probe"), { "steps.locate.outputs.file": pin }, path, root);
     expect([probe.exitCode, probe.outputs]).toEqual([0, { pinned }]);
     const resolve = runStep(
       stepById("resolve"),
       {
-        "${{ steps.locate.outputs.file }}": pin,
-        "${{ steps.setup-bun.outcome }}": outcome,
+        "steps.locate.outputs.file": pin,
+        "steps.setup-bun.outcome": outcome,
       },
       path,
       root,
