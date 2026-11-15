@@ -19,6 +19,7 @@ import {
 } from "../post-green/fleet_sync_marker.ts";
 import { requireEnv } from "../shared/gha.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
+import { codeSpan } from "../shared/markdown_code.ts";
 import { BOT_LOGIN, issueCommentsPages, stickyComment } from "../shared/sticky_comment.ts";
 import { loadLayer } from "../sync/writer/settings_layers.ts";
 import { captureNetwork } from "./discovery.ts";
@@ -89,7 +90,7 @@ function noteFrame(known: FleetSyncLabels, note: Note): [lead: string, closing: 
 
 export function noteBody(paths: readonly string[], known: FleetSyncLabels, note: Note): string {
   const [lead, closing] = noteFrame(known, note);
-  const listed = paths.slice(0, LISTED_PATHS).map((path) => `- \`${path}\``);
+  const listed = paths.slice(0, LISTED_PATHS).map((path) => `- ${codeSpan(path)}`);
   if (paths.length > LISTED_PATHS) listed.push(`- and ${paths.length - LISTED_PATHS} more`);
   return [MARKER, lead, "", ...listed, "", `${closing} Details: [all-green.md](${DOCS}).`, ""].join(
     "\n",

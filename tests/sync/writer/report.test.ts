@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import MarkdownIt from "markdown-it";
 import {
   buildReport,
   holdReasons,
@@ -175,6 +176,23 @@ describe("renderReport", () => {
         .filter((line) => line.startsWith("| `a"))[0]
         .split("|").length,
     ).toBe("| `a\\|b.md` | managed | held | x \\| y |".split("|").length);
+  });
+
+  // CommonMark: a code span closes on a backtick run of its own length, so a path carrying backticks under single
+  // ticks ends the span early and the rest of the cell renders as prose.
+  test("a path carrying backticks stays whole inside its code span", () => {
+    const text = renderReport(
+      buildReport({
+        ...QUIET,
+        written: [
+          { path: "a`b.md", class: "managed", change: "updated", detail: "" },
+          { path: "`c``.md", class: "managed", change: "updated", detail: "" },
+        ],
+      }),
+    );
+    const rendered = new MarkdownIt().render(text);
+    expect(rendered).toContain("<td><code>a`b.md</code></td>");
+    expect(rendered).toContain("<td><code>`c``.md</code></td>");
   });
 
   // Markdown injection: a registration value, a mirror target, or a replaced path carrying a newline could open a

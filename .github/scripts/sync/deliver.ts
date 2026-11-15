@@ -20,6 +20,7 @@ import { NETWORK_TIMEOUT_MS, readDispatchBranch } from "../fleet/discovery.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
+import { fenced } from "../shared/markdown_code.ts";
 import { capture, redactText } from "../shared/proc.ts";
 import { tokenUrl } from "../shared/token_url.ts";
 import { readMigrated } from "./migrate.ts";
@@ -59,11 +60,6 @@ export function tail(path: string, bytes = TAIL_BYTES): string {
   return size > bytes ? `... (${size - bytes} earlier bytes not shown)\n${cut}` : cut;
 }
 
-export function fenceFor(text: string): string {
-  const longest = (text.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0);
-  return "`".repeat(Math.max(4, longest + 1));
-}
-
 export function failureBody(input: {
   runUrl: string;
   build: string;
@@ -74,8 +70,7 @@ export function failureBody(input: {
 }): string {
   const block = (title: string, text: string) => {
     if (text === "") return [];
-    const fence = fenceFor(text);
-    return ["", `## ${title}`, "", `${fence}text`, text.replace(/\n$/, ""), fence];
+    return ["", `## ${title}`, "", ...fenced(text.replace(/\n$/, ""), "text")];
   };
   return [
     `The ${PLATFORM_NAME} sync for this repository failed: ${input.reason}.`,

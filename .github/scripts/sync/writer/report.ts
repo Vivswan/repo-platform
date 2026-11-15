@@ -3,6 +3,7 @@
 import { createTwoFilesPatch, FILE_HEADERS_ONLY } from "diff";
 import { z } from "zod";
 import type { FileClass } from "../../../../actions/plan/files_config.ts";
+import { codeSpan, fenced } from "../../shared/markdown_code.ts";
 import type { MirrorRow } from "./mirrors.ts";
 import type { RetireRow } from "./retire.ts";
 import type { Change } from "./write_managed.ts";
@@ -143,26 +144,13 @@ export function unifiedDiff(
 const oneLine = (text: string) => text.replace(/[\r\n]+/g, " ");
 
 /** An inline code span, flattened first: a newline would end it. */
-const code = (text: string) => `\`${oneLine(text)}\``;
+const code = (text: string) => codeSpan(oneLine(text));
 
 /** A pipe inside a cell would split it; the escape keeps the column count. */
 const cell = (text: string) => oneLine(text).replaceAll("|", "\\|");
 
 /** A list item, flattened first: a newline would end it. */
 const bullet = (text: string) => `- ${oneLine(text)}`;
-
-/** A diff line quoting the target's own content may open with backticks
- *  (a context line is its text behind one space), so the fence is one
- *  backtick longer than any such run and the content cannot close it.
- *  Markdown ends a line at a bare CR too, which the diff keeps inside a
- *  line, so the scan splits on every line ending. */
-function fencedDiff(diff: string): string[] {
-  const longest = diff
-    .split(/\r\n|\r|\n/)
-    .reduce((max, line) => Math.max(max, /^ {0,3}(`+)/.exec(line)?.[1].length ?? 0), 2);
-  const fence = "`".repeat(longest + 1);
-  return [`${fence}diff`, diff, fence];
-}
 
 function table(header: string[], rows: string[][]): string {
   const line = (cells: string[]) => `| ${cells.map(cell).join(" | ")} |`;
@@ -200,7 +188,7 @@ export function renderReport(report: SyncReport): string {
       "> These files held content no manifest record vouched for. The platform version replaced it; the text it replaced is below.",
     );
     for (const row of report.replaced) {
-      parts.push("", `#### ${code(row.path)}`, "", ...fencedDiff(row.diff));
+      parts.push("", `#### ${code(row.path)}`, "", ...fenced(row.diff, "diff"));
     }
   }
   if (report.retired.length > 0) {

@@ -13,12 +13,12 @@ import { PLATFORM_NAME, PLATFORM_SLUG, SYNC_LABEL } from "../../../actions/share
 import { fail, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { parseJsonWith } from "../shared/json.ts";
+import { codeSpan, fenced } from "../shared/markdown_code.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 import { issueCommentsPages, stickyComment } from "../shared/sticky_comment.ts";
 import {
   boundedReport,
   DELIVERY_CALL_BOUND_MS,
-  fenceFor,
   prTitle,
   SUMMARY_FILE,
   SYNC_LOG,
@@ -58,14 +58,11 @@ function commentBody(
   const branch = `\`${input.branch}\``;
   const run = `([run](${input.runUrl}))`;
   const report = (text: string) => ["", boundedReport(text).replace(/\n$/, "")];
-  const fenced = (text: string) => {
-    const fence = fenceFor(text);
-    return ["", `${fence}text`, text.replace(/\n$/, ""), fence];
-  };
+  const quoted = (text: string) => ["", ...fenced(text.replace(/\n$/, ""), "text")];
   const lines = (() => {
     switch (outcome.kind) {
       case "failed":
-        return [`${build} NOT pushed: ${outcome.what} failed ${run}.`, ...fenced(outcome.log)];
+        return [`${build} NOT pushed: ${outcome.what} failed ${run}.`, ...quoted(outcome.log)];
       case "held":
         return [
           `${build} NOT pushed: the writer holds ${branch} for review, see the Review section ${run}.`,
@@ -73,7 +70,7 @@ function commentBody(
         ];
       case "workflow files":
         return [
-          `${build} NOT pushed: the sync changes ${outcome.paths.map((path) => `\`${path}\``).join(", ")}, and the repository token cannot create or update a workflow file ${run}.`,
+          `${build} NOT pushed: the sync changes ${outcome.paths.map(codeSpan).join(", ")}, and the repository token cannot create or update a workflow file ${run}.`,
           `The owner's dispatch of sync-repos.yml in ${PLATFORM_SLUG} with \`repo=<owner>/<name>\` and \`branch=${input.branch}\` pushes the same commit with the fleet token.`,
           ...report(outcome.report),
         ];
@@ -85,7 +82,7 @@ function commentBody(
       case "push rejected":
         return [
           `${build} NOT pushed: the push onto ${branch} was refused ${run}. A commit that reached the branch meanwhile is the usual cause; add the \`${SYNC_LABEL}\` label again once the branch is where you want it.`,
-          ...fenced(outcome.log),
+          ...quoted(outcome.log),
         ];
       case "pushed":
         return [

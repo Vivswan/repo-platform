@@ -6,7 +6,6 @@ import {
   boundedReport,
   closedFences,
   failureBody,
-  fenceFor,
   prBody,
   prTitle,
   tail,
@@ -617,7 +616,7 @@ describe("deliver.ts", () => {
       expect(result.issueBody).toContain(
         `The repo-platform sync for this repository failed: ${reason}.`,
       );
-      expect(result.issueBody).toContain(`## Delivery log\n\n\`\`\`\`text\n`);
+      expect(result.issueBody).toContain(`## Delivery log\n\n\`\`\`text\n`);
       expect(result.issueBody).toContain(`${logged}\nfiling the failure report: ${reason}`);
       expect(result.git.map((argv) => argv[3])).toEqual(git);
     },
@@ -721,7 +720,6 @@ describe("failureBody", () => {
     expect(body).toContain("``````text\na ````` b\n``````");
     expect(body).not.toContain("Delivery log");
     expect(body).not.toContain("Checkout log");
-    expect(fenceFor("none")).toBe("````");
   });
 
   // The failure issue carries the END of a long log, where git and the writer put their last words; keeping the
@@ -923,7 +921,7 @@ describe("boundedReport", () => {
     expect(seen.headed).toBeGreaterThan(0);
   });
 
-  // Cross-file with report.ts fencedDiff (one backtick longer than any quoted run) against deliver.ts closedFences:
+  // Cross-file with markdown_code.ts fenced (one backtick longer than any quoted run) against deliver.ts closedFences:
   // three backticks would leave the marker and the Review section rendering as code.
   test("a cut inside a four-backtick fence (a diff quoting a fence line) is closed with four backticks", () => {
     const outcome: SyncOutcome = {
