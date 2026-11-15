@@ -257,4 +257,33 @@ describe("post-green wiring", () => {
       forkRefreshPush: [],
     });
   });
+
+  // GitHub fails a job whose condition errors, and fromJSON errors on the empty text an unrun job's output reads as.
+  // Every other clause holds here, so the leg's own guard is what keeps a skipped platform a skip and not a red run.
+  test("the skeleton: a leg selected by module stands down, without an error, when platform published no modules", () => {
+    const skeleton = parseYaml(
+      read("files/base/.github/workflows/ci.yml").replaceAll("{{github_username}}", "owner"),
+    ) as { jobs: Record<string, Job> };
+    const verdicts = Object.entries(skeleton.jobs)
+      .filter(([, job]) => job.if?.includes("needs.platform.outputs.modules"))
+      .map(([id, job]) => {
+        const others = (job.needs ?? []).filter((need) => need !== "platform");
+        const ran = new Set(others);
+        const context = {
+          "github.event_name": "push",
+          "github.ref": "refs/heads/main",
+          "github.event.repository.fork": false,
+          ...needsContext(others, ran, [], { release_created: "true", prs_created: "true" }),
+          "needs.platform.result": "skipped",
+        };
+        return [id, evaluateCondition(job.if ?? "", context)];
+      });
+
+    expect(Object.fromEntries(verdicts)).toEqual({
+      "release": false,
+      "npm-latest": false,
+      "npm-next": false,
+      "site": false,
+    });
+  });
 });
