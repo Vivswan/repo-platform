@@ -15,6 +15,7 @@ import {
   readDispatchBranch,
 } from "../fleet/discovery.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
+import { GitHubClient } from "../shared/github.ts";
 import { maskForms } from "../shared/mask.ts";
 import { tokenUrl } from "../shared/token_url.ts";
 
@@ -61,15 +62,19 @@ export function resolveRow(
  *
  *  Env: ROW_KEY (the plan's key for this row), PAT and GITHUB_RUN_ID (the key's inputs), OWNER and
  *  GH_TOKEN (the listing), GITHUB_ENV. */
-export function resolveTarget(
+export async function resolveTarget(
   script: string,
   handOn: (target: DiscoveredRepo) => Record<string, string>,
   admit: (target: DiscoveredRepo) => string | null = () => null,
-): void {
+): Promise<void> {
   const keyOf = rowKeyOf(requireEnv("PAT"), requireEnv("GITHUB_RUN_ID"));
   const rowKey = requireEnv("ROW_KEY");
   const owner = requireEnv("OWNER");
-  const rows = discoverOwnerRepos(owner, `${script}: user/repos response`);
+  const rows = await discoverOwnerRepos(
+    new GitHubClient(),
+    owner,
+    `${script}: user/repos response`,
+  );
   const resolved = resolveRow(rows, rowKey, keyOf);
   if ("refusal" in resolved) fail(`${resolved.refusal}; re-run the workflow`);
   for (const form of maskForms(resolved.target.repo)) setSecret(form);
@@ -108,7 +113,7 @@ export function branchRefusal(target: DiscoveredRepo): string | null {
 }
 
 if (import.meta.main) {
-  resolveTarget(
+  await resolveTarget(
     "resolve_row",
     (target) => ({ TARGET: target.repo, TARGET_PRIVATE: String(target.private) }),
     branchRefusal,

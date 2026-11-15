@@ -9,11 +9,11 @@ import { error, notice, setOutput, warning } from "@actions/core";
 import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { env, requireEnv } from "../shared/gha.ts";
+import { GitHubClient } from "../shared/github.ts";
 import { parseJson } from "../shared/json.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { ROWS_FILE } from "../sync/verdict.ts";
 import {
-  captureNetwork,
   notAdoptedNotice,
   PRIVATE_DISPLAY,
   parseDiscovered,
@@ -21,7 +21,6 @@ import {
   readDispatchAddModules,
   readDispatchBranch,
   readDispatchRepo,
-  scrubSlug,
   selectedLine,
 } from "./discovery.ts";
 import { moduleRoster } from "./modules.ts";
@@ -41,6 +40,7 @@ const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
 const runId = requireEnv("GITHUB_RUN_ID");
 const owner = requireEnv("OWNER");
+const github = new GitHubClient();
 
 const roster = moduleRoster();
 const scope = parseScope(readDispatchRepo(), new Set(roster));
@@ -101,30 +101,21 @@ for (const entry of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) 
     );
     process.exit(1);
   }
-  // Only a 404 means "not adopted"; any other API failure (auth, rate
-  // limit, outage) fails the plan instead of silently skipping repos. The
-  // raw content is read only for a modules: filter and never printed.
-  const adoption = captureNetwork([
-    "gh",
-    "api",
-    `repos/${slug}/contents/${REGISTRATION_PATH}`,
-    "-H",
-    "Accept: application/vnd.github.raw",
-  ]);
-  if (adoption.exitCode !== 0) {
-    // stderr only: a failed or timed-out read can leave file content on
-    // stdout, target-owned text that may name other private repos.
-    if (/HTTP 404/.test(adoption.stderr)) {
-      notice(notAdoptedNotice(display));
-      continue;
-    }
-    error(`adoption check failed for ${display}: ${scrubSlug(adoption.stderr, slug, display)}`);
+  // Only a 404 means "not adopted"; any other answer, the retries spent, fails the plan instead of silently skipping
+  // repos. The content is read only for a modules: filter and never printed.
+  const adoption = await github.text(`repos/${slug}/contents/${REGISTRATION_PATH}`);
+  if (adoption.kind === "not-found") {
+    notice(notAdoptedNotice(display));
+    continue;
+  }
+  if (adoption.kind === "failed") {
+    error(`adoption check failed for ${display}: ${adoption.reason}`);
     process.exit(1);
   }
   // A repo the filter leaves out is counted, never named: it may be private.
   const filters = modulesFilterFor(scope, slug);
   if (filters !== null) {
-    const declared = declaredModules(adoption.stdout);
+    const declared = declaredModules(adoption.value);
     if (declared === null) {
       warning(
         `${display}: its ${REGISTRATION_PATH} has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`,

@@ -1,11 +1,16 @@
-import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { calledRefusal, waitForGreen } from "../../.github/scripts/fleet/require_green_commit";
-import type { GhRunner } from "../../.github/scripts/shared/all_green.ts";
-import type { RunResult } from "../../.github/scripts/shared/proc.ts";
+import type { GitHubClient } from "../../.github/scripts/shared/github.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import {
+  clientOver,
+  type FakeGithubServer,
+  type FakeReply,
+  spawnFakeGithub,
+} from "../shared/fake_github";
 import { tempDirs } from "../shared/temp_dir";
 
 const ROOT = join(import.meta.dir, "../..");
@@ -16,32 +21,30 @@ const dirs = tempDirs();
 
 type Check = { status?: string; conclusion?: string | null };
 
-function checkRuns(checks: Check[]): RunResult {
+function checkRuns(checks: Check[]): FakeReply {
   return {
-    timedOut: false,
-    pid: 0,
-    exitCode: 0,
-    stdout: JSON.stringify({
+    status: 200,
+    body: {
       check_runs: checks.map((check) => ({
         name: "all-green",
         status: check.status ?? "completed",
         conclusion: check.conclusion === undefined ? "success" : check.conclusion,
         app: { slug: "github-actions" },
       })),
-    }),
-    stderr: "",
+    },
   };
 }
 const GREEN = checkRuns([{}]);
 const RED = checkRuns([{ conclusion: "failure" }]);
 const PENDING = checkRuns([{ status: "in_progress", conclusion: null }]);
 const NONE = checkRuns([]);
-const FAILED_READ: RunResult = { timedOut: false, pid: 0, exitCode: 1, stdout: "", stderr: "boom" };
+const FAILED_READ: FakeReply = { status: 403 };
+const CHECK_RUNS = `repos/o/r/commits/${SHA}/check-runs`;
 
-function ghReplaying(answers: RunResult[]): { gh: GhRunner; calls: () => number } {
-  let call = 0;
-  const gh: GhRunner = () => answers[Math.min(call++, answers.length - 1)];
-  return { gh, calls: () => call };
+/** The client over the check-runs replies, in order, and how many reads it has made. */
+function replaying(answers: FakeReply[]): { github: GitHubClient; calls: () => number } {
+  const { client, github } = clientOver({ [CHECK_RUNS]: answers });
+  return { github: client, calls: () => github.calls().length };
 }
 
 describe("waitForGreen", () => {
@@ -49,7 +52,7 @@ describe("waitForGreen", () => {
   // would spin until the runner's own timeout; the bound turns that into a red call count within a second.
   test.each<{
     reason: string;
-    answers: RunResult[];
+    answers: FakeReply[];
     deadlineMs: number;
     result: unknown;
     calls: number;
@@ -104,11 +107,11 @@ describe("waitForGreen", () => {
       calls: 1,
       sleeps: [],
     },
-  ])("$reason", ({ answers, deadlineMs, result, calls, sleeps }) => {
-    const gh = ghReplaying(answers);
+  ])("$reason", async ({ answers, deadlineMs, result, calls, sleeps }) => {
+    const gh = replaying(answers);
     const slept: number[] = [];
-    const outcome = waitForGreen("o/r", SHA, {
-      gh: gh.gh,
+    const outcome = await waitForGreen("o/r", SHA, {
+      github: gh.github,
       deadlineMs,
       pollMs: 5,
       sleep: (ms) => slept.push(ms),
@@ -129,7 +132,7 @@ describe("calledRefusal", () => {
   // the conclusion at the bound, not on the first read.
   test.each<{
     reason: string;
-    answers: RunResult[];
+    answers: FakeReply[];
     deadlineMs: number;
     refusal: unknown;
     calls: number;
@@ -181,11 +184,11 @@ describe("calledRefusal", () => {
         "is not green - no all-green verdict check exists there (waited 0s)",
       ),
     },
-  ])("$reason", ({ answers, deadlineMs, refusal, calls, sleeps }) => {
-    const gh = ghReplaying(answers);
+  ])("$reason", async ({ answers, deadlineMs, refusal, calls, sleeps }) => {
+    const gh = replaying(answers);
     const slept: number[] = [];
-    const outcome = calledRefusal("o/r", SHA, SHA, {
-      gh: gh.gh,
+    const outcome = await calledRefusal("o/r", SHA, SHA, {
+      github: gh.github,
       wait: { deadlineMs, sleepMs: 5, sleep: (ms) => slept.push(ms) },
     });
     const got: { refusal: unknown; calls: number; sleeps: number[] } = {
@@ -209,26 +212,32 @@ describe("calledRefusal", () => {
       sourceSha: SHA.slice(0, 12),
       refusal: `${SOURCE_SHA} is not a full commit sha (got '${SHA.slice(0, 12)}')`,
     },
-  ])("$reason is refused before any probe", ({ sourceSha, refusal }) => {
-    const gh = ghReplaying([GREEN]);
-    expect(calledRefusal("o/r", SHA, sourceSha, { gh: gh.gh })).toContain(refusal);
+  ])("$reason is refused before any probe", async ({ sourceSha, refusal }) => {
+    const gh = replaying([GREEN]);
+    expect(await calledRefusal("o/r", SHA, sourceSha, { github: gh.github })).toContain(refusal);
     expect(gh.calls()).toBe(0);
   });
 });
 
 describe("the CLI", () => {
   const script = join(ROOT, ".github/scripts/fleet/require_green_commit.ts");
-  const bin = dirs.dir("require-green-cli-bin-");
-  // Every call is logged: "refused before any probe" is the log's absence, never a wait for the real gh to fail.
-  writeFileSync(
-    join(bin, "gh"),
-    `#!/usr/bin/env bash\necho "gh $*" >> "$STUB_CALLS"\nprintf '%s' "$FAKE_CHECK_RUNS"\n`,
-    { mode: 0o755 },
-  );
+  // Every read is logged per run: "refused before any probe" is an empty log, never a wait for a real API to fail.
+  let green: FakeGithubServer;
+  let red: FakeGithubServer;
+  let runs = 0;
+  beforeAll(async () => {
+    const logs = dirs.dir("require-green-cli-api-");
+    green = await spawnFakeGithub({ [CHECK_RUNS]: [GREEN] }, join(logs, "green.log"));
+    red = await spawnFakeGithub({ [CHECK_RUNS]: [RED] }, join(logs, "red.log"));
+  });
+  afterAll(() => {
+    green.stop();
+    red.stop();
+  });
 
-  function runCli(overrides: Record<string, string | undefined>) {
+  function runCli(overrides: Record<string, string | undefined>, api = green) {
     const work = dirs.dir("require-green-cli-run-");
-    const calls = join(work, "gh-calls");
+    const name = `run-${++runs}`;
     const output = join(work, "github-output");
     const env: Record<string, string | undefined> = {
       ...process.env,
@@ -239,9 +248,9 @@ describe("the CLI", () => {
       GREEN_WAIT_MS: "0",
       // Unset in the base env: an ambient value from the shell would take every row down the called path.
       [SOURCE_SHA]: undefined,
-      PATH: `${bin}:${process.env.PATH}`,
-      STUB_CALLS: calls,
-      FAKE_CHECK_RUNS: GREEN.stdout,
+      GH_TOKEN: "stub-token",
+      GITHUB_API_URL: `${api.host}/${name}`,
+      GITHUB_RETRY_BASE_MS: "0",
       ...overrides,
     };
     for (const [name, value] of Object.entries(env)) {
@@ -251,7 +260,7 @@ describe("the CLI", () => {
     return {
       ...proc,
       lines: proc.stdout.trimEnd().split("\n"),
-      ghCalls: existsSync(calls) ? readFileSync(calls, "utf-8").trimEnd().split("\n").length : 0,
+      reads: api.calls(name).length,
       output: existsSync(output),
     };
   }
@@ -275,14 +284,14 @@ describe("the CLI", () => {
       refused: proc.exitCode !== 0,
       stdout: proc.stdout,
       stderr: proc.stderr,
-      ghCalls: proc.ghCalls,
+      reads: proc.reads,
       output: proc.output,
     };
     expect(got).toEqual({
       refused: true,
       stdout: expect.stringContaining(message),
       stderr: "",
-      ghCalls: 0,
+      reads: 0,
       output: false,
     });
   });
@@ -290,25 +299,27 @@ describe("the CLI", () => {
   test.each<{
     reason: string;
     env: Record<string, string>;
+    red?: boolean;
     exitCode: number;
     line: unknown;
-    ghCalls: number;
+    reads: number;
   }>([
     {
       reason: "a red tip exits 1 with the halt as an error annotation",
-      env: { FAKE_CHECK_RUNS: RED.stdout },
+      env: {},
+      red: true,
       exitCode: 1,
       line: expect.stringMatching(
         /^::error::refusing the settings apply: commit 000000000000 is not green - its all-green verdict concluded 'failure'\./,
       ),
-      ghCalls: 1,
+      reads: 1,
     },
     {
       reason: "a green tip exits 0 and lets the apply proceed",
       env: {},
       exitCode: 0,
       line: "commit 000000000000 is green; the settings apply may proceed",
-      ghCalls: 1,
+      reads: 1,
     },
     {
       reason:
@@ -320,24 +331,24 @@ describe("the CLI", () => {
           `^::error::refusing the called settings apply: the sha input ${OTHER.slice(0, 12)} is not this run's own commit ${SHA.slice(0, 12)}\\.`,
         ),
       ),
-      ghCalls: 0,
+      reads: 0,
     },
-  ])("$reason, publishing no output", ({ env, exitCode, line, ghCalls }) => {
-    const proc = runCli(env);
+  ])("$reason, publishing no output", ({ env, red: isRed, exitCode, line, reads }) => {
+    const proc = runCli(env, isRed === true ? red : green);
     const got: {
       exitCode: number;
       lines: unknown[];
       stderr: string;
-      ghCalls: number;
+      reads: number;
       output: boolean;
     } = {
       exitCode: proc.exitCode,
       lines: proc.lines,
       stderr: proc.stderr,
-      ghCalls: proc.ghCalls,
+      reads: proc.reads,
       output: proc.output,
     };
-    expect(got).toEqual({ exitCode, lines: [line], stderr: "", ghCalls, output: false });
+    expect(got).toEqual({ exitCode, lines: [line], stderr: "", reads, output: false });
   });
 
   test("settings-repos.yml hands the gate step the call's sha under the name the script reads", () => {

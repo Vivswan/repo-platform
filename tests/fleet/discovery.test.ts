@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   captureNetwork,
@@ -7,13 +7,15 @@ import {
   readDispatchAddModules,
   readDispatchBranch,
   readDispatchRepo,
-  scrubSlug,
 } from "../../.github/scripts/fleet/discovery.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { type FakeReply, spawnFakeGithub } from "../shared/fake_github";
+import type { LoopbackServer } from "../shared/loopback_server";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 const DISCOVERY = join(import.meta.dir, "../../.github/scripts/fleet/discovery.ts");
+const GITHUB = join(import.meta.dir, "../../.github/scripts/shared/github.ts");
 
 /** The whole subprocess outcome of a payload the parser refuses: the process exits with the label and the path, and the
  *  offending value reaches no channel (it may be a private slug). */
@@ -102,76 +104,6 @@ describe("captureNetwork", () => {
     // The scan read the scripts that make network calls, not an empty or
     // misaddressed directory.
     expect(bounded).toBeGreaterThan(0);
-  });
-});
-
-// scrubSlug keeps a private repo's slug and bare name out of captured error
-// text that both selectors print into publicly readable logs.
-describe("scrubSlug", () => {
-  const SLUG = "Vivswan/hidden-server";
-  const HINT = "h**-s**r";
-
-  test.each([
-    {
-      reason: "every occurrence goes: slugs in URLs, bare names, and repeats alike",
-      detail:
-        "fatal: 'https://github.com/Vivswan/hidden-server.git/': fetch of hidden-server failed; retrying hidden-server, then Vivswan/hidden-server again",
-      slug: SLUG,
-      hint: HINT,
-      expected:
-        "fatal: 'https://github.com/h**-s**r.git/': fetch of h**-s**r failed; retrying h**-s**r, then h**-s**r again",
-    },
-    {
-      reason: "a name embedded in a longer token is still masked (substring semantics)",
-      detail: "branch hidden-server-backup rejected",
-      slug: SLUG,
-      hint: HINT,
-      expected: "branch h**-s**r-backup rejected",
-    },
-    {
-      // GitHub identity is case-insensitive: error text may echo a casing
-      // other than discovery's canonical full_name (a redirect, a tool that
-      // lowercases URLs), and each variant is as private as the original.
-      reason: "every casing of the slug and bare name is scrubbed",
-      detail:
-        "GET https://api.github.com/repos/other/shared-private: 502; SHARED-PRIVATE is unreachable, Shared-Private retried",
-      slug: "Other/Shared-Private",
-      hint: "S**-P**e",
-      expected:
-        "GET https://api.github.com/repos/S**-P**e: 502; S**-P**e is unreachable, S**-P**e retried",
-    },
-    {
-      reason: "regex metacharacters in a slug are treated literally",
-      detail: "cannot read Vivswan/dotted.repo today",
-      slug: "Vivswan/dotted.repo",
-      hint: "d**.r**",
-      expected: "cannot read d**.r** today",
-    },
-    {
-      // The control for the row above: the "." must not match arbitrary
-      // characters, so an unrelated name one character apart stays untouched.
-      reason: "a near-miss of a metacharacter slug is left alone",
-      detail: "cannot read Vivswan/dottedXrepo today",
-      slug: "Vivswan/dotted.repo",
-      hint: "d**.r**",
-      expected: "cannot read Vivswan/dottedXrepo today",
-    },
-    {
-      reason: "a no-op when the display IS the slug: the bare name must not expand into the slug",
-      detail: "push to hidden-server rejected",
-      slug: SLUG,
-      hint: SLUG,
-      expected: "push to hidden-server rejected",
-    },
-    {
-      reason: "a slug without an owner segment scrubs as its own bare name",
-      detail: "cloning monorepo into monorepo",
-      slug: "monorepo",
-      hint: "m**o",
-      expected: "cloning m**o into m**o",
-    },
-  ])("$reason", ({ detail, slug, hint, expected }) => {
-    expect(scrubSlug(detail, slug, hint)).toBe(expected);
   });
 });
 
@@ -390,33 +322,10 @@ describe("the dispatch inputs", () => {
 });
 
 // discoverWritableRepos exits the process on failure, so it runs behind a
-// subprocess entry file with a stub gh on PATH.
+// subprocess entry file against a loopback API.
 describe("discoverWritableRepos", () => {
   const root = temp.dir("discovery-proc-");
-  const bin = join(root, "bin");
   const LABEL = "discovery.test: user/repos response";
-
-  mkdirSync(bin);
-  writeFileSync(join(bin, "gh"), '#!/usr/bin/env bash\ncat "$STUB_PAYLOAD"\n', { mode: 0o755 });
-
-  const discoverEntry = join(root, "discover_entry.ts");
-  writeFileSync(
-    discoverEntry,
-    [
-      `import { discoverWritableRepos } from ${JSON.stringify(DISCOVERY)};`,
-      `const repos = discoverWritableRepos(${JSON.stringify(LABEL)});`,
-      "console.log(JSON.stringify(repos.map((repo) => repo.full_name)));",
-      "",
-    ].join("\n"),
-  );
-
-  function runDiscover(name: string, payload: string) {
-    const payloadFile = join(root, `${name}.json`);
-    writeFileSync(payloadFile, payload);
-    return boundedSpawnSync(["bun", discoverEntry], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, STUB_PAYLOAD: payloadFile },
-    });
-  }
 
   function repoEntry(full_name: string, overrides: Record<string, unknown> = {}) {
     return {
@@ -429,21 +338,68 @@ describe("discoverWritableRepos", () => {
     };
   }
 
-  test("keeps writable non-archived repos across pages and owners, drops the rest", () => {
-    // `permissions` is optional in user/repos and `push` reports the USER's permission, not the token's grant; the
-    // cross-owner pass-through is the boundary with discoverOwnerRepos, which drops them.
-    const r = runDiscover(
-      "pages",
-      JSON.stringify([
-        [
+  // One listing per run name: the first segment of the run's GITHUB_API_URL.
+  const LISTINGS: Record<string, FakeReply[]> = {
+    pages: [
+      {
+        status: 200,
+        next: true,
+        body: [
           repoEntry("Vivswan/keep"),
           repoEntry("Vivswan/archived-out", { archived: true }),
           repoEntry("Vivswan/read-only", { permissions: { push: false } }),
           repoEntry("Vivswan/no-permissions", { permissions: undefined }),
         ],
-        [repoEntry("Other/cross-owner"), repoEntry("Vivswan/pub", { private: false })],
-      ]),
-    );
+      },
+      {
+        status: 200,
+        body: [repoEntry("Other/cross-owner"), repoEntry("Vivswan/pub", { private: false })],
+      },
+    ],
+    malformed: [{ status: 200, body: [{ full_name: "Vivswan/shapeless" }] }],
+    unparsable: [{ status: 200, body: '[{"full_name": hiddenserver}]' }],
+    outage: [{ status: 502, body: { message: "Vivswan/hiddenserver is unreachable" } }],
+    absent: [{ status: 404 }],
+    bodiless: [{ status: 200, body: null }],
+    truncated: [{ status: 200, next: true, body: [repoEntry("Vivswan/keep")] }, { status: 409 }],
+  };
+  const servers: Record<string, LoopbackServer> = {};
+  beforeAll(async () => {
+    for (const [name, replies] of Object.entries(LISTINGS)) {
+      servers[name] = await spawnFakeGithub({ "user/repos": replies }, join(root, `${name}.log`));
+    }
+  });
+  afterAll(() => {
+    for (const server of Object.values(servers)) server.stop();
+  });
+
+  const discoverEntry = join(root, "discover_entry.ts");
+  writeFileSync(
+    discoverEntry,
+    [
+      `import { discoverWritableRepos } from ${JSON.stringify(DISCOVERY)};`,
+      `import { GitHubClient } from ${JSON.stringify(GITHUB)};`,
+      `const repos = await discoverWritableRepos(new GitHubClient(), ${JSON.stringify(LABEL)});`,
+      "console.log(JSON.stringify(repos.map((repo) => repo.full_name)));",
+      "",
+    ].join("\n"),
+  );
+
+  function runDiscover(name: string) {
+    return boundedSpawnSync(["bun", discoverEntry], {
+      env: {
+        ...process.env,
+        GH_TOKEN: "stub-token",
+        GITHUB_API_URL: `${servers[name].host}/${name}`,
+        GITHUB_RETRY_BASE_MS: "0",
+      },
+    });
+  }
+
+  test("keeps writable non-archived repos across pages and owners, drops the rest", () => {
+    // `permissions` is optional in user/repos and `push` reports the USER's permission, not the token's grant; the
+    // cross-owner pass-through is the boundary with discoverOwnerRepos, which drops them.
+    const r = runDiscover("pages");
     expect({ ...r, stdout: JSON.parse(r.stdout) }).toEqual({
       exitCode: 0,
       stdout: ["Vivswan/keep", "Other/cross-owner", "Vivswan/pub"],
@@ -451,27 +407,39 @@ describe("discoverWritableRepos", () => {
     });
   });
 
-  test.each<{ reason: string; payload: string; diagnostic: string; value: string }>([
+  // Fail closed: without a trustworthy fleet list nothing downstream may run, and a listing that reads as empty
+  // would be "no repositories", green.
+  test.each<{ name: string; reason: string; diagnostic: string }>([
     {
-      reason: "a malformed payload",
-      payload: JSON.stringify([[{ full_name: "Vivswan/shapeless" }]]),
-      diagnostic: "unexpected shape",
-      value: "shapeless",
+      name: "malformed",
+      reason: "a listing off user/repos' shape",
+      diagnostic:
+        "the reply: unexpected shape - 0.archived: invalid_type; 0.private: invalid_type; 0.owner: invalid_type",
     },
     {
-      reason: "an unparsable listing",
-      payload: '[[{"full_name": hiddenserver}]]',
-      diagnostic: "not valid JSON",
-      value: "hiddenserver",
+      name: "unparsable",
+      reason: "a listing that is not JSON",
+      diagnostic: "the reply: unexpected shape - (root): invalid_type",
     },
-  ])(
-    "$reason fails loudly with the caller's label, never a value",
-    ({ reason, payload, diagnostic, value }) => {
-      const proc = runDiscover(Bun.hash(reason).toString(16), payload);
-      const { got, want } = refusal(proc, LABEL, diagnostic, null, value);
-      expect(got).toEqual(want);
+    { name: "outage", reason: "an outage the retries do not outlast", diagnostic: "HTTP 502" },
+    { name: "absent", reason: "a 404, which is no empty fleet", diagnostic: "HTTP 404" },
+    {
+      name: "bodiless",
+      reason: "a 200 with no array, which is no empty fleet",
+      diagnostic: "the reply: unexpected shape - (root): invalid_type",
     },
-  );
+    {
+      name: "truncated",
+      reason: "a second page that fails, which is no shorter fleet",
+      diagnostic: "HTTP 409",
+    },
+  ])("$reason exits 1 with the caller's label, never a value", ({ name, diagnostic }) => {
+    expect(runDiscover(name)).toEqual({
+      exitCode: 1,
+      stdout: `::error::${LABEL} could not be read (${diagnostic})\n`,
+      stderr: "",
+    });
+  });
 });
 
 describe("parseDiscovered", () => {

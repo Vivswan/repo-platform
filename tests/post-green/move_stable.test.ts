@@ -1,28 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { parseGithubOutput } from "../shared/github_output";
 import { tempDirs } from "../shared/temp_dir";
+import { verdictApis } from "../shared/verdict_api";
 
 const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/post-green/move_stable.ts");
 const TAG = "refs/tags/stable";
 
-function verdict(conclusion: string): string {
-  return JSON.stringify({
-    check_runs: [
-      {
-        name: "all-green",
-        status: "completed",
-        conclusion,
-        app: { slug: "github-actions" },
-      },
-    ],
-  });
-}
+const verdicts = verdictApis(temp, "move-stable-api-");
 
 interface Scenario {
   tag?: "m1" | "m2" | "m3";
@@ -41,7 +31,7 @@ interface Outcome {
   exitCode: number;
   output: string;
   outputs: Record<string, string>;
-  ghCalls: string[];
+  reads: string[];
   originTag: () => string;
   m1: string;
   m2: string;
@@ -78,12 +68,8 @@ function run(scenario: Scenario): Outcome {
   const root = temp.dir("move-stable-");
   const bin = join(root, "bin");
   mkdirSync(bin);
-  const ghLog = join(root, "gh.log");
-  writeFileSync(
-    join(bin, "gh"),
-    `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(ghLog)}\nprintf '%s' '${verdict(scenario.conclusion ?? "success")}'\n`,
-    { mode: 0o755 },
-  );
+  const api = verdicts.answering(scenario.conclusion ?? "success");
+  const name = verdicts.nextRun();
   const origin = join(root, "origin.git");
   fixtureGit(root, ["init", "--quiet", "--bare", "-b", "main", "origin.git"]);
   const work = join(root, "work");
@@ -155,6 +141,9 @@ function run(scenario: Scenario): Outcome {
       // The gate's poll is for a fresh check racing a consumer; a fixture's
       // verdict never changes, so the red case must not wait it out.
       ALL_GREEN_WAIT_MS: "0",
+      GH_TOKEN: "stub-token",
+      GITHUB_API_URL: `${api.host}/${name}`,
+      GITHUB_RETRY_BASE_MS: "0",
       // The hang case needs a deadline the descendant outlives; every other probe keeps the default.
       ...(scenario.lsRemoteHangs === true ? { PROBE_TIMEOUT_MS: "2000" } : {}),
     },
@@ -164,11 +153,7 @@ function run(scenario: Scenario): Outcome {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
     outputs,
-    ghCalls: existsSync(ghLog)
-      ? readFileSync(ghLog, "utf-8")
-          .split("\n")
-          .filter((line) => line !== "")
-      : [],
+    reads: api.calls(name),
     originTag: () => {
       const probe = boundedSpawnSync(
         ["git", "-C", origin, "rev-parse", "--verify", "--quiet", TAG],
@@ -210,8 +195,8 @@ describe("move_stable.ts behavior (real git)", () => {
     expect(r.exitCode).toBe(0);
     expect(r.outputs).toEqual({ previous: r.m1 });
     expect(r.originTag()).toBe(r.m2);
-    expect(r.ghCalls).toEqual([
-      `api repos/o/r/commits/${r.m2}/check-runs?check_name=all-green&filter=latest&per_page=100`,
+    expect(r.reads).toEqual([
+      `repos/o/r/commits/${r.m2}/check-runs?check_name=all-green&filter=latest&per_page=100`,
     ]);
   });
 
