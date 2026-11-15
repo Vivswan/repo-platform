@@ -4,9 +4,13 @@
 import { readFileSync } from "node:fs";
 import { error } from "@actions/core";
 import { z } from "zod";
+import {
+  type GitHubClient,
+  REQUEST_DEADLINE_MS,
+  unansweredReason,
+} from "../../../actions/github-client/github.ts";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { env } from "../shared/gha.ts";
-import { type GitHubClient, REQUEST_DEADLINE_MS, unansweredReason } from "../shared/github.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
 

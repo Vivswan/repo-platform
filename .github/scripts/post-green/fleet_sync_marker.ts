@@ -7,8 +7,8 @@
 import { resolve } from "node:path";
 import { notice, setOutput, warning } from "@actions/core";
 import { z } from "zod";
+import { GitHubClient, unansweredReason } from "../../../actions/github-client/github.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
-import { GitHubClient, unansweredReason } from "../shared/github.ts";
 import { loadLayer, sectionEntries } from "../sync/writer/settings_layers.ts";
 import {
   type DiffBase,

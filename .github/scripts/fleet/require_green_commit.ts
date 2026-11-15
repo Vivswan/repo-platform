@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
+import type { GitHubClient } from "../../../actions/github-client/github.ts";
 import { allGreenFailure, type VerdictWait, verdictPending } from "../shared/all_green.ts";
 import { env, fail, requireEnv } from "../shared/gha.ts";
-import type { GitHubClient } from "../shared/github.ts";
 
 export interface GreenWaitOptions {
   deadlineMs?: number;

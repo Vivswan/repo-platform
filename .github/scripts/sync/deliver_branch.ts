@@ -9,10 +9,10 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { GitHubClient, unansweredReason } from "../../../actions/github-client/github.ts";
 import { PLATFORM_NAME, PLATFORM_SLUG, SYNC_LABEL } from "../../../actions/shared/platform.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
-import { GitHubClient, unansweredReason } from "../shared/github.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { codeSpan, fenced } from "../shared/markdown_code.ts";
 import { capture, mustCapture } from "../shared/proc.ts";

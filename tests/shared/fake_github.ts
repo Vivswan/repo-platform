@@ -1,4 +1,4 @@
-// A stand-in for api.github.com at the client's transport seam (.github/scripts/shared/github.ts), answering each path from
+// A stand-in for api.github.com at the client's transport seam (actions/github-client/github.ts), answering each path from
 // a table of replies handed out in order, the last one repeating; a path the table lacks answers 404, as GitHub does.
 //
 // In process: `fakeGithub(routes).fetch` is the client's `fetch` option. For a script run as a subprocess the same table
@@ -6,7 +6,7 @@
 // run sees another's place in a reply list, and a run may bring its own table. `bun tests/shared/fake_github.ts <routes json> <request log>`.
 
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { GitHubClient, type GitHubClientOptions } from "../../.github/scripts/shared/github.ts";
+import { GitHubClient, type GitHubClientOptions } from "../../actions/github-client/github.ts";
 import { type LoopbackServer, spawnLoopback } from "./loopback_server";
 
 export interface FakeReply {

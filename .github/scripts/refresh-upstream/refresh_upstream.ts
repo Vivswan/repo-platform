@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 import { setOutput } from "@actions/core";
 import { CST, isScalar, Parser, parseDocument, visit } from "yaml";
 import { z } from "zod";
+import { GitHubClient, unansweredReason } from "../../../actions/github-client/github.ts";
 import {
   type FilesConfig,
   type ModulePin,
@@ -20,7 +21,6 @@ import {
   upstreamRefs,
 } from "../../../actions/plan/files_config.ts";
 import { BUN_PIN_FILE, bunLockDirs } from "../../../scripts/bootstrap.ts";
-import { GitHubClient, unansweredReason } from "../shared/github.ts";
 import { must } from "../shared/proc.ts";
 import { unifiedDiff } from "../sync/writer/report.ts";
 import { type Fetch, fetchText, fetchUpstream, RAW_HOST } from "../sync/writer/upstream.ts";

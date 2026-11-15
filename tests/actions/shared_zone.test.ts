@@ -4,9 +4,9 @@
 // keeps what neither can see: the folder's shape, and that the linter's block still bites.
 
 import { expect, test } from "bun:test";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { boundedSpawnSync } from "../shared/bounded_spawn.ts";
+import { readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { lintFixture } from "../shared/biome_fixture.ts";
 import { tempDirs } from "../shared/temp_dir.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
@@ -50,40 +50,13 @@ test("the linter reds each way out of the zone, in the zone only, and passes eac
     "export const all = [readFileSync, readFile, loaders, loader, Module, z, core, join, up, deep, lazy, computed, old, viaCast, viaRenamed, text] as Only[];",
     "",
   ].join("\n");
-  const files: Record<string, string> = {
-    "biome.json": readFileSync(join(REPO_ROOT, "biome.json"), "utf-8"),
-    "biome.local.jsonc": readFileSync(join(REPO_ROOT, "biome.local.jsonc"), "utf-8"),
-    ...Object.fromEntries(
-      readdirSync(join(REPO_ROOT, "biome")).map((name) => [
-        `biome/${name}`,
-        readFileSync(join(REPO_ROOT, "biome", name), "utf-8"),
-      ]),
-    ),
+  const zoneRules = new Set(["lint/style/noRestrictedImports", "plugin"]);
+  const seen = lintFixture(lintRoot, {
     "actions/shared/x.ts": source,
     "actions/other/x.ts": source,
-  };
-  for (const [rel, content] of Object.entries(files)) {
-    mkdirSync(dirname(join(lintRoot, rel)), { recursive: true });
-    writeFileSync(join(lintRoot, rel), content);
-  }
-
-  const r = boundedSpawnSync(
-    [
-      join(REPO_ROOT, "node_modules", ".bin", "biome"),
-      "lint",
-      "--reporter=json",
-      "--vcs-enabled=false",
-      ".",
-    ],
-    { cwd: lintRoot },
-  );
-  const report = JSON.parse(r.stdout) as {
-    diagnostics: { category: string; location: { path: string; start: { line: number } } }[];
-  };
-  const zoneRules = new Set(["lint/style/noRestrictedImports", "plugin"]);
-  const seen = report.diagnostics
+  })
     .filter((d) => zoneRules.has(d.category))
-    .map((d) => `${d.location.path}:${d.location.start.line} ${d.category}`)
+    .map((d) => `${d.path}:${d.line} ${d.category}`)
     .sort();
 
   expect(seen).toEqual(

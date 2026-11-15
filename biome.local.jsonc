@@ -209,6 +209,18 @@
       ],
       "plugins": ["./biome/stream_write.grit"]
     },
+    // The one GitHub client: its package alone installs octokit, so no other file imports it.
+    {
+      "includes": [
+        "scripts/**",
+        ".github/scripts/**",
+        "tests/**",
+        "migrations/**",
+        "actions/**",
+        "!actions/github-client/**"
+      ],
+      "plugins": ["./biome/octokit_import.grit"]
+    },
     // The dependency-free zone: only the running action's node_modules exist on a runner, and bun resolves a bare import
     // from the importing file's directory, so a zone module reaches node builtins and its own siblings, nothing else.
     {

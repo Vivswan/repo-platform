@@ -22,7 +22,6 @@
     "@actions/expressions": "^0.3.61",
     "@biomejs/biome": "2.6.4",
     "@types/bun": "1.4.4",
-    "@types/http-link-header": "1.0.7",
     "colorjs.io": "0.7.1",
     "happy-dom": "21.0.4",
     "markdown-it": "15.0.3",
@@ -33,15 +32,10 @@
   },
   "dependencies": {
     "@actions/core": "3.0.1",
-    "@octokit/core": "7.0.8",
-    "@octokit/plugin-retry": "8.1.1",
-    "@octokit/plugin-throttling": "11.0.5",
-    "@octokit/request-error": "7.1.2",
     "@vivswan/github-settings-as-code": "next",
     "diff": "9.0.0",
-    "http-link-header": "1.1.4",
     "yaml": "^2.9.1",
-    "zod": "^4.6.7"
+    "zod": "4.6.7"
   },
   "resolutions": {
     "@vivswan/github-settings-as-code/zod": "4.6.7"

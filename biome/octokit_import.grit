@@ -1,0 +1,9 @@
+// Octokit is installed in actions/github-client alone, and a second caller of it is a second retry and failure policy.
+// Any import source or string that opens with the scope counts, an import() or require() specifier included: over-matching is the loud direction.
+or {
+  JsModuleSource() as $specifier,
+  string() as $specifier
+} where {
+  $specifier <: r"[\"']@octokit/[\s\S]*",
+  register_diagnostic(span=$specifier, message="ask GitHub through actions/github-client/github.ts; @octokit is imported there alone")
+}

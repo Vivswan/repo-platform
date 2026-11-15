@@ -1,0 +1,18 @@
+{
+  "name": "github-client",
+  "private": true,
+  "description": "Dependency manifest for the one GitHub REST client the scripts and the actions share: octokit's core with its retry and throttling plugins, http-link-header for a listing's next page, zod for a reply's shape.",
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "@types/http-link-header": "1.0.7",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@octokit/core": "7.0.8",
+    "@octokit/plugin-retry": "8.1.1",
+    "@octokit/plugin-throttling": "11.0.5",
+    "@octokit/request-error": "7.1.2",
+    "http-link-header": "1.1.4",
+    "zod": "4.6.7"
+  }
+}

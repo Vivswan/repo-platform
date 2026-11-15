@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { calledRefusal, waitForGreen } from "../../.github/scripts/fleet/require_green_commit";
-import type { GitHubClient } from "../../.github/scripts/shared/github.ts";
+import type { GitHubClient } from "../../actions/github-client/github.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import {
   clientOver,

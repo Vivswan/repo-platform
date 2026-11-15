@@ -5,8 +5,8 @@ import {
   type Read,
   type Sent,
   type WriteMethod,
-} from "../../.github/scripts/shared/github.ts";
-import { clientOver, type FakeReply, type FakeRoutes, fakeGithub } from "./fake_github";
+} from "../../../actions/github-client/github.ts";
+import { clientOver, type FakeReply, type FakeRoutes, fakeGithub } from "../../shared/fake_github";
 
 const REGISTRATION = "repos/example-owner/hidden-server/contents/.repo-platform.yml";
 const BASE = "https://api.github.test";

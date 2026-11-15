@@ -4,8 +4,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { error, setOutput } from "@actions/core";
 import { z } from "zod";
+import { GitHubClient, unansweredReason } from "../../../actions/github-client/github.ts";
 import { env, requireEnv } from "../shared/gha.ts";
-import { GitHubClient, unansweredReason } from "../shared/github.ts";
 
 /** The checkout holding the pin file. */
 const REPO_ROOT = resolve(import.meta.dir, "../../..");

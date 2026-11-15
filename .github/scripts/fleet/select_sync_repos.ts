@@ -6,10 +6,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { error, notice, setOutput, warning } from "@actions/core";
+import { GitHubClient } from "../../../actions/github-client/github.ts";
 import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { env, requireEnv } from "../shared/gha.ts";
-import { GitHubClient } from "../shared/github.ts";
 import { parseJson } from "../shared/json.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { ROWS_FILE } from "../sync/verdict.ts";

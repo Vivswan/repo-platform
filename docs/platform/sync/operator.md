@@ -33,7 +33,7 @@ The residual is a slug another writable repository takes within the run: the row
 
 ## Reading the GitHub API
 
-The scripts' reads and writes of the GitHub API go through one client ([shared/github.ts](../../../.github/scripts/shared/github.ts)), so one answer means one thing in every script. The reads are the repository listing, a repository's registration and rendered settings, a commit's check runs, and a target's pull requests, issues, and comments.
+The scripts' reads and writes of the GitHub API go through one client ([actions/github-client/github.ts](../../../actions/github-client/github.ts)), so one answer means one thing in every script. The reads are the repository listing, a repository's registration and rendered settings, a commit's check runs, and a target's pull requests, issues, and comments.
 
 | GitHub answers                                                                                                         | The read                                                    |
 | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |

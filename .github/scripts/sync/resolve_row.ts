@@ -8,6 +8,7 @@
 
 import { createHmac } from "node:crypto";
 import { exportVariable, setSecret } from "@actions/core";
+import { GitHubClient } from "../../../actions/github-client/github.ts";
 import {
   captureNetwork,
   type DiscoveredRepo,
@@ -15,7 +16,6 @@ import {
   readDispatchBranch,
 } from "../fleet/discovery.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
-import { GitHubClient } from "../shared/github.ts";
 import { maskForms } from "../shared/mask.ts";
 import { tokenUrl } from "../shared/token_url.ts";
 

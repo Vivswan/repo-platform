@@ -1,4 +1,4 @@
-// The scripts' one GitHub REST client: every read and write shares one retry and rate-limit policy, one deadline, and one failure vocabulary.
+// The scripts' and the actions' one GitHub REST client: every read and write shares one retry and rate-limit policy, one deadline, and one failure vocabulary.
 // A failure's reason is fixed text. The library's error spells the request URL, which names a private repository, and the selectors' logs are public (docs/platform/sync/private-repositories.md).
 
 import { randomUUID } from "node:crypto";
@@ -8,8 +8,8 @@ import { throttling } from "@octokit/plugin-throttling";
 import { RequestError } from "@octokit/request-error";
 import LinkHeader from "http-link-header";
 import { z } from "zod";
-import { env } from "./gha.ts";
-import { JsonShapeError, parseWithThrow } from "./json.ts";
+import { env } from "../shared/action_runtime.ts";
+import { JsonShapeError, parseWithThrow } from "./shape.ts";
 
 /** A stalled-network backstop for one read or write, not a latency budget: two minutes covers the paginated user/repos listing of several hundred repos, and the plan jobs' timeout-minutes are sized from it. */
 export const REQUEST_DEADLINE_MS = 120_000;

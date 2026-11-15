@@ -6,10 +6,10 @@
 // and a slug there would be dropped by the runner as masked or, unmasked, name a private repository.
 
 import { error, notice, setOutput, setSecret, summary, warning } from "@actions/core";
+import { GitHubClient } from "../../../actions/github-client/github.ts";
 import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH, SETTINGS_PATH } from "../../../actions/shared/platform.ts";
 import { env, requireEnv } from "../shared/gha.ts";
-import { GitHubClient } from "../shared/github.ts";
 import { maskForms } from "../shared/mask.ts";
 import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../sync/writer/settings_entry.ts";

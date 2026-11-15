@@ -15,7 +15,7 @@ import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 const DISCOVERY = join(import.meta.dir, "../../.github/scripts/fleet/discovery.ts");
-const GITHUB = join(import.meta.dir, "../../.github/scripts/shared/github.ts");
+const GITHUB = join(import.meta.dir, "../../actions/github-client/github.ts");
 
 /** The whole subprocess outcome of a payload the parser refuses: the process exits with the label and the path, and the
  *  offending value reaches no channel (it may be a private slug). */
@@ -76,7 +76,7 @@ describe("captureNetwork", () => {
     expect(got).toEqual(outcome);
   });
 
-  // The fleet scripts ask GitHub through the client (shared/github.ts), which carries the deadline, the retry rule, and
+  // The fleet scripts ask GitHub through the client (actions/github-client/github.ts), which carries the deadline, the retry rule, and
   // the fixed failure text. A spawned gh or curl, bounded or not, brings back stderr that spells a private slug.
   test("no fleet script spawns gh or curl (class sweep)", () => {
     const SPAWNED = /\[\s*"(?:gh|curl)"/g;

@@ -6,8 +6,8 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { error } from "@actions/core";
 import { z } from "zod";
+import { GitHubClient, unansweredReason } from "../../../actions/github-client/github.ts";
 import { requireEnv } from "../shared/gha.ts";
-import { GitHubClient, unansweredReason } from "../shared/github.ts";
 import { discoverOwnerRepos } from "./discovery.ts";
 
 /** Where the discovered list is written for the selectors. */

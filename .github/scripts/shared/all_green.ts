@@ -1,7 +1,7 @@
 // The one green-commit predicate every consumer shares (docs/all-green.md, "Consuming the gate").
 
 import { z } from "zod";
-import { GitHubClient, unansweredReason } from "./github.ts";
+import { GitHubClient, unansweredReason } from "../../../actions/github-client/github.ts";
 
 /** The gate check's name: the context branch protection requires (files/settings/override.yml) and the ci.yml all-green job's own check run carries (a job's check run is named by its job id). */
 export const CHECK_NAME = "all-green";

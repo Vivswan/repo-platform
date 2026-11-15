@@ -12,6 +12,14 @@ import { summary } from "@actions/core";
 import MarkdownIt from "markdown-it";
 import { z } from "zod";
 import {
+  type Fields,
+  GitHubClient,
+  type Read,
+  type Sent,
+  unansweredReason,
+  type WriteMethod,
+} from "../../../actions/github-client/github.ts";
+import {
   AUTOMATION_BRANCH,
   FAILURE_ISSUE_TITLE,
   MANIFEST_NAME,
@@ -22,14 +30,6 @@ import {
 import { NETWORK_TIMEOUT_MS, readDispatchBranch } from "../fleet/discovery.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
-import {
-  type Fields,
-  GitHubClient,
-  type Read,
-  type Sent,
-  unansweredReason,
-  type WriteMethod,
-} from "../shared/github.ts";
 import { parseJsonWithThrow } from "../shared/json.ts";
 import { fenced } from "../shared/markdown_code.ts";
 import { capture, redactText } from "../shared/proc.ts";

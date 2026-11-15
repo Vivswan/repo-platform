@@ -14,7 +14,7 @@ import {
   tagVersion,
   typesBunDirs,
 } from "../../.github/scripts/refresh-upstream/refresh_upstream.ts";
-import { GitHubClient } from "../../.github/scripts/shared/github.ts";
+import { GitHubClient } from "../../actions/github-client/github.ts";
 import { parseFilesConfig, upstreamRefs } from "../../actions/plan/files_config.ts";
 import { clientOver, type FakeReply, type FakeRoutes, fakeGithub } from "../shared/fake_github";
 import { tempDirs } from "../shared/temp_dir";

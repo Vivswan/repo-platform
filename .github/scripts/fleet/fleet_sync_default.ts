@@ -9,6 +9,12 @@
 
 import { notice, warning } from "@actions/core";
 import { z } from "zod";
+import {
+  GitHubClient,
+  type Read,
+  type Sent,
+  unansweredReason,
+} from "../../../actions/github-client/github.ts";
 import { PLATFORM_NAME, PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import {
   FLEET_SYNC_OVERLAY,
@@ -18,7 +24,6 @@ import {
   readDirective,
 } from "../post-green/fleet_sync_marker.ts";
 import { requireEnv } from "../shared/gha.ts";
-import { GitHubClient, type Read, type Sent, unansweredReason } from "../shared/github.ts";
 import { codeSpan } from "../shared/markdown_code.ts";
 import { BOT_LOGIN, issueComment, stickyComment } from "../shared/sticky_comment.ts";
 import { loadLayer } from "../sync/writer/settings_layers.ts";
