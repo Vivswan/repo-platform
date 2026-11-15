@@ -227,7 +227,6 @@
         "actions/**",
         "!actions/autofix/autofix.ts",
         "!actions/pages-site/build.ts",
-        "!actions/plan/plan.ts",
         "!actions/release-health/release-health.ts"
       ],
       "plugins": ["./biome/gh_spawn.grit"]

@@ -3,8 +3,14 @@
 // owns both rules (biome.local.jsonc); this file keeps that each bites.
 
 import { expect, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { lintFixture } from "../shared/biome_fixture.ts";
 import { tempDirs } from "../shared/temp_dir.ts";
+
+const REPO_ROOT = resolve(import.meta.dir, "..", "..");
+const GH_SPAWN_PLUGIN = "./biome/gh_spawn.grit";
+const GH_SPAWN_MESSAGE = "never a spawned gh";
 
 const temp = tempDirs();
 
@@ -68,4 +74,36 @@ test("the linter reds a spawned gh in an action, and nowhere else", () => {
     "actions/other/x.ts:1",
     "actions/other/x.ts:2",
   ]);
+});
+
+// Drifts silently without this: an action that stops spawning gh keeps its exclusion, so a gh spawned there later is
+// never judged.
+test("every file the gh rule excludes still spawns gh", () => {
+  const config = Bun.JSONC.parse(readFileSync(join(REPO_ROOT, "biome.local.jsonc"), "utf-8")) as {
+    overrides: { includes: string[]; plugins?: string[] }[];
+  };
+  const block = config.overrides.find((override) => override.plugins?.includes(GH_SPAWN_PLUGIN));
+  if (block === undefined) throw new Error(`no override runs ${GH_SPAWN_PLUGIN}`);
+
+  const exclusions = block.includes.filter((glob) => glob.startsWith("!"));
+
+  // Under lifted/ no exclusion matches, so the rule judges the real content; a file that is gone is judged empty.
+  const lifted = (exclusion: string): string => `actions/lifted/${exclusion.slice(1)}`;
+  const content = (exclusion: string): string => {
+    const file = join(REPO_ROOT, exclusion.slice(1));
+
+    return existsSync(file) ? readFileSync(file, "utf-8") : "";
+  };
+  const spawning = new Set(
+    lintFixture(
+      temp.dir("github-client-zone-lint-"),
+      Object.fromEntries(exclusions.map((exclusion) => [lifted(exclusion), content(exclusion)])),
+    )
+      .filter((d) => d.message.includes(GH_SPAWN_MESSAGE))
+      .map((d) => d.path),
+  );
+
+  const staleLines = exclusions.filter((exclusion) => !spawning.has(lifted(exclusion)));
+
+  expect(staleLines).toEqual([]);
 });

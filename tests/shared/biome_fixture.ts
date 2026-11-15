@@ -17,6 +17,9 @@ export interface FixtureDiagnostic {
 
   /** The line the diagnostic starts on. */
   line: number;
+
+  /** The rule's own words, which tell one grit plugin from another. */
+  message: string;
 }
 
 /** Every diagnostic biome reports for `files` under the repository's lint configuration.
@@ -44,12 +47,17 @@ export function lintFixture(lintRoot: string, files: Record<string, string>): Fi
     { cwd: lintRoot },
   );
   const report = JSON.parse(ran.stdout) as {
-    diagnostics: { category: string; location: { path: string; start: { line: number } } }[];
+    diagnostics: {
+      category: string;
+      message: string;
+      location: { path: string; start: { line: number } };
+    }[];
   };
 
   return report.diagnostics.map((d) => ({
     category: d.category,
     path: d.location.path,
     line: d.location.start.line,
+    message: d.message,
   }));
 }
