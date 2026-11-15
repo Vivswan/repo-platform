@@ -31,7 +31,7 @@ import {
 import { ownLinksPattern, pagesSite, pagesSiteAt } from "../shared/pages_site.ts";
 import { PLATFORM_NAME } from "../shared/platform.ts";
 import { type IncludeRoot, isUnwalkedEntry, LANDING_FILES } from "./.vitepress/conventions.ts";
-import { collectFacts, type DetectedLicense, detectedLicense } from "./facts.ts";
+import { collectFacts } from "./facts.ts";
 import {
   type DocsMount,
   mountRel,
@@ -61,9 +61,6 @@ const MAX_VERSIONS = 5;
 
 /** A local git read answers in under a second, so a minute names a wedged one (release-health bounds its own the same). */
 const GIT_READ_BOUND_MS = 60_000;
-
-/** One API read answers in seconds, so a minute names a wedged one. */
-const API_READ_BOUND_MS = 60_000;
 
 /** `git archive` of one ref's tree, or its extraction: disk-bound, as long as the scripts' whole-tree calls (five minutes). */
 const TREE_EXTRACT_BOUND_MS = 300_000;
@@ -106,14 +103,6 @@ function treeFile(workspace: string, ref: string, path: string): string | null {
   if (mode !== "100644" && mode !== "100755") return null;
 
   return git(workspace, ["show", `${ref}:${path}`]);
-}
-
-/** What GitHub detects as the license at one commit, read with the step's GH_TOKEN. */
-function licenseAt(repository: string, sha: string): DetectedLicense | null {
-  const answer = capture(["gh", "api", `repos/${repository}/license?ref=${sha}`], {
-    timeoutMs: API_READ_BOUND_MS,
-  });
-  return detectedLicense(answer, `${repository} at ${sha}`);
 }
 
 function writeExclusive(path: string, content: string, what: string): void {
@@ -183,9 +172,6 @@ interface Config extends SiteConfig {
 
   /** DEFAULT_BRANCH, else `main`: the edit links' branch, and the provenance label of a tier built from HEAD. */
   defaultBranch: string;
-
-  /** Whether this run is the docs PR check, which asks no API. */
-  check: boolean;
 }
 
 /** Whether this run is the docs PR check. Parsed at the boundary: anything but the two honest spellings is a wiring
@@ -224,7 +210,6 @@ function readConfig(check: boolean): Config {
     origin,
     rootBase,
     defaultBranch,
-    check,
     editBase: `${serverUrl}/${repository}/edit/${defaultBranch}/`,
   };
 }
@@ -370,8 +355,7 @@ export function assertIncludePages(target: string, include: IncludeRoot): void {
 
 /** Dead-link strictness is derived here from the tier, the one owner.
  *  So a strict HEAD build and a lenient tag build are the only representable states.
- *  Project facts read the tier's own ref, so a tagged version shows the toolchains and license that tag carried.
- *  The check's card carries no license: nothing it builds is published. */
+ *  Project facts read the tier's own ref, so a tagged version shows the toolchains and license that tag carried. */
 function buildVitepressTier(
   cfg: Config,
   tier: Tier,
@@ -425,7 +409,6 @@ function buildVitepressTier(
     ref: tier.ref,
     sha,
     serverUrl: cfg.serverUrl,
-    license: cfg.check ? null : licenseAt(cfg.repository, sha),
   });
   // The action's own bun (the one running this script), never `bun` off
   // PATH: the hook's toolchain setup may have put the repository's bun first.

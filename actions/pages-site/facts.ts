@@ -2,10 +2,7 @@
 // version shows that tag's facts.
 //   an absent or malformed file       -> null or [], never a failed build
 //   a failed git read in the reader   -> still throws: a broken checkout is a build fault, not a missing fact
-//   a failed license read at GitHub   -> throws too: a card never names a license GitHub did not answer
 
-import { z } from "zod";
-import { failureDetail, type RunResult, succeeded } from "../shared/action_runtime.ts";
 import { SETTINGS_PATH } from "../shared/platform.ts";
 import { isMapping } from "../shared/values.ts";
 
@@ -28,7 +25,7 @@ export interface ProjectFacts {
   /** The toolchains the version dotfiles pin, in TOOLCHAIN_FILES order. */
   toolchains: { name: string; version: string }[];
 
-  /** The license by name and file; null when GitHub detects no license file, and in the docs PR check. */
+  /** The license by name and file; null without a LICENSE.md. */
   license: { name: string; path: string } | null;
 
   /** The docs tree the pages render from, repo-relative: the prefix that turns a page's staged path into its repository path. */
@@ -41,16 +38,6 @@ export interface ProjectFacts {
   hue: number;
 }
 
-/** What GitHub's license detection answered for one commit. */
-export interface DetectedLicense {
-  /** The license file GitHub picked, repo-relative. */
-  path: string;
-
-  /** The SPDX id of the license the text matches; null for a text that matches none. */
-  spdxId: string | null;
-}
-
-/** `license` is GitHub's answer for `sha`: null for no license file, and for a build that asks no API. */
 export interface FactsInput {
   repository: string;
   docsDir: string;
@@ -58,27 +45,34 @@ export interface FactsInput {
   ref: string;
   sha: string;
   serverUrl: string;
-  license: DetectedLicense | null;
 }
 
 type Identity = Pick<ProjectFacts, "description" | "homepage" | "topics">;
 
 export type FactsReader = (path: string) => string | null;
 
-/** How far into the license file a heading is looked for. */
+/** The one license file the card reads. */
+const LICENSE_FILE = "LICENSE.md";
+
+/** How far into the file the name is looked for: a heading, else the opening paragraphs. */
 const LICENSE_HEAD_LINES = 20;
 
-/** The SPDX id GitHub answers for a license file whose text matches no known license. */
-const UNDETECTED_SPDX_ID = "NOASSERTION";
+/** The card's name when the text has neither a heading nor a recognized opening. */
+const LICENSE_FALLBACK = "See LICENSE.md";
 
-/** The fields read from `GET /repos/{owner}/{repo}/license`; `license` is null or carries a null id where GitHub names none. */
-const LICENSE_ANSWER = z.object({
-  path: z.string().min(1),
-  license: z.object({ spdx_id: z.string().nullable() }).nullable(),
-});
-
-/** GitHub's error body for a repository with no license file at the ref. */
-const NOT_FOUND_ANSWER = z.object({ status: z.literal("404") });
+/** Known licenses by the wording their standard texts open with, anchored so only a title that starts with the name canonicalizes: "Not the MIT License" and a body line mentioning MIT keep a custom license's name. */
+const KNOWN_LICENSES: [RegExp, string][] = [
+  [/^MIT License\b/i, "MIT"],
+  [/^Apache License,?\s+(?:Version\s+)?2\.0\b/i, "Apache-2.0"],
+  [/^BSD 2-Clause\b/i, "BSD-2-Clause"],
+  [/^BSD 3-Clause\b/i, "BSD-3-Clause"],
+  [/^GNU GENERAL PUBLIC LICENSE\s+Version 3\b/i, "GPL-3.0"],
+  [/^GNU LESSER GENERAL PUBLIC LICENSE\b/i, "LGPL"],
+  [/^Mozilla Public License,?\s+(?:Version\s+)?2\.0\b/i, "MPL-2.0"],
+  [/^ISC License\b/i, "ISC"],
+  [/^Unlicense\b/i, "Unlicense"],
+  [/^CC0\b/, "CC0"],
+];
 
 /** The version dotfiles the card reads, in display order, each with the reader of its version. */
 const TOOLCHAIN_FILES: { name: string; path: string; version: (text: string) => string | null }[] =
@@ -201,44 +195,43 @@ function firstHeading(lines: string[]): string | null {
   return null;
 }
 
-function parsedJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
+function paragraphs(lines: string[]): string[][] {
+  const result: string[][] = [];
+  let current: string[] = [];
+  for (const line of lines.map((entry) => entry.trim())) {
+    if (line !== "") {
+      current.push(line);
+    } else if (current.length > 0) {
+      result.push(current);
+      current = [];
+    }
   }
+
+  return current.length > 0 ? [...result, current] : result;
 }
 
-/**
- * Reads the answer of `gh api repos/{owner}/{repo}/license?ref={sha}`.
- *
- * @param what - the repository and commit asked about, for the error
- * @returns the detected license; null when GitHub finds no license file at the commit
- * @throws {Error} the read failed for any reason but a missing license, or answered another shape
- */
-export function detectedLicense(answer: RunResult, what: string): DetectedLicense | null {
-  const body = parsedJson(answer.stdout);
-  if (!succeeded(answer.exit)) {
-    if (NOT_FOUND_ANSWER.safeParse(body).success) return null;
-
-    throw new Error(`cannot read the license of ${what} from GitHub (${failureDetail(answer)})`);
-  }
-
-  const parsed = LICENSE_ANSWER.safeParse(body);
-  if (!parsed.success) {
-    throw new Error(`GitHub's license answer for ${what} has an unexpected shape`);
-  }
-
-  const spdxId = parsed.data.license?.spdx_id ?? null;
-  return { path: parsed.data.path, spdxId: spdxId === UNDETECTED_SPDX_ID ? null : spdxId };
+function knownLicense(title: string): string | null {
+  const bare = title.replace(/^the\s+/i, "");
+  return KNOWN_LICENSES.find(([pattern]) => pattern.test(bare))?.[1] ?? null;
 }
 
-/** A text GitHub matches to no license is named by its own first heading, as a custom license titles itself. */
-function licenseName(read: FactsReader, detected: DetectedLicense): string {
-  if (detected.spdxId !== null) return detected.spdxId;
+/** A markdown heading is authoritative: canonicalized when it starts with a known name, kept verbatim otherwise.
+ *    "# Not the MIT License"                       -> a custom license, whatever the body says
+ *    Apache, the GPL: the name centered over 2 lines -> read from the opening paragraph joined
+ *    GitHub's CC0: "Creative Commons Legal Code"    -> a publisher banner; read from the next paragraph's first line */
+function licenseName(text: string): string {
+  const lines = text.split("\n").slice(0, LICENSE_HEAD_LINES);
+  const heading = firstHeading(lines);
+  if (heading !== null) return knownLicense(heading) ?? heading;
 
-  const text = read(detected.path) ?? "";
-  return firstHeading(text.split("\n").slice(0, LICENSE_HEAD_LINES)) ?? `See ${detected.path}`;
+  const [opening, next] = paragraphs(lines);
+  const candidates = [opening?.join(" "), next?.[0]].filter((entry) => entry !== undefined);
+  return candidates.map(knownLicense).find((name) => name !== null) ?? LICENSE_FALLBACK;
+}
+
+function readLicense(read: FactsReader): ProjectFacts["license"] {
+  const text = read(LICENSE_FILE);
+  return text === null ? null : { name: licenseName(text), path: LICENSE_FILE };
 }
 
 /** FNV-1a over the UTF-8 bytes, folded to the six theme hues. */
@@ -262,10 +255,7 @@ export function collectFacts(read: FactsReader, input: FactsInput): ProjectFacts
       const version = text === null ? null : toolchain.version(text);
       return version === null ? [] : [{ name: toolchain.name, version }];
     }),
-    license:
-      input.license === null
-        ? null
-        : { name: licenseName(read, input.license), path: input.license.path },
+    license: readLicense(read),
     docsDir: input.docsDir,
     provenance: {
       label: input.ref === "HEAD" ? input.defaultBranch : input.ref,
