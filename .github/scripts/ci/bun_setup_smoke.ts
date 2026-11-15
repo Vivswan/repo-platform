@@ -3,18 +3,47 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { error, setOutput } from "@actions/core";
+import { z } from "zod";
 import { env, requireEnv } from "../shared/gha.ts";
+import { GitHubClient, unansweredReason } from "../shared/github.ts";
 
+/** The checkout holding the pin file. */
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
-/** The previous minor's .0 always exists: every bun minor line starts at .0. */
-export function earlierRelease(version: string): string {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
-  if (match === null) throw new Error(`not a release version: '${version}'`);
-  const [major, minor, patch] = match.slice(1).map(Number);
-  if (patch > 0) return `${major}.${minor}.${patch - 1}`;
-  if (minor > 0) return `${major}.${minor - 1}.0`;
-  throw new Error(`no release before ${version}`);
+/** Where bun publishes its releases. */
+const BUN_REPOSITORY = "oven-sh/bun";
+
+/** A release tag that names a version; the canary tag does not. */
+const RELEASE_TAG = /^bun-v(\d+\.\d+\.\d+)$/;
+
+/** The fields of a listed release that decide whether it counts. */
+const listedRelease = z.object({
+  tag_name: z.string(),
+  draft: z.boolean(),
+  prerelease: z.boolean(),
+});
+
+/** The newest published bun release older than the pin, read from bun's release list.
+ *
+ * @throws {Error} the list could not be read, or holds no release older than the pin
+ */
+export async function earlierRelease(pin: string, github: GitHubClient): Promise<string> {
+  const releases = await github.paginate(`repos/${BUN_REPOSITORY}/releases`, listedRelease);
+  if (releases.kind !== "ok") {
+    throw new Error(
+      `${BUN_REPOSITORY}: releases could not be read (${unansweredReason(releases)})`,
+    );
+  }
+
+  const older = releases.value
+    .filter((release) => !release.draft && !release.prerelease)
+    .flatMap((release) => RELEASE_TAG.exec(release.tag_name)?.slice(1) ?? [])
+    .filter((version) => Bun.semver.order(version, pin) < 0)
+    .sort(Bun.semver.order);
+  const newest = older.at(-1);
+  if (newest === undefined) throw new Error(`${BUN_REPOSITORY}: no release before ${pin}`);
+
+  return newest;
 }
 
 /** The action's outputs from one call; `version` is what `path` printed when it was resolved. */
@@ -28,7 +57,7 @@ export interface SmokeReading {
   /** The manifests' pin, first on PATH before the first call. */
   current: string;
 
-  /** An earlier release, so not the bun first on PATH before the second call. */
+  /** The release before the pin, so not the bun first on PATH before the second call. */
   previous: string;
 
   /** The call made with `current` first on PATH. */
@@ -58,9 +87,9 @@ export function smokeProblems(reading: SmokeReading): string[] {
   return problems;
 }
 
-function plant(): number {
+async function plant(): Promise<number> {
   const current = readFileSync(join(REPO_ROOT, "files/bun/.bun-version"), "utf8").trim();
-  const previous = earlierRelease(current);
+  const previous = await earlierRelease(current, new GitHubClient());
   const root = join(requireEnv("RUNNER_TEMP"), "bun-setup-smoke");
   for (const [name, version] of [
     ["current", current],
@@ -92,7 +121,7 @@ function judge(): number {
   return problems.length === 0 ? 0 : 1;
 }
 
-function main(argv: string[]): number {
+async function main(argv: string[]): Promise<number> {
   if (argv.length === 1 && argv[0] === "plant") return plant();
   if (argv.length === 1 && argv[0] === "judge") return judge();
   console.error("usage: bun_setup_smoke.ts plant|judge");
@@ -100,5 +129,5 @@ function main(argv: string[]): number {
 }
 
 if (import.meta.main) {
-  process.exit(main(process.argv.slice(2)));
+  process.exit(await main(process.argv.slice(2)));
 }

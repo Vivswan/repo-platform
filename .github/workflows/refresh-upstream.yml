@@ -1,10 +1,12 @@
-# Moves every upstream pin in files.yml that is behind and opens at most one PR per kind of pin.
+# Moves every upstream pin that is behind and opens at most one PR per kind of pin.
 #
 # The kinds:
-#   - a commit pin (an upstream ref's sha) moves to its repository's HEAD
+#   - a commit pin (an upstream ref's sha in files.yml) moves to its repository's HEAD
 #   - a release pin (a module's version dotfile under files/) moves to its repository's latest release
+#   - a tool pin (a release archive ci.yml installs by version and sha256) moves to its repository's latest release
 #
 # One matrix leg and one PR branch per kind, so a toolchain bump is never held behind a gitignore diff.
+# The PR's subject follows what the kind changes: fleet content is a fix, this repository's own CI tools are ci.
 #
 # A commit PR's body carries each fetched file's diff between the two commits, which the next sync renders, after
 # each entry's `replace`, wherever the file lands.
@@ -28,7 +30,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kind: [commit, release]
+        include:
+          - kind: commit
+            subject: "fix(files)"
+          - kind: release
+            subject: "fix(files)"
+          - kind: tool
+            subject: "ci"
     # Schedule and dispatch both push the same PR branch; queue runs,
     # never cancel one mid-push.
     concurrency:
@@ -70,6 +78,6 @@ jobs:
           delete-branch: true
           committer: repo-platform-sync <repo-platform-sync@users.noreply.github.com>
           author: repo-platform-sync <repo-platform-sync@users.noreply.github.com>
-          commit-message: "fix(files): bump ${{ steps.refresh.outputs.bumps }}"
-          title: "fix(files): bump ${{ steps.refresh.outputs.bumps }}"
+          commit-message: "${{ matrix.subject }}: bump ${{ steps.refresh.outputs.bumps }}"
+          title: "${{ matrix.subject }}: bump ${{ steps.refresh.outputs.bumps }}"
           body: ${{ steps.refresh.outputs.body }}
