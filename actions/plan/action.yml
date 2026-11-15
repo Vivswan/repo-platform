@@ -7,7 +7,8 @@ description: |
   - default: what fleet.yml's jobs key on (the module selection in canonical order, the visibility, the CodeQL
     languages, the tracking labels).
   - site: the configuration the pages-site action consumes, as one JSON document (the site title, the docs mount path or null
-    for no docs half, the include roots, the link-rot label).
+    for no docs half, the include roots, the link-rot label). Given the vars input, it also exports the repository
+    variables the registration's site.vars names as environment values of the job.
 
   GH_TOKEN is needed only when the private input is empty, since the visibility is then read from the API.
 
@@ -20,6 +21,11 @@ inputs:
     description: >-
       The repository's visibility, "true" or "false" (pass github.event.repository.private), or empty to ask the API
       with GH_TOKEN.
+    required: false
+    default: ""
+  vars:
+    description: |
+      The caller's `vars` context as JSON (toJSON(vars), which a composite action cannot read), from which mode site exports the variables the registration's site.vars names, and no others, a name the repository has not set as empty; empty exports nothing.
     required: false
     default: ""
 outputs:
@@ -44,6 +50,9 @@ outputs:
       The site configuration as compact JSON {"site_title", "docs_path", "include", "link_rot_label",
       "link_rot_color", "link_rot_description"}, the pages-site action's config input, with docs_path null when the registration turns the docs half off with site.path: null (mode site).
     value: ${{ steps.plan.outputs.config }}
+  site-vars:
+    description: The names of the repository variables the registration's site.vars declares, comma-separated and empty for none (mode site).
+    value: ${{ steps.plan.outputs.site-vars }}
 
 runs:
   using: composite
@@ -73,6 +82,7 @@ runs:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         MODE: ${{ inputs.mode }}
         PRIVATE: ${{ inputs.private }}
+        VARS: ${{ inputs.vars }}
         FILES_CONFIG: ${{ github.action_path }}/../../files.yml
         FILES_TREE: ${{ github.action_path }}/../../files
       run: '"$ACTION_BUN" "${{ github.action_path }}/plan.ts"'

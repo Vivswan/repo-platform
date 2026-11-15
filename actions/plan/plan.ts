@@ -3,7 +3,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { error, setFailed, setOutput } from "@actions/core";
+import { error, exportVariable, setFailed, setOutput } from "@actions/core";
 import type { DocsConfig, SiteConfigJson } from "../pages-site/.vitepress/conventions.ts";
 import {
   capture,
@@ -16,6 +16,7 @@ import {
 import { LABEL_RE } from "../shared/label.ts";
 import { REGISTRATION_PATH } from "../shared/platform.ts";
 import { moduleList } from "../shared/selection.ts";
+import { isMapping } from "../shared/values.ts";
 import {
   type FileEntry,
   type FilesConfig,
@@ -247,6 +248,9 @@ export interface SitePlan {
 
   /** The link-rot stream: the registration's label under the docs module's tuple. */
   linkRot: LabelTuple;
+
+  /** The names of the repository variables the site-build hook reads, as the registration declares them. */
+  vars: string[];
 }
 
 export function planSite(input: PlanInput): SitePlan {
@@ -279,7 +283,26 @@ export function planSite(input: PlanInput): SitePlan {
       color: tuple.color,
       description: tuple.description,
     },
+    vars: site?.vars ?? [],
   };
+}
+
+/** The environment the site-build hook gets from the caller's `vars` context (JSON): the declared names alone, a name the repository has not set empty.
+ *  An empty context is a caller that hands none over, and exports nothing. */
+function siteVars(names: readonly string[], context: string): Record<string, string> {
+  if (context === "") return {};
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(context);
+  } catch (cause) {
+    throw new PlanError([`the vars input is not JSON (${messageOf(cause)})`]);
+  }
+
+  const set = isMapping(parsed) ? parsed : {};
+  return Object.fromEntries(
+    names.map((name) => [name, typeof set[name] === "string" ? set[name] : ""]),
+  );
 }
 
 export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
@@ -292,7 +315,7 @@ export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
       link_rot_color: plan.linkRot.color,
       link_rot_description: plan.linkRot.description,
     };
-    return { config: JSON.stringify(config) };
+    return { "config": JSON.stringify(config), "site-vars": plan.vars.join(",") };
   }
 
   return {
@@ -368,7 +391,9 @@ function main(): number {
       mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
   };
   const plan = mode === "site" ? planSite(input) : planCi(input);
+  const exported = "vars" in plan ? siteVars(plan.vars, env("VARS")) : {};
   for (const [name, value] of Object.entries(outputsOf(plan))) setOutput(name, value);
+  for (const [name, value] of Object.entries(exported)) exportVariable(name, value);
 
   return 0;
 }

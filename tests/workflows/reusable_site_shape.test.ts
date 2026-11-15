@@ -61,6 +61,17 @@ describe("reusable-site.yml", () => {
     expect(new Set(read)).toEqual(new Set(Object.keys(SITE_URLS.outputs ?? {})));
   });
 
+  // Cross-file with actions/plan/action.yml: an input the action never declares is dropped with a warning, so the
+  // hook's variables would read empty. A plan step after the hook exports too late for it.
+  test("every plan input the workflow passes is declared, and each plan step runs before the hook", () => {
+    const declared = Object.keys(loadAction("actions/plan/action.yml").inputs ?? {});
+    const plans = steps.filter((candidate) => candidate.uses === "$/actions/plan");
+    const passed = plans.flatMap((candidate) => Object.keys(candidate.with ?? {}));
+    const hook = steps.indexOf(step("hook") as Step);
+    expect(declared).toEqual(expect.arrayContaining(passed));
+    expect(plans.filter((candidate) => steps.indexOf(candidate) > hook)).toEqual([]);
+  });
+
   // The lowercase host is lychee's reporting convention: a link to the own site in another case would be reported as
   // external. The remap is lychee's regex pair (pattern, a space, the replacement with $N captures): a blob link into the own
   // default branch, with a line fragment, a query, or a trailing slash (GitHub serves all three), must land on the

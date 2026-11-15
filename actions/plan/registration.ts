@@ -134,6 +134,14 @@ const label = z
     "must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters",
   );
 
+/** A repository variable's name as GitHub stores it; a name outside this shape can never be set, so it is a typo. */
+const variableName = z
+  .string()
+  .regex(
+    /^(?!GITHUB_)[A-Z_][A-Z0-9_]*$/,
+    "must be a repository variable's name: uppercase letters, digits, and underscores, not starting with a digit or GITHUB_",
+  );
+
 /** One grammar for both documents that declare mirrors: files.yml's fleet list and the registration's own. `kind` is how a target carries the source: its bytes, or a relative symbolic link to it (docs/platform/sync/mirrors.md). */
 export const mirrorsSchema = z.array(
   z.strictObject({
@@ -170,6 +178,8 @@ export const registrationSchema = z.strictObject({
           if (message !== null) ctx.addIssue({ code: "custom", message });
         })
         .optional(),
+      // The repository variables the site-build hook reads as environment values (docs/modules/site.md, "Repository variables").
+      vars: z.array(variableName).optional(),
     })
     .superRefine((site, ctx) => {
       const message = includeWithoutDocsProblem(site.path, site.include ?? []);
