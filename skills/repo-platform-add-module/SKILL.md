@@ -38,6 +38,7 @@ One line each, the `description` of each module in the platform's `files.yml`.
 | `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels                                                     |
 | `npm`            | publishes one npm package through trusted publishing: latest at a release, next when the release PR refreshes                             |
 | `pr-title`       | Conventional Commit PR title check, its own required workflow                                                                             |
+| `autofix`        | commits a pull request's automated fixes: the fix-lint label, or a declared push, runs the repo-owned autofix hook                        |
 | `fuzzer`         | nightly fuzz starter with issue filing, replay inputs, auto-close                                                                         |
 | `nightly`        | nightly CI starter with failure issue filing and auto-close                                                                               |
 | `custom-license` | repo carries its own license in LICENSE.md; the fleet license is not written                                                              |
@@ -46,21 +47,21 @@ One line each, the `description` of each module in the platform's `files.yml`.
 
 From the platform's `files.yml`. Managed files are rewritten on every sync; starters are written once and then repo-owned; split files get the module's block inside their managed region.
 
-| Module                     | Files                                                                                                           | Class            |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `bun`                      | `.bun-version`, `biome.json` (the TypeScript lint floor; it extends the local layer)                            | managed          |
-| `bun`                      | `biome.local.jsonc` (the repo's own biome layer under the floor)                                                | starter          |
-| `uv`                       | `ruff.toml`, the Python lint floor the repository's `pyproject.toml` builds on                                  | managed          |
-| `rust`                     | `Cargo.toml` (the workspace root with the lint floor); `clippy.toml` (the floor's thresholds)                   | starter; managed |
-| every toolchain            | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml`                                     | split; managed   |
-| every toolchain but `rust` | `.github/workflows/auto-format.yml`                                                                             | starter          |
-| `site`                     | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | -                |
-| `release-please`           | `release-please-config.json`, `.release-please-manifest.json`; the release variant of `.typography-allow`       | starter; managed |
-| `npm`                      | `.github/actions/npm-build/action.yml` (the build hook the npm legs run; it fails until filled in)              | starter          |
-| `pr-title`                 | `.github/workflows/pr-title.yml`                                                                                | managed          |
-| `fuzzer`                   | `.github/workflows/nightly-fuzz.yml`                                                                            | starter          |
-| `nightly`                  | `.github/workflows/nightly.yml`                                                                                 | starter          |
-| `custom-license`           | `LICENSE.md` is no longer written; the fleet copy is retired on that sync                                       | -                |
+| Module           | Files                                                                                                           | Class            |
+| ---------------- | --------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `bun`            | `.bun-version`, `biome.json` (the TypeScript lint floor; it extends the local layer)                            | managed          |
+| `bun`            | `biome.local.jsonc` (the repo's own biome layer under the floor)                                                | starter          |
+| `uv`             | `ruff.toml`, the Python lint floor the repository's `pyproject.toml` builds on                                  | managed          |
+| `rust`           | `Cargo.toml` (the workspace root with the lint floor); `clippy.toml` (the floor's thresholds)                   | starter; managed |
+| every toolchain  | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml`                                     | split; managed   |
+| `site`           | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | -                |
+| `release-please` | `release-please-config.json`, `.release-please-manifest.json`; the release variant of `.typography-allow`       | starter; managed |
+| `npm`            | `.github/actions/npm-build/action.yml` (the build hook the npm legs run; it fails until filled in)              | starter          |
+| `pr-title`       | `.github/workflows/pr-title.yml`                                                                                | managed          |
+| `autofix`        | `.github/workflows/auto-fix.yml`; `.github/actions/autofix/action.yml` (the fix hook; it fails until filled in) | managed; starter |
+| `fuzzer`         | `.github/workflows/nightly-fuzz.yml`                                                                            | starter          |
+| `nightly`        | `.github/workflows/nightly.yml`                                                                                 | starter          |
+| `custom-license` | `LICENSE.md` is no longer written; the fleet copy is retired on that sync                                       | -                |
 
 The release, npm, and site legs of `ci.yml` exist in every repository and run only when their module is selected. Per-module keys, companion steps, and removal notes are in [references/modules.md](references/modules.md).
 
@@ -122,6 +123,7 @@ The full checklist per module is in [references/modules.md](references/modules.m
 - Labels: the sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from the registration's `labels.*` keys (the module's default when the key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; a `labels.*` key for an unselected module fails the plan (step 1) and also holds the sync PR.
 - `fuzzer` / `nightly`: replace the starter's placeholder step with real work; a custom label also goes into the starter's `label:` inputs.
 - `npm`: fill in the repo-owned `.github/actions/npm-build/action.yml` hook, seeded to fail so an unbuilt package never publishes; publish the package once by hand, then add its trusted publisher on npmjs.com (workflow `ci.yml`, "npm publish" and "Allow npm dist-tag" ticked); have release-please write the version into its `package.json` from the root package in `release-please-config.json` (`release-type: node`, or an `extra-files` entry for a nested one; [references/modules.md](references/modules.md#npm)).
+- `autofix`: declare the `autofix` block (`label.paths`, and `push` only for a repository that regenerates files on a push); fill in the repo-owned `.github/actions/autofix/action.yml` hook, seeded to fail; delete the repository's own `auto-format.yml` or fix workflow ([references/modules.md](references/modules.md#autofix)).
 - `site`: the module's settings layer enables Pages on the next settings apply (before it: `gh api -X POST repos/Vivswan/<repo>/pages -f build_type=workflow`); the repo's own website goes into the repo-owned `.github/actions/site-build/action.yml` hook, seeded as a no-op, so fill it in or the site is the docs alone (`docs/README.md` was step 1's business).
 
 ## Module keys
@@ -132,12 +134,13 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | --------- | ------------------------------------------------------- | ----------------------------------- |
 | `site`    | `site.path`, `site.include`, `site.vars`, `labels.site` | `docs`, none, none, `docs-link-rot` |
 | `npm`     | `npm.path`                                              | the repository root                 |
+| `autofix` | `autofix.label`, `autofix.push`                         | required, none                      |
 | `fuzzer`  | `labels.fuzzer`                                         | `fuzz-nightly`                      |
 | `nightly` | `labels.nightly`                                        | `nightly-failure`                   |
 
 Two keys belong to no module. `project` is required, with `name`, `slug`, and `description` together; `copyright_holder` is optional and defaults to the owner's handle and GitHub page. `mirrors` defaults to none.
 
-- **No sync needed:** a `site.path`, `site.include`, `site.vars`, or `npm.path` change; the site and npm legs read the registration at run time.
+- **No sync needed:** a `site.path`, `site.include`, `site.vars`, `npm.path`, or `autofix` change; the site, npm, and autofix jobs read the registration at run time.
 - **Needs a branch sync on the PR:** `mirrors`, `labels.*`, and `project.*`. The `repo-platform:sync` label pushes a hold-free report; a held one (a replaced local edit, or a mirror change that leaves a registration note, such as a dropped declaration whose recorded copy stays) takes the branch dispatch (`-f branch=`). `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`); a `labels.*` value re-renders `.github/settings.yml` (step 3, Labels).
 - **Starters keep their content:** an existing starter (`.github/settings.local.yml`) is not rewritten, so edit it yourself.
 - Tracking labels (`fuzzer`, `nightly`, `site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label.

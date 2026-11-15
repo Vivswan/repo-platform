@@ -142,6 +142,19 @@ const variableName = z
     "must be a repository variable's name: uppercase letters, digits, and underscores, not starting with a digit or GITHUB_, and not PATH or NODE_OPTIONS",
   );
 
+/** Why `value` cannot be an entry of an autofix list, or null: a glob over repository paths, or a directory spelled with a closing slash. */
+function fixGlobProblem(value: string): string | null {
+  if (value.startsWith("!")) return "is a negation, which a list of allowed paths does not take";
+
+  return pathProblem(value.endsWith("/") ? value.slice(0, -1) : value);
+}
+
+/** A list of the autofix module, matched against repository paths by the autofix action. */
+const fixGlobs = z.array(judged(fixGlobProblem));
+
+/** One event's allow-lists of the autofix module: what a fix may add or change, and what it may delete. */
+const fixLists = z.strictObject({ paths: fixGlobs.min(1), delete: fixGlobs.default([]) });
+
 /** One grammar for both documents that declare mirrors: files.yml's fleet list and the registration's own. `kind` is how a target carries the source: its bytes, or a relative symbolic link to it (docs/platform/sync/mirrors.md). */
 export const mirrorsSchema = z.array(
   z.strictObject({
@@ -188,6 +201,10 @@ export const registrationSchema = z.strictObject({
     .optional(),
   // The directory of the package the npm legs publish; absent is the repository root (docs/modules/npm.md).
   npm: z.strictObject({ path: relativePath.optional() }).optional(),
+  // What a fix may carry, per trigger: the fix-lint label, and a push to a pull request touching `on` (docs/modules/autofix.md).
+  autofix: z
+    .strictObject({ label: fixLists, push: fixLists.extend({ on: fixGlobs.min(1) }).optional() })
+    .optional(),
   labels: z.record(z.string(), label).optional(),
   // Paths the repository keeps as its own: no files.yml entry there is
   // written for it (docs/platform/sync/files.md, Selection).

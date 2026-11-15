@@ -15,8 +15,20 @@ describe("the Markdown code delimiters", () => {
     "trailing`",
     "two``ticks and one` tick",
     " spaced at both ends ",
+    " ",
+    "   ",
+    "`",
+    "```",
   ])("a code span holds %p whole", (text) => {
     expect(markdown.renderInline(codeSpan(text))).toBe(`<code>${text}</code>`);
+  });
+
+  // CommonMark has no empty code span: two backticks are an opener, and they close on the next span's delimiter, so
+  // the text that span was quoting renders as Markdown of its own.
+  test("no text renders as fixed words that the next span's delimiter cannot pair with", () => {
+    const link = "`[click](https://example.com)";
+    const html = markdown.renderInline(`${codeSpan("")}: ${codeSpan(link)}`);
+    expect(html).toBe(`(empty): <code>${link}</code>`);
   });
 
   test.each([

@@ -1,0 +1,42 @@
+# This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
+
+name: Autofix
+description: |
+  Makes this repository's automated fixes in the checkout, for the fleet's auto-fix.yml to commit and push.
+
+  It runs on the pull request's head commit, in a job whose token can only read. It leaves the fixes in the work tree
+  and never commits or pushes. A non-zero exit stops the fix: nothing is committed.
+
+  What the commit may carry is the `autofix` block of .repo-platform.yml on the default branch. The contract and
+  examples are the fleet's docs/modules/autofix.md.
+
+inputs:
+  event:
+    description: What started the run, `label` (the fix-lint label) or `push` (a push the registration's autofix.push names)
+    required: true
+
+outputs:
+  findings:
+    description: What the fixer could not fix, shown in the pull request's notice; empty for none
+    value: "" # for the example below: ${{ steps.lint.outputs.findings }}
+  subject:
+    description: The commit's subject, a Conventional Commit line; empty for the fleet's default
+    value: ""
+
+runs:
+  using: composite
+  steps:
+    # A repository replaces the failing step below with its toolchain setup, its own install, and its own fixer, and
+    # points the outputs above at the steps that set them (docs/modules/autofix.md). For a bun repository:
+    #   - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+    #     with: { bun-version-file: .bun-version }
+    #   - shell: bash
+    #     run: bun install --frozen-lockfile --ignore-scripts
+    #   # The repository's own script, at its lockfile's version. A non-zero exit on leftover findings is swallowed and reported.
+    #   - id: lint
+    #     shell: bash
+    #     run: bun run lint:fix || echo "findings=the fixer left findings" >> "$GITHUB_OUTPUT"
+    - shell: bash
+      run: |
+        echo "::error::autofix hook: not configured; fill in .github/actions/autofix/action.yml before the autofix module fixes a pull request"
+        exit 1

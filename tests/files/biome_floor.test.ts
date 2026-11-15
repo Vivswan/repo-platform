@@ -122,19 +122,14 @@ describe("one biome version", () => {
     /^https:\/\/biomejs\.dev\/schemas\/(.+)\/schema\.json$/.exec(
       (JSON.parse(text) as { $schema: string }).$schema,
     )?.[1];
-  const starterVersion = (): string | undefined =>
-    /bun x @biomejs\/biome@(\S+) check --write \./.exec(
-      readFileSync(join(FILES_TREE, "bun/.github/workflows/auto-format.toolchain.yml"), "utf-8"),
-    )?.[1];
 
   // The root biome.json's $schema is not compared: a managed root copy follows the shipped file by self-sync.
-  test("the action's dependency, the root devDependency, the shipped $schema URL, and the auto-format starter name one version", () => {
+  test("the action's dependency, the root devDependency, and the shipped $schema URL name one version", () => {
     const pinned = dependency("actions/biome/package.json", "dependencies");
     expect(pinned).toMatch(/^\d+\.\d+\.\d+$/);
     expect({
       root: dependency("package.json", "devDependencies"),
       shippedSchema: schemaVersion(SHIPPED_FLOOR),
-      starter: starterVersion(),
-    }).toEqual({ root: pinned, shippedSchema: pinned, starter: pinned });
+    }).toEqual({ root: pinned, shippedSchema: pinned });
   });
 });
