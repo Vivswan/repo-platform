@@ -22,8 +22,13 @@ const RATE_LIMIT_WAIT_SECONDS = 60;
 /** The largest page GitHub serves. */
 const PAGE_SIZE = 100;
 
+/** The statuses the Fetch standard gives no body. */
+const BODILESS = [204, 205, 304];
+
+/** The client class: the core with this module's three policies plugged in. */
 const PlatformOctokit = Octokit.plugin(retry, throttling, paginateRest);
 
+/** A logger that prints nothing: the library's messages spell the request URL. */
 const SILENT = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
 /** One read's outcome. `not-found` is GitHub's 404 and nothing else; `failed` is every other non-answer, its reason safe for a public log. */
@@ -61,9 +66,6 @@ function sitsOutRateLimit(
 ): boolean {
   return retryCount === 0 && retryAfterSeconds <= RATE_LIMIT_WAIT_SECONDS;
 }
-
-/** The statuses the Fetch standard gives no body. */
-const BODILESS = [204, 205, 304];
 
 /** A transport that hands back a reply only once its whole body arrived, so a connection cut mid-body throws where the retry plugin sees it; the request layer reads a broken body as empty text. */
 function wholeReplies(transport: typeof fetch): typeof fetch {
@@ -104,6 +106,7 @@ export function unansweredReason(read: Exclude<Read<unknown>, { kind: "ok" }>): 
 
 export class GitHubClient {
   readonly #octokit: InstanceType<typeof PlatformOctokit>;
+
   readonly #deadlineMs: number;
 
   constructor(options: GitHubClientOptions = {}) {

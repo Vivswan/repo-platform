@@ -8,6 +8,7 @@
 import { type LoopbackServer, spawnLoopback } from "./loopback_server";
 
 export interface FakeReply {
+  /** The HTTP status. */
   status: number;
 
   /** A string is a file's raw bytes; anything else is sent as JSON. Absent: GitHub's `{"message": ...}` error body. */
@@ -38,12 +39,14 @@ export interface FakeCall {
 }
 
 export interface FakeGithub {
+  /** The client's `fetch` option. */
   fetch: typeof fetch;
 
   /** Every request so far, in order. */
   calls(): FakeCall[];
 }
 
+/** GitHub's answer for a path the table lacks. */
 const NOT_FOUND: FakeReply = { status: 404 };
 
 /** The run name the server keeps for itself: `/__calls/<run>` lists that run's requests. */
