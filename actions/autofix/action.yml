@@ -1,0 +1,99 @@
+name: Autofix
+description: |
+  Builds a pull request's fix in a job with no write token and pushes it from a job that runs no pull request code, in
+  phases around the caller's steps. docs/modules/autofix.md has the rules.
+
+  - plan: whether the event starts a fix. The fix-lint label always does; a push does when the registration declares
+    `autofix.push` and a changed file matches its `on` list.
+  - stage: after the repository's hook ran, stages what the event's lists allow and writes the patch and a report into
+    `directory`, for the caller to upload.
+  - read: hands the staged report's subject to the caller as `subject`, for the validate-commit-names action to judge.
+  - push: judges the downloaded patch against the lists again, commits it on the event's head sha, pushes it leased to
+    that sha, and words the sticky notice.
+  - unlabel: takes the fix-lint label off the pull request.
+  - fork: takes the label off a fork's pull request; `notice` says why nothing was fixed.
+
+  Every phase reads the pull request from the run's event payload, never from an input. Phases plan, unlabel, and fork
+  need GH_TOKEN in the environment (pull-requests read; write to remove the label); push needs it with contents write.
+
+inputs:
+  phase:
+    description: plan, stage, read, push, unlabel, or fork.
+    required: true
+  config:
+    description: The plan action's `autofix-config` output, read from the default branch (phases plan, stage, push).
+    required: false
+    default: ""
+  repository-directory:
+    description: The checkout of the pull request's head sha (phases stage, push).
+    required: false
+    default: ""
+  staged-directory:
+    description: The directory the stage phase's artifact was downloaded to (phases read, push).
+    required: false
+    default: ""
+  findings:
+    description: The hook's `findings` output (phase stage).
+    required: false
+    default: ""
+  subject:
+    description: The hook's `subject` output (phase stage), or the read phase's `subject` output (phase push).
+    required: false
+    default: ""
+  subject-accepted:
+    description: '"true" when the validate-commit-names action accepted the subject; anything else commits under the default subject (phase push).'
+    required: false
+    default: ""
+
+outputs:
+  run:
+    description: '"true" when the event starts a fix (phase plan).'
+    value: ${{ steps.run.outputs.run }}
+  directory:
+    description: The directory holding the patch and the report, to upload as one artifact (phase stage).
+    value: ${{ steps.run.outputs.directory }}
+  changed:
+    description: '"true" when the patch carries a change (phase stage).'
+    value: ${{ steps.run.outputs.changed }}
+  subject:
+    description: The hook's subject when it is one line of printable ASCII, else empty (phase read).
+    value: ${{ steps.run.outputs.subject }}
+  outcome:
+    description: How the push ended, one of pushed, nothing, superseded, refused, failed (phase push).
+    value: ${{ steps.run.outputs.outcome }}
+  notice:
+    description: The sticky notice for the pull request, Markdown, empty when there is nothing to say (phases push, fork).
+    value: ${{ steps.run.outputs.notice }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: $/actions/bun-setup
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --ignore-scripts --cwd "$ACTION_PATH"'
+
+    - name: Run the phase
+      id: run
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        PHASE: ${{ inputs.phase }}
+        CONFIG: ${{ inputs.config }}
+        REPOSITORY_DIRECTORY: ${{ inputs.repository-directory }}
+        STAGED_DIRECTORY: ${{ inputs.staged-directory }}
+        FINDINGS: ${{ inputs.findings }}
+        SUBJECT: ${{ inputs.subject }}
+        SUBJECT_ACCEPTED: ${{ inputs.subject-accepted }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/autofix.ts"'
