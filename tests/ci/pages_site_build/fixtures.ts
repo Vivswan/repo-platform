@@ -19,6 +19,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { pagesSite } from "../../../actions/shared/pages_site.ts";
 import { fill, loadAction, stepNamed } from "../../shared/action_step.ts";
+import { argvStub } from "../../shared/argv_stub.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
 import { parseGithubOutput } from "../../shared/github_output.ts";
@@ -33,6 +34,13 @@ export const BUILD_TIMEOUT_MS = 180_000;
 
 /** The test's own cap, above the build bound and stretched the same way. */
 export const TEST_TIMEOUT_MS = harnessBound(200_000);
+
+/** The license read's answer unless a caller's `GH_ANSWER` names another: MIT detected in `LICENSE`, in the documented shape. */
+const MIT_ANSWER = JSON.stringify({
+  name: "LICENSE",
+  path: "LICENSE",
+  license: { key: "mit", name: "MIT License", spdx_id: "MIT" },
+});
 
 /** The title siteConfig declares unless a caller overrides it. */
 export const SITE_TITLE = "Fixture Site";
@@ -160,10 +168,14 @@ export function runLinkCheck(
 export interface BuildResult extends BoundedSpawnResult {
   /** The step outputs the build set, read back from its GITHUB_OUTPUT file. */
   outputs: Record<string, string>;
+
+  /** Every `gh` call the build made, each as `gh` followed by its arguments. */
+  gh: string[][];
 }
 
 /** `SITE_URL` defaults to the address GitHub reports for `repository` with no custom domain, in configure-pages'
- *  slashless spelling; a caller's `env` names another. */
+ *  slashless spelling; a caller's `env` names another. The build's `gh` is a stub that prints `GH_ANSWER` and exits
+ *  `STUB_EXIT`, so no build reaches GitHub. */
 export function buildSite(
   workspace: string,
   repository: string,
@@ -173,9 +185,12 @@ export function buildSite(
   const output = join(dirname(runner.alias), "github-output");
   writeFileSync(output, "");
   const { origin, basePath } = pagesSite(repository);
+  const gh = argvStub(dirname(runner.alias), "gh", ["printf '%s' \"$GH_ANSWER\""]);
   const result = boundedSpawnSync([process.execPath, BUILD_TS], {
     env: {
       ...process.env,
+      PATH: `${gh.bin}:${process.env.PATH}`,
+      GH_ANSWER: MIT_ANSWER,
       GITHUB_WORKSPACE: workspace,
       GITHUB_REPOSITORY: repository,
       RUNNER_TEMP: runner.alias,
@@ -187,7 +202,7 @@ export function buildSite(
     },
     timeoutMs: BUILD_TIMEOUT_MS,
   });
-  return { ...result, outputs: parseGithubOutput(readFileSync(output, "utf-8")) };
+  return { ...result, outputs: parseGithubOutput(readFileSync(output, "utf-8")), gh: gh.calls() };
 }
 
 /** A failure message that carries the build's own output, so a red build
