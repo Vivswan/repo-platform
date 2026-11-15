@@ -47,6 +47,22 @@ jobs:
         id: urls
         uses: $/actions/site-urls
 
+      # The registration's site keys, read before the hook; the assembly reads this step's config.
+      - name: Plan the site from the registration
+        id: plan
+        uses: $/actions/plan
+        with:
+          mode: site
+
+      # A workflow alone reads the vars context, so it hands the context to the plan, which exports the variables the
+      # registration's site.vars names, and no others, to the steps below. A repository naming none never runs this.
+      - name: Hand the declared repository variables to the hook
+        if: steps.plan.outputs.site-vars != ''
+        uses: $/actions/plan
+        with:
+          mode: site
+          vars: ${{ toJSON(vars) }}
+
       # A repository without the hook publishes docs/ alone, when it has one; the assembly says so with a notice.
       - name: Build the repository's website
         id: hook
@@ -64,6 +80,7 @@ jobs:
         uses: $/actions/pages-site
         with:
           site-dir: ${{ steps.hook.outputs.dist }}
+          config: ${{ steps.plan.outputs.config }}
 
       - if: steps.site.outputs.publish == 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0

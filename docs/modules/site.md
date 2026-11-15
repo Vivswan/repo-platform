@@ -33,7 +33,7 @@ The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release
 
 - **Without the release-please module** the release leg skips, and the deploy still runs after it: GitHub resolves that skip only once the leg's own need, the repo-owned post-green hook, has finished.
 
-The called workflow is one job: the checkout, the shared [site-urls action](../../actions/site-urls/action.yml), the repository's hook when it exists, the [pages-site](../../actions/pages-site/action.yml) assembly (the layout below, the internal link check, the link-rot ignore list, `versions.json`), the Pages deploy when something was built, and the link-rot check on the schedule alone ([below](#link-rot)).
+The called workflow is one job: the checkout, the shared [site-urls action](../../actions/site-urls/action.yml), the [plan](../../actions/plan/action.yml) of the registration's site keys, the repository's hook when it exists, the [pages-site](../../actions/pages-site/action.yml) assembly (the layout below, the internal link check, the link-rot ignore list, `versions.json`), the Pages deploy when something was built, and the link-rot check on the schedule alone ([below](#link-rot)).
 
 A repository with nothing to publish ends green with a notice (`nothing to publish`) and no deploy ([layout](#layout)).
 
@@ -94,6 +94,39 @@ runs:
 ```
 
 Map the two inputs onto whatever the tool expects (`ASTRO_BASE`/`ASTRO_SITE`, `vite build --base`, MkDocs `site_url`, mdBook `MDBOOK_OUTPUT__HTML__SITE_URL`), or ignore them for a path-relative site. Anything the repository's CI can install runs here; the fleet sees only the directory.
+
+### Repository variables (`site.vars`)
+
+A composite action cannot read the `vars` context, so the hook gets a repository variable only when the registration names it:
+
+```yaml
+# .repo-platform.yml
+site:
+  vars: [DEMO_URL]
+```
+
+```yaml
+# .github/actions/site-build/action.yml
+- id: build
+  shell: bash
+  run: |
+    <your build command, which reads $DEMO_URL>
+    echo "dist=<the built site directory>" >> "$GITHUB_OUTPUT"
+```
+
+| Variable                                   | What the hook's steps read as `$NAME`     |
+| ------------------------------------------ | ----------------------------------------- |
+| named in `site.vars` and set               | its value                                 |
+| named in `site.vars` and not set           | empty; the build does not fail            |
+| not named in `site.vars`                   | nothing: the plan step does not export it |
+| a secret                                   | nothing: no key hands one over            |
+| a name GitHub cannot store (lowercase)     | the plan refuses the registration         |
+| `PATH` or `NODE_OPTIONS`, the runner's own | the plan refuses the registration         |
+
+- **Which variables:** the `vars` context of the deploy job, so the repository's, its organization's, and the `github-pages` environment's.
+- **How long:** the value is set for the rest of the deploy job, the hook's steps and the fleet's after them.
+- **Size:** the whole context travels as one environment value, which the runner caps at 128 KiB. A repository naming a variable while its variables together exceed that fails the deploy; one naming none never sends the context.
+- **No sync needed:** the leg reads the registration on every run.
 
 **A pre-existing hook:** a repository that already had its own `.github/actions/site-build/action.yml` keeps it (`unchanged` in the sync report). The fleet passes it `base-path` and `origin`, which an unrelated action may not declare: check that it takes those two inputs and sets the `dist` output.
 
@@ -256,9 +289,10 @@ Keep it to hosts that are alive in a browser and reject automated clients, each 
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | `site.path`                 | the URL segment the docs mount under when the hook also builds a website; `null` turns the docs half off ([above](#turning-the-docs-half-off-sitepath-null)) | `docs` (`modules.site.path` in `files.yml`)                                |
 | `site.include`              | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude))                                                                      | none                                                                       |
+| `site.vars`                 | the repository variables the hook reads as environment values ([above](#repository-variables-sitevars))                                                      | none                                                                       |
 | `labels.site`               | the link-rot tracking issue's label                                                                                                                          | the site module's `tracking_label` default in [files.yml](../../files.yml) |
 
-**The `config` output:** the plan action ([actions/plan](../../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into one `config` output. That is the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label` with its `link_rot_color` and `link_rot_description`).
+**The `config` output:** the plan action ([actions/plan](../../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into the `site-vars` output (the names `site.vars` declares) and one `config` output. That is the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label` with its `link_rot_color` and `link_rot_description`).
 
 **A caller without a registration** passes the same document by hand, and its `site_title` must be non-empty like the registration's `project.name`.
 

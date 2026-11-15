@@ -21,7 +21,7 @@ import { parseRegistration, type Registration } from "../../../actions/plan/regi
 import { reservedLabelNames } from "../../../actions/plan/reserved_labels.ts";
 import { loadAction } from "../../shared/action_step.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
-import { parseGithubOutput } from "../../shared/github_output.ts";
+import { parseGithubEnv, parseGithubOutput } from "../../shared/github_output.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -314,6 +314,7 @@ describe("planSite", () => {
         "  include:",
         "    - { path: skills, mount: skills, page: SKILL.md }",
         "    - { path: guides, mount: guides, page: GUIDE.md }",
+        "  vars: [DEMO_URL]",
         "labels: { site: rot }",
       ].join("\n"),
       plan: {
@@ -326,21 +327,30 @@ describe("planSite", () => {
           ],
         },
         linkRot: { ...ROT, name: "rot" },
+        vars: ["DEMO_URL"],
       },
     },
     {
       reason: "a bare selection takes every default",
       text: "modules: [site]",
-      plan: { siteTitle: "Demo Project", docs: { path: "docs", include: [] }, linkRot: ROT },
+      plan: {
+        siteTitle: "Demo Project",
+        docs: { path: "docs", include: [] },
+        linkRot: ROT,
+        vars: [],
+      },
     },
     {
       reason: "site.path: null plans no docs half",
       text: "modules: [site]\nsite: { path: null }",
-      plan: { siteTitle: "Demo Project", docs: null, linkRot: ROT },
+      plan: { siteTitle: "Demo Project", docs: null, linkRot: ROT, vars: [] },
     },
   ])("$reason", ({ text, plan }) => {
     expect(planSite(input(text))).toEqual(plan);
-    expect(outputsOf(planSite(input(text)))).toEqual({ config: config(plan) });
+    expect(outputsOf(planSite(input(text)))).toEqual({
+      "config": config(plan),
+      "site-vars": plan.vars.join(","),
+    });
   });
 
   // The docs module is whichever module declares `path`, under any name; its tuple files the link-rot issue under the
@@ -366,6 +376,7 @@ describe("planSite", () => {
       siteTitle: "Demo Project",
       docs: { path: "guide", include: [] },
       linkRot: { name: "custom-rot", color: "ABCDEF", description: "Manual link rot" },
+      vars: [],
     });
     const bare = declared("{ path: guide, tracking_label: { key: manual, default: rot } }");
     expect(() =>
@@ -383,14 +394,21 @@ describe("plan.ts as a child", () => {
   function run(
     files: Record<string, string>,
     env: Record<string, string>,
-  ): { exitCode: number; stdout: string; outputs: Record<string, string> } {
+  ): {
+    exitCode: number;
+    stdout: string;
+    outputs: Record<string, string>;
+    exported: Record<string, string>;
+  } {
     const root = temp.dir("plan-root-");
     for (const [rel, text] of Object.entries(files)) {
       mkdirSync(join(root, rel, ".."), { recursive: true });
       writeFileSync(join(root, rel), text);
     }
     const output = join(temp.dir("plan-output-"), "output");
+    const exported = join(temp.dir("plan-env-"), "env");
     writeFileSync(output, "");
+    writeFileSync(exported, "");
     const result = boundedSpawnSync([process.execPath, join(REPO_ROOT, "actions/plan/plan.ts")], {
       cwd: root,
       env: {
@@ -399,6 +417,7 @@ describe("plan.ts as a child", () => {
         FILES_CONFIG,
         FILES_TREE,
         GITHUB_OUTPUT: output,
+        GITHUB_ENV: exported,
         GITHUB_REPOSITORY: "o/r",
         ...env,
       },
@@ -407,11 +426,17 @@ describe("plan.ts as a child", () => {
       exitCode: result.exitCode,
       stdout: result.stdout,
       outputs: parseGithubOutput(readFileSync(output, "utf-8")),
+      exported: parseGithubEnv(readFileSync(exported, "utf-8")),
     };
   }
   const WEEKLY = String(new Date().getUTCDay() === 1);
-  const SITE_CONFIG = (title: string, include: string) => ({
-    config: `{"site_title":"${title}","docs_path":"docs","include":${include},"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}`,
+  const VARS_CONTEXT = JSON.stringify({
+    DEMO_URL: "https://demo.example.com",
+    OTHER: "line one\nline two",
+  });
+  const SITE_CONFIG = (title: string, include: string, vars = "") => ({
+    "config": `{"site_title":"${title}","docs_path":"docs","include":${include},"link_rot_label":"docs-link-rot","link_rot_color":"D4A72C","link_rot_description":"Automated docs-site link-rot report"}`,
+    "site-vars": vars,
   });
 
   // The row names are the outputs fleet.yml's plan step hands its jobs: a renamed or missing row leaves them unselected, green.
@@ -422,6 +447,7 @@ describe("plan.ts as a child", () => {
     registration: string;
     env: Record<string, string>;
     outputs: Record<string, string>;
+    exported?: Record<string, string>;
   }>([
     {
       reason: "default mode, the mode fleet.yml gets by omitting the input",
@@ -454,10 +480,55 @@ describe("plan.ts as a child", () => {
       env: { MODE: "site" },
       outputs: SITE_CONFIG("Site", '[{"path":"skills","mount":"skills","page":"SKILL.md"}]'),
     },
-  ])("$reason writes every row fleet.yml reads", ({ registration, env, outputs }) => {
-    const result = run({ ".repo-platform.yml": registration }, env);
-    expect([result.exitCode, result.outputs, result.stdout]).toEqual([0, outputs, ""]);
-  });
+    // The context arrives whole and, with nothing declared, none of it reaches the job's environment.
+    {
+      reason: "site mode handed the vars context, with no site.vars",
+      registration: `modules: [site]\n${PROJECT}`,
+      env: { MODE: "site", VARS: VARS_CONTEXT },
+      outputs: SITE_CONFIG("Demo Project", "[]"),
+    },
+    // The same config as the row above: the declaration changes the job's environment and nothing the assembly reads.
+    {
+      reason:
+        "site mode handed the vars context, with site.vars naming a set and an unset variable",
+      registration: `modules: [site]\n${PROJECT}site: { vars: [DEMO_URL, UNSET_URL] }\n`,
+      env: { MODE: "site", VARS: VARS_CONTEXT },
+      outputs: SITE_CONFIG("Demo Project", "[]", "DEMO_URL,UNSET_URL"),
+      exported: { DEMO_URL: "https://demo.example.com", UNSET_URL: "" },
+    },
+    // The deploy's first plan and pages-site's own, on a PR's docs-check, pass no context: the names are published for
+    // reusable-site.yml's gate, and nothing is blanked in the job's environment.
+    {
+      reason: "site mode handed no vars context, with site.vars",
+      registration: `modules: [site]\n${PROJECT}site: { vars: [DEMO_URL] }\n`,
+      env: { MODE: "site" },
+      outputs: SITE_CONFIG("Demo Project", "[]", "DEMO_URL"),
+    },
+    // Default mode plans fleet.yml's jobs, which have no hook: a context handed there by mistake exports nothing.
+    {
+      reason: "default mode handed the vars context, with site.vars",
+      registration: `modules: [site]\n${PROJECT}site: { vars: [DEMO_URL] }\n`,
+      env: { PRIVATE: "false", VARS: VARS_CONTEXT },
+      outputs: {
+        "modules": '["site"]',
+        "private": "false",
+        "codeql-languages": "[]",
+        "tracking-labels": "docs-link-rot",
+        "weekly": WEEKLY,
+      },
+    },
+  ])(
+    "$reason writes every row fleet.yml reads and exports the declared variables alone",
+    ({ registration, env, outputs, exported }) => {
+      const result = run({ ".repo-platform.yml": registration }, env);
+      expect([result.exitCode, result.outputs, result.exported, result.stdout]).toEqual([
+        0,
+        outputs,
+        exported ?? {},
+        "",
+      ]);
+    },
+  );
 
   const missingFiles = () => join(temp.dir("plan-files-missing-"), "files.yml");
   const invalidFiles = () => {
@@ -534,6 +605,13 @@ describe("plan.ts as a child", () => {
       error: () => '::error::.repo-platform.yml: (top level): Unrecognized key: "nope"\n',
     },
     {
+      reason: "a vars context that is not JSON",
+      files: { ".repo-platform.yml": `modules: [site]\n${PROJECT}site: { vars: [DEMO_URL] }\n` },
+      env: { MODE: "site", VARS: "{" },
+      error: () => "::error::the vars input is not JSON (",
+      detail: true,
+    },
+    {
       reason: "an unknown mode",
       files: { ".repo-platform.yml": `modules: []\n${PROJECT}` },
       env: { MODE: "pages" },
@@ -554,7 +632,12 @@ describe("plan.ts as a child", () => {
       const result = run(files, typeof env === "function" ? env(at) : env);
       const expected = error(at);
       const stdout = detail ? result.stdout.slice(0, expected.length) : result.stdout;
-      expect([result.exitCode, result.outputs, stdout]).toEqual([1, {}, expected]);
+      expect([result.exitCode, result.outputs, result.exported, stdout]).toEqual([
+        1,
+        {},
+        {},
+        expected,
+      ]);
     },
   );
 
@@ -592,6 +675,7 @@ describe("plan.ts as a child", () => {
     expect([site.exitCode, site.outputs]).toEqual([
       0,
       {
+        ...SITE_CONFIG("Demo Project", "[]"),
         config: SITE_CONFIG("Demo Project", "[]").config.replace(
           '"docs_path":"docs"',
           '"docs_path":"manual"',

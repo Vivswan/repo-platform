@@ -125,15 +125,15 @@ The full checklist per module is in [references/modules.md](references/modules.m
 
 A module's settings live next to the selection, in `.repo-platform.yml`, and are changed by an ordinary PR:
 
-| Module    | Keys                                       | Default                       |
-| --------- | ------------------------------------------ | ----------------------------- |
-| `site`    | `site.path`, `site.include`, `labels.site` | `docs`, none, `docs-link-rot` |
-| `fuzzer`  | `labels.fuzzer`                            | `fuzz-nightly`                |
-| `nightly` | `labels.nightly`                           | `nightly-failure`             |
+| Module    | Keys                                                    | Default                             |
+| --------- | ------------------------------------------------------- | ----------------------------------- |
+| `site`    | `site.path`, `site.include`, `site.vars`, `labels.site` | `docs`, none, none, `docs-link-rot` |
+| `fuzzer`  | `labels.fuzzer`                                         | `fuzz-nightly`                      |
+| `nightly` | `labels.nightly`                                        | `nightly-failure`                   |
 
 Two keys belong to no module. `project` is required, with `name`, `slug`, and `description` together; `copyright_holder` is optional and defaults to the owner's handle and GitHub page. `mirrors` defaults to none.
 
-- **No sync needed:** a `site.path` or `site.include` change; the site leg reads the registration at run time.
+- **No sync needed:** a `site.path`, `site.include`, or `site.vars` change; the site leg reads the registration at run time.
 - **Needs a branch sync on the PR:** `mirrors`, `labels.*`, and `project.*`. The `repo-platform:sync` label pushes a hold-free report; a held one (a replaced local edit, or a mirror change that leaves a registration note, such as a dropped declaration whose recorded copy stays) takes the branch dispatch (`-f branch=`). `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`); a `labels.*` value re-renders `.github/settings.yml` (step 3, Labels).
 - **Starters keep their content:** an existing starter (`.github/settings.local.yml`) is not rewritten, so edit it yourself.
 - Tracking labels (`fuzzer`, `nightly`, `site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label.

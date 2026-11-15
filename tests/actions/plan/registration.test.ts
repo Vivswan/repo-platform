@@ -30,6 +30,7 @@ describe("parseRegistration", () => {
       "  include:",
       "    - { path: skills, mount: skills, page: SKILL.md }",
       "    - { path: guides, mount: guides, page: GUIDE.md }",
+      "  vars: [DEMO_URL, _BUILD_2, PATH_PREFIX]",
       "labels:",
       "  fuzzer: fuzz-nightly",
       "  site: rot",
@@ -56,6 +57,7 @@ describe("parseRegistration", () => {
             { path: "skills", mount: "skills", page: "SKILL.md" },
             { path: "guides", mount: "guides", page: "GUIDE.md" },
           ],
+          vars: ["DEMO_URL", "_BUILD_2", "PATH_PREFIX"],
         },
         labels: { fuzzer: "fuzz-nightly", site: "rot" },
         except: [".github/workflows/ci.yml", ".yamllint"],
@@ -205,6 +207,16 @@ describe("parseRegistration", () => {
         error: `${FILE}: mirrors.0.kind: Invalid option: expected one of "copy"|"symlink"`,
       },
     },
+    // GitHub stores a variable's name in uppercase and reserves GITHUB_, so the first four can never be set: accepted,
+    // the hook would read empty forever with nothing saying why. The last two are the runner's own: an exported PATH,
+    // empty when unset, leaves the next step unable to find a command, and the runner refuses NODE_OPTIONS in GITHUB_ENV.
+    ...["demo_url", "GITHUB_DEMO", "2_URL", "DEMO-URL", "PATH", "NODE_OPTIONS"].map((name) => ({
+      reason: `a site variable named ${name}, which cannot reach the hook`,
+      text: `modules: [site]\n${PROJECT}site: { vars: [${name}] }\n`,
+      outcome: {
+        error: `${FILE}: site.vars.0: must be a repository variable's name: uppercase letters, digits, and underscores, not starting with a digit or GITHUB_, and not PATH or NODE_OPTIONS`,
+      },
+    })),
   ])("refuses $reason", ({ text, outcome }) => {
     const read = parseRegistration(text);
     if ("registration" in outcome) expect(read).toEqual(outcome);

@@ -134,6 +134,14 @@ const label = z
     "must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters",
   );
 
+/** A name the hook can receive: GitHub's shape for a variable name, less PATH (exported empty when unset, it breaks command lookup) and NODE_OPTIONS (refused in GITHUB_ENV). */
+const variableName = z
+  .string()
+  .regex(
+    /^(?!GITHUB_|(?:PATH|NODE_OPTIONS)$)[A-Z_][A-Z0-9_]*$/,
+    "must be a repository variable's name: uppercase letters, digits, and underscores, not starting with a digit or GITHUB_, and not PATH or NODE_OPTIONS",
+  );
+
 /** One grammar for both documents that declare mirrors: files.yml's fleet list and the registration's own. `kind` is how a target carries the source: its bytes, or a relative symbolic link to it (docs/platform/sync/mirrors.md). */
 export const mirrorsSchema = z.array(
   z.strictObject({
@@ -170,6 +178,8 @@ export const registrationSchema = z.strictObject({
           if (message !== null) ctx.addIssue({ code: "custom", message });
         })
         .optional(),
+      // The repository variables the site-build hook reads as environment values (docs/modules/site.md, "Repository variables").
+      vars: z.array(variableName).optional(),
     })
     .superRefine((site, ctx) => {
       const message = includeWithoutDocsProblem(site.path, site.include ?? []);
