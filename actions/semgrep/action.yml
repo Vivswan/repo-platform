@@ -39,7 +39,7 @@ runs:
 
     - name: Install semgrep
       shell: bash
-      run: python3 -m pip install --quiet semgrep==1.176.1
+      run: python3 -m pip install --quiet --requirement "$GITHUB_ACTION_PATH/requirements.txt"
 
     # The verdict is semgrep's exit code: 1 on a finding (--error), 2 and up when the scan itself failed, 0 for a
     # clean completed scan. Parse failures and timeouts are warn-level, reported in semgrep's own summary, and exit 0.
