@@ -12,6 +12,12 @@ const SHORT_SHA = 7;
 const HELD_RUN =
   "GitHub holds the new head's `pull_request` run for approval after a push with the workflow token, so its checks stay unreported. Approve the run from the merge box or the Actions tab, or push a commit to this branch.";
 
+const FAILED_HEADLINE = {
+  untouched: "The fix failed before anything was pushed",
+  unmoved: "The push failed and the branch has not moved",
+  unread: "The push failed, and the branch could not be read back",
+} as const;
+
 export const FORK_NOTICE =
   "Forks are not fixed: the workflow token cannot push to a fork's branch. Run the repository's fixer locally and push the result. The `fix-lint` label was removed.";
 
@@ -30,7 +36,7 @@ export type Outcome =
   | { kind: "nothing" }
   | { kind: "superseded" }
   | { kind: "refused"; why: string; refused: NamedPath[] }
-  | { kind: "failed"; detail: string };
+  | { kind: "failed"; branch: keyof typeof FAILED_HEADLINE; detail: string };
 
 /** What the unprivileged job reported beside the patch. */
 export interface Remarks {
@@ -84,7 +90,7 @@ function headline(event: FixEvent, outcome: Outcome, remarks: Remarks): string[]
     return [`Refused, nothing was committed: ${outcome.why}`, "", ...pathLines(outcome.refused)];
   }
 
-  return [`The push failed and the branch has not moved: ${outcome.detail}`];
+  return [`${FAILED_HEADLINE[outcome.branch]}: ${outcome.detail}`];
 }
 
 /**

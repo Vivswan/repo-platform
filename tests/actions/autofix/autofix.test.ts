@@ -702,22 +702,51 @@ describe("stage and push", () => {
     });
   });
 
-  // A remote that refuses the push for its own reasons (a protected branch) says "rejected" as a moved branch does.
-  // Only the branch read back, still at the leased sha, tells this failure from the harmless race.
-  test("a push the remote refuses with the branch unmoved is a failure, not a superseded run", () => {
-    const { out } = staged("label", "guarded", FORMAT, (directory) =>
+  // A remote that refuses the push for its own reasons (a protected branch) says "rejected" as a moved branch does,
+  // and a patch git will not apply never reaches the remote: the notice may claim of the branch only what was read.
+  test.each<{
+    reason: string;
+    branch: string;
+    spoil?: string;
+    headline: string;
+  }>([
+    {
+      reason: "the patch does not apply, so nothing was pushed",
+      branch: "guarded-apply",
+      spoil: [
+        "diff --git a/src/a.ts b/src/a.ts",
+        "--- a/src/a.ts",
+        "+++ b/src/a.ts",
+        "@@ -1 +1 @@",
+        "-a line the file does not hold",
+        "+x",
+        "",
+      ].join("\n"),
+      headline: "The fix failed before anything was pushed: the patch does not apply to BASE.",
+    },
+    {
+      reason: "the remote refuses the push and the branch reads back unmoved",
+      branch: "guarded-unmoved",
+      headline:
+        "The push failed and the branch has not moved: git push was rejected; the run's log has git's words.",
+    },
+  ])("a failed fix claims only what was checked: $reason", ({ branch, spoil, headline }) => {
+    const { out } = staged("label", branch, FORMAT, (directory) =>
       write(directory, { "src/a.ts": "export const a = 1;\n" }),
     );
+    if (spoil !== undefined) writeFileSync(join(out, "fix.patch"), spoil);
     const hook = join(origin, "hooks/update");
     mkdirSync(dirname(hook), { recursive: true });
-    writeFileSync(hook, '#!/bin/sh\ntest "$1" != refs/heads/guarded\n');
+    writeFileSync(hook, '#!/bin/sh\ncase "$1" in refs/heads/guarded-*) exit 1 ;; esac\n');
     chmodSync(hook, 0o755);
 
-    const result = pushed("label", "guarded", FORMAT, out);
-    expect({ outcome: result.outcome, remote: remote("guarded") }).toEqual({
-      outcome: { kind: "failed", detail: "git push was rejected; the run's log has git's words." },
-      remote: base,
-    });
+    const repository = clone(branch, "push");
+    const result = pushFix(request(event("label", branch), FORMAT, repository, out), tools);
+    expect({
+      outcome: result.outcome.kind,
+      headline: result.notice.split("\n")[0],
+      remote: remote(branch),
+    }).toEqual({ outcome: "failed", headline: headline.replace("BASE", base), remote: base });
   });
 
   // A file name is bytes, and git's are read here as UTF-8: a name that is none comes back changed. Unstaged by the

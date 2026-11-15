@@ -111,11 +111,12 @@ In order, the first row that matches ends the run:
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | the stage job reported a push-event change outside the lists  | refused, red; the notice names each path; nothing is committed                 |
 | an empty patch                                                | no commit; the label gets "nothing to fix", a push removes its last notice     |
-| a patch that does not apply to the head sha                   | failed, red                                                                    |
+| a patch that does not apply to the head sha                   | failed, red; the notice says nothing was pushed                                |
 | a patched path outside the lists, or in the never-carried set | the whole patch is refused, red, even on the label: the stage job was bypassed |
 | the branch still at the head sha                              | one commit pushed; the notice says the new head's run waits for approval       |
 | the branch moved while the fix was built                      | superseded, green, with a notice; the branch is left alone                     |
-| the push rejected with the branch unmoved                     | failed, red, with a notice                                                     |
+| the push rejected with the branch unmoved                     | failed, red; the notice says the branch has not moved                          |
+| the push rejected and the branch unreadable                   | failed, red; the notice says the branch could not be read back                 |
 
 - **The push is leased to the built sha:** it lands only while the branch names exactly the commit the hook ran on. A rejection is classed by reading the branch again, never by git's message.
 - **The commit** is authored by `github-actions[bot]` and carries the date of the commit it fixes, so a rerun of the push job rebuilds the same commit and finds it pushed.

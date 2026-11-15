@@ -271,26 +271,6 @@ function messageFor(subject: string, author: string): string[] {
 }
 
 /**
- * How a rejected push ended, from the branch re-read after it, never from git's words.
- *
- * @param remoteHead - the branch's sha on the remote, empty when the branch is gone, null when it could not be read
- * @param leased - the sha the push was leased to
- * @param commit - the fix commit
- */
-function classifyRejection(
-  remoteHead: string | null,
-  leased: string,
-  commit: string,
-): "pushed" | "superseded" | "failed" {
-  // A rerun rebuilds the same commit, which is on the branch already.
-  if (remoteHead === commit) return "pushed";
-
-  if (remoteHead === null || remoteHead === leased) return "failed";
-
-  return "superseded";
-}
-
-/**
  * A child's words for the log. The runner reads a line that opens with `::`, and a `##[` anywhere in a line, as a
  * command, so each line goes behind a prefix and each `##[` is split.
  */
@@ -520,12 +500,17 @@ function pushCommit(request: PushRequest, commit: string, tools: Tools): Outcome
   if (succeeded(pushed.exit)) return { kind: "pushed", commit, subject };
 
   tools.log.info(quotedOutput(pushed.stderr));
-  const verdict = classifyRejection(remoteHead(request, tools), event.sha, commit);
-  if (verdict === "pushed") return { kind: "pushed", commit, subject };
+  // How a rejected push ended is read from the branch, never from git's words.
+  const head = remoteHead(request, tools);
+  const detail = "git push was rejected; the run's log has git's words.";
+  if (head === null) return { kind: "failed", branch: "unread", detail };
 
-  if (verdict === "superseded") return { kind: "superseded" };
+  // A rerun rebuilds the same commit, which is on the branch already.
+  if (head === commit) return { kind: "pushed", commit, subject };
 
-  return { kind: "failed", detail: "git push was rejected; the run's log has git's words." };
+  if (head === event.sha) return { kind: "failed", branch: "unmoved", detail };
+
+  return { kind: "superseded" };
 }
 
 function applyAndPush(request: PushRequest, report: Report, tools: Tools): Outcome {
@@ -549,7 +534,8 @@ function applyAndPush(request: PushRequest, report: Report, tools: Tools): Outco
   const applied = git(tools, repository, ["apply", "--cached", "--whitespace=nowarn", patch.path]);
   if (!succeeded(applied.exit)) {
     tools.log.info(quotedOutput(applied.stderr));
-    return { kind: "failed", detail: `the patch does not apply to ${event.sha}.` };
+    const detail = `the patch does not apply to ${event.sha}.`;
+    return { kind: "failed", branch: "untouched", detail };
   }
 
   const changes = stagedChanges(tools, repository);
