@@ -90,6 +90,12 @@ const SHELL_DIALECT: ReadonlyMap<string, Dialect> = new Map([
   ["cmd", "cmd"],
 ]);
 
+/** env's options whose operand is the next word: `-u NAME`, `-C DIR`. */
+const ENV_OPERAND_OPTIONS: ReadonlySet<string> = new Set(["-u", "--unset", "-C", "--chdir"]);
+
+/** A `NAME=value` word, which env sets before the command. */
+const ENV_ASSIGNMENT = /^[A-Za-z_]\w*=/;
+
 /** Each dialect's line continuation: syntactically nothing, one source line. */
 const CONTINUATION: Readonly<Record<Dialect, string>> = {
   bash: " \\\n",
@@ -174,17 +180,28 @@ export function isExtensionless(relPath: string): boolean {
   return extname(relPath) === "";
 }
 
-/** The dialect a first-line shebang names, or null for no shebang or another program. `env` runs the first word after
- *  its own options, `-S` attached or apart: `#!/usr/bin/env -S bash -e` and `#!/usr/bin/env -Sbash -e` are bash. */
+/** The command an `env` shebang runs, or "": the first word after env's own options, their operands, and its
+ *  assignments. `-S` is attached or apart: `-S bash -e`, `-Sbash -e`, and `-S -u FOO sh -e` all name a shell. */
+function envCommand(args: readonly string[]): string {
+  const words = args.map((arg) => arg.replace(/^-S/, "")).filter((word) => word !== "");
+  let at = 0;
+  while (at < words.length) {
+    const word = words[at];
+    if (ENV_OPERAND_OPTIONS.has(word)) at += 2;
+    else if (word.startsWith("-") || ENV_ASSIGNMENT.test(word)) at += 1;
+    else return word;
+  }
+
+  return "";
+}
+
+/** The dialect a first-line shebang names, or null for no shebang or another program. */
 export function shebangDialect(text: string): Dialect | null {
   const line = text.split("\n", 1)[0] ?? "";
   if (!line.startsWith("#!")) return null;
 
   const [interpreter = "", ...args] = line.slice(2).trim().split(/\s+/);
-  if (basename(interpreter) !== "env") return SHELL_DIALECT.get(shellName(interpreter)) ?? null;
-
-  const words = args.map((arg) => arg.replace(/^-S/, ""));
-  const program = words.find((word) => word !== "" && !word.startsWith("-")) ?? "";
+  const program = basename(interpreter) === "env" ? envCommand(args) : interpreter;
   return SHELL_DIALECT.get(shellName(program)) ?? null;
 }
 

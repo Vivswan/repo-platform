@@ -472,6 +472,32 @@ describe("the collector", () => {
         problems: [],
       },
     ],
+    [
+      "bin/unset-split",
+      "#!/usr/bin/env -S -u FOO sh -e\nmake\n",
+      {
+        bodies: [
+          body("bin/unset-split", 1, "script", "bash", "#!/usr/bin/env -S -u FOO sh -e\nmake\n"),
+        ],
+        problems: [],
+      },
+    ],
+    [
+      "bin/assigned",
+      "#!/usr/bin/env -S FOO=1 bash\nmake\n",
+      {
+        bodies: [body("bin/assigned", 1, "script", "bash", "#!/usr/bin/env -S FOO=1 bash\nmake\n")],
+        problems: [],
+      },
+    ],
+    [
+      "bin/unset",
+      "#!/usr/bin/env -u FOO bash\nmake\n",
+      {
+        bodies: [body("bin/unset", 1, "script", "bash", "#!/usr/bin/env -u FOO bash\nmake\n")],
+        problems: [],
+      },
+    ],
     ["bin/tool", "#!/usr/bin/env python3\nprint(1)\n", { bodies: [], problems: [] }],
     [
       ".profile",
