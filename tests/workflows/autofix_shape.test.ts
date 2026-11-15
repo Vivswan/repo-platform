@@ -12,6 +12,7 @@ import { REPO_ROOT } from "../shared/action_step";
 import { evaluateCondition, hasStatusFunction, interpolate } from "../shared/github_expression";
 
 interface Step {
+  id?: string;
   uses?: string;
   if?: string;
   with?: Record<string, string>;
@@ -55,6 +56,32 @@ function event(
 }
 
 const FORK = { head: "stranger/widget" };
+
+function outcome(runs: boolean, failed: boolean): string {
+  if (!runs) return "skipped";
+
+  return failed ? "failure" : "success";
+}
+
+/**
+ * The steps that run, by GitHub's rule: once a step failed, only a condition with a status function still runs.
+ * Each step's outcome is written into `context` for the steps after it; `fails` is the id of the step that fails.
+ */
+function stepsRunning(steps: Step[], context: Context, fails: string | undefined): Step[] {
+  const ran: Step[] = [];
+  let broke = false;
+  for (const step of steps) {
+    const condition = step.if ?? "";
+    const holds = condition === "" || evaluateCondition(condition, context);
+    const runs = holds && (!broke || hasStatusFunction(condition));
+    const failed = runs && step.id !== undefined && step.id === fails;
+    if (runs) ran.push(step);
+    if (failed) broke = true;
+    if (step.id !== undefined) context[`steps.${step.id}.outcome`] = outcome(runs, failed);
+  }
+
+  return ran;
+}
 
 describe("the managed auto-fix.yml", () => {
   test.each<{ reason: string; context: Context; calls: boolean }>([
@@ -114,14 +141,16 @@ describe("the managed auto-fix.yml", () => {
   });
 
   // cancel-in-progress is on, and a same-repository label starts a pull_request run and a pull_request_target run at
-  // once. In one lane the second, which calls nothing, would cancel the fix.
-  test("the label's fix, the same label's pull_request_target run, a push, and another label each hold their own lane; two pushes share one", () => {
-    const lane = (context: Context) => interpolate(caller.concurrency.group, context);
+  // once. In one lane the second, which calls nothing, would cancel the fix. GitHub compares lane names without case,
+  // and anyone who may label can add a label named `push`, whose lane must not be the push's.
+  test("the label's fix, the same label's pull_request_target run, a push, and another label, even one named push, each hold their own lane; two pushes share one", () => {
+    const lane = (context: Context) => interpolate(caller.concurrency.group, context).toLowerCase();
     const lanes = [
       lane(event("pull_request", "labeled", { label: "fix-lint" })),
       lane(event("pull_request_target", "labeled", { label: "fix-lint" })),
       lane(event("pull_request", "synchronize")),
       lane(event("pull_request", "labeled", { label: "bug" })),
+      lane(event("pull_request", "labeled", { label: "PUSH" })),
     ];
     expect({
       distinct: new Set(lanes).size,
@@ -210,14 +239,18 @@ describe("the called fleet-autofix.yml", () => {
     expect(jobsRunning(on, run, results)).toEqual(jobs);
   });
 
-  // The push job runs after a failed stage, for the label's removal alone. A step there that tested the stage's
-  // result, the report's subject, or the notice loosely would apply, ask the gate, or comment with nothing staged.
+  // The push job runs after a failed stage, for the label's removal alone, and its notice step speaks for a run that
+  // died. A step there that tested the stage's result, the report's subject, or the notice loosely would apply, ask
+  // the gate, or comment with nothing staged. And a refusal left on the pull request by an earlier run, or one lane's
+  // notice written over the other's, would tell the reader something no longer true.
   test.each<{
     reason: string;
     stage: string;
-    outputs: Record<string, string>;
+    outputs?: Record<string, string>;
+    fails?: string;
     action: string;
-    ran: { fix: boolean; gate: boolean; notice: boolean; unlabel: boolean };
+    ran: { fix: boolean; gate: boolean; unlabel: boolean };
+    told: string | null;
   }>([
     {
       reason: "a staged fix with a subject and something to say, on the label",
@@ -227,70 +260,108 @@ describe("the called fleet-autofix.yml", () => {
         "steps.push.outputs.notice": "Pushed.",
       },
       action: "labeled",
-      ran: { fix: true, gate: true, notice: true, unlabel: true },
+      ran: { fix: true, gate: true, unlabel: true },
+      told: "repo-platform/autofix-label: Pushed.",
     },
     {
-      reason: "a push with no subject and nothing to say",
+      reason:
+        "a push with no subject and nothing to say, which clears what an earlier push run said",
       stage: "success",
       outputs: { "steps.report.outputs.subject": "", "steps.push.outputs.notice": "" },
       action: "synchronize",
-      ran: { fix: true, gate: false, notice: false, unlabel: false },
+      ran: { fix: true, gate: false, unlabel: false },
+      told: "repo-platform/autofix-push: deleted",
     },
     {
-      reason: "steps that died before setting an output",
+      reason: "a push whose fix was refused, in the push lane's own comment",
       stage: "success",
-      outputs: {},
+      outputs: { "steps.report.outputs.subject": "", "steps.push.outputs.notice": "Refused." },
+      fails: "push",
+      action: "synchronize",
+      ran: { fix: true, gate: false, unlabel: false },
+      told: "repo-platform/autofix-push: Refused.",
+    },
+    {
+      reason: "a report that cannot be read, which ends the run before the push step",
+      stage: "success",
+      fails: "report",
       action: "labeled",
-      ran: { fix: true, gate: false, notice: false, unlabel: true },
+      ran: { fix: false, gate: false, unlabel: true },
+      told: "repo-platform/autofix-label: the fixed line",
+    },
+    {
+      reason: "a push step that died before it worded a notice",
+      stage: "success",
+      outputs: { "steps.report.outputs.subject": "" },
+      fails: "push",
+      action: "opened",
+      ran: { fix: true, gate: false, unlabel: false },
+      told: "repo-platform/autofix-push: the fixed line",
     },
     {
       reason: "a failed hook on the label",
       stage: "failure",
-      outputs: {},
       action: "labeled",
-      ran: { fix: false, gate: false, notice: false, unlabel: true },
+      ran: { fix: false, gate: false, unlabel: true },
+      told: null,
     },
     {
       reason: "a failed hook on a push",
       stage: "failure",
-      outputs: {},
       action: "opened",
-      ran: { fix: false, gate: false, notice: false, unlabel: false },
+      ran: { fix: false, gate: false, unlabel: false },
+      told: null,
     },
     {
       reason: "a failed plan on the label, with no stage at all",
       stage: "skipped",
-      outputs: {},
       action: "labeled",
-      ran: { fix: false, gate: false, notice: false, unlabel: true },
+      ran: { fix: false, gate: false, unlabel: true },
+      told: null,
     },
     {
       reason: "a cancelled stage",
       stage: "cancelled",
-      outputs: {},
       action: "synchronize",
-      ran: { fix: false, gate: false, notice: false, unlabel: false },
+      ran: { fix: false, gate: false, unlabel: false },
+      told: null,
     },
-  ])("the push job's steps: $reason", ({ stage, outputs, action, ran }) => {
-    // A step that set no output still has its entry in the steps context.
+  ])("the push job's steps: $reason", ({ stage, outputs = {}, fails, action, ran, told }) => {
     const context: Context = {
       "needs.stage.result": stage,
       "github.event.action": action,
-      "steps.push.outcome": "skipped",
       ...outputs,
     };
-    const steps = called.jobs.push.steps ?? [];
-    const runs = (pick: (step: Step) => boolean) => {
-      const step = steps.find(pick);
-      return step !== undefined && evaluateCondition(step.if ?? "false", context);
-    };
-    const phase = (name: string) => (step: Step) => step.with?.phase === name;
+    const steps = stepsRunning(called.jobs.push.steps ?? [], context, fails);
+    const phase = (name: string) => steps.some((step) => step.with?.phase === name);
+    const sticky = steps.find((step) => step.uses?.startsWith("marocchino/") === true);
+    const say = (key: string) => interpolate(sticky?.with?.[key] ?? "", context);
+    const notice = outputs["steps.push.outputs.notice"] ?? "";
+    // The fixed line's wording is the workflow's own; what is pinned is that a run with no notice still says something.
+    const fixed = say("message") === "" ? "nothing" : "the fixed line";
+    const message = say("message") === notice ? notice : fixed;
     expect({
-      fix: runs(phase("push")),
-      gate: runs((step) => step.uses === "$/actions/validate-commit-names"),
-      notice: runs((step) => step.uses?.startsWith("marocchino/") === true),
-      unlabel: runs(phase("unlabel")),
-    }).toEqual(ran);
+      ran: {
+        fix: phase("push"),
+        gate: steps.some((step) => step.uses === "$/actions/validate-commit-names"),
+        unlabel: phase("unlabel"),
+      },
+      told:
+        sticky === undefined
+          ? null
+          : `${say("header")}: ${say("delete") === "true" ? "deleted" : message}`,
+    }).toEqual({ ran, told });
+  });
+
+  // A fork is told through the label lane's comment: the label is what it answers, and a second comment for it
+  // would never be replaced.
+  test("the fork job's note and a label run's notice are one comment", () => {
+    const header = (job: Job, context: Context) => {
+      const sticky = (job.steps ?? []).find((step) => step.uses?.startsWith("marocchino/"));
+      return interpolate(sticky?.with?.header ?? "", context);
+    };
+    const labeled = { "github.event.action": "labeled" };
+    expect(header(called.jobs.fork, labeled)).toBe(header(called.jobs.push, labeled));
   });
 
   // The gate's step runs under continue-on-error, and a skipped or failed one must read as "not accepted": a loose
@@ -308,25 +379,37 @@ describe("the called fleet-autofix.yml", () => {
   });
 
   // The hook's `event` input and the action's own reading of the payload must name one trigger, or the hook runs the
-  // formatter while the lists judged are the generator's.
-  test.each(["labeled", "opened", "synchronize", "reopened"])(
-    "on %p the hook is told the trigger the action reads from the payload",
-    (action) => {
+  // formatter while the lists judged are the generator's. An expression compares the label without case, so a label
+  // the caller lets through in another case must read as the label here too, never throw with the label left on.
+  test.each([
+    ["labeled", "fix-lint"],
+    ["labeled", "Fix-Lint"],
+    ["labeled", "FIX-LINT"],
+    ["opened", undefined],
+    ["synchronize", undefined],
+    ["reopened", undefined],
+  ])(
+    "on %p (label %p) the caller starts the fix and the hook is told the trigger the action reads from the payload",
+    (action, label) => {
       const hook = (called.jobs.stage.steps ?? []).find(
         (step) => step.uses === "./.github/actions/autofix",
       );
       const payload = {
         action,
-        label: { name: "fix-lint" },
+        label: label === undefined ? undefined : { name: label },
         pull_request: {
           number: 7,
           head: { sha: "a".repeat(40), ref: "topic" },
           user: { login: "octocat" },
         },
       };
-      expect(interpolate(hook?.with?.event ?? "", { "github.event.action": action })).toBe(
-        parseEvent(JSON.stringify(payload)).kind,
-      );
+      expect({
+        called: evaluateCondition(
+          caller.jobs.autofix.if ?? "",
+          event("pull_request", action, { label }),
+        ),
+        hook: interpolate(hook?.with?.event ?? "", { "github.event.action": action }),
+      }).toEqual({ called: true, hook: parseEvent(JSON.stringify(payload)).kind });
     },
   );
 });

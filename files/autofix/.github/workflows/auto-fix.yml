@@ -19,11 +19,12 @@ on:
 permissions: {}
 
 # One lane per pull request and trigger: a newer push replaces the older push's fix, and adding the label again replaces
-# the older label's. The event name keeps the fork job's run out of the fix's lane; another label gets a lane of its own.
+# the older label's. The event name keeps the fork job's run out of the fix's lane; another label gets a lane of its own,
+# and its `label-` prefix keeps a label named `push` out of the push lane.
 concurrency:
   group: >-
     auto-fix-${{ github.event_name }}-${{ github.event.pull_request.number }}-${{
-    github.event.action == 'labeled' && github.event.label.name || 'push' }}
+    github.event.action == 'labeled' && format('label-{0}', github.event.label.name) || 'push' }}
   cancel-in-progress: true
 
 jobs:

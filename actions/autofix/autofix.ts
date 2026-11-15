@@ -9,7 +9,8 @@
 //
 // The push job trusts nothing the stage job hands over: it reads the event and the lists itself, and judges every path.
 
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempDisposableSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as core from "@actions/core";
 import { z } from "zod";
@@ -24,7 +25,15 @@ import {
   succeeded,
 } from "../shared/action_runtime.ts";
 import { FORK_NOTICE, type NamedPath, noticeOf, type Outcome, type Remarks } from "./notice.ts";
-import { type FixEvent, judge, type Lists, matches, parseRawDiff, rejection } from "./paths.ts";
+import {
+  type FixEvent,
+  judge,
+  type Lists,
+  matches,
+  parseRawDiff,
+  type RawChange,
+  rejection,
+} from "./paths.ts";
 
 const LABEL = "fix-lint";
 const DEFAULT_SUBJECT = "style: apply automated fixes";
@@ -189,6 +198,11 @@ export function parseConfig(text: string): Config {
   return configSchema.parse(JSON.parse(text));
 }
 
+/** Whether `name` is the fix label. A workflow expression compares without case, so every phase must too. */
+function isFixLabel(name: string | undefined): boolean {
+  return name?.toLowerCase() === LABEL;
+}
+
 /**
  * The event a run answers, from the payload GitHub wrote for the run.
  *
@@ -197,7 +211,7 @@ export function parseConfig(text: string): Config {
 export function parseEvent(text: string): PullRequestEvent {
   const payload = eventSchema.parse(JSON.parse(text));
   const labeled = payload.action === "labeled";
-  if (labeled && payload.label?.name !== LABEL) {
+  if (labeled && !isFixLabel(payload.label?.name)) {
     throw new Error(`the label is '${payload.label?.name}', not ${LABEL}: nothing to fix`);
   }
 
@@ -263,7 +277,7 @@ function messageFor(subject: string, author: string): string[] {
  * @param leased - the sha the push was leased to
  * @param commit - the fix commit
  */
-export function classifyRejection(
+function classifyRejection(
   remoteHead: string | null,
   leased: string,
   commit: string,
@@ -325,10 +339,41 @@ function mustGit(
   return result.stdout;
 }
 
-function stagedChanges(tools: Tools, repository: string) {
+/** The staged changes, read from a file git wrote: a name's bytes survive there, and a child's output is read as text. */
+function stagedChanges(tools: Tools, repository: string): RawChange[] {
+  using scratch = mkdtempDisposableSync(join(tmpdir(), "autofix-"));
+  const listing = join(scratch.path, "staged.raw");
   const raw = ["diff", "--cached", "--raw", "-z", "--no-renames", "--no-abbrev"];
+  mustGit(tools, repository, [...raw, `--output=${listing}`]);
 
-  return parseRawDiff(mustGit(tools, repository, raw));
+  return parseRawDiff(readFileSync(listing));
+}
+
+/**
+ * Takes `changes` out of the index, each by its own bytes.
+ *
+ *   added -> `rm --cached`: a file's name is that file alone
+ *   other -> `reset`: brings back the file HEAD holds
+ *
+ * `reset` reads a name as everything under it. On an added file that took a directory's place, it would bring the
+ * directory's deleted files back.
+ */
+function unstage(tools: Tools, repository: string, changes: readonly RawChange[]): void {
+  const added = changes.filter((change) => change.status === "A");
+  const other = changes.filter((change) => change.status !== "A");
+  const steps: [string[], RawChange[]][] = [
+    [["rm", "--cached", "--quiet"], added],
+    [["reset", "--quiet"], other],
+  ];
+  using scratch = mkdtempDisposableSync(join(tmpdir(), "autofix-"));
+  const pathspecs = join(scratch.path, "pathspecs");
+  for (const [command, group] of steps) {
+    if (group.length === 0) continue;
+
+    writeFileSync(pathspecs, Buffer.concat(group.flatMap(({ name }) => [name, Buffer.alloc(1)])));
+    const named = [`--pathspec-from-file=${pathspecs}`, "--pathspec-file-nul"];
+    mustGit(tools, repository, [...command, ...named], { GIT_LITERAL_PATHSPECS: "1" });
+  }
 }
 
 /**
@@ -341,7 +386,8 @@ export function stageFix(request: StageRequest, tools: Tools): boolean {
   const { repository, out } = request;
   mustGit(tools, repository, ["add", "--all"]);
 
-  const judgment = judge(request.kind, stagedChanges(tools, repository), request.lists);
+  const changes = stagedChanges(tools, repository);
+  const judgment = judge(request.kind, changes, request.lists);
   const rejected = judgment.kind === "refuse" ? judgment.refused : judgment.dropped;
   for (const { path, reason } of rejected.slice(0, WARNED_PATHS)) {
     tools.log.warning(`not carried by the fix: ${path} (${reason})`);
@@ -350,16 +396,11 @@ export function stageFix(request: StageRequest, tools: Tools): boolean {
   mkdirSync(out, { recursive: true });
   if (judgment.kind === "refuse") mustGit(tools, repository, ["reset", "--quiet"]);
 
-  if (judgment.kind === "stage" && rejected.length > 0) {
-    const pathspecs = join(out, "dropped.pathspec");
-    writeFileSync(pathspecs, rejected.map(({ path }) => `${path}\0`).join(""));
-    const unstage = [
-      "reset",
-      "--quiet",
-      `--pathspec-from-file=${pathspecs}`,
-      "--pathspec-file-nul",
-    ];
-    mustGit(tools, repository, unstage, { GIT_LITERAL_PATHSPECS: "1" });
+  if (judgment.kind === "stage") {
+    // By the decoded name: two names that decode alike are both not UTF-8, and both dropped.
+    const dropped = new Set(judgment.dropped.map(({ path }) => path));
+    const leaving = changes.filter(({ path }) => dropped.has(path));
+    unstage(tools, repository, leaving);
   }
 
   const patch = join(out, PATCH_FILE);
@@ -425,11 +466,20 @@ function pushConfig(credential: Credential | null): readonly [string, string][] 
 
 /** The branch's sha on the remote: empty when the branch is gone, null when the remote could not be read. */
 function remoteHead(request: PushRequest, tools: Tools): string | null {
-  const args = ["ls-remote", "origin", `refs/heads/${request.event.ref}`];
+  const branch = `refs/heads/${request.event.ref}`;
+  const args = ["ls-remote", "origin", branch];
   const result = git(tools, request.repository, args, gitEnv(pushConfig(request.credential)));
   if (!succeeded(result.exit)) return null;
 
-  return result.stdout.split("\t", 1)[0].trim();
+  // git matches the pattern against the tail of a ref's name, so refs/heads/a/refs/heads/<branch> is listed too.
+  const shaByName = new Map(
+    result.stdout.split("\n").map((record): [string, string] => {
+      const [sha, name] = record.split("\t");
+      return [name, sha];
+    }),
+  );
+
+  return shaByName.get(branch) ?? "";
 }
 
 function commitFix(request: PushRequest, tools: Tools): string {
@@ -542,7 +592,7 @@ function labelled(repository: string, event: PullRequestEvent, tools: Tools): bo
     throw new Error(`reading the pull request's labels failed: ${failureDetail(listed)}`);
   }
 
-  return listed.stdout.split("\n").some((name) => name.toLowerCase() === LABEL);
+  return listed.stdout.split("\n").some(isFixLabel);
 }
 
 /**

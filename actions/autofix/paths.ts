@@ -38,6 +38,12 @@ export interface Change {
   newMode: string;
 }
 
+/** A change as git printed it, with the name the decoded `path` loses when its bytes are not UTF-8. */
+export interface RawChange extends Change {
+  /** The path's own bytes, as the index holds them. */
+  name: Buffer;
+}
+
 /** A change no fix may carry, and why. */
 export interface Rejection {
   /** The path the fix changed. */
@@ -119,20 +125,25 @@ export function judge(event: FixEvent, changes: readonly Change[], lists: Lists)
  *
  * @throws {Error} a record is not git's `:<old mode> <new mode> <old sha> <new sha> <status>` header and a path
  */
-export function parseRawDiff(output: string): Change[] {
-  const fields = output.split("\0");
-  if (fields.at(-1) === "") fields.pop();
+export function parseRawDiff(output: Buffer): RawChange[] {
+  const fields: Buffer[] = [];
+  let start = 0;
+  while (start < output.length) {
+    const end = output.indexOf(0, start);
+    fields.push(output.subarray(start, end === -1 ? output.length : end));
+    start = end === -1 ? output.length : end + 1;
+  }
 
-  const changes: Change[] = [];
+  const changes: RawChange[] = [];
   for (let index = 0; index < fields.length; index += 2) {
-    const header = RAW_HEADER.exec(fields[index]);
-    const path = fields[index + 1];
-    if (header === null || path === undefined) {
+    const header = RAW_HEADER.exec(fields[index].toString("latin1"));
+    const name = fields[index + 1];
+    if (header === null || name === undefined) {
       throw new Error(`git diff --raw printed a record this action cannot read at field ${index}`);
     }
 
     const [, oldMode, newMode, status] = header;
-    changes.push({ path, status, oldMode, newMode });
+    changes.push({ path: name.toString("utf8"), name, status, oldMode, newMode });
   }
 
   return changes;

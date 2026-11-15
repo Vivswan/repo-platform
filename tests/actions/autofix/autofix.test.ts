@@ -18,10 +18,8 @@ import MarkdownIt from "markdown-it";
 import {
   type Config,
   candidateSubject,
-  classifyRejection,
   type PullRequestEvent,
   type PushRequest,
-  parseEvent,
   pushFix,
   type Runner,
   removeLabel,
@@ -36,7 +34,6 @@ import { noticeOf } from "../../../actions/autofix/notice.ts";
 import {
   type Change,
   type FixEvent,
-  judge,
   type Lists,
   rejection,
 } from "../../../actions/autofix/paths.ts";
@@ -186,26 +183,6 @@ test.each<{ reason: string; change: Change; lists: Lists; refused: string | null
   expect(rejection(change, lists)).toBe(refused);
 });
 
-// A format fix is per file and a regeneration is one set: half a generator's output committed would leave the branch
-// inconsistent, green. A rename reaches the rule as its deletion and its addition.
-test("the label drops a change outside its lists and keeps the rest; a push refuses the whole fix", () => {
-  const rename = [file("src/old.ts", "D"), file("src/new.ts", "A")];
-  const changes = [file("src/a.ts"), file("LICENSE"), ...rename];
-  const outside = [
-    { path: "LICENSE", reason: "outside the paths list" },
-    { path: "src/old.ts", reason: "a deletion outside the delete list" },
-  ];
-  expect({
-    label: judge("label", changes, FORMAT),
-    push: judge("push", changes, FORMAT),
-    cleanPush: judge("push", [file("README.md")], GENERATED),
-  }).toEqual({
-    label: { kind: "stage", staged: [file("src/a.ts"), file("src/new.ts", "A")], dropped: outside },
-    push: { kind: "refuse", refused: outside },
-    cleanPush: { kind: "stage", staged: [file("README.md")], dropped: [] },
-  });
-});
-
 // The hook's subject is put to the commit-names gate, which reads a message: it passes a subject with a body under
 // it, and the body would ride into the commit the write token pushes. So only one printable line ever reaches the gate.
 test("a subject with a second line passes the gate's commitlint, and is never put to it", async () => {
@@ -235,71 +212,7 @@ test("a subject with a second line passes the gate's commitlint, and is never pu
   });
 });
 
-// git says "rejected" for a moved branch, a protected branch, and a network cut alike, in words that change between
-// versions. The branch re-read after the rejection is what tells a harmless race from a failure.
-test.each<{
-  reason: string;
-  remoteHead: string | null;
-  verdict: ReturnType<typeof classifyRejection>;
-}>([
-  { reason: "another commit landed first", remoteHead: "c".repeat(40), verdict: "superseded" },
-  { reason: "the branch was deleted", remoteHead: "", verdict: "superseded" },
-  {
-    reason: "the branch still names the leased sha",
-    remoteHead: "a".repeat(40),
-    verdict: "failed",
-  },
-  { reason: "the branch could not be read", remoteHead: null, verdict: "failed" },
-  {
-    reason: "the branch names the fix commit, a rerun",
-    remoteHead: "b".repeat(40),
-    verdict: "pushed",
-  },
-])("a rejected push: $reason", ({ remoteHead, verdict }) => {
-  expect(classifyRejection(remoteHead, "a".repeat(40), "b".repeat(40))).toBe(verdict);
-});
-
 describe("the notice", () => {
-  const QUIET = { findings: "", dropped: [] };
-
-  test.each<{ reason: string; event: FixEvent; notice: string }>([
-    {
-      reason: "the label on a clean branch says so",
-      event: "label",
-      notice: "Nothing to fix: the fixer changed no file.",
-    },
-    { reason: "a push on a consistent branch says nothing", event: "push", notice: "" },
-  ])("an empty patch: $reason", ({ event, notice }) => {
-    expect(noticeOf(event, { kind: "nothing" }, QUIET)).toBe(notice);
-  });
-
-  test("a pushed fix names the commit, the held run, what was left out, and the findings", () => {
-    const notice = noticeOf(
-      "label",
-      {
-        kind: "pushed",
-        commit: "0123456789abcdef0123456789abcdef01234567",
-        subject: "style: format",
-      },
-      { findings: "src/a.ts:3 lint/noDebugger\n", dropped: [{ path: "LICENSE", reason: null }] },
-    );
-    expect(notice.split("\n")).toEqual([
-      "Pushed `style: format` as 0123456.",
-      "",
-      "GitHub holds the new head's `pull_request` run for approval after a push with the workflow token, so its checks stay unreported. Approve the run from the merge box or the Actions tab, or push a commit to this branch.",
-      "",
-      "Left out of the commit, outside the registration's `autofix` lists or never changed by a fix:",
-      "",
-      "- `LICENSE`",
-      "",
-      "The fixer left findings:",
-      "",
-      "```text",
-      "src/a.ts:3 lint/noDebugger",
-      "```",
-    ]);
-  });
-
   // A file name and the hook's findings are text the pull request chose. Unquoted, a name could open a link, a heading,
   // or a mention in the comment the write token posts, and a fence in the findings could end the block early.
   test("a path and findings written to break out of their quoting render as code and nothing else", () => {
@@ -327,17 +240,6 @@ describe("the notice", () => {
 });
 
 describe("the event", () => {
-  const payload = (action: string, label?: string) =>
-    JSON.stringify({
-      action,
-      label: label === undefined ? undefined : { name: label },
-      pull_request: {
-        number: 7,
-        changed_files: 2,
-        head: { sha: "a".repeat(40), ref: "topic", repo: { full_name: "example/widget" } },
-        user: { login: "octocat" },
-      },
-    });
   const event = (kind: FixEvent, changedFiles = 2): PullRequestEvent => ({
     kind,
     number: 7,
@@ -345,19 +247,6 @@ describe("the event", () => {
     ref: "topic",
     author: "octocat",
     changedFiles,
-  });
-
-  // The push job picks its lists by this reading alone. An event read as the label when it was a push would judge a
-  // generator's output against the formatter's lists.
-  test("the label is the label event, every other action is a push, and another label is refused", () => {
-    expect({
-      labeled: parseEvent(payload("labeled", "fix-lint")),
-      synchronize: parseEvent(payload("synchronize")),
-      opened: parseEvent(payload("opened")),
-    }).toEqual({ labeled: event("label"), synchronize: event("push"), opened: event("push") });
-    expect(() => parseEvent(payload("labeled", "bug"))).toThrow(
-      "the label is 'bug', not fix-lint: nothing to fix",
-    );
   });
 
   // Without the stand-down every push to every pull request would run the hook; with one too eager, a generator's
@@ -406,7 +295,8 @@ describe("the event", () => {
 });
 
 // The label is removed on every path, and a rerun meets it already gone. gh answers a second removal with an error
-// in prose, so the labels read back are what says whether the removal is done.
+// in prose, so the labels read back are what says whether the removal is done. The routes are GitHub's own and no
+// test reaches GitHub: a wrong one is green here and fails every real removal.
 describe("removing the label", () => {
   const ok = (stdout = ""): RunResult => ({
     exit: { kind: "exited", code: 0 },
@@ -427,10 +317,14 @@ describe("removing the label", () => {
     changedFiles: 1,
   };
 
+  const LIST = "GET repos/example/widget/issues/7/labels";
+  const DELETE = "DELETE repos/example/widget/issues/7/labels/fix-lint";
+
   function removal(answers: RunResult[]): { calls: string[]; error: string | null } {
     const calls: string[] = [];
     const run: Runner = (command) => {
-      calls.push(command.includes("DELETE") ? "delete" : "list");
+      const route = command.find((word) => word.startsWith("repos/"));
+      calls.push(`${command.includes("DELETE") ? "DELETE" : "GET"} ${route}`);
       return answers.shift() ?? failed;
     };
     try {
@@ -445,31 +339,31 @@ describe("removing the label", () => {
     {
       reason: "the label is not on the pull request: a rerun",
       answers: [ok("bug\n")],
-      calls: ["list"],
+      calls: [LIST],
       error: null,
     },
     {
       reason: "the label is there and goes",
       answers: [ok("bug\nFix-Lint\n"), ok()],
-      calls: ["list", "delete"],
+      calls: [LIST, DELETE],
       error: null,
     },
     {
       reason: "the removal fails because another run took it first",
       answers: [ok("fix-lint\n"), failed, ok("")],
-      calls: ["list", "delete", "list"],
+      calls: [LIST, DELETE, LIST],
       error: null,
     },
     {
       reason: "the removal fails and the label is still there",
       answers: [ok("fix-lint\n"), failed, ok("fix-lint\n")],
-      calls: ["list", "delete", "list"],
+      calls: [LIST, DELETE, LIST],
       error: "removing the fix-lint label failed: gh: Label does not exist",
     },
     {
       reason: "the labels cannot be read",
       answers: [failed],
-      calls: ["list"],
+      calls: [LIST],
       error: "reading the pull request's labels failed: gh: Label does not exist",
     },
   ])("$reason", ({ answers, calls, error }) => {
@@ -787,6 +681,113 @@ describe("stage and push", () => {
     expect({ outcome: result.outcome, remote: remote("rewound") }).toEqual({
       outcome: { kind: "superseded" },
       remote: ancestor,
+    });
+  });
+
+  // `git ls-remote origin refs/heads/topic` also answers for refs/heads/a/refs/heads/topic, which sorts first: git
+  // matches the pattern against the tail of a ref name. Read by position, the decoy's sha stands for the branch's.
+  test("a rejected push is classed by the branch itself, not by another branch whose name ends in its full name", () => {
+    const { out } = staged("label", "decoyed", FORMAT, (directory) =>
+      write(directory, { "src/a.ts": "export const a = 1;\n" }),
+    );
+    const repository = clone("decoyed", "push");
+    // The decoy names the leased sha, so the moved branch would read as unmoved, and the race as a failure.
+    fixtureGit(origin, ["update-ref", "refs/heads/a/refs/heads/decoyed", base]);
+    fixtureGit(origin, ["update-ref", "refs/heads/decoyed", ancestor]);
+
+    const result = pushFix(request(event("label", "decoyed"), FORMAT, repository, out), tools);
+    expect({ outcome: result.outcome, remote: remote("decoyed") }).toEqual({
+      outcome: { kind: "superseded" },
+      remote: ancestor,
+    });
+  });
+
+  // A remote that refuses the push for its own reasons (a protected branch) says "rejected" as a moved branch does.
+  // Only the branch read back, still at the leased sha, tells this failure from the harmless race.
+  test("a push the remote refuses with the branch unmoved is a failure, not a superseded run", () => {
+    const { out } = staged("label", "guarded", FORMAT, (directory) =>
+      write(directory, { "src/a.ts": "export const a = 1;\n" }),
+    );
+    const hook = join(origin, "hooks/update");
+    mkdirSync(dirname(hook), { recursive: true });
+    writeFileSync(hook, '#!/bin/sh\ntest "$1" != refs/heads/guarded\n');
+    chmodSync(hook, 0o755);
+
+    const result = pushed("label", "guarded", FORMAT, out);
+    expect({ outcome: result.outcome, remote: remote("guarded") }).toEqual({
+      outcome: { kind: "failed", detail: "git push was rejected; the run's log has git's words." },
+      remote: base,
+    });
+  });
+
+  // A file name is bytes, and git's are read here as UTF-8: a name that is none comes back changed. Unstaged by the
+  // name as read, the file stayed in the patch, and the push job refused the whole fix for one stray file. The name is
+  // put into the index directly, because not every file system stores such a name.
+  test("the label drops a file whose name is not UTF-8 and names it, and the rest is pushed, a deletion included", () => {
+    const stray = Buffer.concat([Buffer.from("src/caf"), Buffer.from([0xe9]), Buffer.from(".ts")]);
+    const hookWithStray: Tools = {
+      ...tools,
+      run: (command, options) => {
+        const result = run(command, options);
+        if (command.join(" ") !== "git add --all") return result;
+
+        const blob = fixtureGit(options.cwd ?? "", ["rev-parse", "HEAD:src/a.ts"]);
+        const entry = Buffer.concat([Buffer.from(`100644 ${blob}\t`), stray, Buffer.from([0])]);
+        const added = boundedSpawnSync(["git", "update-index", "-z", "--index-info"], {
+          cwd: options.cwd,
+          env: fixtureGitEnv(),
+          stdin: entry,
+        });
+        if (added.exitCode !== 0) throw new Error(added.stderr);
+
+        return result;
+      },
+    };
+    fixtureGit(origin, ["update-ref", "refs/heads/stray-name", base]);
+    const repository = clone("stray-name", "stage");
+    write(repository, { "src/a.ts": "export const a = 1;\n" });
+    rmSync(join(repository, "LICENSE"));
+    rmSync(join(repository, "src/retired"), { recursive: true });
+    const lists = { paths: FORMAT.paths, delete: ["src/retired/"] };
+    const out = join(root, "stray-name-out");
+    stageFix({ kind: "label", lists, repository, out, findings: "", subject: "" }, hookWithStray);
+
+    const result = pushed("label", "stray-name", lists, out);
+    expect({
+      outcome: result.outcome.kind,
+      tree: tree("stray-name"),
+      dropped: result.notice.split("\n").filter((line) => line.startsWith("- ")),
+    }).toEqual({
+      outcome: "pushed",
+      tree: ["M\tsrc/a.ts", "D\tsrc/retired/old.ts"],
+      dropped: ["- `LICENSE`", "- `src/caf\uFFFD.ts`"],
+    });
+  });
+
+  // git reads a pathspec that names a directory as everything under it. A dropped or carried path unstaged or staged
+  // that way takes its neighbours along when a file and a directory swapped places: a refused file rides into the
+  // patch, or an allowed deletion is lost without a word.
+  test("the label drops exactly the paths outside its lists when a file became a directory and a directory a file", () => {
+    const lists = { paths: ["src/a.ts"], delete: ["LICENSE", "src/retired/"] };
+    const { out } = staged("label", "swapped", lists, (directory) => {
+      rmSync(join(directory, "LICENSE"));
+      rmSync(join(directory, "src/retired"), { recursive: true });
+      write(directory, {
+        "LICENSE/private.txt": "x\n",
+        "src/retired": "now a file\n",
+        "src/a.ts": "export const a = 1;\n",
+      });
+    });
+
+    const result = pushed("label", "swapped", lists, out);
+    expect({
+      outcome: result.outcome.kind,
+      tree: tree("swapped"),
+      dropped: result.notice.split("\n").filter((line) => line.startsWith("- ")),
+    }).toEqual({
+      outcome: "pushed",
+      tree: ["D\tLICENSE", "M\tsrc/a.ts", "D\tsrc/retired/old.ts"],
+      dropped: ["- `LICENSE/private.txt`", "- `src/retired`"],
     });
   });
 

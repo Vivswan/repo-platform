@@ -19,7 +19,7 @@ The repository's own commands run where the token can only read. The job that ca
 | Trigger          | Runs when                                                                          | A change outside the lists                           | Nothing to fix |
 | ---------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------- | -------------- |
 | `fix-lint` label | the label is added to a same-repository pull request; it is removed after each run | dropped and named in the notice; the rest is pushed  | one notice     |
-| a push           | `autofix.push` is declared and a file the pull request changes matches `push.on`   | the whole fix is refused, red, and the path is named | silence        |
+| a push           | `autofix.push` is declared and a file the pull request changes matches `push.on`   | the whole fix is refused, red, and the path is named | no notice      |
 
 ## Set it up
 
@@ -108,7 +108,7 @@ In order, the first row that matches ends the run:
 | The push job finds                                            | Outcome                                                                        |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | the stage job reported a push-event change outside the lists  | refused, red; the notice names each path; nothing is committed                 |
-| an empty patch                                                | no commit; the label gets "nothing to fix", a push gets silence                |
+| an empty patch                                                | no commit; the label gets "nothing to fix", a push removes its last notice     |
 | a patch that does not apply to the head sha                   | failed, red                                                                    |
 | a patched path outside the lists, or in the never-carried set | the whole patch is refused, red, even on the label: the stage job was bypassed |
 | the branch still at the head sha                              | one commit pushed; the notice says the new head's run waits for approval       |
@@ -121,6 +121,17 @@ In order, the first row that matches ends the run:
 - **Git hooks never run** in the push job, and the patch is applied to the index alone.
 - **Paths and findings are quoted** in the notice and the run summary: a path as a code span, findings as a fenced block, each cut to a cap.
 
+## The notice
+
+Each trigger keeps one comment of its own, so a label run and a push run on the same commit never write over each other.
+
+| The run                                       | Its trigger's comment                                     |
+| --------------------------------------------- | --------------------------------------------------------- |
+| has something to say                          | replaced with the new notice                              |
+| is a push with nothing to fix                 | deleted, so an earlier "Refused" does not outlive the fix |
+| died before the push step could word a notice | replaced with one fixed line that points at the run's log |
+| stopped in the hook, or was cancelled         | left as it was; the red run is the report                 |
+
 ## The held run
 
 A push with the workflow token does not start the new head's `pull_request` run: GitHub holds it for approval. The notice says so. Approve the run from the merge box or the Actions tab, or push a commit. No stronger token is wired in, by design: a token that started runs would sit one job away from the pull request's own code.
@@ -130,6 +141,8 @@ A repository that declares `autofix.push` takes this cost on every fix the push 
 ## Forks, reruns, and removal
 
 - **A fork's pull request** given the label: the label is removed with a note that forks are not fixed. That job runs on `pull_request_target`, checks nothing out, and runs no pull request code. A fork's pushes run nothing.
+- **A push by Dependabot** starts its run as a fork's push does: read-only unless the workflow's `permissions` raise the token, which no real run has confirmed here. Count on the label for a Dependabot pull request: a person adds it, so its run holds the usual token.
+- **The label's name** is matched without case, as GitHub matches it.
 - **A rerun** is safe at every step: the label already gone, the commit already on the branch, and the notice already posted each read as done.
 - **Adding the label again** cancels the older label run; a newer push cancels the older push run.
 - **Removing the module** retires `auto-fix.yml`; the hook stays (a starter).

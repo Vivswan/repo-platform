@@ -174,13 +174,17 @@ jobs:
           subject: ${{ steps.report.outputs.subject }}
           subject-accepted: ${{ steps.subject.outcome == 'success' }}
 
-      # always(): a refused or failed push words a notice before it fails the step above.
+      # One comment per lane, so a label run and a push run on one head never replace each other's notice.
+      #   a notice                   -> posted over the lane's last one
+      #   a push with nothing to say -> the lane's last notice is deleted, so no stale "Refused" stays
+      #   no notice and a failure    -> the fixed line: a step died before the push step could word one
       - name: Tell the pull request
-        if: always() && steps.push.outputs.notice != ''
+        if: needs.stage.result == 'success' && !cancelled()
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
-          header: repo-platform/autofix
-          message: ${{ steps.push.outputs.notice }}
+          header: repo-platform/autofix-${{ github.event.action == 'labeled' && 'label' || 'push' }}
+          message: ${{ steps.push.outputs.notice || 'The fix run failed before it could say why. The run log has the reason.' }}
+          delete: ${{ steps.push.outcome == 'success' && steps.push.outputs.notice == '' }}
 
       # The label is a one-shot request: it goes even when a step above failed, so a broken run cannot loop.
       - name: Remove the fix-lint label
@@ -212,5 +216,5 @@ jobs:
         if: steps.fork.outputs.notice != ''
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
-          header: repo-platform/autofix
+          header: repo-platform/autofix-label
           message: ${{ steps.fork.outputs.notice }}
