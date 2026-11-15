@@ -2,7 +2,6 @@
 // A failure's reason is fixed text. The library's error spells the request URL, which names a private repository, and the selectors' logs are public (docs/platform/sync/private-repositories.md).
 
 import { Octokit } from "@octokit/core";
-import { paginateRest } from "@octokit/plugin-paginate-rest";
 import { retry } from "@octokit/plugin-retry";
 import { throttling } from "@octokit/plugin-throttling";
 import { RequestError } from "@octokit/request-error";
@@ -13,8 +12,8 @@ import { JsonShapeError, parseWithThrow } from "./json.ts";
 /** A stalled-network backstop, not a latency budget: two minutes covers the paginated user/repos listing of several hundred repos, and the plan jobs' timeout-minutes are sized from it. */
 export const READ_DEADLINE_MS = 120_000;
 
-/** The statuses a second attempt cannot change. 429 is here because the throttling plugin alone answers a rate limit. */
-const NEVER_RETRIED = [400, 401, 403, 404, 410, 422, 429, 451];
+/** Every 4xx: a second attempt cannot change one, and a rate limit (403, 429) is the throttling plugin's alone to wait out. */
+const NEVER_RETRIED = Array.from({ length: 100 }, (_, offset) => 400 + offset);
 
 /** The longest rate-limit wait a billed runner sits out; a longer one fails the read. */
 const RATE_LIMIT_WAIT_SECONDS = 60;
@@ -25,8 +24,17 @@ const PAGE_SIZE = 100;
 /** The statuses the Fetch standard gives no body. */
 const BODILESS = [204, 205, 304];
 
-/** The client class: the core with this module's three policies plugged in. */
-const PlatformOctokit = Octokit.plugin(retry, throttling, paginateRest);
+/** The next page's URL in a listing's Link header, as GitHub writes it. */
+const NEXT_LINK = /<([^<>]+)>;\s*rel="next"/;
+
+/** Any spelling of a next relation: one NEXT_LINK cannot read fails the listing, since ending there would shorten it. */
+const NAMES_NEXT = /rel="?next\b/i;
+
+/** The client class: the core with the retry and rate-limit policies plugged in. */
+const PlatformOctokit = Octokit.plugin(retry, throttling);
+
+/** What a shape diagnosis calls the thing it judged. */
+const REPLY = "the reply";
 
 /** A logger that prints nothing: the library's messages spell the request URL. */
 const SILENT = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
@@ -41,7 +49,7 @@ export type Read<T> =
 export type Query = Record<string, string | number>;
 
 export interface GitHubClientOptions {
-  /** Defaults to GH_TOKEN, then GITHUB_TOKEN, an empty one skipped (gh's own lookup); none reads anonymously. */
+  /** Defaults to GH_TOKEN, then GITHUB_TOKEN, an empty one skipped (gh's own lookup). */
   token?: string;
 
   /** Defaults to the runner's GITHUB_API_URL, then api.github.com. */
@@ -50,7 +58,7 @@ export interface GitHubClientOptions {
   /** The transport; tests answer from a table here. */
   fetch?: typeof fetch;
 
-  /** The wire time one read may take, its retries and pages included. */
+  /** The time one read may take, its retries, waits, and pages included. */
   deadlineMs?: number;
 
   /** The unit of the retry backoff (1, 4, 9 units) and of a rate-limit wait's seconds; tests pass 0 so no retry sleeps. */
@@ -112,9 +120,16 @@ export class GitHubClient {
   constructor(options: GitHubClientOptions = {}) {
     const retryBaseMs = options.retryBaseMs ?? Number(env("GITHUB_RETRY_BASE_MS", "1000"));
     const token = options.token ?? (env("GH_TOKEN") || env("GITHUB_TOKEN"));
+    // GitHub answers an anonymous read of a private repository with 404, which reads as "not there".
+    if (token === "") {
+      throw new Error(
+        "GH_TOKEN or GITHUB_TOKEN must be set: the GitHub API is never read anonymously",
+      );
+    }
+
     this.#deadlineMs = options.deadlineMs ?? READ_DEADLINE_MS;
     this.#octokit = new PlatformOctokit({
-      auth: token === "" ? undefined : token,
+      auth: token,
       baseUrl: options.baseUrl ?? env("GITHUB_API_URL", "https://api.github.com"),
       // The request layer logs through its own option, not the client's: both spell the URL in a deprecation warning.
       log: SILENT,
@@ -133,15 +148,15 @@ export class GitHubClient {
    * @param path - the API path, as `gh api` takes it: `repos/o/r/commits/HEAD`
    */
   get<T>(path: string, schema: z.ZodType<T>, query: Query = {}): Promise<Read<T>> {
-    return this.#read(schema, async (signal) => {
+    return this.#read(async (signal) => {
       const reply = await this.#octokit.request(`GET /${path}`, { ...query, request: { signal } });
-      return reply.data;
+      return parseWithThrow(schema, reply.data, REPLY);
     });
   }
 
   /** A file's raw bytes as text, from a `contents/` path. The text is repository-owned: read for a fact, never printed. */
   text(path: string): Promise<Read<string>> {
-    return this.#read(z.string(), async (signal) => {
+    return this.#read(async (signal) => {
       const reply = await this.#octokit.request(`GET /${path}`, {
         headers: { accept: "application/vnd.github.raw" },
         request: { signal, parseSuccessResponseBody: false },
@@ -150,44 +165,48 @@ export class GitHubClient {
     });
   }
 
-  /** Every page of a listing as one array, each item validated. */
+  /** Every page of a listing as one array. Each page is validated as an array before it is added, so a page that is
+   *  not one fails the listing instead of shortening it. */
   paginate<T>(path: string, itemSchema: z.ZodType<T>, query: Query = {}): Promise<Read<T[]>> {
-    const search = new URLSearchParams({ per_page: String(PAGE_SIZE) });
-    for (const [name, value] of Object.entries(query)) search.set(name, String(value));
+    const page = z.array(itemSchema);
 
-    return this.#read(z.array(itemSchema), (signal) => {
-      // The plugin asks for each next page with the method, URL, and headers alone, so the signal rides the request's defaults.
-      const page = this.#octokit.request.defaults({
-        method: "GET",
-        url: `/${path}?${search}`,
+    return this.#read(async (signal) => {
+      const items: T[] = [];
+      let reply = await this.#octokit.request(`GET /${path}`, {
+        per_page: PAGE_SIZE,
+        ...query,
         request: { signal },
       });
-      return this.#octokit.paginate(page);
+      for (;;) {
+        items.push(...parseWithThrow(page, reply.data, REPLY));
+        const link = reply.headers.link ?? "";
+        const next = NEXT_LINK.exec(link);
+        if (next === null && NAMES_NEXT.test(link)) {
+          throw new JsonShapeError(`${REPLY}: a Link header whose next page cannot be read`);
+        }
+        if (next === null) return items;
+
+        reply = await this.#octokit.request({ method: "GET", url: next[1], request: { signal } });
+      }
     });
   }
 
   /** A reply of the wrong shape is a failure like an outage: no caller may act on a listing it cannot trust. */
-  async #read<T>(
-    schema: z.ZodType<T>,
-    send: (signal: AbortSignal) => Promise<unknown>,
-  ): Promise<Read<T>> {
+  async #read<T>(send: (signal: AbortSignal) => Promise<T>): Promise<Read<T>> {
     const deadline = new AbortController();
     // An abort() is not retried by the retry plugin; AbortSignal.timeout's TimeoutError would be.
     const timer = setTimeout(() => deadline.abort(), this.#deadlineMs);
-    let data: unknown;
+    // The abort ends the wire, not a backoff or a rate-limit wait the plugins sleep through, so the read races it.
+    const expiry = new Promise<never>((_, reject) => {
+      deadline.signal.addEventListener("abort", () => reject(deadline.signal.reason));
+    });
     try {
-      data = await send(deadline.signal);
+      return { kind: "ok", value: await Promise.race([send(deadline.signal), expiry]) };
     } catch (error) {
+      if (error instanceof JsonShapeError) return failed(error.message);
       return thrownOutcome(error, deadline.signal.aborted, this.#deadlineMs);
     } finally {
       clearTimeout(timer);
-    }
-
-    try {
-      return { kind: "ok", value: parseWithThrow(schema, data, "the reply") };
-    } catch (error) {
-      if (!(error instanceof JsonShapeError)) throw error;
-      return failed(error.message);
     }
   }
 }

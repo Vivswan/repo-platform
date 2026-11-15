@@ -7,7 +7,6 @@
       "dependencies": {
         "@actions/core": "3.0.1",
         "@octokit/core": "7.0.8",
-        "@octokit/plugin-paginate-rest": "16.0.0",
         "@octokit/plugin-retry": "8.1.1",
         "@octokit/plugin-throttling": "11.0.5",
         "@octokit/request-error": "7.1.2",
@@ -82,8 +81,6 @@
     "@octokit/graphql": ["@octokit/graphql@9.0.5", "", { "dependencies": { "@octokit/request": "^10.0.16", "@octokit/types": "^18.0.0", "universal-user-agent": "^7.0.0" } }, "sha512-bt/hm03LeU6Vy7FwTrkkC9p3XGT/lBwClglMqxBSe5/q0E5CdJTXeAqEI0vlw89/LF/G6tryTIH8HirZ3prMVg=="],
 
     "@octokit/openapi-types": ["@octokit/openapi-types@29.0.1", "", {}, "sha512-9qWOMFNxxLokERcms42rU0PTLqQmVs7g5E41TI4mCOxmpFayD1rfC7XxOL55cG9MBZLFlC31BrR37myMKardwg=="],
-
-    "@octokit/plugin-paginate-rest": ["@octokit/plugin-paginate-rest@16.0.0", "", { "dependencies": { "@octokit/types": "^18.0.0" }, "peerDependencies": { "@octokit/core": ">=6" } }, "sha512-7RtUeGZypAK4EA4LrjTCnsLALNOoUcYh5vOnCNXpdIQVTQCPh4OFu7324iPqAls3KGgVnZktKUnNKZCOKyHrlA=="],
 
     "@octokit/plugin-request-log": ["@octokit/plugin-request-log@6.0.0", "", { "peerDependencies": { "@octokit/core": ">=6" } }, "sha512-UkOzeEN3W91/eBq9sPZNQ7sUBvYCqYbrrD8gTbBuGtHEuycE4/awMXcYvx6sVYo7LypPhmQwwpUe4Yyu4QZN5Q=="],
 

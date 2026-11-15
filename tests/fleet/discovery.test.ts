@@ -360,6 +360,8 @@ describe("discoverWritableRepos", () => {
     unparsable: [{ status: 200, body: '[{"full_name": hiddenserver}]' }],
     outage: [{ status: 502, body: { message: "Vivswan/hiddenserver is unreachable" } }],
     absent: [{ status: 404 }],
+    bodiless: [{ status: 200, body: null }],
+    truncated: [{ status: 200, next: true, body: [repoEntry("Vivswan/keep")] }, { status: 409 }],
   };
   const servers: Record<string, LoopbackServer> = {};
   beforeAll(async () => {
@@ -414,9 +416,23 @@ describe("discoverWritableRepos", () => {
       diagnostic:
         "the reply: unexpected shape - 0.archived: invalid_type; 0.private: invalid_type; 0.owner: invalid_type",
     },
-    { name: "unparsable", reason: "a listing that is not JSON", diagnostic: "the request failed" },
+    {
+      name: "unparsable",
+      reason: "a listing that is not JSON",
+      diagnostic: "the reply: unexpected shape - (root): invalid_type",
+    },
     { name: "outage", reason: "an outage the retries do not outlast", diagnostic: "HTTP 502" },
     { name: "absent", reason: "a 404, which is no empty fleet", diagnostic: "HTTP 404" },
+    {
+      name: "bodiless",
+      reason: "a 200 with no array, which is no empty fleet",
+      diagnostic: "the reply: unexpected shape - (root): invalid_type",
+    },
+    {
+      name: "truncated",
+      reason: "a second page that fails, which is no shorter fleet",
+      diagnostic: "HTTP 409",
+    },
   ])("$reason exits 1 with the caller's label, never a value", ({ name, diagnostic }) => {
     expect(runDiscover(name)).toEqual({
       exitCode: 1,

@@ -45,6 +45,18 @@ describe("GitHubClient", () => {
       1,
     ],
     [
+      "a 409 is a failure, never retried: an empty repository's commits/HEAD answers it for good",
+      [{ status: 409 }],
+      { kind: "failed", reason: "HTTP 409" },
+      1,
+    ],
+    [
+      "a 408 is a failure, never retried: every 4xx fails at once",
+      [{ status: 408 }],
+      { kind: "failed", reason: "HTTP 408" },
+      1,
+    ],
+    [
       "a rate limit that lifts at once is waited out",
       [{ status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "0" } }, FILE],
       { kind: "ok", value: "modules: [base]\n" },
@@ -80,7 +92,12 @@ describe("GitHubClient", () => {
       attempts++;
       throw new TypeError(`connect ECONNRESET ${BASE}/${REGISTRATION}`);
     }) as unknown as typeof fetch;
-    const client = new GitHubClient({ baseUrl: BASE, fetch: dropping, retryBaseMs: 0 });
+    const client = new GitHubClient({
+      token: "stub-token",
+      baseUrl: BASE,
+      fetch: dropping,
+      retryBaseMs: 0,
+    });
 
     expect(await client.text(REGISTRATION)).toEqual({ kind: "failed", reason: "no response" });
     expect(attempts).toBe(4);
@@ -146,7 +163,6 @@ describe("GitHubClient", () => {
       { GH_TOKEN: "", GITHUB_TOKEN: "second" },
       "token second",
     ],
-    ["neither reads anonymously", {}, null],
   ])(
     "the token comes from the environment the workflows set: %s",
     async (_name, tokens, authorization) => {
@@ -167,6 +183,46 @@ describe("GitHubClient", () => {
       expect(github.calls()).toEqual([{ path: REGISTRATION, authorization }]);
     },
   );
+
+  // GitHub answers an anonymous read of a private repository with 404, so a client with no token would read "not
+  // adopted" where the truth is "no access".
+  test.each<[string, Record<string, string>]>([
+    ["neither variable set", {}],
+    ["both empty", { GH_TOKEN: "", GITHUB_TOKEN: "" }],
+  ])("no token is no client: %s", (_name, tokens) => {
+    const saved = { GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+    delete process.env.GH_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+    Object.assign(process.env, tokens);
+    try {
+      expect(() => new GitHubClient({ baseUrl: BASE })).toThrow(
+        "GH_TOKEN or GITHUB_TOKEN must be set: the GitHub API is never read anonymously",
+      );
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
+  test("a rate-limit wait longer than the deadline ends at the deadline: the green gate's 15 seconds are its bound", async () => {
+    const limited: FakeReply = {
+      status: 403,
+      headers: { "retry-after": "60" },
+      body: { message: "You have exceeded a secondary rate limit." },
+    };
+    const { client } = clientOver(
+      { [REGISTRATION]: [limited, FILE] },
+      { deadlineMs: 50, retryBaseMs: 10 },
+    );
+
+    const started = performance.now();
+    const outcome = await client.text(REGISTRATION);
+
+    expect(outcome).toEqual({ kind: "failed", reason: "no answer within 50ms" });
+    expect(performance.now() - started).toBeLessThan(400);
+  });
 
   test("a file that is itself JSON comes back as its text, not parsed: the selectors read a first line and a YAML document from it", async () => {
     const { client } = over({
@@ -196,7 +252,61 @@ describe("GitHubClient", () => {
     ]);
   });
 
-  test("a listing whose second page stalls ends at the deadline: the plugin's page requests carry the read's signal", async () => {
+  // The weekly sync reads "nothing to sync" off an empty listing and stays green, so a listing GitHub did not really
+  // give must never read as an empty or a shorter one.
+  const ONE: FakeReply = { status: 200, body: [{ name: "one" }], next: true };
+  const untrusted: [string, FakeReply[], string][] = [
+    [
+      "a null body",
+      [{ status: 200, body: null }],
+      "the reply: unexpected shape - (root): invalid_type",
+    ],
+    [
+      "an empty body",
+      [{ status: 200, body: "" }],
+      "the reply: unexpected shape - (root): invalid_type",
+    ],
+    ["a 409", [{ status: 409 }], "HTTP 409"],
+    [
+      "a null second page",
+      [ONE, { status: 200, body: null }],
+      "the reply: unexpected shape - (root): invalid_type",
+    ],
+    ["a 409 on the second page", [ONE, { status: 409 }], "HTTP 409"],
+    [
+      "a next link the client cannot read",
+      [
+        {
+          status: 200,
+          body: [{ name: "one" }],
+          headers: {
+            link: '<https://api.github.test/user/repos?page=2>; title="more"; rel="next"',
+          },
+        },
+      ],
+      "the reply: a Link header whose next page cannot be read",
+    ],
+  ];
+
+  test.each(untrusted)("a listing with %s is no listing", async (_name, replies, reason) => {
+    const { client } = over({ "user/repos": replies });
+
+    expect(await client.paginate("user/repos", z.object({ name: z.string() }))).toEqual({
+      kind: "failed",
+      reason,
+    });
+  });
+
+  test("an empty array is an empty listing: a user with no repositories is not an outage", async () => {
+    const { client } = over({ "user/repos": [{ status: 200, body: [] }] });
+
+    expect(await client.paginate("user/repos", z.object({ name: z.string() }))).toEqual({
+      kind: "ok",
+      value: [],
+    });
+  });
+
+  test("a listing whose second page stalls ends at the deadline: one deadline covers every page", async () => {
     const { client } = over(
       {
         "user/repos": [
