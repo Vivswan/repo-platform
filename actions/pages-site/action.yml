@@ -28,6 +28,10 @@ inputs:
     description: Build docs/ once as a strict PR check (no artifact) instead of assembling the site
     required: false
     default: "false"
+  site-url:
+    description: The address GitHub reports for the site (configure-pages' base_url), required for a deploy and unread under check
+    required: false
+    default: ""
 
 outputs:
   publish:
@@ -91,6 +95,7 @@ runs:
       env:
         SITE_DIR: ${{ inputs.site-dir }}
         CHECK: ${{ inputs.check }}
+        SITE_URL: ${{ inputs.site-url }}
         CONFIG: ${{ inputs.config != '' && inputs.config || steps.plan.outputs.config }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}

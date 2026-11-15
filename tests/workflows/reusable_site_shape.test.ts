@@ -36,12 +36,14 @@ const SITE_URLS = loadAction("actions/site-urls/action.yml");
 const step = (id: string) => steps.find((candidate) => candidate.id === id);
 
 describe("reusable-site.yml", () => {
-  /** The site-urls action's own step run as the runner runs it, for `repository` checked out at `workspace`. */
-  function resolveUrls(repository: string, workspace: string): StepRun {
+  /** The site-urls action's own step run as the runner runs it, for `repository` checked out at `workspace`;
+   *  `siteUrl` is the address GitHub reports, "" for a caller with no Pages API to ask. */
+  function resolveUrls(repository: string, workspace: string, siteUrl = ""): StepRun {
     return runBashStep(stepNamed(SITE_URLS, "Resolve the site URLs"), {
       fills: {
         "${{ github.action_path }}": join(REPO_ROOT, "actions/site-urls"),
         "${{ github.event.repository.default_branch }}": "main",
+        "${{ inputs.site-url }}": siteUrl,
         "${{ steps.action-bun.outputs.path }}": process.execPath,
       },
       env: {
@@ -127,6 +129,26 @@ describe("reusable-site.yml", () => {
       "base-path": "/",
       "origin": "https://vivswan.github.io",
     });
+  });
+
+  // The hook's two inputs under the address GitHub reports. configure-pages spells it without a trailing slash and
+  // members' hooks join onto `base-path` with one, so a custom domain is "/" and a project site keeps "/<repo>/"; the
+  // repository's name decides nothing once GitHub has answered.
+  test.each([
+    { siteUrl: "https://docs.example.com", basePath: "/", origin: "https://docs.example.com" },
+    {
+      siteUrl: "https://neworg.github.io/Example-Repo",
+      basePath: "/Example-Repo/",
+      origin: "https://neworg.github.io",
+    },
+  ])("the urls step, handed $siteUrl, gives the hook $origin and $basePath", (row) => {
+    const { exitCode, stderr, outputs } = resolveUrls(
+      "Vivswan/Example-Repo",
+      "/home/runner/work/Example-Repo/Example-Repo",
+      row.siteUrl,
+    );
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
+    expect(outputs).toMatchObject({ "base-path": row.basePath, "origin": row.origin });
   });
 
   // The nightly's own-site exclusion must be the regex the assembly remapped into the artifact, which only the assembly
@@ -227,10 +249,28 @@ describe("reusable-site.yml", () => {
     );
   });
 
+  // The address is asked before anything is built and handed to both readers: a reader left unwired builds by the
+  // rule, green and wrong under a custom domain, and an input the action never declares is dropped with a warning.
+  test("configure-pages runs unconditionally before the urls step, and the urls step and the assembly both take its base_url", () => {
+    const pages = step("pages");
+    const assembly = steps.find((candidate) => candidate.uses === "$/actions/pages-site");
+    const address = "${{ steps.pages.outputs.base_url }}";
+    expect(pages?.uses).toStartWith("actions/configure-pages@");
+    expect(pages?.if).toBeUndefined();
+    expect(steps.indexOf(pages as Step)).toBeLessThan(steps.indexOf(step("urls") as Step));
+    expect([step("urls")?.with?.["site-url"], assembly?.with?.["site-url"]]).toEqual([
+      address,
+      address,
+    ]);
+    for (const action of ["actions/site-urls/action.yml", "actions/pages-site/action.yml"]) {
+      expect(Object.keys(loadAction(action).inputs ?? {})).toContain("site-url");
+    }
+  });
+
   // The gate names a step id of this file and an output declared in another (actions/pages-site/action.yml). Either
-  // one misspelled reads as false, so every Pages step skips and the deploy is silently off until a repository
-  // notices its site never updates. Exact gates: a skipped or unset `publish` reads as false downstream too.
-  test("the Pages steps and the link check gate on the assembly step's declared publish output alone", () => {
+  // one misspelled reads as false, so the upload and the deploy skip and the site is silently off until a repository
+  // notices it never updates. Exact gates: a skipped or unset `publish` reads as false downstream too.
+  test("the upload, the deploy, and the link check gate on the assembly step's declared publish output alone", () => {
     const assembly = steps.find((candidate) => candidate.uses === "$/actions/pages-site");
     const declared = Object.keys(loadAction("actions/pages-site/action.yml").outputs ?? {});
     expect(declared).toEqual(expect.arrayContaining(["publish", "link-rot-label"]));
@@ -239,14 +279,11 @@ describe("reusable-site.yml", () => {
     const at = (action: string) =>
       steps.findIndex((candidate) => (candidate.uses ?? "").startsWith(`actions/${action}@`));
     expect(assembly?.id).toBeDefined();
-    expect(steps.indexOf(assembly as Step)).toBeLessThan(at("configure-pages"));
     expect({
-      configure: steps[at("configure-pages")].if,
       upload: steps[at("upload-pages-artifact")].if,
       deploy: steps[at("deploy-pages")].if,
       links: step("links")?.if,
     }).toEqual({
-      configure: gate,
       upload: gate,
       deploy: gate,
       links: `github.event_name == 'schedule' && ${gate} && ${read("link-rot-label")} != ''`,
