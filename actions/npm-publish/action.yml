@@ -3,8 +3,8 @@ description: |
   Publishes the npm package in the caller's checkout through trusted publishing, in two phases around the caller's
   build.
 
-  - plan: judges the registry's record before anything is built. On the next channel it mints a pre-release version
-    from the commit's position on main and stamps it into package.json.
+  - plan: judges the registry's record before anything is built. On the next channel it mints a pre-release of the
+    version the open release PR will cut, from the commit's position on main, and stamps it into package.json.
   - publish: judges the record again, publishes, waits for the record to show the version, and checks the channel's
     dist-tag. A release publishes with a plain `npm publish`, so npm itself refuses a version below the newest
     release, and then moves `next` to itself.
@@ -26,6 +26,10 @@ inputs:
     required: true
   tag:
     description: The release's tag, which must end with `v<version>` (phase plan, channel latest).
+    required: false
+    default: ""
+  release-branch:
+    description: The open release PR's head branch, whose package.json names the release the pre-release leads to (phase plan, channel next).
     required: false
     default: ""
   version:
@@ -73,5 +77,6 @@ runs:
         CHANNEL: ${{ inputs.channel }}
         PACKAGE_PATH: ${{ inputs.path }}
         TAG: ${{ inputs.tag }}
+        RELEASE_BRANCH: ${{ inputs.release-branch }}
         VERSION: ${{ inputs.version }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/npm-publish.ts"'

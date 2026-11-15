@@ -4,6 +4,7 @@
 //
 // Two phases around the repository's build hook:
 //   plan    -> judge the record, stamp the next version   (the hook then builds what carries that version)
+//              next's version is a pre-release of the release the open release PR will cut
 //   publish -> judge the record again, publish, check the dist-tags
 
 import { readFileSync } from "node:fs";
@@ -26,6 +27,7 @@ const NPM_CLI = join(import.meta.dir, "node_modules", "npm", "bin", "npm-cli.js"
 const REGISTRY = "https://registry.npmjs.org";
 const DEFAULT_TAG = "latest";
 const PLAIN_RELEASE = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+const MAIN_COUNT = /^\d+\.\d+\.\d+-main\.(\d+)\.\d{8}\.g[0-9a-f]{7}$/;
 const GIT_BOUND_MS = 60_000;
 const NPM_BOUND_MS = 60_000;
 const PUBLISH_BOUND_MS = 600_000;
@@ -103,17 +105,10 @@ export interface Tools {
   log: Log;
 }
 
-/** What the plan phase is asked. */
-export interface PlanRequest {
-  /** The dist-tag to publish under. */
-  channel: Channel;
-
-  /** The release's tag, read on the latest channel alone. */
-  tag: string;
-
-  /** The package's directory, inside a full checkout of the commit being published. */
-  directory: string;
-}
+/** What the plan phase is asked: the package's directory, inside a full checkout of the commit being published, and what names the version. */
+export type PlanRequest =
+  | { channel: "next"; releaseBranch: string; directory: string }
+  | { channel: "latest"; tag: string; directory: string };
 
 /** The plan phase's result, the action's outputs there. */
 export interface Plan {
@@ -179,18 +174,41 @@ export function parsePackage(text: string): Package {
   return { name: parsed.data.name, version: parsed.data.version };
 }
 
-/**
- * The pre-release version a main commit publishes under `next`: above the release on disk, below the next release
- * whatever its bump, and rising along main by the commit count.
- *
- * @param base - the version on disk, a plain release X.Y.Z
- */
-export function nextVersion(base: string, position: MainPosition): string {
-  const [major, minor, patch] = base.split(".");
+/** The pre-release identifiers of a main commit's version, the same whatever release it leads to. */
+function commitIdentifiers(position: MainPosition): string {
   // The `g` keeps an all-digit short sha an identifier: npm reads 0123456 as the number 123456.
-  const source = `g${position.sha.slice(0, 7)}`;
+  return `main.${position.count}.${position.date}.g${position.sha.slice(0, 7)}`;
+}
 
-  return `${major}.${minor}.${Number(patch) + 1}-main.${position.count}.${position.date}.${source}`;
+/**
+ * The pre-release version a main commit publishes under `next`: a pre-release of the release it leads to, so below
+ * that release and above every earlier one, rising along main by the commit count.
+ *
+ * @param upcoming - the version the open release PR will cut, a plain release X.Y.Z
+ */
+export function nextVersion(upcoming: string, position: MainPosition): string {
+  return `${upcoming}-${commitIdentifiers(position)}`;
+}
+
+/** The version this commit already holds on the record, whatever release it was minted for; undefined when it holds none. */
+function publishedFor(position: MainPosition, record: RegistryRecord): string | undefined {
+  const identifiers = `-${commitIdentifiers(position)}`;
+
+  return Object.keys(record.versions).find((known) => known.endsWith(identifiers));
+}
+
+/** The place on main a minted version carries, its commit count; undefined for a version of any other scheme. */
+function mainCount(version: string): number | undefined {
+  const count = MAIN_COUNT.exec(version)?.[1];
+
+  return count === undefined ? undefined : Number(count);
+}
+
+/** The newest plain release on the record; undefined when it holds none. */
+function newestRelease(record: RegistryRecord): string | undefined {
+  const releases = Object.keys(record.versions).filter((known) => PLAIN_RELEASE.test(known));
+
+  return releases.sort(Bun.semver.order).at(-1);
 }
 
 /** Why `channel`'s dist-tag ended behind `version` on a record that shows the version, or null when it did not. */
@@ -215,8 +233,7 @@ export function verdictOf(channel: Channel, version: string, record: RegistryRec
     return { action: "skip", reason: `${version} is already on the registry (a rerun)` };
   }
 
-  const releases = Object.keys(record.versions).filter((known) => PLAIN_RELEASE.test(known));
-  const newest = releases.sort(Bun.semver.order).at(-1);
+  const newest = newestRelease(record);
   if (newest !== undefined && Bun.semver.order(version, newest) <= 0) {
     return {
       action: "fail",
@@ -225,10 +242,21 @@ export function verdictOf(channel: Channel, version: string, record: RegistryRec
   }
 
   const next = record["dist-tags"].next;
-  if (channel === "next" && next !== undefined && Bun.semver.order(next, version) >= 0) {
+  if (channel !== "next" || next === undefined) return { action: "publish" };
+
+  if (Bun.semver.order(next, version) >= 0) {
     return {
       action: "skip",
       reason: `next names ${next}, which is not below this commit's ${version}: next never moves back`,
+    };
+  }
+
+  // A release PR that moved up since lifts an old commit's version over a later commit's, so the place on main is compared too.
+  const [held, own] = [mainCount(next), mainCount(version)];
+  if (held !== undefined && own !== undefined && held >= own) {
+    return {
+      action: "skip",
+      reason: `next names ${next}, the build of a commit not before this one on main (${version}): next never moves back`,
     };
   }
 
@@ -278,6 +306,39 @@ function mainPosition(run: Runner, cwd: string): MainPosition {
   const date = new Date(committed * 1000).toISOString().slice(0, 10).replaceAll("-", "");
 
   return { count, date, sha: git(run, cwd, ["rev-parse", "HEAD"]) };
+}
+
+/** The version the open release PR will cut, read from the package.json release-please wrote on the PR's branch. */
+function upcomingRelease(run: Runner, cwd: string, pkg: Package, branch: string): string {
+  if (branch === "") {
+    throw new Error(
+      "the next channel needs the release PR's branch (release-branch): this repository's ci.yml does not pass it yet, so merge its sync PR",
+    );
+  }
+
+  // The job's checkout fetched every branch, after the release leg refreshed this one.
+  const shown = run(["git", "show", `refs/remotes/origin/${branch}:./package.json`], {
+    cwd,
+    timeoutMs: GIT_BOUND_MS,
+  });
+  if (!succeeded(shown.exit)) {
+    throw new Error(
+      `the release PR's branch ${branch} shows no package.json here, so this commit has no release to lead to (a merged release PR's branch is deleted): ${failureDetail(shown)}`,
+    );
+  }
+
+  const { version } = parsePackage(shown.stdout);
+  if (!PLAIN_RELEASE.test(version)) {
+    throw new Error(`the release PR will cut ${version}, which is not a plain release X.Y.Z`);
+  }
+
+  if (Bun.semver.order(version, pkg.version) <= 0) {
+    throw new Error(
+      `the release PR will cut ${version}, not above the ${pkg.version} in main's package.json: lower main's version (never below the registry's newest release) or raise the PR's (release-please's initial-version), or have release-please bump this file`,
+    );
+  }
+
+  return version;
 }
 
 function releasedVersion(version: string, tag: string): string {
@@ -366,11 +427,43 @@ function requireDefaultConfig(pkg: Package, cwd: string, tools: Tools): void {
   }
 }
 
+/** The version a plan judges, with the record it is judged against. */
+async function judgedVersion(
+  pkg: Package,
+  request: PlanRequest,
+  tools: Tools,
+): Promise<{ version: string; record: RegistryRecord }> {
+  if (request.channel === "latest") {
+    const version = releasedVersion(pkg.version, request.tag);
+
+    return { version, record: await tools.readRecord(pkg.name) };
+  }
+
+  const position = mainPosition(tools.run, request.directory);
+  const record = await tools.readRecord(pkg.name);
+  // A rerun judges the version its commit published: by then the release PR may name another release, or be merged and its branch gone.
+  const published = publishedFor(position, record);
+  if (published !== undefined) return { version: published, record };
+
+  // The release PR's branch names the release after the registry's newest, whichever commit reads it.
+  const newest = newestRelease(record);
+  if (newest !== undefined && Bun.semver.order(pkg.version, newest) < 0) {
+    throw new Error(
+      `this commit's package.json is at ${pkg.version}, below the released ${newest}: a commit from before a release publishes nothing to next (a rerun of an old run ends here), and on main's newest commit ${BEHIND_RELEASE.next}`,
+    );
+  }
+
+  const upcoming = upcomingRelease(tools.run, request.directory, pkg, request.releaseBranch);
+
+  return { version: nextVersion(upcoming, position), record };
+}
+
 /**
  * Judges the package against the registry before anything is built, and on next stamps the version it will publish.
  *
  * @throws {Error} the version on disk is not a plain release, npm is configured with a tag or another registry, the
- *   release tag names another version, the checkout is shallow, or the verdict is a refusal
+ *   commit predates the registry's newest release, the release PR's branch does not name a later plain release, the release tag names another version, the checkout is
+ *   shallow, or the verdict is a refusal
  */
 export async function planPublish(pkg: Package, request: PlanRequest, tools: Tools): Promise<Plan> {
   const { channel, directory } = request;
@@ -380,11 +473,8 @@ export async function planPublish(pkg: Package, request: PlanRequest, tools: Too
 
   requireDefaultConfig(pkg, directory, tools);
 
-  const version =
-    channel === "next"
-      ? nextVersion(pkg.version, mainPosition(tools.run, directory))
-      : releasedVersion(pkg.version, request.tag);
-  const verdict = verdictOf(channel, version, await tools.readRecord(pkg.name));
+  const { version, record } = await judgedVersion(pkg, request, tools);
+  const verdict = verdictOf(channel, version, record);
 
   if (verdict.action === "fail") throw new Error(verdict.reason);
 
@@ -582,7 +672,11 @@ async function main(): Promise<void> {
   };
 
   if (phase === "plan") {
-    const plan = await planPublish(pkg, { channel, tag: env("TAG"), directory }, tools);
+    const request: PlanRequest =
+      channel === "next"
+        ? { channel, releaseBranch: env("RELEASE_BRANCH"), directory }
+        : { channel, tag: env("TAG"), directory };
+    const plan = await planPublish(pkg, request, tools);
     core.setOutput("version", plan.version);
     core.setOutput("publish", String(plan.publish));
     return;
@@ -590,8 +684,8 @@ async function main(): Promise<void> {
 
   if (phase !== "publish") throw new Error(`phase must be plan or publish; got '${phase}'`);
 
-  const request = { channel, version: requireEnv("VERSION"), directory };
-  const outcome = await publishPackage(pkg, request, tools);
+  const built = { channel, version: requireEnv("VERSION"), directory };
+  const outcome = await publishPackage(pkg, built, tools);
   core.setOutput("version", outcome.version);
   core.setOutput("published", String(outcome.published));
 }

@@ -26,6 +26,11 @@ on:
         required: false
         type: string
         default: ""
+      release-branch:
+        description: The open release PR's head branch, read on the next channel
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -45,7 +50,7 @@ jobs:
       group: npm-publish
       cancel-in-progress: false
     steps:
-      # The next version counts main's commits, which needs fetch-depth 0.
+      # The next version counts main's commits and reads the release PR's branch: fetch-depth 0 fetches all history and every branch.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -77,6 +82,7 @@ jobs:
           channel: ${{ inputs.channel }}
           path: ${{ steps.registration.outputs.npm-path }}
           tag: ${{ inputs.tag }}
+          release-branch: ${{ inputs.release-branch }}
 
       # The seeded hook fails, so a repository that has not filled it in never publishes an unbuilt package.
       - name: Build the package
