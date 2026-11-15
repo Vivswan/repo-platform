@@ -408,12 +408,19 @@ describe("planAutofix", () => {
     expect(parseConfig(outputsOf(plan)["autofix-config"])).toEqual(plan.autofix);
   });
 
+  // The managed workflow reaches a pull request's branch before the default branch selects the module, so a
+  // refusal there would turn every push to the adopting pull request red.
+  test("a registration that does not select the module plans null, which the autofix action reads as nothing to fix", () => {
+    const plan = planAutofix(input("modules: [bun]"));
+    expect(plan.autofix).toBeNull();
+    expect(parseConfig(outputsOf(plan)["autofix-config"])).toBeNull();
+  });
+
   // A selected module with no block would plan nothing to judge with.
-  test.each([
-    ["modules: [bun]", "the autofix module is not selected"],
-    ["modules: [bun, autofix]", "the autofix module needs an autofix block"],
-  ])("%p is refused: %s", (text, message) => {
-    expect(() => planAutofix(input(text))).toThrow(message);
+  test("the module selected with no autofix block is refused", () => {
+    expect(() => planAutofix(input("modules: [bun, autofix]"))).toThrow(
+      "the autofix module needs an autofix block",
+    );
   });
 
   // The matcher reads a leading `!` as "every path but these", so one such entry in a list of allowed paths would

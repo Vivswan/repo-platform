@@ -64,7 +64,8 @@ outputs:
   autofix-config:
     description: >-
       The registration's autofix block as compact JSON {"label": {"paths", "delete"}, "push": {"on", "paths", "delete"}},
-      the autofix action's config input, with push null when the registration declares none (mode autofix).
+      the autofix action's config input, with push null when the registration declares none, or `null` when the
+      registration does not select the module (mode autofix).
     value: ${{ steps.plan.outputs.autofix-config }}
 
 runs:

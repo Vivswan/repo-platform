@@ -193,10 +193,12 @@ const DIFF = `.typography-allow: differs from what ${SHORT} writes\n--- .typogra
 const REMEDY =
   "Each path named differs from what repo-platform writes at the commit this repository was synced with " +
   "(the + lines are the sync's). Restore it from git history, or run the sync: on a pull request, the " +
-  "`repo-platform:sync` label syncs its branch and brings a registration change's files with it.";
+  "`repo-platform:sync` label syncs its branch and brings a registration change's files with it, unless the sync " +
+  "changes a workflow file: that one is the owner's branch dispatch.";
 const checkSection = (body: string, remedy = `\n\n${REMEDY}`) =>
   `#### repo-platform at ${SHORT}\n\n\`\`\`diff\n${body}\n\`\`\`${remedy}`;
 const REFUSED = "1 manifest record is not a shape the writer records";
+const UNKNOWN_KEY = '.repo-platform.yml: (top level): Unrecognized key: "autofix"';
 const HYGIENE = "#### Errors (1)\n\n- docs/notes.md: carries conflict-marker lines";
 
 describe("the recorded commit's check and the hygiene checks reach the report as one verdict", () => {
@@ -487,6 +489,28 @@ describe("freshness against the stable tag informs and never fails", () => {
     });
     expect([outcome.verdict?.kind, outcome.runExit]).toEqual([kind, kind === "clean" ? 0 : 1]);
     expect(outcome.summary.startsWith(line)).toBe(true);
+  });
+
+  // Without this the refusal of a key the recorded build predates reads as a mistake in the registration.
+  test("a refusal while stable is ahead names the older build as the likely cause", () => {
+    let short = "";
+    const outcome = play({
+      env: { CHECK_EXIT: "2", CHECK_STDOUT: UNKNOWN_KEY },
+      platform: (dir) => {
+        fixtureGit(dir, ["init", "-q", "-b", "main"]);
+        const commit = commitAll(dir, "recorded");
+        advance(dir, "one");
+        fixtureGit(dir, ["tag", "stable"]);
+        short = commit.slice(0, 12);
+        return commit;
+      },
+    });
+    // The count and the build come from git ancestry; the fenced refusal stays as the writer printed it.
+    const findings = outcome.verdict?.kind === "findings" ? outcome.verdict.findings : "";
+    expect(findings).toStartWith(
+      `#### repo-platform at ${short}\n\n\`\`\`diff\n${UNKNOWN_KEY}\n\`\`\`\n\n`,
+    );
+    expect(findings).toContain(`manifest records build ${short}, and stable is 1 commit past it.`);
   });
 });
 

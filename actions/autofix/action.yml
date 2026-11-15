@@ -3,8 +3,9 @@ description: |
   Builds a pull request's fix in a job with no write token and pushes it from a job that runs no pull request code, in
   phases around the caller's steps. docs/modules/autofix.md has the rules.
 
-  - plan: whether the event starts a fix. The fix-lint label always does; a push does when the registration declares
-    `autofix.push` and a changed file matches its `on` list.
+  - plan: whether the event starts a fix. Nothing does where the default branch does not select the module (a `null`
+    config). Else the fix-lint label always does; a push does when the registration declares `autofix.push` and a
+    changed file matches its `on` list.
   - stage: after the repository's hook ran, stages what the event's lists allow and writes the patch and a report into
     `directory`, for the caller to upload.
   - read: hands the staged report's subject to the caller as `subject`, for the validate-commit-names action to judge.

@@ -218,6 +218,12 @@ describe("the called fleet-autofix.yml", () => {
   }>([
     { reason: "a planned fix", on: PUSH, run: "true", jobs: ["plan", "stage", "push"] },
     { reason: "a plan that stands down", on: PUSH, run: "false", jobs: ["plan"] },
+    {
+      reason: "the label where the module is not selected, which reaches the label's removal alone",
+      on: LABEL,
+      run: "false",
+      jobs: ["plan", "push"],
+    },
     { reason: "a plan that set no output", on: LABEL, run: null, jobs: ["plan"] },
     { reason: "a plan whose output is empty", on: LABEL, run: "", jobs: ["plan"] },
     {
