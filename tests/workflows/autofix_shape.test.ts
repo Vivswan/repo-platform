@@ -365,14 +365,15 @@ describe("the called fleet-autofix.yml", () => {
 
   // The comment is posted with the write token, and its message is not quoted by anything: a message that read the
   // pull request's title or branch name would post the pull request's own Markdown. The one value it may read is
-  // the notice the push step worded, and the line that stands in for a missing one is fixed text.
-  test("the notice step's message reads the push step's notice alone, and its stand-in is fixed text", () => {
+  // the notice worded by the step that runs the push phase, whatever that step's id, and its stand-in is fixed text.
+  test("the notice step's message reads the push phase's notice alone, and its stand-in is fixed text", () => {
+    const push = (called.jobs.push.steps ?? []).find((step) => step.with?.phase === "push");
     const expressions = expressionsIn(stickyStep(called.jobs.push)?.with?.message ?? "");
     expect({
       reads: expressions.flatMap((source) => contextReads(parseExpression(source).tree)),
       standIn: { said: NO_NOTICE_LINE !== "", expression: NO_NOTICE_LINE.includes("${{") },
     }).toEqual({
-      reads: [["steps", "push", "outputs", "notice"]],
+      reads: [["steps", push?.id ?? "no step runs the push phase", "outputs", "notice"]],
       standIn: { said: true, expression: false },
     });
   });

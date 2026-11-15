@@ -88,7 +88,7 @@ const eventSchema = z.object({
   }),
 });
 
-const reportedPath = z.string().max(REPORT_CAPS.path);
+const reportedPath = z.string().min(1).max(REPORT_CAPS.path);
 
 const droppedSchema = z.strictObject({ path: reportedPath, without: reportedPath.nullable() });
 
@@ -266,13 +266,14 @@ export function startsFix(
 /**
  * The hook's subject as the commit-names gate is asked about it, or empty for none: one line of printable ASCII
  * that no log reads as a workflow command. The gate prints what it judges, and it reads a second line as a body
- * and passes it, which would ride into the commit.
+ * and passes it, which would ride into the commit. Spaces around it go first: a log reads a command behind them.
  */
 export function candidateSubject(reported: string): string {
-  const oneLine = reported.length <= SUBJECT_MAX && ONE_PRINTABLE_LINE.test(reported);
-  const command = reported.startsWith("::") || reported.includes("##[");
+  const subject = reported.trim();
+  const oneLine = subject.length <= SUBJECT_MAX && ONE_PRINTABLE_LINE.test(subject);
+  const command = subject.startsWith("::") || subject.includes("##[");
 
-  return oneLine && !command ? reported : "";
+  return oneLine && !command ? subject : "";
 }
 
 /** The commit subject: the candidate when the commit-names gate accepted it, else the default. */

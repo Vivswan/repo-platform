@@ -197,6 +197,8 @@ test("a subject with a second line passes the gate's commitlint, and is never pu
       "style: \u001b[31mred",
       "::error::forged",
       "style: format ##[error]forged",
+      " ::add-mask::forged",
+      " style: format ",
       `style: ${"x".repeat(100)}`,
       "",
     ].map(candidateSubject),
@@ -205,12 +207,17 @@ test("a subject with a second line passes the gate's commitlint, and is never pu
     noCandidate: subjectOf("", true),
   }).toEqual({
     gate: 0,
-    candidates: ["", "style: format", "", "", "", "", "", ""],
+    candidates: ["", "style: format", "", "", "", "", "", "style: format", "", ""],
     refusedByTheGate: "style: apply automated fixes",
     acceptedByTheGate: "style: format",
     noCandidate: "style: apply automated fixes",
   });
 });
+
+/** A lane's marker as the pinned sticky comment action builds it: its header follows `Comment` with no space. */
+function stickyMarker(lane: FixEvent, opener = "<!--"): string {
+  return `${opener} Sticky Pull Request Commentrepo-platform/autofix-${lane} -->`;
+}
 
 describe("the notice", () => {
   // A file name and the hook's findings are text the pull request chose. Unquoted, a name could open a link, a heading,
@@ -226,7 +233,8 @@ describe("the notice", () => {
       },
       {
         findings: `\`\`\`\n# not a heading\n[link](https://example.com)\n\`\`\`\`\n${"x".repeat(3000)}`,
-        dropped: [],
+        // No path at all: an empty span would be an opener that the next span's delimiter closes.
+        dropped: [{ path: "", reason: displacedBy("`[click](https://example.com) @octocat") }],
       },
     );
     const html = markdown.render(notice);
@@ -243,7 +251,7 @@ describe("the notice", () => {
   test.each<FixEvent>(["label", "push"])(
     "no text the pull request chose leaves the %s lane's sticky marker in a notice",
     (lane) => {
-      const marker = `<!-- Sticky Pull Request Comment repo-platform/autofix-${lane} -->`;
+      const marker = stickyMarker(lane);
       const notices = [
         noticeOf(
           "label",
@@ -262,9 +270,7 @@ describe("the notice", () => {
       expect({
         markers: notices.filter((notice) => notice.includes(marker)).length,
         comments: notices.filter((notice) => notice.includes("<!--")).length,
-        shown: notices[0].includes(
-          `left <\\x21-- Sticky Pull Request Comment repo-platform/autofix-${lane} -->`,
-        ),
+        shown: notices[0].includes(`left ${stickyMarker(lane, "<\\x21--")}`),
       }).toEqual({ markers: 0, comments: 0, shown: true });
     },
   );
@@ -1071,6 +1077,27 @@ describe("stage and push", () => {
       spoil: (out) => writeFileSync(join(out, "report.json"), '{"subject":"x","extra":true}'),
       error: "the staged report.json is not a report",
     },
+    ...[
+      { path: "", without: null },
+      { path: "src/a.ts", without: "" },
+    ].map((dropped) => ({
+      reason: `a report naming no text as a path: ${JSON.stringify(dropped)}`,
+      spoil: (out: string) =>
+        writeFileSync(
+          join(out, "report.json"),
+          JSON.stringify({ subject: "", findings: "", dropped: [dropped], refused: [] }),
+        ),
+      error: "the staged report.json is not a report",
+    })),
+    {
+      reason: "a report refusing no text as a path",
+      spoil: (out) =>
+        writeFileSync(
+          join(out, "report.json"),
+          JSON.stringify({ subject: "", findings: "", dropped: [], refused: [""] }),
+        ),
+      error: "the staged report.json is not a report",
+    },
     {
       reason: "a patch that is a symbolic link",
       spoil: (out) => {
@@ -1079,12 +1106,13 @@ describe("stage and push", () => {
       },
       error: "the staged fix.patch is missing or is not a regular file",
     },
-  ])("a staged directory is refused: $reason", ({ spoil, error }) => {
-    const { out } = staged("label", `spoiled-${error.length}`, FORMAT, (directory) =>
+  ])("a staged directory is refused: $reason", ({ reason, spoil, error }) => {
+    const name = `spoiled-${reason.replaceAll(/\W+/g, "-")}`;
+    const { out } = staged("label", name, FORMAT, (directory) =>
       write(directory, { "src/a.ts": "export const a = 1;\n" }),
     );
     spoil(out);
-    expect(() => pushed("label", `spoiled-${error.length}`, FORMAT, out)).toThrow(error);
+    expect(() => pushed("label", name, FORMAT, out)).toThrow(error);
   });
 });
 
