@@ -47,6 +47,11 @@ export function rootOf(argv: string[]): string {
   return resolve(argv[0] ?? ".");
 }
 
+/** `text` as the content of one markdown table cell: a `|` ends the cell even inside a code span, so each is escaped. */
+export function tableCell(text: string): string {
+  return text.replaceAll("|", "\\|");
+}
+
 export async function runCheck<Verdict>(
   program: CheckProgram<Verdict>,
   core: Core,
