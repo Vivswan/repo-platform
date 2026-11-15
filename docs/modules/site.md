@@ -33,21 +33,45 @@ The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release
 
 - **Without the release-please module** the release leg skips, and the deploy still runs after it: GitHub resolves that skip only once the leg's own need, the repo-owned post-green hook, has finished.
 
-The called workflow is one job: the checkout, the shared [site-urls action](../../actions/site-urls/action.yml), the [plan](../../actions/plan/action.yml) of the registration's site keys, the repository's hook when it exists, the [pages-site](../../actions/pages-site/action.yml) assembly (the layout below, the internal link check, the link-rot ignore list, `versions.json`), the Pages deploy when something was built, and the link-rot check on the schedule alone ([below](#link-rot)).
+The called workflow is one job: the checkout, GitHub's configure-pages (where the site is served), the shared [site-urls action](../../actions/site-urls/action.yml), the [plan](../../actions/plan/action.yml) of the registration's site keys, the repository's hook when it exists, the [pages-site](../../actions/pages-site/action.yml) assembly (the layout below, the internal link check, the link-rot ignore list, `versions.json`), the Pages deploy when something was built, and the link-rot check on the schedule alone ([below](#link-rot)).
 
-A repository with nothing to publish ends green with a notice (`nothing to publish`) and no deploy ([layout](#layout)).
+A repository with nothing to publish ends green with a notice (`nothing to publish`) and no deploy ([layout](#layout)), once its Pages site exists ([below](#pages-enablement)).
 
 ## Pages enablement
 
 **Nothing to do:** the module's settings layer creates the Pages site on the next fleet settings apply ([settings.md](../settings.md)), which runs daily.
 
-- **A deploy before that apply** fails red on configure-pages's own error (`Get Pages site failed`): the job token can read the site but never create one. The red run needs no action and no rerun.
+- **A run before that apply** fails red on configure-pages's own error (`Get Pages site failed`), before anything is built: the job asks GitHub where the site is served first, and its token can read the site but never create one. The red run needs no action and no rerun.
 - **The nightly rebuild** deploys once the site exists; the next main push does the same. A private repository has no nightly, so there it is the next main push or a dispatch.
 
 **The `github-pages` environment is the module's,** declared by its settings layer ([settings.md](../settings.md)). A required-reviewers rule added by hand parks every deploy "waiting for review" with later runs queued behind it. Once the repository's rendered settings carry the declaration (the next sync), the daily apply heals it:
 
 - **an extra branch pattern** is removed on every repository;
 - **a reviewer rule** is removed on a public repository; the reviewer keys are the public-only part of the layer, since GitHub refuses them on a private repository, so a rule added by hand there stays until removed by hand.
+
+## Custom domain
+
+The site is built for the address GitHub reports, so a custom domain needs one declaration and no change to the hook:
+
+```yaml
+# .github/settings.local.yml
+pages:
+  cname: docs.example.com
+```
+
+| Address                            | `origin`                    | `base-path` |
+| ---------------------------------- | --------------------------- | ----------- |
+| no custom domain                   | `https://<owner>.github.io` | `/<repo>/`  |
+| the `<owner>.github.io` repository | `https://<owner>.github.io` | `/`         |
+| `cname: docs.example.com`          | `https://docs.example.com`  | `/`         |
+
+- **What the platform does:** the next sync renders the key into `.github/settings.yml`, the daily settings apply sets the domain on the Pages site ([settings.md](../settings.md)), and the next deploy after it (a main push, or the nightly) builds every asset URL, version link, and own-link rule for the domain.
+- **What stays manual:** the DNS record at the domain's registrar, the domain's verification on the account (GitHub recommends it), and the wait for GitHub's certificate. GitHub's [custom domain guide](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site) owns those steps.
+- **HTTPS:** add `https_enforced: true` beside `cname` once the certificate is issued. GitHub can refuse the key before that, and until it is set the reported origin can be `http://`.
+- **Between the apply and the next deploy** the domain serves the previous build. A project site's was laid out for `/<repo>/`, so its assets 404 until then: rerun the site leg, or wait for the nightly.
+- **An owner rename or a move to an organization** needs nothing: the origin follows the address GitHub reports.
+
+The [docs PR check](#the-docs-pr-check) asks no API. It builds at `/` and renders no version menu, so the address reaches none of its output.
 
 ## The hook: `.github/actions/site-build/action.yml`
 
@@ -57,8 +81,8 @@ It is a composite action, so the fleet can run it from the caller's checkout ins
 
 | Contract                  | Value                                                                                                                                                                                                                             |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| input `base-path`         | the URL path the site is served under: `/<repo>/`, or `/` for the owner's `<owner>.github.io` repository, which GitHub serves at the origin's root                                                                                |
-| input `origin`            | `https://<owner>.github.io`                                                                                                                                                                                                       |
+| input `base-path`         | the URL path the site is served under, with a trailing slash: `/<repo>/`, or `/` where GitHub serves the site at an origin's root (the owner's `<owner>.github.io` repository, a [custom domain](#custom-domain))                 |
+| input `origin`            | `https://<owner>.github.io`, or the custom domain's origin                                                                                                                                                                        |
 | output `dist`             | the built site's directory, relative to the repository root, with an `index.html`; empty (the seeded default) means no repository website                                                                                         |
 | runs as                   | a step of the deploy job, on the checked-out judged commit, under that job's token (contents read, pages and id-token write, issues write), the same exposure the release hooks have, so it runs only code from the judged commit |
 | declares no `dist` output | only the docs directory publishes, when there is one, with the assembly's notice that no dist directory was named                                                                                                                 |
