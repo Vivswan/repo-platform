@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import {
   DELIVERED_SURFACE,
@@ -20,8 +20,13 @@ import {
 } from "../../.github/scripts/post-green/fleet_sync_marker.ts";
 import { BOT_LOGIN } from "../../.github/scripts/shared/sticky_comment.ts";
 import { loadLayer } from "../../.github/scripts/sync/writer/settings_layers.ts";
-import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import {
+  type FakeGithubServer,
+  type FakeReply,
+  type FakeRoutes,
+  spawnFakeGithub,
+} from "../shared/fake_github";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -248,20 +253,17 @@ describe("plan", () => {
 
 describe("main", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_default.ts");
-  const root = temp.dir("fleet-sync-default-");
-  // The stub answers each endpoint from the scenario's directory; an endpoint with no file answers `{}` (a write's reply).
-  // DENY_WRITES is a fork's token: reads pass, every -X call is refused.
-  const gh = argvStub(root, "gh", [
-    'if [ -n "$DENY_WRITES" ] && [ "$3" = "-X" ]; then echo "HTTP 403: Resource not accessible by integration" >&2; exit 1; fi',
-    'key=$(printf "%s" "$2" | tr "/" "_")',
-    'if [ -f "$ANSWERS/$key.json" ]; then cat "$ANSWERS/$key.json"; else printf "{}"; fi',
-  ]);
+  let api: FakeGithubServer;
+  beforeAll(async () => {
+    api = await spawnFakeGithub({}, join(temp.dir("fleet-sync-default-"), "api.log"));
+  });
+  afterAll(() => api.stop());
 
   type File = { filename: string; previous_filename?: string };
   type Comment = { id: number; body: string; user: { login: string } | null };
   const own = (id: number, body: string): Comment => ({ id, body, user: { login: BOT_LOGIN } });
-  /** What the gh stub answers about the pull request; changedFiles is its own count, the listing's length unless a
-   *  scenario says otherwise. */
+  /** What GitHub answers about the pull request; changedFiles is its own count, the listing's length unless a
+   *  scenario says otherwise, and `replies` answers a route in the default's place. */
   interface Scenario {
     files: File[][];
     labels: string[];
@@ -270,7 +272,7 @@ describe("main", () => {
     base?: string;
     state?: "open" | "closed";
     changedFiles?: number;
-    stubEnv?: Record<string, string>;
+    replies?: FakeRoutes;
   }
   const file = (filename: string, previous_filename?: string): File =>
     previous_filename === undefined ? { filename } : { filename, previous_filename };
@@ -284,51 +286,60 @@ describe("main", () => {
   const PULL = "repos/o/r/pulls/7";
   const ISSUE = "repos/o/r/issues/7";
   const COMMENTS = `${ISSUE}/comments`;
-  const comment = (id: number) => `repos/o/r/issues/comments/${id}`;
-  const READS = [
-    [PULL],
-    [`${PULL}/files`, "--paginate", "--slurp"],
-    [`${ISSUE}/events`, "--paginate", "--slurp"],
-  ];
-  const COMMENTS_READ = [COMMENTS, "--paginate", "--slurp"];
-  const labelAdded = [`${ISSUE}/labels`, "-X", "POST", "-f", `labels[]=${PUBLIC}`];
-  const labelRemoved = [`${ISSUE}/labels/fleet-sync%3Apublic`, "-X", "DELETE"];
-  const posted = (body: string) => [COMMENTS, "-X", "POST", "-f", `body=${body}`];
-  const patched = (id: number, body: string) => [comment(id), "-X", "PATCH", "-f", `body=${body}`];
-  const deleted = (id: number) => [comment(id), "-X", "DELETE"];
+  const comment = (id: number | "*") => `repos/o/r/issues/comments/${id}`;
+  const PAGED = "?per_page=100";
+  const READS = [PULL, `${PULL}/files${PAGED}`, `${ISSUE}/events${PAGED}`];
+  const COMMENTS_READ = `${COMMENTS}${PAGED}`;
+  const labelAdded = { path: `POST ${ISSUE}/labels`, body: { labels: [PUBLIC] } };
+  const labelRemoved = { path: `DELETE ${ISSUE}/labels/fleet-sync%3Apublic`, body: null };
+  const posted = (body: string) => ({ path: `POST ${COMMENTS}`, body: { body } });
+  const patched = (id: number, body: string) => ({ path: `PATCH ${comment(id)}`, body: { body } });
+  const deleted = (id: number) => ({ path: `DELETE ${comment(id)}`, body: null });
   const notice = (label: string, text: string) => `::notice::${label}; ${text}\n`;
   const warning = (text: string) => `::warning::fleet-sync default skipped: ${text}\n`;
+  const OK: FakeReply = { status: 200, body: {} };
 
+  /** The run's requests in order: a read by its path and query, a write with the body it sent. */
   function run(name: string, scenario: Scenario) {
-    const answers = join(root, name);
-    mkdirSync(answers);
-    const answer = (endpoint: string, value: unknown) =>
-      writeFileSync(join(answers, `${endpoint.replaceAll("/", "_")}.json`), JSON.stringify(value));
-    answer(PULL, {
-      state: scenario.state ?? "open",
-      labels: scenario.labels.map((label) => ({ name: label })),
-      changed_files: scenario.changedFiles ?? scenario.files.flat().length,
-      base: { ref: scenario.base ?? "main", repo: { default_branch: "main" } },
+    const pages = scenario.files;
+    api.routes(name, {
+      [PULL]: [
+        {
+          status: 200,
+          body: {
+            state: scenario.state ?? "open",
+            labels: scenario.labels.map((label) => ({ name: label })),
+            changed_files: scenario.changedFiles ?? scenario.files.flat().length,
+            base: { ref: scenario.base ?? "main", repo: { default_branch: "main" } },
+          },
+        },
+      ],
+      [`${PULL}/files`]: pages.map((body, index) => ({
+        status: 200,
+        body,
+        next: index < pages.length - 1,
+      })),
+      [`${ISSUE}/events`]: [{ status: 200, body: scenario.events }],
+      [COMMENTS]: [{ status: 200, body: scenario.comments }],
+      [`POST ${ISSUE}/labels`]: [OK],
+      [`DELETE ${ISSUE}/labels/*`]: [OK],
+      [`POST ${COMMENTS}`]: [{ status: 201, body: {} }],
+      [`PATCH ${comment("*")}`]: [OK],
+      [`DELETE ${comment("*")}`]: [{ status: 204 }],
+      ...scenario.replies,
     });
-    answer(`${PULL}/files`, scenario.files);
-    answer(`${ISSUE}/events`, [scenario.events]);
-    answer(COMMENTS, [scenario.comments]);
-    const before = gh.calls().length;
     const proc = boundedSpawnSync(["bun", script], {
       env: {
         ...process.env,
-        PATH: `${gh.bin}:${process.env.PATH}`,
         GH_TOKEN: "t",
+        GITHUB_API_URL: `${api.host}/${name}`,
+        GITHUB_RETRY_BASE_MS: "0",
         GITHUB_REPOSITORY: "o/r",
         PR_NUMBER: "7",
-        ANSWERS: answers,
-        ...scenario.stubEnv,
       },
     });
-    const calls = gh
-      .calls()
-      .slice(before)
-      .map((call) => call.slice(2));
+    const writes = api.writes(name);
+    const calls = api.calls(name).map((path) => (writes[0]?.path === path ? writes.shift() : path));
     return { exitCode: proc.exitCode, stdout: proc.stdout, stderr: proc.stderr, calls };
   }
 
@@ -384,7 +395,14 @@ describe("main", () => {
       exitCode: 0,
       stdout: notice("label kept", "updated the comment"),
       stderr: "",
-      calls: [...READS, COMMENTS_READ, patched(5, note(...TWO))],
+      calls: [
+        READS[0],
+        READS[1],
+        `${PULL}/files${PAGED}&page=2`,
+        READS[2],
+        COMMENTS_READ,
+        patched(5, note(...TWO)),
+      ],
     });
   });
 
@@ -453,20 +471,50 @@ describe("main", () => {
     });
   });
 
+  // GitHub answers 404 for a label that is already off or a comment that is already gone, which is what a retried
+  // removal gets once its first reply was lost: a warning there would report a removal that landed as one skipped.
+  test("a removal answered 404 is the thing gone, the label and the note alike; any other refusal is still a warning", () => {
+    const existing = [own(5, note(...TWO))];
+    const left = { files: workflow, labels: [PUBLIC], events: botAdded, comments: existing };
+    const lostReply = [{ status: 502 }, { status: 404 }];
+    const removed = {
+      exitCode: 0,
+      stdout: notice(
+        "removed fleet-sync:public",
+        "removed the comment: no path here reaches the fleet through a sync",
+      ),
+      stderr: "",
+    };
+    expect(run("gone", { ...left, replies: { [labelRemoved.path]: lostReply } })).toEqual({
+      ...removed,
+      calls: [...READS, labelRemoved, labelRemoved, COMMENTS_READ, deleted(5)],
+    });
+    expect(run("note", { ...left, replies: { [deleted(5).path]: lostReply } })).toEqual({
+      ...removed,
+      calls: [...READS, labelRemoved, COMMENTS_READ, deleted(5), deleted(5)],
+    });
+    expect(run("held", { ...left, replies: { [labelRemoved.path]: [{ status: 403 }] } })).toEqual({
+      exitCode: 0,
+      stdout: warning(`${ISSUE}/labels/fleet-sync%253Apublic: HTTP 403`),
+      stderr: "",
+      calls: [...READS, labelRemoved],
+    });
+  });
+
   test("a failed read, a refused write, or a capped listing is a warning and exit 0, and nothing is deleted", () => {
     const existing = [own(5, note("files.yml"))];
     const fresh = { files: trigger, labels: [], events: [], comments: [] };
-    expect(run("down", { ...fresh, stubEnv: { STUB_EXIT: "1" } })).toEqual({
+    expect(run("down", { ...fresh, replies: { [PULL]: [{ status: 502 }] } })).toEqual({
       exitCode: 0,
-      stdout: warning(`${PULL}: gh api exit 1`),
+      stdout: warning(`${PULL}: HTTP 502`),
       stderr: "",
-      calls: [[PULL]],
+      calls: [PULL, PULL, PULL, PULL],
     });
-    expect(run("fork", { ...fresh, stubEnv: { DENY_WRITES: "1" } })).toEqual({
+    // A fork's token: reads pass, every write is refused, and GitHub's words for it stay out of the public warning.
+    const denied = { status: 403, body: { message: "Resource not accessible by integration" } };
+    expect(run("fork", { ...fresh, replies: { [labelAdded.path]: [denied] } })).toEqual({
       exitCode: 0,
-      stdout: warning(
-        `${ISSUE}/labels: gh api exit 1: HTTP 403: Resource not accessible by integration`,
-      ),
+      stdout: warning(`${ISSUE}/labels: HTTP 403`),
       stderr: "",
       calls: [...READS, labelAdded],
     });

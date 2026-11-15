@@ -1,10 +1,10 @@
 // The branch delivery's contract with the human reading the pull request (docs/platform/sync/operator.md, "Syncing a branch by label"),
-// driven as the workflow drives it: the script spawned over git and gh stubs, one row per outcome. What would drift
+// driven as the workflow drives it: the script spawned over a git stub and a fake GitHub API, one row per outcome. What would drift
 // silently: the label staying on after a failure, a hold or a workflow-file diff reaching the push, a queued relabel
 // losing the approval line, a refused push reported without git's own words.
 
-import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SYNC_IDENTITY } from "../../.github/scripts/shared/git_identity.ts";
 import { BOT_LOGIN } from "../../.github/scripts/shared/sticky_comment.ts";
@@ -13,6 +13,7 @@ import type { SyncReport } from "../../.github/scripts/sync/writer/report.ts";
 import { SYNC_LABEL } from "../../actions/shared/platform.ts";
 import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { type FakeGithubServer, type FakeReply, spawnFakeGithub } from "../shared/fake_github";
 import { FIXTURE_GITCONFIG, fixtureGit } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 import {
@@ -41,6 +42,9 @@ const EARLIER_COMMENT = {
   body: "<!-- repo-platform sync-branch -->\nBuild `0000000` pushed.",
   user: { login: BOT_LOGIN },
 };
+const ISSUE = `repos/${REPOSITORY}/issues/42`;
+const LABEL = `DELETE ${ISSUE}/labels/${encodeURIComponent(SYNC_LABEL)}`;
+const COMMENTS = `${ISSUE}/comments`;
 
 const GIT_LINES = [
   // With STUB_REAL_GIT set, every target call but the push runs the real git over the fixture checkout.
@@ -56,42 +60,45 @@ const GIT_LINES = [
   `  *" push "*) if [ "\${STUB_PUSH_FAIL:-}" = 1 ]; then echo "${PUSH_REFUSAL}" >&2; exit 1; fi ;;`,
   "esac",
 ];
-const GH_LINES = [
-  // The comment body travels as `-F body=@<file>`; the stub copies it out so the test reads what GitHub would show.
-  'for a in "$@"; do case "$a" in body=@*) cp "${a#body=@}" "$STUB_COMMENT_OUT" ;; esac; done',
-  'case "$*" in',
-  `  *" DELETE "*"/labels/"*) case "\${STUB_LABEL:-ok}" in 404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; fail) echo "gh: Forbidden (HTTP 403)" >&2; exit 1 ;; esac ;;`,
-  '  *"/comments --paginate --slurp") printf "%s" "${STUB_COMMENTS:-[[]]}" ;;',
-  "esac",
-];
+type Comment = { id: number; body: string; user: { login: string } };
 
-/** The run's inputs; written builds a real checkout under root/target and answers the writer's summary over it, so
- *  git then runs for real. */
+/** The run's inputs:
+ *    written   builds a real checkout under root/target and answers the writer's summary over it, so git then runs for real
+ *    label     GitHub's answer to the label removal; the label came off when absent
+ *    comments  the pull request's comments, one array per page; none when absent */
 interface Options {
   migrate?: "success" | "failure";
   writer?: "success" | "failure" | "skipped";
   hold?: boolean;
   stub?: Record<string, string>;
   written?: (root: string) => SyncReport;
+  label?: FakeReply;
+  comments?: readonly (readonly Comment[])[];
 }
 
 /** What the run left behind:
- *    commentMethod  the comment call that carried the body: POST creates on the issue, PATCH replaces the found comment by its id
+ *    commentCall    the write that carried the body: a POST creates on the issue, a PATCH replaces the found comment by its id
  *    commitSubject  the `-m` the sync commit was made with, null when no commit was made */
 interface Run {
   exitCode: number;
   stdout: string;
   stderr: string;
   target: string;
-  labelRemoved: boolean;
+  labelRemovalAsked: boolean;
   comment: string | null;
-  commentMethod: string | null;
-  commentEndpoint: string | null;
+  commentCall: string | null;
   committed: boolean;
   commitSubject: string | null;
   pushAttempted: boolean;
   pushLease: string | null;
 }
+
+let api: FakeGithubServer;
+let runs = 0;
+beforeAll(async () => {
+  api = await spawnFakeGithub({}, join(temp.dir("deliver-branch-api-"), "api.log"));
+});
+afterAll(() => api.stop());
 
 function run(options: Options = {}): Run {
   const root = temp.dir("deliver-branch-");
@@ -105,9 +112,15 @@ function run(options: Options = {}): Run {
   writeFileSync(join(runnerTemp, "summary.json"), JSON.stringify(summary));
   writeFileSync(join(runnerTemp, "sync.log"), REPORT);
   const committed = join(root, "committed");
-  const commentOut = join(root, "comment.md");
   const git = argvStub(root, "git", GIT_LINES);
-  const gh = argvStub(root, "gh", GH_LINES);
+  const name = `run-${++runs}`;
+  const pages = options.comments ?? [[]];
+  api.routes(name, {
+    [LABEL]: [options.label ?? { status: 200, body: [] }],
+    [COMMENTS]: pages.map((body, index) => ({ status: 200, body, next: index < pages.length - 1 })),
+    [`POST ${COMMENTS}`]: [{ status: 201, body: { id: 1 } }],
+    [`PATCH repos/${REPOSITORY}/issues/comments/*`]: [{ status: 200, body: { id: 1 } }],
+  });
   const result = boundedSpawnSync(["bun", SCRIPT], {
     cwd: root,
     env: {
@@ -119,17 +132,18 @@ function run(options: Options = {}): Run {
       BRANCH,
       RUN_URL,
       GH_TOKEN: "ghs_SENTINEL",
+      GITHUB_API_URL: `${api.host}/${name}`,
+      GITHUB_RETRY_BASE_MS: "0",
       MIGRATE_OUTCOME: options.migrate ?? "success",
       WRITER_OUTCOME: options.writer ?? "success",
       STUB_COMMITTED: committed,
-      STUB_COMMENT_OUT: commentOut,
       GIT_CONFIG_GLOBAL: FIXTURE_GITCONFIG,
       ...(options.written === undefined ? {} : { STUB_REAL_GIT: REAL_GIT }),
       ...(options.stub ?? {}),
     },
   });
-  const ghCalls = gh.calls();
-  const commentCall = ghCalls.find((call) => call.some((arg) => arg.startsWith("body=@")));
+  const writes = api.writes(name);
+  const commented = writes.find((write) => write.path !== LABEL);
   const gitCalls = git.calls();
   const push = gitCalls.find((call) => call.includes("push"));
   const commit = gitCalls.find((call) => call.includes("commit"));
@@ -138,14 +152,9 @@ function run(options: Options = {}): Run {
     stdout: result.stdout,
     stderr: result.stderr,
     target,
-    labelRemoved: ghCalls.some(
-      (call) =>
-        call.includes("DELETE") &&
-        call.at(-1)?.endsWith(`/labels/${encodeURIComponent(SYNC_LABEL)}`) === true,
-    ),
-    comment: existsSync(commentOut) ? readFileSync(commentOut, "utf-8") : null,
-    commentMethod: commentCall?.[commentCall.indexOf("--method") + 1] ?? null,
-    commentEndpoint: commentCall?.find((arg) => arg.startsWith("repos/")) ?? null,
+    labelRemovalAsked: writes[0]?.path === LABEL,
+    comment: (commented?.body as { body: string } | undefined)?.body ?? null,
+    commentCall: commented?.path ?? null,
     committed: existsSync(committed),
     commitSubject: commit?.[commit.indexOf("-m") + 1] ?? null,
     pushAttempted: push !== undefined,
@@ -260,21 +269,19 @@ describe("the branch delivery's outcomes", () => {
     const result = run(options);
     expect({
       exitCode: result.exitCode,
-      labelRemoved: result.labelRemoved,
+      labelRemovalAsked: result.labelRemovalAsked,
       committed: result.committed,
       pushAttempted: result.pushAttempted,
-      commentMethod: result.commentMethod,
-      commentEndpoint: result.commentEndpoint,
+      commentCall: result.commentCall,
       said: says.filter((text) => result.comment?.includes(text)),
       saidNot: saysNot.filter((text) => result.comment?.includes(text)),
       firstLine: result.comment?.split("\n")[0],
     }).toEqual({
       exitCode,
-      labelRemoved: true,
+      labelRemovalAsked: true,
       committed,
       pushAttempted,
-      commentMethod: "POST",
-      commentEndpoint: `repos/${REPOSITORY}/issues/42/comments`,
+      commentCall: `POST ${COMMENTS}`,
       said: says,
       saidNot: [],
       firstLine: "<!-- repo-platform sync-branch -->",
@@ -337,15 +344,34 @@ describe("the branch delivery's outcomes", () => {
     });
   });
 
-  test("a label already off (a relabel queued behind a run that took it) is not a failure; any other refusal is, before any comment", () => {
-    const gone = run({ stub: { STUB_CHANGED: "", STUB_AUTHOR: "Vivswan", STUB_LABEL: "404" } });
-    const refused = run({ stub: { STUB_CHANGED: "", STUB_LABEL: "fail" } });
-    expect({
-      gone: { exitCode: gone.exitCode, commented: gone.comment !== null },
-      refused: { exitCode: refused.exitCode, commented: refused.comment !== null },
-    }).toEqual({
-      gone: { exitCode: 0, commented: true },
-      refused: { exitCode: 1, commented: false },
+  // The label's removal is read by its status. Read off gh's stderr for "HTTP 404", an outage whose message quoted a
+  // 404 passed for "already off", and the run went on to push with the label never taken off.
+  test.each<{ reason: string; label: FakeReply; exitCode: number; commented: boolean }>([
+    {
+      reason:
+        "a 404 is the label already off (a relabel queued behind a run that took it): the run goes on",
+      label: { status: 404 },
+      exitCode: 0,
+      commented: true,
+    },
+    {
+      reason: "a 403 is a refusal: red before any comment",
+      label: { status: 403 },
+      exitCode: 1,
+      commented: false,
+    },
+    {
+      reason:
+        "a 502 whose message mentions HTTP 404 is an outage, not a missing label: red before any comment",
+      label: { status: 502, body: { message: "upstream answered HTTP 404 for the backend" } },
+      exitCode: 1,
+      commented: false,
+    },
+  ])("the label removal: $reason", ({ label, exitCode, commented }) => {
+    const result = run({ label, stub: { STUB_CHANGED: "", STUB_AUTHOR: "Vivswan" } });
+    expect({ exitCode: result.exitCode, commented: result.comment !== null }).toEqual({
+      exitCode,
+      commented,
     });
   });
 
@@ -354,17 +380,15 @@ describe("the branch delivery's outcomes", () => {
     {
       name: "an earlier comment of this bot is replaced in place, not joined",
       comments: [[{ id: 3, body: "unrelated", user: { login: BOT_LOGIN } }], [EARLIER_COMMENT]],
-      expected: { method: "PATCH", endpoint: `repos/${REPOSITORY}/issues/comments/777` },
+      expected: `PATCH repos/${REPOSITORY}/issues/comments/777`,
     },
     {
       name: "a comment opening with the marker under another login is left alone and the bot posts its own",
       comments: [[{ ...EARLIER_COMMENT, user: { login: "vivswan" } }]],
-      expected: { method: "POST", endpoint: `repos/${REPOSITORY}/issues/42/comments` },
+      expected: `POST ${COMMENTS}`,
     },
   ])("$name", ({ comments, expected }) => {
-    const result = run({
-      stub: { STUB_CHANGED: "", STUB_AUTHOR: "Vivswan", STUB_COMMENTS: JSON.stringify(comments) },
-    });
-    expect({ method: result.commentMethod, endpoint: result.commentEndpoint }).toEqual(expected);
+    const result = run({ comments, stub: { STUB_CHANGED: "", STUB_AUTHOR: "Vivswan" } });
+    expect(result.commentCall).toBe(expected);
   });
 });

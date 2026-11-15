@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
-import { GitHubClient, type Read } from "../../.github/scripts/shared/github.ts";
+import {
+  GitHubClient,
+  type Read,
+  type Sent,
+  type WriteMethod,
+} from "../../.github/scripts/shared/github.ts";
 import { clientOver, type FakeReply, type FakeRoutes, fakeGithub } from "./fake_github";
 
 const REGISTRATION = "repos/example-owner/hidden-server/contents/.repo-platform.yml";
@@ -143,6 +148,164 @@ describe("GitHubClient", () => {
         const outcome = await client.get(REGISTRATION, z.object({ sha: z.string() }));
 
         expect(outcome.kind).toBe("failed");
+        expect(JSON.stringify(outcome)).not.toMatch(/hidden|example-owner|github\.test/i);
+        expect(logged.flatMap((spy) => spy.mock.calls)).toEqual([]);
+      },
+    );
+  });
+
+  describe("a write", () => {
+    const ISSUES = "repos/example-owner/hidden-server/issues";
+    const CREATED: FakeReply = { status: 201, body: { number: 7 } };
+    const LIFTS_AT_ONCE: FakeReply = {
+      status: 403,
+      headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "0" },
+    };
+    const issue = z.object({ number: z.number() });
+
+    // The retry rule is the plugin's per-request `retries` option and GitHub's statuses, not this repository's: a bump
+    // that starts retrying a POST files two failure issues on one lost reply, and one that turns a 404 or a 422 into a
+    // failure makes "already gone" and "already there" read as outages.
+    const sends: [string, WriteMethod, FakeReply[], Sent<{ number: number }>, number][] = [
+      [
+        "a POST that creates is the reply",
+        "POST",
+        [CREATED],
+        { kind: "ok", value: { number: 7 } },
+        1,
+      ],
+      [
+        "a POST is never sent twice: a 502 may have created the thing",
+        "POST",
+        [BAD_GATEWAY, CREATED],
+        { kind: "failed", reason: "HTTP 502" },
+        1,
+      ],
+      [
+        "a POST whose reply is cut off is not sent again",
+        "POST",
+        [{ ...CREATED, cut: true }, CREATED],
+        { kind: "failed", reason: "no response" },
+        1,
+      ],
+      [
+        "a PATCH is retried like a read: twice leaves the same state",
+        "PATCH",
+        [BAD_GATEWAY, { status: 200, body: { number: 7 } }],
+        { kind: "ok", value: { number: 7 } },
+        2,
+      ],
+      [
+        "a 404 is an answer with its status, never retried",
+        "PATCH",
+        [{ status: 404 }],
+        { kind: "refused", status: 404 },
+        1,
+      ],
+      [
+        "a 422 is an answer with its status",
+        "POST",
+        [{ status: 422 }],
+        { kind: "refused", status: 422 },
+        1,
+      ],
+      [
+        "a rate-limited POST is sent again: GitHub did not act on the first",
+        "POST",
+        [LIFTS_AT_ONCE, CREATED],
+        { kind: "ok", value: { number: 7 } },
+        2,
+      ],
+      [
+        "a reply of the wrong shape is a failure",
+        "POST",
+        [{ status: 201, body: { id: 7 } }],
+        { kind: "failed", reason: "the reply: unexpected shape - number: invalid_type" },
+        1,
+      ],
+    ];
+
+    test.each(sends)("%s", async (_name, method, replies, expected, attempts) => {
+      const { client, github } = over({ [`${method} ${ISSUES}`]: replies });
+
+      expect(await client.send(method, ISSUES, { title: "t" }, issue)).toEqual(expected);
+      expect(github.calls().length).toBe(attempts);
+    });
+
+    // GitHub answers 404 for a thing already gone, which is what a DELETE retried after a lost reply gets. Read by each
+    // caller, the rule was missed one call site at a time; a 404 on a POST or a PATCH is no such thing.
+    const removals: [string, FakeReply[], Sent<undefined>, number][] = [
+      ["a 204 is the thing removed", [{ status: 204 }], { kind: "ok", value: undefined }, 1],
+      [
+        "a 502 then a 204 is the thing removed: a DELETE is retried like a read",
+        [BAD_GATEWAY, { status: 204 }],
+        { kind: "ok", value: undefined },
+        2,
+      ],
+      [
+        "a 502 then a 404 is the thing gone: the first attempt removed it",
+        [BAD_GATEWAY, { status: 404 }],
+        { kind: "ok", value: undefined },
+        2,
+      ],
+      ["a 403 is a refusal", [{ status: 403 }], { kind: "refused", status: 403 }, 1],
+      ["a 422 is a refusal", [{ status: 422 }], { kind: "refused", status: 422 }, 1],
+      ["a 502 on every attempt fails", [BAD_GATEWAY], { kind: "failed", reason: "HTTP 502" }, 4],
+    ];
+
+    test.each(removals)("a removal: %s", async (_name, replies, expected, attempts) => {
+      const { client, github } = over({ [`DELETE ${ISSUES}/7/labels`]: replies });
+
+      expect(await client.remove(`${ISSUES}/7/labels`)).toEqual(expected);
+      expect(github.calls().length).toBe(attempts);
+    });
+
+    test("the fields travel as the JSON body under the token, and a bodiless 204 is ok with no value", async () => {
+      const { client, github } = over({ [`DELETE ${ISSUES}/7/labels/a%3Ab`]: [{ status: 204 }] });
+      const sent = await client.remove(`${ISSUES}/7/labels/a%3Ab`);
+      const patched = await client.send("PATCH", `${ISSUES}/7`, { state: "open", body: "b" });
+
+      expect([sent, patched]).toEqual([
+        { kind: "ok", value: undefined },
+        { kind: "refused", status: 404 },
+      ]);
+      expect(github.calls()).toEqual([
+        { path: `DELETE ${ISSUES}/7/labels/a%3Ab`, authorization: "token stub-token" },
+        { path: `PATCH ${ISSUES}/7`, authorization: "token stub-token" },
+      ]);
+      expect(github.writes()).toEqual([
+        { path: `DELETE ${ISSUES}/7/labels/a%3Ab`, body: null },
+        { path: `PATCH ${ISSUES}/7`, body: { state: "open", body: "b" } },
+      ]);
+    });
+
+    // The sync's delivery writes to private repositories and its failure text reaches a public warning or summary.
+    const logged = [spyOn(console, "warn"), spyOn(console, "error"), spyOn(console, "log")];
+    afterEach(() => {
+      for (const spy of logged) spy.mockClear();
+    });
+    const leaky: [string, FakeReply][] = [
+      [
+        "a 500 naming the repository",
+        { status: 500, body: { message: "example-owner/hidden-server is down" } },
+      ],
+      [
+        "a 422 naming the repository",
+        { status: 422, body: { message: "hidden-server: a pull request already exists" } },
+      ],
+      ["a deprecated endpoint", { status: 500, headers: { deprecation: "true", sunset: "soon" } }],
+      ["a stalled write", { status: 200, hang: true }],
+      ["a reply of the wrong shape", { status: 201, body: { owner: "hidden-server" } }],
+    ];
+
+    test.each(leaky)(
+      "%s leaves no part of the name in the outcome or on the console",
+      async (_name, reply) => {
+        const { client } = over({ [`POST ${ISSUES}`]: [reply] }, 50);
+
+        const outcome = await client.send("POST", ISSUES, { title: "hidden-server" }, issue);
+
+        expect(outcome.kind).not.toBe("ok");
         expect(JSON.stringify(outcome)).not.toMatch(/hidden|example-owner|github\.test/i);
         expect(logged.flatMap((spy) => spy.mock.calls)).toEqual([]);
       },
