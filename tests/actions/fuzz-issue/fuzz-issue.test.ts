@@ -581,6 +581,7 @@ describe("the script", () => {
 
   // A composite's `required: true` only documents, so an omitted input reaches the script as an empty string; without
   // the check resolve mode lists every open issue under an empty label and closes them all.
+  // The refusal is the runner's `::error::` command on stdout: a line on stderr alone fails the step with no annotation.
   test.each([
     { vars: {}, error: "the mode input is required" },
     { vars: { MODE: "" }, error: "the mode input is required" },
@@ -596,7 +597,7 @@ describe("the script", () => {
     },
     {
       vars: { ...REPORT_TUPLE, STREAM: "fuzz", RUNNER_TEMP: undefined },
-      error: "RUNNER_TEMP and GITHUB_OUTPUT are required",
+      error: "RUNNER_TEMP and GITHUB_OUTPUT are required (the runner sets both)",
     },
     ...(["TITLE", "LABEL_COLOR", "LABEL_DESCRIPTION"] as const).map((variable) => ({
       vars: { ...REPORT_TUPLE, STREAM: "fuzz", [variable]: undefined },
@@ -604,7 +605,11 @@ describe("the script", () => {
     })),
   ])("refuses $vars and writes nothing", ({ vars, error }) => {
     const result = run(vars);
-    expect([result.exitCode, result.file]).toEqual([1, undefined]);
-    expect(result.stderr).toContain(error);
+    expect([result.exitCode, result.stdout, result.stderr, result.file]).toEqual([
+      1,
+      `::error::${error}\n`,
+      "",
+      undefined,
+    ]);
   });
 });
