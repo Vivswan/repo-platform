@@ -46,6 +46,16 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in the config.
 - Removal: the legs skip; the starters stay.
 
+## npm
+
+- Starter: `.github/actions/npm-build/action.yml`, the build hook, seeded to fail until filled in: toolchain setup, the install, the build, and a check of what was built. It receives the `version` input, already stamped into `package.json`, and runs only when there is something to publish.
+- Legs: `npm-next` publishes a pre-release under the `next` dist-tag when a push to main creates or refreshes the release PR; `npm-latest` publishes the release at a cut, and `publish-release` waits for it. Both need `release-please` selected, and neither runs in a fork.
+- Channels: `next` is never older than `latest`: a release moves `next` to itself, and each release-PR refresh after it moves `next` on.
+- Key: `npm.path`, the package's directory (default: the repository root).
+- Companion: release-please must write the version into that `package.json` (`release-type: node`, `always-update` off); the package exists on npm, with a trusted publisher naming this repository and the workflow `ci.yml`, "npm publish" and "Allow npm dist-tag" ticked, no environment. No token is stored.
+- Removal: the legs skip; the hook stays (a starter); the package stays on npm.
+- Depth: the platform's `docs/modules/npm.md` (the version scheme, what the publish refuses, reruns).
+
 ## fuzzer / nightly
 
 - Starters: `nightly-fuzz.yml` (fuzzer) / `nightly.yml` (nightly). The placeholder step is a green no-op until customized.

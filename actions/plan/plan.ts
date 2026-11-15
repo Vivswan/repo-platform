@@ -34,7 +34,7 @@ import {
 import { parseRegistration, type Registration, unknownModuleProblems } from "./registration.ts";
 import { type LabelTuple, type LayerSources, reservedLabelNames } from "./reserved_labels.ts";
 
-export const MODES = ["default", "site"] as const;
+export const MODES = ["default", "site", "npm"] as const;
 export type Mode = (typeof MODES)[number];
 
 export class PlanError extends Error {
@@ -305,7 +305,21 @@ function siteVars(names: readonly string[], context: string): Record<string, str
   );
 }
 
-export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
+/** What the npm-publish action reads from the registration (docs/modules/npm.md). */
+export interface NpmPlan {
+  /** The package's directory, relative to the repository root. */
+  packagePath: string;
+}
+
+export function planNpm(input: PlanInput): NpmPlan {
+  selectModules(input);
+
+  return { packagePath: input.registration.npm?.path ?? "." };
+}
+
+export function outputsOf(plan: CiPlan | SitePlan | NpmPlan): Record<string, string> {
+  if ("packagePath" in plan) return { "npm-path": plan.packagePath };
+
   if ("docs" in plan) {
     const config: SiteConfigJson = {
       site_title: plan.siteTitle,
@@ -373,6 +387,12 @@ export function resolvePrivate(input: string, repository: string): boolean {
   return value === "true";
 }
 
+const PLANNERS: Record<Mode, (input: PlanInput) => CiPlan | SitePlan | NpmPlan> = {
+  default: planCi,
+  site: planSite,
+  npm: planNpm,
+};
+
 function main(): number {
   const mode = env("MODE", "default");
   if (!MODES.includes(mode as Mode)) {
@@ -388,9 +408,9 @@ function main(): number {
     ...moduleData,
     reservedLabels: reservedLabelNames(moduleData.layers, tree),
     private:
-      mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
+      mode === "default" ? resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")) : false,
   };
-  const plan = mode === "site" ? planSite(input) : planCi(input);
+  const plan = PLANNERS[mode as Mode](input);
   const exported = "vars" in plan ? siteVars(plan.vars, env("VARS")) : {};
   for (const [name, value] of Object.entries(outputsOf(plan))) setOutput(name, value);
   for (const [name, value] of Object.entries(exported)) exportVariable(name, value);

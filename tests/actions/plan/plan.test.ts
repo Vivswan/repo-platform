@@ -615,7 +615,7 @@ describe("plan.ts as a child", () => {
       reason: "an unknown mode",
       files: { ".repo-platform.yml": `modules: []\n${PROJECT}` },
       env: { MODE: "pages" },
-      error: () => "::error::MODE must be one of default, site; got 'pages'\n",
+      error: () => "::error::MODE must be one of default, site, npm; got 'pages'\n",
     },
     ...([{ PRIVATE: "false" }, { MODE: "site" }] as Record<string, string>[]).map((env) => ({
       reason: `an unknown registration key under ${JSON.stringify(env)}`,

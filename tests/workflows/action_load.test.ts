@@ -3,6 +3,7 @@
 // the fleet is the first to load it, via `stable`.
 //   dependency-review -> pull requests only: its upstream action refuses every other event
 //   release-assets    -> never: it reads a draft release by its id, and this repository cuts no releases
+//   npm-publish       -> never: it publishes a package to npm, and this repository has none
 
 // `shipped` is the platform's own manifest walk, nested actions included, so this test and the shipping read one list.
 
@@ -63,6 +64,7 @@ test("every shipped action is run, so loaded, by a gating job's step on every pu
   expect(judged).toEqual({
     ...Object.fromEntries(shipped.map((dir) => [dir, "every event"])),
     "actions/dependency-review": "pull requests",
+    "actions/npm-publish": "never",
     "actions/release-assets": "never",
   });
 });

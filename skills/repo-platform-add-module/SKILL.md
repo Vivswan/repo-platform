@@ -36,6 +36,7 @@ One line each, the `description` of each module in the platform's `files.yml`.
 | `rust`           | Rust/cargo toolchain (cargo dependabot, Rust gitignore, the clippy readability floor; no CodeQL)                                          |
 | `site`           | one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme) |
 | `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels                                                     |
+| `npm`            | publishes one npm package through trusted publishing: latest at a release, next when the release PR refreshes                             |
 | `pr-title`       | Conventional Commit PR title check, its own required workflow                                                                             |
 | `fuzzer`         | nightly fuzz starter with issue filing, replay inputs, auto-close                                                                         |
 | `nightly`        | nightly CI starter with failure issue filing and auto-close                                                                               |
@@ -55,12 +56,13 @@ From the platform's `files.yml`. Managed files are rewritten on every sync; star
 | every toolchain but `rust` | `.github/workflows/auto-format.yml`                                                                             | starter          |
 | `site`                     | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | -                |
 | `release-please`           | `release-please-config.json`, `.release-please-manifest.json`; the release variant of `.typography-allow`       | starter; managed |
+| `npm`                      | `.github/actions/npm-build/action.yml` (the build hook the npm legs run; it fails until filled in)              | starter          |
 | `pr-title`                 | `.github/workflows/pr-title.yml`                                                                                | managed          |
 | `fuzzer`                   | `.github/workflows/nightly-fuzz.yml`                                                                            | starter          |
 | `nightly`                  | `.github/workflows/nightly.yml`                                                                                 | starter          |
 | `custom-license`           | `LICENSE.md` is no longer written; the fleet copy is retired on that sync                                       | -                |
 
-The release and site legs of `ci.yml` exist in every repository and run only when their module is selected. Per-module keys, companion steps, and removal notes are in [references/modules.md](references/modules.md).
+The release, npm, and site legs of `ci.yml` exist in every repository and run only when their module is selected. Per-module keys, companion steps, and removal notes are in [references/modules.md](references/modules.md).
 
 ## Adding a module
 
@@ -119,6 +121,7 @@ The full checklist per module is in [references/modules.md](references/modules.m
 
 - Labels: the sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from the registration's `labels.*` keys (the module's default when the key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; a `labels.*` key for an unselected module fails the plan (step 1) and also holds the sync PR.
 - `fuzzer` / `nightly`: replace the starter's placeholder step with real work; a custom label also goes into the starter's `label:` inputs.
+- `npm`: fill in the repo-owned `.github/actions/npm-build/action.yml` hook, seeded to fail so an unbuilt package never publishes; publish the package once by hand, then add its trusted publisher on npmjs.com (workflow `ci.yml`, "npm publish" and "Allow npm dist-tag" ticked); give the package `release-type: node` in `release-please-config.json`.
 - `site`: the module's settings layer enables Pages on the next settings apply (before it: `gh api -X POST repos/Vivswan/<repo>/pages -f build_type=workflow`); the repo's own website goes into the repo-owned `.github/actions/site-build/action.yml` hook, seeded as a no-op, so fill it in or the site is the docs alone (`docs/README.md` was step 1's business).
 
 ## Module keys
@@ -128,12 +131,13 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | Module    | Keys                                                    | Default                             |
 | --------- | ------------------------------------------------------- | ----------------------------------- |
 | `site`    | `site.path`, `site.include`, `site.vars`, `labels.site` | `docs`, none, none, `docs-link-rot` |
+| `npm`     | `npm.path`                                              | the repository root                 |
 | `fuzzer`  | `labels.fuzzer`                                         | `fuzz-nightly`                      |
 | `nightly` | `labels.nightly`                                        | `nightly-failure`                   |
 
 Two keys belong to no module. `project` is required, with `name`, `slug`, and `description` together; `copyright_holder` is optional and defaults to the owner's handle and GitHub page. `mirrors` defaults to none.
 
-- **No sync needed:** a `site.path`, `site.include`, or `site.vars` change; the site leg reads the registration at run time.
+- **No sync needed:** a `site.path`, `site.include`, `site.vars`, or `npm.path` change; the site and npm legs read the registration at run time.
 - **Needs a branch sync on the PR:** `mirrors`, `labels.*`, and `project.*`. The `repo-platform:sync` label pushes a hold-free report; a held one (a replaced local edit, or a mirror change that leaves a registration note, such as a dropped declaration whose recorded copy stays) takes the branch dispatch (`-f branch=`). `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`); a `labels.*` value re-renders `.github/settings.yml` (step 3, Labels).
 - **Starters keep their content:** an existing starter (`.github/settings.local.yml`) is not rewritten, so edit it yourself.
 - Tracking labels (`fuzzer`, `nightly`, `site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label.
@@ -151,7 +155,7 @@ Remove the name from `modules:` and the module's own keys (`labels.<key>`, `site
 ## Verify
 
 - The sync run's job log ends `row 0: PR opened` or `row 0: branch pushed`, and every Written row is explained by the module diff.
-- After merging, the module's leg or job runs on the next push to main (`release` for release-please, `site`). Many modules add no job at all.
+- After merging, the module's leg or job runs on the next push to main (`release` for release-please, `site`; the npm legs wait for a release PR refresh or a cut). Many modules add no job at all.
 - For label-carrying modules, the label exists on the repo after the next settings apply once the sync PR has merged: `gh label list -R Vivswan/<repo>`.
 
 An end-to-end walkthrough, adding `nightly` to a repo that already has `fuzzer`, is in [references/worked-examples.md](references/worked-examples.md).
