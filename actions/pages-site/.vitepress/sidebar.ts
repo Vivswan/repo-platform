@@ -1,4 +1,5 @@
-// A page's place comes from its own frontmatter (`order`, `group`) and its title: the fleet's repos carry only markdown.
+// A page's place comes from its own frontmatter (`order`, `group`) and its title, a directory's from its README's:
+// the fleet's repos carry only markdown.
 
 import type { MarkdownRenderer } from "vitepress";
 import { deriveRewrites, detectLocales, type PageMeta, readPage, routeOf } from "./derive.ts";
@@ -79,88 +80,91 @@ function sidebarLevel(
   context: LevelContext,
   siteTitle: string | null,
 ): SidebarItem[] {
-  const level = orderedLevel(prefix, context);
   const items: SidebarItem[] = [];
-  // orderedLevel keeps a group's members contiguous, so a member joins the
-  // group when the item before it is that group.
-  for (const { file, meta, landing } of level.pages) {
-    const text = landing && meta.title === siteTitle ? "Overview" : meta.title;
-    const row = { text, link: navigable(routeOf(file, context.rewrites)) };
-    const previous = items[items.length - 1];
-    if (meta.group === null) {
-      items.push(row);
-    } else if (previous?.items !== undefined && previous.text === meta.group) {
-      previous.items.push(row);
-    } else {
-      items.push({ text: meta.group, items: [row] });
+  const groups = new Map<string, SidebarItem[]>();
+  for (const entry of orderedLevel(prefix, context)) {
+    if (entry.kind === "dir") {
+      const nested = sidebarLevel(`${prefix}${entry.dir}/`, context, siteTitle);
+      items.push({ text: entry.title, collapsed: false, items: nested });
+      continue;
     }
-  }
 
-  for (const dir of level.dirs) {
-    items.push({
-      text: dirTitle(dir),
-      collapsed: false,
-      items: sidebarLevel(`${prefix}${dir}/`, context, siteTitle),
-    });
+    const text = entry.landing && entry.title === siteTitle ? "Overview" : entry.title;
+    const row = { text, link: navigable(routeOf(entry.file, context.rewrites)) };
+    if (entry.group === null) {
+      items.push(row);
+      continue;
+    }
+
+    const members = groups.get(entry.group);
+    if (members !== undefined) {
+      members.push(row);
+      continue;
+    }
+
+    const heading = [row];
+    groups.set(entry.group, heading);
+    items.push({ text: entry.group, items: heading });
   }
 
   return items;
 }
 
-interface LevelPage {
+/** `title` and `order` are what a level sorts by, whatever the entry is. */
+interface PageEntry {
+  kind: "page";
+  title: string;
+  order: number | null;
   file: string;
-  meta: PageMeta;
+  group: string | null;
   landing: boolean;
 }
 
-/** One directory's pages and, in file order, its subdirectories. */
-interface Level {
-  pages: LevelPage[];
-  dirs: string[];
+interface DirEntry {
+  kind: "dir";
+  title: string;
+  order: number | null;
+  dir: string;
+}
+
+type LevelEntry = PageEntry | DirEntry;
+
+function pageEntry(file: string, context: LevelContext): PageEntry {
+  const meta = context.source.page(file);
+  const landing = isLandingFile(file, context.includePages);
+  return { kind: "page", title: meta.title, order: meta.order, file, group: meta.group, landing };
+}
+
+/** A directory is placed and titled by its landing README.md. An include root's page is an article: its `order` places it
+ *  inside its directory. */
+function dirEntry(prefix: string, dir: string, context: LevelContext): DirEntry {
+  const readme = `${prefix}${dir}/README.md`;
+  if (!context.files.includes(readme) || !isLandingFile(readme, context.includePages)) {
+    return { kind: "dir", title: dirTitle(dir), order: null, dir };
+  }
+
+  const meta = context.source.page(readme);
+  return { kind: "dir", title: meta.declaredTitle ?? dirTitle(dir), order: meta.order, dir };
 }
 
 /** The level's order as docs/modules/site.md states it for authors. */
-function orderedLevel(prefix: string, context: LevelContext): Level {
+function orderedLevel(prefix: string, context: LevelContext): LevelEntry[] {
   const here = context.files.filter((file) => file.startsWith(prefix));
   const local = (file: string) => file.slice(prefix.length);
-  const dirs = [
-    ...new Set(
-      here.filter((file) => local(file).includes("/")).map((file) => local(file).split("/")[0]),
-    ),
-  ];
+  const dirNames = new Set(
+    here.filter((file) => local(file).includes("/")).map((file) => local(file).split("/")[0]),
+  );
+  const dirs = [...dirNames].map((dir) => dirEntry(prefix, dir, context));
   const pages = here
     .filter((file) => !local(file).includes("/"))
-    .map(
-      (file): LevelPage => ({
-        file,
-        meta: context.source.page(file),
-        landing: isLandingFile(file, context.includePages),
-      }),
-    );
-  const byTitle = (a: LevelPage, b: LevelPage) => a.meta.title.localeCompare(b.meta.title);
+    .map((file) => pageEntry(file, context));
+  const byTitle = (a: LevelEntry, b: LevelEntry) => a.title.localeCompare(b.title);
   const landings = pages.filter((page) => page.landing);
   const rest = pages.filter((page) => !page.landing);
-  const ranked = rest
-    .filter((page) => page.meta.order !== null)
-    .sort((a, b) => (a.meta.order ?? 0) - (b.meta.order ?? 0) || byTitle(a, b));
-  const unranked = rest.filter((page) => page.meta.order === null).sort(byTitle);
-  return { pages: grouped([...landings, ...ranked, ...unranked]), dirs };
-}
-
-function grouped(pages: LevelPage[]): LevelPage[] {
-  const runs: LevelPage[][] = [];
-  const byGroup = new Map<string, LevelPage[]>();
-  for (const page of pages) {
-    const members = page.meta.group === null ? undefined : byGroup.get(page.meta.group);
-    if (members !== undefined) {
-      members.push(page);
-      continue;
-    }
-
-    const run = [page];
-    if (page.meta.group !== null) byGroup.set(page.meta.group, run);
-    runs.push(run);
-  }
-
-  return runs.flat();
+  const ranked = [...rest, ...dirs]
+    .filter((entry) => entry.order !== null)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || byTitle(a, b));
+  const unrankedPages = rest.filter((page) => page.order === null).sort(byTitle);
+  const unrankedDirs = dirs.filter((dir) => dir.order === null);
+  return [...landings, ...ranked, ...unrankedPages, ...unrankedDirs];
 }
