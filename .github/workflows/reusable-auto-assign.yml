@@ -1,4 +1,4 @@
-# Assigns opened or dispatched issues and PRs to the repository owner (a fork or Dependabot PR waits for the sweep),
+# Assigns opened or dispatched issues and PRs to the repository owner (a fork PR waits for the sweep),
 # and sweeps every open unassigned one on the caller's schedule or an empty dispatch.
 #
 # A called job can only downgrade the caller's token, so a scope added here lands in the managed auto-assign.yml
@@ -21,14 +21,9 @@ on:
 
 jobs:
   assign:
-    # Dependabot PR runs get a read-only GITHUB_TOKEN, so the write below would fail; the nightly sweep assigns those PRs with the repo's own token.
-    if: >-
-      ((github.event_name == 'issues' || github.event_name == 'pull_request') &&
-      github.actor != 'dependabot[bot]') ||
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # A Dependabot PR's run starts with a read-only token, which these grants raise.
     permissions:
       issues: write # issue events, and the sweep assigns issues and PRs alike
       pull-requests: write # PR events, and a dispatched number may be a PR
