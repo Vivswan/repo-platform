@@ -24,6 +24,7 @@ const PKG: Package = { name: "@example/widget", version: "1.2.0" };
 const SHA = "0123456089abcdef0123456789abcdef01234567";
 const COMMITTED = String(Date.UTC(2026, 10, 14, 23, 30) / 1000);
 const MINTED = "1.2.1-main.42.20261114.g0123456";
+const RELEASE_BRANCH = "release-please--branches--main";
 
 const ok = (stdout = ""): RunResult => ({ exit: { kind: "exited", code: 0 }, stdout, stderr: "" });
 const failed = (stderr: string): RunResult => ({
@@ -40,32 +41,46 @@ function record(versions: string[], tags: Record<string, string> = {}): Registry
 }
 
 // A package may already carry versions of this scheme, so a version this action mints must sort among them: the count
-// compares as a number, the release on disk sits below, and any next release sits above, whatever its bump.
-test.each<{ reason: string; base: string; count: number; sha: string; minted: string }>([
+// compares as a number, the release it leads to sits above, and the commit before sits below, also when that one was
+// minted as the next patch after the version on disk, as every pre-release was before the release PR named the base.
+test.each<{
+  reason: string;
+  upcoming: string;
+  count: number;
+  sha: string;
+  commitBefore: string;
+  minted: string;
+}>([
   {
-    reason: "the next patch, then main, the count, the UTC date, and the short sha",
-    base: "1.2.0",
+    reason: "the upcoming release, then main, the count, the UTC date, and the short sha",
+    upcoming: "1.3.0",
     count: 42,
     sha: "abcdef0123456789abcdef0123456789abcdef01",
-    minted: "1.2.1-main.42.20261114.gabcdef0",
+    commitBefore: "1.2.1-main.41.20261113.gaaaaaaa",
+    minted: "1.3.0-main.42.20261114.gabcdef0",
   },
   {
     reason: "an all-digit short sha keeps its leading zero behind the g",
-    base: "0.9.9",
+    upcoming: "0.9.10",
     count: 7,
     sha: SHA,
+    commitBefore: "0.9.10-main.6.20261113.gaaaaaaa",
     minted: "0.9.10-main.7.20261114.g0123456",
   },
-])("the next version: $reason", ({ base, count, sha, minted }) => {
-  const version = nextVersion(base, { count, date: "20261114", sha });
-  const later = nextVersion(base, { count: count + 100, date: "20261114", sha });
-  const [major, minor, patch] = base.split(".").map(Number);
+])("the next version: $reason", ({ upcoming, count, sha, commitBefore, minted }) => {
+  const version = nextVersion(upcoming, { count, date: "20261114", sha });
+  const later = nextVersion(upcoming, { count: count + 100, date: "20261114", sha });
   expect({
     version,
-    aboveItsBase: Bun.semver.order(version, base),
-    belowTheNextPatch: Bun.semver.order(version, `${major}.${minor}.${patch + 1}`),
+    belowItsRelease: Bun.semver.order(version, upcoming),
+    aboveTheCommitBefore: Bun.semver.order(version, commitBefore),
     belowALaterCommit: Bun.semver.order(version, later),
-  }).toEqual({ version: minted, aboveItsBase: 1, belowTheNextPatch: -1, belowALaterCommit: -1 });
+  }).toEqual({
+    version: minted,
+    belowItsRelease: -1,
+    aboveTheCommitBefore: 1,
+    belowALaterCommit: -1,
+  });
 });
 
 const SKIP_BEHIND = (next: string): Verdict => ({
@@ -125,6 +140,32 @@ test.each<{
       next: "1.2.1-main.43.20261114.gbbbbbbb",
     }),
     verdict: SKIP_BEHIND("1.2.1-main.43.20261114.gbbbbbbb"),
+  },
+  {
+    reason:
+      "next on a later commit's build of a lower release, where a rerun of this commit read a release PR that has since moved up",
+    channel: "next",
+    version: "1.3.0-main.42.20261114.g0123456",
+    held: record(["1.2.0", "1.2.1-main.43.20261114.gbbbbbbb"], {
+      latest: "1.2.0",
+      next: "1.2.1-main.43.20261114.gbbbbbbb",
+    }),
+    verdict: {
+      action: "skip",
+      reason:
+        "next names 1.2.1-main.43.20261114.gbbbbbbb, the build of a commit not before this one on main (1.3.0-main.42.20261114.g0123456): next never moves back",
+    },
+  },
+  {
+    reason:
+      "next on a tag of another scheme, which carries no place on main to compare, whatever its last identifiers look like",
+    channel: "next",
+    version: MINTED,
+    held: record(["1.2.0", "1.2.1-ci-main.999.20261114.gbbbbbbb"], {
+      latest: "1.2.0",
+      next: "1.2.1-ci-main.999.20261114.gbbbbbbb",
+    }),
+    verdict: { action: "publish" },
   },
   {
     reason: "no next tag yet, the package's first pre-release",
@@ -358,6 +399,9 @@ interface Answers {
   /** Whether the checkout is shallow. */
   shallow?: boolean;
 
+  /** The package.json on the release PR's branch, release-please's bump to 1.2.1 unless named; null when the branch shows none. */
+  onReleaseBranch?: object | null;
+
   /** What `npm config get <key>` prints, over npm's defaults. */
   config?: Record<string, string>;
 
@@ -387,6 +431,13 @@ function answerTo(line: string, answers: Answers): RunResult {
     "git rev-parse HEAD": SHA,
   };
   if (line in git) return ok(`${git[line]}\n`);
+
+  if (line === `git show refs/remotes/origin/${RELEASE_BRANCH}:./package.json`) {
+    const manifest = answers.onReleaseBranch;
+    if (manifest === null) return failed("fatal: invalid object name");
+
+    return ok(JSON.stringify(manifest ?? { name: PKG.name, version: "1.2.1" }));
+  }
 
   if (line.startsWith("npm config get ")) {
     const key = line.slice("npm config get ".length);
@@ -454,15 +505,24 @@ async function runWith(
   };
 }
 
+/** The plan of one channel; `names` is what names the version there, the release PR's branch on next and the release's tag on latest. */
 const plan = (
   channel: Channel,
-  tag: string,
+  names: string,
   records: RegistryRecord[],
   answers?: Answers,
   pkg = PKG,
 ) =>
   runWith(
-    (tools) => planPublish(pkg, { channel, tag, directory: "/work/pkg" }, tools),
+    (tools) => {
+      const directory = "/work/pkg";
+      const request =
+        channel === "next"
+          ? ({ channel, releaseBranch: names, directory } as const)
+          : ({ channel, tag: names, directory } as const);
+
+      return planPublish(pkg, request, tools);
+    },
     records,
     answers,
   );
@@ -490,6 +550,7 @@ const CONFIG = [
   "npm config get registry",
   "npm config get @example:registry",
 ];
+const UPCOMING = `git show refs/remotes/origin/${RELEASE_BRANCH}:./package.json`;
 const POSITION = [
   "git rev-parse --is-shallow-repository",
   "git rev-list --count --first-parent HEAD",
@@ -514,13 +575,190 @@ const E403 = "npm notice package: @example/widget\nnpm error code E403\nnpm erro
 // The plan runs before the repository's build, so what it leaves is the build's input: the version in package.json on
 // next, and a verdict that keeps the build from running for nothing. The count and the UTC date are what place the
 // version among those already published.
+// The base is release-please's, read from the release PR's branch: a pre-release minted from the version on disk named
+// a patch the next release never cuts (0.0.1-main... ahead of a first release 0.1.0).
 test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   {
     reason: "next: mints from the checkout and stamps the version the build will carry",
-    run: () => plan("next", "", [BEFORE]),
+    run: () => plan("next", RELEASE_BRANCH, [BEFORE]),
     expected: {
       outcome: { version: MINTED, publish: true },
-      commands: [...CONFIG, ...POSITION, STAMP],
+      commands: [...CONFIG, ...POSITION, UPCOMING, STAMP],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "next: a minor bump on the release PR is the pre-release's base, not the patch after the version on disk",
+    run: () =>
+      plan("next", RELEASE_BRANCH, [BEFORE], {
+        onReleaseBranch: { name: PKG.name, version: "1.3.0" },
+      }),
+    expected: {
+      outcome: { version: "1.3.0-main.42.20261114.g0123456", publish: true },
+      commands: [
+        ...CONFIG,
+        ...POSITION,
+        UPCOMING,
+        "npm version 1.3.0-main.42.20261114.g0123456 --no-git-tag-version --ignore-scripts",
+      ],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "next: a release PR whose version dropped (a reverted feature) never moves next back to a lower base",
+    run: () =>
+      plan("next", RELEASE_BRANCH, [
+        record(["1.2.0", "1.3.0-main.41.20261113.gaaaaaaa"], {
+          latest: "1.2.0",
+          next: "1.3.0-main.41.20261113.gaaaaaaa",
+        }),
+      ]),
+    expected: {
+      outcome: { version: MINTED, publish: false },
+      commands: [...CONFIG, ...POSITION, UPCOMING],
+      reads: 1,
+      waitedOut: false,
+      lines: [
+        [
+          "notice",
+          `@example/widget: nothing to publish, next names 1.3.0-main.41.20261113.gaaaaaaa, which is not below this commit's ${MINTED}: next never moves back`,
+        ],
+      ],
+    },
+  },
+  {
+    reason:
+      "next: a rerun after the release PR merged, its branch deleted, still finds its commit's version and passes",
+    run: () => plan("next", RELEASE_BRANCH, [AFTER], { onReleaseBranch: null }),
+    expected: {
+      outcome: { version: MINTED, publish: false },
+      commands: [...CONFIG, ...POSITION],
+      reads: 1,
+      waitedOut: false,
+      lines: [
+        [
+          "notice",
+          `@example/widget: nothing to publish, ${MINTED} is already on the registry (a rerun)`,
+        ],
+      ],
+    },
+  },
+  {
+    reason:
+      "next: a rerun after the release PR moved to another release publishes no second version of its commit",
+    run: () =>
+      plan("next", RELEASE_BRANCH, [AFTER], {
+        onReleaseBranch: { name: PKG.name, version: "1.3.0" },
+      }),
+    expected: {
+      outcome: { version: MINTED, publish: false },
+      commands: [...CONFIG, ...POSITION],
+      reads: 1,
+      waitedOut: false,
+      lines: [
+        [
+          "notice",
+          `@example/widget: nothing to publish, ${MINTED} is already on the registry (a rerun)`,
+        ],
+      ],
+    },
+  },
+  {
+    reason:
+      "next: a rerun of a commit from before a release, the release PR since reopened for the next one, publishes nothing over that release",
+    run: () =>
+      plan(
+        "next",
+        RELEASE_BRANCH,
+        [record(["1.2.0", "1.2.1"], { latest: "1.2.1", next: "1.2.1" })],
+        { onReleaseBranch: { name: PKG.name, version: "1.2.2" } },
+      ),
+    expected: {
+      outcome:
+        "this commit's package.json is at 1.2.0, below the released 1.2.1: a commit from before a release publishes nothing to next (a rerun of an old run ends here), and on main's newest commit the package.json on main is behind the registry",
+      commands: [...CONFIG, ...POSITION],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "next: a release PR that cuts the version main already holds (0.0.0, nothing released) publishes no 0.0.0-main pre-release",
+    run: () =>
+      plan(
+        "next",
+        RELEASE_BRANCH,
+        [record([])],
+        { onReleaseBranch: { name: PKG.name, version: "0.0.0" } },
+        { name: PKG.name, version: "0.0.0" },
+      ),
+    expected: {
+      outcome:
+        "the release PR will cut 0.0.0, not above the 0.0.0 in main's package.json: lower main's version (never below the registry's newest release) or raise the PR's (release-please's initial-version), or have release-please bump this file",
+      commands: [...CONFIG, ...POSITION, UPCOMING],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "next: a ci.yml that passes no release branch publishes nothing from a commit that has not published",
+    run: () => plan("next", "", [BEFORE]),
+    expected: {
+      outcome:
+        "the next channel needs the release PR's branch (release-branch): this repository's ci.yml does not pass it yet, so merge its sync PR",
+      commands: [...CONFIG, ...POSITION],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason:
+      "next: a ci.yml that passes no release branch still passes a rerun of a commit that already published",
+    run: () => plan("next", "", [AFTER]),
+    expected: {
+      outcome: { version: MINTED, publish: false },
+      commands: [...CONFIG, ...POSITION],
+      reads: 1,
+      waitedOut: false,
+      lines: [
+        [
+          "notice",
+          `@example/widget: nothing to publish, ${MINTED} is already on the registry (a rerun)`,
+        ],
+      ],
+    },
+  },
+  {
+    reason:
+      "next: a release branch deleted before this commit published leaves no release to mint a pre-release of",
+    run: () => plan("next", RELEASE_BRANCH, [BEFORE], { onReleaseBranch: null }),
+    expected: {
+      outcome: `the release PR's branch ${RELEASE_BRANCH} shows no package.json here, so this commit has no release to lead to (a merged release PR's branch is deleted): fatal: invalid object name`,
+      commands: [...CONFIG, ...POSITION, UPCOMING],
+      reads: 1,
+      waitedOut: false,
+      lines: [],
+    },
+  },
+  {
+    reason: "next: a release PR that cuts a pre-release would be minted into a second pre-release",
+    run: () =>
+      plan("next", RELEASE_BRANCH, [BEFORE], {
+        onReleaseBranch: { name: PKG.name, version: "1.3.0-rc.1" },
+      }),
+    expected: {
+      outcome: "the release PR will cut 1.3.0-rc.1, which is not a plain release X.Y.Z",
+      commands: [...CONFIG, ...POSITION, UPCOMING],
       reads: 1,
       waitedOut: false,
       lines: [],
@@ -528,10 +766,13 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason: "next: a later commit holds the tag, so nothing is stamped or built",
-    run: () => plan("next", "", [record(["1.2.0"], { next: "1.2.1-main.43.20261114.gbbbbbbb" })]),
+    run: () =>
+      plan("next", RELEASE_BRANCH, [
+        record(["1.2.0"], { next: "1.2.1-main.43.20261114.gbbbbbbb" }),
+      ]),
     expected: {
       outcome: { version: MINTED, publish: false },
-      commands: [...CONFIG, ...POSITION],
+      commands: [...CONFIG, ...POSITION, UPCOMING],
       reads: 1,
       waitedOut: false,
       lines: [
@@ -583,7 +824,7 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason: "a shallow checkout: the count would stop at its boundary, so nothing is minted",
-    run: () => plan("next", "", [BEFORE], { shallow: true }),
+    run: () => plan("next", RELEASE_BRANCH, [BEFORE], { shallow: true }),
     expected: {
       outcome: "the checkout is shallow: the next version counts main's commits (fetch-depth: 0)",
       commands: [...CONFIG, ...POSITION.slice(0, 1)],
@@ -594,7 +835,8 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason: "a pre-release on disk would be minted into a second pre-release",
-    run: () => plan("next", "", [BEFORE], {}, { name: PKG.name, version: "1.2.0-rc.1" }),
+    run: () =>
+      plan("next", RELEASE_BRANCH, [BEFORE], {}, { name: PKG.name, version: "1.2.0-rc.1" }),
     expected: {
       outcome: "the version on disk, 1.2.0-rc.1, must be a plain release X.Y.Z",
       commands: [],
@@ -619,7 +861,9 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   {
     reason: "a registry configured for the package's scope is not the one the record is read from",
     run: () =>
-      plan("next", "", [BEFORE], { config: { "@example:registry": "https://npm.example.com/" } }),
+      plan("next", RELEASE_BRANCH, [BEFORE], {
+        config: { "@example:registry": "https://npm.example.com/" },
+      }),
     expected: {
       outcome:
         "npm's @example:registry is configured as https://npm.example.com: this module publishes to https://registry.npmjs.org alone",
@@ -631,7 +875,8 @@ test.each<{ reason: string; run: () => Promise<Run>; expected: Run }>([
   },
   {
     reason: "a default registry configured elsewhere",
-    run: () => plan("next", "", [BEFORE], { config: { registry: "https://npm.example.com/" } }),
+    run: () =>
+      plan("next", RELEASE_BRANCH, [BEFORE], { config: { registry: "https://npm.example.com/" } }),
     expected: {
       outcome:
         "npm's registry is configured as https://npm.example.com: this module publishes to https://registry.npmjs.org alone",
