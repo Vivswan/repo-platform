@@ -1,44 +1,10 @@
-// bun has no DOM, so the document holds only what the render pass touches.
+// bun has no DOM, so happy-dom gives this file a document; the global is removed when the file ends.
+// happy-dom has no document.fonts, so the face API the pass asks is the stub below, set per phase.
 
-import { beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeEach, expect, jest, test } from "bun:test";
+import { type Element, type HTMLElement, Window } from "happy-dom";
 import { HUES, SHARED_TOKENS } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 
-class FakeElement {
-  children: FakeElement[] = [];
-  parent: FakeElement | null = null;
-  className = "";
-  innerHTML = "";
-  textContent = "";
-  type = "";
-  dataset: Record<string, string> = {};
-  attributes: Record<string, string> = {};
-  constructor(readonly tag: string) {}
-  setAttribute(name: string, value: string): void {
-    this.attributes[name] = value;
-  }
-  addEventListener(): void {}
-  append(child: FakeElement): void {
-    child.parent = this;
-    this.children.push(child);
-  }
-  remove(): void {
-    this.parent?.children.splice(this.parent.children.indexOf(this), 1);
-    this.parent = null;
-  }
-  querySelector(selector: string): FakeElement | null {
-    const match = /^:scope > \.([\w-]+)$/.exec(selector);
-    if (match === null) throw new Error(`unsupported selector ${selector}`);
-    return this.children.find((child) => child.className.split(" ").includes(match[1])) ?? null;
-  }
-  get shape(): string {
-    const content = this.tag === "div" && this.innerHTML !== "" ? this.innerHTML : this.textContent;
-    const label = this.tag === "button" ? `[${this.attributes["aria-label"]}]` : "";
-    return `${this.tag}.${this.className}${label}:${content}`;
-  }
-}
-
-const mounts: FakeElement[] = [];
-const html = new FakeElement("html");
 interface Held {
   resolve: () => void;
   reject: (error: Error) => void;
@@ -68,30 +34,15 @@ const fontsApi = {
     );
   },
 };
-const fakeDocument = {
-  documentElement: html,
-  querySelectorAll: () => mounts,
-  createElement: (tag: string) => new FakeElement(tag),
-  fonts: fontsApi as typeof fontsApi | undefined,
-};
-(globalThis as { document?: unknown }).document = fakeDocument;
+const window = new Window();
+const page = window.document;
+const faces = page as unknown as { fonts: typeof fontsApi | undefined };
+Object.assign(globalThis, { document: page });
+afterAll(async () => {
+  Reflect.deleteProperty(globalThis, "document");
+  await window.happyDOM.close();
+});
 
-async function withFakeTimers(body: (armed: Map<number, () => void>) => Promise<void>) {
-  const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
-  const armed = new Map<number, () => void>();
-  let handle = 0;
-  globalThis.setTimeout = ((callback: () => void) => {
-    handle += 1;
-    armed.set(handle, callback);
-    return handle;
-  }) as unknown as typeof setTimeout;
-  globalThis.clearTimeout = ((id: number) => armed.delete(id)) as typeof clearTimeout;
-  try {
-    await body(armed);
-  } finally {
-    Object.assign(globalThis, real);
-  }
-}
 Bun.plugin({
   name: "mermaid-stub",
   setup(build) {
@@ -113,7 +64,7 @@ Bun.plugin({
               }
               if (source.endsWith("-->")) throw new Error("Parse error on line 2:\nA -->\n-----^");
               // Each render's SVG carries its ordinal, so a stale result landing is visible.
-              return { svg: `<svg data-render="${ordinal}">${source}</svg>` };
+              return { svg: `<svg data-render="${ordinal}">${Bun.escapeHTML(source)}</svg>` };
             },
           },
         },
@@ -126,18 +77,27 @@ const { renderAll } = await import(
   "../../../actions/pages-site/.vitepress/theme/mermaid-render.ts"
 );
 
-function mount(source: string): FakeElement {
-  const element = new FakeElement("div");
+function mount(source: string): HTMLElement {
+  const element = page.createElement("div");
   element.className = "fleet-mermaid";
-  const pre = new FakeElement("pre");
+  const pre = page.createElement("pre");
   pre.className = "fleet-mermaid-source";
   pre.textContent = source;
   element.append(pre);
-  mounts.push(element);
+  page.body.append(element);
   return element;
 }
 
-const shapes = (element: FakeElement) => element.children.map((child) => child.shape);
+/** One child of a mount as `tag.class[label]:content`. A diagram's content is its markup, with the
+ *  `&gt;` the DOM writes for an arrow in the SVG's text read back as `>`. */
+function shape(element: Element): string {
+  const tag = element.localName;
+  const label = tag === "button" ? `[${element.getAttribute("aria-label")}]` : "";
+  const markup = tag === "div" ? element.innerHTML.replaceAll("&gt;", ">") : "";
+  return `${tag}.${element.className}${label}:${markup === "" ? element.textContent : markup}`;
+}
+
+const shapes = (element: Element) => [...element.children].map(shape);
 const darkModes = () =>
   calls.initialize.map((config) => (config.themeVariables as { darkMode: boolean }).darkMode);
 
@@ -157,11 +117,11 @@ function nextPhase(): void {
   stub.holdFonts = false;
   stub.heldFonts.length = 0;
   stub.failFonts = false;
-  fakeDocument.fonts = fontsApi;
+  faces.fonts = fontsApi;
 }
 beforeEach(() => {
-  mounts.length = 0;
-  html.dataset = { fleetHue: "2" };
+  page.body.replaceChildren();
+  page.documentElement.dataset.fleetHue = "2";
   calls.renders.length = 0;
   nextPhase();
 });
@@ -310,27 +270,27 @@ test("initializes and draws only once the theme's mono face has loaded for every
 
   nextPhase();
   stub.holdFonts = true;
-  await withFakeTimers(async (armed) => {
+  jest.useFakeTimers();
+  try {
     const settled = renderAll(true);
-    expect(armed.size).toBe(1);
+    expect(jest.getTimerCount()).toBe(1);
     stub.heldFonts[0].resolve();
     await settled;
-    expect(armed.size).toBe(0);
+    expect(jest.getTimerCount()).toBe(0);
     expect(drawn()).toEqual(drawnAs(5, 6));
     const stalled = renderAll(false);
-    expect(armed.size).toBe(1);
-    for (const [handle, fire] of armed) {
-      armed.delete(handle);
-      fire();
-    }
+    expect(jest.getTimerCount()).toBe(1);
+    jest.runOnlyPendingTimers();
     await stalled;
-  });
+  } finally {
+    jest.useRealTimers();
+  }
   expect(stub.heldFonts).toHaveLength(2);
   expect(darkModes()).toEqual([true, false]);
   expect(drawn()).toEqual(drawnAs(7, 8));
 
   nextPhase();
-  fakeDocument.fonts = undefined;
+  faces.fonts = undefined;
   await renderAll(true);
   expect(calls.fontLoads).toEqual([]);
   expect(calls.initialize).toHaveLength(1);
