@@ -1,8 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import {
+  Binary,
+  type Expr,
+  FunctionCall,
+  Grouping,
+  Literal,
+  Logical,
+  Unary,
+} from "@actions/expressions/ast";
+import { TokenType } from "@actions/expressions/lexer";
 import { parse as parseYaml } from "yaml";
 import { parseFilesConfig } from "../../actions/plan/files_config.ts";
+import {
+  type ContextRead,
+  conditionSource,
+  contextRead,
+  contextReads,
+  parseExpression,
+  printed,
+} from "../shared/github_expression.ts";
 
 // GitHub reads an unrun step's ABSENT output as the number 0, so a condition that tests a step output
 // negatively passes when the step never ran, wherever the guarded step is a push, a PR, or an issue
@@ -19,36 +37,70 @@ interface Step {
   "continue-on-error"?: boolean | string;
 }
 
-/** Only `== '<non-zero literal>'`, `!= ''`, and `contains(<output>, '<non-empty literal>')` cannot be satisfied by an
- *  absent output. Terms without a step output (`env.*`, `needs.*`) are not this hazard. The offending term, or null. */
-function unsafeStepCondition(raw: string): string | null {
-  // One spelling per term: the `${{ }}` delimiters GitHub accepts around an `if:` go, spaces around a
-  // dot go, and a literal bracket index (`steps['probe'].outputs['changed']`) reads as the dotted path
-  // it names. Context names are case-insensitive to GitHub, so they are matched that way.
-  const condition = raw
-    .trim()
-    .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1")
-    .replaceAll(/\s*\.\s*/g, ".")
-    .replaceAll(/\[\s*'([\w-]+)'\s*\]/g, ".$1");
-  // A step output is any term reaching `.outputs` from `steps`, a dynamic index (`steps[env.PROBE]`)
-  // included: a term the classifier below cannot read is named, never passed.
-  const OUTPUT = /(?<![.\w])steps\b.*\.outputs\b/i;
-  if (!OUTPUT.test(condition)) return null;
-  // A negated GROUP inverts terms this check reads term by term, so it cannot be proven safe here.
-  // `!cancelled()` and friends do not match: the parenthesis has to follow the `!` directly.
-  if (/!\s*\(/.test(condition)) return `a negated group: ${condition.trim()}`;
-  // A parenthesis becomes a space, never nothing: glued to the function name, `contains(steps...` would read as no
-  // step output at all.
-  for (const raw of condition.split(/&&|\|\|/)) {
-    const term = raw.replaceAll(/[()]/g, " ").replaceAll(/\s+/g, " ").trim();
-    if (!OUTPUT.test(term)) continue;
-    if (/^contains steps\.[\w-]+\.outputs\.[\w-]+, '[^']+'$/i.test(term)) continue;
-    const match = /^steps\.[\w-]+\.outputs\.[\w-]+ ?(==|!=) ?'([^']*)'$/i.exec(term);
-    if (match === null) return term;
-    const [, operator, literal] = match;
-    if (operator === "==" ? Number(literal) === 0 : literal !== "") return term;
+/** Whether the read reaches a step's outputs, a computed step id included. GitHub reads context names in any case. */
+function isStepOutput(read: ContextRead): boolean {
+  return read[0]?.toLowerCase() === "steps" && read[2]?.toLowerCase() === "outputs";
+}
+
+/** Whether the node reads one named output of one named step: `steps.<id>.outputs.<key>`, in any spelling. */
+function isNamedOutput(expr: Expr): boolean {
+  const read = contextRead(expr);
+  return read !== null && read.length === 4 && isStepOutput(read) && !read.includes(null);
+}
+
+/** The text of a string literal, or null for any other node. */
+function stringLiteral(expr: Expr): string | null {
+  const quoted = expr instanceof Literal && expr.token.type === TokenType.STRING;
+  return quoted ? expr.literal.coerceString() : null;
+}
+
+/** Whether an absent output cannot satisfy the term: `<output> == '<non-zero literal>'`, `<output> != ''`, or
+ *  `contains(<output>, '<non-empty literal>')`. */
+function failsOnAbsentOutput(term: Expr): boolean {
+  if (term instanceof FunctionCall) {
+    const [haystack, needle] = term.args;
+    const searches =
+      term.functionName.lexeme.toLowerCase() === "contains" && term.args.length === 2;
+    return searches && isNamedOutput(haystack) && (stringLiteral(needle) ?? "") !== "";
   }
-  return null;
+
+  if (!(term instanceof Binary) || !isNamedOutput(term.left)) return false;
+
+  const literal = stringLiteral(term.right);
+  if (literal === null) return false;
+
+  if (term.operator.type === TokenType.EQUAL_EQUAL) return Number(literal) !== 0;
+
+  return term.operator.type === TokenType.BANG_EQUAL && literal === "";
+}
+
+/** The first term of the tree an absent step output can satisfy, as text, or null. Terms without a step output
+ *  (`env.*`, `needs.*`) are not this hazard, and a computed index (`steps[env.PROBE]`) is named whatever it compares
+ *  against. A negated group inverts terms this check reads one by one, so it cannot be proven safe here. */
+function unsafeTerm(expr: Expr): string | null {
+  if (!contextReads(expr).some(isStepOutput)) return null;
+
+  if (expr instanceof Logical) {
+    return expr.args.map(unsafeTerm).find((term) => term !== null) ?? null;
+  }
+
+  if (expr instanceof Grouping) return unsafeTerm(expr.group);
+
+  if (expr instanceof Unary && expr.expr instanceof Grouping) {
+    return `a negated group: ${printed(expr)}`;
+  }
+
+  if (failsOnAbsentOutput(expr)) return null;
+
+  return printed(expr);
+}
+
+/** The offending term of an `if:`, or null. */
+function unsafeStepCondition(raw: string): string | null {
+  const source = conditionSource(raw);
+  if (source === "") return null;
+
+  return unsafeTerm(parseExpression(source).tree);
 }
 
 /** A FAIL step's gate opening on an absent output turns the job red, which is the point, so it is
@@ -96,10 +148,10 @@ describe("unsafeStepCondition", () => {
   // skips the unsafe one cannot pass.
   test.each([
     ["steps.merge.outputs.skipped != 'true'", "steps.merge.outputs.skipped != 'true'"],
-    ["steps.render.outputs.skipped!='true'", "steps.render.outputs.skipped!='true'"],
+    ["steps.render.outputs.skipped!='true'", "steps.render.outputs.skipped != 'true'"],
     ["'true' != steps.merge.outputs.skipped", "'true' != steps.merge.outputs.skipped"],
     ["!steps.merge.outputs.skipped", "!steps.merge.outputs.skipped"],
-    ["! steps.merge.outputs.skipped", "! steps.merge.outputs.skipped"],
+    ["! steps.merge.outputs.skipped", "!steps.merge.outputs.skipped"],
     [
       "!(steps.merge.outputs.skipped == 'true')",
       "a negated group: !(steps.merge.outputs.skipped == 'true')",
@@ -118,12 +170,12 @@ describe("unsafeStepCondition", () => {
     ["steps.a.outputs.b == 'false' || !steps.c.outputs.d", "!steps.c.outputs.d"],
     // contains('', '') is true, so an empty needle is satisfied by an absent output; a needle with no
     // step output inside is the hazard read the other way round.
-    ["contains(steps.plan.outputs.modules, '')", "contains steps.plan.outputs.modules, ''"],
+    ["contains(steps.plan.outputs.modules, '')", "contains(steps.plan.outputs.modules, '')"],
     [
       "contains('\"bun\"', steps.plan.outputs.modules)",
-      "contains '\"bun\"', steps.plan.outputs.modules",
+      "contains('\"bun\"', steps.plan.outputs.modules)",
     ],
-    // Bracket indexes name the same output GitHub reads; the term is named in its dotted spelling.
+    // Bracket indexes name the same output GitHub reads; every term is named in one spelling.
     ["steps.probe.outputs['changed'] != 'true'", "steps.probe.outputs.changed != 'true'"],
     ["steps['probe'].outputs.changed != 'true'", "steps.probe.outputs.changed != 'true'"],
     ["${{ steps.probe.outputs['changed'] != 'true' }}", "steps.probe.outputs.changed != 'true'"],
@@ -137,6 +189,16 @@ describe("unsafeStepCondition", () => {
     // GitHub reads these as the plain spelling; so does the classifier.
     ["steps . probe . outputs . changed != 'true'", "steps.probe.outputs.changed != 'true'"],
     ["STEPS.probe.OUTPUTS.changed != 'true'", "STEPS.probe.OUTPUTS.changed != 'true'"],
+    // An output read inside a call or a group is still read: neither default below needs the step to have run.
+    [
+      "fromJSON(steps.probe.outputs.json || '{\"ready\":\"yes\"}').ready == 'yes'",
+      "fromJSON(steps.probe.outputs.json || '{\"ready\":\"yes\"}').ready == 'yes'",
+    ],
+    ["(steps.probe).outputs.changed != 'true'", "(steps.probe).outputs.changed != 'true'"],
+    [
+      "contains(fromJSON('[\"a\"]'), steps.probe.outputs.kind)",
+      "contains(fromJSON('[\"a\"]'), steps.probe.outputs.kind)",
+    ],
     // A job named `steps` is a needs term, not this hazard; the unsafe term beside it is the one named.
     [
       "needs.steps.outputs.ready == 'true' && steps.probe.outputs.changed != 'true'",
@@ -168,6 +230,9 @@ describe("unsafeStepCondition", () => {
     "steps.probe.outputs.bumps!=''",
     "needs.steps.outputs.ready == 'true'",
     "${{ steps['probe'].outputs.changed == 'true' }}",
+    // An operator inside a string literal is text.
+    "steps.probe.outputs.kind == 'a||b'",
+    "(steps.probe).outputs.changed == 'true'",
     "",
   ])("accepts %s", (condition) => {
     expect(unsafeStepCondition(condition)).toBeNull();

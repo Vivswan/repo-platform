@@ -161,12 +161,8 @@ function shell(
   root: string,
 ): Outputs {
   const ran = runBashStep(
-    {
-      ...step,
-      env: { ...inherited, ...filled(step.env, context) },
-      run: interpolate(String(step.run), context),
-    },
-    { cwd: root, root },
+    { ...step, env: {} },
+    { context, env: { ...inherited, ...filled(step.env, context) }, cwd: root, root },
   );
   return ran.exitCode === 0 ? ran.outputs : null;
 }

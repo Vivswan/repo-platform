@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { boundedSpawnSync } from "./bounded_spawn";
+import { interpolate } from "./github_expression";
 import { parseGithubOutput } from "./github_output";
 
 export const REPO_ROOT = join(import.meta.dir, "../..");
@@ -41,22 +42,27 @@ export function fill(text: string, fills: Record<string, string>): string {
   return filled;
 }
 
+/** The step run under the runner's bash, its `env:` and `run:` filled once over `context`: each key a dotted path
+ *  (`inputs.label`), each value what the runner would hand the step. */
 export function runBashStep(
   step: Step,
   options: {
+    context?: Record<string, string | boolean>;
     fills?: Record<string, string>;
     env?: Record<string, string>;
     cwd: string;
     root: string;
   },
 ): StepRun {
-  const fills = options.fills ?? {};
+  const { fills } = options;
+  const filled = (text: string): string =>
+    fills === undefined ? interpolate(text, options.context ?? {}) : fill(text, fills);
   const outputs = join(options.root, `${String(step.id ?? step.name)}-outputs.txt`);
   writeFileSync(outputs, "");
   const stepEnv = Object.fromEntries(
-    Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [k, fill(v, fills)]),
+    Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [k, filled(v)]),
   );
-  const proc = boundedSpawnSync([...RUNNER_BASH, fill(String(step.run), fills)], {
+  const proc = boundedSpawnSync([...RUNNER_BASH, filled(String(step.run))], {
     cwd: options.cwd,
     env: {
       PATH: process.env.PATH ?? "",
