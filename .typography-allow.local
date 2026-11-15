@@ -1,0 +1,3 @@
+# Path prefixes exempt from the check-typography action, this repository's own (see .typography-allow).
+# The upstream gitignore fixture keeps the bare CR byte the sync's `replace` rule exists to rewrite.
+tests/ci/sync_end_to_end/fixtures/upstream/Global/macOS.gitignore
