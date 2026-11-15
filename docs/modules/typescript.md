@@ -25,6 +25,7 @@ Biome merges `extends` left to right and applies the extending file last. Measur
 - **The `fix-lint` label commits what biome can fix:** the [bun block](https://github.com/Vivswan/repo-platform/blob/main/files/bun/.github/workflows/auto-format.toolchain.yml) of the `auto-format.yml` starter lets the commit follow biome's non-zero exit, so a finding with no safe fix stays for the `biome` gate to report. A copy whose format step lacks `continue-on-error: true` fails there and commits nothing: add the line by hand ([starters are written once](../toolchains.md#overriding-per-toolchain)).
 - **A repository that already has a `biome.jsonc`:** move its content into `biome.local.jsonc` and delete it. Biome reads `biome.json` and silently ignores a `biome.jsonc` beside it, so the old file would be dead configuration.
 - **A repository that already has a `biome.json`:** the sync replaces it and reports the diff under Replaced local edits; its content moves into `biome.local.jsonc` the same way.
+- **The `knip` step's verdict, locally:** the fleet runs the knip version pinned in [the action's manifest](../../actions/knip/package.json), as `knip --treat-config-hints-as-errors` ([the action](../../actions/knip/action.yml)), so a stale `ignore` entry fails the step. A repository's own `knip` script runs the same flag on the same version; another version, or no flag, can pass locally and fail the step.
 
 ## The member-shape rules
 
