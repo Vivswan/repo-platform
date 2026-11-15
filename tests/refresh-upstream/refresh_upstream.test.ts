@@ -252,6 +252,28 @@ describe("the refresh", () => {
     "",
   ].join("\n");
   const DOTFILES = { "files/bun/.bun-version": "1.4.0\n", "files/uv/.uv-version": "2.9.5\n" };
+  const CI = ".github/workflows/ci.yml";
+  const sha = (digit: string) => digit.repeat(64);
+  /** A workflow installing both tools; the values are invented. */
+  const workflow = (pinact: [string, string], vale: [string, string]) =>
+    [
+      "jobs:",
+      "  lint:",
+      "    steps:",
+      "      - name: Install pinact",
+      "        env:",
+      `          PINACT_VERSION: ${pinact[0]}`,
+      `          PINACT_SHA256: ${pinact[1]}  # the archive`,
+      '        run: curl -o pinact.tar.gz "https://example.com/v${PINACT_VERSION}/pinact.tar.gz"',
+      "  docs:",
+      "    steps:",
+      "      - env:",
+      `          VALE_VERSION: ${vale[0]}`,
+      `          VALE_SHA256: ${vale[1]}`,
+      "        run: vale docs",
+      "",
+    ].join("\n");
+  const WORKFLOW = workflow(["4.1.1", sha("a")], ["3.24.0", sha("b")]);
   const NODE_DIFF =
     "--- Node.gitignore\n+++ Node.gitignore\n@@ -1,1 +1,2 @@\n node_modules/\n+.bun/";
 
@@ -259,7 +281,11 @@ describe("the refresh", () => {
     const root = temp.dir("refresh-upstream-");
     // The @types/bun hook walks actions/ for lockfiles, as in the repository; none here, so no `bun add` runs.
     mkdirSync(join(root, "actions"));
-    for (const [path, text] of [["files.yml", CONFIG], ...Object.entries(DOTFILES)]) {
+    for (const [path, text] of [
+      ["files.yml", CONFIG],
+      [CI, WORKFLOW],
+      ...Object.entries(DOTFILES),
+    ]) {
       mkdirSync(join(root, dirname(path)), { recursive: true });
       writeFileSync(join(root, path), text);
     }
@@ -295,14 +321,44 @@ describe("the refresh", () => {
   const HEAD = "repos/o/a/commits/HEAD";
   const BUN_LATEST = "repos/oven-sh/bun/releases/latest";
   const UV_LATEST = "repos/astral-sh/uv/releases/latest";
+  const PINACT_LATEST = "repos/suzuki-shunsuke/pinact/releases/latest";
+  const VALE_LATEST = "repos/vale-cli/vale/releases/latest";
+  const asset = (name: string, digit: string | null) => ({
+    name,
+    digest: digit === null ? null : `sha256:${sha(digit)}`,
+  });
   const routes: FakeRoutes = {
     [HEAD]: [{ status: 200, body: { sha: NEW } }],
     [BUN_LATEST]: [{ status: 200, body: { tag_name: "bun-v1.4.1" } }],
     [UV_LATEST]: [{ status: 200, body: { tag_name: "v3.0.0" } }],
+    [PINACT_LATEST]: [
+      {
+        status: 200,
+        body: {
+          tag_name: "v5.0.0",
+          assets: [
+            asset("pinact_darwin_arm64.tar.gz", "c"),
+            asset("pinact_linux_amd64.tar.gz", "d"),
+          ],
+        },
+      },
+    ],
+    [VALE_LATEST]: [
+      {
+        status: 200,
+        body: {
+          tag_name: "v3.24.1",
+          assets: [
+            asset("vale_3.24.0_Linux_64-bit.tar.gz", "e"),
+            asset("vale_3.24.1_Linux_64-bit.tar.gz", "f"),
+          ],
+        },
+      },
+    ],
   };
 
   const rows: {
-    kind: "commit" | "release";
+    kind: "commit" | "release" | "tool";
     fetched: string[];
     bumps: Bump[];
     written: Record<string, string>;
@@ -362,6 +418,29 @@ describe("the refresh", () => {
         "## uv: `2.9.5` -> `3.0.0`",
         "",
         "The next sync writes each dotfile to every repository selecting its module (docs/toolchains.md). Merging this moves the stable tag once green.",
+      ].join("\n"),
+    },
+    {
+      kind: "tool",
+      fetched: [PINACT_LATEST, VALE_LATEST],
+      bumps: [
+        { kind: "tool", name: "pinact", from: "4.1.1", to: "5.0.0" },
+        { kind: "tool", name: "vale", from: "3.24.0", to: "3.24.1" },
+      ],
+      // Each archive's own digest lands, never a sibling asset's; the comment and the command stay.
+      written: {
+        "files.yml": CONFIG,
+        [CI]: workflow(["5.0.0", sha("d")], ["3.24.1", sha("f")]),
+      },
+      prose: "pinact to 5.0.0 and vale to 3.24.1",
+      body: [
+        "**MAJOR VERSION JUMP: pinact 4 -> 5 - review before merging.**",
+        "",
+        "## pinact: `4.1.1` -> `5.0.0`",
+        "",
+        "## vale: `3.24.0` -> `3.24.1`",
+        "",
+        "This pull request's own checks install each tool at its new version, by the sha256 GitHub records for the release archive, so a green run is the proof the bump works. Nothing here reaches the fleet (docs/toolchains.md).",
       ].join("\n"),
     },
   ];
@@ -431,6 +510,29 @@ describe("the refresh", () => {
       expect(readFileSync(join(root, "files/bun/.bun-version"), "utf-8")).toBe("1.4.0\n");
     },
   );
+
+  // GitHub records no digest for an asset uploaded before it kept them, and a release can drop an archive name: the
+  // workflow would then check a download against a value that is no sha256, so the run aborts with both pins unmoved.
+  test.each([
+    {
+      reason: "a null digest",
+      assets: [asset("vale_3.24.1_Linux_64-bit.tar.gz", null)],
+    },
+    {
+      reason: "no archive of the pinned name",
+      assets: [asset("vale_3.24.1_Linux_arm64.tar.gz", "f")],
+    },
+  ])("tool pins: $reason aborts the run before any pin moves", async ({ assets }) => {
+    const root = plant();
+    const bare = upstream(answers, {
+      ...routes,
+      [VALE_LATEST]: [{ status: 200, body: { tag_name: "v3.24.1", assets } }],
+    });
+    await expect(refresh({ kind: "tool", root, host: "h", ...bare })).rejects.toThrow(
+      "vale-cli/vale: the latest release records no sha256 for vale_3.24.1_Linux_64-bit.tar.gz",
+    );
+    expect(readFileSync(join(root, CI), "utf-8")).toBe(WORKFLOW);
+  });
 
   // Named incident: one 502 from releases/latest failed the weekly refresh, which had no second attempt.
   test("a 502 followed by a 200 still moves the pin", async () => {
