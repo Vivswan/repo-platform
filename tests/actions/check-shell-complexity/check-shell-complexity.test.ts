@@ -1,4 +1,4 @@
-// The verdict per construct rides on an external parser's node vocabulary (mvdan/sh's NodeType strings, PowerShell's AST
+// The verdict per construct rides on an external parser's node vocabulary (mvdan/sh's node type names, PowerShell's AST
 // class names), the collector on the yaml package's scalar positions (a block scalar's content starts the line after its
 // header) and GitHub's runner defaults, and the regression scenario is a long bash block that tests a `$(...)` inside
 // `[ ]`, where `set -e` does not reach a failed command, which one `bun script.ts` line replaces.
@@ -114,7 +114,24 @@ describe("the rule, per construct and dialect", () => {
       "bash: a body that does not parse is a finding at the parser's line",
       "bash",
       "bun install\nif [ x; then\n",
-      [at(2, 'does not parse as bash: if statement must end with "fi"')],
+      [at(2, "does not parse as bash: `then` must be followed by a statement list")],
+    ],
+    [
+      "bash: a bash 5.3 `${ cmd; }` substitution parses, as bash runs it",
+      "bash",
+      "x=${ echo hi; }\n",
+      [],
+    ],
+    [
+      "bash: a zsh-only expansion is a finding at its line, which the parser carries only in its message",
+      "bash",
+      "echo ok\necho ${(U)name}\n",
+      [
+        at(
+          2,
+          "does not parse as bash: parameter expansion flags are a zsh feature; tried parsing as bash",
+        ),
+      ],
     ],
     [
       "bash: a straight line of commands",
@@ -546,11 +563,12 @@ describe("the check over a checkout", () => {
 
   const REMEDY = `move this block to a TypeScript script run by bun, or list the file in ${ALLOWLIST_FILE} with a # reason`;
 
-  test("the incident block is refused at its lines, an exempted action is not, and the report carries the table with its pipes escaped", () => {
+  test("the incident block is refused at its lines, an exempted action is not, and the report carries the table with its pipes escaped and the parser's backticks inside the code span", () => {
     const root = checkout(temp, "check-shell-complexity-", {
       ".github/workflows/release.yml": INCIDENT,
       "actions/pin/action.yml": PIN_ACTION,
       "scripts/a|b.sh": "#!/bin/bash\nif true; then\n  make || echo failed\nfi\n",
+      "scripts/open.sh": "echo 'never closed\n",
       [ALLOWLIST_FILE]: "actions/pin/action.yml # the pre-bun pin walk\n",
     });
     expect(run(root)).toEqual({
@@ -558,23 +576,25 @@ describe("the check over a checkout", () => {
       stdout: [
         `::error file=.github/workflows/release.yml,line=20::.github/workflows/release.yml:20: $(...) tested inside if; ${REMEDY}`,
         `::error file=scripts/a|b.sh,line=3::scripts/a|b.sh:3: || inside if; ${REMEDY}`,
+        `::error file=scripts/open.sh,line=1::scripts/open.sh:1: does not parse as bash: reached EOF without closing quote \`'\`; ${REMEDY}`,
         "",
       ].join("\n"),
-      stderr: `2 finding(s). Shell may nest no construct inside another; ${REMEDY}.\n`,
+      stderr: `3 finding(s). Shell may nest no construct inside another; ${REMEDY}.\n`,
       output: { report: "findings" },
       report: [
         "## Shell complexity check",
         "",
-        "2 refused construct(s) (fails).",
+        "3 refused construct(s) (fails).",
         "",
         "| Where | Construct | Source |",
         "| --- | --- | --- |",
-        "| `.github/workflows/release.yml:20` | `$(...) tested inside if` | workflow run step, bash/sh/zsh |",
-        "| `scripts/a\\|b.sh:3` | `\\|\\| inside if` | script file, bash/sh/zsh |",
+        "| `.github/workflows/release.yml:20` | `` $(...) tested inside if `` | workflow run step, bash/sh/zsh |",
+        "| `scripts/a\\|b.sh:3` | `` \\|\\| inside if `` | script file, bash/sh/zsh |",
+        "| `scripts/open.sh:1` | `` does not parse as bash: reached EOF without closing quote `'` `` | script file, bash/sh/zsh |",
         "",
         `Move each block to a TypeScript script run by bun, or list the file in \`${ALLOWLIST_FILE}\` with a \`# reason\` (a block that must stay shell).`,
         "",
-        "Bodies judged: 1 workflow run step, 1 composite action run step, 1 script file.",
+        "Bodies judged: 1 workflow run step, 1 composite action run step, 2 script files.",
         "",
       ].join("\n"),
     });
