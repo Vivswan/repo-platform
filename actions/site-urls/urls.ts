@@ -3,8 +3,8 @@
 // a pattern, a space, and a replacement carrying `$N` captures.
 
 import { setFailed, setOutput } from "@actions/core";
-import { messageOf, requireEnv } from "../shared/action_runtime.ts";
-import { pagesSite } from "../shared/pages_site.ts";
+import { env, messageOf, requireEnv } from "../shared/action_runtime.ts";
+import { pagesSite, pagesSiteAt } from "../shared/pages_site.ts";
 
 export interface SiteUrls {
   "base-path": string;
@@ -13,16 +13,20 @@ export interface SiteUrls {
   "tree-links": string;
 }
 
-/** `tree-links` is case-sensitive on purpose: a branch in another case is another ref, and a link spelled otherwise
+/** `siteUrl` is the address GitHub reports for the site, or "" for a caller with no Pages API to ask, which gets
+ *  the rule's.
+ *
+ *  `tree-links` is case-sensitive on purpose: a branch in another case is another ref, and a link spelled otherwise
  *  stays a network check. The path capture `$2` drops trailing slashes, the query, and the fragment, since GitHub
  *  serves them and a file path does not. */
 export function siteUrls(input: {
   repository: string;
+  siteUrl: string;
   serverUrl: string;
   workspace: string;
   defaultBranch: string;
 }): SiteUrls {
-  const site = pagesSite(input.repository);
+  const site = input.siteUrl === "" ? pagesSite(input.repository) : pagesSiteAt(input.siteUrl);
   const repoUrl = `${input.serverUrl}/${input.repository}/`;
   return {
     "base-path": site.basePath,
@@ -38,6 +42,7 @@ if (import.meta.main) {
   try {
     const urls = siteUrls({
       repository: requireEnv("GITHUB_REPOSITORY"),
+      siteUrl: env("SITE_URL"),
       serverUrl: requireEnv("GITHUB_SERVER_URL").replace(/\/+$/, ""),
       workspace: requireEnv("GITHUB_WORKSPACE"),
       defaultBranch: requireEnv("DEFAULT_BRANCH"),

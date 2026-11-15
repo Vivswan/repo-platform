@@ -3,16 +3,23 @@ description: |
   Resolves where GitHub Pages serves the calling repository, for reusable-site.yml's deploy (docs/modules/site.md):
   the base path the site-build hook builds for, the origin, and the edit and tree patterns the nightly link-rot check reads.
 
-  - The base path is `/<repo>/`, or `/` for the owner's user site, the repository named `<owner>.github.io`.
-  - The owner is lowercased in the origin: Pages serves `<owner>.github.io` in lowercase and lychee reports hosts
-    that way.
+  - With `site-url`, the origin and the base path are that address's: a custom domain's site sits at `/`.
+  - Without it, they follow the rule for a site with no custom domain: `https://<owner>.github.io` and `/<repo>/`, or
+    `/` for the owner's user site, the repository named `<owner>.github.io`.
+  - The host is lowercase either way: Pages serves it so and lychee reports hosts that way.
+
+inputs:
+  site-url:
+    description: The address GitHub reports for the site (configure-pages' base_url), or empty where no Pages API can be asked
+    required: false
+    default: ""
 
 outputs:
   base-path:
-    description: The URL path the site is served under, "/<repo>/" or "/"
+    description: The URL path the site is served under, with a trailing slash, "/<repo>/" or "/"
     value: ${{ steps.urls.outputs.base-path }}
   origin:
-    description: The site's origin, https://<owner>.github.io
+    description: The site's origin, https://<owner>.github.io or the custom domain's
     value: ${{ steps.urls.outputs.origin }}
   edit-links:
     description: The regex matching the theme's "Edit this page" links, which an anonymous crawl cannot judge
@@ -48,4 +55,5 @@ runs:
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        SITE_URL: ${{ inputs.site-url }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/urls.ts"'
