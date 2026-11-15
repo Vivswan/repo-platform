@@ -10,6 +10,13 @@ import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { PLATFORM_OWNER, PLATFORM_SLUG } from "../../actions/shared/platform.ts";
 import { type Action, REPO_ROOT, type Step } from "../shared/action_step";
+import {
+  type ContextRead,
+  conditionSource,
+  contextReads,
+  expressionsIn,
+  parseExpression,
+} from "../shared/github_expression";
 
 const ACTIONS_DIR = join(REPO_ROOT, "actions");
 const ACTION_NAMES = readdirSync(ACTIONS_DIR)
@@ -20,9 +27,7 @@ const CALLER_ROOTS = [
   ...readdirSync(join(REPO_ROOT, "files")).map((module) => `files/${module}/.github/workflows`),
 ].filter((root) => existsSync(join(REPO_ROOT, root)));
 
-const EXPRESSION = /\$\{\{([\s\S]*?)\}\}/g;
-const STEP_REF = /\bsteps\.([\w-]+)\.(?:outputs\.([\w-]+)|outcome|conclusion)\b/g;
-const INPUT_REF = /\binputs\.([\w-]+)/g;
+const STEP_FIELDS = new Set(["outputs", "outcome", "conclusion"]);
 const ACTION_PATH = "${{ github.action_path }}";
 const SCRIPT_TOKEN = /\S+\.ts\b/g;
 const OWN_ACTION = new RegExp(`^(?:\\$/actions/|${PLATFORM_SLUG}/actions/)([\\w-]+)(?:@|$)`);
@@ -42,12 +47,35 @@ function loadYaml(rel: string): unknown {
 
 const loadAction = (name: string): Action => loadYaml(`actions/${name}/action.yml`) as Action;
 
-/** An `if:` is an expression whole; everywhere else only the `${{ }}` spans are. */
-function expressionsOf(node: unknown): string[] {
-  const found = [...JSON.stringify(node).matchAll(EXPRESSION)].map((m) => m[1]);
-  const condition = (node as { if?: unknown }).if;
-  if (typeof condition === "string") found.push(condition);
-  return found;
+/** Every string a YAML node holds, at any depth. */
+function strings(node: unknown): string[] {
+  if (typeof node === "string") return [node];
+
+  if (node === null || typeof node !== "object") return [];
+
+  return Object.values(node).flatMap(strings);
+}
+
+/** Every context read of a step or an output spec, as GitHub's parser reads it: an `if:` is an expression whole,
+ *  everywhere else only the `${{ }}` spans are. */
+function readsOf(node: unknown): ContextRead[] {
+  const { if: condition, ...rest } = node as Record<string, unknown>;
+  const sources = strings(rest).flatMap(expressionsIn);
+  if (typeof condition === "string") sources.push(conditionSource(condition));
+
+  return sources.flatMap((source) => contextReads(parseExpression(source).tree));
+}
+
+/** The step a read names and the output key it reads, for `steps.<id>.outputs.<key>`, `.outcome`, and `.conclusion`;
+ *  null for any other read, a computed step id included. */
+function stepRead(read: ContextRead): { id: string; key: string | undefined } | null {
+  const [context, id, , key] = read;
+  const field = read[2]?.toLowerCase() ?? "";
+  if (context?.toLowerCase() !== "steps" || typeof id !== "string" || !STEP_FIELDS.has(field)) {
+    return null;
+  }
+
+  return { id, key: field === "outputs" ? (key ?? undefined) : undefined };
 }
 
 /** In a run, a key leaves through `echo "key=..." >> "$GITHUB_OUTPUT"` (the write on the same line); a shell assignment
@@ -56,7 +84,7 @@ function expressionsOf(node: unknown): string[] {
  *  (`return { key: x }`). The text is read, not run: a reference to a name some other single-key record returns
  *  passes here and is caught by the step's own test. */
 function writesKey(text: string, key: string, form: "run" | "script"): boolean {
-  const name = key.replaceAll("-", "\\-");
+  const name = RegExp.escape(key);
   if (form === "run") return new RegExp(`(["']|echo\\s+)${name}=[^\\n]*GITHUB_OUTPUT`).test(text);
   const lines = text.replaceAll("\\n", "\n");
   return (
@@ -97,28 +125,32 @@ function stepWrites(actionName: string, step: Step, key: string): boolean {
   return Object.hasOwn(loadAction(own[1]).outputs ?? {}, key);
 }
 
-/** Every `inputs.x` one expression reads that the action does not declare. */
-function undeclaredInputReads(where: string, expression: string, inputs: Set<string>): string[] {
-  return [...expression.matchAll(INPUT_REF)]
-    .filter((m) => !inputs.has(m[1]))
-    .map((m) => `${where}: inputs.${m[1]} is not declared`);
+/** Every `inputs.x` among the reads that the action does not declare. */
+function undeclaredInputReads(where: string, reads: ContextRead[], inputs: Set<string>): string[] {
+  return reads
+    .filter(([context, name]) => context?.toLowerCase() === "inputs" && typeof name === "string")
+    .filter(([, name]) => !inputs.has(String(name)))
+    .map(([, name]) => `${where}: inputs.${name} is not declared`);
 }
 
-/** Every `steps.id.outputs.key` one expression reads from a step that is not among `visible` or writes no such key. */
+/** Every step read among the reads whose step is not among `visible` or writes no such key. */
 function badStepReads(
   where: string,
-  expression: string,
+  reads: ContextRead[],
   visible: Set<string>,
   byId: Map<string, Step>,
   actionName: string,
 ): string[] {
   const problems: string[] = [];
-  for (const [, id, key] of expression.matchAll(STEP_REF)) {
-    const step = byId.get(id);
-    if (!visible.has(id) || step === undefined) {
-      problems.push(`${where}: steps.${id} is no earlier step`);
-    } else if (key !== undefined && !stepWrites(actionName, step, key)) {
-      problems.push(`${where}: steps.${id} writes no output '${key}'`);
+  for (const read of reads) {
+    const named = stepRead(read);
+    if (named === null) continue;
+
+    const step = byId.get(named.id);
+    if (!visible.has(named.id) || step === undefined) {
+      problems.push(`${where}: steps.${named.id} is no earlier step`);
+    } else if (named.key !== undefined && !stepWrites(actionName, step, named.key)) {
+      problems.push(`${where}: steps.${named.id} writes no output '${named.key}'`);
     }
   }
   return problems;
@@ -128,21 +160,20 @@ function manifestProblems(name: string, action: Action): string[] {
   const inputs = new Set(Object.keys(action.inputs ?? {}));
   const steps = action.runs.steps;
   const byId = new Map(steps.filter((s) => typeof s.id === "string").map((s) => [String(s.id), s]));
-  const judge = (where: string, expressions: string[], visible: Set<string>): string[] =>
-    expressions.flatMap((expression) => [
-      ...undeclaredInputReads(where, expression, inputs),
-      ...badStepReads(where, expression, visible, byId, name),
-    ]);
+  const judge = (where: string, reads: ContextRead[], visible: Set<string>): string[] => [
+    ...undeclaredInputReads(where, reads, inputs),
+    ...badStepReads(where, reads, visible, byId, name),
+  ];
   const problems: string[] = [];
   const earlier = new Set<string>();
   steps.forEach((step, index) => {
     problems.push(
-      ...judge(`step ${index + 1} (${String(step.name ?? step.id)})`, expressionsOf(step), earlier),
+      ...judge(`step ${index + 1} (${String(step.name ?? step.id)})`, readsOf(step), earlier),
     );
     if (typeof step.id === "string") earlier.add(step.id);
   });
   for (const [output, spec] of Object.entries(action.outputs ?? {})) {
-    problems.push(...judge(`outputs.${output}`, expressionsOf(spec), new Set(byId.keys())));
+    problems.push(...judge(`outputs.${output}`, readsOf(spec), new Set(byId.keys())));
   }
   return problems;
 }
@@ -192,11 +223,61 @@ const CONTROL_ACTION: Action = {
         shell: "bash",
         run: 'echo "path=1" >> "$GITHUB_OUTPUT"',
       },
-      { id: "second", shell: "bash", run: "true", env: { A: "${{ steps.first.outputs.pat }}" } },
-      { id: "third", shell: "bash", run: "true", if: "steps.fourth.outcome == 'failure'" },
+      {
+        id: "second",
+        shell: "bash",
+        run: "true",
+        env: {
+          A: "${{ steps.first.outputs.pat }}",
+          B: "${{ steps['absent'].outputs.path }}",
+          C: "${{ STEPS.first.Outputs.pat }}",
+        },
+      },
+      {
+        id: "third",
+        shell: "bash",
+        run: "true",
+        if: "steps.fourth.outcome == 'failure'",
+        env: { D: "${{ github.event.inputs.mod }}" },
+      },
     ],
   },
 };
+
+// GitHub takes any string as an output key (`outputs['path.*']`), so a key read as a pattern matches writes of other
+// keys and a reference to a key no step writes passes.
+test.each<{ name: string; text: string; key: string; form: "run" | "script"; written: boolean }>([
+  {
+    name: "a key holding a wildcard is not the key it would match",
+    text: 'echo "path=1" >> "$GITHUB_OUTPUT"',
+    key: "path.*",
+    form: "run",
+    written: false,
+  },
+  {
+    name: "a dot in a key is a dot",
+    text: "fooXbar=${value}",
+    key: "foo.bar",
+    form: "script",
+    written: false,
+  },
+  {
+    name: "a dotted key is found where it is written",
+    text: "foo.bar=${value}",
+    key: "foo.bar",
+    form: "script",
+    written: true,
+  },
+  {
+    name: "a hyphenated key is found where it is written",
+    text: 'echo "cache-hit=true" >> "$GITHUB_OUTPUT"',
+    key: "cache-hit",
+    form: "run",
+    written: true,
+  },
+])("writesKey: $name", ({ text, key, form, written }) => {
+  expect(writesKey(text, key, form)).toBe(written);
+});
 
 test("every steps.<id>, inputs.<x>, and output mapping in the action manifests names a step, an input, and a key the step writes", () => {
   const actions = new Map(ACTION_NAMES.map((name) => [name, loadAction(name)]));
@@ -206,6 +287,8 @@ test("every steps.<id>, inputs.<x>, and output mapping in the action manifests n
   expect(judged).toEqual(Object.fromEntries(ACTION_NAMES.map((name) => [name, []])));
   expect(manifestProblems("control", CONTROL_ACTION)).toEqual([
     "step 1 (first): inputs.mod is not declared",
+    "step 2 (second): steps.first writes no output 'pat'",
+    "step 2 (second): steps.absent is no earlier step",
     "step 2 (second): steps.first writes no output 'pat'",
     "step 3 (third): steps.fourth is no earlier step",
     "outputs.path: steps.gone is no earlier step",
@@ -274,7 +357,8 @@ export function undeclaredOutputReads(steps: Step[], actions: Map<string, Action
     if (own !== null && typeof step.id === "string") ownAction.set(step.id, own[1]);
   }
   const problems: string[] = [];
-  for (const [, id, key] of JSON.stringify(steps).matchAll(STEP_REF)) {
+  for (const read of steps.flatMap(readsOf)) {
+    const { id = "", key } = stepRead(read) ?? {};
     const name = ownAction.get(id);
     if (key === undefined || name === undefined) continue;
     const action = actions.get(name);

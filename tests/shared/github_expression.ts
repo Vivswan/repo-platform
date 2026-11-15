@@ -5,11 +5,14 @@
 import { data, Evaluator, Lexer, Parser } from "@actions/expressions";
 import {
   Binary,
+  ContextAccess,
   type Expr,
   FunctionCall,
   Grouping,
   IndexAccess,
+  Literal,
   Logical,
+  Star,
   Unary,
 } from "@actions/expressions/ast";
 import type { Token } from "@actions/expressions/lexer";
@@ -43,6 +46,65 @@ const STATUS_FUNCTIONS = new Map(
     },
   ]),
 );
+const STATUS_FUNCTION_NAMES = new Set(["success", "failure", "cancelled", "always"]);
+const RUNNER_FUNCTIONS = [...STATUS_FUNCTION_NAMES, "hashFiles"].map((name) => ({
+  name,
+  minArgs: 0,
+  maxArgs: 255,
+}));
+const OPEN = "${{";
+const CLOSE = "}}";
+const PLAIN_NAME = /^[A-Za-z_][\w-]*$/;
+
+/** One piece of a workflow string: text the runner keeps as written, or the source of one `${{ }}` expression. */
+export type TemplateSegment = { literal: string } | { expression: string };
+
+/** One context read, the names from the context down: `steps['build'].outputs.path` is `["steps", "build", "outputs",
+ *  "path"]`. A `null` stands where the index is computed (`steps[env.ID]`) or a `*`. */
+export type ContextRead = (string | null)[];
+
+/** The index of the `}}` closing an expression whose inside starts at `from`: the first one outside a single-quoted
+ *  string, as the runner finds it. A doubled quote inside a string closes and reopens it, which reads the same here. */
+function closeOf(text: string, from: number): number {
+  let quoted = false;
+  for (let at = from; at < text.length; at += 1) {
+    if (text[at] === "'") quoted = !quoted;
+    if (!quoted && text.startsWith(CLOSE, at)) return at;
+  }
+  throw new Error(`an expression is never closed in ${text}`);
+}
+
+/** The text split as the runner splits a workflow string, in order; no piece is read twice. */
+export function templateSegments(text: string): TemplateSegment[] {
+  const segments: TemplateSegment[] = [];
+  let at = 0;
+  for (let open = text.indexOf(OPEN); open !== -1; open = text.indexOf(OPEN, at)) {
+    const close = closeOf(text, open + OPEN.length);
+    if (open > at) segments.push({ literal: text.slice(at, open) });
+    segments.push({ expression: text.slice(open + OPEN.length, close).trim() });
+    at = close + CLOSE.length;
+  }
+
+  if (at < text.length) segments.push({ literal: text.slice(at) });
+
+  return segments;
+}
+
+/** The source of every `${{ }}` expression in the text, in order. */
+export function expressionsIn(text: string): string[] {
+  return templateSegments(text).flatMap((segment) =>
+    "expression" in segment ? [segment.expression] : [],
+  );
+}
+
+/** The expression an `if:` is: the text itself, or the inside of the one `${{ }}` that wraps it whole. */
+export function conditionSource(condition: string): string {
+  const segments = templateSegments(condition.trim());
+  const [only] = segments;
+  if (segments.length === 1 && "expression" in only) return only.expression;
+
+  return condition.trim();
+}
 
 /** The expression's value over the context, each key a dotted path. A key nobody set reads as null, as an unrun job's
  *  output does in Actions. The status functions are the workflow runner's, not the expression language's: a step or
@@ -83,17 +145,14 @@ export function evaluateCondition(
 
 /** The text as the runner fills a `with:` or `env:` value: every `${{ }}` span replaced by its value over the context. */
 export function interpolate(text: string, context: Record<string, string | boolean>): string {
-  return text.replaceAll(/\$\{\{([\s\S]*?)\}\}/g, (_span, expression: string) =>
-    evaluate(expression.trim(), context).coerceString(),
-  );
+  return templateSegments(text)
+    .map((segment) =>
+      "expression" in segment
+        ? evaluate(segment.expression, context).coerceString()
+        : segment.literal,
+    )
+    .join("");
 }
-
-const STATUS_FUNCTION_NAMES = new Set(["success", "failure", "cancelled", "always"]);
-const RUNNER_FUNCTIONS = [...STATUS_FUNCTION_NAMES, "hashFiles"].map((name) => ({
-  name,
-  minArgs: 0,
-  maxArgs: 255,
-}));
 
 /** The tokens and the tree of one expression's source, the `${{ }}` already stripped. */
 export function parseExpression(source: string): { tokens: Token[]; tree: Expr } {
@@ -114,6 +173,83 @@ export function subexpressions(expr: Expr): Expr[] {
   if (expr instanceof IndexAccess) return [expr.expr, expr.index];
 
   return [];
+}
+
+/** The node inside any parentheses around it. Grouping is the tree's one wrapper that changes no value, so every
+ *  reader of a node's kind asks this first and a parenthesis decides nothing. */
+export function ungrouped(expr: Expr): Expr {
+  return expr instanceof Grouping ? ungrouped(expr.group) : expr;
+}
+
+/** The name a literal index reads, or null for a computed one or a `*`. */
+export function indexName(index: Expr): string | null {
+  const literal = ungrouped(index);
+  return literal instanceof Literal ? literal.literal.coerceString() : null;
+}
+
+/** The read the node itself is, or null when it is no chain down from a context: `fromJSON(steps.a.outputs.b).c`
+ *  holds a read and is none. */
+export function contextRead(grouped: Expr): ContextRead | null {
+  const expr = ungrouped(grouped);
+  if (expr instanceof ContextAccess) return [expr.name.lexeme];
+
+  if (!(expr instanceof IndexAccess)) return null;
+
+  const base = contextRead(expr.expr);
+  if (base === null) return null;
+
+  return [...base, indexName(expr.index)];
+}
+
+/** The reads inside the computed indexes of a chain: `env.ID` in `steps[env.ID].outputs.path`. */
+function indexReads(grouped: Expr): ContextRead[] {
+  const expr = ungrouped(grouped);
+  if (!(expr instanceof IndexAccess)) return [];
+
+  return [...indexReads(expr.expr), ...contextReads(expr.index)];
+}
+
+/** Every context read in the tree, outermost first: `a.b` and `a['b']` are one read, as the runner resolves them. */
+export function contextReads(expr: Expr): ContextRead[] {
+  const path = contextRead(expr);
+  if (path === null) return subexpressions(expr).flatMap(contextReads);
+
+  return [path, ...indexReads(expr)];
+}
+
+/** The tree in one spelling whatever the source's spacing and quoting, for naming a term in a failure: a literal
+ *  name index prints dotted, a computed one in brackets. */
+export function printed(expr: Expr): string {
+  if (expr instanceof Literal) return expr.token.lexeme;
+
+  if (expr instanceof ContextAccess) return expr.name.lexeme;
+
+  if (expr instanceof Unary) return `${expr.operator.lexeme}${printed(expr.expr)}`;
+
+  if (expr instanceof Binary) {
+    return `${printed(expr.left)} ${expr.operator.lexeme} ${printed(expr.right)}`;
+  }
+
+  if (expr instanceof Logical) return expr.args.map(printed).join(` ${expr.operator.lexeme} `);
+
+  if (expr instanceof Grouping) return `(${printed(expr.group)})`;
+
+  if (expr instanceof FunctionCall) {
+    return `${expr.functionName.lexeme}(${expr.args.map(printed).join(", ")})`;
+  }
+
+  if (!(expr instanceof IndexAccess)) throw new Error("an expression node of no known kind");
+
+  const base = printed(expr.expr);
+  if (expr.index instanceof Star) return `${base}.*`;
+
+  const { index } = expr;
+  const named = index instanceof Literal && index.literal instanceof data.StringData;
+  if (named && PLAIN_NAME.test(index.literal.coerceString())) {
+    return `${base}.${index.literal.coerceString()}`;
+  }
+
+  return `${base}[${printed(index)}]`;
 }
 
 /** Every function the expression calls, by lower-cased name, outermost first. */
