@@ -50,7 +50,7 @@ Rules that follow:
 
 - **Never hand-edit the dotfile:** it is managed, so the next sync overwrites it, with the change visible only in the sync PR. Keep deliberate divergence in the workflow inputs above.
 
-- **Starters are written once:** repo-owned starters (`copilot-setup-steps.yml`, the `checks.yml` examples) are never resynced, so a later change to a starter reaches an existing copy only by hand.
+- **Starters are written once:** repo-owned starters (the `checks.yml` examples among them) are never resynced, so a later change to a starter reaches an existing copy only by hand.
 
 - **Drop `packageManager`:** once the dotfile pins bun, drop any `packageManager` field for it from `package.json`. setup-bun falls back to `packageManager`/`engines.bun` only when no version input or file matched, so a stale field is at best dead and at worst a second, disagreeing pin.
 

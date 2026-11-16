@@ -11,8 +11,6 @@
     // and indentation-relative fragments, which are not YAML before the writer renders them (the root .yamllint skips
     // them for the same reason); the rendered copies are judged in the fleet lint tree.
     // A license is kept verbatim, wherever it sits (the floor's override says the same once the self-sync carries it).
-    // The managed review instructions follow their source under files/base, which is judged here, and lag it by one
-    // self-sync.
     "includes": [
       "**",
       "!.github/repo-platform-manifest.json",
@@ -20,8 +18,7 @@
       "!files/**/*.yml",
       "!files/**/*.yaml",
       "!tests/ci/sync_end_to_end/fixtures/**/*.yml",
-      "!**/LICENSE.md",
-      "!.github/instructions/review.instructions.md"
+      "!**/LICENSE.md"
     ]
   },
   // The docs' `---` frontmatter is data, not a heading.

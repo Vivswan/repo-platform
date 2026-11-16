@@ -33,7 +33,7 @@ beforeAll(async () => {
 afterAll(() => upstream.stop());
 const REGISTRATION =
   "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n" +
-  "except: [CLAUDE.md, .github/agents.md, .github/copilot-instructions.md]\n";
+  "except: [CLAUDE.md, .github/agents.md, .github/assistants.md]\n";
 
 interface Platform {
   /** The checkout the commits below were made in. */

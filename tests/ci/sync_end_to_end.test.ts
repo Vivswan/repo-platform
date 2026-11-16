@@ -77,11 +77,11 @@ const LOCAL_DOCKERIGNORE = "dist/\n";
 const UNHASHED = "# unhashed notes\n";
 const HANDMADE = "# my own notes, recorded by hand\n";
 const LOCAL_DEPENDABOT = "version: 2\n# my own update schedule\n";
-const LOCAL_COPILOT = "# my own copilot notes\n";
+const LOCAL_NOTES = "# my own agent notes\n";
 const FLEET_LINKS = {
   "CLAUDE.md": "AGENTS.md",
   ".github/agents.md": "../AGENTS.md",
-  ".github/copilot-instructions.md": "../AGENTS.md",
+  ".github/assistants.md": "../AGENTS.md",
 };
 const noWriterNote = (path: string) =>
   `manifest record for \`${path}\` had no writer: no files.yml entry declares the path now; ` +
@@ -214,7 +214,7 @@ function seedTarget(): string {
     "HANDMADE.md": HANDMADE,
     ".github/dependabot.yml": LOCAL_DEPENDABOT,
     // A hand-written file where the fleet's symlink lands: replaced, its text shown.
-    ".github/copilot-instructions.md": LOCAL_COPILOT,
+    ".github/assistants.md": LOCAL_NOTES,
     [MANIFEST]: oldManifest(),
   };
   for (const [rel, content] of Object.entries(files)) {
@@ -509,7 +509,7 @@ describe("sync.ts end to end", () => {
     expect(summary.mirrors).toEqual([
       mirror("AGENTS.md", "CLAUDE.md", "current"),
       mirror("AGENTS.md", ".github/agents.md", "written"),
-      mirror("AGENTS.md", ".github/copilot-instructions.md", "replaced local edits"),
+      mirror("AGENTS.md", ".github/assistants.md", "replaced local edits"),
       mirror("LICENSE.md", "skills/new/LICENSE.md", "written"),
       mirror("LICENSE.md", "plain", "replaced", "a directory stood at the target"),
       mirror(
@@ -551,7 +551,7 @@ describe("sync.ts end to end", () => {
       expect(read(path)).toBe(read("AGENTS.md"));
     }
     expect(stdout).toContain(
-      "#### `.github/copilot-instructions.md`\n\n```diff\n--- .github/copilot-instructions.md\n+++ .github/copilot-instructions.md\n@@ -1,1 +1,1 @@\n-# my own copilot notes\n+../AGENTS.md\n\\ No newline at end of file",
+      "#### `.github/assistants.md`\n\n```diff\n--- .github/assistants.md\n+++ .github/assistants.md\n@@ -1,1 +1,1 @@\n-# my own agent notes\n+../AGENTS.md\n\\ No newline at end of file",
     );
   });
 
@@ -695,7 +695,7 @@ describe("sync.ts end to end", () => {
       "local edits replaced in .github/workflows/ci.yml",
       "local edits replaced in .github/dependabot.yml",
       "local edits replaced in constructor",
-      "local edits replaced in .github/copilot-instructions.md",
+      "local edits replaced in .github/assistants.md",
       "local edits replaced in template/LICENSE.md",
       "local edits replaced in skills/beta/LICENSE.md",
       "local edits replaced in skills/gamma/LICENSE.md",
@@ -1237,7 +1237,7 @@ describe("sync.ts over a registration with except", () => {
     );
     mkdirSync(join(target, ".github/workflows"), { recursive: true });
     writeFileSync(join(target, ".github/workflows/ci.yml"), LOCAL_CI);
-    writeFileSync(join(target, "CLAUDE.md"), LOCAL_COPILOT);
+    writeFileSync(join(target, "CLAUDE.md"), LOCAL_NOTES);
     fixtureGit(target, ["init", "-q", "-b", "main"]);
     const { summary } = runSync(target, join(temp.dir("sync-e2e-except-summary-"), "summary.json"));
     const paths = summary.written.map((row) => row.path);
@@ -1245,10 +1245,10 @@ describe("sync.ts over a registration with except", () => {
     expect(paths).toContain("LICENSE.md");
     expect(readFileSync(join(target, ".github/workflows/ci.yml"), "utf-8")).toBe(LOCAL_CI);
     // An excepted fleet mirror target is the repository's own; the other targets still land.
-    expect(readFileSync(join(target, "CLAUDE.md"), "utf-8")).toBe(LOCAL_COPILOT);
+    expect(readFileSync(join(target, "CLAUDE.md"), "utf-8")).toBe(LOCAL_NOTES);
     expect(summary.mirrors.map((row) => row.target)).toEqual([
       ".github/agents.md",
-      ".github/copilot-instructions.md",
+      ".github/assistants.md",
     ]);
     const note = "`except` names `docs/nothing.md`, a path no files.yml entry writes";
     expect(summary.notes).toEqual([note]);

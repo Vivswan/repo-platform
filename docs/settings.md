@@ -10,14 +10,14 @@ This page is the settings model of a managed repository: the layers the sync ren
 - **The rendered document:** every managed repository carries `.github/settings.yml`, a managed file the sync writes from six plain YAML layers. It is the one document [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code) applies.
 - **The edit rule:** the repository edits `.github/settings.local.yml`, its own layer, never the rendered file ([editing your settings](#editing-your-settings)).
 
-| #   | Layer                    | Home                                                                                                      | Contents                                                                                                                                                      |
-| --- | ------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Fleet baseline           | [files/settings/baseline.yml](../files/settings/baseline.yml)                                             | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels                                                          |
-| 2   | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | public: `security_and_analysis`, and the `main` ruleset's `code_quality` and `copilot_code_review` rules; private: the `settings-as-code-report` marker label |
-| 3   | Module layer             | `files/<module>/settings.yml` and, for site, [settings.public.yml](../files/site/settings.public.yml)     | what selecting that module adds, as its layer file says                                                                                                       |
-| 4   | CodeQL layer             | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml)                                   | the `code_scanning` rule, for public repos with a CodeQL toolchain                                                                                            |
-| 5   | Repo overlay             | the repo's own `.github/settings.local.yml`                                                               | identity keys (`description`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides                                                        |
-| 6   | Fleet override           | [files/settings/override.yml](../files/settings/override.yml)                                             | the invariants no repo may weaken (the list below)                                                                                                            |
+| #   | Layer                    | Home                                                                                                      | Contents                                                                                                                           |
+| --- | ------------------------ | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Fleet baseline           | [files/settings/baseline.yml](../files/settings/baseline.yml)                                             | the overridable fleet defaults: repository feature toggles, default branch, the unconditional labels                               |
+| 2   | Fleet visibility overlay | [files/settings/public.yml](../files/settings/public.yml) or [private.yml](../files/settings/private.yml) | public: `security_and_analysis`, and the `main` ruleset's `code_quality` rule; private: the `settings-as-code-report` marker label |
+| 3   | Module layer             | `files/<module>/settings.yml` and, for site, [settings.public.yml](../files/site/settings.public.yml)     | what selecting that module adds, as its layer file says                                                                            |
+| 4   | CodeQL layer             | [files/settings/codeql-public.yml](../files/settings/codeql-public.yml)                                   | the `code_scanning` rule, for public repos with a CodeQL toolchain                                                                 |
+| 5   | Repo overlay             | the repo's own `.github/settings.local.yml`                                                               | identity keys (`description`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides                             |
+| 6   | Fleet override           | [files/settings/override.yml](../files/settings/override.yml)                                             | the invariants no repo may weaken (the list below)                                                                                 |
 
 What a module layer adds is the layer file itself (`files/<module>/settings.yml`).
 
@@ -123,7 +123,7 @@ The apply is stateless, touches only declared keys, and upserts by name, all on 
 
 - **A whole ruleset no layer declares any more** is deleted on the next apply too: the override declares `_undeclared: delete` above every overlay, so no repository can keep one alive.
 
-- **`_remove: true` on a rule** in the overlay's `main` entry drops the rule a LOWER layer contributed (`rules: [{type: copilot_code_review, _remove: true}]`). It cannot touch the override layer's rules, so the fleet's mandatory protection survives it either way.
+- **`_remove: true` on a rule** in the overlay's `main` entry drops the rule a LOWER layer contributed (`rules: [{type: code_quality, _remove: true}]`). It cannot touch the override layer's rules, so the fleet's mandatory protection survives it either way.
 
 - **Repository fields, topics, and security toggles** are applied only when declared; omitting a key leaves the live value alone. The overlay starter therefore seeds `topics: []` unconditionally, like `private:`: the empty list declares-and-clears instead of leaving the field unmanaged.
 
@@ -154,14 +154,6 @@ A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](
 **Selecting:** the workflow and the ruleset ride one sync PR, so selecting the module never requires a check nothing creates.
 
 **Deselecting keeps a bounded window:** the sync PR that deletes `pr-title.yml` also drops the ruleset from the render. The still-live requirement wedges that PR on its own head until an admin bypass merges it; the apply after the merge deletes the ruleset.
-
-### Copilot code review
-
-`copilot_code_review` REQUESTS a Copilot code review on every pull request to the default branch (new pushes and drafts included), on PUBLIC repositories only. The rule lives in the fleet's public visibility overlay by fleet policy, not platform limit: private repos can run Copilot reviews, and the fleet chooses not to request them there.
-
-**The reviews are ADVISORY:** each executes as a dynamic Actions workflow and posts a `copilot-pull-request-reviewer` check run on the reviewed head, but nothing blocks on it.
-
-**Known gaps** where no automatic run fires: new pushes to DRAFT PRs, and bot-authored PRs such as Dependabot's. Re-request from the reviewers panel if a review is wanted.
 
 ## repo-platform itself is a target
 

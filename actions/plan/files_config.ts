@@ -485,7 +485,7 @@ function resolveWhen(
   return when;
 }
 
-/** Once per key: two starters share toolchain_steps, and a bad list is one problem. */
+/** Once per key: entries can share a block list, and a bad list is one problem. */
 function blockListProblems(data: ConfigData): string[] {
   const problems: string[] = [];
   const blockKeys = new Set(data.files.flatMap((entry) => entry.blocks ?? []));

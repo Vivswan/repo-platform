@@ -190,7 +190,7 @@ git push origin automation/repo-platform
 
 ## Disposition every bot review comment
 
-Copilot and other bots leave review comments on sync PRs; do not merge with any of them unaddressed. Read them all (`gh pr view <number> --comments`, plus `gh api repos/{owner}/{repo}/pulls/<number>/comments` for inline ones). Fix the valid ones on the branch, reply on the thread explaining why an invalid one is rejected, and resolve the thread.
+Bots can leave review comments on sync PRs; do not merge with any of them unaddressed. Read them all (`gh pr view <number> --comments`, plus `gh api repos/{owner}/{repo}/pulls/<number>/comments` for inline ones). Fix the valid ones on the branch, reply on the thread explaining why an invalid one is rejected, and resolve the thread.
 
 ## Resolving on a human's behalf
 

@@ -35,6 +35,7 @@ export const DELIVERED_SURFACE = [
   "actions/",
   ".github/scripts/sync/",
   ".github/scripts/shared/",
+  "migrations/",
   "bun.lock",
   "package.json",
 ] as const;
