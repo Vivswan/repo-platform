@@ -120,55 +120,55 @@ files:
       Windows:
         {
           repository: github/gitignore,
-          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          sha: b71db924d35085e481ad7c7ad8a7435b8d8b3016,
           path: Global/Windows.gitignore,
         }
       macOS:
         {
           repository: github/gitignore,
-          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          sha: b71db924d35085e481ad7c7ad8a7435b8d8b3016,
           path: Global/macOS.gitignore,
         }
       Linux:
         {
           repository: github/gitignore,
-          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          sha: b71db924d35085e481ad7c7ad8a7435b8d8b3016,
           path: Global/Linux.gitignore,
         }
       VSCode:
         {
           repository: github/gitignore,
-          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          sha: b71db924d35085e481ad7c7ad8a7435b8d8b3016,
           path: Global/VisualStudioCode.gitignore,
         }
       JetBrains:
         {
           repository: github/gitignore,
-          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          sha: b71db924d35085e481ad7c7ad8a7435b8d8b3016,
           path: Global/JetBrains.gitignore,
         }
       Node:
         {
           repository: github/gitignore,
-          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          sha: b71db924d35085e481ad7c7ad8a7435b8d8b3016,
           path: Node.gitignore,
         }
       bun:
         {
           repository: github/gitignore,
-          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          sha: b71db924d35085e481ad7c7ad8a7435b8d8b3016,
           path: bun.gitignore,
         }
       Python:
         {
           repository: github/gitignore,
-          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          sha: b71db924d35085e481ad7c7ad8a7435b8d8b3016,
           path: Python.gitignore,
         }
       Rust:
         {
           repository: github/gitignore,
-          sha: 6bb5af7a1b050e5add3a71b6e6365c93498822ac,
+          sha: b71db924d35085e481ad7c7ad8a7435b8d8b3016,
           path: Rust.gitignore,
         }
       fuzzer: files/fuzzer/fuzzer.gitignore
