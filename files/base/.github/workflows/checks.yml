@@ -3,7 +3,9 @@
 # This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync, so edit freely.
 #
 # The caller passes the repository's secrets through (a job reading an environment secret declares its environment) and
-# caps at contents: read. A check needing more permissions gets its own workflow, wired via .github/settings.yml.
+# grants contents: read and pull-requests: write. The block below keeps every job at contents: read; the job that keeps
+# a sticky comment on the pull request (the fleet's docs/fleet-guidelines.md) raises itself with its own block. A check
+# needing more permissions gets its own workflow, wired via .github/settings.yml.
 #
 # A job skipped by its own `if:` stands down from the all-green gate. A job with `continue-on-error: true` is an
 # advisory check, whose failures stay out of the gate too.
@@ -12,6 +14,9 @@ name: Checks
 
 on:
   workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   checks:
