@@ -26,6 +26,12 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 **Rule:** a workflow that comments on a PR uses `marocchino/sticky-pull-request-comment` with `header: <repo>/<workflow-stem>` (repo-platform's managed workflows use `repo-platform/<stem>`), upserting in place and never swallowing a failure (no `continue-on-error`, no `|| true`): one comment per workflow that edits itself on later runs. A composite action alone may set `continue-on-error` on its comment step, since a fork PR grants its token no write.
 
+**In checks.yml:** a job of the repo-owned checks.yml may keep one, under `<repo>/checks`. The job declares `pull-requests: write`, and its comment step carries `if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository`.
+
+- **A push to main** has no pull request to comment on.
+- **A fork's pull request** gets a read-only token whatever the job asks, unless a private repository's Actions settings send write tokens.
+- **A Dependabot pull request** needs no clause: the job's declared grant raises its token.
+
 **Enforced by:** review.
 
 ## Conventional Commits, squash-merged
