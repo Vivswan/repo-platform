@@ -269,11 +269,11 @@ jobs:
       release-branch: ${{ needs.release.outputs.pr_head_branch }}
 
   # Same run as the gate, so github.sha IS the judged commit and a red main never reaches the site.
-  #   needs release   -> a release commit's own deploy serves its new tag; an order, not a gate (!cancelled()), so a
-  #                      skipped or red release still deploys
-  #   no push clause  -> every main run deploys, so the nightly schedule IS the rebuild and a dispatch IS the manual deploy
+  #   needs publish-release -> a release commit's own deploy serves its new tag and its published release; an order,
+  #                            not a gate (!cancelled()), so a skipped or red release or publish still deploys
+  #   no push clause        -> every main run deploys, so the nightly schedule IS the rebuild and a dispatch IS the manual deploy
   site:
-    needs: [platform, all-green, release]
+    needs: [platform, all-green, publish-release]
     if: >-
       !cancelled() &&
       needs.all-green.result == 'success' &&
