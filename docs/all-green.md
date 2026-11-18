@@ -56,7 +56,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `checks`       | calls the repo-owned checks.yml with the repository's secrets; skipped on the nightly schedule run                                                                                                                                                                      |
 | `platform`     | calls [fleet.yml](../.github/workflows/fleet.yml)`@stable` with no inputs. The `plan` step of its `standard-checks` job reads `.repo-platform.yml` through [actions/plan](../actions/plan/action.yml), and the job outputs the module selection, visibility, and labels |
-| `release-gate` | calls the repo-owned release-gate.yml on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository))                                                                                   |
+| `release-gate` | calls the repo-owned release-gate.yml with the repository's secrets on the release PR and on a dispatch, skipped on every other event ([the release-gate hook](#the-release-gate-hook-in-every-managed-repository))                                                     |
 | `all-green`    | needs all three                                                                                                                                                                                                                                                         |
 
 <a id="the-nightly-schedule-run"></a>**The nightly schedule run** is public repositories' alone, and the `platform` call's alone: CodeQL reruns on the plan's `weekly` day, and every other check stands down.
@@ -148,7 +148,11 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 | every other event                                                                                                              | the job skips, and `allowed-skips` names it so the gate stays green                                                                                                                                                                                                |
 | the nightly schedule                                                                                                           | not ci.yml's: a nightly.yml the [nightly](modules/nightly.md) module seeds from now on calls the same file every night, an existing one [adds the sibling job itself](modules/nightly.md#customizing-the-starter), and a red tier files the nightly tracking issue |
 
-- **The caller's contract:** no secrets, permissions cap at `contents: read`. A tier needing more gets its own workflow.
+- **The caller's contract:** every repository secret is passed through, as for the post-green hook, and permissions cap at `contents: read`. A job that reads an environment secret declares its `environment:`. A tier needing more permission gets its own workflow.
+
+- **A pull request from a fork gets no secrets from GitHub** unless a private repository's Actions settings send them, and a fork's head branch can carry the release prefix, so a job that needs a secret skips or fails clearly when the secret is empty.
+
+- **A newer push to the release PR cancels the calling run** (ci.yml's group cancels in progress on a pull request), so a job holding an outside resource releases it in a step that runs on cancellation (`if: always()`).
 
 - **Outputs are the repository's own,** and the managed call ignores them. Every job inside gates: the caller's result aggregates every job of the workflow it calls.
 

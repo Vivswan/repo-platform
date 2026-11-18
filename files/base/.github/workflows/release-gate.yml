@@ -4,7 +4,7 @@
 #
 # This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
 #
-# Replace the no-op job with this repository's tiers; the caller grants no secrets and caps at contents: read.
+# Replace the no-op job with this repository's tiers; the caller passes the repository's secrets and caps at contents: read.
 
 name: Release Gate
 
