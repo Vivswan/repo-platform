@@ -206,6 +206,7 @@ describe("post-green wiring", () => {
         headRef: "release-please--branches--main",
       }),
       redHook: runs("push", released, { failed: ["post-green"] }),
+      redPublish: runs("push", released, { failed: ["publish-release"] }),
     }).toEqual({
       releasePush: every.filter((job) => job !== "release-gate"),
       plainPush: ["all-green", "checks", "platform", "post-green"],
@@ -216,6 +217,7 @@ describe("post-green wiring", () => {
       pullRequest: ["all-green", "checks", "platform"],
       releasePullRequest: ["all-green", "checks", "platform", "release-gate"],
       redHook: ["all-green", "checks", "platform", "site"],
+      redPublish: every.filter((job) => job !== "release-gate" && job !== "publish-release"),
     });
   });
 

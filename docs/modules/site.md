@@ -17,7 +17,7 @@ repo-platform dogfoods the docs half: this guide and the rest of `docs/` are the
 
 ## The leg and its triggers
 
-The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release`, and runs on every run of ci.yml on main whose gate passed:
+The `site` job in the managed ci.yml needs `platform`, `all-green`, and `publish-release`, and runs on every run of ci.yml on main whose gate passed:
 
 | Trigger              | The deploy it is    |
 | -------------------- | ------------------- |
@@ -29,9 +29,9 @@ The `site` job in the managed ci.yml needs `platform`, `all-green`, and `release
 - **No nightly on a private repository:** its scheduled run skips every job ([all-green.md](../all-green.md#the-nightly-schedule-run)), so the rebuild is a push or a dispatch and the link-rot check never runs there.
 - **The judged commit:** the job calls reusable-site.yml`@stable` with `github.sha`, so a red main never reaches the site, and holds the `pages` concurrency lane.
 
-**The release leg sits before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the tag and then runs whatever the release's result, and a release commit's own deploy serves its new tag ([all-green.md](../all-green.md#after-the-gate)).
+**The release legs sit before it as an ORDER, not a gate.** The condition leads with `!cancelled()`, so the deploy waits for the tag and the published release and then runs whatever their results, and a release commit's own deploy serves its new tag and its published release ([all-green.md](../all-green.md#after-the-gate)).
 
-- **Without the release-please module** the release leg skips, and the deploy still runs after it: GitHub resolves that skip only once the leg's own need, the repo-owned post-green hook, has finished.
+- **Without the release-please module** the release legs skip, and the deploy still runs after them: GitHub resolves those skips only once the first leg's own need, the repo-owned post-green hook, has finished.
 
 The called workflow is one job: the checkout, GitHub's configure-pages (where the site is served), the shared [site-urls action](../../actions/site-urls/action.yml), the [plan](../../actions/plan/action.yml) of the registration's site keys, the repository's hook when it exists, the [pages-site](../../actions/pages-site/action.yml) assembly (the layout below, the internal link check, the link-rot ignore list, `versions.json`), the Pages deploy when something was built, and the link-rot check on the schedule alone ([below](#link-rot)).
 

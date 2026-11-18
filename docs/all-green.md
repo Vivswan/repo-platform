@@ -110,7 +110,7 @@ Post-gate work rides downstream in the same run, `needs: [all-green]` on a push 
 
 **The lane rule:** the runs of neighbouring commits therefore overlap, and the legs that mutate shared state serialize on their job lanes (`stable-tag-move`, `sync-repos`, `settings-repos`, `pages`, `npm-publish`). On a lane, GitHub keeps one running plus one pending job and replaces the pending one with the newest, in arrival order rather than commit order.
 
-**The `pages` lane also cancels its running deploy** when a newer one arrives, so the newest arrival wins and never waits behind a deploy already running.
+**The `pages` lane also cancels its running deploy** when a newer one arrives, so the newest arrival wins and never waits behind a deploy already running. On a release commit the deploy arrives after the publish, so a push that lands while the release is being packaged can be deployed first and then replaced by the release commit's older tree, until the next green main run or the nightly rebuild.
 
 Repo-platform's own run after the gate (the tag mover, the fleet sync and settings legs, the fleet token) is [platform/post-green.md](platform/post-green.md#the-run-leg-by-leg).
 
@@ -168,7 +168,7 @@ Repo-platform's own run after the gate (the tag mover, the fleet sync and settin
 checks + platform + release-gate -> all-green -> post-green (repo-owned hook) -> release -> update-release (hook) -> npm-latest -> publish-release
                                             \                                          \-> update-release-pr (hook)
                                              \                                          \-> npm-next
-                                             \-> site, ordered behind release
+                                             \-> site, ordered behind publish-release
 ```
 
 **The legs after the hook are STATIC:** every managed ci.yml carries the same `release`, `update-release`, `npm-latest`, `publish-release`, `update-release-pr`, `npm-next`, and `site` jobs, present in every run, and each skips where its module is not selected.
@@ -197,7 +197,7 @@ checks + platform + release-gate -> all-green -> post-green (repo-owned hook) ->
 
 - The leg has no push clause: it runs on every main run whose gate passed, so the nightly schedule is the rebuild and a dispatch is the manual deploy, and no site workflow of its own exists.
 
-- It is ordered behind `release` as an ORDER and not a gate: its condition leads with `!cancelled()`, so it waits for the tag and then deploys whatever the release's result (a red hook skips the release; the deploy still runs). A release commit's own deploy serves its new tag.
+- It is ordered behind `publish-release` as an ORDER and not a gate: its condition leads with `!cancelled()`, so it waits for the tag and the published release and then deploys whatever their results (a red hook skips the release, a red publish leaves it a draft; the deploy still runs). A release commit's own deploy serves its new tag and its published release.
 
 ### Opting a PR into an immediate fleet sync
 
