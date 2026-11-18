@@ -38,6 +38,9 @@ jobs:
   # The same hook ci.yml calls on the release PR, so a tier the release blocks on is also judged every night.
   release-gate:
     uses: ./.github/workflows/release-gate.yml
+    # The called workflow is this repository's own, so it inherits the repository's secrets by design.
+    # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit
+    secrets: inherit # zizmor: ignore[secrets-inherit]
 
   # A CANCELLED job counts as red: hitting the timeout cancels rather
   # than fails, and a hang is exactly what a nightly exists to catch.
