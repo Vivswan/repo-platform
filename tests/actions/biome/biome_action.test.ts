@@ -2,13 +2,12 @@
 // biome the action pins: `extends` loads the local layer first and the managed file applies last, `linter.rules`
 // deep-merges so a local addition lands beneath the floor, and a local `overrides` entry still scopes a rule off by
 // path. A floor edit or a biome bump that changed any of these would let a repository lower the floor, green. The step
-// runs as the manifest spells it, under node, over a scratch checkout holding the shipped bytes.
+// runs as the manifest spells it, over a scratch checkout holding the shipped bytes, with a PATH that holds no node.
 
 import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadAction, REPO_ROOT, RUNNER_BASH, stepNamed } from "../../shared/action_step";
-import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { loadAction, REPO_ROOT, runBashStep, stepNamed } from "../../shared/action_step";
 import { tempDirs } from "../../shared/temp_dir";
 
 /** This file's fixture owner: every scratch checkout below is removed with it. */
@@ -98,10 +97,14 @@ test.each<Row>([
     named: [],
   },
 ])("$row", ({ local, files, exitCode, named, unnamed }) => {
-  const run = boundedSpawnSync([...RUNNER_BASH, String(step.run)], {
+  const run = runBashStep(step, {
+    context: { "steps.action-bun.outputs.path": process.execPath },
     cwd: fixture(local, files),
-    timeoutMs: 60_000,
-    env: { ...process.env, GITHUB_ACTION_PATH: join(REPO_ROOT, "actions/biome") },
+    root: temp.dir("biome-step-"),
+    env: {
+      GITHUB_ACTION_PATH: join(REPO_ROOT, "actions/biome"),
+      PATH: temp.dir("biome-no-tools-"),
+    },
   });
   const text = `${run.stdout}\n${run.stderr}`;
   expect({

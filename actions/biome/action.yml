@@ -8,7 +8,8 @@ description: |
   - The one bypass is a path override in the repository's own biome layer, with its reason beside it; a finding is
     split or raised there, never silenced inline with a biome-ignore comment.
   - An error-level finding fails the step; a warn-level one (the readability thresholds) is logged and the step passes.
-    The caller installs nothing for it, since the action brings its own biome.
+    The caller installs nothing for it, since the action brings its own biome and runs it with its own bun; the runner
+    needs no node.
 
 runs:
   using: composite
@@ -32,7 +33,10 @@ runs:
       # --silent: a failed install must name itself in the caller's log.
       run: '"$ACTION_BUN" install --frozen-lockfile --production'
 
-    # Under node, as `npx biome` runs it, from the caller's checkout so its biome.json is the one read.
+    # biome's launcher under the action's bun, which starts the platform's native biome; from the caller's checkout so
+    # its biome.json is the one read.
     - name: Lint
       shell: bash
-      run: node "$GITHUB_ACTION_PATH/node_modules/.bin/biome" lint
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "$GITHUB_ACTION_PATH/node_modules/.bin/biome" lint'

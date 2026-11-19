@@ -25,7 +25,7 @@ Biome merges `extends` left to right and applies the extending file last. Measur
 - **The `fix-lint` label commits what biome can fix,** with the [autofix](autofix.md) module: the repository's autofix hook runs its own biome script. biome exits non-zero on a finding with no safe fix, after writing the rest, so the hook swallows that exit and reports it as `findings`; the finding stays for the `biome` gate to report.
 - **A repository that already has a `biome.jsonc`:** move its content into `biome.local.jsonc` and delete it. Biome reads `biome.json` and silently ignores a `biome.jsonc` beside it, so the old file would be dead configuration.
 - **A repository that already has a `biome.json`:** the sync replaces it and reports the diff under Replaced local edits; its content moves into `biome.local.jsonc` the same way.
-- **The `knip` step's verdict, locally:** the fleet runs the knip version pinned in [the action's manifest](../../actions/knip/package.json), as `knip --treat-config-hints-as-errors` ([the action](../../actions/knip/action.yml)), so a stale `ignore` entry fails the step. A repository's own `knip` script runs the same flag on the same version; another version, or no flag, can pass locally and fail the step.
+- **The `knip` step's verdict, locally:** the fleet runs the knip version pinned in [the action's manifest](../../actions/knip/package.json), as `knip --treat-config-hints-as-errors` ([the action](../../actions/knip/action.yml)), under bun, so a stale `ignore` entry fails the step. A repository's own `knip` script runs the same flag on the same version (`bun node_modules/.bin/knip` for the same runtime); another version, or no flag, can pass locally and fail the step.
 
 ## The member-shape rules
 
