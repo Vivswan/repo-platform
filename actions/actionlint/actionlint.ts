@@ -4,6 +4,7 @@
 
 import { dirname, join } from "node:path";
 import * as core from "@actions/core";
+import * as toolCache from "@actions/tool-cache";
 import {
   capture,
   messageOf,
@@ -88,15 +89,17 @@ function sha256Pins(tool: string): Record<Arch, string> {
   return { X64: requireEnv(`${tool}_SHA256_X64`), ARM64: requireEnv(`${tool}_SHA256_ARM64`) };
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const runner = thisRunner();
-  const actionlint = setUpReleaseBinary(
+  const actionlint = await setUpReleaseBinary(
     actionlintRelease(requireEnv("ACTIONLINT_VERSION"), sha256Pins("ACTIONLINT")),
     runner,
+    toolCache,
   );
-  const shellcheck = setUpReleaseBinary(
+  const shellcheck = await setUpReleaseBinary(
     shellcheckRelease(requireEnv("SHELLCHECK_VERSION"), sha256Pins("SHELLCHECK")),
     runner,
+    toolCache,
   );
   for (const tool of [actionlint, shellcheck]) {
     if (tool.installed) core.addPath(dirname(tool.path));
@@ -122,7 +125,7 @@ function main(): void {
 
 if (import.meta.main) {
   try {
-    main();
+    await main();
   } catch (cause) {
     core.setFailed(messageOf(cause));
   }

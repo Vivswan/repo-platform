@@ -44,6 +44,8 @@ Every platform job that runs the GitHub CLI gets it from the shared [actions/gh-
 
 The pin is three values in the action's `env`, which a bump moves together: one cli/cli release, and the sha256 of its Linux archive for X64 and for ARM64. A download whose sha256 is not the pinned one is refused before anything is unpacked.
 
+The download and the unpacking are GitHub's `@actions/tool-cache`; the sha256 check is the platform's own. An archive's whole tree is unpacked under the runner's temp directory, never into the runner's tool cache.
+
 ## How the lint steps pin their tools
 
 Two standard checks need tools beside their linter, and each brings them at its own pin, the same on every runner:

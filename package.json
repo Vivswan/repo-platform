@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@actions/expressions": "^0.3.61",
+    "@actions/tool-cache": "4.0.0",
     "@biomejs/biome": "2.6.7",
     "@types/bun": "1.4.4",
     "@types/http-link-header": "1.0.7",
