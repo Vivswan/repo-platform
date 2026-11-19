@@ -1,12 +1,12 @@
 // knip, at the version the action pins, exits 0 on a configuration hint unless the flag the manifest's step passes
 // turns it into an error: external, so a bump that keeps the flag but not its effect would pass hints silently. A
-// repository with nothing unused, so a hint is the run's only fault. The step runs as the manifest spells it, under node.
+// repository with nothing unused, so a hint is the run's only fault. The step runs as the manifest spells it,
+// with a PATH that holds no node.
 
 import { expect, test } from "bun:test";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadAction, REPO_ROOT, RUNNER_BASH, stepNamed } from "../../shared/action_step";
-import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { loadAction, REPO_ROOT, runBashStep, stepNamed } from "../../shared/action_step";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -15,7 +15,7 @@ const step = stepNamed(
   "Find unused files, exports, and dependencies",
 );
 
-// Real paths throughout: node's process.cwd() is one, and knip maps a file to a workspace by string prefix.
+// Real paths throughout: the runtime's process.cwd() is one, and knip maps a file to a workspace by string prefix.
 function fixture(config: string): string {
   const repo = realpathSync(temp.dir("knip-fixture-"));
   mkdirSync(join(repo, "src"));
@@ -48,12 +48,13 @@ test.each([
 ])("$verdict", ({ config, exitCode, hinted }) => {
   // knip's jiti writes its cache under the temp dir, so the child gets a fixture of this file as TMPDIR, removed with
   // the rest; the launcher counts anything else left there as a leak.
-  const run = boundedSpawnSync([...RUNNER_BASH, String(step.run)], {
+  const run = runBashStep(step, {
+    context: { "steps.action-bun.outputs.path": process.execPath },
     cwd: fixture(config),
-    timeoutMs: 60_000,
+    root: temp.dir("knip-step-"),
     env: {
-      ...process.env,
       GITHUB_ACTION_PATH: join(REPO_ROOT, "actions/knip"),
+      PATH: temp.dir("knip-no-tools-"),
       TMPDIR: temp.dir("knip-child-tmp-"),
     },
   });

@@ -6,6 +6,7 @@ description: |
   - Configuration: knip's defaults, overridden by whatever the repository carries (any knip config file, knip.ts or
     knip.js included, or a knip key in package.json). A configured entry or project list replaces the default list.
   - The caller installs the toolchain and the dependencies first, since knip resolves imports through node_modules.
+  - knip runs under the action's own bun, never under node; the runner needs none.
   - A finding fails the step, and so does a configuration hint (a stale `ignore*` entry, a pattern matching nothing), whose fix
     is in the repository's own knip configuration. The bypasses for a finding are an ignore entry there, with a reason,
     or a `@public` JSDoc tag on an export kept for outside callers.
@@ -32,7 +33,9 @@ runs:
       # --silent: a failed install must name itself in the caller's log.
       run: '"$ACTION_BUN" install --frozen-lockfile --production'
 
-    # Under node, as `npx knip` runs it; a configuration hint fails the run.
+    # Under the action's bun; a configuration hint fails the run.
     - name: Find unused files, exports, and dependencies
       shell: bash
-      run: node "$GITHUB_ACTION_PATH/node_modules/.bin/knip" --treat-config-hints-as-errors
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "$GITHUB_ACTION_PATH/node_modules/.bin/knip" --treat-config-hints-as-errors'
