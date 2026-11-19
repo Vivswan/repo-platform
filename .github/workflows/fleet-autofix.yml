@@ -19,7 +19,7 @@ jobs:
   # and a changed file matches its `on` list. A default branch that does not select the module starts none, green.
   plan:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -52,7 +52,7 @@ jobs:
   stage:
     needs: [plan]
     if: needs.plan.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -104,7 +104,7 @@ jobs:
       (needs.plan.outputs.run == 'true' ||
       (github.event.action == 'labeled' &&
       (needs.plan.result == 'failure' || needs.plan.outputs.run == 'false')))
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 15
     permissions:
       contents: write
@@ -201,7 +201,7 @@ jobs:
   # checks nothing out and runs no pull request code, which is what makes pull_request_target safe here.
   fork:
     if: github.event_name == 'pull_request_target'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       pull-requests: write

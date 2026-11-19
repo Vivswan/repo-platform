@@ -8,9 +8,9 @@ import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { PLATFORM_SLUG } from "../../actions/shared/platform.ts";
 import { parseExpression, printed, soleExpression } from "../shared/github_expression.ts";
 import { shippedSource } from "../shared/shipped_source.ts";
+import { calledWorkflow, PLATFORM_CALL } from "../shared/shipped_workflows.ts";
 
 type Permissions = Record<string, string> | string | undefined;
 interface Concurrency {
@@ -46,22 +46,11 @@ const CALLER_ROOTS = [
   "files/base/.github/workflows",
   "files/autofix/.github/workflows",
 ];
-const LOCAL_CALL = /^[.$]\/\.github\/workflows\/(.+)$/;
-const PLATFORM_CALL = new RegExp(`^${PLATFORM_SLUG}/(\\.github/workflows/.+)@`);
 const FALLBACK_LANE =
   /^inputs\.([\w-]+) != '' && format\('[\w-]+-called-\{0\}', github\.run_id\) \|\| '([\w-]+)'$/;
 
 function load(rel: string): Workflow {
   return parseYaml(shippedSource(rel)) as Workflow;
-}
-
-/** A reusable workflow of this repository, whichever spelling the caller uses; a third-party call is GitHub's alone to
- *  judge. The skeleton is the fleet's ci.yml: its `./` calls resolve against the starters beside it, its @stable calls
- *  against this repository's workflows, whose own `$/` calls resolve against the workflows beside them. */
-function calledPath(uses: string, callerRoot: string): string | null {
-  const local = LOCAL_CALL.exec(uses);
-  if (local !== null) return `${callerRoot}/${local[1]}`;
-  return PLATFORM_CALL.exec(uses)?.[1] ?? null;
 }
 
 const workflowFiles = (root: string) =>
@@ -93,7 +82,8 @@ function deriveCalls(): Call[] {
     }
     const caller = load(callerRel);
     for (const [callerJob, job] of Object.entries(caller.jobs)) {
-      const calledRel = job.uses === undefined ? null : calledPath(job.uses, dirname(callerRel));
+      const calledRel =
+        job.uses === undefined ? null : calledWorkflow(job.uses, dirname(callerRel));
       if (calledRel === null) continue;
       const heldHere = new Set([
         ...held,
@@ -163,7 +153,7 @@ function absorbGrants(
   seen: Set<string>,
 ): void {
   for (const [id, job] of Object.entries(workflow.jobs)) {
-    const calledRel = job.uses === undefined ? null : calledPath(job.uses, dirname(callerRel));
+    const calledRel = job.uses === undefined ? null : calledWorkflow(job.uses, dirname(callerRel));
     if (calledRel !== null) {
       if (!seen.has(calledRel)) {
         seen.add(calledRel);
@@ -182,7 +172,7 @@ function unionOfGrants(platformCalls: Call[]): Record<string, string> {
   const union: Record<string, string> = {};
   const seen = new Set<string>();
   for (const call of platformCalls) {
-    const calledRel = calledPath(call.job.uses ?? "", dirname(SKELETON)) ?? "";
+    const calledRel = calledWorkflow(call.job.uses ?? "", dirname(SKELETON)) ?? "";
     if (!seen.has(calledRel)) {
       seen.add(calledRel);
       absorbGrants(calledRel, call.called, union, seen);
