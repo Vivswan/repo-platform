@@ -28,7 +28,7 @@
     "markdown-it": "15.0.3",
     "postcss": "8.5.33",
     "postcss-value-parser": "4.2.0",
-    "puppeteer-core": "25.16.0",
+    "puppeteer-core": "25.17.0",
     "typescript": "^7.0.2"
   },
   "dependencies": {
