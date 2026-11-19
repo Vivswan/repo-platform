@@ -1,0 +1,9 @@
+[project]
+name = "actionlint-action"
+version = "0"
+requires-python = "==3.13.*"
+dependencies = ["pyflakes==4.1.0"]
+
+[tool.uv]
+python-preference = "only-managed"
+no-build = true

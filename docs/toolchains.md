@@ -45,6 +45,15 @@ Every platform job that runs the GitHub CLI gets it from the shared [actions/gh-
 
 The pin is three values in the action's `env`, which a bump moves together: one cli/cli release, and the sha256 of its Linux archive for X64 and for ARM64. A download whose sha256 is not the pinned one is refused before anything is unpacked.
 
+## How the lint steps pin their tools
+
+Two standard checks need tools beside their linter, and each brings them at its own pin, the same on every runner:
+
+- **actionlint:** the [actionlint action](../actions/actionlint/action.yml) fetches actionlint and shellcheck as release binaries, as gh is fetched, and takes pyflakes from its own `uv.lock`; it hands actionlint both by path, since actionlint skips an integration it cannot find.
+- **typos:** the [typos action](../actions/typos/action.yml) puts its pinned jq on PATH before the upstream typos action runs, which formats each finding's annotation with it.
+
+A release binary's pin is three values in its action's `env`, moved together by hand: one release, and the sha256 of its Linux download for X64 and for ARM64. shellcheck is pinned at the version GitHub's image carries, so a bump there changes what the fleet's `run:` blocks are held to and is reviewed as one. Dependabot bumps pyflakes.
+
 ## Overriding, per toolchain
 
 To run one repo on a different version, override in a repo-owned workflow and leave the dotfile alone:

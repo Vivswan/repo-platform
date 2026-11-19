@@ -32,13 +32,18 @@ function fakeGh(dir: string, version: string): string {
   return path;
 }
 
-/** The gzipped tar a release would publish: the binary under MEMBER beside a file the setup has no use for. */
-function archiveOf(root: string, version: string): Uint8Array {
+/** What a release publishes for one architecture: a tar by its compression flag, or the binary itself. */
+type Published = "-z" | "-J" | "binary";
+
+/** The bytes a release would publish: a tar holds the binary under MEMBER beside a file the setup has no use for. */
+function publishedOf(root: string, version: string, published: Published): Uint8Array {
   const tree = join(root, "tree");
-  fakeGh(join(tree, "tool_linux/bin"), version);
+  const binary = fakeGh(join(tree, "tool_linux/bin"), version);
+  if (published === "binary") return new Uint8Array(readFileSync(binary));
+
   writeFileSync(join(tree, "tool_linux/LICENSE"), "MIT\n");
-  const file = join(root, "archive.tar.gz");
-  const packed = boundedSpawnSync(["tar", "-czf", file, "-C", tree, "tool_linux"]);
+  const file = join(root, "archive.tar");
+  const packed = boundedSpawnSync(["tar", "-c", published, "-f", file, "-C", tree, "tool_linux"]);
   if (packed.exitCode !== 0) throw new Error(`tar failed: ${packed.stderr}`);
   return new Uint8Array(readFileSync(file));
 }
@@ -51,10 +56,10 @@ interface Planted {
   download: (url: string, file: string) => void;
 }
 
-/** A runner whose PATH holds `onPath` (a gh version, or none) and a release whose X64 archive holds `archived`. */
-function plant(onPath: string | undefined, archived: string): Planted {
+/** A runner whose PATH holds `onPath` (a gh version, or none) and a release whose X64 download holds `archived`. */
+function plant(onPath: string | undefined, archived: string, published: Published = "-z"): Planted {
   const root = temp.dir("gh-setup-");
-  const bytes = archiveOf(root, archived);
+  const bytes = publishedOf(root, archived, published);
   const bin = join(root, "bin");
   if (onPath !== undefined) fakeGh(bin, onPath);
   const fetched: string[] = [];
@@ -64,11 +69,11 @@ function plant(onPath: string | undefined, archived: string): Planted {
       version: PINNED,
       versionArgs: ["--version"],
       versionPattern: /^gh version (\S+)/,
-      archives: {
+      downloads: {
         X64: {
           url: "https://example.com/x64.tar.gz",
           sha256: sha256(Buffer.from(bytes)),
-          member: MEMBER,
+          ...(published === "binary" ? {} : { member: MEMBER }),
         },
       },
     },
@@ -121,14 +126,36 @@ describe("setUpReleaseBinary", () => {
     },
   );
 
-  test("an archive whose bytes are not the pinned ones is refused and nothing is unpacked", () => {
-    const planted = plant(undefined, PINNED);
+  test.each<{ kind: string; published: Published; landed: string[] }>([
+    { kind: "an xz tar", published: "-J", landed: ["tool_linux"] },
+    { kind: "the binary itself", published: "binary", landed: ["gh"] },
+  ])(
+    "a release that publishes $kind is fetched and leaves only the binary, which runs",
+    ({ published, landed }) => {
+      const planted = plant(undefined, PINNED, published);
+      const setUp = setUpReleaseBinary(planted.tool, planted.runner, planted.download);
+      const root = join(planted.runner.temp, `gh-${PINNED}`);
+      expect([setUp, readdirSync(root)]).toEqual([
+        { path: join(root, published === "binary" ? "gh" : MEMBER), installed: true },
+        landed,
+      ]);
+      const printed = boundedSpawnSync([setUp.path, "--version"]).stdout.split("\n")[0];
+      expect(printed).toBe(`gh version ${PINNED} (2026-01-01)`);
+    },
+  );
+
+  test.each<{ kind: string; published: Published }>([
+    { kind: "a gzipped tar", published: "-z" },
+    { kind: "an xz tar", published: "-J" },
+    { kind: "the binary itself", published: "binary" },
+  ])("$kind whose bytes are not the pinned ones is refused and nothing lands", ({ published }) => {
+    const planted = plant(undefined, PINNED, published);
     const tampered = Uint8Array.from(planted.bytes);
     tampered[tampered.length - 1] ^= 1;
     const refusal = () =>
       setUpReleaseBinary(planted.tool, planted.runner, (_, file) => writeFileSync(file, tampered));
     expect(refusal).toThrow(
-      `gh ${PINNED}: https://example.com/x64.tar.gz has sha256 ${sha256(Buffer.from(tampered))}, and the pin is ${sha256(Buffer.from(planted.bytes))}; nothing was unpacked`,
+      `gh ${PINNED}: https://example.com/x64.tar.gz has sha256 ${sha256(Buffer.from(tampered))}, and the pin is ${sha256(Buffer.from(planted.bytes))}; nothing was installed`,
     );
     expect(landed(planted)).toEqual([]);
   });
@@ -137,7 +164,7 @@ describe("setUpReleaseBinary", () => {
     const planted = plant(undefined, "2.104.0");
     const refusal = () => setUpReleaseBinary(planted.tool, planted.runner, planted.download);
     expect(refusal).toThrow(
-      `gh ${PINNED}: the unpacked ${join(planted.runner.temp, `gh-${PINNED}`, MEMBER)} prints 2.104.0`,
+      `gh ${PINNED}: the fetched ${join(planted.runner.temp, `gh-${PINNED}`, MEMBER)} prints 2.104.0`,
     );
   });
 
