@@ -68,7 +68,7 @@ jobs:
 
   # fetch-depth 0 so the event's commit range resolves; pull-requests read because the action lists
   # the PR's commits to build that range. Comments off keeps that scope at read; findings still land
-  # in the job summary and SARIF artifact.
+  # in the log and the job summary. The artifact is off as in fleet.yml.
   gitleaks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -83,6 +83,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
           # The action's default binary (8.24.3) predates .gitleaks.toml's
           # minVersion floor AND skips that check silently; pin one meeting
           # the floor so CI honors the same config local runs do.
@@ -533,6 +534,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
           GITLEAKS_VERSION: "8.30.1"
       # The zizmor job uploads this commit's SARIF; the verdict pass alone runs the same zizmor.
       - if: ${{ !cancelled() }}
