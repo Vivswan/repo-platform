@@ -3,6 +3,7 @@
 
 import { dirname } from "node:path";
 import * as core from "@actions/core";
+import * as toolCache from "@actions/tool-cache";
 import { messageOf, requireEnv } from "../shared/action_runtime.ts";
 import { type ReleaseBinary, setUpReleaseBinary, thisRunner } from "../shared/release_binary.ts";
 
@@ -31,12 +32,12 @@ export function ghRelease(
   };
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const release = ghRelease(requireEnv("GH_VERSION"), {
     X64: requireEnv("GH_SHA256_X64"),
     ARM64: requireEnv("GH_SHA256_ARM64"),
   });
-  const gh = setUpReleaseBinary(release, thisRunner());
+  const gh = await setUpReleaseBinary(release, thisRunner(), toolCache);
   if (gh.installed) core.addPath(dirname(gh.path));
   core.setOutput("path", gh.path);
   core.setOutput("installed", String(gh.installed));
@@ -45,7 +46,7 @@ function main(): void {
 
 if (import.meta.main) {
   try {
-    main();
+    await main();
   } catch (cause) {
     core.setFailed(messageOf(cause));
   }

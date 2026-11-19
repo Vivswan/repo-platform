@@ -3,6 +3,7 @@
 
 import { dirname } from "node:path";
 import * as core from "@actions/core";
+import * as toolCache from "@actions/tool-cache";
 import { messageOf, requireEnv } from "../shared/action_runtime.ts";
 import { type ReleaseBinary, setUpReleaseBinary, thisRunner } from "../shared/release_binary.ts";
 
@@ -24,18 +25,18 @@ export function jqRelease(version: string, sha256: Record<Arch, string>): Releas
   };
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const release = jqRelease(requireEnv("JQ_VERSION"), {
     X64: requireEnv("JQ_SHA256_X64"),
     ARM64: requireEnv("JQ_SHA256_ARM64"),
   });
-  const jq = setUpReleaseBinary(release, thisRunner());
+  const jq = await setUpReleaseBinary(release, thisRunner(), toolCache);
   if (jq.installed) core.addPath(dirname(jq.path));
 }
 
 if (import.meta.main) {
   try {
-    main();
+    await main();
   } catch (cause) {
     core.setFailed(messageOf(cause));
   }
