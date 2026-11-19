@@ -38,6 +38,12 @@ The fleet's ruff step is not a module pin either: the version is spelled inline 
 
 repo-platform's own composite actions pin their bun from the root `.bun-version` the sync writes from the same file, through the shared [actions/bun-setup](../actions/bun-setup/action.yml) as their first step, and run that bun by path afterwards, never `bun` by name: a caller's older bun could not parse the lockfiles repo-platform's bun writes. The action's description carries the rest.
 
+## How the jobs pin gh
+
+Every platform job that runs the GitHub CLI gets it from the shared [actions/gh-setup](../actions/gh-setup/action.yml), never from the runner: a composite action that runs `gh` calls it after its own bun setup, and a workflow job whose own steps run `gh` calls it as its first step. The action's description carries the rest.
+
+The pin is three values in the action's `env`, which a bump moves together: one cli/cli release, and the sha256 of its Linux archive for X64 and for ARM64. A download whose sha256 is not the pinned one is refused before anything is unpacked.
+
 ## Overriding, per toolchain
 
 To run one repo on a different version, override in a repo-owned workflow and leave the dotfile alone:
