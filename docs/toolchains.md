@@ -20,7 +20,9 @@ biome is a tool pin, not a toolchain pin: one version spelled in the action's pa
 
 The gate's biome is always the action's. A repository's own fixer, run by its [autofix hook](modules/autofix.md), is the version its lockfile holds.
 
-The fleet's yamllint step is not a module pin: the action's own requirements pin it, and dependabot bumps it there.
+The fleet's yamllint, semgrep, and zizmor steps are not module pins: each action's own `pyproject.toml` names the tool's exact version, its `uv.lock` holds that tool and every package under it by hash, and Dependabot bumps the two together.
+
+Each of those steps runs its tool with `uv run --locked`, which refuses a lock that disagrees with the `pyproject.toml`, on a Python uv downloads itself, so the runner needs no Python and no pip.
 
 The fleet's ruff step is not a module pin either: the version is spelled inline in fleet.yml's `ruff` step and the uv starters' format lines, held to one value by a test, and bumped by hand, never by the refresh: a ruff minor can add rules to a selected family, so a bump changes the [Python lint floor](modules/python.md) and is reviewed as one.
 

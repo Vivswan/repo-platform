@@ -37,15 +37,18 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
-    - name: Install semgrep
-      shell: bash
-      run: python3 -m pip install --quiet --requirement "$GITHUB_ACTION_PATH/requirements.txt"
+    - name: Set up uv
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      with:
+        working-directory: ${{ github.action_path }}
+        enable-cache: false
 
     # The verdict is semgrep's exit code: 1 on a finding (--error), 2 and up when the scan itself failed, 0 for a
     # clean completed scan. Parse failures and timeouts are warn-level, reported in semgrep's own summary, and exit 0.
     - name: Scan
       shell: bash
       run: >-
+        uv run --isolated --project "$GITHUB_ACTION_PATH" --locked
         semgrep scan --config p/default --metrics=off --severity ERROR --error
         --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
         --sarif-output="$RUNNER_TEMP/semgrep.sarif" .
