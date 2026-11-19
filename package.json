@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@actions/expressions": "^0.3.61",
-    "@biomejs/biome": "2.6.4",
+    "@biomejs/biome": "2.6.7",
     "@types/bun": "1.4.4",
     "@types/http-link-header": "1.0.7",
     "colorjs.io": "0.7.1",
