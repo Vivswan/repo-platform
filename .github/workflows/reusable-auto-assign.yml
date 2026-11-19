@@ -21,7 +21,7 @@ on:
 
 jobs:
   assign:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 10
     # A Dependabot PR's run starts with a read-only token, which these grants raise.
     permissions:

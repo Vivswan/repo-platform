@@ -51,7 +51,7 @@ on:
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 15
     # Keyed by the judged commit: no other run shares the lane, so nothing can cancel a pending cut.
     # The caller holds no lane: a shared lane keeps one pending call and cancels the older one,

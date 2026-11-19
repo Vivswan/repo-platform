@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   Binary,
@@ -15,7 +15,6 @@ import {
 } from "@actions/expressions/ast";
 import { TokenType } from "@actions/expressions/lexer";
 import { parse as parseYaml } from "yaml";
-import { parseFilesConfig } from "../../actions/plan/files_config.ts";
 import {
   type ContextRead,
   conditionSource,
@@ -27,6 +26,7 @@ import {
   ungrouped,
 } from "../shared/github_expression.ts";
 import { rendered } from "../shared/shipped_source.ts";
+import { shippedWorkflowFiles, WORKFLOW_FRAGMENTS } from "../shared/shipped_workflows.ts";
 
 // GitHub reads an unrun step's ABSENT output as the number 0, so a condition that tests a step output
 // negatively passes when the step never ran, wherever the guarded step is a push, a PR, or an issue
@@ -438,16 +438,7 @@ jobs:
   });
 });
 
-/** The tree files files.yml splices into a workflow: each a step list indented for its `{{blocks}}` line, wherever it sits under files/. */
-const fragments = new Set(
-  parseFilesConfig(readFileSync(join(root, "files.yml"), "utf-8")).files.flatMap((entry) =>
-    "sources" in entry && entry.path.startsWith(".github/workflows/")
-      ? Object.values(entry.sources)
-          .filter((source): source is string => typeof source === "string")
-          .map((source) => join(root, "files", source))
-      : [],
-  ),
-);
+const fragments = new Set([...WORKFLOW_FRAGMENTS].map((rel) => join(root, rel)));
 
 /** A shipped file as a target's workflow parses: placeholders stubbed, and a fragment wrapped as one job. */
 function asWorkflow(fragment: boolean, text: string): string {
@@ -477,11 +468,7 @@ describe("every workflow tests step outputs positively", () => {
       .filter((name) => /\.ya?ml$/.test(name))
       .map((name) => join(dir, name));
   const own = workflowsUnder(join(root, ".github/workflows"));
-  const shipped = readdirSync(join(root, "files"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => join(root, "files", entry.name, ".github/workflows"))
-    .filter((dir) => existsSync(dir))
-    .flatMap(workflowsUnder);
+  const shipped = shippedWorkflowFiles().map((rel) => join(root, rel));
   const files = [...new Set([...own, ...shipped, ...fragments])];
 
   test("the scan reaches the operator's and the fleet's workflows (ARMED)", () => {
