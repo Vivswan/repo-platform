@@ -15,6 +15,12 @@ import { parse as parseYaml } from "yaml";
 import { CHECK_NAME } from "../../.github/scripts/shared/all_green.ts";
 import { actionManifestPaths } from "../../scripts/lib/action_steps";
 import { REPO_ROOT } from "../shared/action_step";
+import {
+  conditionSource,
+  contextReads,
+  evaluateCondition,
+  parseExpression,
+} from "../shared/github_expression.ts";
 
 interface Step {
   uses?: string;
@@ -28,23 +34,32 @@ interface Job {
   steps?: Step[];
 }
 
-const PULL_REQUESTS_ONLY = "github.event_name == 'pull_request'";
 const shipped = actionManifestPaths(join(REPO_ROOT, "actions")).map(dirname);
 const ci = parseYaml(readFileSync(join(REPO_ROOT, ".github/workflows/ci.yml"), "utf8")) as {
   jobs: Record<string, Job>;
 };
 
-/** A step or job under continue-on-error fails to load without failing the gate, so it judges nothing;
- *  an expression there is read as such, since nothing here can evaluate it. */
+/** The events a step runs on, read by evaluating its job's condition and its own for a push and for a pull request, so
+ *  a status function or the expression delimiters decide nothing. A step or job under continue-on-error fails to load
+ *  without failing the gate, so it judges nothing. */
 function runsOn(job: Job, step: Step): string {
   const advisory = (owner: Job | Step) =>
     owner["continue-on-error"] !== undefined && owner["continue-on-error"] !== false;
   if (advisory(job) || advisory(step)) return "under continue-on-error";
-  const narrowing = [job.if, step.if]
-    .map((condition) => (condition ?? "").trim())
-    .filter((condition) => condition !== "" && condition !== "always()")
-    .map((condition) => (condition === PULL_REQUESTS_ONLY ? "pull requests" : `when ${condition}`));
-  return narrowing.length === 0 ? "every event" : narrowing.join(" and ");
+  const conditions = [job.if, step.if].flatMap((condition) =>
+    condition === undefined ? [] : [conditionSource(condition)],
+  );
+  // The event's name is all the evaluation knows: a condition reading anything else is never read as covering an event.
+  const readsTheEventAlone = conditions.every((condition) =>
+    contextReads(parseExpression(condition).tree).every(
+      (read) => read.join(".") === "github.event_name",
+    ),
+  );
+  const holdsOn = (event: string) =>
+    readsTheEventAlone &&
+    conditions.every((condition) => evaluateCondition(condition, { "github.event_name": event }));
+  if (holdsOn("push") && holdsOn("pull_request")) return "every event";
+  return holdsOn("pull_request") ? "pull requests" : `when ${conditions.join(" and ")}`;
 }
 
 test("every shipped action is run, so loaded, by a gating job's step on every push and pull request", () => {

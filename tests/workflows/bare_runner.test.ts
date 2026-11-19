@@ -20,6 +20,7 @@ import {
 } from "../shared/shipped_workflows.ts";
 
 interface Step {
+  if?: string;
   uses?: string;
   run?: string;
   shell?: string;
@@ -283,7 +284,9 @@ describe("the bare container runs every shipped action", () => {
     const gate = (steps: Step[]) =>
       steps
         .filter((step) => /^(astral-sh\/setup-uv|re-actors\/alls-green)@/.test(step.uses ?? ""))
-        .map((step) => (step.uses?.startsWith("re-actors/") ? { uses: step.uses } : step));
+        .map(({ if: _runsAfterAFailure, ...step }) =>
+          step.uses?.startsWith("re-actors/") ? { uses: step.uses } : step,
+        );
     const skeleton = Object.fromEntries(
       shippedJobs<{ steps?: Step[] }>("files/base/.github/workflows/ci.yml"),
     )["all-green"];

@@ -477,13 +477,14 @@ jobs:
     permissions:
       contents: read
       issues: read
+      # Read: the findings comments belong to the jobs that keep them, and each action tolerates a comment it cannot post.
       pull-requests: read
       # The semgrep action's SARIF upload.
       security-events: write
     steps:
       # The image's build, not a shipped step: what the baseline names and the slim image lacks, after which apt leaves
-      # PATH so no later step installs more. The link: the runner fills some expressions with its own path for the work
-      # folder, which the container mounts at /__w (actions/runner#2185).
+      # PATH so no later step installs more. Two container artifacts: the runner fills some expressions with its own path
+      # for the work folder, mounted here at /__w (actions/runner#2185), and its user owns the checkout these steps read as root.
       - name: Build the baseline
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -493,82 +494,109 @@ jobs:
           rm /usr/bin/apt /usr/bin/apt-get
           mkdir -p /home/runner
           ln -s /__w /home/runner/work
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
+      # Every step below runs whatever failed before it, so one run names every gap.
       # fleet.yml's standard-checks job.
-      - id: plan
+      - if: ${{ !cancelled() }}
+        id: plan
         uses: $/actions/plan
         with:
           private: ${{ github.event.repository.private }}
-      - uses: $/actions/validate-managed-files
+      - if: ${{ !cancelled() }}
+        uses: $/actions/validate-managed-files
         with:
           private: ${{ steps.plan.outputs.private }}
-      - uses: $/actions/check-typography
-      - uses: $/actions/check-file-size
+      - if: ${{ !cancelled() }}
+        uses: $/actions/check-typography
+      - if: ${{ !cancelled() }}
+        uses: $/actions/check-file-size
       # `files` as in the shell-complexity job. The action's own .ps1 is this checkout's one PowerShell body, and judging
       # one takes the runner's pwsh, by the action's description.
-      - uses: $/actions/check-shell-complexity
+      - if: ${{ !cancelled() }}
+        uses: $/actions/check-shell-complexity
         with:
           skip: files, check-shell-complexity
-      - uses: $/actions/validate-commit-names
-      - uses: $/actions/actionlint
-      - uses: $/actions/yamllint
-      - uses: $/actions/typos
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+      - if: ${{ !cancelled() }}
+        uses: $/actions/validate-commit-names
+      - if: ${{ !cancelled() }}
+        uses: $/actions/actionlint
+      - if: ${{ !cancelled() }}
+        uses: $/actions/yamllint
+      - if: ${{ !cancelled() }}
+        uses: $/actions/typos
+      - if: ${{ !cancelled() }}
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_VERSION: "8.30.1"
       # The zizmor job uploads this commit's SARIF; the verdict pass alone runs the same zizmor.
-      - uses: $/actions/zizmor
+      - if: ${{ !cancelled() }}
+        uses: $/actions/zizmor
         with:
           upload-sarif: "false"
-      - uses: $/actions/trivy
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - if: ${{ !cancelled() }}
+        uses: $/actions/trivy
+      - if: ${{ !cancelled() }}
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: files/bun/.bun-version
-      - name: Install dependencies
+      - if: ${{ !cancelled() }}
+        name: Install dependencies
         run: bun install --frozen-lockfile --silent
-      - uses: $/actions/biome
-      - uses: $/actions/check-member-shape
-      - uses: $/actions/knip
+      - if: ${{ !cancelled() }}
+        uses: $/actions/biome
+      - if: ${{ !cancelled() }}
+        uses: $/actions/check-member-shape
+      - if: ${{ !cancelled() }}
+        uses: $/actions/knip
 
       # fleet.yml's semgrep, dependency-review, and docs-check jobs.
-      - uses: $/actions/semgrep
-      - if: github.event_name == 'pull_request'
+      - if: ${{ !cancelled() }}
+        uses: $/actions/semgrep
+      - if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         uses: $/actions/dependency-review
-      - id: site
+      - if: ${{ !cancelled() }}
+        id: site
         uses: $/actions/plan
         with:
           mode: site
-      - uses: $/actions/pages-site
+      - if: ${{ !cancelled() }}
+        uses: $/actions/pages-site
         with:
           check: "true"
           config: ${{ steps.site.outputs.config }}
 
       # The actions of the release, nightly, site, and autofix workflows, with the action-load job's inputs.
-      - uses: $/actions/release-health
+      - if: ${{ !cancelled() }}
+        uses: $/actions/release-health
         with:
           mode: after-propose
         env:
           GH_TOKEN: ${{ github.token }}
-      - uses: $/actions/fuzz-issue
+      - if: ${{ !cancelled() }}
+        uses: $/actions/fuzz-issue
         with:
           mode: resolve
           label: bare-runner
           stream: generic
-      - uses: $/actions/site-urls
-      - if: github.event_name == 'pull_request'
+      - if: ${{ !cancelled() }}
+        uses: $/actions/site-urls
+      - if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         uses: $/actions/autofix
         with:
           phase: plan
           config: '{"label":{"paths":["**"],"delete":[]},"push":null}'
-      - uses: $/actions/gh-setup
+      - if: ${{ !cancelled() }}
+        uses: $/actions/gh-setup
 
       # The skeleton's all-green job, over a needs context of one green job. Last: it puts a python on PATH.
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - if: ${{ !cancelled() }}
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: "3.13"
           activate-environment: true
@@ -577,7 +605,8 @@ jobs:
           ignore-empty-workdir: true
         env:
           UV_PYTHON_PREFERENCE: only-managed
-      - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+      - if: ${{ !cancelled() }}
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
           jobs: '{"baseline": {"result": "success", "outputs": {}}}'
 
