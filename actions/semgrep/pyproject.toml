@@ -1,0 +1,9 @@
+[project]
+name = "semgrep-action"
+version = "0"
+requires-python = "==3.13.*"
+dependencies = ["semgrep==1.176.1"]
+
+[tool.uv]
+python-preference = "only-managed"
+no-build = true

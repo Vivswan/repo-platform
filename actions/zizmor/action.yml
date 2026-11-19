@@ -4,12 +4,10 @@ description: |
   audit, under the fleet policy shipped beside this action (a repository's own zizmor config is not read). A medium or
   low finding neither blocks nor surfaces.
 
-  Two passes of zizmor's own action at one pin, under the same policy: one writes SARIF and uploads it to code scanning
-  (public repositories only, as private personal repositories have none; it passes whatever it finds), and a plain one
-  whose exit is the verdict, so a high finding fails the step.
-
-  The action pin is the zizmor pin: each release of the action carries one exact zizmor with its wheel hashes, so the
-  `version` input stays unset and Dependabot's bump of the pin is the zizmor bump.
+  Two passes of the zizmor locked in this action's uv.lock, under the same policy: one writes SARIF and uploads it to
+  code scanning (public repositories only, as private personal repositories have none; it passes whatever it finds), and
+  a plain one whose exit is the verdict, so a high finding fails the step. Both run zizmor's online audits on the job's
+  token.
 
   The one bypass is zizmor's own: a `# zizmor: ignore[rule]` comment on the finding's line, with the reason beside it.
 
@@ -33,17 +31,33 @@ runs:
         OWNER: ${{ github.repository_owner }}
       run: sed "s|{{github_username}}|$OWNER|g" "$FLEET_POLICY" > "$RUNNER_TEMP/zizmor.yml"
 
+    - name: Set up uv
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      with:
+        working-directory: ${{ github.action_path }}
+        enable-cache: false
+
+    - name: Write the high findings as SARIF
+      if: inputs.upload-sarif == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: >-
+        uv run --isolated --project "$GITHUB_ACTION_PATH" --locked
+        zizmor --config="$RUNNER_TEMP/zizmor.yml" --min-severity=high --format=sarif .
+        > "$RUNNER_TEMP/zizmor.sarif"
+
     - name: Upload the high findings to code scanning
       if: inputs.upload-sarif == 'true'
-      uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
       with:
-        config: ${{ runner.temp }}/zizmor.yml
-        min-severity: high
-        advanced-security: "true"
+        sarif_file: ${{ runner.temp }}/zizmor.sarif
+        category: zizmor
 
     - name: Fail on a high finding
-      uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
-      with:
-        config: ${{ runner.temp }}/zizmor.yml
-        min-severity: high
-        advanced-security: "false"
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: >-
+        uv run --isolated --project "$GITHUB_ACTION_PATH" --locked
+        zizmor --config="$RUNNER_TEMP/zizmor.yml" --min-severity=high --color=always .
