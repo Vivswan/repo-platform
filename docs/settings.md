@@ -38,7 +38,6 @@ Every layer is a plain settings-as-code YAML document a human can read on its ow
 
 - **Tracking labels are the one non-file input.** The label NAME is the registration's `labels.fuzzer` / `labels.nightly` / `labels.site` key (the module's default when unset). Its color and description are the module's `tracking_label` data in `files.yml`, and the render folds them in as the top layer ([apply semantics](#apply-semantics)).
 
-
 ## The merge dialect
 
 The fold is [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code)'s own `mode: render`, run as its npm library from [sync/writer/settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts); the render and the apply read one dialect, the library's [layering guide](https://github.com/Vivswan/github-settings-as-code/blob/main/docs/operate/layering.md). What the fleet relies on:

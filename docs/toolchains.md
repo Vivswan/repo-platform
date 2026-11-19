@@ -34,7 +34,6 @@ The fleet's ruff step is not a module pin either: the version is spelled inline 
 
 - **The site hook:** the [site module's](modules/site.md) build hook is the repository's own composite action, so it installs whatever toolchain its steps name (the seeded example reads `.bun-version`); the fleet's docs build runs under the fleet's own bun, never the repository's pin.
 
-
 ## How the composite actions pin bun
 
 repo-platform's own composite actions pin their bun from the root `.bun-version` the sync writes from the same file, through the shared [actions/bun-setup](../actions/bun-setup/action.yml) as their first step, and run that bun by path afterwards, never `bun` by name: a caller's older bun could not parse the lockfiles repo-platform's bun writes. The action's description carries the rest.
