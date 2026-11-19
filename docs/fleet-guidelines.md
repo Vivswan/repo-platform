@@ -175,7 +175,7 @@ What the runner must offer for the platform's jobs to pass: the tools GitHub's i
 | network access to GitHub and the tools' download hosts                                | the same downloads, PyPI, the semgrep registry, the npm registry                                                               |
 
 - **bun:** the platform's actions reuse a bun already on PATH when it prints the pinned version, and download it otherwise ([toolchains.md](toolchains.md#how-the-composite-actions-pin-bun)).
-- **State:** a self-hosted runner keeps its disk between jobs, so one job's leftovers reach the next. The platform's jobs are tested on GitHub's runners only.
+- **A clean start, required:** the runner starts every job clean: a fresh machine or container per job, or everything a job can write destroyed when it ends (its work folder, the runner user's home and temp, any tool directory on PATH). The platform's jobs are written for GitHub's fresh machine per job and tested there only: autofix's write-capable job follows one that ran pull-request code, so a leftover would run that code with the write token.
 - **Architecture:** the platform runs on x64 Linux; another system or ARM64 is untested.
 
 **Enforced by:** `tests/workflows/runner_switch.test.ts` in repo-platform, which fails a shipped job whose `runs-on` is any other line; review for a repository's own jobs.
