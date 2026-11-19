@@ -218,6 +218,9 @@ function stepOutputs(
   const platform = /^\$\/actions\/([\w-]+)$/.exec(step.uses ?? "")?.[1];
   if (platform === undefined) return thirdParty(String(step.uses), root);
 
+  // The gh setup is the runner's, as the bun setup is: the stub on PATH stands for the gh it puts there.
+  if (platform === "gh-setup") return {};
+
   const stepEnv = { ...jobEnv, ...filled(step.env, context) };
   return platformAction(platform, filled(step.with, context), stepEnv, root);
 }
@@ -298,7 +301,7 @@ test.each<{
 
 // The cut reports a release and no id, and the skeleton sends no tag. Asked for an empty tag, gh answers the latest
 // published release, so the job would attest and publish that one, green, with the cut's draft still a draft.
-test("a publish job sent neither an id nor a tag is red at its first step, before any gh call", () => {
+test("a publish job sent neither an id nor a tag is red at the step that reads the id, before any gh call", () => {
   const cut = { release_created: "true", tag_name: "v1.2.3" };
 
   expect(publish(cut, SKELETON_SENDS)).toEqual({ red: "by-tag", calls: [] });

@@ -222,8 +222,7 @@ export async function findReleasePr(
   // on a busy repo the merged release PR can sit past the default first
   // page; paginate rather than silently ungating the release. --slurp pins
   // the multi-page output to one array-of-pages document regardless of gh
-  // version or endpoint shape (needs gh >= 2.51; hosted runners ship
-  // current gh).
+  // version or endpoint shape (needs gh >= 2.51; gh-setup pins a later one).
   const json = await run([
     "api",
     "--paginate",

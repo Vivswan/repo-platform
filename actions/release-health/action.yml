@@ -25,8 +25,7 @@ description: |
 
   Needs GH_TOKEN with issues read, pull-requests read, and vulnerability-alerts read (an unreadable alerts endpoint
   fails
-  the gate), gh >= 2.51 on the runner (GitHub-hosted runners ship current gh), and for after-refresh's branch update
-  contents write and pull-requests write.
+  the gate), and for after-refresh's branch update contents write and pull-requests write.
 
 inputs:
   mode:
@@ -73,6 +72,9 @@ runs:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         ACTION_PATH: ${{ github.action_path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    - name: Set up the pinned gh
+      uses: $/actions/gh-setup
 
     # The merge ref GitHub checks out by default already contains the base
     # tip, so the caller checks out the PR head; GITHUB_BASE_REF names the base.

@@ -1,0 +1,53 @@
+name: gh Setup
+description: |
+  The one GitHub CLI setup for repo-platform's jobs: every job that runs `gh` gets the release pinned here, so none
+  depends on the gh its runner carries.
+
+  - A gh already on PATH that prints the pinned version is reused; otherwise the release's archive for the runner's
+    architecture is downloaded, refused unless its sha256 is the pinned one, and unpacked under the runner's temp
+    directory, which is added to PATH for the job's later steps.
+  - Linux on X64 and ARM64 are pinned; any other runner fails the step, named.
+  - A composite action that runs gh calls this itself, and a workflow job whose own steps run gh calls it first: a
+    second call in one job reuses what the first fetched.
+
+outputs:
+  path:
+    description: Absolute path of the gh that prints the pinned version.
+    value: ${{ steps.gh.outputs.path }}
+  installed:
+    description: Whether the archive was fetched, "false" for a gh reused from PATH.
+    value: ${{ steps.gh.outputs.installed }}
+  version:
+    description: The pinned version.
+    value: ${{ steps.gh.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: $/actions/bun-setup
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    # Each sha256 is the pin for its archive: the release's checksums file comes from the same place as the archive.
+    # The three values move together, to one release of cli/cli.
+    - name: Set up the pinned gh
+      id: gh
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        GH_VERSION: 2.105.0
+        GH_SHA256_X64: 79e7ab5db738c48777b696e374f8b428f0647debfb424f44d2f426370407fe2f
+        GH_SHA256_ARM64: b1278c75107423d818f1937fd92cafc9e5e9b606631568f68d7fb816f5885a02
+      run: '"$ACTION_BUN" "${{ github.action_path }}/gh-setup.ts"'

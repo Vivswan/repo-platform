@@ -85,6 +85,9 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --production --ignore-scripts --cwd "$ACTION_PATH"'
 
+    - name: Set up the pinned gh
+      uses: $/actions/gh-setup
+
     - name: Run the phase
       id: run
       shell: bash
