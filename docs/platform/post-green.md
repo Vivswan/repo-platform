@@ -114,5 +114,3 @@ The legs, what each does for a repository, and the release leg's known limits ar
 - **Any workflow in this repository could mint a look-alike `all-green` check run** (the Actions app pin does not distinguish jobs). The repo is its own sole workflow author; review owns that surface.
 
 - **A job-created `all-green` check from a pull_request run** judged the merge tree, not the sha, and would vouch for a sha that is also a main commit. Reachable only when a PR head becomes a main commit itself, which squash-only merges make contrived (an assessment, not a tested claim).
-
-- **Copilot code review** sits outside the gate: the `copilot_code_review` rule and what blocks on it are [settings.md's](../settings.md#copilot-code-review).

@@ -138,10 +138,6 @@ test("every required check a fleet layer declares is pinned to the Actions app",
 describe("the managed rulesets", () => {
   const CODEQL_MODULES = ["bun", "uv"];
   const codeQuality = { type: "code_quality", parameters: { severity: "warnings" } };
-  const copilotReview = {
-    type: "copilot_code_review",
-    parameters: { review_on_push: true, review_draft_pull_requests: true },
-  };
   // The fleet's high-or-critical bar: a non-security warning or a medium security alert never blocks a merge.
   const codeScanning = {
     type: "code_scanning",
@@ -169,10 +165,10 @@ describe("the managed rulesets", () => {
     others?: Record<string, unknown>[];
   }>([
     {
-      reason: "a bare public selection: code_quality and the Copilot auto-request alone",
+      reason: "a bare public selection: code_quality alone",
       selection: selection(),
       names: ["main"],
-      main: [codeQuality, copilotReview],
+      main: [codeQuality],
     },
     {
       reason: "a private selection declares no ruleset in these layers",
@@ -184,13 +180,13 @@ describe("the managed rulesets", () => {
       reason: "a public toolchain without CodeQL renders no code_scanning",
       selection: selection({ modules: ["rust"] }),
       names: ["main"],
-      main: [codeQuality, copilotReview],
+      main: [codeQuality],
     },
     ...CODEQL_MODULES.map((module) => ({
       reason: `a public ${module} repository gets the CodeQL rule with the exact threshold tuple`,
       selection: selection({ modules: [module] }),
       names: ["main"],
-      main: [codeQuality, copilotReview, codeScanning],
+      main: [codeQuality, codeScanning],
     })),
     ...CODEQL_MODULES.map((module) => ({
       reason: `a private ${module} repository gets no CodeQL rule`,
@@ -202,13 +198,13 @@ describe("the managed rulesets", () => {
       reason: "two CodeQL toolchains select the one CodeQL layer, so code_scanning renders once",
       selection: selection({ modules: ["bun", "uv"] }),
       names: ["main"],
-      main: [codeQuality, copilotReview, codeScanning],
+      main: [codeQuality, codeScanning],
     },
     {
       reason: "release-please adds the whole release-tags ruleset, active, admins bypassing",
       selection: selection({ modules: ["release-please"] }),
       names: ["main", "release-tags"],
-      main: [codeQuality, copilotReview],
+      main: [codeQuality],
       others: [
         {
           name: "release-tags",
@@ -541,8 +537,6 @@ test("the shipped override layer pins the whole protection policy", () => {
 
   const main = rulesets.find((r) => r.name === "main");
   const mainRules = main?.rules as Record<string, unknown>[];
-  // copilot_code_review is deliberately NOT here: it lives in the fleet
-  // PUBLIC visibility overlay.
   expect(mainRules.map((r) => r.type).sort()).toEqual([
     "deletion",
     "non_fast_forward",
@@ -630,7 +624,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   // The apply upserts a declared ruleset with a FULL-PAYLOAD PUT, and the
   // dialect's rule APPEND runs between LAYERS, never against live state,
   // so no live rule can survive its absence here. A private repository's
-  // overlay can still declare a copilot_code_review rule: the starter
+  // overlay can still declare a code_quality rule: the starter
   // declares no ruleset, so the rule leaves the payload only once the
   // overlay stops carrying it.
   const privateFleet = fleetLayers({ modules: [], private: true });
@@ -645,7 +639,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   };
 
   const STARTER = 'repository:\n  description: "x"\n  topics: []\n  private: true\n';
-  const REPO_RULE = `${STARTER}rulesets:\n  - name: main\n    rules:\n      - type: copilot_code_review\n        parameters:\n          review_on_push: true\n`;
+  const REPO_RULE = `${STARTER}rulesets:\n  - name: main\n    rules:\n      - type: code_quality\n        parameters:\n          severity: warnings\n`;
 
   test("the starter leaves it out of the emitted main ruleset; an overlay declaring it keeps it, BELOW the override", () => {
     // Both full lists: the negative half alone would also pass for an
@@ -659,7 +653,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
       "pull_request",
     ];
     expect(mainRuleTypes(STARTER)).toEqual(OVERRIDE_MAIN);
-    expect(mainRuleTypes(REPO_RULE)).toEqual(["copilot_code_review", ...OVERRIDE_MAIN]);
+    expect(mainRuleTypes(REPO_RULE)).toEqual(["code_quality", ...OVERRIDE_MAIN]);
   });
 });
 

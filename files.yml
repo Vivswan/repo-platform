@@ -181,7 +181,6 @@ files:
       uv: files/uv/.github/dependabot.uv.yml
       cargo: files/rust/.github/dependabot.cargo.yml
   - { path: .github/actionlint.yaml, class: starter }
-  - { path: .github/instructions/review.instructions.md, class: managed }
   # The overlay starter precedes the rendered document, which reads the
   # overlay it seeds in the same run.
   - { path: .github/settings.local.yml, class: starter }
@@ -202,13 +201,6 @@ files:
   - { path: .github/workflows/update-release.yml, class: starter }
   - { path: .github/workflows/update-release-pr.yml, class: starter }
   - { path: .github/actions/site-build/action.yml, class: starter }
-  - path: .github/workflows/copilot-setup-steps.yml
-    class: starter
-    blocks: toolchain_steps
-    sources:
-      bun: files/bun/.github/workflows/copilot-setup-steps.toolchain.yml
-      uv: files/uv/.github/workflows/copilot-setup-steps.toolchain.yml
-      rust: files/rust/.github/workflows/copilot-setup-steps.toolchain.yml
   - { path: .gitleaks.toml, class: starter }
   - { path: .yamllint, class: managed }
   - { path: .github/workflows/auto-assign.yml, class: managed }
@@ -253,4 +245,4 @@ files:
 mirrors:
   - source: AGENTS.md
     kind: symlink
-    targets: [CLAUDE.md, .github/agents.md, .github/copilot-instructions.md]
+    targets: [CLAUDE.md, .github/agents.md]

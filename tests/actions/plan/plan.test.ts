@@ -265,8 +265,7 @@ describe("planCi", () => {
       text: "modules: [bun]\nexcept: [AGENTS.md]\n",
       error:
         "files.yml: mirrors: source 'AGENTS.md', target 'CLAUDE.md': the source is not a managed or split file files.yml writes for this repository\n" +
-        "files.yml: mirrors: source 'AGENTS.md', target '.github/agents.md': the source is not a managed or split file files.yml writes for this repository\n" +
-        "files.yml: mirrors: source 'AGENTS.md', target '.github/copilot-instructions.md': the source is not a managed or split file files.yml writes for this repository",
+        "files.yml: mirrors: source 'AGENTS.md', target '.github/agents.md': the source is not a managed or split file files.yml writes for this repository",
     },
     {
       reason: "a sound mirror declaration",

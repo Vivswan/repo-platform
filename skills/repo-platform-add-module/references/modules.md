@@ -4,9 +4,9 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 
 ## Base (every managed repo, no module needed)
 
-- Managed: `.github/workflows/ci.yml` (the same file everywhere), `.github/workflows/auto-assign.yml`, `.github/instructions/review.instructions.md`, `.yamllint`, `.typography-allow`, `.github/settings.yml` (rendered from the fleet settings layers, the selected modules' layers, and the repo's overlay), `.github/repo-platform-manifest.json` (the record of what the platform wrote).
+- Managed: `.github/workflows/ci.yml` (the same file everywhere), `.github/workflows/auto-assign.yml`, `.yamllint`, `.typography-allow`, `.github/settings.yml` (rendered from the fleet settings layers, the selected modules' layers, and the repo's overlay), `.github/repo-platform-manifest.json` (the record of what the platform wrote).
 - Split: `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS`, `AGENTS.md`, `LICENSE.md`. Managed with per-module blocks: `.github/dependabot.yml` (the github-actions ecosystem always).
-- Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work on a push to main), `release-gate.yml` (your release acceptance tests; the contract is the platform's docs/all-green.md), `update-release.yml` and `update-release-pr.yml` (the release hooks, called only with release-please), `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml` (the repo's own settings overlay; edit it, never the rendered `.github/settings.yml`), `.github/actions/site-build/action.yml` (the site-build hook the `site` leg runs; a no-op until filled in).
+- Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work on a push to main), `release-gate.yml` (your release acceptance tests; the contract is the platform's docs/all-green.md), `update-release.yml` and `update-release-pr.yml` (the release hooks, called only with release-please), `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml` (the repo's own settings overlay; edit it, never the rendered `.github/settings.yml`), `.github/actions/site-build/action.yml` (the site-build hook the `site` leg runs; a no-op until filled in).
 - Settings are rendered into `.github/settings.yml` by the sync and applied by the platform for every registered repo; the labels a module needs land in the render with its selection.
 
 ## Toolchains: bun / uv / rust
@@ -15,7 +15,7 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Fleet CI on the floors: `biome` on a bun repo holding `biome.json` and `member-shape` on every bun repo; the `ruff` step on every uv repo, at a pinned ruff. Public repos with bun/uv: fleet CI runs CodeQL for their language.
 - Blocks: a gitignore section and a Toolchain section in `AGENTS.md` (split files), and a Dependabot ecosystem entry (the managed `.github/dependabot.yml`).
 - Starter: bun's `biome.local.jsonc`, the repo's own biome layer (exclusions, formatter, extra rules, per-path overrides with reasons), an empty object until filled in; a repo with its own `biome.json` or `biome.jsonc` folds it in as the platform's `docs/modules/typescript.md` says. The `Cargo.toml` workspace root with the lint floor for rust, written only when absent.
-- A starter is written once: an existing `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
+- A starter is written once: an existing `checks.yml` or `.gitleaks.toml` does not gain a later toolchain's piece; add it by hand.
 - Removal: the version dotfile, `ruff.toml`, and `biome.json` are retired, and the `biome`, `member-shape`, and `ruff` steps stand down; `biome.local.jsonc` stays (a starter), so a repo that keeps linting renames it to `biome.json` or extends it from one. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
 
 ## autofix

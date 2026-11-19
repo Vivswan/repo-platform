@@ -19,5 +19,5 @@ Selecting the `rust` module gives a repository a `Cargo.toml` workspace-root sta
 The path depends on what the repository already has ([the writer's classes](../platform/sync/writer.md#classes)):
 
 1. **A new repository:** `Cargo.toml` lands before any crate exists; its header says how a crate created inside the workspace inherits the floor.
-2. **A repository that already owns `Cargo.toml`:** copy the lint tables into it by hand and give each member crate `[lints] workspace = true`; when the starter gains a row, copy the row the same way. Its workflows are starters too, so copy the cargo steps from the rust blocks into its `checks.yml` and `copilot-setup-steps.yml` as well.
+2. **A repository that already owns `Cargo.toml`:** copy the lint tables into it by hand and give each member crate `[lints] workspace = true`; when the starter gains a row, copy the row the same way. Its workflows are starters too, so copy the cargo steps from the rust blocks into its `checks.yml` as well.
 3. **Every repository:** the managed `clippy.toml` arrives at the root; a member crate that carries its own is the one case the file's header asks it to remove.

@@ -108,4 +108,4 @@ files:
 mirrors:
   - source: AGENTS.md
     kind: symlink
-    targets: [CLAUDE.md, .github/agents.md, .github/copilot-instructions.md]
+    targets: [CLAUDE.md, .github/agents.md, .github/assistants.md]

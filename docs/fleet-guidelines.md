@@ -7,20 +7,19 @@ group: Start here
 
 Conventions every managed repository follows, whether the file is managed by sync or repo-owned. A rule a check enforces is the check's to state when it fires, so this page keeps the rest: each entry names what enforces it, and "review" means nothing in CI does.
 
-| Guideline                                                                        | Enforced by                                                                                                                                        |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Sticky PR comments](#sticky-pr-comments)                                        | review                                                                                                                                             |
-| [Conventional Commits, squash-merged](#conventional-commits-squash-merged)       | the `pr-title` check and the `commit-names` step for the grammar; review for the type                                                              |
-| [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped)    | `wrap:check` (repo-platform); review elsewhere                                                                                                     |
-| [AGENTS.md keeps what the skills do not](#agentsmd-keeps-what-the-skills-do-not) | review                                                                                                                                             |
-| [Copilot review comments are advisory](#copilot-review-comments-are-advisory)    | the managed `.github/instructions/review.instructions.md` for what earns a comment; the `main` ruleset for thread resolution; review for the reply |
-| [No backwards-compatibility code](#no-backwards-compatibility-code)              | review                                                                                                                                             |
-| [The boundary repairs or refuses](#the-boundary-repairs-or-refuses)              | review                                                                                                                                             |
-| [Short comments](#short-comments)                                                | the `file-size` step's comment caps (warn only); review for content                                                                                |
-| [Action and workflow descriptions](#action-and-workflow-descriptions)            | `tests/actions/action_metadata.test.ts` in repo-platform (no expression delimiter); review for the shape                                           |
-| [Pre-commit hooks only check](#pre-commit-hooks-only-check)                      | review                                                                                                                                             |
-| [File size caps](#file-size-caps)                                                | the `file-size` step (a hard cap fails the step, and the step fails the `standard-checks` job)                                                     |
-| [How to bypass a check](#how-to-bypass-a-check)                                  | each tool's own per-finding, in-repo bypass; no job-level switch exists                                                                            |
+| Guideline                                                                        | Enforced by                                                                                              |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| [Sticky PR comments](#sticky-pr-comments)                                        | review                                                                                                   |
+| [Conventional Commits, squash-merged](#conventional-commits-squash-merged)       | the `pr-title` check and the `commit-names` step for the grammar; review for the type                    |
+| [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped)    | `wrap:check` (repo-platform); review elsewhere                                                           |
+| [AGENTS.md keeps what the skills do not](#agentsmd-keeps-what-the-skills-do-not) | review                                                                                                   |
+| [No backwards-compatibility code](#no-backwards-compatibility-code)              | review                                                                                                   |
+| [The boundary repairs or refuses](#the-boundary-repairs-or-refuses)              | review                                                                                                   |
+| [Short comments](#short-comments)                                                | the `file-size` step's comment caps (warn only); review for content                                      |
+| [Action and workflow descriptions](#action-and-workflow-descriptions)            | `tests/actions/action_metadata.test.ts` in repo-platform (no expression delimiter); review for the shape |
+| [Pre-commit hooks only check](#pre-commit-hooks-only-check)                      | review                                                                                                   |
+| [File size caps](#file-size-caps)                                                | the `file-size` step (a hard cap fails the step, and the step fails the `standard-checks` job)           |
+| [How to bypass a check](#how-to-bypass-a-check)                                  | each tool's own per-finding, in-repo bypass; no job-level switch exists                                  |
 
 ## Sticky PR comments
 
@@ -51,12 +50,6 @@ Conventions every managed repository follows, whether the file is managed by syn
 **Rule:** AGENTS.md holds what an agent cannot learn elsewhere: the repository's CI gates, its contracts and decisions, its toolchain entry points, and the managed block. It never restates a rule an installed agent skill owns outright (PR body shape, review rounds, attribution lines, comment and test standards). A convention a skill defers to the repository (Conventional Commits) stays.
 
 **Enforced by:** review.
-
-## Copilot review comments are advisory
-
-**Rule:** rejecting a Copilot review comment is a valid outcome: reply with the reason, then resolve the thread ("Resolve conversation", or GraphQL `resolveReviewThread`). What earns a comment is the managed `.github/instructions/review.instructions.md` (source: `files/base/.github/instructions/review.instructions.md`); whether a review blocks is the settings layers' ([Copilot code review](settings.md#copilot-code-review)).
-
-**Enforced by:** review of the reply; the `main` ruleset's thread resolution blocks the merge on an unresolved thread whatever the reply says.
 
 ## No backwards-compatibility code
 
