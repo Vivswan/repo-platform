@@ -53,6 +53,12 @@ Two standard checks need tools beside their linter, and each brings them at its 
 
 A release binary's pin is three values in its action's `env`, moved together by hand: one release, and the sha256 of its Linux download for X64 and for ARM64. shellcheck is pinned at the version GitHub's image carries, so a bump there changes what the fleet's `run:` blocks are held to and is reviewed as one. Dependabot bumps pyflakes.
 
+## What proves the jobs bring their tools
+
+A shipped job takes from the runner [the baseline](fleet-guidelines.md#runner) alone, with the limits that section lists. Repo-platform's own [ci.yml](../.github/workflows/ci.yml) proves it on every push and pull request: its `bare-runner` job runs the shipped actions and the gate's steps in a container holding the baseline alone, where a missing tool is a red step.
+
+The container's image is pinned by digest in the job, and moved by hand: Dependabot does not read a workflow's `container:`.
+
 ## Overriding, per toolchain
 
 To run one repo on a different version, override in a repo-owned workflow and leave the dotfile alone:
