@@ -7,21 +7,21 @@ group: Start here
 
 Conventions every managed repository follows, whether the file is managed by sync or repo-owned. A rule a check enforces is the check's to state when it fires, so this page keeps the rest: each entry names what enforces it, and "review" means nothing in CI does.
 
-| Guideline                                                                        | Enforced by                                                                                                                                        |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Sticky PR comments](#sticky-pr-comments)                                        | review                                                                                                                                             |
-| [Conventional Commits, squash-merged](#conventional-commits-squash-merged)       | the `pr-title` check and the `commit-names` step for the grammar; review for the type                                                              |
-| [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped)    | `wrap:check` (repo-platform); review elsewhere                                                                                                     |
-| [AGENTS.md keeps what the skills do not](#agentsmd-keeps-what-the-skills-do-not) | review                                                                                                                                             |
-| [Copilot review comments are advisory](#copilot-review-comments-are-advisory)    | the managed `.github/instructions/review.instructions.md` for what earns a comment; the `main` ruleset for thread resolution; review for the reply |
-| [No backwards-compatibility code](#no-backwards-compatibility-code)              | review                                                                                                                                             |
-| [The boundary repairs or refuses](#the-boundary-repairs-or-refuses)              | review                                                                                                                                             |
-| [Short comments](#short-comments)                                                | the `file-size` step's comment caps (warn only); review for content                                                                                |
-| [Action and workflow descriptions](#action-and-workflow-descriptions)            | `tests/actions/action_metadata.test.ts` in repo-platform (no expression delimiter); review for the shape                                           |
-| [Pre-commit hooks only check](#pre-commit-hooks-only-check)                      | review                                                                                                                                             |
-| [File size caps](#file-size-caps)                                                | the `file-size` step (a hard cap fails the step, and the step fails the `standard-checks` job)                                                     |
-| [Runner](#runner)                                                                | `tests/workflows/runner_switch.test.ts` in repo-platform for the jobs it ships; review for a repository's own                                      |
-| [How to bypass a check](#how-to-bypass-a-check)                                  | each tool's own per-finding, in-repo bypass; no job-level switch exists                                                                            |
+| Guideline                                                                        | Enforced by                                                                                                                                                                     |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Sticky PR comments](#sticky-pr-comments)                                        | review                                                                                                                                                                          |
+| [Conventional Commits, squash-merged](#conventional-commits-squash-merged)       | the `pr-title` check and the `commit-names` step for the grammar; review for the type                                                                                           |
+| [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped)    | `wrap:check` (repo-platform); review elsewhere                                                                                                                                  |
+| [AGENTS.md keeps what the skills do not](#agentsmd-keeps-what-the-skills-do-not) | review                                                                                                                                                                          |
+| [Copilot review comments are advisory](#copilot-review-comments-are-advisory)    | the managed `.github/instructions/review.instructions.md` for what earns a comment; the `main` ruleset for thread resolution; review for the reply                              |
+| [No backwards-compatibility code](#no-backwards-compatibility-code)              | review                                                                                                                                                                          |
+| [The boundary repairs or refuses](#the-boundary-repairs-or-refuses)              | review                                                                                                                                                                          |
+| [Short comments](#short-comments)                                                | the `file-size` step's comment caps (warn only); review for content                                                                                                             |
+| [Action and workflow descriptions](#action-and-workflow-descriptions)            | `tests/actions/action_metadata.test.ts` in repo-platform (no expression delimiter); review for the shape                                                                        |
+| [Pre-commit hooks only check](#pre-commit-hooks-only-check)                      | review                                                                                                                                                                          |
+| [File size caps](#file-size-caps)                                                | the `file-size` step (a hard cap fails the step, and the step fails the `standard-checks` job)                                                                                  |
+| [Runner](#runner)                                                                | `tests/workflows/runner_switch.test.ts`, `tests/workflows/bare_runner.test.ts`, and the `bare-runner` job in repo-platform for the jobs it ships; review for a repository's own |
+| [How to bypass a check](#how-to-bypass-a-check)                                  | each tool's own per-finding, in-repo bypass; no job-level switch exists                                                                                                         |
 
 ## Sticky PR comments
 
@@ -116,7 +116,7 @@ A hook installs nothing: no runtime, no dependencies, no tools. Setup is the rep
 
 A hook is a tracked executable file, with `core.hooksPath` naming its folder, so every checkout and worktree has it with nothing generated. A hook folder a tool generates at install time exists only where that install ran, and a fresh worktree commits unchecked.
 
-A hook runs only the checks the repository's own toolchain provides (bun here; uv in a Python repository). A check that needs another runtime or a separately installed binary, yamllint, actionlint, and gitleaks among them, is CI's: the shipped workflow runs it on every pull request and push to main, for every repository alike.
+A hook runs only the checks the repository's own toolchain provides (bun here; uv in a Python repository). A check whose tool is outside that toolchain, yamllint, actionlint, and gitleaks among them, is CI's: the shipped workflow fetches the tool at its pin and runs it on every pull request and push to main, for every repository alike.
 
 **Enforced by:** review. repo-platform's own hook is the tracked [.githooks/pre-commit](../.githooks/pre-commit), which `bun run bootstrap` installs through `core.hooksPath` ([scripts/bootstrap.ts](../scripts/bootstrap.ts)); it runs the static checks and fails, and never writes.
 
@@ -160,26 +160,26 @@ runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-lates
 - **One job at a time:** a single runner runs the gate's jobs one after another, so a run takes longer than on GitHub's runners.
 - **A scheduled run** reads the repository's visibility from the event, which GitHub sends with it; an event that names no repository falls back to `ubuntu-latest`.
 
-What the runner must offer for the platform's jobs to pass: the tools GitHub's image carries and the jobs call without installing. No shipped job uses Docker or a service container.
+What the runner must offer is the baseline. Every shipped job fetches whatever else it runs, at the platform's pins, the same on every runner: none needs `python`, `pip`, `pipx`, `jq`, `gh`, `shellcheck`, `sudo`, `apt-get`, Docker, or a `node` or `npm` on PATH.
 
-| Needed                                                                                | By                                                                                                                             |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `bash`, `git`                                                                         | every job                                                                                                                      |
-| `python` on PATH                                                                      | the `all-green` job                                                                                                            |
-| `python3` whose `pip install` works and lands on PATH                                 | yamllint and semgrep (a system Python that refuses `pip install` fails them); zizmor needs `python3` with pip only to download |
-| `npm`; `shellcheck` and `pyflakes`, or else `sudo apt-get` and `pipx` to install them | actionlint                                                                                                                     |
-| `gh`, 2.51 or newer                                                                   | auto-assign, the release jobs, the nightly starters' issue filing                                                              |
-| `wget`, `tar`, `gzip`, `jq`                                                           | typos                                                                                                                          |
-| the usual unpack tools (`curl`, `unzip`, `xz`)                                        | the other tools the jobs download: bun, lychee, gitleaks, trivy, uv, rust                                                      |
-| a C compiler and linker (`cc`)                                                        | the cargo steps of a rust repository                                                                                           |
-| network access to GitHub and the tools' download hosts                                | the same downloads, PyPI, the semgrep registry, the npm registry                                                               |
+| The baseline                                                  | For                                                 |
+| ------------------------------------------------------------- | --------------------------------------------------- |
+| `bash`, `git`, and the GNU core tools (`sed`, `grep`, `find`) | every step                                          |
+| `curl`, `wget`, `tar`, `gzip`, `xz`, `unzip`                  | the downloads                                       |
+| glibc and CA certificates                                     | the binaries the jobs fetch                         |
+| the runner's own bundled node                                 | JavaScript actions                                  |
+| network access to GitHub and the tools' download hosts        | the downloads, PyPI, the semgrep and npm registries |
 
+- **The proof:** the `bare-runner` job of repo-platform's own ci.yml runs every shipped action it can, and the gate's steps, in a Debian container holding the baseline alone, so a step that leans on GitHub's image is red before `stable` moves.
+- **Not in the proof:** the release, npm publish, Pages deploy, CodeQL, ruff, and cargo steps, which need a release, a package, or a toolchain repo-platform lacks. Their `run:` lines are held by the test below, the rest by review.
+- **PowerShell:** a repository holding a PowerShell script or a `shell: pwsh` step needs `pwsh` on its runner. The shell-complexity step fails naming it.
+- **A rust repository** also needs a C linker (`cc`) for its cargo steps.
 - **bun:** the platform's actions reuse a bun already on PATH when it prints the pinned version, and download it otherwise ([toolchains.md](toolchains.md#how-the-composite-actions-pin-bun)).
 - **A clean start, required:** the runner starts every job clean: a fresh machine or container per job, or everything a job can write destroyed when it ends (its work folder, the runner user's home and temp, any tool directory on PATH).
 - **Why clean:** the platform's jobs are written for GitHub's fresh machine per job and tested there only. Autofix's write-capable job follows one that ran pull-request code, so a leftover would run that code with the write token.
-- **Architecture:** the platform runs on x64 Linux; another system or ARM64 is untested.
+- **Architecture:** the fetched binaries are pinned for Linux on X64 and ARM64, and another system fails the setup step, named. The proof runs on X64 alone: no CI job runs ARM64.
 
-**Enforced by:** `tests/workflows/runner_switch.test.ts` in repo-platform, which fails a shipped job whose `runs-on` is any other line; review for a repository's own jobs.
+**Enforced by:** `tests/workflows/runner_switch.test.ts` in repo-platform, which fails a shipped job whose `runs-on` is any other line; `tests/workflows/bare_runner.test.ts` and the `bare-runner` job for the baseline; review for a repository's own jobs.
 
 ## How to bypass a check
 
@@ -191,7 +191,6 @@ What the runner must offer for the platform's jobs to pass: the tools GitHub's i
 
 | Check        | Where it runs                                                                           | Blocks on                                                                                                                                                         | Bypass                                                                                                                                                                     |
 | ------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| actionlint   | standard-checks                                                                         | any finding                                                                                                                                                       | a `# shellcheck disable=SCnnnn` comment on the line above the command (shellcheck findings); the repo-owned `.github/actionlint.yaml` for the rest                         |
 | gitleaks     | standard-checks                                                                         | any leak                                                                                                                                                          | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml`                                                                       |
 | clippy floor | the cargo steps of the repo-owned `checks.yml` (rust repos, [rust.md](modules/rust.md)) | any lint of the floor but its three thresholds (`too_many_arguments`, `too_many_lines`, `cognitive_complexity`), which warn under `--force-warn`; the rest `deny` | `#[expect(clippy::<lint>, reason = "...")]` on the one item it names; never `#[allow]` (itself denied), never a raised threshold (the floor's lint tables are the fleet's) |
 | CodeQL       | codeql                                                                                  | nothing in the job; the `main` ruleset's `code_scanning` rule blocks the merge at the fleet's alert bar ([settings.md](settings.md#what-the-baseline-contains))   | a code scanning dismissal with a reason                                                                                                                                    |
