@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 // Usage: bun scripts/run_tests.ts [bun test arguments]
+//   --shard=1/2  -> bun's own split: the first of two disjoint slices of the test files (ci.yml runs one per machine)
 
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,9 +12,6 @@ import { PLATFORM_NAME } from "../actions/shared/platform.ts";
 
 /** The checkout, one level above scripts/. */
 const REPO_ROOT = resolve(import.meta.dir, "..");
-
-// tests/ is the one root: knip.jsonc keeps a test file under actions/ out of the entries, so one there is an unused-file finding.
-const DEFAULT_TARGETS = ["./tests"];
 
 /** Relayed to the bun child, so the run ends the way the terminal asked. */
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -36,7 +34,6 @@ export function leftoverExitCode(exitCode: number, leftovers: string[]): number 
 }
 
 async function main(argv: string[]): Promise<number> {
-  const args = argv.length > 0 ? argv : DEFAULT_TARGETS;
   // Handlers are installed before the scratch exists: under bun's default disposition a signal would end the launcher ahead of the finally.
   // The first await sits after the spawn and handlers run from the event loop, so the child is always there when one fires.
   let child: Subprocess | undefined;
@@ -47,7 +44,7 @@ async function main(argv: string[]): Promise<number> {
     // a synchronous spawn would hold the signal until the child exited on
     // its own. Inherited stdio, so there is no pipe to drain and no hang to
     // bound beyond the child's own life.
-    child = Bun.spawn(["bun", "test", ...args], {
+    child = Bun.spawn(["bun", "test", "--parallel", ...argv], {
       cwd: REPO_ROOT,
       env: { ...process.env, TMPDIR: scratch },
       stdio: ["inherit", "inherit", "inherit"],

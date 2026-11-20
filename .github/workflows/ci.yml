@@ -234,7 +234,13 @@ jobs:
         with:
           private: ${{ steps.plan.outputs.private }}
 
+  # One machine per slice of the test files (bun's own --shard split). fail-fast is off, so one red slice does not
+  # cancel the other and hide its failures; the gate's `needs` reads the job red when either slice is.
   script-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/2", "2/2"]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -253,7 +259,8 @@ jobs:
       - name: Run .github/scripts and action tests
         env:
           UV_REQUIRED: "1"
-        run: bun run test
+          SHARD: ${{ matrix.shard }}
+        run: bun run test "--shard=$SHARD"
 
   # This repository's own skills catalog, judged by the action Vivswan/skills carries (it pins its
   # own bun). Skills publishes no release tags, so the pin's comment names its branch.
