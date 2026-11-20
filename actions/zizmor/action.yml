@@ -32,7 +32,7 @@ runs:
       run: sed "s|{{github_username}}|$OWNER|g" "$FLEET_POLICY" > "$RUNNER_TEMP/zizmor.yml"
 
     - name: Set up uv
-      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         working-directory: ${{ github.action_path }}
         enable-cache: false
@@ -49,7 +49,7 @@ runs:
 
     - name: Upload the high findings to code scanning
       if: inputs.upload-sarif == 'true'
-      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
       with:
         sarif_file: ${{ runner.temp }}/zizmor.sarif
         category: zizmor
