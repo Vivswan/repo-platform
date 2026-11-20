@@ -20,13 +20,14 @@ import {
 } from "../../.github/scripts/post-green/fleet_sync_marker.ts";
 import { BOT_LOGIN } from "../../.github/scripts/shared/sticky_comment.ts";
 import { loadLayer } from "../../.github/scripts/sync/writer/settings_layers.ts";
-import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { boundedSpawnSync, SPAWN_TIMEOUT_MS } from "../shared/bounded_spawn";
 import {
   type FakeGithubServer,
   type FakeReply,
   type FakeRoutes,
   spawnFakeGithub,
 } from "../shared/fake_github";
+import { harnessBound } from "../shared/harness_bound";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -259,6 +260,10 @@ describe("main", () => {
   });
   afterAll(() => api.stop());
 
+  /** A test here runs the script up to four times, each under boundedSpawnSync's own bound. bun's 5-second default
+   *  ends a test before that on a busy machine, and kills the fake API with the script, so the tests after it fail too. */
+  const RUNS_TIMEOUT_MS = harnessBound(4 * SPAWN_TIMEOUT_MS);
+
   type File = { filename: string; previous_filename?: string };
   type Comment = { id: number; body: string; user: { login: string } | null };
   const own = (id: number, body: string): Comment => ({ id, body, user: { login: BOT_LOGIN } });
@@ -347,192 +352,226 @@ describe("main", () => {
   const workflow = [[file(".github/workflows/fleet.yml")]];
   const botAdded = [ev("labeled", BOT_LOGIN, PUBLIC)];
 
-  test("a fresh pull request gets the label and the note; the next run finds both current", () => {
-    const body = note(...TWO);
-    expect(run("fresh", { files: trigger, labels: ["bug"], events: [], comments: [] })).toEqual({
-      exitCode: 0,
-      stdout: notice("added fleet-sync:public", "posted the comment"),
-      stderr: "",
-      calls: [...READS, labelAdded, COMMENTS_READ, posted(body)],
-    });
-    // A reply quoting the note carries the marker mid-text and is not the sticky comment.
-    const quoting = own(3, `> ${MARKER}\n> Added...\n\nWhy?`);
-    const steady = {
-      files: trigger,
-      labels: [PUBLIC],
-      events: botAdded,
-      comments: [quoting, own(5, body)],
-    };
-    expect(run("steady", steady)).toEqual({
-      exitCode: 0,
-      stdout: notice("label kept", "the comment is current"),
-      stderr: "",
-      calls: [...READS, COMMENTS_READ],
-    });
-  });
-
-  test("a comment that opens with the marker under another login is not the bot's: it is neither rewritten nor deleted", () => {
-    const theirs = { id: 4, body: `${MARKER}\nmine`, user: { login: HUMAN } };
-    const orphaned = { id: 6, body: `${MARKER}\nwhose`, user: null };
-    const comments = [theirs, orphaned];
-    expect(run("theirs", { files: trigger, labels: [], events: [], comments }).calls).toEqual([
-      ...READS,
-      labelAdded,
-      COMMENTS_READ,
-      posted(note(...TWO)),
-    ]);
-    expect(
-      run("theirs-clear", { files: workflow, labels: [], events: [], comments }).calls,
-    ).toEqual([...READS, COMMENTS_READ]);
-  });
-
-  test("a changed path list rewrites the note in place, the listing read across pages", () => {
-    const pages = [[file("docs/sync.md"), file("files.yml")], [file("files/base/AGENTS.md")]];
-    const stale = own(5, note("files.yml"));
-    expect(
-      run("patch", { files: pages, labels: [PUBLIC], events: botAdded, comments: [stale] }),
-    ).toEqual({
-      exitCode: 0,
-      stdout: notice("label kept", "updated the comment"),
-      stderr: "",
-      calls: [
-        READS[0],
-        READS[1],
-        `${PULL}/files${PAGED}&page=2`,
-        READS[2],
-        COMMENTS_READ,
-        patched(5, note(...TWO)),
-      ],
-    });
-  });
-
-  test("a rename out of files/ is judged by the path it left", () => {
-    const moved = [[file("docs/old.md", "files/base/old.md")]];
-    expect(run("rename", { files: moved, labels: [], events: [], comments: [] }).calls).toEqual([
-      ...READS,
-      labelAdded,
-      COMMENTS_READ,
-      posted(note("files/base/old.md")),
-    ]);
-  });
-
-  test("a human's removal is final: the note changes, the label is not re-added", () => {
-    const events = [...botAdded, ev("unlabeled", HUMAN, PUBLIC)];
-    const existing = [own(5, note(...TWO))];
-    expect(run("kept-off", { files: trigger, labels: [], events, comments: existing })).toEqual({
-      exitCode: 0,
-      stdout: notice("label kept", "updated the comment"),
-      stderr: "",
-      calls: [
-        ...READS,
-        COMMENTS_READ,
-        patched(5, noteBody(TWO, KNOWN, { kind: "kept-off", by: HUMAN })),
-      ],
-    });
-  });
-
-  test("the bot's label is withdrawn when a human picks all or the paths leave the diff; a closed pull request is left alone", () => {
-    const existing = [own(5, note(...TWO))];
-    const withdrawn = (reason: string) => ({
-      exitCode: 0,
-      stdout: notice("removed fleet-sync:public", `removed the comment: ${reason}`),
-      stderr: "",
-      calls: [...READS, labelRemoved, COMMENTS_READ, deleted(5)],
-    });
-    const humanAll = [...botAdded, ev("labeled", HUMAN, ALL)];
-    expect(
-      run("all", { files: trigger, labels: [PUBLIC, ALL], events: humanAll, comments: existing }),
-    ).toEqual(withdrawn("fleet-sync:all chosen"));
-    expect(
-      run("left", { files: workflow, labels: [PUBLIC], events: botAdded, comments: existing }),
-    ).toEqual(withdrawn("no path here reaches the fleet through a sync"));
-    expect(
-      run("closed", {
+  test(
+    "a fresh pull request gets the label and the note; the next run finds both current",
+    () => {
+      const body = note(...TWO);
+      expect(run("fresh", { files: trigger, labels: ["bug"], events: [], comments: [] })).toEqual({
+        exitCode: 0,
+        stdout: notice("added fleet-sync:public", "posted the comment"),
+        stderr: "",
+        calls: [...READS, labelAdded, COMMENTS_READ, posted(body)],
+      });
+      // A reply quoting the note carries the marker mid-text and is not the sticky comment.
+      const quoting = own(3, `> ${MARKER}\n> Added...\n\nWhy?`);
+      const steady = {
         files: trigger,
         labels: [PUBLIC],
         events: botAdded,
-        comments: existing,
-        state: "closed",
-      }),
-    ).toEqual({
-      exitCode: 0,
-      stdout: notice("label kept", "comment left as it is (the pull request is closed)"),
-      stderr: "",
-      calls: READS,
-    });
-    expect(run("quiet", { files: workflow, labels: [], events: [], comments: [] })).toEqual({
-      exitCode: 0,
-      stdout: notice(
-        "label kept",
-        "nothing to say (no path here reaches the fleet through a sync)",
-      ),
-      stderr: "",
-      calls: [...READS, COMMENTS_READ],
-    });
-  });
+        comments: [quoting, own(5, body)],
+      };
+      expect(run("steady", steady)).toEqual({
+        exitCode: 0,
+        stdout: notice("label kept", "the comment is current"),
+        stderr: "",
+        calls: [...READS, COMMENTS_READ],
+      });
+    },
+    RUNS_TIMEOUT_MS,
+  );
+
+  test(
+    "a comment that opens with the marker under another login is not the bot's: it is neither rewritten nor deleted",
+    () => {
+      const theirs = { id: 4, body: `${MARKER}\nmine`, user: { login: HUMAN } };
+      const orphaned = { id: 6, body: `${MARKER}\nwhose`, user: null };
+      const comments = [theirs, orphaned];
+      expect(run("theirs", { files: trigger, labels: [], events: [], comments }).calls).toEqual([
+        ...READS,
+        labelAdded,
+        COMMENTS_READ,
+        posted(note(...TWO)),
+      ]);
+      expect(
+        run("theirs-clear", { files: workflow, labels: [], events: [], comments }).calls,
+      ).toEqual([...READS, COMMENTS_READ]);
+    },
+    RUNS_TIMEOUT_MS,
+  );
+
+  test(
+    "a changed path list rewrites the note in place, the listing read across pages",
+    () => {
+      const pages = [[file("docs/sync.md"), file("files.yml")], [file("files/base/AGENTS.md")]];
+      const stale = own(5, note("files.yml"));
+      expect(
+        run("patch", { files: pages, labels: [PUBLIC], events: botAdded, comments: [stale] }),
+      ).toEqual({
+        exitCode: 0,
+        stdout: notice("label kept", "updated the comment"),
+        stderr: "",
+        calls: [
+          READS[0],
+          READS[1],
+          `${PULL}/files${PAGED}&page=2`,
+          READS[2],
+          COMMENTS_READ,
+          patched(5, note(...TWO)),
+        ],
+      });
+    },
+    RUNS_TIMEOUT_MS,
+  );
+
+  test(
+    "a rename out of files/ is judged by the path it left",
+    () => {
+      const moved = [[file("docs/old.md", "files/base/old.md")]];
+      expect(run("rename", { files: moved, labels: [], events: [], comments: [] }).calls).toEqual([
+        ...READS,
+        labelAdded,
+        COMMENTS_READ,
+        posted(note("files/base/old.md")),
+      ]);
+    },
+    RUNS_TIMEOUT_MS,
+  );
+
+  test(
+    "a human's removal is final: the note changes, the label is not re-added",
+    () => {
+      const events = [...botAdded, ev("unlabeled", HUMAN, PUBLIC)];
+      const existing = [own(5, note(...TWO))];
+      expect(run("kept-off", { files: trigger, labels: [], events, comments: existing })).toEqual({
+        exitCode: 0,
+        stdout: notice("label kept", "updated the comment"),
+        stderr: "",
+        calls: [
+          ...READS,
+          COMMENTS_READ,
+          patched(5, noteBody(TWO, KNOWN, { kind: "kept-off", by: HUMAN })),
+        ],
+      });
+    },
+    RUNS_TIMEOUT_MS,
+  );
+
+  test(
+    "the bot's label is withdrawn when a human picks all or the paths leave the diff; a closed pull request is left alone",
+    () => {
+      const existing = [own(5, note(...TWO))];
+      const withdrawn = (reason: string) => ({
+        exitCode: 0,
+        stdout: notice("removed fleet-sync:public", `removed the comment: ${reason}`),
+        stderr: "",
+        calls: [...READS, labelRemoved, COMMENTS_READ, deleted(5)],
+      });
+      const humanAll = [...botAdded, ev("labeled", HUMAN, ALL)];
+      expect(
+        run("all", { files: trigger, labels: [PUBLIC, ALL], events: humanAll, comments: existing }),
+      ).toEqual(withdrawn("fleet-sync:all chosen"));
+      expect(
+        run("left", { files: workflow, labels: [PUBLIC], events: botAdded, comments: existing }),
+      ).toEqual(withdrawn("no path here reaches the fleet through a sync"));
+      expect(
+        run("closed", {
+          files: trigger,
+          labels: [PUBLIC],
+          events: botAdded,
+          comments: existing,
+          state: "closed",
+        }),
+      ).toEqual({
+        exitCode: 0,
+        stdout: notice("label kept", "comment left as it is (the pull request is closed)"),
+        stderr: "",
+        calls: READS,
+      });
+      expect(run("quiet", { files: workflow, labels: [], events: [], comments: [] })).toEqual({
+        exitCode: 0,
+        stdout: notice(
+          "label kept",
+          "nothing to say (no path here reaches the fleet through a sync)",
+        ),
+        stderr: "",
+        calls: [...READS, COMMENTS_READ],
+      });
+    },
+    RUNS_TIMEOUT_MS,
+  );
 
   // GitHub answers 404 for a label that is already off or a comment that is already gone, which is what a retried
   // removal gets once its first reply was lost: a warning there would report a removal that landed as one skipped.
-  test("a removal answered 404 is the thing gone, the label and the note alike; any other refusal is still a warning", () => {
-    const existing = [own(5, note(...TWO))];
-    const left = { files: workflow, labels: [PUBLIC], events: botAdded, comments: existing };
-    const lostReply = [{ status: 502 }, { status: 404 }];
-    const removed = {
-      exitCode: 0,
-      stdout: notice(
-        "removed fleet-sync:public",
-        "removed the comment: no path here reaches the fleet through a sync",
-      ),
-      stderr: "",
-    };
-    expect(run("gone", { ...left, replies: { [labelRemoved.path]: lostReply } })).toEqual({
-      ...removed,
-      calls: [...READS, labelRemoved, labelRemoved, COMMENTS_READ, deleted(5)],
-    });
-    expect(run("note", { ...left, replies: { [deleted(5).path]: lostReply } })).toEqual({
-      ...removed,
-      calls: [...READS, labelRemoved, COMMENTS_READ, deleted(5), deleted(5)],
-    });
-    expect(run("held", { ...left, replies: { [labelRemoved.path]: [{ status: 403 }] } })).toEqual({
-      exitCode: 0,
-      stdout: warning(`${ISSUE}/labels/fleet-sync%253Apublic: HTTP 403`),
-      stderr: "",
-      calls: [...READS, labelRemoved],
-    });
-  });
+  test(
+    "a removal answered 404 is the thing gone, the label and the note alike; any other refusal is still a warning",
+    () => {
+      const existing = [own(5, note(...TWO))];
+      const left = { files: workflow, labels: [PUBLIC], events: botAdded, comments: existing };
+      const lostReply = [{ status: 502 }, { status: 404 }];
+      const removed = {
+        exitCode: 0,
+        stdout: notice(
+          "removed fleet-sync:public",
+          "removed the comment: no path here reaches the fleet through a sync",
+        ),
+        stderr: "",
+      };
+      expect(run("gone", { ...left, replies: { [labelRemoved.path]: lostReply } })).toEqual({
+        ...removed,
+        calls: [...READS, labelRemoved, labelRemoved, COMMENTS_READ, deleted(5)],
+      });
+      expect(run("note", { ...left, replies: { [deleted(5).path]: lostReply } })).toEqual({
+        ...removed,
+        calls: [...READS, labelRemoved, COMMENTS_READ, deleted(5), deleted(5)],
+      });
+      expect(run("held", { ...left, replies: { [labelRemoved.path]: [{ status: 403 }] } })).toEqual(
+        {
+          exitCode: 0,
+          stdout: warning(`${ISSUE}/labels/fleet-sync%253Apublic: HTTP 403`),
+          stderr: "",
+          calls: [...READS, labelRemoved],
+        },
+      );
+    },
+    RUNS_TIMEOUT_MS,
+  );
 
-  test("a failed read, a refused write, or a capped listing is a warning and exit 0, and nothing is deleted", () => {
-    const existing = [own(5, note("files.yml"))];
-    const fresh = { files: trigger, labels: [], events: [], comments: [] };
-    expect(run("down", { ...fresh, replies: { [PULL]: [{ status: 502 }] } })).toEqual({
-      exitCode: 0,
-      stdout: warning(`${PULL}: HTTP 502`),
-      stderr: "",
-      calls: [PULL, PULL, PULL, PULL],
-    });
-    // A fork's token: reads pass, every write is refused, and GitHub's words for it stay out of the public warning.
-    const denied = { status: 403, body: { message: "Resource not accessible by integration" } };
-    expect(run("fork", { ...fresh, replies: { [labelAdded.path]: [denied] } })).toEqual({
-      exitCode: 0,
-      stdout: warning(`${ISSUE}/labels: HTTP 403`),
-      stderr: "",
-      calls: [...READS, labelAdded],
-    });
-    // The listing stops at 3,000 files; the omitted ones may be the delivered ones.
-    const docsOnly = [[file("docs/sync.md")]];
-    expect(
-      run("capped", {
-        files: docsOnly,
-        labels: [PUBLIC],
-        events: botAdded,
-        comments: existing,
-        changedFiles: 3001,
-      }),
-    ).toEqual({
-      exitCode: 0,
-      stdout: warning(`${PULL}/files lists 1 of 3001 changed files`),
-      stderr: "",
-      calls: READS.slice(0, 2),
-    });
-  });
+  test(
+    "a failed read, a refused write, or a capped listing is a warning and exit 0, and nothing is deleted",
+    () => {
+      const existing = [own(5, note("files.yml"))];
+      const fresh = { files: trigger, labels: [], events: [], comments: [] };
+      expect(run("down", { ...fresh, replies: { [PULL]: [{ status: 502 }] } })).toEqual({
+        exitCode: 0,
+        stdout: warning(`${PULL}: HTTP 502`),
+        stderr: "",
+        calls: [PULL, PULL, PULL, PULL],
+      });
+      // A fork's token: reads pass, every write is refused, and GitHub's words for it stay out of the public warning.
+      const denied = { status: 403, body: { message: "Resource not accessible by integration" } };
+      expect(run("fork", { ...fresh, replies: { [labelAdded.path]: [denied] } })).toEqual({
+        exitCode: 0,
+        stdout: warning(`${ISSUE}/labels: HTTP 403`),
+        stderr: "",
+        calls: [...READS, labelAdded],
+      });
+      // The listing stops at 3,000 files; the omitted ones may be the delivered ones.
+      const docsOnly = [[file("docs/sync.md")]];
+      expect(
+        run("capped", {
+          files: docsOnly,
+          labels: [PUBLIC],
+          events: botAdded,
+          comments: existing,
+          changedFiles: 3001,
+        }),
+      ).toEqual({
+        exitCode: 0,
+        stdout: warning(`${PULL}/files lists 1 of 3001 changed files`),
+        stderr: "",
+        calls: READS.slice(0, 2),
+      });
+    },
+    RUNS_TIMEOUT_MS,
+  );
 });

@@ -9,6 +9,9 @@ import { boundedSpawnSync } from "./bounded_spawn";
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 
+/** One writer run's hang bound; a test that makes several gives bun their sum as its own timeout. */
+export const SYNC_TIMEOUT_MS = 60_000;
+
 export interface SyncOptions {
   /** The checkout the writer fills, a directory the caller's tempDirs minted. */
   target: string;
@@ -61,7 +64,7 @@ export function syncedCheckout({
       "--upstream",
       upstream,
     ],
-    { cwd: REPO_ROOT, timeoutMs: 60_000 },
+    { cwd: REPO_ROOT, timeoutMs: SYNC_TIMEOUT_MS },
   );
   expect(result.stderr).toBe("");
   expect(result.exitCode).toBe(0);
