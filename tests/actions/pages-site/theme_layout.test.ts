@@ -418,8 +418,8 @@ test("the view closes when the reader leaves its page through history", async ()
     });
 
     // A finished lightbox left through history: the content update starts medium-zoom's fading close, and the
-    // page stays inert under the fade until the close lands. The fade is the 300ms one: under reduced motion it is
-    // 1ms and the sample would land after the close.
+    // page stays inert under the fade until the close lands. The fade is the 300ms one: under reduced motion the
+    // close lands on the next frame and the sample could come after it.
     await cdp.send("Emulation.setEmulatedMedia", {
       features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
     });
@@ -499,28 +499,38 @@ const FOCUS_BEHIND_OVERLAY = `[...document.querySelectorAll(".Layout a, .Layout 
   return document.activeElement === el;
 })`;
 
-/** Whether the first image takes a focus() aimed at it: the tabindex medium-zoom gave it. */
+/** Whether the first image takes a focus() aimed at it: the tabindex image-zoom.ts gave it. */
 const FOCUS_IMAGE = `(() => {
   const img = document.querySelector(".vp-doc img");
   img.focus();
   return document.activeElement === img;
 })()`;
 
-/** Whether the lightbox finished opening within a second of the key press, and what the original and its copy carry. */
-const KEY_OPENED = `new Promise((resolve) => {
-  const timer = setTimeout(() => resolve({ opened: false }), 1000);
-  document.querySelector(".vp-doc img").addEventListener("medium-zoom:opened", () => {
-    clearTimeout(timer);
-    const img = document.querySelector(".vp-doc img");
-    const copy = document.querySelector(".medium-zoom-image--opened");
-    resolve({
-      opened: true,
-      originalTabIndex: img.getAttribute("tabindex"),
-      copyTabIndex: copy.getAttribute("tabindex"),
-      copyRole: copy.getAttribute("role"),
-    });
-  }, { once: true });
-})`;
+/** How long a probe waits for medium-zoom to report an open finished before it reports that none did. */
+const OPEN_BOUND_MS = harnessBound(5_000);
+
+/** Arms the wait for the first image's lightbox to finish opening and returns once it listens, so a key pressed
+ *  after this cannot open the lightbox unheard; KEY_OPENED reads what the wait saw. */
+const ARM_KEY_OPENED = `(() => {
+  window.__keyOpened = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ opened: false }), ${OPEN_BOUND_MS});
+    document.querySelector(".vp-doc img").addEventListener("medium-zoom:opened", () => {
+      clearTimeout(timer);
+      const img = document.querySelector(".vp-doc img");
+      const copy = document.querySelector(".medium-zoom-image--opened");
+      resolve({
+        opened: true,
+        originalTabIndex: img.getAttribute("tabindex"),
+        copyTabIndex: copy.getAttribute("tabindex"),
+        copyRole: copy.getAttribute("role"),
+      });
+    }, { once: true });
+  });
+  return true;
+})()`;
+
+/** Whether the lightbox finished opening after the key press, and what the original and its copy carry. */
+const KEY_OPENED = "window.__keyOpened";
 
 /** Whether focus is back on the first image: what a close hands back to its opener. */
 const FOCUS_ON_IMAGE = `document.activeElement === document.querySelector(".vp-doc img")`;
@@ -553,12 +563,16 @@ const WHEN_OVERLAY_GONE = `new Promise((resolve) => {
   }).observe(document.body, { childList: true });
 })`;
 
-/** Clicks the first image and leaves for the other page inside the opening transition; resolves once the open finishes on the (by then detached) image. */
-const RACE_OPEN_WITH_NAVIGATION = `new Promise((resolve) => {
+/** Clicks the first image and leaves for the other page inside the opening transition; resolves once medium-zoom reports the close on the (by then detached) image. */
+const LEAVE_OPENING_LIGHTBOX = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc img");
-  img.addEventListener("medium-zoom:opened", () => {
+  let opened = false;
+  img.addEventListener("medium-zoom:opened", () => { opened = true; }, { once: true });
+  img.addEventListener("medium-zoom:closed", () => {
     resolve({
+      opened,
       inert: document.querySelector(".Layout").hasAttribute("inert"),
+      overlay: document.querySelector(".medium-zoom-overlay") !== null,
       navigated: !img.isConnected && document.querySelector("h1").textContent.startsWith("Other"),
     });
   }, { once: true });
@@ -600,17 +614,18 @@ const LEAVE_OPEN_LIGHTBOX = `new Promise((resolve) => {
   img.click();
 })`;
 
-/** Clicks the broken-srcset image and, well past the 300ms transition, reports the stuck state: the page inert, the overlay up, the open never finished. */
+/** Clicks the broken-srcset image and reports the lightbox once its open finishes, or at the bound without one. */
 const OPEN_BROKEN = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc img[srcset]");
-  let opened = false;
-  img.addEventListener("medium-zoom:opened", () => { opened = true; }, { once: true });
-  img.addEventListener("medium-zoom:open", () => {
-    setTimeout(() => resolve({
-      inert: document.querySelector(".Layout").hasAttribute("inert"),
-      overlay: document.querySelector(".medium-zoom-overlay") !== null,
-      opened,
-    }), 700);
+  const state = (opened) => ({
+    inert: document.querySelector(".Layout").hasAttribute("inert"),
+    overlay: document.querySelector(".medium-zoom-overlay") !== null,
+    opened,
+  });
+  const timer = setTimeout(() => resolve(state(false)), ${OPEN_BOUND_MS});
+  img.addEventListener("medium-zoom:opened", () => {
+    clearTimeout(timer);
+    resolve(state(true));
   }, { once: true });
   img.click();
 })`;
@@ -635,8 +650,8 @@ const WHEN_LIGHTBOX_CLOSED = `new Promise((resolve) => {
   img.addEventListener("medium-zoom:closed", () => resolve(closed()), { once: true });
 })`;
 
-// medium-zoom finishes an open or close on transitionend, so a reduced-motion sheet that stops its transition
-// outright leaves the lightbox stuck open; the second pass runs under that preference.
+// The reduced-motion sheet stops every transition, and medium-zoom then finishes an open or close on the next frame
+// with no transitionend to wait for; the second pass runs under that preference.
 test("an article image opens by click or Enter in a lightbox over the nav, larger than inline, page inert, focus back after; a linked or unnamed image does not; the original prints; Escape closes it, under reduced motion too", async () => {
   const { page, cdp } = await openPage();
   try {
@@ -666,7 +681,7 @@ test("an article image opens by click or Enter in a lightbox over the nav, large
         layoutInert: true,
       });
       // A real Tab is not pressed: with the whole page inert it leaves the document for the browser's own UI, and a
-      // headless page that lost focus stalls its transitions, so the close the test presses next would never finish.
+      // headless page that lost focus stalls its transitions.
       expect(await evaluate<boolean>(page, FOCUS_BEHIND_OVERLAY)).toBe(false);
       expect(lightbox.zoomed).toBeGreaterThan(lightbox.inline * 1.5);
       expect(lightbox.overlay.color).not.toBe("rgba(0, 0, 0, 0)");
@@ -685,13 +700,13 @@ test("an article image opens by click or Enter in a lightbox over the nav, large
       role: "button",
       name: "A picture",
     });
-    // KEY_OPENED waits for the open to finish, not for the body class medium-zoom sets a frame into the open: an
-    // Escape before the transition ends is one the library drops.
-    const keyOpened = evaluate<Record<string, unknown>>(page, KEY_OPENED);
+    // The wait is armed before the key and reads the open's finish, not the body class medium-zoom sets a frame
+    // into the open: the Escape below is to close a finished lightbox, not to cancel an opening one.
+    await evaluate(page, ARM_KEY_OPENED);
     await page.keyboard.press("Enter");
     // The original is what medium-zoom clones (a srcset image gets a second, later copy), so it carries no
     // button attributes while it is hidden behind its copy.
-    expect(await keyOpened).toEqual({
+    expect(await evaluate<Record<string, unknown>>(page, KEY_OPENED)).toEqual({
       opened: true,
       originalTabIndex: null,
       copyTabIndex: null,
@@ -711,20 +726,17 @@ test("an article image opens by click or Enter in a lightbox over the nav, large
     // medium-zoom hid the original while its copy was up, which drops focus to <body>.
     expect(await evaluate<boolean>(page, FOCUS_ON_IMAGE)).toBe(true);
 
-    // Leaving the page inside a healthy open: the content update frees the page, then the open finishes over the
-    // new page and takes it back until Escape closes the lightbox. `navigated` proves the other page had landed by
-    // then: a slow page module would let the open finish first and prove nothing.
+    // Leaving the page inside the opening transition: the content update closes the lightbox before its open
+    // finishes, and the close frees the new page. `opened` proves the other page landed inside the transition: a
+    // slow page module would let the open finish first and prove nothing.
     await cdp.send("Emulation.setEmulatedMedia", {
       features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
     });
-    expect(await evaluate<Record<string, boolean>>(page, RACE_OPEN_WITH_NAVIGATION)).toEqual({
-      inert: true,
-      navigated: true,
-    });
-    await page.keyboard.press("Escape");
-    expect(await evaluate<Record<string, unknown>>(page, WHEN_OVERLAY_GONE)).toEqual({
+    expect(await evaluate<Record<string, boolean>>(page, LEAVE_OPENING_LIGHTBOX)).toEqual({
+      opened: false,
+      inert: false,
       overlay: false,
-      layoutInert: false,
+      navigated: true,
     });
   } finally {
     await page.close();
@@ -752,24 +764,25 @@ test("a lightbox closed by scrolling away hands focus back without scrolling the
   }
 });
 
-// medium-zoom waits for its high-resolution clone's load and never its error, so a srcset image whose chosen candidate
-// fails leaves it mid-open for good. Navigation by link: headless Chrome wedges on a history step under that open.
-test("a lightbox stuck mid-open frees the page on the next content update", async () => {
+// medium-zoom loads a high-resolution clone of a srcset image; when the chosen candidate fails it opens on the copy
+// of the original, so the lightbox finishes its open and closes like any other.
+test("an image whose srcset candidate fails still opens, and the next content update closes it and frees the page", async () => {
   const { page } = await openPage();
   try {
     await evaluate(page, WHEN_ATTACHED);
     expect(await evaluate<Record<string, boolean>>(page, OPEN_BROKEN)).toEqual({
       inert: true,
       overlay: true,
-      opened: false,
+      opened: true,
     });
     await evaluate(
       page,
       WHEN_TITLED("Other", "document.querySelector('a[href*=\"other\"]').click()"),
     );
-    expect(
-      await evaluate<boolean>(page, 'document.querySelector(".Layout").hasAttribute("inert")'),
-    ).toBe(false);
+    expect(await evaluate<Record<string, unknown>>(page, WHEN_OVERLAY_GONE)).toEqual({
+      overlay: false,
+      layoutInert: false,
+    });
   } finally {
     await page.close();
   }

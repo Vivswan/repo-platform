@@ -6,7 +6,12 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
-import { ONE_SCOPE, SUBJECT_CASE, TYPE_ENUM, verdict } from "../../shared/commitlint_verdict.ts";
+import {
+  ONE_SCOPE,
+  SUBJECT_SENTENCE_CASE,
+  TYPE_ENUM,
+  verdict,
+} from "../../shared/commitlint_verdict.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -69,7 +74,7 @@ const TITLES: [title: string, problems: string[]][] = [
   ["fix(a):(c): x", [ONE_SCOPE]],
   // The parser reads the scope up to the last `): `, and so will release-please on the landed subject.
   ["fix(core): handle fn(): safely", [ONE_SCOPE]],
-  ["fix: Repair installer", [SUBJECT_CASE]],
+  ["fix: Repair installer", [SUBJECT_SENTENCE_CASE]],
   ["fix: x.", ["subject may not end with full stop [subject-full-stop]"]],
   ["fix: x ", ["header must not end with whitespace [header-trim]"]],
   ["fix(a):x", ["subject may not be empty [subject-empty]", "type may not be empty [type-empty]"]],
@@ -130,7 +135,7 @@ function scratchRepo(): { repo: string; base: string; head: string; orphan: stri
 }
 
 // Newest first, the order commitlint reports a range in; the merge commit itself is ignored.
-const RANGE_PROBLEMS = [SUBJECT_CASE, ONE_SCOPE];
+const RANGE_PROBLEMS = [SUBJECT_SENTENCE_CASE, ONE_SCOPE];
 
 describe("the event's commit range", () => {
   let repo: string;

@@ -8,19 +8,19 @@
     "@fontsource-variable/wix-madefor-display": "^5.3.0",
     "@fontsource-variable/wix-madefor-text": "^5.3.0",
     "@panzoom/panzoom": "4.6.2",
-    "entities": "^8.0.0",
+    "entities": "^9.0.0",
     "github-slugger": "^2.0.0",
-    "medium-zoom": "1.1.0",
+    "medium-zoom": "1.1.2",
     "mermaid": "11.17.2",
-    "reka-ui": "2.10.4",
+    "reka-ui": "2.11.0",
     "vitepress": "1.6.4",
     "vitepress-carbon": "1.6.0",
-    "vue": "^3.5.13",
+    "vue": "^3.5.45",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2"
   }
 }

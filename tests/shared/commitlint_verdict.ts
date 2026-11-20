@@ -5,8 +5,7 @@ import type { BoundedSpawnResult } from "./bounded_spawn.ts";
 
 export const ONE_SCOPE =
   "one scope per subject, spelled [A-Za-z0-9._/-]: split the change or pick the scope that names it [scope-one]";
-export const SUBJECT_CASE =
-  "subject must not be sentence-case, start-case, pascal-case, upper-case [subject-case]";
+export const SUBJECT_SENTENCE_CASE = "subject must not be sentence-case [subject-case]";
 export const TYPE_ENUM =
   "type must be one of [build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test] [type-enum]";
 
