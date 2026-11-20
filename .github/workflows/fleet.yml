@@ -88,12 +88,14 @@ jobs:
         uses: $/actions/typos
       # Allowlist false positives in the repo-owned .gitleaks.toml;
       # comments off: findings land in the log and summary, not PR comments.
+      # The artifact off: the action uploads its SARIF relative to $HOME and fails where the work folder is outside it.
       - id: gitleaks
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
           # The action's default binary predates .gitleaks.toml's
           # minVersion floor and skips that check silently; pin past it.
           GITLEAKS_VERSION: "8.30.1"

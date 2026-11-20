@@ -6,7 +6,7 @@
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { capture, failureDetail, requireEnv, succeeded } from "./action_runtime.ts";
+import { capture, messageOf, requireEnv, succeeded } from "./action_runtime.ts";
 import { sha256 } from "./values.ts";
 
 /** One architecture's download of a release: a tar, or the binary itself. */
@@ -17,7 +17,7 @@ export interface ReleaseDownload {
   /** Of the downloaded bytes, lowercase hex. */
   sha256: string;
 
-  /** The binary's path inside the tar, gzipped or xz; absent when the download is the binary. */
+  /** The binary's path inside the tar, gzipped or xz, which is unpacked whole; absent when the download is the binary. */
   member?: string;
 }
 
@@ -71,12 +71,16 @@ export interface SetUp {
   installed: boolean;
 }
 
-/** Writes the bytes at `url` to `file`. */
-export type Download = (url: string, file: string) => void;
+/** The slice of @actions/tool-cache the release is fetched with. The zone cannot carry the package (see `Core` in
+ *  check_main.ts), so the action hands its own in. */
+export interface ToolCache {
+  /** Writes the bytes at `url` to `dest`, which must not exist; a failed download leaves no file. */
+  downloadTool(url: string, dest: string): Promise<string>;
+
+  extractTar(file: string, dest: string, flags: string): Promise<string>;
+}
 
 const VERSION_BOUND_MS = 30_000;
-const UNPACK_BOUND_MS = 120_000;
-const DOWNLOAD_BOUND_MS = 600_000;
 
 /** The version the binary at `path` prints, or undefined when it does not run or prints none. */
 function printedVersion(tool: ReleaseBinary, path: string): string | undefined {
@@ -86,27 +90,16 @@ function printedVersion(tool: ReleaseBinary, path: string): string | undefined {
   return tool.versionPattern.exec(result.stdout)?.[1];
 }
 
-/** To a file, never a pipe: curl starts the file over on a retry, and a pipe would keep the failed attempt's bytes. */
-export const download: Download = (url, file) => {
-  const curl = capture(
-    ["curl", "-fsSL", "--retry", "3", "--retry-all-errors", "--max-time", "120", "-o", file, url],
-    { timeoutMs: DOWNLOAD_BOUND_MS },
-  );
-  if (!succeeded(curl.exit)) {
-    throw new Error(`${url} could not be downloaded (${failureDetail(curl)})`);
-  }
-};
-
 /** The pinned binary for the job: the one on PATH when it prints the pinned version, a fetched one otherwise.
  *
  * @throws {Error} the runner is not one the release is pinned for, the download failed or its sha256 is not the pin,
  *   or what was fetched does not print the pinned version
  */
-export function setUpReleaseBinary(
+export async function setUpReleaseBinary(
   tool: ReleaseBinary,
   runner: Runner,
-  fetchRelease: Download = download,
-): SetUp {
+  toolCache: ToolCache,
+): Promise<SetUp> {
   const what = `${tool.name} ${tool.version}`;
   const release = runner.os === "Linux" ? tool.downloads[runner.arch] : undefined;
   if (release === undefined) {
@@ -125,7 +118,12 @@ export function setUpReleaseBinary(
   rmSync(root, { recursive: true, force: true });
   mkdirSync(root, { recursive: true });
   const file = join(root, `${tool.name}.download`);
-  fetchRelease(release.url, file);
+  try {
+    await toolCache.downloadTool(release.url, file);
+  } catch (cause) {
+    throw new Error(`${release.url} could not be downloaded (${messageOf(cause)})`);
+  }
+
   const fetched = sha256(readFileSync(file));
   if (fetched !== release.sha256) {
     rmSync(root, { recursive: true, force: true });
@@ -139,16 +137,14 @@ export function setUpReleaseBinary(
     renameSync(file, path);
     chmodSync(path, 0o755);
   } else {
-    // tar reads the compression from the file, so one command unpacks a gzipped tar and an xz one.
-    const unpacked = capture(["tar", "-xf", file, "-C", root, release.member], {
-      timeoutMs: UNPACK_BOUND_MS,
-    });
-    rmSync(file);
-    if (!succeeded(unpacked.exit)) {
-      throw new Error(
-        `${what}: ${release.member} could not be unpacked (${failureDetail(unpacked)})`,
-      );
+    // No compression flag: tar reads it from the file, so one call unpacks a gzipped tar and an xz one.
+    try {
+      await toolCache.extractTar(file, root, "x");
+    } catch (cause) {
+      throw new Error(`${what}: ${release.url} could not be unpacked (${messageOf(cause)})`);
     }
+
+    rmSync(file);
   }
 
   const printed = printedVersion(tool, path);

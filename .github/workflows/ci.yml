@@ -68,7 +68,7 @@ jobs:
 
   # fetch-depth 0 so the event's commit range resolves; pull-requests read because the action lists
   # the PR's commits to build that range. Comments off keeps that scope at read; findings still land
-  # in the job summary and SARIF artifact.
+  # in the log and the job summary. The artifact is off as in fleet.yml.
   gitleaks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -83,6 +83,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
           # The action's default binary (8.24.3) predates .gitleaks.toml's
           # minVersion floor AND skips that check silently; pin one meeting
           # the floor so CI honors the same config local runs do.
@@ -249,15 +250,15 @@ jobs:
         uses: $/actions/typos
       - name: Put the installed typos on PATH
         run: echo "$RUNNER_TEMP" >>"$GITHUB_PATH"
-      # The link-check step installs the pinned lychee on PATH, which the site tests' live link check then runs.
-      - name: Install the site action's lychee
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+      # The site tests' live link check runs the lychee action's own step, which brings its lychee through uv.
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
-          lycheeVersion: v0.24.2
-          args: --offline --no-progress --version
+          enable-cache: false
+          ignore-empty-workdir: true
       - name: Run .github/scripts and action tests
         env:
           TYPOS_REQUIRED: "1"
+          UV_REQUIRED: "1"
         run: bun run test
 
   # This repository's own skills catalog, judged by the action Vivswan/skills carries (it pins its
@@ -465,6 +466,161 @@ jobs:
         with:
           phase: plan
           config: '{"label":{"paths":["**"],"delete":[]},"push":null}'
+      # Offline over the README: its links into this checkout are judged, and the network is never asked.
+      - id: lychee
+        uses: $/actions/lychee
+        with:
+          working-directory: ${{ github.workspace }}
+          args: |
+            --offline
+            --no-progress
+            README.md
+          report: ${{ runner.temp }}/action-load/links.md
+
+  # GitHub's image carries python, node, jq, gh, and shellcheck, so a shipped step that leans on one stays green there.
+  # Here the shipped actions and the gate's steps run in a container holding the baseline alone (docs/fleet-guidelines.md,
+  # "Runner"), so the missing tool is a red step; tests/workflows/bare_runner.test.ts holds the job to the actions directory.
+  bare-runner:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: read
+      # Read: the findings comments belong to the jobs that keep them, and each action tolerates a comment it cannot post.
+      pull-requests: read
+      # The semgrep action's SARIF upload.
+      security-events: write
+    steps:
+      # The image's build, not a shipped step: what the baseline names and the slim image lacks, after which apt leaves
+      # PATH so no later step installs more. Two container artifacts: the runner fills some expressions with its own path
+      # for the work folder, mounted here at /__w (actions/runner#2185), and its user owns the checkout these steps read as root.
+      - name: Build the baseline
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends ca-certificates curl git unzip wget xz-utils
+          rm /usr/bin/apt /usr/bin/apt-get
+          mkdir -p /home/runner
+          ln -s /__w /home/runner/work
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Every step below runs whatever failed before it, so one run names every gap.
+      # fleet.yml's standard-checks job.
+      - if: ${{ !cancelled() }}
+        id: plan
+        uses: $/actions/plan
+        with:
+          private: ${{ github.event.repository.private }}
+      - if: ${{ !cancelled() }}
+        uses: $/actions/validate-managed-files
+        with:
+          private: ${{ steps.plan.outputs.private }}
+      - if: ${{ !cancelled() }}
+        uses: $/actions/check-typography
+      - if: ${{ !cancelled() }}
+        uses: $/actions/check-file-size
+      # `files` as in the shell-complexity job. The action's own .ps1 is this checkout's one PowerShell body, and judging
+      # one takes the runner's pwsh, by the action's description.
+      - if: ${{ !cancelled() }}
+        uses: $/actions/check-shell-complexity
+        with:
+          skip: files, check-shell-complexity
+      - if: ${{ !cancelled() }}
+        uses: $/actions/validate-commit-names
+      - if: ${{ !cancelled() }}
+        uses: $/actions/actionlint
+      - if: ${{ !cancelled() }}
+        uses: $/actions/yamllint
+      - if: ${{ !cancelled() }}
+        uses: $/actions/typos
+      - if: ${{ !cancelled() }}
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_VERSION: "8.30.1"
+      # The zizmor job uploads this commit's SARIF; the verdict pass alone runs the same zizmor.
+      - if: ${{ !cancelled() }}
+        uses: $/actions/zizmor
+        with:
+          upload-sarif: "false"
+      - if: ${{ !cancelled() }}
+        uses: $/actions/trivy
+      - if: ${{ !cancelled() }}
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: files/bun/.bun-version
+      - if: ${{ !cancelled() }}
+        name: Install dependencies
+        run: bun install --frozen-lockfile --silent
+      - if: ${{ !cancelled() }}
+        uses: $/actions/biome
+      - if: ${{ !cancelled() }}
+        uses: $/actions/check-member-shape
+      - if: ${{ !cancelled() }}
+        uses: $/actions/knip
+
+      # fleet.yml's semgrep, dependency-review, and docs-check jobs.
+      - if: ${{ !cancelled() }}
+        uses: $/actions/semgrep
+      - if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: $/actions/dependency-review
+      - if: ${{ !cancelled() }}
+        id: site
+        uses: $/actions/plan
+        with:
+          mode: site
+      - if: ${{ !cancelled() }}
+        uses: $/actions/pages-site
+        with:
+          check: "true"
+          config: ${{ steps.site.outputs.config }}
+
+      # The actions of the release, nightly, site, and autofix workflows, with the action-load job's inputs.
+      - if: ${{ !cancelled() }}
+        uses: $/actions/release-health
+        with:
+          mode: after-propose
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: ${{ !cancelled() }}
+        uses: $/actions/fuzz-issue
+        with:
+          mode: resolve
+          label: bare-runner
+          stream: generic
+      - if: ${{ !cancelled() }}
+        uses: $/actions/site-urls
+      - if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: $/actions/autofix
+        with:
+          phase: plan
+          config: '{"label":{"paths":["**"],"delete":[]},"push":null}'
+      - if: ${{ !cancelled() }}
+        uses: $/actions/gh-setup
+
+      # The skeleton's all-green job, over a needs context of one green job. Last: it puts a python on PATH.
+      - if: ${{ !cancelled() }}
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: "3.13"
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/gate-python
+          enable-cache: false
+          ignore-empty-workdir: true
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+      - if: ${{ !cancelled() }}
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          jobs: '{"baseline": {"result": "success", "outputs": {}}}'
 
   # THE gate: this job's own check run is the ruleset's required check (files/settings/override.yml),
   # and alls-green passes only when every needed result is success, or skipped for a job named in allowed-skips.
@@ -498,6 +654,7 @@ jobs:
       - bun-setup-smoke
       - trivy
       - action-load
+      - bare-runner
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

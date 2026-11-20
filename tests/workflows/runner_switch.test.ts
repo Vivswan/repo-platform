@@ -1,18 +1,10 @@
 // What would drift silently: a job shipped with a fixed runner. A private repository that set CI_RUNS_ON would still
 // queue that one job on a GitHub-hosted runner, and its gate would never go green (docs/fleet-guidelines.md, "Runner").
-// Judged over every workflow a managed repository's run executes: the sources under files/ and each platform workflow
-// they call, followed through the `uses:` lines so a new workflow is judged without being registered here.
+// Judged over every workflow a managed repository's run executes (executedWorkflowFiles).
 
 import { describe, expect, test } from "bun:test";
-import { dirname } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { interpolate } from "../shared/github_expression.ts";
-import { shippedSource } from "../shared/shipped_source.ts";
-import {
-  calledWorkflow,
-  shippedWorkflowFiles,
-  WORKFLOW_FRAGMENTS,
-} from "../shared/shipped_workflows.ts";
+import { executedWorkflowFiles, shippedJobs } from "../shared/shipped_workflows.ts";
 
 interface Job {
   uses?: string;
@@ -25,39 +17,15 @@ const RUNS_ON = "${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubun
 /** Copilot reads this job's `runs-on` itself, and its documentation names labels only, so the job keeps a plain one. */
 const PLAIN_LABEL = new Set(["files/base/.github/workflows/copilot-setup-steps.yml"]);
 
-/** The workflows a target receives whole. */
-const sources = shippedWorkflowFiles().filter((rel) => !WORKFLOW_FRAGMENTS.has(rel));
-
-/** A workflow's jobs by id, as a target's copy parses. */
-const jobsOf = (rel: string) =>
-  Object.entries((parseYaml(shippedSource(rel)) as { jobs: Record<string, Job> }).jobs);
-
-/** The sources and every platform workflow reached from them, each once. */
-function executed(): string[] {
-  const seen = new Set(sources);
-  const queue = [...sources];
-  for (let rel = queue.pop(); rel !== undefined; rel = queue.pop()) {
-    for (const [, job] of jobsOf(rel)) {
-      // A source's `./` call names another source, whichever module ships it, and every source is walked already.
-      const called = calledWorkflow(job.uses ?? "", dirname(rel));
-      if (called === null || called.startsWith("files/") || seen.has(called)) continue;
-
-      seen.add(called);
-      queue.push(called);
-    }
-  }
-  return [...seen].sort();
-}
-
 /** Each job whose runner is not the one expression, as `file: job 'id'`. */
 function fixedRunners(rel: string): string[] {
-  return jobsOf(rel).flatMap(([id, job]) =>
+  return shippedJobs<Job>(rel).flatMap(([id, job]) =>
     job.uses === undefined && job["runs-on"] !== RUNS_ON ? [`${rel}: job '${id}'`] : [],
   );
 }
 
 describe("every shipped job takes its runner from the one expression", () => {
-  const files = executed();
+  const files = executedWorkflowFiles();
 
   test("the walk reaches the starters, the skeleton's calls, and a call's own call (ARMED)", () => {
     expect(files).toContain("files/base/.github/workflows/checks.yml");

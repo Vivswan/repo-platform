@@ -1,12 +1,13 @@
 {
   "name": "gh-setup",
   "private": true,
-  "description": "Dependency manifest for the gh-setup action: @actions/core adds gh to the job's PATH and annotates the run.",
+  "description": "Dependency manifest for the gh-setup action: @actions/tool-cache downloads and unpacks gh, and @actions/core adds it to the job's PATH and annotates the run.",
   "devDependencies": {
     "@types/bun": "1.4.4",
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@actions/core": "3.0.1"
+    "@actions/core": "3.0.1",
+    "@actions/tool-cache": "4.0.0"
   }
 }

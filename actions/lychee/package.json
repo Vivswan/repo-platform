@@ -1,0 +1,12 @@
+{
+  "name": "lychee",
+  "private": true,
+  "description": "Dependency manifest for the lychee action: @actions/core publishes the exit code and annotates the run.",
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@actions/core": "3.0.1"
+  }
+}
