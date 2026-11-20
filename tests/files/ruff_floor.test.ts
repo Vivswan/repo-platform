@@ -6,8 +6,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseFilesConfig } from "../../actions/plan/files_config";
 import { isManaged } from "../../actions/shared/managed_header";
+import { harnessBound } from "../shared/harness_bound";
 import type { LoopbackServer } from "../shared/loopback_server";
-import { syncedCheckout } from "../shared/synced_checkout";
+import { SYNC_TIMEOUT_MS, syncedCheckout } from "../shared/synced_checkout";
 import { tempDirs } from "../shared/temp_dir";
 import { spawnStubUpstream } from "../shared/upstream_server";
 
@@ -32,13 +33,18 @@ const synced = (label: string, modules: string[]) =>
   syncedCheckout({ target: temp.dir(`ruff-floor-${label}-`), upstream: upstream.host, modules });
 
 describe("the managed ruff.toml", () => {
-  test("lands for the uv module alone, rendered as a managed file that still parses as TOML", () => {
-    expect(existsSync(join(synced("none", []), FLOOR))).toBe(false);
-    const text = readFileSync(join(synced("uv", ["uv"]), FLOOR), "utf-8");
-    expect(text).not.toContain("{{");
-    expect(isManaged(text)).toBe(true);
-    expect(() => Bun.TOML.parse(text)).not.toThrow();
-  });
+  // Two writer runs under the test's own timeout: bun's 5-second default ends it before syncedCheckout's bound can.
+  test(
+    "lands for the uv module alone, rendered as a managed file that still parses as TOML",
+    () => {
+      expect(existsSync(join(synced("none", []), FLOOR))).toBe(false);
+      const text = readFileSync(join(synced("uv", ["uv"]), FLOOR), "utf-8");
+      expect(text).not.toContain("{{");
+      expect(isManaged(text)).toBe(true);
+      expect(() => Bun.TOML.parse(text)).not.toThrow();
+    },
+    harnessBound(2 * SYNC_TIMEOUT_MS),
+  );
 });
 
 describe("the ruff pin", () => {
