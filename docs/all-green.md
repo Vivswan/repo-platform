@@ -91,7 +91,7 @@ A managed repository's ci.yml ([the managed file](new-repo.md#3-add-checks-to-ch
 
 - **Bypassing a check:** each check's per-finding bypass is its action description's; the rule, and the checks run without a description, are [fleet-guidelines.md](fleet-guidelines.md#how-to-bypass-a-check)'s.
 
-- **Repo-platform's own ci.yml** has no callers to hide behind: its gating jobs are the needs list itself.
+- **Repo-platform's own ci.yml** has no callers to hide behind: its gating jobs are the needs list itself. Its tests are the `checks` job, which calls its own checks.yml with `contents: read` and no secret, on the schedule too, so the gate allows it no skip.
 
 - **A repo-owned advisory check** opts out with `continue-on-error: true` on its job in checks.yml.
 

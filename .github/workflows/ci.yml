@@ -234,33 +234,12 @@ jobs:
         with:
           private: ${{ steps.plan.outputs.private }}
 
-  # One machine per slice of the test files (bun's own --shard split). fail-fast is off, so one red slice does not
-  # cancel the other and hide its failures; the gate's `needs` reads the job red when either slice is.
-  script-tests:
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ["1/2", "2/2"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: files/bun/.bun-version
-      # The root install's postinstall installs every action's pinned dependencies, the site action's among them.
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --silent
-      # The typos tests and the site tests' live link check run their action's own step, which brings its tool through uv.
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          enable-cache: false
-          ignore-empty-workdir: true
-      - name: Run .github/scripts and action tests
-        env:
-          UV_REQUIRED: "1"
-          SHARD: ${{ matrix.shard }}
-        run: bun run test "--shard=$SHARD"
+  # This repository's own tests: edit checks.yml, as in every managed repository. They need no secret and write nothing, so
+  # the call inherits none and its ceiling is a read; they run on the schedule too, so the gate grants the job no skip.
+  checks:
+    permissions:
+      contents: read
+    uses: $/.github/workflows/checks.yml
 
   # This repository's own skills catalog, judged by the action Vivswan/skills carries (it pins its
   # own bun). Skills publishes no release tags, so the pin's comment names its branch.
@@ -643,7 +622,7 @@ jobs:
       - typecheck
       - invariants
       - managed-files
-      - script-tests
+      - checks
       - validate-skills
       - skills-discovery
       - docs-check
