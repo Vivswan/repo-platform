@@ -20,6 +20,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Action and workflow descriptions](#action-and-workflow-descriptions)            | `tests/actions/action_metadata.test.ts` in repo-platform (no expression delimiter); review for the shape                                           |
 | [Pre-commit hooks only check](#pre-commit-hooks-only-check)                      | review                                                                                                                                             |
 | [File size caps](#file-size-caps)                                                | the `file-size` step (a hard cap fails the step, and the step fails the `standard-checks` job)                                                     |
+| [Runner](#runner)                                                                | `tests/workflows/runner_switch.test.ts` in repo-platform for the jobs it ships; review for a repository's own                                      |
 | [How to bypass a check](#how-to-bypass-a-check)                                  | each tool's own per-finding, in-repo bypass; no job-level switch exists                                                                            |
 
 ## Sticky PR comments
@@ -132,6 +133,53 @@ A hook runs only the checks the repository's own toolchain provides (bun here; u
 - **Packaging:** a repository that packages from its root (an npm package with no `files` field, for one) lists the allowlist in its packaging ignore file (`.npmignore`), or it ships as content.
 
 **Enforced by:** the `file-size` step of fleet.yml's `standard-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)), whose description carries the tiers, the exemptions, and the allowlist's grammar; the caps themselves are [check-file-size.ts](../actions/check-file-size/check-file-size.ts)'s.
+
+## Runner
+
+**Rule:** every job the platform ships takes its runner from one line, and a repository's own jobs copy it:
+
+```yaml
+runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-latest' }}
+```
+
+| `CI_RUNS_ON`                   | The job runs on                     |
+| ------------------------------ | ----------------------------------- |
+| unset or empty                 | `ubuntu-latest`                     |
+| set, the repository is private | that label, `self-hosted` for one   |
+| set, the repository is public  | `ubuntu-latest`, whatever the value |
+
+**Why:** a private repository whose Actions minutes are spent or blocked cannot start a job on GitHub's runners, so its gate never goes green; its own runner costs no minutes. A public repository's minutes are free, and a self-hosted runner must never run a stranger's pull request, so the variable is not read there.
+
+**How:** register a self-hosted runner on the repository, then set the repository variable (`gh variable set CI_RUNS_ON --body self-hosted`).
+
+- **One label:** the value is one runner label. A repository cannot name two.
+- **The repository's own files:** a starter is seeded once, so a `checks.yml`, `post-green.yml`, or nightly seeded before the line existed still says `ubuntu-latest` until the repository edits it. `copilot-setup-steps.yml` keeps a plain label: Copilot reads that job's `runs-on` itself.
+- **A fork's pull request** to a private repository reads the variable only when the repository's Actions settings send variables to fork pull requests: then it runs on that runner (only people with read access can open one), otherwise on `ubuntu-latest`. The autofix module's run on a fork's pull request reads the repository's own variables, so it goes to the runner either way.
+- **Visibility is the event's:** a run reads the visibility its event recorded, so a run started while private and rerun after the repository went public still goes to the runner. Delete the variable before making a repository public.
+- **npm publishing:** npm's trusted publishing accepts GitHub-hosted runners only, so a repository on its own runner cannot publish through the npm module.
+- **One job at a time:** a single runner runs the gate's jobs one after another, so a run takes longer than on GitHub's runners.
+- **A scheduled run** reads the repository's visibility from the event, which GitHub sends with it; an event that names no repository falls back to `ubuntu-latest`.
+
+What the runner must offer for the platform's jobs to pass: the tools GitHub's image carries and the jobs call without installing. No shipped job uses Docker or a service container.
+
+| Needed                                                                                | By                                                                                                                             |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `bash`, `git`                                                                         | every job                                                                                                                      |
+| `python` on PATH                                                                      | the `all-green` job                                                                                                            |
+| `python3` whose `pip install` works and lands on PATH                                 | yamllint and semgrep (a system Python that refuses `pip install` fails them); zizmor needs `python3` with pip only to download |
+| `npm`; `shellcheck` and `pyflakes`, or else `sudo apt-get` and `pipx` to install them | actionlint                                                                                                                     |
+| `gh`, 2.51 or newer                                                                   | auto-assign, the release jobs, the nightly starters' issue filing                                                              |
+| `wget`, `tar`, `gzip`, `jq`                                                           | typos                                                                                                                          |
+| the usual unpack tools (`curl`, `unzip`, `xz`)                                        | the other tools the jobs download: bun, lychee, gitleaks, trivy, uv, rust                                                      |
+| a C compiler and linker (`cc`)                                                        | the cargo steps of a rust repository                                                                                           |
+| network access to GitHub and the tools' download hosts                                | the same downloads, PyPI, the semgrep registry, the npm registry                                                               |
+
+- **bun:** the platform's actions reuse a bun already on PATH when it prints the pinned version, and download it otherwise ([toolchains.md](toolchains.md#how-the-composite-actions-pin-bun)).
+- **A clean start, required:** the runner starts every job clean: a fresh machine or container per job, or everything a job can write destroyed when it ends (its work folder, the runner user's home and temp, any tool directory on PATH).
+- **Why clean:** the platform's jobs are written for GitHub's fresh machine per job and tested there only. Autofix's write-capable job follows one that ran pull-request code, so a leftover would run that code with the write token.
+- **Architecture:** the platform runs on x64 Linux; another system or ARM64 is untested.
+
+**Enforced by:** `tests/workflows/runner_switch.test.ts` in repo-platform, which fails a shipped job whose `runs-on` is any other line; review for a repository's own jobs.
 
 ## How to bypass a check
 

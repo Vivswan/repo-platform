@@ -96,6 +96,8 @@ The run itself is [platform/settings-apply.md](platform/settings-apply.md): its 
 
 - **The `code_scanning` rule blocks at the fleet's high-or-critical bar,** the same bar as the other [security scans](modules/security-scans.md), so a non-security warning or a medium security alert never blocks a merge.
 
+- **Repository variables are not settings:** the layers declare none and the platform sets none. `CI_RUNS_ON` ([the runner rule](fleet-guidelines.md#runner)) is a repository variable, not a secret, set by hand: Settings, Secrets and variables, Actions, Variables, or `gh variable set`.
+
 **The label roster** is the union of every selected layer's `labels`, less any fleet-layer entry the overlay drops with `_remove: true`. The tracking labels fold in above the overlay, so a removal naming one holds the row instead.
 
 Which labels each layer declares is the layer file's; the owner's two PR-flow labels and the dependabot labels carry rules of their own:

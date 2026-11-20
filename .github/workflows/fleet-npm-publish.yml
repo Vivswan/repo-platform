@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   npm-publish:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-latest' }}
     # Above the sum of the action's own bounds, with room for the setup and the build:
     #   npm publish 10 min + its confirmation 10 min + npm dist-tag 1 min + its confirmation 10 min = 31 min
     timeout-minutes: 45
