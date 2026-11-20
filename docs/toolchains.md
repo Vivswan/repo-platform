@@ -11,6 +11,7 @@ One version per toolchain, fleet-wide, spelled once: a version dotfile under `fi
 
 bun is the one pinned toolchain: [files/bun/.bun-version](../files/bun/.bun-version), read by the fleet's synced `.bun-version`, this repository's workflows, every composite action's bun-setup step, and `@types/bun` in every package declaring it. uv floats on its setup action's default, and the rust blocks' setup action installs the toolchain the repository's `rust-toolchain.toml` names (stable when there is none), so rust version selection stays repository-owned.
 
+- **Dependabot's version bumps arrive grouped:** one PR per ecosystem each monthly cycle, for the actions and for each selected toolchain's packages, so one bump that breaks the checks holds its whole group's PR. A security update is outside the groups and stays a PR of its own.
 - **Dependabot's bun PRs** install with the lockfile Dependabot wrote; a PR whose frozen install fails is fixed by hand, or by re-running Dependabot on it.
 - **A known limitation, accepted:** Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while the bun the fleet pins writes version 2 ([dependabot-core#15848](https://github.com/dependabot/dependabot-core/issues/15848)), so a Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
 

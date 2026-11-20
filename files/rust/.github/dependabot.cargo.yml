@@ -1,6 +1,10 @@
 
   - package-ecosystem: "cargo"
     directory: "/"
+    # One PR per cycle for all cargo bumps, not one PR per package.
+    groups:
+      cargo:
+        patterns: ["*"]
     schedule:
       interval: "monthly"
     cooldown:
