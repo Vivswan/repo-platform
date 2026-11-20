@@ -1,47 +1,78 @@
 // typos layers --config over the _typos.toml it discovers at the checkout root (external): the action's description
 // promises the extension, and a typos release that replaced instead of layering would drop every repository's words at
-// once. The end-to-end rows need a typos binary on PATH.
-//   locally            -> skipped without one
-//   TYPOS_REQUIRED=1   -> mandatory; ci.yml's script-tests job runs the action (which installs the pinned release) and sets it
+// once. The end-to-end rows run the action's own step, so the typos is the one its lock names, and read the findings
+// through the action's problem matcher, the way the runner annotates them.
+//   locally        -> skipped without uv
+//   UV_REQUIRED=1  -> mandatory; ci.yml's script-tests job sets it after its setup-uv
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadAction, REPO_ROOT, stepNamed } from "../../shared/action_step";
-import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { loadAction, REPO_ROOT, runBashStep, stepNamed } from "../../shared/action_step";
 import { tempDirs } from "../../shared/temp_dir";
-
-/** The config the action names, so a `with.config` the action drops or moves is a config these rows stop finding. */
-function fleetConfig(): string {
-  const step = stepNamed(loadAction("actions/typos/action.yml"), "Check spelling");
-  const input = String((step.with as Record<string, string>).config);
-  return input.replace("${{ github.action_path }}", join(REPO_ROOT, "actions/typos"));
-}
+import { UV_TIMEOUT_MS, uvEnv, uvOnPath } from "../../shared/uv_project";
 
 const temp = tempDirs();
-const FLEET_CONFIG = fleetConfig();
-const typosBinary = Bun.which("typos");
-const typosRequired = process.env.TYPOS_REQUIRED === "1";
-const endToEnd = typosBinary === null && !typosRequired ? test.skip : test;
+const ACTION = join(REPO_ROOT, "actions/typos");
+const CHECK = stepNamed(loadAction("actions/typos/action.yml"), "Check spelling");
+
+interface Annotation {
+  file: string;
+  line: number;
+  column: number;
+  message: string;
+}
+
+const MATCHER = (
+  JSON.parse(readFileSync(join(ACTION, "typos-matcher.json"), "utf8")) as {
+    problemMatcher: [
+      {
+        pattern: [{ regexp: string; file: number; line: number; column: number; message: number }];
+      },
+    ];
+  }
+).problemMatcher[0].pattern[0];
+
+/** The annotations the runner makes of `log` with the action's matcher, one per matching line. */
+function annotations(log: string): Annotation[] {
+  return log.split("\n").flatMap((line) => {
+    const found = new RegExp(MATCHER.regexp).exec(line);
+    if (found === null) return [];
+
+    return [
+      {
+        file: found[MATCHER.file],
+        line: Number(found[MATCHER.line]),
+        column: Number(found[MATCHER.column]),
+        message: found[MATCHER.message],
+      },
+    ];
+  });
+}
 
 describe("actions/typos", () => {
-  test.skipIf(!typosRequired)(
-    "TYPOS_REQUIRED: the binary on PATH is the release the action pins",
-    () => {
-      // The end-to-end rows run whatever typos is on PATH; without this they prove another release's behaviour.
-      expect(typosBinary).not.toBeNull();
-      const pinned = /uses: crate-ci\/typos@[0-9a-f]{40} # v(\d+\.\d+\.\d+)$/m.exec(
-        readFileSync(join(REPO_ROOT, "actions/typos/action.yml"), "utf8"),
-      );
-      const version = boundedSpawnSync([typosBinary ?? "typos", "--version"]);
-      expect(version.stdout.trim()).toBe(`typos-cli ${pinned?.[1]}`);
-    },
-  );
+  // The lines are typos 1.51.1's `--format brief`, hand-written: a finding in a file's name carries no place, so it
+  // fails the step and annotates nothing.
+  test("the matcher reads a misspelling's and a disallowed word's place and message, and nothing of a line that names no place", () => {
+    const log = [
+      "./docs/a b.md:12:7: error: `teh` should be `the`",
+      "./src/x.ts:3:1: error: `mis` should be `miss`, `mist`",
+      "./src/x.ts:4:9: error: `hello` is disallowed",
+      "error: `seperate` should be `separate`",
+      "error: the config could not be read",
+      "",
+    ].join("\n");
+    expect(annotations(log)).toEqual([
+      { file: "./docs/a b.md", line: 12, column: 7, message: "`teh` should be `the`" },
+      { file: "./src/x.ts", line: 3, column: 1, message: "`mis` should be `miss`, `mist`" },
+      { file: "./src/x.ts", line: 4, column: 9, message: "`hello` is disallowed" },
+    ]);
+  });
 
   // typos exits 2 on findings, 0 when clean; a fixture tree is the axis. The findings are asserted whole, as
   // `path:line word`, so a rule that widened or narrowed shows the line it changed; every misspelling is unique to
   // its line so no other line can stand in for it.
-  endToEnd.each<{
+  test.skipIf(!uvOnPath()).each<{
     reason: string;
     files: Record<string, string>;
     found: string[];
@@ -84,24 +115,26 @@ describe("actions/typos", () => {
       },
       found: ["./lib/index.js:1 permision", "./src/lib/a.ts:1 teh"],
     },
-  ])("end to end: $reason", ({ files, found }) => {
-    const repo = temp.dir("typos-e2e-");
-    for (const [rel, text] of Object.entries(files)) {
-      mkdirSync(join(repo, rel, ".."), { recursive: true });
-      writeFileSync(join(repo, rel), text);
-    }
-    const run = boundedSpawnSync(
-      [typosBinary ?? "typos", "--config", FLEET_CONFIG, "--format", "brief", "."],
-      { cwd: repo },
-    );
-    // `--format brief` prints `path:line:col: error: \`word\` should be ...`; the column and the suggestion are the
-    // dictionary's, not the rule's.
-    const reported = run.stdout
-      .trimEnd()
-      .split("\n")
-      .map((line) => /^(\S+:\d+):\d+: error: `([^`]+)`/.exec(line))
-      .map((match) => (match === null ? "unparsed line" : `${match[1]} ${match[2]}`))
-      .sort();
-    expect([run.exitCode, reported]).toEqual([2, found]);
-  });
+  ])(
+    "end to end: $reason",
+    ({ files, found }) => {
+      const repo = temp.dir("typos-e2e-");
+      for (const [rel, text] of Object.entries(files)) {
+        mkdirSync(join(repo, rel, ".."), { recursive: true });
+        writeFileSync(join(repo, rel), text);
+      }
+      const run = runBashStep(CHECK, {
+        env: { ...uvEnv(), GITHUB_ACTION_PATH: ACTION },
+        cwd: repo,
+        root: temp.dir("typos-e2e-step-"),
+        timeoutMs: UV_TIMEOUT_MS,
+      });
+      // The column and the suggestion are the dictionary's, not the rule's.
+      const reported = annotations(run.stdout)
+        .map(({ file, line, message }) => `${file}:${line} ${/^`([^`]+)`/.exec(message)?.[1]}`)
+        .sort();
+      expect([run.exitCode, reported]).toEqual([2, found]);
+    },
+    UV_TIMEOUT_MS,
+  );
 });

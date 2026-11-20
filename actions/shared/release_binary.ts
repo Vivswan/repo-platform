@@ -1,24 +1,24 @@
-// A tool a job needs as one binary from a release: reused when the runner already has the pinned version, fetched and
+// A tool a job needs as one binary from a release's tar: reused when the runner already has the pinned version, fetched and
 // checked against the pinned sha256 otherwise. The sha256 is the pin, since a release's own checksums file comes from
 // the same place as its download.
 //
 // DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal imports only.
 
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { capture, messageOf, requireEnv, succeeded } from "./action_runtime.ts";
 import { sha256 } from "./values.ts";
 
-/** One architecture's download of a release: a tar, or the binary itself. */
+/** One architecture's download of a release: a tar holding the binary. */
 export interface ReleaseDownload {
-  /** Where the tar, or the binary, is downloaded from. */
+  /** Where the tar is downloaded from. */
   url: string;
 
   /** Of the downloaded bytes, lowercase hex. */
   sha256: string;
 
-  /** The binary's path inside the tar, gzipped or xz, which is unpacked whole; absent when the download is the binary. */
-  member?: string;
+  /** The binary's path inside the tar, gzipped or xz, which is unpacked whole. */
+  member: string;
 }
 
 export interface ReleaseBinary {
@@ -132,20 +132,15 @@ export async function setUpReleaseBinary(
     );
   }
 
-  const path = join(root, release.member ?? tool.name);
-  if (release.member === undefined) {
-    renameSync(file, path);
-    chmodSync(path, 0o755);
-  } else {
-    // No compression flag: tar reads it from the file, so one call unpacks a gzipped tar and an xz one.
-    try {
-      await toolCache.extractTar(file, root, "x");
-    } catch (cause) {
-      throw new Error(`${what}: ${release.url} could not be unpacked (${messageOf(cause)})`);
-    }
-
-    rmSync(file);
+  // No compression flag: tar reads it from the file, so one call unpacks a gzipped tar and an xz one.
+  try {
+    await toolCache.extractTar(file, root, "x");
+  } catch (cause) {
+    throw new Error(`${what}: ${release.url} could not be unpacked (${messageOf(cause)})`);
   }
+
+  rmSync(file);
+  const path = join(root, release.member);
 
   const printed = printedVersion(tool, path);
   if (printed !== tool.version) {

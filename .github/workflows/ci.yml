@@ -245,19 +245,13 @@ jobs:
       # The root install's postinstall installs every action's pinned dependencies, the site action's among them.
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
-      # Running the typos action installs its pinned release into $RUNNER_TEMP, which the end-to-end cases need on PATH.
-      - name: Install typos by running the action
-        uses: $/actions/typos
-      - name: Put the installed typos on PATH
-        run: echo "$RUNNER_TEMP" >>"$GITHUB_PATH"
-      # The site tests' live link check runs the lychee action's own step, which brings its lychee through uv.
+      # The typos tests and the site tests' live link check run their action's own step, which brings its tool through uv.
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: false
           ignore-empty-workdir: true
       - name: Run .github/scripts and action tests
         env:
-          TYPOS_REQUIRED: "1"
           UV_REQUIRED: "1"
         run: bun run test
 

@@ -44,8 +44,6 @@ export function runBashStep(
     env?: Record<string, string>;
     cwd: string;
     root: string;
-
-    /** The hang bound, for a step slower than boundedSpawnSync's default. */
     timeoutMs?: number;
   },
 ): StepRun {
