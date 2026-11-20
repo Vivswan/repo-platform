@@ -1,6 +1,10 @@
 
   - package-ecosystem: "uv"
     directory: "/"
+    # One PR per cycle for all uv bumps, not one PR per package.
+    groups:
+      uv:
+        patterns: ["*"]
     schedule:
       interval: "monthly"
     cooldown:
