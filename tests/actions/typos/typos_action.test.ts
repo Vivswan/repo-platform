@@ -3,7 +3,7 @@
 // once. The end-to-end rows run the action's own step, so the typos is the one its lock names, and read the findings
 // through the action's problem matcher, the way the runner annotates them.
 //   locally        -> skipped without uv
-//   UV_REQUIRED=1  -> mandatory; ci.yml's script-tests job sets it after its setup-uv
+//   UV_REQUIRED=1  -> mandatory; checks.yml's script-tests job sets it after its setup-uv
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
