@@ -1,9 +1,5 @@
 # Repo-owned actionlint configuration. Written once by
 # {{github_username}}/repo-platform, never overwritten by a later sync,
-# so add this repository's own ignores freely.
-
-paths:
-  .github/workflows/**/*.{yml,yaml}:
-    ignore:
-      # actionlint's permission-scope list lacks `vulnerability-alerts` (rhysd/actionlint#666); drop when it knows the scope.
-      - 'unknown permission scope "vulnerability-alerts"'
+# so add this repository's own settings freely: its self-hosted runner
+# labels under `self-hosted-runner.labels`, its own ignores under
+# `paths.<glob>.ignore`.
