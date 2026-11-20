@@ -506,21 +506,31 @@ const FOCUS_IMAGE = `(() => {
   return document.activeElement === img;
 })()`;
 
-/** Whether the lightbox finished opening within a second of the key press, and what the original and its copy carry. */
-const KEY_OPENED = `new Promise((resolve) => {
-  const timer = setTimeout(() => resolve({ opened: false }), 1000);
-  document.querySelector(".vp-doc img").addEventListener("medium-zoom:opened", () => {
-    clearTimeout(timer);
-    const img = document.querySelector(".vp-doc img");
-    const copy = document.querySelector(".medium-zoom-image--opened");
-    resolve({
-      opened: true,
-      originalTabIndex: img.getAttribute("tabindex"),
-      copyTabIndex: copy.getAttribute("tabindex"),
-      copyRole: copy.getAttribute("role"),
-    });
-  }, { once: true });
-})`;
+/** How long a probe waits for medium-zoom to report an open finished before it reports that none did. */
+const OPEN_BOUND_MS = harnessBound(5_000);
+
+/** Arms the wait for the first image's lightbox to finish opening and returns once it listens, so a key pressed
+ *  after this cannot open the lightbox unheard; KEY_OPENED reads what the wait saw. */
+const ARM_KEY_OPENED = `(() => {
+  window.__keyOpened = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ opened: false }), ${OPEN_BOUND_MS});
+    document.querySelector(".vp-doc img").addEventListener("medium-zoom:opened", () => {
+      clearTimeout(timer);
+      const img = document.querySelector(".vp-doc img");
+      const copy = document.querySelector(".medium-zoom-image--opened");
+      resolve({
+        opened: true,
+        originalTabIndex: img.getAttribute("tabindex"),
+        copyTabIndex: copy.getAttribute("tabindex"),
+        copyRole: copy.getAttribute("role"),
+      });
+    }, { once: true });
+  });
+  return true;
+})()`;
+
+/** Whether the lightbox finished opening after the key press, and what the original and its copy carry. */
+const KEY_OPENED = "window.__keyOpened";
 
 /** Whether focus is back on the first image: what a close hands back to its opener. */
 const FOCUS_ON_IMAGE = `document.activeElement === document.querySelector(".vp-doc img")`;
@@ -604,7 +614,7 @@ const LEAVE_OPEN_LIGHTBOX = `new Promise((resolve) => {
   img.click();
 })`;
 
-/** Clicks the broken-srcset image and reports the lightbox once its open finishes, or after five seconds without one. */
+/** Clicks the broken-srcset image and reports the lightbox once its open finishes, or at the bound without one. */
 const OPEN_BROKEN = `new Promise((resolve) => {
   const img = document.querySelector(".vp-doc img[srcset]");
   const state = (opened) => ({
@@ -612,7 +622,7 @@ const OPEN_BROKEN = `new Promise((resolve) => {
     overlay: document.querySelector(".medium-zoom-overlay") !== null,
     opened,
   });
-  const timer = setTimeout(() => resolve(state(false)), 5000);
+  const timer = setTimeout(() => resolve(state(false)), ${OPEN_BOUND_MS});
   img.addEventListener("medium-zoom:opened", () => {
     clearTimeout(timer);
     resolve(state(true));
@@ -690,13 +700,13 @@ test("an article image opens by click or Enter in a lightbox over the nav, large
       role: "button",
       name: "A picture",
     });
-    // KEY_OPENED waits for the open to finish, not for the body class medium-zoom sets a frame into the open: the
-    // Escape below is to close a finished lightbox, not to cancel an opening one.
-    const keyOpened = evaluate<Record<string, unknown>>(page, KEY_OPENED);
+    // The wait is armed before the key and reads the open's finish, not the body class medium-zoom sets a frame
+    // into the open: the Escape below is to close a finished lightbox, not to cancel an opening one.
+    await evaluate(page, ARM_KEY_OPENED);
     await page.keyboard.press("Enter");
     // The original is what medium-zoom clones (a srcset image gets a second, later copy), so it carries no
     // button attributes while it is hidden behind its copy.
-    expect(await keyOpened).toEqual({
+    expect(await evaluate<Record<string, unknown>>(page, KEY_OPENED)).toEqual({
       opened: true,
       originalTabIndex: null,
       copyTabIndex: null,
