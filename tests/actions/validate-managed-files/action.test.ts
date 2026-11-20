@@ -11,7 +11,7 @@ import {
   readVerdict,
   writeVerdict,
 } from "../../../actions/validate-managed-files/src/verdict";
-import { loadAction, type Step, stepNamed } from "../../shared/action_step";
+import { loadAction, runBashStep, type Step, stepNamed } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../../shared/fixture_git";
 import { tempDirs } from "../../shared/temp_dir";
@@ -527,6 +527,53 @@ test("repo-platform is cloned whole, from its own slug, into the dir run.ts read
     clone.includes("--depth"),
   ]).toEqual([true, false]);
   expect(env("validate").PLATFORM_DIR).toBe(env("platform").PLATFORM_DIR);
+});
+
+describe("clear.ts", () => {
+  // The incident: an earlier step exported BUN_INSPECT_PRELOAD naming a script that exits 0, and the clear reported
+  // success with every path still there. An exported `exec` function skipped it the same way.
+  test("removes the three paths whatever the job's environment exports", () => {
+    const dir = temp.dir("clear-");
+    const paths = [
+      join(dir, "validate-managed-files"),
+      join(dir, "validate-managed-files-verdict.json"),
+      join(dir, "validate-managed-files-report.md"),
+    ];
+    const skip = join(dir, "skip.ts");
+    mkdirSync(join(paths[0], "platform"), { recursive: true });
+    writeFileSync(join(paths[0], "platform/planted"), "");
+    writeFileSync(paths[1], "planted");
+    writeFileSync(skip, "process.exit(0);\n");
+    const ran = runBashStep(stepNamed(action, "Clear the scratch root"), {
+      context: {
+        "steps.action-bun.outputs.path": process.execPath,
+        "github.action_path": ACTION,
+        "runner.temp": dir,
+      },
+      env: {
+        BUN_INSPECT_PRELOAD: skip,
+        BUN_OPTIONS: `--preload=${skip}`,
+        "BASH_FUNC_exec%%": "() { return 0; }",
+      },
+      cwd: ACTION,
+      root: temp.dir("clear-outputs-"),
+    });
+    expect(ran.exitCode).toBe(0);
+    expect(paths.map((path) => existsSync(path))).toEqual([false, false, false]);
+  });
+
+  test("the step clears, with the action's bun, the paths the later steps use", () => {
+    const env = (id: string) =>
+      (action.runs.steps.find((step) => step.id === id) as Step & { env: Record<string, string> })
+        .env;
+    expect(env("clear")).toMatchObject({
+      ACTION_BUN: env("validate").ACTION_BUN,
+      SCRATCH_DIR: env("validate").SCRATCH_DIR,
+      VERDICT_FILE: env("validate").VERDICT_FILE,
+      COMMENT_FILE: env("report").COMMENT_FILE,
+    });
+    expect(env("report").VERDICT).toBe(env("validate").VERDICT_FILE);
+  });
 });
 
 describe("verdict.ts", () => {

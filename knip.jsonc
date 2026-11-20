@@ -32,9 +32,10 @@
       "ignoreDependencies": ["npm"]
     },
     "actions/validate-managed-files": {
-      // The three step scripts and the hygiene validator action.yml runs, and the byte-to-byte check run by path.
+      // The four step scripts and the hygiene validator action.yml runs, and the byte-to-byte check run by path.
       "entry": [
         "check.ts",
+        "src/clear.ts",
         "src/read_commit.ts",
         "src/run.ts",
         "src/report.ts",
