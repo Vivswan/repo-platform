@@ -19,8 +19,9 @@ interface Step {
 
 const ROOT = join(import.meta.dir, "../..");
 const source = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
-const ci = parseYaml(source) as {
-  jobs: Record<string, { steps?: Step[]; strategy?: { matrix: { shard: string[] } } }>;
+const ci = parseYaml(source) as { jobs: Record<string, { steps?: Step[] }> };
+const checks = parseYaml(readFileSync(join(ROOT, ".github/workflows/checks.yml"), "utf8")) as {
+  jobs: Record<string, { strategy: { matrix: { shard: string[] } } }>;
 };
 
 test("the skills pins share one sha and the `# main` comment, the skills checkout ref included; pinact ignores the delivery ref, and verifies comments after the writer", () => {
@@ -61,7 +62,7 @@ test("the skills pins share one sha and the `# main` comment, the skills checkou
 // bun cuts the test files into as many slices as the denominator says and runs the one the numerator names, so a matrix
 // short of an index leaves that slice's files run by no machine, with every job green.
 test("the script-tests matrix names every shard of one count", () => {
-  const shards = ci.jobs["script-tests"].strategy?.matrix.shard ?? [];
+  const shards = checks.jobs["script-tests"].strategy.matrix.shard;
   expect(shards.length).toBeGreaterThan(0);
   expect(shards).toEqual(shards.map((_, at) => `${at + 1}/${shards.length}`));
 });

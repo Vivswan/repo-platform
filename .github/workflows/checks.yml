@@ -1,0 +1,41 @@
+# Runs this repository's own tests under the all-green gate: ci.yml's `checks` job calls it, as every managed repository's
+# ci.yml calls its own checks.yml. The file is this repository's own (.repo-platform.yml excepts the path).
+#
+# The caller grants contents: read and passes no secret: the tests need neither a write nor a secret.
+
+name: Checks
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # One machine per slice of the test files (bun's own --shard split). fail-fast is off, so one red slice does not
+  # cancel the other and hide its failures; the gate reads the calling job red when either slice is.
+  script-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/2", "2/2"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: files/bun/.bun-version
+      # The root install's postinstall installs every action's pinned dependencies, the site action's among them.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
+      # The typos tests and the site tests' live link check run their action's own step, which brings its tool through uv.
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: false
+          ignore-empty-workdir: true
+      - name: Run .github/scripts and action tests
+        env:
+          UV_REQUIRED: "1"
+          SHARD: ${{ matrix.shard }}
+        run: bun run test "--shard=$SHARD"

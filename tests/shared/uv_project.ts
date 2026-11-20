@@ -5,7 +5,7 @@
 export const UV_TIMEOUT_MS = 300_000;
 
 /** Whether a step that calls `uv` can run here. Without uv its tests are skipped loudly, except under UV_REQUIRED=1
- *  (ci.yml's script-tests job, after its setup-uv), where a missing uv is an error.
+ *  (checks.yml's script-tests job, after its setup-uv), where a missing uv is an error.
  *
  * @throws {Error} UV_REQUIRED=1 and no uv on PATH
  */
