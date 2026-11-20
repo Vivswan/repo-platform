@@ -51,6 +51,7 @@ repo-platform: Standards files, CI, and settings for Vivswan's repositories, pus
 ### Working on this repository
 
 - `bun run bootstrap` is the developer setup: every package's dependencies, then `core.hooksPath` to the tracked `.githooks/`. A bare `bun install` sets no hook.
+- `bun run test` runs every test file, in parallel workers; `bun run test --shard=1/2` runs one of the two slices that CI's `script-tests` job runs on separate machines.
 
 ### Decisions to keep
 

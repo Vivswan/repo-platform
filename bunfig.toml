@@ -1,0 +1,3 @@
+# tests/ is the one root: knip.jsonc keeps a test file under actions/ out of the entries, so one there is an unused-file finding.
+[test]
+root = "tests"
