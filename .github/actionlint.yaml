@@ -5,8 +5,6 @@
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:
-      # actionlint's permission-scope list lacks `vulnerability-alerts` (rhysd/actionlint#666); drop when it knows the scope.
-      - 'unknown permission scope "vulnerability-alerts"'
       # actionlint's `uses:` grammar lacks GitHub's `$/` self-repository path as of v1.7.12 (rhysd/actionlint#711); drop when it knows it.
       - 'specifying action "\$/.+" in invalid format because ref is missing'
       - 'reusable workflow call "\$/.+" at "uses" is not following the format'
