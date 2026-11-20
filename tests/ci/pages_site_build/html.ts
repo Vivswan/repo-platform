@@ -31,3 +31,7 @@ export function select(html: string, selector: string): MatchedElement[] {
 export function texts(html: string, selector: string): string[] {
   return select(html, selector).map((element) => element.text);
 }
+
+export function hrefs(html: string, selector: string): string[] {
+  return select(html, selector).map((a) => a.attrs.href);
+}

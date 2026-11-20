@@ -3,24 +3,21 @@
 // input, these pin what the real vitepress and vite builds emit and the artifact the deploy hands on.
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tierRouteGuard } from "../../../actions/pages-site/.vitepress/theme/tier-routes.ts";
-import { fixtureGit } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 import { uvOnPath } from "../../shared/uv_project.ts";
 import {
   assetFiles,
   type BuildResult,
   buildSite,
-  commitAll,
   deployLinkCheckArgs,
   describeRun,
   FLEET_BASE,
   FLEET_ENV,
   FLEET_REPO,
   fleetRepo,
-  initRepo,
   isFile,
   linkCheckInputs,
   linkCheckRemap,
@@ -32,19 +29,15 @@ import {
   readSite,
   runLinkCheck,
   runnerTemp,
-  SEALED_DEAD_LINK,
-  SITE_TITLE,
-  siteConfig,
   TEST_TIMEOUT_MS,
   versionLabels,
 } from "./fixtures.ts";
-import { select, texts } from "./html.ts";
+import { hrefs, select, texts } from "./html.ts";
 
 const temp = tempDirs();
 
 /** The one build, shared by every case below; RUNNER_TEMP is a symlink on purpose (fixtures.ts), the shape under
  *  which every internal link once read dead. */
-let workspace = "";
 let runner: RunnerTemp;
 let built: BuildResult;
 let site = "";
@@ -52,7 +45,7 @@ let latestIndex = "";
 let latestAssets = "";
 
 beforeAll(() => {
-  workspace = temp.dir("pages-site-fleet-");
+  const workspace = temp.dir("pages-site-fleet-");
   fleetRepo(workspace);
   runner = runnerTemp(temp, FLEET_BASE);
   built = buildSite(workspace, FLEET_REPO, runner, FLEET_ENV);
@@ -63,8 +56,6 @@ beforeAll(() => {
   latestIndex = readSite(site, "docs/latest/index.html");
   latestAssets = readAssets(site, "docs/latest/assets");
 }, TEST_TIMEOUT_MS);
-
-const hrefs = (html: string, selector: string) => select(html, selector).map((a) => a.attrs.href);
 
 describe("the artifact a deploy lands", () => {
   test("lays out the website at the root and the docs beside it (root = newest tag, latest = HEAD, stable = newest tag, one dir per served tag, the indexes), skips the landing-less tag with a notice, and emits the outputs the deploy step reads", () => {
@@ -139,7 +130,7 @@ describe("the artifact a deploy lands", () => {
   test("isolates each tier's content: the HEAD edit in latest alone, the v0.2.0 line at the root and under stable, the dead link sealed in v0.1.0 built lenient and served there alone", () => {
     // Tag tiers build from their git trees, HEAD from the checkout; the layout case stays green on a build that
     // copies HEAD everywhere. The sealed link is the one strictness fact a passing build can show: hardcoded
-    // strict, this build is red (the HEAD half is below).
+    // strict, this build is red (the HEAD half is link_strictness.test.ts).
     expect(readSite(site, "docs/latest/setup.html")).toContain("HEAD-only line");
     expect(readSite(site, "docs/setup.html")).not.toContain("HEAD-only line");
     expect(readSite(site, "docs/stable/setup.html")).not.toContain("HEAD-only line");
@@ -535,248 +526,4 @@ describe("the link check over the whole artifact", () => {
     },
     TEST_TIMEOUT_MS,
   );
-});
-
-describe("link strictness on HEAD", () => {
-  test(
-    "the dead link history seals lenient fails the deploy and the PR check on HEAD, naming it",
-    () => {
-      // Hardcoding strictness either way in the builder turns exactly one of the deploy runs the wrong color:
-      // history cannot be fixed, HEAD can. pages-site.test reads the wiring as a value; only a build shows it armed.
-      // A copy of the checkout, so the shared build's input stays as built.
-      const rotten = temp.dir("pages-site-rotten-");
-      cpSync(workspace, rotten, { recursive: true });
-      const setup = join(rotten, "docs", "setup.md");
-      writeFileSync(setup, `${readFileSync(setup, "utf-8")}\n${SEALED_DEAD_LINK}`);
-      const deploy = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_BASE), FLEET_ENV);
-      const check = buildSite(rotten, FLEET_REPO, runnerTemp(temp, FLEET_BASE), {
-        CHECK: "true",
-        CONFIG: FLEET_ENV.CONFIG,
-      });
-      for (const result of [deploy, check]) {
-        expect(result.exitCode, describeRun(result)).toBe(1);
-        expect(result.stderr).toContain("missing-page");
-      }
-    },
-    TEST_TIMEOUT_MS,
-  );
-});
-
-describe("layouts that build no docs tier", () => {
-  // docs/modules/site.md's two Layout rows a deploy settles without vitepress; the refused layouts are resolvePrebuilt's
-  // and assertDocsLanding's unit tables. An absent path of "." is the site directory itself.
-  const NO_LINK_ROT = { "link-rot-label": "", "link-rot-color": "", "link-rot-description": "" };
-  test.each<{
-    layout: string;
-    fixture: (repo: string) => void;
-    env: Record<string, string>;
-    pages: [string, string][];
-    absent: string[];
-    stdout: string[];
-    outputs: (runner: RunnerTemp) => Record<string, string>;
-  }>([
-    {
-      layout:
-        "website alone: one copy at the root, no version layout, the configured title verbatim",
-      fixture: (repo) => {
-        mkdirSync(join(repo, "dist"), { recursive: true });
-        writeFileSync(
-          join(repo, "dist", "index.html"),
-          "<html><body>WEBSITE-ALONE</body></html>\n",
-        );
-        initRepo(repo);
-        commitAll(repo, "site only");
-      },
-      env: { SITE_DIR: "dist" },
-      pages: [["index.html", "WEBSITE-ALONE"]],
-      absent: ["versions.json", "latest"],
-      stdout: [],
-      outputs: (runner) => ({
-        ...NO_LINK_ROT,
-        "publish": "true",
-        "site-dir": runner.site,
-        "link-check-args": deployLinkCheckArgs(runner),
-        "link-rot-ignore": join(runner.scratch, "link-rot.lycheeignore"),
-        "site-title": SITE_TITLE,
-      }),
-    },
-    {
-      layout:
-        "neither a hook directory nor docs/: green, a notice, publish false, no site directory",
-      fixture: (repo) => {
-        writeFileSync(join(repo, "README.md"), "# Bare\n");
-        initRepo(repo);
-        commitAll(repo, "no site");
-      },
-      env: {},
-      pages: [],
-      absent: ["."],
-      stdout: [
-        "::notice::nothing to publish: the site-build hook named no directory and the repository has no docs/",
-      ],
-      outputs: () => ({
-        ...NO_LINK_ROT,
-        "publish": "false",
-        "site-dir": "",
-        "link-check-args": "",
-        "link-rot-ignore": "",
-        "site-title": SITE_TITLE,
-      }),
-    },
-  ])("$layout", (row) => {
-    const repo = temp.dir("pages-site-layout-");
-    row.fixture(repo);
-    const runner = runnerTemp(temp, FLEET_BASE);
-    const result = buildSite(repo, FLEET_REPO, runner, row.env);
-    expect(result.exitCode, describeRun(result)).toBe(0);
-    expect(result.stdout).not.toMatch(/vitepress|building docs tier/);
-    const missing = row.pages.filter(
-      ([rel, text]) => !(isFile(runner.site, rel) && readSite(runner.site, rel).includes(text)),
-    );
-    expect(missing).toEqual([]);
-    expect(present(runner.site, row.absent)).toEqual([]);
-    for (const line of row.stdout) expect(result.stdout).toContain(line);
-    expect(result.outputs).toEqual(row.outputs(runner));
-  });
-});
-
-describe("a user site", () => {
-  // GitHub serves the repository named <owner>.github.io, in whatever case, at the origin's root. Laid out under
-  // /<repo>/ like a project site, the hook would build for a base path Pages never serves, and lychee would resolve
-  // every root-absolute link under a directory the page is not in.
-  const USER_SITE_REPO = "fixture-owner/Fixture-Owner.github.io";
-  let runner: RunnerTemp;
-  let result: BuildResult;
-
-  beforeAll(() => {
-    const repo = temp.dir("pages-site-user-");
-    mkdirSync(join(repo, "dist"), { recursive: true });
-    writeFileSync(
-      join(repo, "dist", "index.html"),
-      '<html><head><link rel="icon" href="/favicon.ico"></head><body>USER-SITE ' +
-        '<a href="https://fixture-owner.github.io/about">about</a> ' +
-        '<a href="https://fixture-owner.github.io/my%20page">a page with a space in its name</a> ' +
-        '<a href="https://fixture-owner.github.io/other-project/">a project site</a></body></html>\n',
-    );
-    writeFileSync(join(repo, "dist", "favicon.ico"), "");
-    writeFileSync(join(repo, "dist", "about.html"), "<html><body>About</body></html>\n");
-    writeFileSync(join(repo, "dist", "my page.html"), "<html><body>Spaced</body></html>\n");
-    writeFileSync(
-      join(repo, ".lycheeignore"),
-      "# hosts behind a bot wall\n^https://example\\.invalid/\n",
-    );
-    initRepo(repo);
-    commitAll(repo, "user site");
-    runner = runnerTemp(temp, "/");
-    result = buildSite(repo, USER_SITE_REPO, runner, {
-      SITE_DIR: "dist",
-      CONFIG: siteConfig({ docs_path: null }),
-    });
-  });
-
-  // The origin is shared with the owner's project sites (https://owner.github.io/<repo>/), so own links are the
-  // artifact's top-level entries, not the origin: a user site's deploy once failed on its link to a sibling project
-  // site, read as a missing page of the artifact. A link is read as its author spelled it, so an entry matches every
-  // percent-spelling of its name.
-  test("is assembled at the served root itself, the directory uploaded and lychee's root, owning its own entries on the bare origin", () => {
-    expect(result.exitCode, describeRun(result)).toBe(0);
-    expect(runner.site).toBe(runner.served);
-    expect(readSite(runner.site, "index.html")).toContain("USER-SITE");
-    expect(result.outputs).toMatchObject({
-      "publish": "true",
-      "site-dir": runner.served,
-      "link-check-args": deployLinkCheckArgs(runner),
-      "link-rot-ignore": join(runner.scratch, "link-rot.lycheeignore"),
-    });
-    const remap = linkCheckRemap(runner);
-    expect(remap.replacement).toBe(`${Bun.pathToFileURL(runner.served).href}$1`);
-    // The crawl's ignore list: the own links first, then the repository's own list as it stands.
-    expect(readFileSync(join(runner.scratch, "link-rot.lycheeignore"), "utf-8")).toBe(
-      `${remap.pattern}\n# hosts behind a bot wall\n^https://example\\.invalid/\n`,
-    );
-    expect(
-      ownedBy(remap.pattern, {
-        root: "https://fixture-owner.github.io/",
-        bareOrigin: "https://fixture-owner.github.io",
-        page: "https://fixture-owner.github.io/about",
-        pageHtml: "https://fixture-owner.github.io/about.html",
-        spaced: "https://fixture-owner.github.io/my%20page",
-        spacedOtherCase: "https://fixture-owner.github.io/my%20PAGE",
-        spacedEncodedLetters: "https://fixture-owner.github.io/%6dy%20page",
-        icon: "https://fixture-owner.github.io/favicon.ico",
-        sibling: "https://fixture-owner.github.io/other-project/",
-        prefixOfAPage: "https://fixture-owner.github.io/about-us",
-      }),
-    ).toEqual({
-      root: true,
-      bareOrigin: true,
-      page: true,
-      pageHtml: true,
-      spaced: true,
-      spacedOtherCase: false,
-      spacedEncodedLetters: true,
-      icon: true,
-      sibling: false,
-      prefixOfAPage: false,
-    });
-  });
-
-  test.skipIf(!uvOnPath())(
-    "lychee resolves its root-absolute link and its origin-spelled links (one percent-encoded) in the artifact, and leaves the sibling project site's link to the network",
-    () => {
-      const check = runLinkCheck(result.outputs["link-check-args"], runner);
-      expect([check.exitCode, check.outputs["exit-code"]], describeRun(check)).toEqual([0, "0"]);
-      expect(check.report).toContain("| ✅ Successful  | 3     |");
-      expect(check.report).not.toContain("other-project");
-    },
-    TEST_TIMEOUT_MS,
-  );
-});
-
-describe("a custom domain", () => {
-  // GitHub serves a repository under a custom domain at the domain's root, whatever the repository is named. Laid out
-  // under /<repo>/ by the rule, the deployed pages would ask for every asset and version at a path the domain 404s.
-  let runner: RunnerTemp;
-  let result: BuildResult;
-
-  beforeAll(() => {
-    const repo = temp.dir("pages-site-domain-");
-    mkdirSync(join(repo, "dist"), { recursive: true });
-    mkdirSync(join(repo, "docs"));
-    writeFileSync(join(repo, "dist", "index.html"), "<html><body>DOMAIN-SITE</body></html>\n");
-    writeFileSync(join(repo, "docs", "README.md"), "# Home\n");
-    initRepo(repo);
-    commitAll(repo, "site");
-    fixtureGit(repo, ["tag", "v1.0.0"]);
-    runner = runnerTemp(temp, "/");
-    result = buildSite(repo, FLEET_REPO, runner, {
-      SITE_DIR: "dist",
-      SITE_URL: "https://docs.example.com",
-    });
-  }, TEST_TIMEOUT_MS);
-
-  test("is assembled at the served root, its asset URLs and version links under the domain's root and none under the repository's name", () => {
-    expect(result.exitCode, describeRun(result)).toBe(0);
-    expect(result.outputs["site-dir"]).toBe(runner.served);
-    expect(
-      present(runner.served, ["index.html", "docs/latest/index.html", "fixture-repo"]),
-    ).toEqual(["index.html", "docs/latest/index.html"]);
-    const page = readSite(runner.site, "docs/latest/index.html");
-    const assets = select(page, "script[src], link[href]")
-      .map((element) => element.attrs.src ?? element.attrs.href)
-      .filter((url) => url.includes("/assets/"));
-    expect(new Set(assets.map((url) => url.slice(0, url.indexOf("assets/"))))).toEqual(
-      new Set(["/docs/latest/"]),
-    );
-    expect(hrefs(page, ".VPNavBarMenuGroup .VPMenuLink a")).toEqual(
-      ["latest", "stable", "v1.0.0"].map((label) => `https://docs.example.com/docs/${label}/`),
-    );
-    expect(
-      ownedBy(linkCheckRemap(runner).pattern, {
-        root: "https://docs.example.com/",
-        docs: "https://docs.example.com/docs/latest/",
-        githubIo: "https://fixture-owner.github.io/fixture-repo/docs/latest/",
-      }),
-    ).toEqual({ root: true, docs: true, githubIo: false });
-  });
 });

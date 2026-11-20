@@ -12,13 +12,15 @@ permissions:
   contents: read
 
 jobs:
-  # One machine per slice of the test files (bun's own --shard split). fail-fast is off, so one red slice does not
-  # cancel the other and hide its failures; the gate reads the calling job red when either slice is.
+  # One machine per slice of the test files (bun's own --shard split). Four, because the slowest files are each one
+  # shared site build that no split shortens: a fifth machine takes little off the slowest slice. The launcher refuses
+  # a slice unless this list names every slice of its count. fail-fast is off, so one red slice does not cancel the
+  # others and hide their failures; the gate reads the calling job red when any slice is.
   script-tests:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["1/2", "2/2"]
+        shard: ["1/4", "2/4", "3/4", "4/4"]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

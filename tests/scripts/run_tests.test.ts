@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { shardRefusal } from "../../scripts/run_tests.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -90,4 +91,34 @@ describe("run_tests launcher", () => {
       expect(runLauncher(ending, flags)).toEqual({ exitCode, noticed: leaked, named: leaked });
     },
   );
+});
+
+describe("a slice against the matrix", () => {
+  // A slice dropped from the matrix is test files run by no machine with every job green, and a test cannot say so:
+  // it may sit in the dropped slice. The launcher is what every slice runs.
+  const REFUSED = (shard: string, missing: string) =>
+    `run_tests: --shard=${shard} refused: checks.yml's script-tests matrix does not list ${missing}, ` +
+    "so no machine would run those test files";
+  test.each<{ run: string; argv: string[]; listed: string[]; refusal: string | undefined }>([
+    {
+      run: "a slice of a full matrix",
+      argv: ["--shard=2/3"],
+      listed: ["1/3", "2/3", "3/3"],
+      refusal: undefined,
+    },
+    {
+      run: "a slice whose sibling the matrix dropped",
+      argv: ["--shard=1/3"],
+      listed: ["1/3", "3/3"],
+      refusal: REFUSED("1/3", "2/3"),
+    },
+    {
+      run: "the two-argument spelling",
+      argv: ["--shard", "3/3"],
+      listed: ["1/3", "3/3"],
+      refusal: REFUSED("3/3", "2/3"),
+    },
+  ])("$run: $refusal", ({ argv, listed, refusal }) => {
+    expect(shardRefusal(argv, listed)).toBe(refusal);
+  });
 });

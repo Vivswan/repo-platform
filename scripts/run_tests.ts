@@ -1,12 +1,16 @@
 #!/usr/bin/env bun
 
 // Usage: bun scripts/run_tests.ts [bun test arguments]
-//   --shard=1/2  -> bun's own split: the first of two disjoint slices of the test files (ci.yml runs one per machine)
+//   --shard=1/4  -> bun's own split: the first of four disjoint slices of the test files (checks.yml runs one per machine);
+//                   refused unless the script-tests matrix there lists every slice of that count
 
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { parseArgs } from "node:util";
 import type { Subprocess } from "bun";
+import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import { exitCodeOf } from "../.github/scripts/shared/proc.ts";
 import { PLATFORM_NAME } from "../actions/shared/platform.ts";
 
@@ -18,6 +22,51 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
 /** How many leftover temp entries the failure names; the rest is a count. */
 const LISTED_LEFTOVERS = 20;
+
+/** The workflow whose script-tests matrix names the slices CI runs, one per machine. */
+const CHECKS_YML = join(REPO_ROOT, ".github", "workflows", "checks.yml");
+
+/** The slice `argv` asks for, as bun reads it: `--shard=1/4` or `--shard 1/4`. */
+function shardOf(argv: string[]): string | undefined {
+  const { shard } = parseArgs({
+    args: argv,
+    options: { shard: { type: "string" } },
+    strict: false,
+  }).values;
+  return typeof shard === "string" ? shard : undefined;
+}
+
+/** Why the slice `argv` asks for must not run against the matrix `listed`: bun cuts the test files into as many slices as
+ *  the denominator says, so a matrix short of one leaves that slice's files run by no machine, with every job green.
+ *  Every slice passes through here, so a matrix that drops any one turns all the others red. */
+export function shardRefusal(argv: string[], listed: string[]): string | undefined {
+  const shard = shardOf(argv);
+  if (shard === undefined) return undefined;
+  const count = Number(shard.split("/")[1]);
+  const missing = Array.from({ length: count }, (_, at) => `${at + 1}/${count}`).filter(
+    (slice) => !listed.includes(slice),
+  );
+  if (missing.length === 0) return undefined;
+  return (
+    `run_tests: --shard=${shard} refused: checks.yml's script-tests matrix does not list ${missing.join(", ")}, ` +
+    "so no machine would run those test files"
+  );
+}
+
+/** checks.yml as far as the slices go. The matrix is a literal shard list and nothing else: an `exclude` beside it, or an
+ *  expression in its place, would schedule fewer slices than a reader of the list sees. */
+const checksSchema = z.looseObject({
+  jobs: z.looseObject({
+    "script-tests": z.looseObject({
+      strategy: z.looseObject({ matrix: z.strictObject({ shard: z.array(z.string()) }) }),
+    }),
+  }),
+});
+
+function listedShards(): string[] {
+  const checks = checksSchema.parse(parseYaml(readFileSync(CHECKS_YML, "utf-8")));
+  return checks.jobs["script-tests"].strategy.matrix.shard;
+}
 
 export function leftoverExitCode(exitCode: number, leftovers: string[]): number {
   if (leftovers.length === 0) return exitCode;
@@ -34,6 +83,11 @@ export function leftoverExitCode(exitCode: number, leftovers: string[]): number 
 }
 
 async function main(argv: string[]): Promise<number> {
+  const refusal = shardOf(argv) === undefined ? undefined : shardRefusal(argv, listedShards());
+  if (refusal !== undefined) {
+    console.error(refusal);
+    return 1;
+  }
   // Handlers are installed before the scratch exists: under bun's default disposition a signal would end the launcher ahead of the finally.
   // The first await sits after the spawn and handlers run from the event loop, so the child is always there when one fires.
   let child: Subprocess | undefined;
