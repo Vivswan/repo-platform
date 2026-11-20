@@ -14,7 +14,7 @@ description: |
   With an artifacts-dir the body is built from failure reports under docs/modules/fuzzer.md's contract; without one it
   is a generic report (workflow, commit, run link).
 
-  The calling job needs issues: write, and gh on the runner.
+  The calling job needs issues: write.
 
 inputs:
   mode:
@@ -75,6 +75,9 @@ runs:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         ACTION_PATH: ${{ github.action_path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    - name: Set up the pinned gh
+      uses: $/actions/gh-setup
 
     # The label and the report tuple ride along for the script's requirement
     # check: a composite's `required: true` only documents, and the later

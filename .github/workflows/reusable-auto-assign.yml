@@ -32,6 +32,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
       ASSIGNEE: ${{ github.repository_owner }}
     steps:
+      - uses: $/actions/gh-setup
       # The issues REST route covers PRs too, so one call serves an issue, a PR, and a dispatched number of either kind.
       # A fork PR's token is read-only, so only same-repository PRs are assigned on open.
       - name: Assign the opened or dispatched item to the repository owner

@@ -18,7 +18,7 @@ on:
         type: string
         default: ""
       # Read only while a repository's ci.yml still sends the cut's tag and no id, as one the sync has not replaced yet
-      # does: the job's first step reads the id from it, and fails the job when it has neither.
+      # does: the job reads the id from it, and fails the job when it has neither.
       tag:
         description: The draft release's tag, as fleet-release.yml reported it.
         required: false
@@ -38,6 +38,7 @@ jobs:
       # The attest action's own bundle file name.
       BUNDLE_NAME: attestation.json
     steps:
+      - uses: $/actions/gh-setup
       # gh reads an empty tag as no tag and answers the latest published release, so an empty one is refused before gh
       # runs.
       - name: Read the draft's id from the tag

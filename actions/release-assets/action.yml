@@ -46,6 +46,9 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
+    - name: Set up the pinned gh
+      uses: $/actions/gh-setup
+
     - name: Inspect the draft release's assets
       id: inspect
       shell: bash
