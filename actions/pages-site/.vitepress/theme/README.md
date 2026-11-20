@@ -44,7 +44,7 @@ This directory, `theme/`:
 | `mermaid-theme.ts`     | mermaid's `themeVariables` from the fleet's tokens                                      |
 | `mermaid-zoom.ts`      | the Zoom button and the `shown` state the view follows                                  |
 | `mermaid-zoom-view.ts` | the full-size diagram view, on Panzoom 4.6.2 (pinned exact)                             |
-| `image-zoom.ts`        | the image lightbox (`ImageZoom`), on medium-zoom 1.1.0 (pinned exact)                   |
+| `image-zoom.ts`        | the image lightbox (`ImageZoom`), on medium-zoom 1.1.2 (pinned exact)                   |
 | `css.d.ts`             | the type stand-in for CSS imports                                                       |
 
 The parent directory, `.vitepress/`:
