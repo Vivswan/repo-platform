@@ -568,10 +568,8 @@ function linkCheckArgs(
   const literal = (path: string) => path.replace(/[[\]*?]/g, "[$&]");
   const inputs = join(cfg.scratch, "link-check-inputs.txt");
   writeFileSync(inputs, `${pages.map((page) => literal(join(layout.site, page))).join("\n")}\n`);
-  // Each value is quoted for lychee-action, which evals its args in bash.
-  return [`--root-dir ${Bun.$.escape(layout.served)}`, `--files-from ${Bun.$.escape(inputs)}`].join(
-    " ",
-  );
+  // One argument per line, the lychee action's `args`.
+  return [`--root-dir=${layout.served}`, `--files-from=${inputs}`].join("\n");
 }
 
 /** The link check's lychee.toml, read from its working directory, the scratch (action.yml): a link matching `ownLinks`

@@ -46,14 +46,16 @@ The pin is three values in the action's `env`, which a bump moves together: one 
 
 The download and the unpacking are GitHub's `@actions/tool-cache`; the sha256 check is the platform's own. An archive's whole tree is unpacked under the runner's temp directory, never into the runner's tool cache.
 
-## How the lint steps pin their tools
+## How the checks pin their tools
 
 Two standard checks need tools beside their linter, and each brings them at its own pin, the same on every runner:
 
 - **actionlint:** the [actionlint action](../actions/actionlint/action.yml) fetches actionlint and shellcheck as release binaries, as gh is fetched, and takes pyflakes from its own `uv.lock`; it hands actionlint both by path, since actionlint skips an integration it cannot find.
 - **typos:** the [typos action](../actions/typos/action.yml) puts its pinned jq on PATH before the upstream typos action runs, which formats each finding's annotation with it.
 
-A release binary's pin is three values in its action's `env`, moved together by hand: one release, and the sha256 of its Linux download for X64 and for ARM64. shellcheck is pinned at the version GitHub's image carries, so a bump there changes what the fleet's `run:` blocks are held to and is reviewed as one. Dependabot bumps pyflakes.
+The site's link check brings its tool the same way pyflakes comes: the [lychee action](../actions/lychee/action.yml) runs the lychee its own `uv.lock` names, published to PyPI by lychee's own release workflow, under a python uv fetches. Nothing is put on the job's PATH.
+
+A release binary's pin is three values in its action's `env`, moved together by hand: one release, and the sha256 of its Linux download for X64 and for ARM64. shellcheck is pinned at the version GitHub's image carries, so a bump there changes what the fleet's `run:` blocks are held to and is reviewed as one. Dependabot bumps pyflakes and lychee, each in its action's `pyproject.toml` and `uv.lock` together.
 
 ## What proves the jobs bring their tools
 

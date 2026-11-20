@@ -36,6 +36,7 @@ const workflow = parseYaml(source) as {
 };
 const steps = workflow.jobs.site?.steps ?? [];
 const SITE_URLS = loadAction("actions/site-urls/action.yml");
+const LYCHEE = loadAction("actions/lychee/action.yml");
 const step = (id: string) => steps.find((candidate) => candidate.id === id);
 const PAGE_URL = "https://vivswan.github.io/Example-Repo/";
 
@@ -175,28 +176,35 @@ describe("reusable-site.yml", () => {
     );
   });
 
-  // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml), the nightly, and the
-  // install ci.yml's test job runs so the broken-link test is judged by it, all the same action at the same
-  // version. The internal step's own knobs are judged by the live run in tests/ci/pages_site_build.
-  test("the assembly's internal link check, the test job, and the nightly run one lychee at one version", () => {
+  // One lychee judges a site: the assembly's internal check (actions/pages-site/action.yml) and the nightly are the
+  // one lychee action, whose lock names the version. The internal step's own knobs are judged by the live run in
+  // tests/ci/pages_site_build, which runs that action's step.
+  test("the assembly's internal link check and the nightly are the one lychee action, each naming only inputs it declares", () => {
     const internal = stepNamed(
       loadAction("actions/pages-site/action.yml"),
       "Check the site's internal links",
     ) as Step;
-    const ci = parseYaml(
-      readFileSync(join(import.meta.dir, "../../.github/workflows/ci.yml"), "utf8"),
-    ) as { jobs: Record<string, { steps?: Step[] }> };
-    const fixtures = ci.jobs["script-tests"]?.steps?.find(
-      (candidate) => candidate.uses === internal.uses,
-    );
     const nightly = step("links");
-    const pin = (of: Step | undefined) => ({ uses: of?.uses, version: of?.with?.lycheeVersion });
-    expect([pin(internal), pin(fixtures)]).toEqual([pin(nightly), pin(nightly)]);
-    expect(nightly?.with?.lycheeVersion).toMatch(/^v\d+\.\d+\.\d+$/);
+    const declared = Object.keys(LYCHEE.inputs ?? {});
+    expect([internal.uses, nightly?.uses]).toEqual(["$/actions/lychee", "$/actions/lychee"]);
+    for (const caller of [internal, nightly]) {
+      expect(declared).toEqual(expect.arrayContaining(Object.keys(caller?.with ?? {})));
+    }
   });
 
-  // lychee's markdown report as the action writes it (lychee 0.24.2 over a fixture site, the run link appended by
-  // lychee-action), before the fuzz-issue action reads it as a contract-v1 failure report.
+  // The steps after the check gate on the code it publishes: read under a name the action never declares, the code
+  // reads as empty and every night fails without a verdict.
+  test("every output the workflow reads from the link check is declared", () => {
+    const read = readsIn(workflow)
+      .filter(
+        ([context, id, field]) => context === "steps" && id === "links" && field === "outputs",
+      )
+      .map(([, , , key]) => key);
+    expect(new Set(read)).toEqual(new Set(Object.keys(LYCHEE.outputs ?? {})));
+  });
+
+  // lychee's markdown report as the action writes it (lychee 0.24.2 over a fixture site), before the fuzz-issue action
+  // reads it as a contract-v1 failure report.
   const LYCHEE_REPORT = [
     "# Summary",
     "",
@@ -223,12 +231,10 @@ describe("reusable-site.yml", () => {
     "",
     "* [ERROR] <https://no-such-host.example-fixture.org/a> (at 10:10) | Connection failed. Check network connectivity and firewall settings",
     "",
-    "[Full Github Actions output](https://github.com/o/r/actions/runs/42?check_suite_focus=true)",
-    "",
   ].join("\n");
 
   test("lychee's report is the one failure of the fuzz-issue contract: written under the artifacts-dir, it rides into the issue body whole", () => {
-    const output = String(step("links")?.with?.output);
+    const output = String(step("links")?.with?.report);
     const report = steps.find((candidate) => candidate.with?.mode === "report");
     const artifactsDir = String(report?.with?.["artifacts-dir"]);
     expect(output.startsWith(`${artifactsDir}/`)).toBe(true);
@@ -384,7 +390,7 @@ describe("reusable-site.yml", () => {
     { night: "no code published", outcome: "success", code: undefined, does: ["fail"] },
   ])("after the link check, $night does $does and nothing else", ({ outcome, code, does }) => {
     const context: Record<string, string> = { "steps.links.outcome": outcome };
-    if (code !== undefined) context["steps.links.outputs.exit_code"] = code;
+    if (code !== undefined) context["steps.links.outputs.exit-code"] = code;
     const after = steps.slice(steps.indexOf(step("links") as Step) + 1);
     const done: string[] = [];
     for (const next of after) {

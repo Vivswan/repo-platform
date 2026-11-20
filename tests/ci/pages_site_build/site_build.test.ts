@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { tierRouteGuard } from "../../../actions/pages-site/.vitepress/theme/tier-routes.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
+import { uvOnPath } from "../../shared/uv_project.ts";
 import {
   assetFiles,
   type BuildResult,
@@ -25,7 +26,6 @@ import {
   linkCheckRemap,
   MERMAID_MOUNT_HTML,
   ownedBy,
-  pinnedLychee,
   present,
   type RunnerTemp,
   readAssets,
@@ -492,8 +492,8 @@ describe("include roots inside the docs mount", () => {
 describe("the link check over the whole artifact", () => {
   // A link from the website half into the docs mount has no judge but the check over the assembled artifact. The
   // build hands lychee its arguments and the action's next step runs it, so the failing run is reproduced here
-  // with the step's own args, when the pinned lychee is on PATH.
-  const lychee = pinnedLychee();
+  // with the step's own args, where uv can bring the action's lychee.
+  const live = uvOnPath();
 
   test("lists the pages built from HEAD for lychee, the website's and latest/'s, a glob-named one as the pattern matching it alone, and never a tag tier's", () => {
     // The docs root and stable/ serve v0.2.0 here: a sealed dead link in history must not fail the deploy.
@@ -509,28 +509,29 @@ describe("the link check over the whole artifact", () => {
     }
   });
 
-  test.skipIf(lychee === null)(
-    "lychee, run as the step runs it, fails on the website's links into missing docs pages (the glob-named page's included) and the docs' link to a missing anchor, naming each",
+  test.skipIf(!live)(
+    "lychee, run as the step runs it, fails the step on the website's links into missing docs pages (the glob-named page's included) and the docs' link to a missing anchor, naming each in the log and the report",
     () => {
-      const check = runLinkCheck(lychee ?? "", built.outputs["link-check-args"], runner.scratch);
-      expect(check.exitCode, describeRun(check)).toBe(2);
-      expect(check.stdout).toContain(`### Errors in ${site}/index.html`);
-      expect(check.stdout).toMatch(
+      const check = runLinkCheck(built.outputs["link-check-args"], runner);
+      expect([check.exitCode, check.outputs["exit-code"]], describeRun(check)).toEqual([1, "2"]);
+      expect(check.stdout).toContain(check.report);
+      expect(check.report).toContain(`### Errors in ${site}/index.html`);
+      expect(check.report).toMatch(
         new RegExp(
           `^\\* \\[ERROR\\] <file://${site}/docs/skills/missing> \\(at \\d+:\\d+\\) \\| File not found\\. Check if file exists and path is correct$`,
           "m",
         ),
       );
-      expect(check.stdout).toContain(`### Errors in ${site}/docs/latest/index.html`);
-      expect(check.stdout).toMatch(
+      expect(check.report).toContain(`### Errors in ${site}/docs/latest/index.html`);
+      expect(check.report).toMatch(
         new RegExp(
           `^\\* \\[ERROR\\] <file://${site}/docs/latest/skills/alpha#nope> \\(at \\d+:\\d+\\) \\| Cannot find fragment$`,
           "m",
         ),
       );
-      expect(check.stdout).toContain(`### Errors in ${site}/[guide].html`);
-      expect(check.stdout).toContain(`<file://${site}/docs/skills/also-missing>`);
-      expect(check.stdout.match(/^\* \[ERROR\]/gm)).toHaveLength(3);
+      expect(check.report).toContain(`### Errors in ${site}/[guide].html`);
+      expect(check.report).toContain(`<file://${site}/docs/skills/also-missing>`);
+      expect(check.report.match(/^\* \[ERROR\]/gm)).toHaveLength(3);
     },
     TEST_TIMEOUT_MS,
   );
@@ -720,17 +721,13 @@ describe("a user site", () => {
     });
   });
 
-  test.skipIf(pinnedLychee() === null)(
+  test.skipIf(!uvOnPath())(
     "lychee resolves its root-absolute link and its origin-spelled links (one percent-encoded) in the artifact, and leaves the sibling project site's link to the network",
     () => {
-      const check = runLinkCheck(
-        pinnedLychee() ?? "",
-        result.outputs["link-check-args"],
-        runner.scratch,
-      );
-      expect(check.exitCode, describeRun(check)).toBe(0);
-      expect(check.stdout).toContain("| ✅ Successful  | 3     |");
-      expect(check.stdout).not.toContain("other-project");
+      const check = runLinkCheck(result.outputs["link-check-args"], runner);
+      expect([check.exitCode, check.outputs["exit-code"]], describeRun(check)).toEqual([0, "0"]);
+      expect(check.report).toContain("| ✅ Successful  | 3     |");
+      expect(check.report).not.toContain("other-project");
     },
     TEST_TIMEOUT_MS,
   );

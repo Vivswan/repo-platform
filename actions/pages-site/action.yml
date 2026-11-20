@@ -109,15 +109,14 @@ runs:
     # argument), and no .lycheeignore of the caller's is there.
     - name: Check the site's internal links
       if: steps.assemble.outputs.link-check-args != ''
-      uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+      uses: $/actions/lychee
       with:
-        lycheeVersion: v0.24.2
-        workingDirectory: ${{ runner.temp }}/pages-site
-        args: >-
+        working-directory: ${{ runner.temp }}/pages-site
+        args: |
           --offline
           --no-progress
           --include-fragments=anchor-only
-          --index-files index.html
-          --fallback-extensions html,htm
+          --index-files=index.html
+          --fallback-extensions=html,htm
           ${{ steps.assemble.outputs.link-check-args }}
-        output: ${{ runner.temp }}/pages-site/link-check.md
+        report: ${{ runner.temp }}/pages-site/link-check.md

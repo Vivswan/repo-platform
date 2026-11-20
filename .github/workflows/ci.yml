@@ -250,15 +250,15 @@ jobs:
         uses: $/actions/typos
       - name: Put the installed typos on PATH
         run: echo "$RUNNER_TEMP" >>"$GITHUB_PATH"
-      # The link-check step installs the pinned lychee on PATH, which the site tests' live link check then runs.
-      - name: Install the site action's lychee
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+      # The site tests' live link check runs the lychee action's own step, which brings its lychee through uv.
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
-          lycheeVersion: v0.24.2
-          args: --offline --no-progress --version
+          enable-cache: false
+          ignore-empty-workdir: true
       - name: Run .github/scripts and action tests
         env:
           TYPOS_REQUIRED: "1"
+          UV_REQUIRED: "1"
         run: bun run test
 
   # This repository's own skills catalog, judged by the action Vivswan/skills carries (it pins its
@@ -466,6 +466,16 @@ jobs:
         with:
           phase: plan
           config: '{"label":{"paths":["**"],"delete":[]},"push":null}'
+      # Offline over the README: its links into this checkout are judged, and the network is never asked.
+      - id: lychee
+        uses: $/actions/lychee
+        with:
+          working-directory: ${{ github.workspace }}
+          args: |
+            --offline
+            --no-progress
+            README.md
+          report: ${{ runner.temp }}/action-load/links.md
 
   # GitHub's image carries python, node, jq, gh, and shellcheck, so a shipped step that leans on one stays green there.
   # Here the shipped actions and the gate's steps run in a container holding the baseline alone (docs/fleet-guidelines.md,

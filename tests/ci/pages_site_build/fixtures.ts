@@ -18,13 +18,20 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pagesSite } from "../../../actions/shared/pages_site.ts";
-import { loadAction, stepNamed } from "../../shared/action_step.ts";
+import {
+  loadAction,
+  REPO_ROOT,
+  runBashStep,
+  type StepRun,
+  stepNamed,
+} from "../../shared/action_step.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
 import { interpolate } from "../../shared/github_expression.ts";
 import { parseGithubOutput } from "../../shared/github_output.ts";
 import { harnessBound } from "../../shared/harness_bound.ts";
 import type { TempDirs } from "../../shared/temp_dir.ts";
+import { UV_TIMEOUT_MS, uvEnv } from "../../shared/uv_project.ts";
 
 /** The action's build entry. */
 export const BUILD_TS = resolve(import.meta.dir, "../../../actions/pages-site/build.ts");
@@ -85,11 +92,11 @@ export function runnerTemp(temp: TempDirs, basePath: string): RunnerTemp {
 }
 
 /** The `link-check-args` output a deploy emits for `runner`'s layout: the served root and the page list in the scratch
- *  directory, each quoted the way `Bun.$.escape` quotes for bash, which the live lychee run proves bash reads. */
+ *  directory, one lychee argument per line. */
 export function deployLinkCheckArgs(runner: RunnerTemp): string {
   return (
-    `--root-dir ${Bun.$.escape(runner.served)} ` +
-    `--files-from ${Bun.$.escape(join(runner.scratch, "link-check-inputs.txt"))}`
+    `--root-dir=${runner.served}\n` +
+    `--files-from=${join(runner.scratch, "link-check-inputs.txt")}`
   );
 }
 
@@ -120,42 +127,42 @@ export function linkCheckInputs(runner: RunnerTemp): string[] {
 const LINK_CHECK_STEP = stepNamed(
   loadAction("actions/pages-site/action.yml"),
   "Check the site's internal links",
-) as { with: { args: string; lycheeVersion: string } };
+) as { with: { args: string; report: string } };
+const LYCHEE_ACTION = "actions/lychee";
+const LYCHEE = loadAction(`${LYCHEE_ACTION}/action.yml`);
 
-/** The lychee the action's link-check step pins, when it is on PATH; null, and the live run is skipped loudly. A
- *  lychee that cannot print its version is broken, not absent. */
-export function pinnedLychee(): string | null {
-  const pinned = `lychee ${LINK_CHECK_STEP.with.lycheeVersion.replace(/^v/, "")}`;
-  const path = Bun.which("lychee");
-  if (path === null) {
-    console.warn(
-      `${pinned} is not on PATH: the live link check is skipped here and runs in the action`,
-    );
-    return null;
-  }
-  const version = boundedSpawnSync([path, "--version"]);
-  if (version.exitCode !== 0) {
-    throw new Error(`${path} --version exited ${version.exitCode}:\n${version.stderr}`);
-  }
-  const printed = version.stdout.trim();
-  if (printed === pinned) return path;
-  console.warn(
-    `${path} is ${printed}, not ${pinned}: the live link check is skipped here and runs in the action`,
-  );
-  return null;
+export interface LinkCheck extends StepRun {
+  /** The markdown report the step wrote, "" when lychee wrote none. */
+  report: string;
 }
 
-/** The step's lychee run the way lychee-action's entrypoint runs it (bash evals the args string), the markdown
- *  report on stdout. */
-export function runLinkCheck(
-  lychee: string,
-  linkCheckArgs: string,
-  cwd: string,
-): BoundedSpawnResult {
-  const args = interpolate(LINK_CHECK_STEP.with.args, {
-    "steps.assemble.outputs.link-check-args": linkCheckArgs,
+/** The assembly's link-check step as the runner runs it: the lychee action's own step, over the arguments and the
+ *  report path the assembly's step hands it, in the scratch directory. */
+export function runLinkCheck(linkCheckArgs: string, runner: RunnerTemp): LinkCheck {
+  const inputs = (text: string) =>
+    interpolate(text, {
+      "steps.assemble.outputs.link-check-args": linkCheckArgs,
+      "runner.temp": dirname(runner.scratch),
+    });
+  const report = inputs(LINK_CHECK_STEP.with.report);
+  // The runner hands a step its summary file, already created.
+  const summary = join(dirname(runner.alias), "step-summary");
+  writeFileSync(summary, "");
+  const run = runBashStep(stepNamed(LYCHEE, "Check the links"), {
+    context: {
+      "github.action_path": join(REPO_ROOT, LYCHEE_ACTION),
+      "steps.action-bun.outputs.path": process.execPath,
+      "inputs.working-directory": runner.scratch,
+      "inputs.args": inputs(LINK_CHECK_STEP.with.args),
+      "inputs.report": report,
+      "inputs.fail": String(LYCHEE.inputs?.fail.default),
+    },
+    env: { ...uvEnv(), GITHUB_STEP_SUMMARY: summary },
+    cwd: runner.scratch,
+    root: dirname(runner.alias),
+    timeoutMs: UV_TIMEOUT_MS,
   });
-  return boundedSpawnSync(["bash", "-c", `'${lychee}' --format markdown ${args}`], { cwd });
+  return { ...run, report: existsSync(report) ? readFileSync(report, "utf-8") : "" };
 }
 
 export interface BuildResult extends BoundedSpawnResult {

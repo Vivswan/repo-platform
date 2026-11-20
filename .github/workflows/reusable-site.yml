@@ -128,55 +128,58 @@ jobs:
       # ones were fatal at assembly), on the schedule alone so a fixed link
       # closes the issue on the next clean night, never on a push. Green
       # whatever lychee finds (fail: false): the deploy has shipped, so
-      # findings become the tracking issue below. lychee-action still fails
+      # findings become the tracking issue below. The action still fails
       # the step when lychee extracted no link at all (excluded ones count).
       - name: Check external links
         id: links
         if: github.event_name == 'schedule' && steps.site.outputs.publish == 'true' && steps.site.outputs.link-rot-label != ''
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        # The lychee the assembly's internal check ran (actions/pages-site/action.yml): one version judges a site.
+        # It runs anonymously, which this crawl depends on: with a token, a deleted deep link into a private
+        # repository reads as alive and closes the link-rot issue (actions/lychee/lychee.ts).
+        uses: $/actions/lychee
         with:
-          workingDirectory: ${{ steps.site.outputs.site-dir }}
-          # The lychee the assembly's internal check ran (actions/pages-site/action.yml): one version judges a site.
-          lycheeVersion: v0.24.2
-          # Anonymous on purpose: given a token, lychee answers a 404 on a
-          # github.com URL by asking the API, which calls a private repository
-          # alive whatever the path. A deleted deep link into this repository
-          # would then read as fixed and close the link-rot issue.
-          token: ""
+          working-directory: ${{ steps.site.outputs.site-dir }}
           # The site's own links were judged against the artifact at assembly (the staged .lycheeignore's first
           # line), and the theme's "Edit this page" links are output an anonymous crawl cannot judge (auth
           # redirect, 404 on a private repository). github.com answers an anonymous crawl of blob pages with 503,
           # so links into this repository's own tree are judged by the checkout instead; the file scheme is for
           # those alone.
-          args: >-
+          args: |
             --no-progress
-            --root-dir ${{ steps.site.outputs.site-dir }}
-            --scheme https --scheme http --scheme file
+            --root-dir=${{ steps.site.outputs.site-dir }}
+            --scheme=https
+            --scheme=http
+            --scheme=file
             --exclude-all-private
-            --exclude '${{ steps.urls.outputs.edit-links }}'
-            --exclude '^file://${{ steps.site.outputs.site-dir }}/'
-            --remap '${{ steps.urls.outputs.tree-links }}'
-            --timeout 30 --max-retries 3 --retry-wait-time 5
-            --glob-ignore-case '**/*.html' '**/*.htm'
+
+            --exclude=${{ steps.urls.outputs.edit-links }}
+            --exclude=^file://${{ steps.site.outputs.site-dir }}/
+            --remap=${{ steps.urls.outputs.tree-links }}
+
+            --timeout=30
+            --max-retries=3
+            --retry-wait-time=5
+            --glob-ignore-case
+            **/*.html
+            **/*.htm
           fail: false
-          format: markdown
           # One failure directory of the fuzz-issue action's report contract
           # (docs/modules/fuzzer.md): <artifacts-dir>/<failure>/report.md, its first
           # line lychee's `# Summary` heading.
-          output: ${{ runner.temp }}/link-rot/external-links/report.md
+          report: ${{ runner.temp }}/link-rot/external-links/report.md
 
       # lychee's verdicts are two exit codes, 0 clean and 2 broken links. Any other code is lychee's own error, which
       # `fail: false` would pass as a green night, so it fails here and neither the report nor the close runs.
       - name: Fail on a link check without a verdict
-        if: steps.links.outcome == 'success' && (steps.links.outputs.exit_code == '' || !contains(fromJSON('["0","2"]'), steps.links.outputs.exit_code))
+        if: steps.links.outcome == 'success' && (steps.links.outputs.exit-code == '' || !contains(fromJSON('["0","2"]'), steps.links.outputs.exit-code))
         env:
-          EXIT_CODE: ${{ steps.links.outputs.exit_code }}
+          EXIT_CODE: ${{ steps.links.outputs.exit-code }}
         run: |
           echo "::error::lychee published no verdict: exit code '$EXIT_CODE' (0 = clean, 2 = broken links)"
           exit 1
 
       - name: File or update the link-rot issue
-        if: steps.links.outputs.exit_code == '2'
+        if: steps.links.outputs.exit-code == '2'
         uses: $/actions/fuzz-issue
         with:
           mode: report
@@ -190,7 +193,7 @@ jobs:
       # Not `== '0'`: a skipped check's absent code reads as 0 (tests/workflows/step_output_gates.test.ts), and every
       # push would close the issue. The step above has failed every other code holding a 0.
       - name: Close the link-rot issue on a clean night
-        if: contains(steps.links.outputs.exit_code, '0')
+        if: contains(steps.links.outputs.exit-code, '0')
         uses: $/actions/fuzz-issue
         with:
           mode: resolve

@@ -282,7 +282,7 @@ fleet.yml's `docs-check` job builds `docs/` strictly on every pull request of a 
 
 - **Every PR runs it:** a PR that changes no docs still runs it, quickly, over the unchanged tree.
 
-**Internal links** are checked across the whole assembled site by [lychee](https://github.com/lycheeverse/lychee), run offline by the same [lychee-action](https://github.com/lycheeverse/lychee-action) step and version as the nightly link-rot check. It reads the artifact laid out the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`.
+**Internal links** are checked across the whole assembled site by [lychee](https://github.com/lycheeverse/lychee), run offline by the same [lychee action](../../actions/lychee/action.yml) as the nightly link-rot check, at the one version that action's `uv.lock` names. It reads the artifact laid out the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`.
 
 Every same-site link on a page built from the default branch must resolve, wherever the target lives (a website page into the docs, a docs page to a staged skill, a `#fragment` naming a heading, an emitted asset, a link spelled with the site's own URL).
 

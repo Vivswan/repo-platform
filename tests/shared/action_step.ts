@@ -44,6 +44,9 @@ export function runBashStep(
     env?: Record<string, string>;
     cwd: string;
     root: string;
+
+    /** The hang bound, for a step slower than boundedSpawnSync's default. */
+    timeoutMs?: number;
   },
 ): StepRun {
   const filled = (text: string): string => interpolate(text, options.context ?? {});
@@ -60,6 +63,7 @@ export function runBashStep(
       ...(options.env ?? {}),
       GITHUB_OUTPUT: outputs,
     },
+    timeoutMs: options.timeoutMs,
   });
   return {
     exitCode: proc.exitCode,
