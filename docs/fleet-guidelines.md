@@ -160,7 +160,7 @@ runs-on: ${{ github.event.repository.private && vars.CI_RUNS_ON || 'ubuntu-lates
 - **One job at a time:** a single runner runs the gate's jobs one after another, so a run takes longer than on GitHub's runners.
 - **A scheduled run** reads the repository's visibility from the event, which GitHub sends with it; an event that names no repository falls back to `ubuntu-latest`.
 
-What the runner must offer is the baseline. Every shipped job fetches whatever else it runs, at the platform's pins, the same on every runner: none needs `python`, `pip`, `pipx`, `jq`, `gh`, `shellcheck`, `sudo`, `apt-get`, Docker, or a `node` or `npm` on PATH.
+What the runner must offer is the baseline, each tool on PATH, wherever the system keeps it. Every shipped job fetches whatever else it runs, at the platform's pins, the same on every runner: none needs `python`, `pip`, `pipx`, `jq`, `gh`, `shellcheck`, `sudo`, `apt-get`, Docker, or a `node` or `npm` on PATH.
 
 | The baseline                                                  | For                                                 |
 | ------------------------------------------------------------- | --------------------------------------------------- |

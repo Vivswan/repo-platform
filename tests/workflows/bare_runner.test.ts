@@ -1,7 +1,8 @@
 // What would drift silently: a shipped step that leans on GitHub's image. A runner offers the baseline alone
 // (docs/fleet-guidelines.md, "Runner"), GitHub's carries far more, so a step calling `gh` or `jq` with nothing fetching
 // it stays green in every run the platform sees and fails only on a repository's own runner.
-//   the scan      -> every shipped `run:` step: a known tool at command position needs the step that sets it up before it
+//   the scan      -> every shipped `run:` step: a known tool at command position needs the step that sets it up before it,
+//                    and no command is an absolute path under /bin, /usr/bin, or /usr/local/bin
 //   the container -> ci.yml's bare-runner job runs every shipped action where a missing tool is a red step
 // The scan reads `run:` text only: a tool a script spawns, or a third-party action calls, is the container's to catch.
 
@@ -87,18 +88,25 @@ const COMMAND = new RegExp(
   "gm",
 );
 
-/** The word at each command position of a `run:` body, a path cut to its last segment: comment lines dropped, a
- *  continued line joined, an expression read as one word. Quotes are not read, so a tool named after `;` or `|` inside a
- *  message counts as called. */
-function commandsOf(run: string): string[] {
-  const text = run
+/** A `run:` body as bash reads its commands: comment lines dropped, a continued line joined, an expression one word. */
+const scriptOf = (run: string): string =>
+  run
     .replace(/\$\{\{.*?\}\}/gs, "_")
     .replace(/\\\n/g, " ")
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("#"))
     .join("\n");
-  return [...text.matchAll(COMMAND)].map((match) => match[1]);
-}
+
+/** The word at each command position of a `run:` body, a path cut to its last segment. Quotes are not read, so a tool
+ *  named after `;` or `|` inside a message counts as called. */
+const commandsOf = (run: string): string[] =>
+  [...scriptOf(run).matchAll(COMMAND)].map((match) => match[1]);
+
+/** A command given by its place on the system: the baseline promises a tool on PATH, never where it lives. */
+const SYSTEM_PATH = new RegExp(
+  String.raw`(?<=${COMMAND_POSITION})/(?:usr/(?:local/)?)?bin/[\w.+-]+(?=[\s;|&)]|$)`,
+  "gm",
+);
 
 /** A step's commands: its `run:` body's, and its `shell:` when that is no shell of the baseline. */
 function calledBy(step: Step): string[] {
@@ -116,8 +124,11 @@ function leansOnTheImage(steps: Step[]): string[] {
     const missing = [...new Set(calledBy(step))]
       .filter((tool) => tool in SET_UP_BY && !onPath.has(tool))
       .map((tool) => `step ${index + 1}: ${tool} (${SET_UP_BY[tool] ?? "not for a shipped step"})`);
+    const located = [...new Set(scriptOf(step.run ?? "").match(SYSTEM_PATH))].map(
+      (path) => `step ${index + 1}: ${path} (call it through PATH)`,
+    );
     for (const tool of setsUp(step)) onPath.add(tool);
-    return missing;
+    return [...missing, ...located];
   });
 }
 
@@ -185,7 +196,13 @@ describe("no shipped run step calls a tool outside the baseline that nothing bef
     {
       planted: "shellcheck by path",
       steps: [{ run: "/usr/bin/shellcheck x.sh" }],
-      refused: ["shellcheck"],
+      refused: ["shellcheck", "/usr/bin/shellcheck"],
+    },
+    { planted: "rm by path", steps: [{ run: '/bin/rm -rf "$DIR"' }], refused: ["/bin/rm"] },
+    {
+      planted: "a core tool by path behind a pipe",
+      steps: [{ run: "cat x | /usr/bin/sort" }],
+      refused: ["/usr/bin/sort"],
     },
     { planted: "docker", steps: [{ run: "docker run --rm alpine true" }], refused: ["docker"] },
     { planted: "gh", steps: [{ run: 'gh api "repos/$GH_REPO"' }], refused: ["gh"] },
@@ -237,6 +254,7 @@ describe("no shipped run step calls a tool outside the baseline that nothing bef
       allowed: "a jq program handed to gh's --jq",
       steps: [{ uses: "$/actions/gh-setup" }, { run: "gh api x --jq '.[] | select(.a)'" }],
     },
+    { allowed: "a system path as an argument", steps: [{ run: "ls -l /usr/bin/sort /bin/sh" }] },
     { allowed: "a comment", steps: [{ run: "# jq would be simpler\ntrue" }] },
   ])("$allowed passes", ({ steps }) => {
     expect(leansOnTheImage(steps)).toEqual([]);

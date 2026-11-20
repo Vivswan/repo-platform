@@ -529,6 +529,38 @@ test("repo-platform is cloned whole, from its own slug, into the dir run.ts read
   expect(env("validate").PLATFORM_DIR).toBe(env("platform").PLATFORM_DIR);
 });
 
+describe("clear.ts", () => {
+  const clear = (env: Record<string, string>) =>
+    boundedSpawnSync([process.execPath, join(ACTION, "src/clear.ts")], { env });
+
+  test("removes the scratch root, the verdict, and the comment body, with no rm on PATH", () => {
+    const dir = temp.dir("clear-");
+    const paths = {
+      SCRATCH_DIR: join(dir, "scratch"),
+      VERDICT_FILE: join(dir, "verdict.json"),
+      COMMENT_FILE: join(dir, "absent.md"),
+    };
+    mkdirSync(join(paths.SCRATCH_DIR, "platform"), { recursive: true });
+    writeFileSync(join(paths.SCRATCH_DIR, "platform/planted"), "");
+    writeFileSync(paths.VERDICT_FILE, "planted");
+    expect(clear({ ...paths, PATH: "" }).exitCode).toBe(0);
+    expect(Object.values(paths).map((path) => existsSync(path))).toEqual([false, false, false]);
+  });
+
+  test("the step clears, with the action's bun, the paths the later steps use", () => {
+    const env = (id: string) =>
+      (action.runs.steps.find((step) => step.id === id) as Step & { env: Record<string, string> })
+        .env;
+    expect(env("clear")).toMatchObject({
+      ACTION_BUN: env("validate").ACTION_BUN,
+      SCRATCH_DIR: env("validate").SCRATCH_DIR,
+      VERDICT_FILE: env("validate").VERDICT_FILE,
+      COMMENT_FILE: env("report").COMMENT_FILE,
+    });
+    expect(env("report").VERDICT).toBe(env("validate").VERDICT_FILE);
+  });
+});
+
 describe("verdict.ts", () => {
   test("a timed-out validator is not judged, with the deadline in the reason", () => {
     const dir = temp.dir("verdict-classify-");
