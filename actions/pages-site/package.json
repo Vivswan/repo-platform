@@ -11,10 +11,10 @@
     "entities": "^9.0.0",
     "github-slugger": "^2.0.0",
     "medium-zoom": "1.1.2",
-    "mermaid": "12.3.0",
+    "mermaid": "11.17.2",
     "reka-ui": "2.11.0",
     "vitepress": "1.6.4",
-    "vitepress-carbon": "1.7.0",
+    "vitepress-carbon": "1.6.0",
     "vue": "^3.5.45",
     "zod": "^4.6.7"
   },
