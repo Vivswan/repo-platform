@@ -35,7 +35,13 @@ export interface StepRun {
   outputs: Record<string, string>;
 }
 
-/** The step run under the runner's bash, its `env:` and `run:` filled once over `context`: each key a dotted path
+/** The argv a step's script follows: its own `shell:` template when it names one, the runner's bash otherwise. */
+function shellOf(step: Step): string[] {
+  const shell = String(step.shell ?? "bash");
+  return shell.includes("{0}") ? shell.replace("{0}", "-c").split(" ") : RUNNER_BASH;
+}
+
+/** The step run under its shell, its `env:` and `run:` filled once over `context`: each key a dotted path
  *  (`inputs.label`), each value what the runner would hand the step. */
 export function runBashStep(
   step: Step,
@@ -53,7 +59,7 @@ export function runBashStep(
   const stepEnv = Object.fromEntries(
     Object.entries((step.env ?? {}) as Record<string, string>).map(([k, v]) => [k, filled(v)]),
   );
-  const proc = boundedSpawnSync([...RUNNER_BASH, filled(String(step.run))], {
+  const proc = boundedSpawnSync([...shellOf(step), filled(String(step.run))], {
     cwd: options.cwd,
     env: {
       PATH: process.env.PATH ?? "",

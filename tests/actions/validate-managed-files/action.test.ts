@@ -11,7 +11,7 @@ import {
   readVerdict,
   writeVerdict,
 } from "../../../actions/validate-managed-files/src/verdict";
-import { loadAction, type Step, stepNamed } from "../../shared/action_step";
+import { loadAction, runBashStep, type Step, stepNamed } from "../../shared/action_step";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../../shared/fixture_git";
 import { tempDirs } from "../../shared/temp_dir";
@@ -530,21 +530,36 @@ test("repo-platform is cloned whole, from its own slug, into the dir run.ts read
 });
 
 describe("clear.ts", () => {
-  const clear = (env: Record<string, string>) =>
-    boundedSpawnSync([process.execPath, join(ACTION, "src/clear.ts")], { env });
-
-  test("removes the scratch root, the verdict, and the comment body, with no rm on PATH", () => {
+  // The incident: an earlier step exported BUN_INSPECT_PRELOAD naming a script that exits 0, and the clear reported
+  // success with every path still there. An exported `exec` function skipped it the same way.
+  test("removes the three paths whatever the job's environment exports", () => {
     const dir = temp.dir("clear-");
-    const paths = {
-      SCRATCH_DIR: join(dir, "scratch"),
-      VERDICT_FILE: join(dir, "verdict.json"),
-      COMMENT_FILE: join(dir, "absent.md"),
-    };
-    mkdirSync(join(paths.SCRATCH_DIR, "platform"), { recursive: true });
-    writeFileSync(join(paths.SCRATCH_DIR, "platform/planted"), "");
-    writeFileSync(paths.VERDICT_FILE, "planted");
-    expect(clear({ ...paths, PATH: "" }).exitCode).toBe(0);
-    expect(Object.values(paths).map((path) => existsSync(path))).toEqual([false, false, false]);
+    const paths = [
+      join(dir, "validate-managed-files"),
+      join(dir, "validate-managed-files-verdict.json"),
+      join(dir, "validate-managed-files-report.md"),
+    ];
+    const skip = join(dir, "skip.ts");
+    mkdirSync(join(paths[0], "platform"), { recursive: true });
+    writeFileSync(join(paths[0], "platform/planted"), "");
+    writeFileSync(paths[1], "planted");
+    writeFileSync(skip, "process.exit(0);\n");
+    const ran = runBashStep(stepNamed(action, "Clear the scratch root"), {
+      context: {
+        "steps.action-bun.outputs.path": process.execPath,
+        "github.action_path": ACTION,
+        "runner.temp": dir,
+      },
+      env: {
+        BUN_INSPECT_PRELOAD: skip,
+        BUN_OPTIONS: `--preload=${skip}`,
+        "BASH_FUNC_exec%%": "() { return 0; }",
+      },
+      cwd: ACTION,
+      root: temp.dir("clear-outputs-"),
+    });
+    expect(ran.exitCode).toBe(0);
+    expect(paths.map((path) => existsSync(path))).toEqual([false, false, false]);
   });
 
   test("the step clears, with the action's bun, the paths the later steps use", () => {
