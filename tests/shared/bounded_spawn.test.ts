@@ -33,27 +33,18 @@ describe("boundedSpawnSync", () => {
     expect(boundedSpawnSync(argv, { stdin })).toEqual(result);
   });
 
-  // The two hung fixtures wait out the scaled bound, so their own bun-test timeouts scale with it.
-  test(
-    "FORCED RED: a hung child hits the bound and reads as failed-to-look",
-    () => {
-      expect(() =>
-        boundedSpawnSync([bunExe, "-e", `await Bun.sleep(${BACKSTOP_MS})`], { timeoutMs: 250 }),
-      ).toThrow(/exceeded the 250ms harness bound.*failed to look/s);
-    },
-    harnessBound(5_000),
-  );
+  test("FORCED RED: a hung child hits the bound and reads as failed-to-look", () => {
+    expect(() =>
+      boundedSpawnSync([bunExe, "-e", `await Bun.sleep(${BACKSTOP_MS})`], { timeoutMs: 250 }),
+    ).toThrow(/exceeded the 250ms harness bound.*failed to look/s);
+  });
 
-  test(
-    "FORCED RED: a clean exit behind a pipe-holding descendant still throws, never exit 0",
-    () => {
-      const fixture = `Bun.spawn(["sleep", "${BACKSTOP_MS / 1000}"], { stdout: "inherit", stderr: "inherit" }); process.exit(0);`;
-      expect(() => boundedSpawnSync([bunExe, "-e", fixture], { timeoutMs: 250 })).toThrow(
-        /exceeded the 250ms harness bound/,
-      );
-    },
-    harnessBound(5_000),
-  );
+  test("FORCED RED: a clean exit behind a pipe-holding descendant still throws, never exit 0", () => {
+    const fixture = `Bun.spawn(["sleep", "${BACKSTOP_MS / 1000}"], { stdout: "inherit", stderr: "inherit" }); process.exit(0);`;
+    expect(() => boundedSpawnSync([bunExe, "-e", fixture], { timeoutMs: 250 })).toThrow(
+      /exceeded the 250ms harness bound/,
+    );
+  });
 
   test("a signal death is failed-to-look, naming the signal - read as exit 0 it would pass any exit assertion", () => {
     expect(() => boundedSpawnSync([bunExe, "-e", "process.kill(process.pid, 'SIGKILL')"])).toThrow(
@@ -61,26 +52,22 @@ describe("boundedSpawnSync", () => {
     );
   });
 
-  test(
-    "TEST_TIME_SCALE stretches the bound: a child that overruns the written bound survives under x8, and the failure names both",
-    () => {
-      const previous = process.env.TEST_TIME_SCALE;
-      process.env.TEST_TIME_SCALE = "8";
-      try {
-        const slow = boundedSpawnSync([bunExe, "-e", "await Bun.sleep(400); console.log('late')"], {
-          timeoutMs: 250,
-        });
-        expect(slow).toEqual({ exitCode: 0, stdout: "late\n", stderr: "" });
-        expect(() =>
-          boundedSpawnSync([bunExe, "-e", `await Bun.sleep(${BACKSTOP_MS})`], { timeoutMs: 250 }),
-        ).toThrow(/exceeded the 250ms harness bound \(stretched to 2000ms for load\)/);
-      } finally {
-        if (previous === undefined) delete process.env.TEST_TIME_SCALE;
-        else process.env.TEST_TIME_SCALE = previous;
-      }
-    },
-    harnessBound(5_000),
-  );
+  test("TEST_TIME_SCALE stretches the bound: a child that overruns the written bound survives under x8, and the failure names both", () => {
+    const previous = process.env.TEST_TIME_SCALE;
+    process.env.TEST_TIME_SCALE = "8";
+    try {
+      const slow = boundedSpawnSync([bunExe, "-e", "await Bun.sleep(400); console.log('late')"], {
+        timeoutMs: 250,
+      });
+      expect(slow).toEqual({ exitCode: 0, stdout: "late\n", stderr: "" });
+      expect(() =>
+        boundedSpawnSync([bunExe, "-e", `await Bun.sleep(${BACKSTOP_MS})`], { timeoutMs: 250 }),
+      ).toThrow(/exceeded the 250ms harness bound \(stretched to 2000ms for load\)/);
+    } finally {
+      if (previous === undefined) delete process.env.TEST_TIME_SCALE;
+      else process.env.TEST_TIME_SCALE = previous;
+    }
+  });
 
   test("a zero, negative, infinite, or NaN bound is refused - bun reads those as NO bound", () => {
     for (const bad of [0, -1, Number.POSITIVE_INFINITY, Number.NaN]) {

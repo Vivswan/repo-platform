@@ -17,7 +17,6 @@ import { MANIFEST_NAME } from "../../../.github/scripts/sync/writer/manifest.ts"
 import { sha256 } from "../../../actions/shared/values.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../../shared/fixture_git";
-import { harnessBound } from "../../shared/harness_bound";
 import type { LoopbackServer } from "../../shared/loopback_server";
 import { tempDirs } from "../../shared/temp_dir";
 import { snapshotTree } from "../../shared/tree_snapshot";
@@ -100,9 +99,6 @@ function target(): string {
 /** One writer run's hang bound. */
 const SYNC_TIMEOUT_MS = 60_000;
 
-/** A test here runs the writer at most twice. bun's 5-second default ends a test before sync()'s own bound can. */
-const SYNCS_TIMEOUT_MS = harnessBound(2 * SYNC_TIMEOUT_MS);
-
 /** The operator checks the build out before the writer reads it, so the tree under files/ is the build's own. */
 function sync(platformRoot: string, targetDir: string, build: string) {
   fixtureGit(platformRoot, ["checkout", "-q", build]);
@@ -159,17 +155,13 @@ describe("the manifest's commit under the stamp rule", () => {
     p = platform();
   });
 
-  test(
-    "a first sync, with no manifest, takes the build",
-    () => {
-      const t = target();
-      const run = sync(p.root, t, p.base);
-      expect(run.stderr).toBe("");
-      expect(run.exitCode).toBe(0);
-      expect(recorded(t)).toBe(p.base);
-    },
-    SYNCS_TIMEOUT_MS,
-  );
+  test("a first sync, with no manifest, takes the build", () => {
+    const t = target();
+    const run = sync(p.root, t, p.base);
+    expect(run.stderr).toBe("");
+    expect(run.exitCode).toBe(0);
+    expect(recorded(t)).toBe(p.base);
+  });
 
   test.each<Second>([
     {
@@ -221,53 +213,45 @@ describe("the manifest's commit under the stamp rule", () => {
       stamp: (p) => p.docs,
       treeKept: true,
     },
-  ])(
-    "$reason",
-    ({ builds, between, stamp, treeKept }) => {
-      const [first, second] = builds(p);
-      const t = target();
-      expect(sync(p.root, t, first).exitCode).toBe(0);
-      expect(recorded(t)).toBe(first);
-      between?.(t);
-      const before = snapshotTree(t);
-      // Control: the first sync wrote the tree, so the snapshot has the manifest in it.
-      expect(before.has(MANIFEST_NAME)).toBe(true);
-      const run = sync(p.root, t, second);
-      expect(run.stderr).toBe("");
-      expect(run.exitCode).toBe(0);
-      expect(recorded(t)).toBe(stamp(p));
-      const after = snapshotTree(t);
-      // A kept stamp keeps the manifest's bytes too; a moved one leaves the manifest out of the comparison.
-      if (stamp(p) !== first) {
-        before.delete(MANIFEST_NAME);
-        after.delete(MANIFEST_NAME);
-      }
-      if (treeKept) expect(after).toEqual(before);
-      else expect(after).not.toEqual(before);
-    },
-    SYNCS_TIMEOUT_MS,
-  );
+  ])("$reason", ({ builds, between, stamp, treeKept }) => {
+    const [first, second] = builds(p);
+    const t = target();
+    expect(sync(p.root, t, first).exitCode).toBe(0);
+    expect(recorded(t)).toBe(first);
+    between?.(t);
+    const before = snapshotTree(t);
+    // Control: the first sync wrote the tree, so the snapshot has the manifest in it.
+    expect(before.has(MANIFEST_NAME)).toBe(true);
+    const run = sync(p.root, t, second);
+    expect(run.stderr).toBe("");
+    expect(run.exitCode).toBe(0);
+    expect(recorded(t)).toBe(stamp(p));
+    const after = snapshotTree(t);
+    // A kept stamp keeps the manifest's bytes too; a moved one leaves the manifest out of the comparison.
+    if (stamp(p) !== first) {
+      before.delete(MANIFEST_NAME);
+      after.delete(MANIFEST_NAME);
+    }
+    if (treeKept) expect(after).toEqual(before);
+    else expect(after).not.toEqual(before);
+  });
 
-  test(
-    "a recorded commit the build checkout's history lacks fails the run before anything is written",
-    () => {
-      const t = target();
-      expect(sync(p.root, t, p.base).exitCode).toBe(0);
-      const before = snapshotTree(t);
-      const manifest = readFileSync(join(t, MANIFEST_NAME), "utf-8");
-      const foreign = "f".repeat(40);
-      writeFileSync(join(t, MANIFEST_NAME), manifest.replace(p.base, foreign));
-      const run = sync(p.root, t, p.docs);
-      expect(run.exitCode).toBe(1);
-      expect(run.stdout).toContain(
-        "::error::git diff could not answer (exit 128); refusing to guess:",
-      );
-      expect(run.stdout).toContain(foreign);
-      before.set(MANIFEST_NAME, sha256(manifest.replace(p.base, foreign)));
-      expect(snapshotTree(t)).toEqual(before);
-    },
-    SYNCS_TIMEOUT_MS,
-  );
+  test("a recorded commit the build checkout's history lacks fails the run before anything is written", () => {
+    const t = target();
+    expect(sync(p.root, t, p.base).exitCode).toBe(0);
+    const before = snapshotTree(t);
+    const manifest = readFileSync(join(t, MANIFEST_NAME), "utf-8");
+    const foreign = "f".repeat(40);
+    writeFileSync(join(t, MANIFEST_NAME), manifest.replace(p.base, foreign));
+    const run = sync(p.root, t, p.docs);
+    expect(run.exitCode).toBe(1);
+    expect(run.stdout).toContain(
+      "::error::git diff could not answer (exit 128); refusing to guess:",
+    );
+    expect(run.stdout).toContain(foreign);
+    before.set(MANIFEST_NAME, sha256(manifest.replace(p.base, foreign)));
+    expect(snapshotTree(t)).toEqual(before);
+  });
 
   test("checkerChanged reads the checker surface alone from the platform checkout's history", () => {
     expect(checkerChanged(p.root, p.base, p.theme)).toBe(false);

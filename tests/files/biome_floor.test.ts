@@ -11,7 +11,6 @@ import { join } from "node:path";
 import type { SyncReport } from "../../.github/scripts/sync/writer/report.ts";
 import { parseFilesConfig } from "../../actions/plan/files_config";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
-import { harnessBound } from "../shared/harness_bound";
 import type { LoopbackServer } from "../shared/loopback_server";
 import { tempDirs } from "../shared/temp_dir";
 import { spawnStubUpstream } from "../shared/upstream_server";
@@ -44,9 +43,6 @@ function registered(label: string, modules: string[]): string {
 
 /** One writer run's hang bound. */
 const SYNC_TIMEOUT_MS = 60_000;
-
-/** A test here runs the writer twice. bun's 5-second default ends a test before sync()'s own bound can. */
-const SYNCS_TIMEOUT_MS = harnessBound(2 * SYNC_TIMEOUT_MS);
 
 /** The two paths' rows as `path: change`, from the `--summary` JSON: the Markdown report is for a reader, and its
  *  layout may move. */
@@ -87,46 +83,38 @@ const landed = (target: string, name: string): string | null =>
   existsSync(join(target, name)) ? readFileSync(join(target, name), "utf-8") : null;
 
 describe("the shipped biome pair", () => {
-  test(
-    "selecting bun lands the managed floor byte-equal to the shipped file and the starter beside it; no module lands neither",
-    () => {
-      const bun = registered("bun", ["bun"]);
-      const none = registered("none", []);
-      expect({
-        rows: sync(bun),
-        floor: landed(bun, "biome.json"),
-        local: landed(bun, "biome.local.jsonc"),
-      }).toEqual({
-        rows: ["biome.json: created", "biome.local.jsonc: created"],
-        floor: SHIPPED_FLOOR,
-        local: SHIPPED_LOCAL,
-      });
-      expect({
-        rows: sync(none),
-        floor: landed(none, "biome.json"),
-        local: landed(none, "biome.local.jsonc"),
-      }).toEqual({
-        rows: [],
-        floor: null,
-        local: null,
-      });
-    },
-    SYNCS_TIMEOUT_MS,
-  );
+  test("selecting bun lands the managed floor byte-equal to the shipped file and the starter beside it; no module lands neither", () => {
+    const bun = registered("bun", ["bun"]);
+    const none = registered("none", []);
+    expect({
+      rows: sync(bun),
+      floor: landed(bun, "biome.json"),
+      local: landed(bun, "biome.local.jsonc"),
+    }).toEqual({
+      rows: ["biome.json: created", "biome.local.jsonc: created"],
+      floor: SHIPPED_FLOOR,
+      local: SHIPPED_LOCAL,
+    });
+    expect({
+      rows: sync(none),
+      floor: landed(none, "biome.json"),
+      local: landed(none, "biome.local.jsonc"),
+    }).toEqual({
+      rows: [],
+      floor: null,
+      local: null,
+    });
+  });
 
-  test(
-    "a second sync leaves the repository's edited local layer alone and finds the floor unchanged",
-    () => {
-      const target = registered("resync", ["bun"]);
-      sync(target);
-      writeFileSync(join(target, "biome.local.jsonc"), LOCAL_EDIT);
-      expect({ rows: sync(target), local: landed(target, "biome.local.jsonc") }).toEqual({
-        rows: ["biome.json: unchanged", "biome.local.jsonc: unchanged"],
-        local: LOCAL_EDIT,
-      });
-    },
-    SYNCS_TIMEOUT_MS,
-  );
+  test("a second sync leaves the repository's edited local layer alone and finds the floor unchanged", () => {
+    const target = registered("resync", ["bun"]);
+    sync(target);
+    writeFileSync(join(target, "biome.local.jsonc"), LOCAL_EDIT);
+    expect({ rows: sync(target), local: landed(target, "biome.local.jsonc") }).toEqual({
+      rows: ["biome.json: unchanged", "biome.local.jsonc: unchanged"],
+      local: LOCAL_EDIT,
+    });
+  });
 });
 
 describe("one biome version", () => {

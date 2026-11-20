@@ -28,7 +28,6 @@ import { closeChrome, evaluate, launchChrome, newPage, serve } from "./headless_
 const REPOSITORY = "fixture-owner/fixture-repo";
 const PAGE = "/fixture-repo/latest/";
 const FONT = `${SHARED_TOKENS.code["--vp-code-font-size"]} ${SHARED_TOKENS.fonts["--vp-font-family-mono"]}`;
-const SCENARIO_TIMEOUT_MS = harnessBound(60_000);
 
 interface Label {
   text: string;
@@ -239,30 +238,26 @@ async function settle(fonts: "served" | "held" | "refused"): Promise<Settled> {
   }
 }
 
-test(
-  "every label ends inside its foreignObject and shape, in the mono face once it arrives and in the fallback when it never does",
-  async () => {
-    const served = await settle("served");
-    expect(served).toEqual({
-      states: ["rendered", "rendered"],
-      faceLoaded: true,
-      overflowing: [],
-      foldLines: 3,
-      labels: served.labels,
-      faceReadyAtRender: true,
-    });
-    expect(served.labels.length).toBeGreaterThanOrEqual(10);
-    const held = await settle("held");
-    expect(held).toEqual({ ...served });
-    const refused = await settle("refused");
-    expect(refused).toEqual({
-      states: ["rendered", "rendered"],
-      faceLoaded: false,
-      overflowing: [],
-      foldLines: 3,
-      labels: refused.labels,
-      faceReadyAtRender: false,
-    });
-  },
-  SCENARIO_TIMEOUT_MS,
-);
+test("every label ends inside its foreignObject and shape, in the mono face once it arrives and in the fallback when it never does", async () => {
+  const served = await settle("served");
+  expect(served).toEqual({
+    states: ["rendered", "rendered"],
+    faceLoaded: true,
+    overflowing: [],
+    foldLines: 3,
+    labels: served.labels,
+    faceReadyAtRender: true,
+  });
+  expect(served.labels.length).toBeGreaterThanOrEqual(10);
+  const held = await settle("held");
+  expect(held).toEqual({ ...served });
+  const refused = await settle("refused");
+  expect(refused).toEqual({
+    states: ["rendered", "rendered"],
+    faceLoaded: false,
+    overflowing: [],
+    foldLines: 3,
+    labels: refused.labels,
+    faceReadyAtRender: false,
+  });
+});

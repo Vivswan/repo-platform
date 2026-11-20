@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { exitCodeOf } from "../.github/scripts/shared/proc.ts";
 import { PLATFORM_NAME } from "../actions/shared/platform.ts";
+import { DEFAULT_TEST_TIMEOUT_MS, harnessBound } from "../tests/shared/harness_bound.ts";
 
 /** The checkout, one level above scripts/. */
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -98,7 +99,8 @@ async function main(argv: string[]): Promise<number> {
     // a synchronous spawn would hold the signal until the child exited on
     // its own. Inherited stdio, so there is no pipe to drain and no hang to
     // bound beyond the child's own life.
-    child = Bun.spawn(["bun", "test", "--parallel", ...argv], {
+    const timeout = `--timeout=${harnessBound(DEFAULT_TEST_TIMEOUT_MS)}`;
+    child = Bun.spawn(["bun", "test", "--parallel", timeout, ...argv], {
       cwd: REPO_ROOT,
       env: { ...process.env, TMPDIR: scratch },
       stdio: ["inherit", "inherit", "inherit"],
