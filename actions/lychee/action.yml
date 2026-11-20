@@ -68,4 +68,4 @@ runs:
         INPUT_ARGS: ${{ inputs.args }}
         INPUT_REPORT: ${{ inputs.report }}
         INPUT_FAIL: ${{ inputs.fail }}
-      run: uv run --isolated --project "$ACTION_PATH" --locked "$ACTION_BUN" "$ACTION_PATH/lychee.ts"
+      run: uv run --isolated --project "$ACTION_PATH" --locked "$ACTION_BUN" "${{ github.action_path }}/lychee.ts"
