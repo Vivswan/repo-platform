@@ -35,15 +35,13 @@ function fakeGh(dir: string, version: string): string {
   return path;
 }
 
-/** What a release publishes for one architecture: a tar by its compression flag, or the binary itself. */
-type Published = "-z" | "-J" | "binary";
+/** What a release publishes for one architecture: a tar, by its compression flag. */
+type Published = "-z" | "-J";
 
 /** The bytes a release would publish: a tar holds the binary under MEMBER beside a file the setup has no use for. */
 function publishedOf(root: string, version: string, published: Published): Uint8Array {
   const tree = join(root, "tree");
-  const binary = fakeGh(join(tree, "tool_linux/bin"), version);
-  if (published === "binary") return new Uint8Array(readFileSync(binary));
-
+  fakeGh(join(tree, "tool_linux/bin"), version);
   writeFileSync(join(tree, "tool_linux/LICENSE"), "MIT\n");
   const file = join(root, "archive.tar");
   const packed = boundedSpawnSync(["tar", "-c", published, "-f", file, "-C", tree, "tool_linux"]);
@@ -88,7 +86,7 @@ function plant(onPath: string | undefined, archived: string, published: Publishe
         X64: {
           url: "https://example.com/x64.tar.gz",
           sha256: sha256(Buffer.from(bytes)),
-          ...(published === "binary" ? {} : { member: MEMBER }),
+          member: MEMBER,
         },
       },
     },
@@ -140,28 +138,21 @@ describe("setUpReleaseBinary", () => {
     },
   );
 
-  test.each<{ kind: string; published: Published; landed: string[] }>([
-    { kind: "an xz tar", published: "-J", landed: ["tool_linux"] },
-    { kind: "the binary itself", published: "binary", landed: ["gh"] },
-  ])(
-    "a release that publishes $kind is fetched and leaves no download behind, and its binary runs",
-    async ({ published, landed }) => {
-      const planted = plant(undefined, PINNED, published);
-      const setUp = await setUpReleaseBinary(planted.tool, planted.runner, planted.toolCache);
-      const root = join(planted.runner.temp, `gh-${PINNED}`);
-      expect([setUp, readdirSync(root)]).toEqual([
-        { path: join(root, published === "binary" ? "gh" : MEMBER), installed: true },
-        landed,
-      ]);
-      const printed = boundedSpawnSync([setUp.path, "--version"]).stdout.split("\n")[0];
-      expect(printed).toBe(`gh version ${PINNED} (2026-01-01)`);
-    },
-  );
+  test("a release that publishes an xz tar is fetched and leaves no download behind, and its binary runs", async () => {
+    const planted = plant(undefined, PINNED, "-J");
+    const setUp = await setUpReleaseBinary(planted.tool, planted.runner, planted.toolCache);
+    const root = join(planted.runner.temp, `gh-${PINNED}`);
+    expect([setUp, readdirSync(root)]).toEqual([
+      { path: join(root, MEMBER), installed: true },
+      ["tool_linux"],
+    ]);
+    const printed = boundedSpawnSync([setUp.path, "--version"]).stdout.split("\n")[0];
+    expect(printed).toBe(`gh version ${PINNED} (2026-01-01)`);
+  });
 
   test.each<{ kind: string; published: Published }>([
     { kind: "a gzipped tar", published: "-z" },
     { kind: "an xz tar", published: "-J" },
-    { kind: "the binary itself", published: "binary" },
   ])(
     "$kind whose bytes are not the pinned ones is refused and nothing lands",
     async ({ published }) => {
