@@ -128,11 +128,8 @@ describe("select_settings_repos.ts", () => {
     summary: string;
   }
 
-  // A cold start pushed the spawning hooks past bun-test's default 5s cap;
-  // SPAWN_TIMEOUT_MS turns a wedged child into a diagnostic throw and
-  // TEST_TIMEOUT_MS sits above it so that throw beats bun's value-free kill.
+  // A wedged child becomes a diagnostic throw; the bound sits under the default test timeout, so the throw beats bun's value-free kill.
   const SPAWN_TIMEOUT_MS = 15_000;
-  const TEST_TIMEOUT_MS = 20_000;
 
   function run(name: string, env: Record<string, string> = {}): Run {
     const work = join(root, `work-${name}`);
@@ -230,7 +227,7 @@ describe("select_settings_repos.ts", () => {
   let main: Run;
   beforeAll(() => {
     main = run("main");
-  }, TEST_TIMEOUT_MS);
+  });
 
   // Only the push advertisement's retries print: a REST read's are the client's, silent until they are spent.
   const PUSH_RETRY = (display: string, detail: string) =>
@@ -344,26 +341,22 @@ describe("select_settings_repos.ts", () => {
     expect(main.stdout).not.toContain("description:");
   });
 
-  test(
-    "a hand-written .github/settings.yml fails the plan with a count: applied alone it would delete every fleet label it does not list",
-    () => {
-      const r = run("handwritten", {
-        ONLY_REPO: "Vivswan/steady",
-        GITHUB_API_URL: `${handWrittenApi.host}/handwritten`,
-      });
-      expect({ ...r, masked: r.masked.length }).toEqual({
-        exitCode: 1,
-        stdout: lines(
-          "::error::1 selected target carries a hand-written .github/settings.yml (names withheld - a target may be private): the apply reads the rendered file alone, so merge the sync PR that renders it, then re-run",
-        ),
-        masked: ALL_MASKS,
-        stderr: "",
-        outputs: {},
-        summary: "",
-      });
-    },
-    TEST_TIMEOUT_MS,
-  );
+  test("a hand-written .github/settings.yml fails the plan with a count: applied alone it would delete every fleet label it does not list", () => {
+    const r = run("handwritten", {
+      ONLY_REPO: "Vivswan/steady",
+      GITHUB_API_URL: `${handWrittenApi.host}/handwritten`,
+    });
+    expect({ ...r, masked: r.masked.length }).toEqual({
+      exitCode: 1,
+      stdout: lines(
+        "::error::1 selected target carries a hand-written .github/settings.yml (names withheld - a target may be private): the apply reads the rendered file alone, so merge the sync PR that renders it, then re-run",
+      ),
+      masked: ALL_MASKS,
+      stderr: "",
+      outputs: {},
+      summary: "",
+    });
+  });
 
   // The scope as the call input passes it (ONLY_REPO; post-green's settings-fleet leg sends
   // `all`).
@@ -403,22 +396,18 @@ describe("select_settings_repos.ts", () => {
       ),
       summary: summaryOf(...PRIVATE_WARNINGS),
     },
-  ])(
-    "called with $scope: $reason",
-    ({ scope, repos, stdout, summary }) => {
-      const r = run(`called-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope });
-      expect({ ...r, masked: r.masked.length, outputs: outputsOf(r) }).toEqual({
-        exitCode: 0,
-        stdout,
-        masked: ALL_MASKS,
-        stderr: "",
-        outputs: { count: String(repos.length), repos },
-        summary,
-      });
-      for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-");
-    },
-    TEST_TIMEOUT_MS,
-  );
+  ])("called with $scope: $reason", ({ scope, repos, stdout, summary }) => {
+    const r = run(`called-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope });
+    expect({ ...r, masked: r.masked.length, outputs: outputsOf(r) }).toEqual({
+      exitCode: 0,
+      stdout,
+      masked: ALL_MASKS,
+      stderr: "",
+      outputs: { count: String(repos.length), repos },
+      summary,
+    });
+    for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-");
+  });
 
   // The modules: filters, dispatched. A repo the filter leaves out is counted, never named,
   // so each exact count rests on the module lists the stub gh declares above.
@@ -466,25 +455,21 @@ describe("select_settings_repos.ts", () => {
       ),
       summary: summaryOf(...ALL_WARNINGS, NOMODS_WARNING),
     },
-  ])(
-    "dispatched with $repo: $reason",
-    ({ repo, repos, stdout, summary }) => {
-      const name = `filter-${Bun.hash(repo).toString(16)}`;
-      const r = run(name, payloadEnv(name, repo));
-      expect({ ...r, masked: r.masked.length, outputs: outputsOf(r) }).toEqual({
-        exitCode: 0,
-        stdout,
-        masked: ALL_MASKS,
-        stderr: "",
-        outputs: { count: String(repos.length), repos },
-        summary,
-      });
-      for (const channel of publicChannels(r)) {
-        expect(channel.toLowerCase()).not.toContain("hidden-");
-      }
-    },
-    TEST_TIMEOUT_MS,
-  );
+  ])("dispatched with $repo: $reason", ({ repo, repos, stdout, summary }) => {
+    const name = `filter-${Bun.hash(repo).toString(16)}`;
+    const r = run(name, payloadEnv(name, repo));
+    expect({ ...r, masked: r.masked.length, outputs: outputsOf(r) }).toEqual({
+      exitCode: 0,
+      stdout,
+      masked: ALL_MASKS,
+      stderr: "",
+      outputs: { count: String(repos.length), repos },
+      summary,
+    });
+    for (const channel of publicChannels(r)) {
+      expect(channel.toLowerCase()).not.toContain("hidden-");
+    }
+  });
 
   // The two transports of one scope meet at readDispatchRepo; past it the selector cannot tell them apart. The
   // workflow passes the dispatch input as the payload, never as ONLY_REPO: the value may be a private slug.
@@ -532,7 +517,6 @@ describe("select_settings_repos.ts", () => {
       });
       for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-server");
     },
-    TEST_TIMEOUT_MS,
   );
 
   // A refused scope writes no plan and echoes no entry: the entries may be private slugs and the log is public. A
@@ -573,23 +557,19 @@ describe("select_settings_repos.ts", () => {
       masked: 0,
       withheld: "flaky",
     },
-  ])(
-    "$reason",
-    ({ reason, env, error, masked, withheld }) => {
-      const name = `refused-${Bun.hash(reason).toString(16)}`;
-      const r = run(name, env(name));
-      expect({ ...r, masked: r.masked.length }).toEqual({
-        exitCode: 1,
-        stdout: errorLine(error),
-        masked,
-        stderr: "",
-        outputs: {},
-        summary: "",
-      });
-      for (const channel of publicChannels(r)) expect(channel).not.toContain(withheld);
-    },
-    TEST_TIMEOUT_MS,
-  );
+  ])("$reason", ({ reason, env, error, masked, withheld }) => {
+    const name = `refused-${Bun.hash(reason).toString(16)}`;
+    const r = run(name, env(name));
+    expect({ ...r, masked: r.masked.length }).toEqual({
+      exitCode: 1,
+      stdout: errorLine(error),
+      masked,
+      stderr: "",
+      outputs: {},
+      summary: "",
+    });
+    for (const channel of publicChannels(r)) expect(channel).not.toContain(withheld);
+  });
 
   test.each([
     {
@@ -623,6 +603,5 @@ describe("select_settings_repos.ts", () => {
       });
       expect(outputsOf(r)).toEqual({ count: "0", repos: [] });
     },
-    TEST_TIMEOUT_MS,
   );
 });

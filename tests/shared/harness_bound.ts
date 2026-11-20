@@ -8,6 +8,10 @@
 
 import os from "node:os";
 
+/** The per-test and per-hook timeout scripts/run_tests.ts hands bun in place of its 5 seconds, stretched like every bound: two syncedCheckout
+ *  runs (2 x SYNC_TIMEOUT_MS) or eight default spawns (8 x SPAWN_TIMEOUT_MS), the most a test without its own timeout does. */
+export const DEFAULT_TEST_TIMEOUT_MS = 120_000;
+
 export function timeScale(): number {
   const raw = process.env.TEST_TIME_SCALE;
   if (raw === undefined) {

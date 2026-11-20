@@ -106,12 +106,8 @@ describe("select_sync_repos.ts", () => {
     rows: { repo: string; private: boolean }[] | null;
   }
 
-  // Same spawn-heavy harness and bounds as select_settings_repos.test.ts
-  // (the full cold-start/load rationale lives there): unbounded, these
-  // spawns died under bun-test's default 5s per-test/hook cap, observed
-  // here as a ~5003ms test timeout with exitCode null under host load.
+  // A wedged child becomes a diagnostic throw, as in select_settings_repos.test.ts.
   const SPAWN_TIMEOUT_MS = 15_000;
-  const TEST_TIMEOUT_MS = 20_000;
 
   function run(
     name: string,
@@ -200,7 +196,7 @@ describe("select_sync_repos.ts", () => {
   let main: Run;
   beforeAll(() => {
     main = run("main");
-  }, TEST_TIMEOUT_MS);
+  });
 
   test("the whole fleet: the rows file carries the real slugs, sorted, with the visibility; the log and the output name no private repository", () => {
     // Cross-file: the fan-out reads the rows file by ROWS_FILE (sync/verdict.ts) and matches each matrix key with
@@ -305,25 +301,21 @@ describe("select_sync_repos.ts", () => {
       ),
       addModules: "site,nightly",
     },
-  ])(
-    "$scope: $reason",
-    ({ reason, env, rows, stdout, withheld, addModules }) => {
-      const name = `called-${Bun.hash(reason).toString(16)}`;
-      const r = run(name, env(name));
-      expect(r).toEqual({
-        exitCode: 0,
-        stdout,
-        stderr: "",
-        outputs: outputFor(rows ?? [], addModules),
-        rows,
-      });
-      for (const channel of publicChannels(r)) {
-        expect(channel).not.toContain("hidden-server");
-        if (withheld !== undefined) expect(channel).not.toContain(withheld);
-      }
-    },
-    TEST_TIMEOUT_MS,
-  );
+  ])("$scope: $reason", ({ reason, env, rows, stdout, withheld, addModules }) => {
+    const name = `called-${Bun.hash(reason).toString(16)}`;
+    const r = run(name, env(name));
+    expect(r).toEqual({
+      exitCode: 0,
+      stdout,
+      stderr: "",
+      outputs: outputFor(rows ?? [], addModules),
+      rows,
+    });
+    for (const channel of publicChannels(r)) {
+      expect(channel).not.toContain("hidden-server");
+      if (withheld !== undefined) expect(channel).not.toContain(withheld);
+    }
+  });
 
   /** A dispatch the selector refuses; named is the one entry the refusal may name, when the selector has already read
    *  it as public. */
@@ -444,30 +436,26 @@ describe("select_sync_repos.ts", () => {
         "push-permission probe for Vivswan/deadprobe failed with HTTP 500; not a permission answer, refusing to guess.",
       named: "Vivswan/deadprobe",
     },
-  ])(
-    "$reason: refused before any row is written",
-    (scenario) => {
-      const { reason, discoveredList = discovered, error, named } = scenario;
-      const name = `refused-${Bun.hash(reason).toString(16)}`;
-      const r = run(name, refusalEnv(name, scenario), discoveredList);
-      expect(r).toEqual({
-        exitCode: 1,
-        stdout: errorLine(error),
-        stderr: "",
-        outputs: {},
-        rows: null,
-      });
-      const withheld = withheldValues(scenario);
-      if (named === undefined) expect(withheld.length).toBeGreaterThan(0);
-      // The selector folds case, so an echo would be lowercased.
-      for (const channel of publicChannels(r)) {
-        for (const value of withheld) {
-          expect(channel.toLowerCase()).not.toContain(value.toLowerCase());
-        }
+  ])("$reason: refused before any row is written", (scenario) => {
+    const { reason, discoveredList = discovered, error, named } = scenario;
+    const name = `refused-${Bun.hash(reason).toString(16)}`;
+    const r = run(name, refusalEnv(name, scenario), discoveredList);
+    expect(r).toEqual({
+      exitCode: 1,
+      stdout: errorLine(error),
+      stderr: "",
+      outputs: {},
+      rows: null,
+    });
+    const withheld = withheldValues(scenario);
+    if (named === undefined) expect(withheld.length).toBeGreaterThan(0);
+    // The selector folds case, so an echo would be lowercased.
+    for (const channel of publicChannels(r)) {
+      for (const value of withheld) {
+        expect(channel.toLowerCase()).not.toContain(value.toLowerCase());
       }
-    },
-    TEST_TIMEOUT_MS,
-  );
+    }
+  });
 
   // The modules: filters, dispatched: the adoption body is read for the list and never printed; a candidate whose list
   // the filter cannot read is left out with a warning (naming it when public); one the filter leaves out is counted.
@@ -515,76 +503,60 @@ describe("select_sync_repos.ts", () => {
         "syncing: Vivswan/badlist and 1 private repository",
       ),
     },
-  ])(
-    "dispatched with $repo: $reason",
-    ({ repo, rows, stdout }) => {
-      const name = `filter-${Bun.hash(repo).toString(16)}`;
-      const r = run(name, payloadEnv(name, { repo }), FILTER_FLEET);
-      expect(r).toEqual({ exitCode: 0, stdout, stderr: "", outputs: outputFor(rows ?? []), rows });
-      for (const channel of publicChannels(r)) {
-        expect(channel).not.toContain("hidden-server");
-        expect(channel).not.toContain("hidden-nomods");
-      }
-    },
-    TEST_TIMEOUT_MS,
-  );
+  ])("dispatched with $repo: $reason", ({ repo, rows, stdout }) => {
+    const name = `filter-${Bun.hash(repo).toString(16)}`;
+    const r = run(name, payloadEnv(name, { repo }), FILTER_FLEET);
+    expect(r).toEqual({ exitCode: 0, stdout, stderr: "", outputs: outputFor(rows ?? []), rows });
+    for (const channel of publicChannels(r)) {
+      expect(channel).not.toContain("hidden-server");
+      expect(channel).not.toContain("hidden-nomods");
+    }
+  });
 
-  test(
-    "a private repo's hard adoption failure names no slug, wherever the slug hid",
-    () => {
-      // GitHub's error body carries the slug in a URL, the bare name in another casing, and another private
-      // repository's name: the failure surfaces as its status alone.
-      const r = run(
-        "hidden-blocked",
-        payloadEnv("hidden-blocked", { repo: "Vivswan/hidden-blocked" }),
-        [...discovered, { repo: "Vivswan/hidden-blocked", private: true }],
-      );
-      expect(r).toEqual({
-        exitCode: 1,
-        stdout: "::error::adoption check failed for a private repository: HTTP 500\n",
-        stderr: "",
-        outputs: {},
-        rows: null,
-      });
-    },
-    TEST_TIMEOUT_MS,
-  );
+  test("a private repo's hard adoption failure names no slug, wherever the slug hid", () => {
+    // GitHub's error body carries the slug in a URL, the bare name in another casing, and another private
+    // repository's name: the failure surfaces as its status alone.
+    const r = run(
+      "hidden-blocked",
+      payloadEnv("hidden-blocked", { repo: "Vivswan/hidden-blocked" }),
+      [...discovered, { repo: "Vivswan/hidden-blocked", private: true }],
+    );
+    expect(r).toEqual({
+      exitCode: 1,
+      stdout: "::error::adoption check failed for a private repository: HTTP 500\n",
+      stderr: "",
+      outputs: {},
+      rows: null,
+    });
+  });
 
   // Named incident: one transient 502 on one repository's registration read ended the plan, and the weekly sync
   // delivered nothing to the whole fleet.
-  test(
-    "a 502 followed by a 200 on a registration read still selects the repository",
-    () => {
-      const flaky = { repo: "Vivswan/flaky", private: false };
-      const r = run("flaky", { ONLY_REPO: "Vivswan/flaky" }, [...discovered, flaky]);
-      expect(r).toEqual({
-        exitCode: 0,
-        stdout: lines("syncing: Vivswan/flaky"),
-        stderr: "",
-        outputs: outputFor([flaky]),
-        rows: [flaky],
-      });
-    },
-    TEST_TIMEOUT_MS,
-  );
+  test("a 502 followed by a 200 on a registration read still selects the repository", () => {
+    const flaky = { repo: "Vivswan/flaky", private: false };
+    const r = run("flaky", { ONLY_REPO: "Vivswan/flaky" }, [...discovered, flaky]);
+    expect(r).toEqual({
+      exitCode: 0,
+      stdout: lines("syncing: Vivswan/flaky"),
+      stderr: "",
+      outputs: outputFor([flaky]),
+      rows: [flaky],
+    });
+  });
 
   // Named incident: "no registration" was read off the error text, so an outage whose text quoted a 404 skipped the
   // repository as not adopted, green, instead of failing the plan.
-  test(
-    "an outage whose error text mentions a 404 fails the plan: only the 404 status is no registration",
-    () => {
-      const r = run("quoting", { ONLY_REPO: "Vivswan/hidden-quoting" }, [
-        ...discovered,
-        { repo: "Vivswan/hidden-quoting", private: true },
-      ]);
-      expect(r).toEqual({
-        exitCode: 1,
-        stdout: "::error::adoption check failed for a private repository: HTTP 502\n",
-        stderr: "",
-        outputs: {},
-        rows: null,
-      });
-    },
-    TEST_TIMEOUT_MS,
-  );
+  test("an outage whose error text mentions a 404 fails the plan: only the 404 status is no registration", () => {
+    const r = run("quoting", { ONLY_REPO: "Vivswan/hidden-quoting" }, [
+      ...discovered,
+      { repo: "Vivswan/hidden-quoting", private: true },
+    ]);
+    expect(r).toEqual({
+      exitCode: 1,
+      stdout: "::error::adoption check failed for a private repository: HTTP 502\n",
+      stderr: "",
+      outputs: {},
+      rows: null,
+    });
+  });
 });
