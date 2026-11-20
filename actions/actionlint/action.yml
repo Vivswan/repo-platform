@@ -1,0 +1,56 @@
+name: Actionlint
+description: |
+  The fleet's workflow lint step: runs the pinned actionlint over the workflows of the caller's checkout, with its
+  shellcheck and pyflakes integrations on, so a `run:` block's shell and a `shell: python` block's Python are linted too.
+
+  - Every tool is the action's own pin, so no runner's image decides what is linted: actionlint and shellcheck are
+    release binaries, each reused from PATH when it prints the pinned version and otherwise downloaded and refused
+    unless its sha256 is the pinned one; pyflakes is the one locked in this action's uv.lock.
+  - Linux on X64 and ARM64 are pinned; any other runner fails the step, named.
+  - Each finding is an error annotation, through actionlint's own problem matcher shipped beside this action. The
+    matcher, actionlint, and shellcheck stay set up for the job's later steps.
+
+  A finding fails the step. The bypasses are the repository's own: a `# shellcheck disable=SCnnnn` comment on the line
+  above the command for a shellcheck finding, or an entry in its `.github/actionlint.yaml`.
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: $/actions/bun-setup
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      with:
+        working-directory: ${{ github.action_path }}
+        enable-cache: false
+
+    # Each sha256 is the pin for its archive: a release's checksums file comes from the same place as the archive.
+    # A tool's three values move together, to one release. shellcheck is the version GitHub's image carries, so a
+    # bump there is a change of the fleet's lint floor and is reviewed as one. uv puts the locked pyflakes on the
+    # script's PATH.
+    - name: Lint the workflows
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+        ACTIONLINT_VERSION: 1.7.12
+        ACTIONLINT_SHA256_X64: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        ACTIONLINT_SHA256_ARM64: 325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6
+        SHELLCHECK_VERSION: 0.9.0
+        SHELLCHECK_SHA256_X64: 700324c6dd0ebea0117591c6cc9d7350d9c7c5c287acbad7630fa17b1d4d9e2f
+        SHELLCHECK_SHA256_ARM64: 179c579ef3481317d130adebede74a34dbbc2df961a70916dd4039ebf0735fae
+      run: uv run --isolated --project "$ACTION_PATH" --locked "$ACTION_BUN" "$ACTION_PATH/actionlint.ts"

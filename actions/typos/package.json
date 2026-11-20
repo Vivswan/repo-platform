@@ -1,0 +1,12 @@
+{
+  "name": "typos",
+  "private": true,
+  "description": "Dependency manifest for the typos action: @actions/core adds the fetched jq to the job's PATH and annotates the run.",
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@actions/core": "3.0.1"
+  }
+}

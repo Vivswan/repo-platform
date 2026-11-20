@@ -8,9 +8,40 @@ description: |
   fixtures spelled wrong on purpose, and `[default.extend-identifiers]` one identifier; or a trailing `typos: ignore`
   comment for a one-off.
 
+  The pinned action fetches its own typos release and formats each finding as an annotation with jq, so this action puts
+  its pinned jq on PATH first: reused when the runner's prints the pinned version, and otherwise downloaded for Linux
+  X64 or ARM64 and refused unless its sha256 is the pinned one.
+
 runs:
   using: composite
   steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: $/actions/bun-setup
+      with:
+        from: ${{ github.action_path }}
+
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    # Each sha256 is the pin for its binary: the release's checksums file comes from the same place as the binary.
+    # The three values move together, to one release of jqlang/jq.
+    - name: Set up the pinned jq
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        JQ_VERSION: 1.8.2
+        JQ_SHA256_X64: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        JQ_SHA256_ARM64: 8b85c817833814ddca00a144c33705546355afccf0cf39b188f3cdb48b852309
+      run: '"$ACTION_BUN" "${{ github.action_path }}/jq-setup.ts"'
+
     - name: Check spelling
       uses: crate-ci/typos@7f9d0819ca1c008ade73f4b41fa9d258d48f605b # v1.51.1
       with:

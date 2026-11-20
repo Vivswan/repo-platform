@@ -1,24 +1,24 @@
-// A tool a job needs as one binary from a release archive: reused when the runner already has the pinned version,
-// fetched and checked against the pinned sha256 otherwise. The sha256 is the pin, since a release's own checksums file
-// comes from the same place as its archive.
+// A tool a job needs as one binary from a release: reused when the runner already has the pinned version, fetched and
+// checked against the pinned sha256 otherwise. The sha256 is the pin, since a release's own checksums file comes from
+// the same place as its download.
 //
 // DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal imports only.
 
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { capture, failureDetail, succeeded } from "./action_runtime.ts";
+import { capture, failureDetail, requireEnv, succeeded } from "./action_runtime.ts";
 import { sha256 } from "./values.ts";
 
-/** One architecture's archive of a release. */
-export interface ReleaseArchive {
-  /** Where the gzipped tar is downloaded from. */
+/** One architecture's download of a release: a tar, or the binary itself. */
+export interface ReleaseDownload {
+  /** Where the tar, or the binary, is downloaded from. */
   url: string;
 
-  /** Of the archive's bytes, lowercase hex. */
+  /** Of the downloaded bytes, lowercase hex. */
   sha256: string;
 
-  /** The binary's path inside the gzipped tar. */
-  member: string;
+  /** The binary's path inside the tar, gzipped or xz; absent when the download is the binary. */
+  member?: string;
 }
 
 export interface ReleaseBinary {
@@ -35,7 +35,7 @@ export interface ReleaseBinary {
   versionPattern: RegExp;
 
   /** Keyed by `runner.arch`. */
-  archives: Record<string, ReleaseArchive>;
+  downloads: Record<string, ReleaseDownload>;
 }
 
 /** The job the binary is set up for, as the runner describes it. */
@@ -53,11 +53,21 @@ export interface Runner {
   path: string;
 }
 
+/** The runner of the job this process is a step of. */
+export function thisRunner(): Runner {
+  return {
+    os: requireEnv("RUNNER_OS"),
+    arch: requireEnv("RUNNER_ARCH"),
+    temp: requireEnv("RUNNER_TEMP"),
+    path: requireEnv("PATH"),
+  };
+}
+
 export interface SetUp {
   /** Absolute path of a binary that printed the pinned version. */
   path: string;
 
-  /** Whether the archive was fetched: false for a binary reused from PATH. */
+  /** Whether the release was fetched: false for a binary reused from PATH. */
   installed: boolean;
 }
 
@@ -90,17 +100,17 @@ export const download: Download = (url, file) => {
 /** The pinned binary for the job: the one on PATH when it prints the pinned version, a fetched one otherwise.
  *
  * @throws {Error} the runner is not one the release is pinned for, the download failed or its sha256 is not the pin,
- *   or what was unpacked does not print the pinned version
+ *   or what was fetched does not print the pinned version
  */
 export function setUpReleaseBinary(
   tool: ReleaseBinary,
   runner: Runner,
-  fetchArchive: Download = download,
+  fetchRelease: Download = download,
 ): SetUp {
   const what = `${tool.name} ${tool.version}`;
-  const archive = runner.os === "Linux" ? tool.archives[runner.arch] : undefined;
-  if (archive === undefined) {
-    const pinned = Object.keys(tool.archives).join(" and ");
+  const release = runner.os === "Linux" ? tool.downloads[runner.arch] : undefined;
+  if (release === undefined) {
+    const pinned = Object.keys(tool.downloads).join(" and ");
     throw new Error(
       `${what} is pinned for Linux ${pinned}, and this runner is ${runner.os} ${runner.arch}`,
     );
@@ -114,31 +124,37 @@ export function setUpReleaseBinary(
   const root = join(runner.temp, `${tool.name}-${tool.version}`);
   rmSync(root, { recursive: true, force: true });
   mkdirSync(root, { recursive: true });
-  const file = join(root, "archive.tar.gz");
-  fetchArchive(archive.url, file);
+  const file = join(root, `${tool.name}.download`);
+  fetchRelease(release.url, file);
   const fetched = sha256(readFileSync(file));
-  if (fetched !== archive.sha256) {
+  if (fetched !== release.sha256) {
     rmSync(root, { recursive: true, force: true });
     throw new Error(
-      `${what}: ${archive.url} has sha256 ${fetched}, and the pin is ${archive.sha256}; nothing was unpacked`,
+      `${what}: ${release.url} has sha256 ${fetched}, and the pin is ${release.sha256}; nothing was installed`,
     );
   }
 
-  const unpacked = capture(["tar", "-xzf", file, "-C", root, archive.member], {
-    timeoutMs: UNPACK_BOUND_MS,
-  });
-  rmSync(file);
-  if (!succeeded(unpacked.exit)) {
-    throw new Error(
-      `${what}: ${archive.member} could not be unpacked (${failureDetail(unpacked)})`,
-    );
+  const path = join(root, release.member ?? tool.name);
+  if (release.member === undefined) {
+    renameSync(file, path);
+    chmodSync(path, 0o755);
+  } else {
+    // tar reads the compression from the file, so one command unpacks a gzipped tar and an xz one.
+    const unpacked = capture(["tar", "-xf", file, "-C", root, release.member], {
+      timeoutMs: UNPACK_BOUND_MS,
+    });
+    rmSync(file);
+    if (!succeeded(unpacked.exit)) {
+      throw new Error(
+        `${what}: ${release.member} could not be unpacked (${failureDetail(unpacked)})`,
+      );
+    }
   }
 
-  const path = join(root, archive.member);
   const printed = printedVersion(tool, path);
   if (printed !== tool.version) {
     throw new Error(
-      `${what}: the unpacked ${path} ${printed === undefined ? "did not print a version" : `prints ${printed}`}`,
+      `${what}: the fetched ${path} ${printed === undefined ? "did not print a version" : `prints ${printed}`}`,
     );
   }
 

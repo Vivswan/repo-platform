@@ -78,7 +78,7 @@ jobs:
         uses: $/actions/validate-commit-names
       - id: actionlint
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
-        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+        uses: $/actions/actionlint
       - id: yamllint
         if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name != 'schedule' }}
         uses: $/actions/yamllint

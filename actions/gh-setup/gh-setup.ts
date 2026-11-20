@@ -1,10 +1,10 @@
-// The GitHub CLI the platform's jobs run: the release and its two archives are pinned in action.yml, which hands them
+// The GitHub CLI the platform's jobs run: the release and its two downloads are pinned in action.yml, which hands them
 // here through the environment, so a job never depends on the gh its runner happens to carry.
 
 import { dirname } from "node:path";
 import * as core from "@actions/core";
 import { messageOf, requireEnv } from "../shared/action_runtime.ts";
-import { type ReleaseBinary, setUpReleaseBinary } from "../shared/release_binary.ts";
+import { type ReleaseBinary, setUpReleaseBinary, thisRunner } from "../shared/release_binary.ts";
 
 /** cli/cli's archive name for each `runner.arch` the platform pins. */
 const ARCHIVE_ARCH = { X64: "amd64", ARM64: "arm64" } as const;
@@ -27,7 +27,7 @@ export function ghRelease(
     version,
     versionArgs: ["--version"],
     versionPattern: /^gh version (\S+)/,
-    archives: { X64: archive("X64"), ARM64: archive("ARM64") },
+    downloads: { X64: archive("X64"), ARM64: archive("ARM64") },
   };
 }
 
@@ -36,12 +36,7 @@ function main(): void {
     X64: requireEnv("GH_SHA256_X64"),
     ARM64: requireEnv("GH_SHA256_ARM64"),
   });
-  const gh = setUpReleaseBinary(release, {
-    os: requireEnv("RUNNER_OS"),
-    arch: requireEnv("RUNNER_ARCH"),
-    temp: requireEnv("RUNNER_TEMP"),
-    path: requireEnv("PATH"),
-  });
+  const gh = setUpReleaseBinary(release, thisRunner());
   if (gh.installed) core.addPath(dirname(gh.path));
   core.setOutput("path", gh.path);
   core.setOutput("installed", String(gh.installed));
