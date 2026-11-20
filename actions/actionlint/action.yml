@@ -13,6 +13,8 @@ description: |
   A finding fails the step. The bypasses are the repository's own: a `# shellcheck disable=SCnnnn` comment on the line
   above the command for a shellcheck finding, or an entry in its `.github/actionlint.yaml`.
 
+  One finding is ignored here, for every repository: actionlint's false `unknown permission scope "vulnerability-alerts"`.
+
 runs:
   using: composite
   steps:

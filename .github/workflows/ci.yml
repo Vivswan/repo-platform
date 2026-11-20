@@ -21,8 +21,8 @@ concurrency:
 
 jobs:
   # The sources under files/ carry placeholders actionlint cannot read, so the writer lands them in
-  # two scratch repositories (every module, none). Each is linted from its own root, where the
-  # starter actionlint.yaml's path-scoped ignores apply; pinact judges the same roots and this checkout.
+  # two scratch repositories (every module, none). Each is linted from its own root, as a repository
+  # is, with the action's ignores; pinact judges the same roots and this checkout.
   actionlint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -41,7 +41,8 @@ jobs:
       - name: actionlint the written workflows
         run: >-
           uv run --isolated --project actions/actionlint --locked
-          bun .github/scripts/ci/run_in_fleet_lint_trees.ts "$RUNNER_TEMP/fleet-lint" -- actionlint -color
+          bun .github/scripts/ci/run_in_fleet_lint_trees.ts "$RUNNER_TEMP/fleet-lint" --
+          bun "$GITHUB_WORKSPACE/.github/scripts/ci/actionlint_written_tree.ts"
       # The archive's sha256 is the pin: the release's checksums file comes from the same place as the archive.
       # refresh-upstream.yml's tool leg moves the two values together (docs/toolchains.md).
       - name: Install the pinned pinact release

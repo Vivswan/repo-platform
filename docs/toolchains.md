@@ -50,6 +50,8 @@ The download and the unpacking are GitHub's `@actions/tool-cache`; the sha256 ch
 
 The [actionlint action](../actions/actionlint/action.yml) needs two tools beside its linter and brings each at its own pin, the same on every runner: it fetches actionlint and shellcheck as release binaries, as gh is fetched, and takes pyflakes from its own `uv.lock`. It hands actionlint both by path, since actionlint skips an integration it cannot find.
 
+The action ignores one false finding itself, on every run: `unknown permission scope "vulnerability-alerts"`, a real GitHub permission that actionlint does not know yet. A repository's own `.github/actionlint.yaml` is still read and is for its own ignores and runner labels; a copy that still carries that line is a harmless duplicate.
+
 A release binary's pin is three values in its action's `env`, moved together by hand: one release, and the sha256 of its Linux tar for X64 and for ARM64. shellcheck is pinned at the version GitHub's image carries, so a bump there changes what the fleet's `run:` blocks are held to and is reviewed as one. Dependabot bumps pyflakes.
 
 ## What proves the jobs bring their tools

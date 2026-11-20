@@ -28,7 +28,7 @@ describe("lint", () => {
     );
     expect(result).toEqual({
       exit: { kind: "exited", code: 1 },
-      stdout: `${root}\n-verbose\n-shellcheck\n/tools/shellcheck\n-pyflakes\n/venv/pyflakes\n`,
+      stdout: `${root}\n-verbose\n-shellcheck\n/tools/shellcheck\n-pyflakes\n/venv/pyflakes\n-ignore\n^unknown permission scope "vulnerability-alerts"\\. \n`,
       stderr: "log\n",
     });
   });

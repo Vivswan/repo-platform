@@ -50,6 +50,9 @@ export function shellcheckRelease(version: string, sha256: Record<Arch, string>)
   };
 }
 
+/** On every run, beside the repository's own config: actionlint's scope list lacks `vulnerability-alerts` (rhysd/actionlint#666); drop when it knows the scope. */
+export const IGNORE_ARGS = ["-ignore", '^unknown permission scope "vulnerability-alerts"\\. '];
+
 /** The commands one lint runs, each an absolute path. */
 export interface Linters {
   actionlint: string;
@@ -67,6 +70,7 @@ export function lint(linters: Linters, cwd: string): RunResult {
       linters.shellcheck,
       "-pyflakes",
       linters.pyflakes,
+      ...IGNORE_ARGS,
     ],
     { cwd, timeoutMs: LINT_BOUND_MS },
   );
