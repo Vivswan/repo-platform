@@ -287,8 +287,8 @@ jobs:
       # The skills' Vale styles over this repository's pages (.vale.ini); the release by sha256, as pinact above.
       - name: Install the pinned Vale release
         env:
-          VALE_VERSION: 3.27.0
-          VALE_SHA256: c80d62f6bce87b81843ac5b512a26e63213927b957adba0a64fc594570da2000
+          VALE_VERSION: 3.28.1
+          VALE_SHA256: 068954ad869ebec24b8dec6ebcd1cbb1fd5f5a83e966a35baedfae8b2cdc093a
         run: |
           curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/vale.tar.gz" \
             "https://github.com/vale-cli/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz"
