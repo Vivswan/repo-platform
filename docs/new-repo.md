@@ -69,10 +69,16 @@ CI is split so the platform can keep improving its half while each repo keeps it
 
 **A starter is written once** and never touched by a sync after that, so when the platform INTRODUCES a starter at a path a repository already owns a file at, the writer leaves the repository's file alone and reports the row `unchanged`. Check the kept file against the interface its callers expect (the [sync-PR skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md) has the triage row).
 
-**What the `checks` call grants:** the repository's secrets, `contents: read`, and `pull-requests: write`, the last so a job can keep [one sticky comment](fleet-guidelines.md#sticky-pr-comments) on the pull request.
+**What the `checks` call grants:** the repository's secrets and two scopes, the same in every repository and on every event.
 
-- **A called job with no `permissions:` of its own** holds the whole grant, so the starter sets `contents: read` for the workflow and the commenting job raises itself with a job-level block.
-- **A checks.yml without that top-level block** holds `pull-requests: write` in every job that declares no `permissions:`, until it adds one.
+| Scope                  | Why                                                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `contents: write`      | a job may publish release assets with the run's own token, where it would otherwise store a personal token |
+| `pull-requests: write` | a job can keep [one sticky comment](fleet-guidelines.md#sticky-pr-comments) on the pull request            |
+
+- **A called job with no `permissions:` of its own** holds the whole grant, so the starter sets `contents: read` for the workflow and a job that writes raises itself with a job-level block.
+- **A job that declares `contents: write`** runs before the gate judges the commit, so it carries its own `if:` for a push to main and a pull request run skips it.
+- **A checks.yml without that top-level block** holds both write scopes in every job that declares no `permissions:`, until it adds one.
 
 **The `platform` job's checks** are fleet.yml's `standard-checks` steps and the jobs beside it ([what gates what](all-green.md#what-gates-what)); each check's action description says what it judges, and [the all-green convention](all-green.md) says how the required `all-green` check judges the gating jobs.
 
