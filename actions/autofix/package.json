@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dependency manifest for the autofix action: @actions/core writes the outputs, the annotations, and the step summary; zod reads the event, the registration's lists, and the report the unprivileged job hands over.",
   "devDependencies": {
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "typescript": "^7.0.2"
   },
   "dependencies": {
