@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dependency manifest for the knip action: the one knip the fleet runs.",
   "dependencies": {
-    "knip": "6.35.1"
+    "knip": "6.46.1"
   },
   "devDependencies": {
     "@types/bun": "1.4.5",

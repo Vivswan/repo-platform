@@ -61,7 +61,8 @@ test.each([
   expect({
     exitCode: run.exitCode,
     stdout: run.stdout.trim(),
-    hinted:
-      run.stderr.includes("Remove from ignoreDependencies") && run.stderr.includes("never-used"),
+    hinted: run.stderr
+      .split("\n")
+      .some((line) => line.includes("never-used") && line.includes("ignoreDependencies")),
   }).toEqual({ exitCode, stdout: "", hinted });
 });
